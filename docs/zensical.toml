@@ -52,6 +52,7 @@ nav = [
     {"Federation" = "operations/federation.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},
+    {"Containers" = "operations/containers.md"},
     {"PostgreSQL" = "operations/postgres.md"},
     {"Backup and restore" = "operations/backup-restore.md"},
   ]},

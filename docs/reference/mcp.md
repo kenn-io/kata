@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-09-30
+last_edited: 2026-10-02
 ---
 
 # Model Context Protocol server
@@ -74,6 +74,13 @@ reads; the token value does not appear in the process arguments. Every HTTP
 listener requires this inbound bearer, including a loopback listener. This
 credential protects the MCP listener and is separate from the daemon
 credential that the Kata process uses for its own API calls.
+
+Use `--http-token-file /run/secrets/mcp-token` to read the inbound bearer from
+an owner-only file instead. It wins over `--http-token-env`; a missing,
+unreadable, insecure, or empty selected file fails without falling back. The
+[daemon secret-file restrictions](configuration.md#daemon-config) apply.
+Both token-source flags require `--http`. The MCP listener does not inherit the
+daemon's generated owner token automatically.
 
 Loopback listeners require the exact configured Host and reject cross-origin
 requests. A non-loopback listener additionally requires

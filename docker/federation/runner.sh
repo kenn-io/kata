@@ -122,11 +122,11 @@ token_env = "KATA_SPOKE_TOKEN"
 allow_insecure = true
 EOF
 cli_enroll_out=$(
-  KATA_HOME="$cli_enroll_home" KATA_SPOKE_TOKEN="$hub_token" \
+  KATA_HOME="$cli_enroll_home" KATA_SPOKE_TOKEN="$hub_token" HUB_ADMIN_TOKEN="$hub_token" \
     kata --daemon spoke-a --project "$cli_project" federation enroll \
       --spoke-instance "$spoke_a_uid" \
       --hub-url "$hub_hostname" \
-      --hub-token "$hub_token" \
+      --hub-token-env HUB_ADMIN_TOKEN \
       --capabilities pull,push \
       --token "$cli_token" \
       --actor cli-agent \

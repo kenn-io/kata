@@ -35,7 +35,7 @@ func (p BearerPolicy) ConfigureClient(c *http.Client, baseURL, token string) err
 // private-network trust decision ([auth].trust_private_network, or
 // KATA_TRUST_PRIVATE_NETWORK when the config cannot be read).
 func ResolvedBearerTrustPrivateNetwork() bool {
-	auth, err := ReadAuthConfig()
+	auth, err := ReadAuthConfigForPolicy()
 	if err != nil {
 		return EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	}

@@ -1,7 +1,7 @@
 ---
 title: Hosted mode
 description: Run the Kata daemon on hosted platforms that provide a Heroku-style PORT environment variable.
-last_edited: 2026-09-15
+last_edited: 2026-10-02
 ---
 
 # Hosted mode
@@ -9,7 +9,7 @@ last_edited: 2026-09-15
 Hosted mode is the `$PORT` convention used by platforms such as Cloud Run,
 Render, Fly.io, Railway, App Engine, and Heroku-style runtimes.
 
-When no `--listen` flag and no config `listen` are set, `kata daemon start
+When no `--listen` flag, `KATA_LISTEN`, or config `listen` are set, `kata daemon start
 --foreground` binds `0.0.0.0:$PORT` if `PORT` is in the environment. Plain
 `kata daemon start` is for local operator use: it starts a background daemon and
 returns after startup is confirmed.
@@ -22,23 +22,55 @@ developer machine does not flip implicit local daemons onto wildcard TCP.
 Set:
 
 ```sh
-KATA_AUTH_TOKEN=<token>
-KATA_TRUST_PRIVATE_NETWORK=1
 KATA_HOME=/writable/path
 ```
 
-Without both `KATA_AUTH_TOKEN` and `KATA_TRUST_PRIVATE_NETWORK=1`, the daemon
-refuses the non-loopback bind. Hosted platforms commonly terminate TLS
-upstream, so the operator must explicitly assert trust in the container network
-path.
+Set `KATA_TRUST_PRIVATE_NETWORK=1` when Kata binds a non-loopback plaintext
+listener.
+
+For an explicit non-loopback service start with private-network trust and no
+configured credential, Kata mints a token once at `$KATA_HOME/auth-token` and
+reuses it on restart. The file is owned by the daemon user with Unix mode
+`0600`. On Windows, its ACL allows only the current user, SYSTEM, and
+Administrators. The startup log shows its path, never its contents. Preserve
+this file with the data volume. Use its contents for browser token login or
+authorized clients.
+A nonempty `KATA_AUTH_TOKEN` still overrides all configured file sources.
+To mount your own secret, set `KATA_AUTH_TOKEN_FILE`; see
+[credential precedence](../reference/configuration.md#daemon-config).
+
+When Kata listens only on local endpoints behind a TLS terminator, a
+non-loopback HTTPS `KATA_WEB_PUBLIC_ORIGIN` also requires browser
+authentication. Kata reuses an eligible persisted token or creates one for
+token login without requiring private-network trust. A non-loopback plaintext
+Kata listener still requires private-network trust, even when the public origin
+uses HTTPS.
+
+Set `[auth].auto_token = false` or pass `--no-auto-token` to suppress creation;
+eligible existing tokens are still reused. Implicit creation and reuse are both
+disabled for read-only, tokenless private-network, identity, and auto-start
+modes. Proxy authentication skips token creation only when an actor header is
+configured and the browser listener is in `trusted_proxy_listeners`. A local-only
+daemon with no public web origin does not need an implicit token. An external HTTPS browser origin without another configured
+auth method must have a reusable token or allow token creation; otherwise
+startup fails. Hosted platforms that route traffic to a non-loopback plaintext
+Kata listener require the operator to trust the container network path.
+
+## Bind an interface
+
+Set `KATA_LISTEN=iface:overlay0:7777` or use the same value with `--listen`
+or top-level `listen`. Kata resolves the named, up interface to exactly one
+eligible non-public IPv4 address before startup. A missing/down interface,
+missing IPv4 address, or multiple eligible addresses fails without a fallback
+listener. Restart after changing the interface address. `kata daemon status
+--json` reports the concrete address and winning config sources without tokens.
 
 ## Browser origin and proxying
 
 Set the exact external HTTPS origin when the platform terminates TLS:
 
-```toml
-[web]
-public_origin = "https://daemon.example"
+```sh
+KATA_WEB_PUBLIC_ORIGIN=https://daemon.example
 ```
 
 The origin is a security input, not display metadata. Kata validates `Host` and
@@ -65,7 +97,9 @@ GET /api/v1/health
 GET /api/v1/ping
 ```
 
-Both are unauthenticated.
+Both are unauthenticated. Probes must still use an accepted `Host`: the exact
+public authority, concrete backend authority, or a configured
+`KATA_WEB_ALLOWED_HOSTS` alias. Forwarded headers do not establish authority.
 
 ## Shutdown
 

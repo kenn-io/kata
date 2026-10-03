@@ -27,7 +27,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Enroll external agents against login-mode federation hubs and run the returned
   join command on the spoke. Join reads current hub metadata when it runs,
   including after a hub purge. **Enrollment credential change:** callers that
-  used `KATA_AUTH_TOKEN` for the hub must now pass `--hub-token` or configure a
+  used `KATA_AUTH_TOKEN` for the hub must now pass `--hub-token-env <env-name>`
+  or configure a
   daemon catalog entry matching `--hub-url`. The local daemon token is no longer
   sent to the hub. See the [enrollment runbook](operations/federation.md#external-agent-onboarding-without-hooks).
 

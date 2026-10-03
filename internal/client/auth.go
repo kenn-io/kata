@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -12,15 +13,11 @@ import (
 // outgoing requests. Resolution mirrors the daemon side:
 //
 //  1. KATA_AUTH_TOKEN env (highest priority).
-//  2. [auth].token in <KATA_HOME>/config.toml.
+//  2. [auth].token > token_file > token_env in <KATA_HOME>/config.toml.
 //  3. Empty (no header injected).
 //
-// Errors reading the TOML are not surfaced: a misformatted file should
-// not silently strand the CLI on a no-auth path, but it also should not
-// block discovery. Daemon startup (which always calls ReadDaemonConfig)
-// is the surface that reports parse errors loudly. Here we degrade to
-// "no token" so the request fails with a clean 401 rather than a noisy
-// client-side decode error.
+// Unrelated TOML errors retain the legacy environment-only fallback. Selected
+// credential errors are retained and stop HTTP client construction.
 func resolveAuthToken() string {
 	return resolveAuthConfig().Token
 }
@@ -30,7 +27,14 @@ func resolveAuthConfig() config.AuthConfig {
 	envTrust := config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	auth, err := config.ReadAuthConfig()
 	if err != nil {
-		return config.AuthConfig{Token: envToken, TrustPrivateNetwork: envTrust}
+		if errors.Is(err, config.ErrCredentialSource) {
+			auth.CredentialError = err
+			return auth
+		}
+		// A malformed TOML file must not erase an independently selected
+		// environment file source. Keep the legacy environment-only fallback.
+		token, _, credentialErr := config.ResolveSecret(envToken, os.Getenv("KATA_AUTH_TOKEN_FILE"), "")
+		return config.AuthConfig{Token: token, TrustPrivateNetwork: envTrust, CredentialError: credentialErr}
 	}
 	return auth
 }

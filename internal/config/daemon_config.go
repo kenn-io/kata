@@ -24,6 +24,8 @@ import (
 // TUI preferences and the named daemon catalog. Workspace-local remote
 // overrides (KATA_SERVER, .kata.local.toml) live in their own resolution path.
 type DaemonConfig struct {
+	// Sources contains safe provenance labels, never secret contents.
+	Sources map[string]string `toml:"-"`
 	// Timezone is the IANA timezone used for civil issue schedules that do not
 	// set their own timezone. Empty preserves the UTC default.
 	Timezone string `toml:"timezone"`
@@ -53,7 +55,8 @@ type DaemonConfig struct {
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
 	// Web carries browser-listener and externally published origin settings.
-	Web WebConfig `toml:"web"`
+	Web    WebConfig    `toml:"web"`
+	Backup BackupConfig `toml:"backup"`
 	// Storage carries DB selection plus backend-specific startup policy; see
 	// config.KataDSN for DSN precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
@@ -235,6 +238,11 @@ func NormalizeGitHubSyncConfig(cfg GitHubSyncConfig) (GitHubSyncConfig, error) {
 // allow_identity_connector_administration = true.
 type AuthConfig struct {
 	Token                                    string      `toml:"token"`
+	TokenFile                                string      `toml:"token_file"`
+	TokenEnv                                 string      `toml:"token_env"`
+	AutoToken                                *bool       `toml:"auto_token"`
+	Source                                   string      `toml:"-"`
+	CredentialError                          error       `toml:"-"`
 	TrustPrivateNetwork                      bool        `toml:"trust_private_network"`
 	AllowUnauthenticatedPrivateNetworkWrites bool        `toml:"allow_unauthenticated_private_network_writes"`
 	RequireTokenIdentity                     bool        `toml:"require_token_identity"`
@@ -354,6 +362,53 @@ func ReadDaemonConfigForHome(home string) (*DaemonConfig, error) {
 	return readDaemonConfig(filepath.Join(home, "config.toml"), false)
 }
 
+// ReadDaemonCatalogAndAuthPolicy reads the selected daemon, catalog, and
+// private-network trust policy. It ignores local bearer credentials and
+// unrelated daemon settings because callers may use an origin-scoped
+// credential from the selected catalog entry.
+func ReadDaemonCatalogAndAuthPolicy() (*DaemonConfig, error) {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	if errors.Is(err, os.ErrNotExist) {
+		return &DaemonConfig{Auth: AuthConfig{TrustPrivateNetwork: EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")}}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file struct {
+		ActiveDaemon string                `toml:"active_daemon"`
+		Auth         AuthConfig            `toml:"auth"`
+		Daemons      []CatalogDaemonConfig `toml:"daemon"`
+	}
+	meta, err := toml.Decode(string(data), &file)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var unknown []string
+	for _, key := range meta.Undecoded() {
+		name := key.String()
+		if strings.HasPrefix(name, "auth.") || strings.HasPrefix(name, "daemon.") {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(unknown, ", "))
+	}
+	cfg := &DaemonConfig{
+		ActiveDaemon: file.ActiveDaemon,
+		Auth:         AuthConfig{TrustPrivateNetwork: file.Auth.TrustPrivateNetwork || EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")},
+		Daemons:      file.Daemons,
+	}
+	trimDaemonCatalog(cfg)
+	if err := normalizeDaemonCatalog(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
@@ -396,10 +451,24 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	default:
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	initializeDeploymentSources(&cfg)
 	if mergeEnv {
-		applyDaemonConfigEnv(&cfg)
+		applyDaemonConfigEnv(&cfg, true)
+		if err := applyDeploymentEnv(&cfg); err != nil {
+			return nil, err
+		}
+	}
+	if err := resolveAuthCredential(&cfg.Auth); err != nil {
+		return nil, err
+	}
+	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
+		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")
 	}
 	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
+		return nil, err
+	}
+	cfg.Backup.Dir = strings.TrimSpace(cfg.Backup.Dir)
+	if _, _, err := cfg.Backup.Durations(); err != nil {
 		return nil, err
 	}
 	if cfg.Timezone != "" {
@@ -558,6 +627,16 @@ func isLoopbackWebOrigin(origin *url.URL) bool {
 // It intentionally skips daemon-catalog normalization so auth-only clients do not
 // lose [auth] settings because an unrelated catalog entry is unavailable.
 func ReadAuthConfig() (AuthConfig, error) {
+	return readAuthConfig(true)
+}
+
+// ReadAuthConfigForPolicy parses daemon auth policy without resolving or
+// returning the local bearer credential.
+func ReadAuthConfigForPolicy() (AuthConfig, error) {
+	return readAuthConfig(false)
+}
+
+func readAuthConfig(resolveCredential bool) (AuthConfig, error) {
 	path, err := DaemonConfigPath()
 	if err != nil {
 		return AuthConfig{}, err
@@ -588,11 +667,26 @@ func ReadAuthConfig() (AuthConfig, error) {
 	default:
 		return AuthConfig{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	applyDaemonConfigEnv(&cfg)
+	applyDaemonConfigEnv(&cfg, resolveCredential)
+	if resolveCredential {
+		if err := resolveAuthCredential(&cfg.Auth); err != nil {
+			return cfg.Auth, err
+		}
+	} else {
+		clearAuthCredential(&cfg.Auth)
+	}
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
 		return AuthConfig{}, err
 	}
 	return cfg.Auth, nil
+}
+
+func clearAuthCredential(auth *AuthConfig) {
+	auth.Token = ""
+	auth.TokenFile = ""
+	auth.TokenEnv = ""
+	auth.Source = ""
+	auth.CredentialError = nil
 }
 
 func trimSearchEmbeddings(cfg *DaemonConfig) {
@@ -718,13 +812,24 @@ func validateEmbeddings(e EmbeddingsConfig) error {
 	return nil
 }
 
-func applyDaemonConfigEnv(cfg *DaemonConfig) {
+func applyDaemonConfigEnv(cfg *DaemonConfig, includeAuthCredentials bool) {
+	if includeAuthCredentials {
+		if value := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN_FILE")); value != "" &&
+			(!cfg.Auth.RequireTokenIdentity || !EnvTruthy("KATA_AUTOSTART")) {
+			cfg.Auth.TokenFile = value
+		}
+	}
 	if raw, ok := os.LookupEnv("KATA_AUTOSTART_IDLE_TIMEOUT"); ok {
 		cfg.AutostartIdleTimeout = strings.TrimSpace(raw)
 	}
-	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" &&
-		(!cfg.Auth.RequireTokenIdentity || !EnvTruthy("KATA_AUTOSTART")) {
-		cfg.Auth.Token = v
+	if includeAuthCredentials {
+		if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" &&
+			(!cfg.Auth.RequireTokenIdentity || !EnvTruthy("KATA_AUTOSTART")) {
+			cfg.Auth.Token = v
+			if cfg.Sources != nil {
+				cfg.Sources["auth"] = "KATA_AUTH_TOKEN"
+			}
+		}
 	}
 	if EnvTruthy("KATA_TRUST_PRIVATE_NETWORK") {
 		cfg.Auth.TrustPrivateNetwork = true

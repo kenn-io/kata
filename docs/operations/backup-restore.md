@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-09-15
+last_edited: 2026-10-02
 ---
 
 # Backup and restore
@@ -48,6 +48,38 @@ For an online backup on the same host:
 ```sh
 kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
 ```
+
+## Scheduled backups
+
+Run an explicit foreground daemon service with `KATA_BACKUP_DIR=/data/backups`
+to take an immediate full JSONL snapshot and another every `24h`. Set
+`KATA_BACKUP_INTERVAL` and `KATA_BACKUP_RETAIN` to positive Go durations such as
+`6h` and `720h`. Retention defaults to `720h` (30 days). The equivalent config is:
+
+```toml
+[backup]
+dir = "/data/backups"
+interval = "24h"
+retain = "720h"
+```
+
+Environment settings override the corresponding config keys. Without `dir`,
+the section must be empty and scheduling is disabled. A partially configured
+schedule or invalid duration stops startup.
+
+Kata exports all projects and includes soft-deleted rows through the same
+consistent snapshot exporter as `kata export`. Exports run serially. Each file
+is published atomically with mode `0600` in an owner-only subdirectory named
+for the database's storage identity. Retention uses the UTC timestamp in Kata's
+backup filenames and removes only old regular backup files in that subdirectory.
+Unrelated files, symlinks, and other databases' subdirectories are preserved.
+A failed export preserves earlier backups, logs the error, and retries at the
+next interval. Shutdown cancels and joins the worker before closing storage.
+
+JSONL contains database state, including database-managed tokens. It does not
+include `config.toml`, mounted secrets, or the generated `auth-token` file.
+Preserve those separately with their original owner-only permissions. Copy
+snapshots off the data volume if you need protection against volume loss.
 
 ## Restore
 

@@ -19,7 +19,7 @@ import (
 type hubAuthInputs struct {
 	hubURL        string
 	hubName       string
-	hubToken      string
+	hubTokenEnv   string
 	allowInsecure bool
 }
 
@@ -29,11 +29,11 @@ type hubAdminAuth struct {
 	allowInsecure bool
 }
 
-// resolveHubAdminAuth applies precedence: --hub-token > named catalog entry
+// resolveHubAdminAuth applies precedence: --hub-token-env > named catalog entry
 // token/token_env > URL-matched catalog entry token/token_env > no credential
 // (empty token here; the caller builds an UNAUTHENTICATED hub client — the
 // local daemon's global KATA_AUTH_TOKEN/[auth].token is never sent to the hub
-// origin implicitly; a token-protected hub requires --hub-token or a catalog
+// origin implicitly; a token-protected hub requires --hub-token-env or a catalog
 // entry).
 //
 // The target URL is ALWAYS the binding's hub URL (in.hubURL), and a catalog
@@ -41,7 +41,7 @@ type hubAdminAuth struct {
 // origin travel together, so neither can redirect the other to a foreign host.
 // A --hub <name> entry that is missing or whose URL differs from the binding
 // errors out — sending a named entry's admin token to a different origin is
-// the cross-origin leak this guards against; --hub-token is the only
+// the cross-origin leak this guards against; --hub-token-env is the only
 // deliberate cross-origin path.
 //
 // allow_insecure for the hub client is the UNION of the caller's opt-in
@@ -60,8 +60,12 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 	if err != nil {
 		return hubAdminAuth{}, fmt.Errorf("canonicalize spoke hub origin: %w", err)
 	}
-	if strings.TrimSpace(in.hubToken) != "" {
-		out.token = in.hubToken
+	if env := strings.TrimSpace(in.hubTokenEnv); env != "" {
+		token, _, err := config.ResolveSecret("", "", env)
+		if err != nil {
+			return hubAdminAuth{}, err
+		}
+		out.token = token
 		// The explicit token selects the credential, but transport policy still
 		// comes from a catalog entry at this hub origin. Never read that entry's
 		// token when an explicit token was supplied.
@@ -111,7 +115,7 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 		if entryOrigin != hubOrigin {
 			return hubAdminAuth{}, &cliError{
 				Message: fmt.Sprintf(
-					"--hub %q resolves to %s, not this spoke's hub %s; refusing to send its admin token to a different origin (pass --hub-token to use an explicit token with this hub)",
+					"--hub %q resolves to %s, not this spoke's hub %s; refusing to send its admin token to a different origin (pass --hub-token-env to use an explicit token with this hub)",
 					name, textsafe.Line(e.URL), textsafe.Line(out.url)),
 				Code:     "hub_catalog_url_mismatch",
 				Kind:     kindValidation,
@@ -157,7 +161,7 @@ func selectedCatalogToken(e *config.CatalogDaemonConfig) (string, error) {
 		token := strings.TrimSpace(os.Getenv(env))
 		if token == "" {
 			return "", &cliError{
-				Message:  fmt.Sprintf("hub admin token_env %q is set but empty; export it or pass --hub-token", env),
+				Message:  fmt.Sprintf("hub admin token_env %q is set but empty; export it or pass --hub-token-env", env),
 				Code:     "hub_token_env_empty",
 				Kind:     kindValidation,
 				ExitCode: ExitValidation,
@@ -266,7 +270,7 @@ func ambiguousHubCatalogOriginError() error {
 // hubAdminClient builds an HTTP client for the resolved hub admin auth.
 func hubAdminClient(ctx context.Context, a hubAdminAuth) (*http.Client, error) {
 	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: a.allowInsecure}
-	auth, err := config.ReadAuthConfig()
+	auth, err := config.ReadAuthConfigForPolicy()
 	if err != nil {
 		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	}

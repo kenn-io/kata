@@ -54,12 +54,14 @@ separate:
 
 - **Daemon API tokens** identify clients talking to a daemon's normal API. They
   are configured with `KATA_AUTH_TOKEN` or `[auth].token` and managed with
-  `kata tokens ...` when token identity is required. Operator commands such as
-  `kata federation enroll`, `kata federation revoke`, `kata federation status`,
-  `kata federation quarantine skip`, and hub-local force-release use this normal
-  daemon API auth surface. `kata federation enroll` is special only in target
-  selection: its `--hub-url` flag selects the hub daemon for the enrollment API
-  call while the CLI's default daemon remains the spoke being enrolled.
+  `kata tokens ...` when token identity is required. Local operator commands
+  such as `kata federation status`, `kata federation quarantine skip`, and
+  hub-local force-release use the default daemon's normal API auth surface.
+  Federation enrollment and hub revoke requests instead use a target-scoped
+  hub admin credential from `--hub-token-env` or a daemon-catalog entry for that
+  same hub origin. They never send the default daemon's global token to the
+  hub. `kata federation enroll` selects the hub with `--hub-url` while the CLI's
+  default daemon remains the spoke being enrolled.
 - **Federation enrollment tokens** authorize one spoke to call hub federation
   transport routes for an enrolled scope and capability set. They are created by
   `kata federation enroll`, stored hashed on the hub, stored plaintext only in
@@ -394,7 +396,7 @@ recent violation summaries.
 kata federation identity
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--allow-insecure]
+  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> --hub-project-id <id> \

@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testfix"
 )
 
@@ -33,6 +34,75 @@ func pingingServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(s.Close)
 	return s
+}
+
+func TestCatalogTargetResolutionIgnoresMissingGlobalTokenFile(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		selectionName string
+		active        bool
+		wantSource    DaemonSource
+	}{
+		{name: "explicit", selectionName: "example-remote", wantSource: DaemonSourceNamedCatalog},
+		{name: "active", active: true, wantSource: DaemonSourceActiveDaemon},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			srv := pingingServer(t)
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			t.Chdir(t.TempDir())
+
+			active := ""
+			if tc.active {
+				active = "active_daemon = \"example-remote\"\n"
+			}
+			cfg := fmt.Sprintf(`%s[auth]
+token_file = %q
+trust_private_network = true
+
+[[daemon]]
+name = "example-remote"
+url = %q
+token = "example-catalog-token"
+`, active, filepath.Join(home, "missing-local-token"), srv.URL)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600))
+			_, err := config.ReadDaemonConfig()
+			require.ErrorIs(t, err, config.ErrCredentialSource)
+			require.Contains(t, err.Error(), "missing-local-token")
+
+			selection, err := InspectSelection(t.Context(), "", tc.selectionName)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSource, selection.Resolved.Source)
+			require.Equal(t, "example-catalog-token", selection.Resolved.Token)
+
+			if tc.active {
+				resolved, ok, err := ResolveRemoteDaemon(t.Context(), "")
+				require.NoError(t, err)
+				require.True(t, ok)
+				require.Equal(t, "example-catalog-token", resolved.Token)
+
+				auth, ok, err := activeRemoteTargetAuthForBaseURL(srv.URL, "")
+				require.NoError(t, err)
+				require.True(t, ok)
+				require.Equal(t, "example-catalog-token", auth.Token)
+				require.True(t, auth.TrustPrivateNetwork)
+			} else {
+				resolved, err := EnsureResolvedNamed(t.Context(), "example-remote")
+				require.NoError(t, err)
+				require.Equal(t, "example-catalog-token", resolved.Token)
+
+				target, err := namedDaemonTargetForBaseURL("example-remote", srv.URL)
+				require.NoError(t, err)
+				require.Equal(t, "example-catalog-token", target.Token)
+			}
+		})
+	}
 }
 
 func TestParseHTTPTimeout(t *testing.T) {

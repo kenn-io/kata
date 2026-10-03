@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/gofrs/flock"
 	"go.kenn.io/kit/pathresolve"
@@ -20,6 +21,7 @@ type nativeAgentHookOptions struct {
 	API                                                     string
 	ManagedAttention                                        bool
 	SourceSet, Contract, Attention                          bool
+	ConfigPathExplicit                                      bool
 }
 type nativeAgentHookChange struct {
 	Path                   string
@@ -28,6 +30,7 @@ type nativeAgentHookChange struct {
 }
 type nativeAgentHookPlan struct {
 	Path                                                        string
+	ProjectRoot                                                 string
 	Changes                                                     []nativeAgentHookChange
 	Contract, AttentionStart, AttentionEnd                      bool
 	CurrentContract, CurrentAttentionStart, CurrentAttentionEnd bool
@@ -126,6 +129,13 @@ func publishNativeAgentHookPlanWithRename(plan nativeAgentHookPlan, rename func(
 }
 
 func publishNativeAgentHookPlanWithFileOps(plan nativeAgentHookPlan, stage func(string, []byte, os.FileMode) (string, error), rename func(string, string) error) (changed bool, err error) {
+	projectRoot := ""
+	if plan.ProjectRoot != "" {
+		projectRoot, err = resolveNativeAgentHookPath(plan.ProjectRoot)
+		if err != nil {
+			return false, err
+		}
+	}
 	preimages := make([]nativeAgentHookChange, 0, len(plan.Changes))
 	changes := make([]nativeAgentHookChange, 0, len(plan.Changes))
 	paths := make([]string, 0, len(plan.Changes))
@@ -134,6 +144,15 @@ func publishNativeAgentHookPlanWithFileOps(plan nativeAgentHookPlan, stage func(
 		path, e := resolveNativeAgentHookPath(change.Path)
 		if e != nil {
 			return false, e
+		}
+		if projectRoot != "" {
+			relative, relErr := filepath.Rel(projectRoot, path)
+			if relErr != nil {
+				return false, relErr
+			}
+			if filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return false, fmt.Errorf("native project hook path %q resolves outside project root %q", change.Path, projectRoot)
+			}
 		}
 		change.Path = path
 		if seen[path] {

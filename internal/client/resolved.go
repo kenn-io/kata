@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
@@ -66,7 +67,10 @@ type ResolvedDaemon struct {
 	// Named catalog entries can be local or remote while sharing one public
 	// source enum. Retain that distinction so Running reproduces the exact
 	// RunningDaemon returned by the credential-free named locator.
-	namedRemote bool
+	namedRemote     bool
+	credentialError error
+	persistedAuth   bool
+	implicitToken   bool
 }
 
 // ConfiguredRemote reports whether resolution selected configured remote
@@ -94,6 +98,7 @@ func (d ResolvedDaemon) Running() RunningDaemon {
 		Network:          d.Network,
 		Scheme:           d.Scheme,
 		ConfiguredRemote: d.ConfiguredRemote(),
+		PersistedAuth:    d.persistedAuth,
 	}
 }
 
@@ -109,18 +114,25 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 	refreshed.LocalProfile = d.LocalProfile
 	refreshed.profileConfig = d.profileConfig
 	refreshed.SourcePath = d.SourcePath
-	return refreshed
+	refreshed.credentialError = d.credentialError
+	refreshed.implicitToken = d.implicitToken
+	if d.implicitToken && !running.PersistedAuth {
+		refreshed.Token = ""
+		refreshed.implicitToken = false
+	}
+	return refreshed.withPersistedAuth()
 }
 
 func resolvedForRunning(source DaemonSource, name string, running RunningDaemon) ResolvedDaemon {
 	resolved := ResolvedDaemon{
-		Source:      source,
-		Name:        name,
-		BaseURL:     running.BaseURL,
-		Address:     running.Address,
-		Network:     running.Network,
-		Scheme:      running.Scheme,
-		namedRemote: source == DaemonSourceNamedCatalog && running.ConfiguredRemote,
+		Source:        source,
+		Name:          name,
+		BaseURL:       running.BaseURL,
+		Address:       running.Address,
+		Network:       running.Network,
+		Scheme:        running.Scheme,
+		namedRemote:   source == DaemonSourceNamedCatalog && running.ConfiguredRemote,
+		persistedAuth: running.PersistedAuth,
 	}
 	if running.Network == "unix" {
 		resolved.UnixSocket = running.Address
@@ -133,21 +145,47 @@ func resolvedForRunning(source DaemonSource, name string, running RunningDaemon)
 
 func (d ResolvedDaemon) withGlobalAuth() ResolvedDaemon {
 	auth := resolveAuthConfig()
+	d.credentialError = auth.CredentialError
 	d.Token = auth.Token
 	if override := authTokenEnvOverride(); override != "" {
 		d.Token = override
 	}
 	d.TrustPrivateNetwork = auth.TrustPrivateNetwork
+	return d.withPersistedAuth()
+}
+
+func (d ResolvedDaemon) withPersistedAuth() ResolvedDaemon {
+	if !d.persistedAuth || d.Token != "" || d.credentialError != nil {
+		return d
+	}
+	var home string
+	var err error
+	if d.LocalProfile != nil {
+		home = d.LocalProfile.Home
+	} else if d.Source == DaemonSourceLocalRuntime || (d.Source == DaemonSourceNamedCatalog && !d.namedRemote) {
+		home, err = config.KataHome()
+	} else {
+		return d
+	}
+	if err == nil {
+		d.Token, err = config.ReadPersistedAuthToken(home)
+		if err == nil && d.Token == "" {
+			err = fmt.Errorf("%w: local runtime's persisted auth token is missing", config.ErrCredentialSource)
+		}
+	}
+	d.credentialError = err
+	d.implicitToken = err == nil && d.Token != ""
 	return d
 }
 
-// GlobalAuthToken returns the bearer token selected by global auth
-// resolution: KATA_AUTH_TOKEN, then [auth].token.
-func GlobalAuthToken() string {
+// GlobalAuthCredential preserves selected-source failures for SDK transports.
+// It never discovers the implicit owner token from a local runtime.
+func GlobalAuthCredential() (string, error) {
 	if override := authTokenEnvOverride(); override != "" {
-		return override
+		return override, nil
 	}
-	return resolveAuthConfig().Token
+	auth := resolveAuthConfig()
+	return auth.Token, auth.CredentialError
 }
 
 func (d ResolvedDaemon) withRemoteTargetAuth(token string, allowInsecure bool) ResolvedDaemon {
@@ -166,9 +204,10 @@ func (d ResolvedDaemon) withLocalTargetAuth(token string) ResolvedDaemon {
 	d.Token = token
 	if d.Token == "" {
 		d.Token = auth.Token
+		d.credentialError = auth.CredentialError
 	}
 	d.TrustPrivateNetwork = auth.TrustPrivateNetwork
-	return d
+	return d.withPersistedAuth()
 }
 
 // EnsureResolvedInWorkspace selects a daemon and retains the policy selected

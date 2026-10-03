@@ -384,8 +384,9 @@ other tabs remain valid. `/api/v1/ui/session/logout` is not a route, and there
 is no browser-session refresh endpoint.
 
 CLI federation enrollment can use the hub's admin bearer token, even when the
-web UI uses `login` mode. The CLI takes that credential from `--hub-token` or a
-daemon catalog entry whose URL matches the hub origin; it never forwards the
+web UI uses `login` mode. The CLI reads the variable named by
+`--hub-token-env <env-name>` or uses a daemon catalog entry whose URL matches
+the hub origin; it never forwards the
 local daemon's global token to the hub. Ordinary API requests without browser
 credentials use daemon bearer authentication on both browser and shared TCP
 listeners. Host validation still applies; requests carrying browser credentials

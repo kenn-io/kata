@@ -51,7 +51,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			}
 		}
 		if name == "" && !workspaceURL {
-			cfg, err := config.ReadDaemonConfig()
+			cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 			if err != nil {
 				return DaemonSelection{}, err
 			}
@@ -68,7 +68,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 				return DaemonSelection{}, err
 			}
 		}
-		cfg, err := config.ReadDaemonConfig()
+		cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 		if err != nil {
 			return DaemonSelection{}, err
 		}

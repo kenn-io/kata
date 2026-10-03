@@ -222,6 +222,7 @@ func daemonStartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		foreground       bool
+		noAutoToken      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -240,9 +241,9 @@ func daemonStartCmd() *cobra.Command {
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
-				return runDaemonForeground(ctx, listen, insecureReadonly)
+				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return err
 			}
@@ -267,6 +268,7 @@ func daemonStartCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
+	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().StringVar(&listen, "listen", "",
 		"bind TCP at host:port (admin-only; non-public addresses only). "+
 			"Falls back to $KATA_HOME/config.toml's `listen` value when "+
@@ -277,7 +279,7 @@ func daemonStartCmd() *cobra.Command {
 	return cmd
 }
 
-func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly bool) (daemonStartOutput, error) {
+func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
@@ -309,7 +311,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		}
 		replacedPID = rec.PID
 	}
-	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly)
+	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, noAutoToken)
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
@@ -353,7 +355,7 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 }
 
 func defaultLaunchDetachedDaemon(
-	ctx context.Context, dataDir, listen string, insecureReadonly bool,
+	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken bool,
 ) (daemonStartOutput, error) {
 	args := []string{"daemon", "start", "--foreground"}
 	if listen != "" {
@@ -361,6 +363,9 @@ func defaultLaunchDetachedDaemon(
 	}
 	if insecureReadonly {
 		args = append(args, "--insecure-readonly")
+	}
+	if noAutoToken {
+		args = append(args, "--no-auto-token")
 	}
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            args,
@@ -427,13 +432,13 @@ func writeDaemonWebURL(w io.Writer, webURL string) error {
 
 func effectiveDaemonListen(listen string) (string, error) {
 	if listen != "" {
-		return listen, nil
+		return daemon.ResolveInterfaceListen(listen)
 	}
 	dcfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return "", err
 	}
-	return effectiveDaemonListenWithConfig(listen, dcfg), nil
+	return daemon.ResolveInterfaceListen(effectiveDaemonListenWithConfig(listen, dcfg))
 }
 
 func effectiveDaemonListenWithConfig(listen string, dcfg *config.DaemonConfig) string {
@@ -518,12 +523,13 @@ func daemonStatusCmd() *cobra.Command {
 			for _, r := range recs {
 				if daemon.RuntimeProcessAlive(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
-						PID:       r.PID,
-						Version:   daemonRuntimeVersion(r),
-						Address:   r.Endpoint().ConfigAddress(),
-						WebURL:    r.Metadata["web_origin"],
-						DBPath:    r.Metadata["db_path"],
-						StartedAt: r.StartedAt,
+						PID:           r.PID,
+						Version:       daemonRuntimeVersion(r),
+						Address:       r.Endpoint().ConfigAddress(),
+						WebURL:        r.Metadata["web_origin"],
+						DBPath:        r.Metadata["db_path"],
+						StartedAt:     r.StartedAt,
+						ConfigSources: runtimeConfigSources(r.Metadata),
 					})
 				}
 			}
@@ -588,12 +594,26 @@ type daemonStatusOutput struct {
 }
 
 type daemonStatusEntry struct {
-	PID       int       `json:"pid"`
-	Version   string    `json:"version"`
-	Address   string    `json:"address"`
-	WebURL    string    `json:"web_url,omitempty"`
-	DBPath    string    `json:"db_path"`
-	StartedAt time.Time `json:"started_at"`
+	PID           int               `json:"pid"`
+	Version       string            `json:"version"`
+	Address       string            `json:"address"`
+	WebURL        string            `json:"web_url,omitempty"`
+	DBPath        string            `json:"db_path"`
+	StartedAt     time.Time         `json:"started_at"`
+	ConfigSources map[string]string `json:"config_sources,omitempty"`
+}
+
+func runtimeConfigSources(metadata map[string]string) map[string]string {
+	var sources map[string]string
+	for key, value := range metadata {
+		if strings.HasPrefix(key, "config_") && strings.HasSuffix(key, "_source") {
+			if sources == nil {
+				sources = make(map[string]string)
+			}
+			sources[strings.TrimSuffix(strings.TrimPrefix(key, "config_"), "_source")] = value
+		}
+	}
+	return sources
 }
 
 func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
@@ -671,6 +691,7 @@ func daemonRestartCmd() *cobra.Command {
 	var (
 		listen           string
 		insecureReadonly bool
+		noAutoToken      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "restart",
@@ -679,7 +700,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly)
+			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return fmt.Errorf("restart: validate replacement: %w", err)
 			}
@@ -701,7 +722,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
 				return err
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return err
 			}
@@ -740,6 +761,7 @@ func daemonRestartCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&listen, "listen", "",
 		"bind the replacement daemon to host:port (overrides config.toml)")
+	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
 	return cmd
@@ -760,7 +782,7 @@ type daemonStartupPreflight struct {
 	VectorsPath    string
 }
 
-func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly bool) (daemonStartupPreflight, error) {
+func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
 	dcfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return daemonStartupPreflight{}, err
@@ -768,7 +790,17 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err := validateFederationStartupConfig(dcfg); err != nil {
 		return daemonStartupPreflight{}, err
 	}
-	listen = effectiveDaemonListenWithConfig(listen, dcfg)
+	if listen != "" {
+		dcfg.Sources["listen"] = "--listen"
+	} else if dcfg.Listen == "" {
+		if _, ok := listenFromPortEnv(); ok {
+			dcfg.Sources["listen"] = "PORT"
+		}
+	}
+	listen, err = daemon.ResolveInterfaceListen(effectiveDaemonListenWithConfig(listen, dcfg))
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return daemonStartupPreflight{}, err
@@ -777,11 +809,22 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
+	home, err := config.KataHome()
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	if err := prepareDaemonAuth(dcfg, endpoint, insecureReadonly, noAutoToken, home); err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	if dcfg.Auth.Source == "generated_file" || dcfg.Auth.Source == "persisted_file" {
+		dcfg.Sources["auth"] = dcfg.Auth.Source
+	}
 	if err := daemon.CheckAuthStartup(listen, dcfg.Auth, insecureReadonly); err != nil {
 		return daemonStartupPreflight{}, err
 	}
 	if dcfg.Web.Listen != "" {
-		if err := daemon.CheckWebStartup(dcfg.Web.Listen, dcfg.Auth, insecureReadonly); err != nil {
+		trustedProxySession := trustedProxyBrowserSession(endpoint, dcfg.Web, dcfg.Auth)
+		if err := daemon.CheckWebStartup(dcfg.Web.Listen, dcfg.Auth, insecureReadonly, trustedProxySession); err != nil {
 			return daemonStartupPreflight{}, err
 		}
 	}
@@ -807,10 +850,6 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		if err := storeConfig.Postgres.Validate(); err != nil {
 			return daemonStartupPreflight{}, err
 		}
-	}
-	home, err := config.KataHome()
-	if err != nil {
-		return daemonStartupPreflight{}, err
 	}
 	hookCfgPath, err := config.HookConfigPath()
 	if err != nil {
@@ -935,7 +974,7 @@ type daemonReloadOutput struct {
 // --foreground` with the platform default endpoint and by the auto-start child
 // process spawned by ensureDaemon.
 func runDaemon(ctx context.Context) error {
-	return runDaemonWithListen(ctx, "", false)
+	return runDaemonWithListen(ctx, "", false, false)
 }
 
 // redactRuntimeDSN returns dsn safe for inclusion in the runtime file and
@@ -991,18 +1030,18 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // When the daemon shuts down because it received the restart signal, it
 // re-executes itself only after every listener and the runtime record have
 // been released.
-func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
+func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
 	restart := newDaemonRestart(os.Stderr)
-	if err := runDaemonProcess(ctx, listen, insecureReadonly, restart); err != nil {
+	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
 		return err
 	}
 	return restart.exec(ctx)
 }
 
 func runDaemonProcess(
-	ctx context.Context, listen string, insecureReadonly bool, restart *daemonRestart,
+	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
 ) (returnErr error) {
-	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly)
+	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
 		return err
 	}
@@ -1101,6 +1140,9 @@ func runDaemonProcess(
 		}
 	}()
 	hookCfgPath := startup.HookConfigPath
+	if dcfg.Auth.Source == "generated_file" {
+		daemonLog.Printf("auth token persisted at %s", filepath.Join(startup.KataHome, "auth-token"))
+	}
 
 	telemetryReporter := newDaemonTelemetryReporter(ctx, store)
 	defer func() {
@@ -1149,6 +1191,9 @@ func runDaemonProcess(
 	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	for key, source := range dcfg.Sources {
+		rec.Metadata["config_"+key+"_source"] = source
+	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	if restart != nil {
 		rec.Metadata[daemon.RuntimeRestartMetadataKey] = "1"
@@ -1343,6 +1388,9 @@ func runDaemonProcess(
 	}()
 
 	mainPolicy := daemon.ListenerPolicy{Kind: daemon.ListenerSocket}
+	if err := startDaemonBackups(ctx, workers, store, dcfg.Backup, ns.DBHash, daemonLog); err != nil {
+		return err
+	}
 	bindings := []daemon.ListenerBinding{{Listener: listener, Policy: mainPolicy}}
 	if webEndpoint.Shared {
 		bindings[0].Policy = daemon.ListenerPolicy{

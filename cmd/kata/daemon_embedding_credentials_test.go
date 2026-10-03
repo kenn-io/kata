@@ -49,9 +49,7 @@ func TestEmbeddingCredentialStartupAndReload(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("startup called provider")
 	}
-	if err := os.WriteFile(path, []byte("file-secret\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writePrivateCredentialFixture(t, path, "file-secret\n")
 	woke := false
 	if err := reloadEmbeddingCredentials(ec, c, func() { woke = true }); err != nil {
 		t.Fatal(err)

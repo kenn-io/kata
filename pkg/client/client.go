@@ -129,7 +129,11 @@ func NewWithGlobalAuth(ctx context.Context, baseURL string, opts ...Option) (*Cl
 	if socket, ok, err := internalclient.UnixSocketPath(baseURL); err != nil {
 		return nil, err
 	} else if ok {
-		return newUnixClient(socket, internalclient.GlobalAuthToken(), merged)
+		token, err := internalclient.GlobalAuthCredential()
+		if err != nil {
+			return nil, err
+		}
+		return newUnixClient(socket, token, merged)
 	}
 	httpClient, err := internalclient.NewHTTPClient(ctx, baseURL, internalOpts(merged.transport))
 	if err != nil {

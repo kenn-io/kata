@@ -143,6 +143,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	references := []string{profile.Catalog.TokenEnv}
 	if profile.Config != nil {
 		references = append(references,
+			profile.Config.Auth.TokenEnv,
 			profile.Config.Search.Embeddings.APIKeyEnv,
 			profile.Config.GitHubSync.TokenEnvName(),
 			profile.Config.NotionSync.TokenEnv,
@@ -158,6 +159,9 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		}
 	}
 	reserved := []string{
+		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
+		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
+		"KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN",
 		"KATA_HOME", "KATA_DB", "KATA_DSN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_ALLOW_INSECURE",
 		"KATA_AUTOSTART", "KATA_AUTOSTART_IDLE_TIMEOUT", "KATA_SKIP_DAEMON_VERSION_CHECK", "KATA_HTTP_TIMEOUT",
 		"KATA_POSTGRES_SCHEMA", "KATA_POSTGRES_SCHEMA_MODE", "KATA_POSTGRES_SCHEMA_OWNER", "KATA_POSTGRES_ALLOW_INSECURE",

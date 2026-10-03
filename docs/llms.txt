@@ -53,6 +53,8 @@ for machine readers.
   config.toml reference
 - [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):
   JSONL export and import
+- [Containers](https://katatracker.com/docs/operations/containers.md):
+  stock images, environment settings, mounted secrets, and persistent storage
 - [Architecture](https://katatracker.com/docs/design/architecture.md): design
   notes
 - [Comparisons](https://katatracker.com/docs/guide/comparisons.md): kata vs.

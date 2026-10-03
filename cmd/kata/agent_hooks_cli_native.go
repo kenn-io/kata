@@ -71,6 +71,7 @@ func selectNativeAgentHookTargets(names []string, all bool, scope, config, dir s
 				return nil, err
 			}
 			target.options.ConfigPath = target.path
+			target.options.ConfigPathExplicit = true
 		}
 		if agentHookUsesKit(capability.Name) {
 			target.options.ConfigPath = target.path
@@ -112,22 +113,33 @@ func nativeAgentHookConfigRoot(name, scope, path string) string {
 }
 
 func planNativeAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHookPlan, error) {
+	var plan nativeAgentHookPlan
+	var err error
 	if agentHookUsesKit(opts.Agent) {
-		return planKitAgentHooks(opts, remove)
+		plan, err = planKitAgentHooks(opts, remove)
+	} else {
+		switch opts.Agent {
+		case "pi":
+			plan, err = planPiAgentHooks(opts, remove)
+		case "amp":
+			plan, err = planAmpAgentHooks(opts, remove)
+		case "opencode":
+			plan, err = planOpenCodeAgentHooks(opts, remove)
+		case "openclaw":
+			plan, err = planOpenClawAgentHooks(opts, remove)
+		case "droid", "antigravity", "zcode", "kimi-code", "kimi", "muse", "grok":
+			plan, err = planExtraAgentHooks(opts, remove)
+		default:
+			return nativeAgentHookPlan{}, agentHookUsage("native provider unavailable for " + opts.Agent)
+		}
 	}
-	switch opts.Agent {
-	case "pi":
-		return planPiAgentHooks(opts, remove)
-	case "amp":
-		return planAmpAgentHooks(opts, remove)
-	case "opencode":
-		return planOpenCodeAgentHooks(opts, remove)
-	case "openclaw":
-		return planOpenClawAgentHooks(opts, remove)
-	case "droid", "antigravity", "zcode", "kimi-code", "kimi", "muse", "grok":
-		return planExtraAgentHooks(opts, remove)
+	if err != nil {
+		return plan, err
 	}
-	return nativeAgentHookPlan{}, agentHookUsage("native provider unavailable for " + opts.Agent)
+	if opts.Scope == "project" && !opts.ConfigPathExplicit {
+		plan.ProjectRoot = opts.Dir
+	}
+	return plan, nil
 }
 
 func newNativeAgentHooksMutationCmd(remove bool) *cobra.Command {
@@ -218,6 +230,9 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		}
 		results := make([]agentHookMutation, 0, len(targets))
 		combined := nativeAgentHookPlan{}
+		if scope == "project" && config == "" {
+			combined.ProjectRoot = dir
+		}
 		for _, target := range targets {
 			result := agentHookMutation{Harness: target.capability.Name, ConfigPath: target.path, State: "unchanged", Warnings: []string{}}
 			if target.skip != "" {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
@@ -53,15 +54,52 @@ func (e WebEndpoint) AllowsLocalSession(auth config.AuthConfig) bool {
 // configured trusted-proxy listener and can exchange its attributed principal
 // for a tab-scoped browser session.
 func (e WebEndpoint) AllowsTrustedProxySession(auth config.AuthConfig) bool {
-	if strings.TrimSpace(auth.Proxy.TrustedActorHeader) == "" {
+	if strings.TrimSpace(auth.Proxy.TrustedActorHeader) == "" ||
+		e.Endpoint.Network != kitdaemon.NetworkTCP {
+		return false
+	}
+	endpointAddress := canonicalTCPListenerAddress(e.Endpoint.Address)
+	if endpointAddress == "" || !specificTCPListener(endpointAddress) {
 		return false
 	}
 	for _, listener := range auth.Proxy.TrustedProxyListeners {
-		if normalizeListenerEntry(listener) == e.Endpoint.Address {
+		if normalizeListenerEntry(listener) == endpointAddress {
 			return true
 		}
 	}
 	return false
+}
+
+func canonicalTCPListenerAddress(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return ""
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return ""
+	}
+	zone := ""
+	if zoneIndex := strings.LastIndexByte(host, '%'); zoneIndex >= 0 {
+		zone = host[zoneIndex+1:]
+		host = host[:zoneIndex]
+		if zone == "" || strings.Contains(host, "%") || !strings.Contains(host, ":") {
+			return ""
+		}
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() || (ip.To4() != nil && ip.To4().IsUnspecified()) {
+		return ""
+	}
+	canonicalHost := ip.String()
+	if zone != "" {
+		canonicalHost += "%" + zone
+	}
+	return net.JoinHostPort(canonicalHost, strconv.Itoa(portNumber))
+}
+
+func specificTCPListener(address string) bool {
+	return canonicalTCPListenerAddress(address) == address
 }
 
 func isLoopbackHost(host string) bool {

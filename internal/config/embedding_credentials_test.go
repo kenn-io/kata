@@ -17,9 +17,7 @@ func TestEmbeddingCredentialResolution(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Chdir(home)
 	path := filepath.Join(home, "embedding.key")
-	if err := os.WriteFile(path, []byte("file-secret\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writePrivateCredentialFixture(t, path, []byte("file-secret\n"))
 	for _, tt := range []struct{ name, inline, file, env, key, source, reason string }{
 		{name: "inline precedence", inline: "inline-secret", file: path, env: "EXAMPLE_EMBEDDING_KEY", key: "inline-secret", source: "inline"},
 		{name: "file precedence", file: path, env: "EXAMPLE_EMBEDDING_KEY", key: "file-secret", source: "file:" + path},
@@ -57,9 +55,10 @@ func TestEmbeddingCredentialFileSafety(t *testing.T) {
 			if runtime.GOOS == "windows" && tt.mode == 0644 {
 				t.Skip("Unix permissions")
 			}
-			if err := os.WriteFile(path, []byte(tt.contents), tt.mode); err != nil {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
+			writePrivateCredentialFixture(t, path, []byte(tt.contents))
 			if err := os.Chmod(path, tt.mode); err != nil {
 				t.Fatal(err)
 			}
@@ -75,9 +74,7 @@ func TestReadDaemonConfigEmbeddingKeyFilePrecedence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	path := filepath.Join(home, "embedding.key")
-	if err := os.WriteFile(path, []byte("file-secret\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	writePrivateCredentialFixture(t, path, []byte("file-secret\n"))
 	body := fmt.Sprintf("[search.embeddings]\nbase_url = \"https://embedding.example/v1\"\nmodel = \"example-model\"\napi_key = \"inline-secret\"\napi_key_file = %q\napi_key_env = \"EXAMPLE_EMBEDDING_KEY\"\n", path)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600); err != nil {
 		t.Fatal(err)

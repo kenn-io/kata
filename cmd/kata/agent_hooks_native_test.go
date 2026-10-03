@@ -93,6 +93,57 @@ func TestNativeAgentHookPublish(t *testing.T) {
 	})
 }
 
+func TestProjectNativeAgentHookRejectsSymlinkEscape(t *testing.T) {
+	opts := piTestOptions(t)
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(opts.Dir, ".pi")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	plan, err := planNativeAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := publishNativeAgentHookPlan(plan)
+	if err == nil || changed || !strings.Contains(err.Error(), "outside project") {
+		t.Fatalf("project hook escaped workspace: changed=%t err=%v", changed, err)
+	}
+	if _, err := os.Stat(filepath.Join(external, "extensions", "kata.js")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("external hook artifact was created: %v", err)
+	}
+}
+
+func TestProjectNativeAgentHookAllowsExplicitExternalConfig(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	externalConfig := filepath.Join(external, "hooks.json")
+	if err := os.WriteFile(externalConfig, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(workspace, ".agents")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "hooks.json")
+	if err := os.Symlink(externalConfig, configPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	opts := nativeAgentHookOptions{
+		Agent: "antigravity", Scope: "project", Home: t.TempDir(), Dir: workspace,
+		ConfigPath: configPath, Executable: "kata", ConfigPathExplicit: true, Contract: true,
+	}
+	plan, err := planNativeAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := publishNativeAgentHookPlan(plan)
+	if err != nil || !changed {
+		t.Fatalf("explicit external config: changed=%t err=%v", changed, err)
+	}
+	if info, err := os.Stat(externalConfig); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("explicit config target was not preserved: info=%v err=%v", info, err)
+	}
+}
+
 func TestNativeAgentHookPublishRollback(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own changes rolled back", true: "external edits retained"}[external], func(t *testing.T) {

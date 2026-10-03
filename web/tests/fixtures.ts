@@ -2,15 +2,13 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { expect, test as base, type APIResponse, type Page } from '@playwright/test'
 
-import {
-  createDevChildEnvironment,
-  developmentKataBuildArguments,
-} from '../src/lib/dev-environment'
+import { createDevChildEnvironment } from '../src/lib/dev-environment'
+import { retryPortBind } from '../src/lib/port-bind-retry'
 
 interface RuntimeRecord {
   metadata?: Record<string, string>
@@ -64,6 +62,8 @@ interface RunningFixture {
   stop(): Promise<void>
 }
 
+const daemonStderr = new WeakMap<ChildProcess, string>()
+
 export const test = base.extend<{ kata: KataFixture }>({
   kata: [
     async ({ browserName }, use) => {
@@ -82,49 +82,15 @@ export const test = base.extend<{ kata: KataFixture }>({
 export { expect }
 
 async function startProductionFixture(): Promise<RunningFixture> {
-  const repositoryRoot = resolve(process.cwd(), '..')
+  const binary = process.env.KATA_WEB_E2E_BINARY
+  if (!binary) throw new Error('shared browser test daemon binary is unavailable')
   const root = await mkdtemp(join(tmpdir(), 'kata-web-browser-e2e-'))
   const home = join(root, 'home')
   const workspace = join(root, 'workspace')
   const remoteHome = join(root, 'remote-home')
   const remoteWorkspace = join(root, 'remote-workspace')
-  const binary = join(root, 'kata')
   await Promise.all([mkdir(home), mkdir(workspace), mkdir(remoteHome), mkdir(remoteWorkspace)])
 
-  run('make', ['web-embed'], repositoryRoot, process.env)
-  run('go', developmentKataBuildArguments(binary), repositoryRoot, process.env)
-
-  const [port, remotePort] = await Promise.all([freePort(), freePort()])
-  const origin = `http://127.0.0.1:${port}`
-  const remoteOrigin = `http://127.0.0.1:${remotePort}`
-  await writeFile(
-    join(home, 'config.toml'),
-    `active_daemon = "example-local"
-
-[[daemon]]
-name = "example-local"
-local = true
-
-[[daemon]]
-name = "example-remote"
-url = "${remoteOrigin}"
-token = "example-remote-token"
-allow_insecure = true
-
-[web]
-listen = "127.0.0.1:${port}"
-`,
-    { mode: 0o600 },
-  )
-  await writeFile(
-    join(remoteHome, 'config.toml'),
-    `listen = "127.0.0.1:${remotePort}"
-
-[auth]
-token = "example-remote-token"
-`,
-    { mode: 0o600 },
-  )
   const environment = {
     ...createDevChildEnvironment(process.env, {
       home,
@@ -144,8 +110,27 @@ token = "example-remote-token"
     KATA_SERVER: '',
   }
 
-  const remoteDaemon = startDaemon(binary, remoteWorkspace, remoteEnvironment)
-  await waitForPing(remoteOrigin, remoteDaemon)
+  const remote = await retryPortBind(freePort, async (remotePort) => {
+    const remoteOrigin = `http://127.0.0.1:${remotePort}`
+    await writeFile(
+      join(remoteHome, 'config.toml'),
+      `listen = "127.0.0.1:${remotePort}"
+
+[auth]
+token = "example-remote-token"
+`,
+      { mode: 0o600 },
+    )
+    const daemon = startDaemon(binary, remoteWorkspace, remoteEnvironment)
+    try {
+      await waitForPing(remoteOrigin, daemon)
+      return { daemon, origin: remoteOrigin }
+    } catch (error) {
+      await stopDaemon(daemon)
+      throw error
+    }
+  })
+  const { daemon: remoteDaemon, origin: remoteOrigin } = remote
   run(binary, ['projects', 'create', 'example-remote-project'], remoteWorkspace, remoteEnvironment)
   await writeFile(
     join(remoteWorkspace, '.kata.toml'),
@@ -158,8 +143,38 @@ token = "example-remote-token"
   if (!directRemoteSnapshot.ok) {
     throw new Error(`direct fixture remote snapshot failed: ${directRemoteSnapshot.status}`)
   }
-  let daemon = startDaemon(binary, workspace, environment)
-  await waitForPing(origin, daemon)
+  const local = await retryPortBind(freePort, async (port) => {
+    const origin = `http://127.0.0.1:${port}`
+    await writeFile(
+      join(home, 'config.toml'),
+      `active_daemon = "example-local"
+
+[[daemon]]
+name = "example-local"
+local = true
+
+[[daemon]]
+name = "example-remote"
+url = "${remoteOrigin}"
+token = "example-remote-token"
+allow_insecure = true
+
+[web]
+listen = "127.0.0.1:${port}"
+`,
+      { mode: 0o600 },
+    )
+    const daemon = startDaemon(binary, workspace, environment)
+    try {
+      await waitForPing(origin, daemon)
+      return { daemon, origin }
+    } catch (error) {
+      await stopDaemon(daemon)
+      throw error
+    }
+  })
+  const { origin } = local
+  let daemon = local.daemon
   run(binary, ['projects', 'create', 'example-project'], workspace, environment)
   run(binary, ['projects', 'create', 'example-inbox'], workspace, environment)
   await writeFile(
@@ -239,12 +254,6 @@ token = "example-remote-token"
     fixture,
     async stop() {
       await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
-      run(
-        'bun',
-        ['run', 'scripts/embed-assets.ts', '--restore-stub'],
-        join(repositoryRoot, 'web'),
-        process.env,
-      )
       await rm(root, { recursive: true, force: true })
     },
   }
@@ -264,11 +273,17 @@ function startDaemon(
   env: NodeJS.ProcessEnv,
   extraArgs: string[] = [],
 ): ChildProcess {
-  return spawn(binary, ['daemon', 'start', '--foreground', ...extraArgs], {
+  const daemon = spawn(binary, ['daemon', 'start', '--foreground', ...extraArgs], {
     cwd,
     env,
     stdio: ['ignore', 'ignore', 'pipe'],
   })
+  daemonStderr.set(daemon, '')
+  daemon.stderr?.on('data', (chunk: Buffer | string) => {
+    const output = `${daemonStderr.get(daemon) ?? ''}${String(chunk)}`
+    daemonStderr.set(daemon, output.slice(-8192))
+  })
+  return daemon
 }
 
 async function stopDaemon(daemon: ChildProcess): Promise<void> {
@@ -284,8 +299,12 @@ async function stopDaemon(daemon: ChildProcess): Promise<void> {
 async function waitForPing(origin: string, daemon: ChildProcess): Promise<void> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (daemon.exitCode !== null)
-      throw new Error(`Kata daemon exited with status ${daemon.exitCode}`)
+    if (daemon.exitCode !== null) {
+      const stderr = daemonStderr.get(daemon)?.trim()
+      throw new Error(
+        `Kata daemon exited with status ${daemon.exitCode}${stderr ? `: ${stderr}` : ''}`,
+      )
+    }
     try {
       if ((await fetch(`${origin}/api/v1/ping`)).ok) return
     } catch {

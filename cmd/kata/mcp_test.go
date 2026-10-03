@@ -334,7 +334,7 @@ func TestMCPServeHTTPRejectsLoopbackHostThatDoesNotMatchConfiguredAuthority(t *t
 }
 
 func TestResolveMCPHTTPTokenLoopbackRequiresBearer(t *testing.T) {
-	_, err := resolveMCPHTTPToken("127.0.0.1:8080", "", false)
+	_, err := resolveMCPHTTPToken("127.0.0.1:8080", "", "", false)
 	require.ErrorContains(t, err, "--http-token-env")
 }
 
@@ -424,7 +424,7 @@ func TestMCPServeHTTPTrustedPrivateNetworkRejectsPublicAndHostnameBinds(t *testi
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	for _, address := range []string{"203.0.113.10:8080", "daemon.example:8080"} {
 		t.Run(address, func(t *testing.T) {
-			_, err := resolveMCPHTTPToken(address, "KATA_MCP_TEST_TOKEN", true)
+			_, err := resolveMCPHTTPToken(address, "", "KATA_MCP_TEST_TOKEN", true)
 			require.ErrorContains(t, err, "non-public")
 		})
 	}
@@ -434,7 +434,7 @@ func TestMCPServeHTTPTrustedPrivateNetworkAllowsPrivateAndWildcardBinds(t *testi
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	for _, address := range []string{"10.0.0.5:8080", "100.64.0.5:8080", "0.0.0.0:8080", "[::]:8080"} {
 		t.Run(address, func(t *testing.T) {
-			token, err := resolveMCPHTTPToken(address, "KATA_MCP_TEST_TOKEN", true)
+			token, err := resolveMCPHTTPToken(address, "", "KATA_MCP_TEST_TOKEN", true)
 			require.NoError(t, err)
 			require.Equal(t, "test-mcp-token", token)
 		})

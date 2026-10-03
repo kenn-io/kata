@@ -25,11 +25,22 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
+| `KATA_AUTH_TOKEN_FILE` | Overrides `[auth].token_file`. A nonempty `KATA_AUTH_TOKEN` continues to win. A selected file failure stops startup and client construction. |
+| `KATA_LISTEN` | Daemon API bind address. Overrides `listen` in the daemon config; `--listen` wins over both. |
+| `KATA_WEB_LISTEN` | Overrides `[web].listen`, the separate browser listener used with a Unix-socket API. |
+| `KATA_WEB_PUBLIC_ORIGIN` | Overrides `[web].public_origin`, the exact root browser origin. Non-loopback plain HTTP requires private-network trust. |
+| `KATA_SEARCH_EMBEDDINGS_BASE_URL` | Overrides `[search.embeddings].base_url`. |
+| `KATA_SEARCH_EMBEDDINGS_MODEL` | Overrides `[search.embeddings].model`. |
+| `KATA_SEARCH_EMBEDDINGS_DIMS` | Overrides `[search.embeddings].dims`. Must be a non-negative integer; `0` keeps the default dimensionality. |
+| `KATA_SEARCH_EMBEDDINGS_API_KEY_FILE` | Overrides `[search.embeddings].api_key_file`; the existing credential precedence and file restrictions apply. |
+| `KATA_BACKUP_DIR` | Destination for [scheduled full JSONL backups](../operations/backup-restore.md#scheduled-backups); overrides `[backup].dir`. |
+| `KATA_BACKUP_INTERVAL` | Overrides `[backup].interval`. Positive duration; defaults to `24h` when a backup directory is configured. |
+| `KATA_BACKUP_RETAIN` | Overrides `[backup].retain`. Positive duration; defaults to `720h`. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. Without it (or `allow_insecure`), a plaintext non-loopback target fails when the client is built, before any request is sent. |
 | `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
 | `KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION` | Set to `1` to let database-backed identity tokens administer connectors and external-root bridges. Off by default. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
-| `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
+| `KATA_TELEMETRY_ENABLED` | Set to `0`, `false`, `no`, or `off` to disable anonymous PostHog telemetry. Values are case-insensitive and trimmed. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
@@ -278,13 +289,26 @@ shared-daemon configuration above. Its minimal configuration is:
 autostart_idle_timeout = "15m"
 ```
 
-The `kata daemon start --listen <host:port>` flag wins over the config file.
+The listener precedence is `--listen`, `KATA_LISTEN`, top-level `listen`,
+hosted-mode `PORT`, then the platform default. Environment overrides are trimmed;
+empty or whitespace-only values leave the corresponding config-file value unchanged.
 Plain `kata daemon start` starts the daemon in the background and returns after
 startup is confirmed; use `kata daemon start --foreground` for service-manager
 and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+Daemon bearer credentials use `[auth].token` > `[auth].token_file` >
+`[auth].token_env` (the name of a variable containing the token). A nonempty
+`KATA_AUTH_TOKEN` overrides the inline token. Token files follow the
+[embedding credential file restrictions](#semantic-search): absolute or `~/`
+paths, regular files owned by the daemon user, no Unix group/world permissions
+or Windows access for other users, and at most 64 KiB. Whitespace and a
+trailing newline are trimmed. An unusable
+selected file or named environment variable fails loudly without falling back.
+For example, mount a `0600` secret file owned by the daemon user and set
+`KATA_AUTH_TOKEN_FILE=/run/secrets/daemon-token`.
 
 `autostart_idle_timeout` lets an implicitly started, owner-local daemon exit
 after a period without client activity. It is off by default. The setting is
@@ -721,10 +745,12 @@ back to a lower-priority source.
 Key files must use an absolute path or start with `~/`, which expands to the
 daemon user's home directory (not `KATA_HOME`). Other relative paths are
 rejected. Symlinks are accepted, and there is no parent-directory ownership or
-permission policy. Kata validates the opened file: it must be regular and, on
-Unix, owned by the daemon's effective user with no group/world permissions
-(`chmod 600`). Files larger than 64 KiB are refused, and reads are bounded to
-enforce that limit. File contents are trimmed, including a trailing newline.
+permission policy. Kata validates the opened file: it must be regular and
+owned by the daemon's effective user. On Unix, group/world permissions are
+rejected (`chmod 600`). On Windows, the file ACL must restrict access to the
+current user, SYSTEM, and Administrators. Files larger than 64 KiB are refused,
+and reads are bounded to enforce that limit. File contents are trimmed,
+including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
 `kata daemon reload`. Reload wakes the embedding backlog; changes to provider
@@ -832,6 +858,10 @@ Disable telemetry with:
 ```sh
 export KATA_TELEMETRY_ENABLED=0
 ```
+
+`false`, `no`, and `off` also disable telemetry, ignoring surrounding
+whitespace and letter case. The global `TELEMETRY_ENABLED` switch and
+`kit_posthog_disabled` build tag retain their existing behavior.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

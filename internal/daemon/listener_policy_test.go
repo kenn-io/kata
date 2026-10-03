@@ -334,14 +334,27 @@ func TestUnixSocketOriginPolicy(t *testing.T) {
 }
 
 func TestCheckWebStartup(t *testing.T) {
-	require.NoError(t, CheckWebStartup("127.0.0.1:27123", config.AuthConfig{}, false))
+	require.NoError(t, CheckWebStartup("127.0.0.1:27123", config.AuthConfig{}, false, false))
 	require.NoError(t, CheckWebStartup("100.64.0.5:27123", config.AuthConfig{
 		Token: "configured-token", TrustPrivateNetwork: true,
-	}, false))
+	}, false, false))
+
+	proxyAuth := config.AuthConfig{
+		TrustPrivateNetwork: true,
+		Proxy: config.ProxyConfig{
+			TrustedActorHeader:    "X-Actor",
+			TrustedProxyListeners: []string{"100.64.0.5:27123"},
+		},
+	}
+	require.NoError(t, CheckWebStartup("100.64.0.5:27123", proxyAuth, false, true))
+	require.Error(t, CheckWebStartup("100.64.0.5:27123", proxyAuth, false, false))
+
+	proxyAuth.TrustPrivateNetwork = false
+	require.Error(t, CheckWebStartup("100.64.0.5:27123", proxyAuth, false, true))
 
 	for _, address := range []string{"100.64.0.5:27123", "0.0.0.0:27123", "8.8.8.8:27123", "daemon.example:27123"} {
 		t.Run(address, func(t *testing.T) {
-			err := CheckWebStartup(address, config.AuthConfig{}, false)
+			err := CheckWebStartup(address, config.AuthConfig{}, false, false)
 			require.Error(t, err)
 		})
 	}

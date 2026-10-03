@@ -256,6 +256,13 @@ func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 	}
 }
 
+func TestMusePollSpecDocumentsClientTokenFileOptions(t *testing.T) {
+	poll := musePollSpec("example-agent")
+	require.Contains(t, poll, "[auth].token_file")
+	require.Contains(t, poll, "KATA_AUTH_TOKEN_FILE")
+	require.NotContains(t, poll, "There is no client auth.token_file setting")
+}
+
 func TestAgentInstructionsUninstallDryPreviewDoesNotWrite(t *testing.T) {
 	resetFlags(t)
 	home := t.TempDir()

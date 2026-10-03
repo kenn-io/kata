@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +15,24 @@ import (
 type recordingRoundTripper struct {
 	calls         int
 	authorization string
+}
+
+func TestResolvedBearerTrustPrivateNetworkSurvivesMissingAuthTokenFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+	config := fmt.Sprintf(`[auth]
+trust_private_network = true
+token_file = %q
+`, filepath.Join(home, "missing-local-token"))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600))
+
+	_, err := ReadAuthConfig()
+	require.ErrorIs(t, err, ErrCredentialSource)
+	assert.Contains(t, err.Error(), "missing-local-token")
+	assert.True(t, ResolvedBearerTrustPrivateNetwork())
 }
 
 func (r *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
