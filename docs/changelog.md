@@ -14,7 +14,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   there is no alias. Update scripts and reinstall user hooks with
   `kata agent-hook install`. For workspace hooks, re-run
   `kata agent-hook install <harness> --local` or the `kata init` hook option
-  that installed them. See the [agent-hook reference](reference/cli.md#agent-hook).
+  that installed them. Reinstalling replaces hooks that still call the plural
+  command. See the [agent-hook reference](reference/cli.md#agent-hook).
 
 - Set up consumer Muse with standing instructions, a Kata skill, and a recurring
   poll specification using `kata agent-hook instructions install muse --home <path>`.

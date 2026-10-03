@@ -109,7 +109,7 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 	if !isKataHookExecutable(executable) && !strings.ContainsAny(executable, "/\\") {
 		return ""
 	}
-	args := argv[1:]
+	args := canonicalAgentHookArgs(argv[1:])
 	var kind agentHookKind
 	var tail []string
 	switch {
@@ -142,6 +142,15 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 		return kind
 	}
 	return ""
+}
+
+// canonicalAgentHookArgs keeps hooks written before the agent-hook rename
+// Kata-owned, so reinstall and uninstall replace or remove them.
+func canonicalAgentHookArgs(args []string) []string {
+	if len(args) > 0 && args[0] == "agent-hooks" {
+		return append([]string{"agent-hook"}, args[1:]...)
+	}
+	return args
 }
 
 func isKataHookExecutable(executable string) bool {

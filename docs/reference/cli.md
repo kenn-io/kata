@@ -180,7 +180,8 @@ The command group has been renamed from `kata agent-hooks` to
 unknown command. Update scripts and hook configurations to use the singular
 name. Reinstall user hooks with `kata agent-hook install`. For workspace hooks,
 re-run `kata agent-hook install <harness> --local` or the `kata init` hook
-option that installed them.
+option that installed them. Reinstalling replaces hooks that still call the
+plural command.
 
 Run Kata's contract and attention hooks from coding-agent configurations:
 

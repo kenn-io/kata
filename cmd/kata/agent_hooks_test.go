@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -275,4 +276,24 @@ func TestAgentHookPluralCommandRejected(t *testing.T) {
 			assert.Contains(t, stderr, "agent-hooks")
 		})
 	}
+}
+
+// Hooks written before the agent-hook rename stay Kata-owned, so reinstalling
+// replaces them instead of leaving a failing plural command beside the new one.
+func TestAgentHookReinstallReplacesPluralCommands(t *testing.T) {
+	isolateAgentHookHomes(t)
+	t.Chdir(t.TempDir())
+	path := filepath.Join(t.TempDir(), "settings.json")
+	install := func() []byte {
+		t.Helper()
+		_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "claude", "--config", path, "--executable", os.Args[0])
+		require.NoError(t, err)
+		data, err := os.ReadFile(path) //nolint:gosec // G304: test-owned temporary config.
+		require.NoError(t, err)
+		return data
+	}
+	fresh := install()
+	require.Contains(t, string(fresh), "agent-hook ")
+	require.NoError(t, os.WriteFile(path, bytes.ReplaceAll(fresh, []byte("agent-hook "), []byte("agent-hooks ")), 0o600))
+	assert.Equal(t, string(fresh), string(install()))
 }

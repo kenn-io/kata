@@ -179,3 +179,22 @@ func TestExtraAgentRejectsUnsupportedBeforeWrites(t *testing.T) {
 		require.ErrorContains(t, err, "--attention")
 	}
 }
+
+func TestExtraReinstallReplacesPluralCommands(t *testing.T) {
+	opts := extraOptions(t, "droid")
+	install := func() (string, []byte) {
+		t.Helper()
+		plan, err := planExtraAgentHooks(opts, false)
+		require.NoError(t, err)
+		_, err = publishNativeAgentHookPlan(plan)
+		require.NoError(t, err)
+		data, err := os.ReadFile(plan.Path)
+		require.NoError(t, err)
+		return plan.Path, data
+	}
+	path, fresh := install()
+	require.Contains(t, string(fresh), "agent-hook ")
+	require.NoError(t, os.WriteFile(path, bytes.ReplaceAll(fresh, []byte("agent-hook "), []byte("agent-hooks ")), 0o600))
+	_, reinstalled := install()
+	require.JSONEq(t, string(fresh), string(reinstalled))
+}
