@@ -73,6 +73,7 @@ func TestNewReporterDisabledDuringGoTests(t *testing.T) {
 func postCaptureEvent(t *testing.T, handler http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/ui/telemetry", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
