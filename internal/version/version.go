@@ -5,10 +5,18 @@
 //nolint:revive // var-naming flags `version` as stdlib-conflicting but no such stdlib package exists.
 package version
 
-import "runtime/debug"
+import (
+	"regexp"
+	"runtime/debug"
+	"strings"
+
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+)
 
 const (
 	defaultVersion   = "dev"
+	modulePath       = "go.kenn.io/kata"
 	unknown          = "unknown"
 	shortHashLen     = 7
 	settingRevision  = "vcs.revision"
@@ -55,6 +63,21 @@ func versionFromVCS() string {
 	if !ok {
 		return defaultVersion
 	}
+	// VCS settings and Main describe the executable, which may embed Kata.
+	if info.Main.Path != modulePath {
+		for _, dep := range info.Deps {
+			if dep.Path == modulePath {
+				if dep.Replace != nil {
+					dep = dep.Replace
+				}
+				if semver.IsValid(dep.Version) {
+					return dep.Version
+				}
+				break
+			}
+		}
+		return defaultVersion
+	}
 	var rev string
 	var dirty bool
 	for _, s := range info.Settings {
@@ -66,6 +89,14 @@ func versionFromVCS() string {
 		}
 	}
 	if rev == "" {
+		// Module-proxy installations carry their tag in Main.Version rather
+		// than VCS settings. Keep that identity for release migration policy.
+		if semver.IsValid(info.Main.Version) {
+			if dirty {
+				return info.Main.Version + dirtySuffix
+			}
+			return info.Main.Version
+		}
 		return defaultVersion
 	}
 	if len(rev) > shortHashLen {
@@ -105,4 +136,18 @@ func buildDateFromVCS() string {
 		}
 	}
 	return unknown
+}
+
+var describeVersion = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+$`)
+var fullVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+]|$)`)
+
+// IsDevelopment reports builds without a clean release version, including
+// bare VCS revisions and git-describe builds ahead of a release tag.
+func IsDevelopment() bool {
+	v := Version
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return !fullVersion.MatchString(v) || !semver.IsValid(v) || module.IsPseudoVersion(v) ||
+		strings.Contains(v, "dirty") || strings.Contains(strings.ToLower(v), "snapshot") || describeVersion.MatchString(v)
 }

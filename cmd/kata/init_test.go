@@ -715,6 +715,7 @@ const beadsFixtureBlock = "<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash
 // It leaves the original byte-for-byte and writes a .kata-proposed sidecar with
 // the beads block removed and kata's block added, and warns where to find it.
 func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
+	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")

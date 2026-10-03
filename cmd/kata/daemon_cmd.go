@@ -219,9 +219,10 @@ var (
 
 func daemonStartCmd() *cobra.Command {
 	var (
-		listen           string
-		insecureReadonly bool
-		foreground       bool
+		listen            string
+		insecureReadonly  bool
+		foreground        bool
+		allowDevMigration bool
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -237,12 +238,13 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
+			allowMigration := allowDevMigration || os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1"
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
-				return runDaemonForeground(ctx, listen, insecureReadonly)
+				return runDaemonForeground(ctx, listen, insecureReadonly, allowMigration)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, allowMigration)
 			if err != nil {
 				return err
 			}
@@ -265,6 +267,8 @@ func daemonStartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&allowDevMigration, "allow-dev-migration", false,
+		"allow this development build to upgrade an existing SQLite database (also KATA_ALLOW_DEV_MIGRATION=1)")
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().StringVar(&listen, "listen", "",
@@ -277,7 +281,7 @@ func daemonStartCmd() *cobra.Command {
 	return cmd
 }
 
-func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly bool) (daemonStartOutput, error) {
+func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, allowDevMigration bool) (daemonStartOutput, error) {
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
@@ -309,7 +313,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		}
 		replacedPID = rec.PID
 	}
-	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly)
+	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, allowDevMigration)
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
@@ -352,16 +356,24 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 	return health.IdleShutdown != nil
 }
 
-func defaultLaunchDetachedDaemon(
-	ctx context.Context, dataDir, listen string, insecureReadonly bool,
-) (daemonStartOutput, error) {
+func detachedDaemonArgs(listen string, insecureReadonly, allowDevMigration bool) []string {
 	args := []string{"daemon", "start", "--foreground"}
+	if allowDevMigration {
+		args = append(args, "--allow-dev-migration")
+	}
 	if listen != "" {
 		args = append(args, "--listen", listen)
 	}
 	if insecureReadonly {
 		args = append(args, "--insecure-readonly")
 	}
+	return args
+}
+
+func defaultLaunchDetachedDaemon(
+	ctx context.Context, dataDir, listen string, insecureReadonly, allowDevMigration bool,
+) (daemonStartOutput, error) {
+	args := detachedDaemonArgs(listen, insecureReadonly, allowDevMigration)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            args,
 		Env:             os.Environ(),
@@ -449,12 +461,25 @@ func effectiveDaemonListenWithConfig(listen string, dcfg *config.DaemonConfig) s
 	return ""
 }
 
-func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
-	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return kitdaemon.RuntimeRecord{}, false
+// Unusable runtime folders do not block unrelated daemons. Apply the same
+// skip-and-warn policy to the current namespace and to legacy namespaces.
+func daemonRuntimeRecords(dataDir string) []kitdaemon.RuntimeRecord {
+	if err := safefileio.ValidatePrivateDir(dataDir); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: skipping daemon runtime namespace %s: %v\n", dataDir, err)
+		}
+		return nil
 	}
-	for _, rec := range recs {
+	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping daemon runtime namespace %s: %v\n", dataDir, err)
+		return nil
+	}
+	return records
+}
+
+func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
+	for _, rec := range daemonRuntimeRecords(dataDir) {
 		if pid != 0 && rec.PID != pid {
 			continue
 		}
@@ -463,6 +488,62 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 		}
 	}
 	return kitdaemon.RuntimeRecord{}, false
+}
+
+// liveSQLiteDaemonRecord also checks other namespaces in this home for legacy
+// daemons that recorded a different spelling of the same SQLite database path.
+func liveSQLiteDaemonRecord(dataDir, dbPath string) (kitdaemon.RuntimeRecord, bool, error) {
+	if rec, ok := liveDaemonRecord(dataDir, 0); ok {
+		return rec, true, nil
+	}
+	databasePath, ok := sqliteRuntimePath(dbPath)
+	if !ok {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	databaseInfo, err := os.Stat(databasePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("stat SQLite database for runtime guard: %w", err)
+	}
+	if !databaseInfo.Mode().IsRegular() {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+
+	runtimeRoot := filepath.Dir(dataDir)
+	entries, err := os.ReadDir(runtimeRoot)
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("read daemon runtime namespaces: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == filepath.Base(dataDir) {
+			continue
+		}
+		candidateDir := filepath.Join(runtimeRoot, entry.Name())
+		for _, rec := range daemonRuntimeRecords(candidateDir) {
+			if !daemon.RuntimeProcessAlive(rec) {
+				continue
+			}
+			recordedPath, ok := sqliteRuntimePath(rec.Metadata["db_path"])
+			if !ok {
+				continue
+			}
+			recordedInfo, err := os.Stat(recordedPath)
+			if err == nil && os.SameFile(databaseInfo, recordedInfo) {
+				return rec, true, nil
+			}
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, false, nil
+}
+
+func sqliteRuntimePath(dbPath string) (string, bool) {
+	if strings.HasPrefix(dbPath, "postgres://") || strings.HasPrefix(dbPath, "postgresql://") || dbPath == "" {
+		return "", false
+	}
+	path, err := filepath.Abs(strings.TrimPrefix(dbPath, "sqlite://"))
+	return path, err == nil
 }
 
 func daemonStartTimeoutError(dataDir string) error {
@@ -701,7 +782,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
 				return err
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1")
 			if err != nil {
 				return err
 			}
@@ -935,7 +1016,7 @@ type daemonReloadOutput struct {
 // --foreground` with the platform default endpoint and by the auto-start child
 // process spawned by ensureDaemon.
 func runDaemon(ctx context.Context) error {
-	return runDaemonWithListen(ctx, "", false)
+	return runDaemonWithListen(ctx, "", false, os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1")
 }
 
 // redactRuntimeDSN returns dsn safe for inclusion in the runtime file and
@@ -991,16 +1072,16 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // When the daemon shuts down because it received the restart signal, it
 // re-executes itself only after every listener and the runtime record have
 // been released.
-func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
+func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, allowDevMigration bool) error {
 	restart := newDaemonRestart(os.Stderr)
-	if err := runDaemonProcess(ctx, listen, insecureReadonly, restart); err != nil {
+	if err := runDaemonProcess(ctx, listen, insecureReadonly, allowDevMigration, restart); err != nil {
 		return err
 	}
 	return restart.exec(ctx)
 }
 
 func runDaemonProcess(
-	ctx context.Context, listen string, insecureReadonly bool, restart *daemonRestart,
+	ctx context.Context, listen string, insecureReadonly, allowDevMigration bool, restart *daemonRestart,
 ) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly)
 	if err != nil {
@@ -1032,8 +1113,21 @@ func runDaemonProcess(
 	hooksClosed := false
 
 	dbPath := startup.DBPath
+	if backend, _ := storeopen.BackendForDSN(dbPath); backend == storeopen.BackendSQLite {
+		// Runtime records also fence older releases that predate the file lock.
+		// Process identity is checked independently of version and listener.
+		if rec, ok, err := liveSQLiteDaemonRecord(ns.DataDir, dbPath); err != nil {
+			return err
+		} else if ok {
+			return fmt.Errorf("daemon already running pid=%d version=%s for database %s; stop it before starting", rec.PID, rec.Version, dbPath)
+		}
+	}
+	startup.StoreConfig.RequireMigrationConsent = version.IsDevelopment() && !allowDevMigration
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
+		if errors.Is(err, storeopen.ErrMigrationConsentRequired) {
+			return fmt.Errorf("development build %s refuses to migrate in KATA_HOME %s: %w; use a temporary KATA_HOME and KATA_DB, or explicitly opt in with --allow-dev-migration or KATA_ALLOW_DEV_MIGRATION=1", version.Version, startup.KataHome, err)
+		}
 		return err
 	}
 	defer func() {

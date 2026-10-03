@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -37,7 +38,15 @@ const (
 // are replaced with that backend's standalone defaults.
 type Config struct {
 	Postgres pgstore.Config
+	// RequireMigrationConsent refuses upgrades of existing SQLite databases.
+	// The CLI sets this for development builds without explicit consent.
+	// Library callers retain automatic upgrades with the zero value.
+	RequireMigrationConsent bool
 }
+
+// ErrMigrationConsentRequired means startup policy refused an existing SQLite
+// schema upgrade. The caller supplies instructions for granting consent.
+var ErrMigrationConsentRequired = errors.New("SQLite migration requires consent")
 
 // InstalledFreshPostgresSchema reports whether store's open created its
 // configured Postgres schema. False is the safe answer for other backends and
@@ -118,7 +127,7 @@ func OpenWithConfig(ctx context.Context, dsn string, openConfig Config, opts ...
 	if hasScheme {
 		path = strings.TrimPrefix(dsn, "sqlite://")
 	}
-	return openSQLite(ctx, path, cfg, opts)
+	return openSQLite(ctx, path, cfg, opts, openConfig.RequireMigrationConsent)
 }
 
 // PeekSchemaVersion reads a target's schema version without applying
@@ -177,10 +186,23 @@ func OpenReadOnly(ctx context.Context, dsn string, opts ...db.OpenOption) (db.St
 	return Open(ctx, dsn, append(opts, db.ReadOnly())...)
 }
 
-func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption) (db.Storage, error) {
+func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption, requireConsent bool) (db.Storage, error) {
 	if cfg.ReadOnly {
 		return sqlitestore.Open(ctx, path, opts...)
 	}
+	lock, err := sqlitelock.Acquire(path)
+	if err != nil {
+		return nil, err
+	}
+	storage, err := openSQLiteDatabase(ctx, path, opts, requireConsent)
+	if err != nil {
+		lock.Release()
+		return nil, err
+	}
+	return &lockedStorage{Store: storage, lock: lock}, nil
+}
+
+func openSQLiteDatabase(ctx context.Context, path string, opts []db.OpenOption, requireConsent bool) (*sqlitestore.Store, error) {
 	ver, peekErr := sqlitestore.PeekSchemaVersion(ctx, path)
 	switch {
 	case peekErr == nil && ver > db.CurrentSchemaVersion():
@@ -195,6 +217,9 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 			if !hasTables {
 				break
 			}
+		}
+		if requireConsent {
+			return nil, fmt.Errorf("%w: database %s from schema %d to %d", ErrMigrationConsentRequired, path, ver, db.CurrentSchemaVersion())
 		}
 		// Pre-current SQLite gets upgraded through JSONL cutover, which
 		// exports the legacy shape and re-imports it into a fresh

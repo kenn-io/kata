@@ -10,6 +10,16 @@
   they are appropriate for interacting with roborev. Never invoke a roborev
   skill (including `roborev-fix` or `roborev-design-review-branch`) unless the
   user explicitly asks for that skill.
+- Isolate Development Builds: Use the installed release binary for this
+  repository's issue tracking. Never run a binary built from the checkout
+  against the default or shared `KATA_HOME`. Use `make dev-kata ARGS="..."`
+  for manual checks; it builds and runs with a temporary `KATA_HOME`, `KATA_DB`,
+  and workspace, then stops its daemon and removes the temporary state.
+  Direct build, `go run`, test helpers, and subprocess checks must also use
+  explicit temporary `KATA_HOME` and `KATA_DB` paths and clear inherited database,
+  daemon, credential, proxy, and hosted `PORT` targets. Never use
+  `--allow-dev-migration` or `KATA_ALLOW_DEV_MIGRATION=1` on shared state without
+  the operator's explicit approval for that database upgrade.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
 - Evidence-Gated Regression Tests: Before writing a regression test, reproduce
   the failure or name the explicit product contract it exercises. Do not encode
