@@ -135,7 +135,7 @@ func newNativeAgentHooksMutationCmd(remove bool) *cobra.Command {
 }
 
 func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal func(io.Reader) bool) *cobra.Command {
-	var all, attention, managed, local, contractOnly bool
+	var all, attention, managed, local, contractOnly, shareInbox bool
 	var scope, config, executable, source, api string
 	verb := "install"
 	short := "Install contract and available attention hooks for configured or named agents"
@@ -175,6 +175,18 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		dir, err := agentHookWorkspacePath()
 		if err != nil {
 			return err
+		}
+		if !remove && cmd.Flags().Changed("share-inbox") {
+			if all || len(args) != 1 {
+				return agentHookUsage("--share-inbox requires exactly one explicit OpenClaw target")
+			}
+			capability, capabilityErr := lookupAgentHookCapability(args[0])
+			if capabilityErr != nil {
+				return capabilityErr
+			}
+			if capability.Name != "openclaw" {
+				return agentHookUsage("--share-inbox requires exactly one explicit OpenClaw target")
+			}
 		}
 		targets, err := selectNativeAgentHookTargets(args, all, scope, config, dir)
 		if err != nil {
@@ -231,6 +243,8 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			opts.Contract = target.capability.Contract
 			opts.Attention = attention
 			opts.ManagedAttention = managed
+			opts.ShareInbox = shareInbox
+			opts.ShareInboxSet = !remove && cmd.Flags().Changed("share-inbox")
 			opts.API = api
 			opts.Source = source
 			opts.SourceSet = !remove && cmd.Flags().Changed("source")
@@ -343,6 +357,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		cmd.Flags().StringVar(&source, "source", "", "contract prompt file for an owned native code adapter")
 		cmd.Flags().StringVar(&api, "api", "", "advanced OpenCode API override: v1 or v2 (default: probe opencode --version)")
 		cmd.Flags().BoolVar(&managed, "managed-attention", false, "grant Muse global forwarding of Kata variables, including KATA_AUTH_TOKEN, to all Muse managed hooks")
+		cmd.Flags().BoolVar(&shareInbox, "share-inbox", false, "share the KATA_INBOX_USER inbox with every OpenClaw prompt")
 	}
 	return cmd
 }

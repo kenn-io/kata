@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # CLI reference
@@ -311,6 +311,24 @@ direction by default. Use
 remains accepted. Contract-only reinstall preserves existing attention; default
 uninstall removes the full owned bundle, while contract-only uninstall preserves
 independent attention. Contradictory explicit component flags fail before writes.
+
+OpenClaw does not add an inbox to prompts on a fresh install. To share the inbox
+selected by `KATA_INBOX_USER` in the Gateway environment with every prompt handled
+by the Kata plugin, install one explicit target with
+`kata agent-hook install openclaw --share-inbox`. The command warns that all
+prompts handled by this plugin may receive that inbox; it does not select a
+recipient per conversation. The recipient stays in the Gateway environment and
+is not copied into OpenClaw config. Use
+`kata agent-hook install openclaw --share-inbox=false` to disable sharing while
+keeping the other hooks. Reinstalling without the option preserves a choice
+recorded by this option while the contract remains installed. Removing the
+contract clears the choice; a later contract install defaults sharing off.
+Bundles installed before this option existed have no recorded opt-in; status
+warns that their running code may still share the inbox until it is reinstalled,
+and reinstall turns sharing off. This option requires exactly one explicit
+OpenClaw target and cannot be used with discovery, `--all`, or multiple targets.
+Offline status repeats the scope warning while sharing is enabled; it cannot
+confirm runtime loading.
 
 OpenCode setup resolves `opencode` on PATH and probes `--version` with bounded
 output and timeout. Supported stable v1 releases start at 1.0.154; stable v2

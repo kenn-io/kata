@@ -43,6 +43,200 @@ assert.equal(globalThis.KATA_REVIEW_MARKER, undefined, 'source escaped its metad
 		require.NoError(t, err, "%s", output)
 	}
 }
+
+func TestOpenClawInboxIsOffByDefault(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	opts := openClawTestOptions(t)
+	opts.Executable = openClawInstallRecorder(t, filepath.Join(opts.Home, "record-kata"))
+	require.NoError(t, os.MkdirAll(opts.Dir, 0700))
+	plan, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(opts.Home, "contract"), []byte("default-contract"), 0600))
+
+	var plugin string
+	for _, change := range plan.Changes {
+		if filepath.Base(change.Path) == "index.js" {
+			plugin = change.Path
+		}
+	}
+	cmd := exec.Command(node, "testdata/openclaw/inbox-opt-in.mjs", plugin, opts.Dir) //nolint:gosec // G204: Node runs a fixed fixture against isolated paths.
+	cmd.Env = append(os.Environ(), "KATA_REF=abcd", "KATA_INBOX_USER=actor/worker", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+}
+
+func TestOpenClawShareInboxCLIIsExplicitAndSingleTarget(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	t.Setenv("KATA_INBOX_USER", "actor/worker")
+	resetFlags(t)
+	out, diagnostic, err := executeAgentHook(t, strings.NewReader(""), "agent-hook", "install", "OpenClaw", "--share-inbox", "--executable", os.Args[0], "--json")
+	require.NoError(t, err, diagnostic)
+	require.Contains(t, out, "every prompt handled by the OpenClaw plugin")
+
+	plugin := filepath.Join(home, ".openclaw", "extensions", "kata-hooks-user", "index.js")
+	data, err := os.ReadFile(plugin) //nolint:gosec // G304: generated artifact is inside the isolated test home.
+	require.NoError(t, err)
+	line, _, ok := strings.Cut(string(data), "\n")
+	require.True(t, ok)
+	var managed struct {
+		ShareInbox bool `json:"shareInbox"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &managed))
+	require.True(t, managed.ShareInbox)
+	require.NotContains(t, string(data), "actor/worker")
+
+	resetFlags(t)
+	_, diagnostic, err = executeAgentHook(t, strings.NewReader(""), "agent-hook", "install", "openclaw", "--executable", os.Args[0])
+	require.NoError(t, err, diagnostic)
+	data, err = os.ReadFile(plugin) //nolint:gosec // G304: generated artifact is inside the isolated test home.
+	require.NoError(t, err)
+	line, _, ok = strings.Cut(string(data), "\n")
+	require.True(t, ok)
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &managed))
+	require.True(t, managed.ShareInbox, "an install without the option preserves the existing choice")
+
+	resetFlags(t)
+	_, diagnostic, err = executeAgentHook(t, strings.NewReader(""), "agent-hook", "install", "openclaw", "--share-inbox=false", "--executable", os.Args[0])
+	require.NoError(t, err, diagnostic)
+	data, err = os.ReadFile(plugin) //nolint:gosec // G304: generated artifact is inside the isolated test home.
+	require.NoError(t, err)
+	line, _, ok = strings.Cut(string(data), "\n")
+	require.True(t, ok)
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &managed))
+	require.False(t, managed.ShareInbox)
+
+	for name, args := range map[string][]string{
+		"implicit discovery": {"agent-hook", "install", "--share-inbox", "--executable", os.Args[0]},
+		"all targets":        {"agent-hook", "install", "--all", "--share-inbox", "--executable", os.Args[0]},
+		"other target":       {"agent-hook", "install", "pi", "--share-inbox", "--executable", os.Args[0]},
+		"multiple targets":   {"agent-hook", "install", "openclaw", "pi", "--share-inbox", "--executable", os.Args[0]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetFlags(t)
+			_, diagnostic, err := executeAgentHook(t, strings.NewReader(""), args...)
+			require.ErrorContains(t, err, "--share-inbox requires exactly one explicit OpenClaw target")
+			require.NotContains(t, diagnostic, "publish hook bundle")
+		})
+	}
+
+	resetFlags(t)
+	_, diagnostic, err = executeAgentHook(t, strings.NewReader(""), "agent-hook", "install", "nosuchtool", "--share-inbox", "--executable", os.Args[0])
+	require.ErrorContains(t, err, `unknown harness "nosuchtool"`)
+	require.NotContains(t, diagnostic, "--share-inbox requires exactly one explicit OpenClaw target")
+}
+
+func TestOpenClawLegacyManagedMetadataUpgradesWithSharingOff(t *testing.T) {
+	opts := openClawTestOptions(t)
+	opts.ShareInbox = true
+	opts.ShareInboxSet = true
+	initial, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(initial)
+	require.NoError(t, err)
+
+	// Pre-option bundles lack a recorded choice even though their runtime read
+	// KATA_INBOX_USER whenever it was set. Recreate the older marker while
+	// retaining the valid ownership digest so the upgrade path is exercised.
+	code, err := os.ReadFile(initial.Changes[0].Path)
+	require.NoError(t, err)
+	line, remainder, ok := strings.Cut(string(code), "\n")
+	require.True(t, ok)
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &metadata))
+	delete(metadata, "shareInbox")
+	legacyLine, err := json.Marshal(metadata)
+	require.NoError(t, err)
+	digestIndex := strings.LastIndex(remainder, "\n"+nativeAgentHookDigestPrefix)
+	require.NotEqual(t, -1, digestIndex)
+	legacyBody := []byte(openClawManagedPrefix + string(legacyLine) + "\n" + remainder[:digestIndex+1])
+	legacyCode := sealNativeAgentHookCode(legacyBody, initial.Changes[1].Content, initial.Changes[2].Content)
+	//nolint:gosec // G703: the planner path is inside this test's isolated OpenClaw home.
+	require.NoError(t, os.WriteFile(initial.Changes[0].Path, legacyCode, 0600))
+
+	statusOpts := opts
+	statusOpts.Contract = false
+	statusOpts.Attention = false
+	status, err := planOpenClawAgentHooks(statusOpts, true)
+	require.NoError(t, err)
+	statusWarnings := strings.Join(status.Warnings, "\n")
+	require.Contains(t, statusWarnings, "legacy OpenClaw plugin")
+	require.Contains(t, statusWarnings, "until it is reinstalled")
+
+	opts.ShareInbox = false
+	opts.ShareInboxSet = false
+	upgraded, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	upgradeWarnings := strings.Join(upgraded.Warnings, "\n")
+	require.Contains(t, upgradeWarnings, "turning off the legacy inbox sharing behavior")
+	line, _, ok = strings.Cut(string(upgraded.Changes[0].Content), "\n")
+	require.True(t, ok)
+	var managed openClawManaged
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &managed))
+	require.False(t, managed.ShareInbox)
+}
+
+func TestOpenClawStatusWarnsWhenSharedInboxIsEnabled(t *testing.T) {
+	installOpts := openClawTestOptions(t)
+	installOpts.ShareInbox = true
+	installOpts.ShareInboxSet = true
+	installed, err := planOpenClawAgentHooks(installOpts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(installed)
+	require.NoError(t, err)
+
+	statusOpts := installOpts
+	statusOpts.Contract = false
+	statusOpts.Attention = false
+	statusOpts.ShareInbox = false
+	statusOpts.ShareInboxSet = false
+	status, err := planOpenClawAgentHooks(statusOpts, true)
+	require.NoError(t, err)
+	require.Contains(t, strings.Join(status.Warnings, "\n"), "OpenClaw shared inbox is enabled")
+	require.Contains(t, strings.Join(status.Warnings, "\n"), "--share-inbox=false")
+}
+
+func TestOpenClawContractRemovalClearsSharedInboxChoice(t *testing.T) {
+	opts := openClawTestOptions(t)
+	opts.ShareInbox = true
+	opts.ShareInboxSet = true
+	installed, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(installed)
+	require.NoError(t, err)
+
+	removeOpts := opts
+	// Removing the contract leaves the independent attention registration intact.
+	removeOpts.Attention = false
+	removeOpts.ShareInboxSet = false
+	removed, err := planOpenClawAgentHooks(removeOpts, true)
+	require.NoError(t, err)
+	line, _, ok := strings.Cut(string(removed.Changes[0].Content), "\n")
+	require.True(t, ok)
+	var removedMetadata openClawManaged
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &removedMetadata))
+	require.False(t, removedMetadata.Contract)
+	require.True(t, removedMetadata.Attention)
+	require.False(t, removedMetadata.ShareInbox)
+	_, err = publishNativeAgentHookPlan(removed)
+	require.NoError(t, err)
+
+	reinstallOpts := opts
+	reinstallOpts.ShareInbox = false
+	reinstallOpts.ShareInboxSet = false
+	reinstalled, err := planOpenClawAgentHooks(reinstallOpts, false)
+	require.NoError(t, err)
+	line, _, ok = strings.Cut(string(reinstalled.Changes[0].Content), "\n")
+	require.True(t, ok)
+	var managed openClawManaged
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, openClawManagedPrefix)), &managed))
+	require.False(t, managed.ShareInbox)
+}
+
 func TestOpenClawObjectRejectsNilMap(t *testing.T) {
 	parent := map[string]any{"hooks": map[string]any(nil)}
 	value, err := openClawObject(parent, "hooks", true)
@@ -226,6 +420,7 @@ func openClawGeneratedNativeBehaviorWithContract(t *testing.T, platform, contrac
 		t.Skip("node unavailable")
 	}
 	opts := openClawTestOptions(t)
+	opts.ShareInbox, opts.ShareInboxSet = true, true
 	opts.Executable = filepath.Join(opts.Home, "record-kata")
 	opts.Source = "prompt with spaces;literal.txt"
 	opts.SourceSet = true
@@ -299,6 +494,7 @@ func TestOpenClawPublishedNativeLoader(t *testing.T) {
 	node, err := exec.LookPath("node")
 	require.NoError(t, err)
 	opts := openClawTestOptions(t)
+	opts.ShareInbox, opts.ShareInboxSet = true, true
 	opts.Executable = filepath.Join(opts.Home, "record-kata")
 	opts.Executable = openClawInstallRecorder(t, opts.Executable)
 	require.NoError(t, os.MkdirAll(opts.Dir, 0700))
