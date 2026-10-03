@@ -20,6 +20,7 @@ type nativeAgentHookOptions struct {
 	API                                                     string
 	ManagedAttention                                        bool
 	SourceSet, Contract, Attention                          bool
+	ShareInbox, ShareInboxSet                               bool
 }
 type nativeAgentHookChange struct {
 	Path                   string

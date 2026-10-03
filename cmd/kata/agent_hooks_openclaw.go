@@ -19,18 +19,20 @@ import (
 const openClawManagedPrefix = "// kata-openclaw-managed: "
 
 type openClawManaged struct {
-	Version         int    `json:"version"`
-	ID              string `json:"id"`
-	Workspace       string `json:"workspace"`
-	Executable      string `json:"executable"`
-	Source          string `json:"source"`
-	SourceSet       bool   `json:"sourceSet"`
-	Contract        bool   `json:"contract"`
-	Attention       bool   `json:"attention"`
-	AddedEnabled    bool   `json:"addedEnabled"`
-	AddedPermission bool   `json:"addedPermission"`
-	AddedAllow      bool   `json:"addedAllow"`
-	AddedPath       bool   `json:"addedPath"`
+	Version            int    `json:"version"`
+	ID                 string `json:"id"`
+	Workspace          string `json:"workspace"`
+	Executable         string `json:"executable"`
+	Source             string `json:"source"`
+	SourceSet          bool   `json:"sourceSet"`
+	Contract           bool   `json:"contract"`
+	Attention          bool   `json:"attention"`
+	ShareInbox         bool   `json:"shareInbox"`
+	ShareInboxRecorded bool   `json:"-"`
+	AddedEnabled       bool   `json:"addedEnabled"`
+	AddedPermission    bool   `json:"addedPermission"`
+	AddedAllow         bool   `json:"addedAllow"`
+	AddedPath          bool   `json:"addedPath"`
 }
 
 // planOpenClawAgentHooks only snapshots and reconciles this package and its
@@ -132,9 +134,18 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 	owned := plan.Changes[0].OriginalExists
 	if owned {
 		line, _, ok := bytes.Cut(plan.Changes[0].Original, []byte("\n"))
-		if !ok || !bytes.HasPrefix(line, []byte(openClawManagedPrefix)) || json.Unmarshal(line[len(openClawManagedPrefix):], &old) != nil || old.Version != 1 || old.ID != id || old.Workspace != workspace {
+		if !ok || !bytes.HasPrefix(line, []byte(openClawManagedPrefix)) {
 			return plan, fmt.Errorf("OpenClaw package %q is authored or unsupported; preserve it and choose another native package", root)
 		}
+		metadata := line[len(openClawManagedPrefix):]
+		var fields map[string]any
+		if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
+			return plan, fmt.Errorf("OpenClaw package %q has invalid ownership metadata; preserve it and choose another native package", root)
+		}
+		if json.Unmarshal(metadata, &old) != nil || old.Version != 1 || old.ID != id || old.Workspace != workspace {
+			return plan, fmt.Errorf("OpenClaw package %q is authored or unsupported; preserve it and choose another native package", root)
+		}
+		_, old.ShareInboxRecorded = fields["shareInbox"]
 		if !plan.Changes[1].OriginalExists || !plan.Changes[2].OriginalExists || !nativeAgentHookCodeUnedited(plan.Changes[0].Original, plan.Changes[1].Original, plan.Changes[2].Original) {
 			return plan, fmt.Errorf("OpenClaw owned package %q has authored edits; preserve it and reconcile with native plugin management", root)
 		}
@@ -172,6 +183,11 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 		if owned && !currentAuthorized {
 			plan.Warnings = append(plan.Warnings, "OpenClaw loading or prompt/workspace-capture permission is denied; inspect native enabled and hooks.allowConversationAccess/allowPromptInjection policy.")
 		}
+		if owned && old.Contract && !old.ShareInboxRecorded {
+			plan.Warnings = append(plan.Warnings, "This legacy OpenClaw plugin may still add the KATA_INBOX_USER inbox to every prompt until it is reinstalled. Reinstall with kata agent-hook install openclaw to turn sharing off; add --share-inbox only if every prompt may receive that inbox.")
+		} else if owned && old.Contract && old.ShareInbox {
+			plan.Warnings = append(plan.Warnings, "OpenClaw shared inbox is enabled; every prompt handled by the plugin may receive the inbox selected by KATA_INBOX_USER in the Gateway environment. Disable it with kata agent-hook install openclaw --share-inbox=false.")
+		}
 		plan.Warnings = append(plan.Warnings, "OpenClaw status is offline configuration evidence; native runtime loading is unverified.")
 		return plan, nil
 	}
@@ -183,6 +199,7 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 	if remove {
 		if opts.Contract {
 			desired.Contract = false
+			desired.ShareInbox = false
 		}
 		if opts.Attention {
 			desired.Attention = false
@@ -193,6 +210,9 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 		}
 		if opts.Attention {
 			desired.Attention = true
+		}
+		if opts.ShareInboxSet {
+			desired.ShareInbox = opts.ShareInbox
 		}
 		if opts.Executable != "" {
 			desired.Executable = opts.Executable
@@ -207,6 +227,12 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 		if desired.SourceSet && desired.Source == "" {
 			return plan, fmt.Errorf("--source requires a nonempty local file path")
 		}
+	}
+	if !desired.Contract {
+		desired.ShareInbox = false
+	}
+	if owned && old.Contract && !old.ShareInboxRecorded && desired.Contract && !desired.ShareInbox {
+		plan.Warnings = append(plan.Warnings, "This install is turning off the legacy inbox sharing behavior. The old plugin may have added KATA_INBOX_USER to every prompt; the updated plugin keeps it off. Use --share-inbox only if every prompt may receive that inbox.")
 	}
 	remaining := desired.Contract || desired.Attention
 	if remaining {
@@ -264,6 +290,9 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 		plan.AttentionEnd = plan.AttentionStart
 		if !authorized {
 			plan.Warnings = append(plan.Warnings, "OpenClaw loading or before_prompt_build permission is denied; contract and workspace-captured attention are unavailable. Review plugins.enabled, allow/deny, entries."+id+".enabled and hooks.allowConversationAccess/allowPromptInjection with native management; authored policy was preserved.")
+		}
+		if desired.ShareInbox {
+			plan.Warnings = append(plan.Warnings, "OpenClaw shared inbox is enabled; every prompt handled by the OpenClaw plugin may receive the inbox selected by KATA_INBOX_USER in the Gateway environment.")
 		}
 		plan.Warnings = append(plan.Warnings, "OpenClaw configuration is offline evidence only; reload the Gateway plugin and inspect native runtime registrations (API >=2026.9.7).")
 	} else if owned {
@@ -609,7 +638,7 @@ export default {
     }
     if(!contract)return;
     const source=['agent-contract-hook'];if(options.sourceSet)source.push('--source',options.source);
-    const recipient=process.env.KATA_INBOX_USER;
+    const recipient=options.shareInbox?process.env.KATA_INBOX_USER:undefined;
     const [contractRead,inboxRead]=await Promise.allSettled([command(source,workspace),recipient?command(['inbox','--for',recipient,'--context'],workspace):Promise.resolve({stdout:''})]);
     ctx.hookInvocation?.assertActive();
     if(!owns(workspace,'contract'))return;
