@@ -82,3 +82,20 @@ func TestNewReporterDisabledDuringGoTests(t *testing.T) {
 
 	assert.False(t, reporter.Enabled())
 }
+
+func TestAppOpenedSurfaceAllowlist(t *testing.T) {
+	reporter, err := NewReporter(Options{DistinctID: "anonymous-instance-id"})
+	require.NoError(t, err)
+
+	for _, surface := range []string{"tui", "web"} {
+		props, err := reporter.SanitizeProperties("app_opened", map[string]any{"surface": surface, "path": "/example"})
+		require.NoError(t, err)
+		assert.Equal(t, surface, props["surface"])
+		assert.NotContains(t, props, "path")
+	}
+	for _, surface := range []any{"desktop", "", 1} {
+		props, err := reporter.SanitizeProperties("app_opened", map[string]any{"surface": surface})
+		require.NoError(t, err)
+		assert.NotContainsf(t, props, "surface", "surface %#v must be dropped", surface)
+	}
+}

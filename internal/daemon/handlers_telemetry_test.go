@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/telemetry"
 )
 
@@ -172,4 +174,51 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
 	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+}
+
+// A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.
+func TestCaptureTelemetryAcceptsBearerClientOnEitherListener(t *testing.T) {
+	const host = "daemon.example"
+	for _, kind := range []ListenerKind{ListenerSharedTCP, ListenerBrowser} {
+		for _, test := range []struct {
+			name  string
+			auth  config.AuthConfig
+			token string
+		}{
+			{name: "configured token", auth: config.AuthConfig{Token: "configured-token"}, token: "configured-token"},
+			{name: "identity token", auth: config.AuthConfig{Token: "configured-token", RequireTokenIdentity: true}, token: "user-token"},
+		} {
+			t.Run(string(kind)+"/"+test.name, func(t *testing.T) {
+				store := openAuthTestDB(t)
+				_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "user-token", Actor: "alice", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+				manager, err := NewWebSessionManager(WebSessionManagerConfig{
+					Origin: "https://" + host, InstanceID: "instance_a", Writable: true, Auth: test.auth, DB: store,
+				})
+				require.NoError(t, err)
+				reporter := &fakeTelemetryReporter{}
+				server := NewServer(ServerConfig{
+					DB: store, StartedAt: time.Now().UTC(), WebSessions: manager, Auth: test.auth, Telemetry: reporter,
+				})
+				t.Cleanup(func() { _ = server.Close() })
+				handler, err := server.HandlerFor(ListenerPolicy{
+					Kind: kind, Origin: "https://" + host, BackendAuthority: "127.0.0.1:7777", RequireBrowserSession: true,
+				})
+				require.NoError(t, err)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://"+host+"/api/v1/ui/telemetry",
+					strings.NewReader(`{"event":"app_opened","properties":{"surface":"tui"}}`))
+				request.RemoteAddr = "127.0.0.1:40123"
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Authorization", "Bearer "+test.token)
+				response := httptest.NewRecorder()
+
+				handler.ServeHTTP(response, request)
+
+				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+				assert.Equal(t, []map[string]any{{"surface": "tui"}}, reporter.captured)
+			})
+		}
+	}
 }

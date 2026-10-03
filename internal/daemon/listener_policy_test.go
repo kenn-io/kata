@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,4 +388,79 @@ func TestServerListenerFailureStopsSibling(t *testing.T) {
 	}
 	_, err = net.DialTimeout("tcp", second.Addr().String(), 100*time.Millisecond)
 	require.Error(t, err)
+}
+
+func TestSharedTCPTelemetryAcceptsOrdinaryClients(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	shared, err := ApplyListenerPolicy(ok, ListenerPolicy{Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123"})
+	require.NoError(t, err)
+	browser, err := ApplyListenerPolicy(ok, ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123"})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		handler http.Handler
+		method  string
+		path    string
+		host    string
+		headers map[string]string
+		cookie  *http.Cookie
+		want    int
+	}{
+		{name: "unmarked telemetry post", handler: shared, want: http.StatusNoContent},
+		{
+			name: "telemetry post with another origin", handler: shared,
+			headers: map[string]string{"Origin": "http://127.0.0.1:27124"}, want: http.StatusForbidden,
+		},
+		{
+			name: "telemetry post with session header", handler: shared,
+			headers: map[string]string{webSessionHeader: "tab-session"}, want: http.StatusForbidden,
+		},
+		{
+			name: "telemetry post with session cookie", handler: shared,
+			cookie: &http.Cookie{
+				Name: "kata_session_instance_a", Value: "cookie-session",
+				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+			},
+			want: http.StatusForbidden,
+		},
+		{name: "telemetry post with foreign host", handler: shared, host: "daemon.example:7777", want: http.StatusBadRequest},
+		{name: "unmarked local session mint", handler: shared, path: "/api/v1/ui/session/local", want: http.StatusNotFound},
+		{name: "unmarked telemetry get", handler: shared, method: http.MethodGet, want: http.StatusNoContent},
+		{name: "unmarked telemetry post on browser listener", handler: browser, want: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method, path, host := tt.method, tt.path, tt.host
+			if method == "" {
+				method = http.MethodPost
+			}
+			if path == "" {
+				path = "/api/v1/ui/telemetry"
+			}
+			if host == "" {
+				host = "127.0.0.1:27123"
+			}
+			var body io.Reader
+			if method == http.MethodPost {
+				body = strings.NewReader(`{"event":"app_opened","properties":{"surface":"tui"}}`)
+			}
+			request := httptest.NewRequest(method, "http://127.0.0.1:27123"+path, body)
+			request.Host = host
+			request.RemoteAddr = "127.0.0.1:40123"
+			if body != nil {
+				request.Header.Set("Content-Type", "application/json")
+			}
+			for name, value := range tt.headers {
+				request.Header.Set(name, value)
+			}
+			if tt.cookie != nil {
+				request.AddCookie(tt.cookie)
+			}
+			response := httptest.NewRecorder()
+			tt.handler.ServeHTTP(response, request)
+			assert.Equal(t, tt.want, response.Code, response.Body.String())
+		})
+	}
 }

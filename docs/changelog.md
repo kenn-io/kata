@@ -97,6 +97,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   count installs where someone opened the UI. `KATA_TELEMETRY_ENABLED=0` turns
   it off with the daemon heartbeat.
 
+- `kata tui` reports an anonymous `app_opened` event through the daemon once per
+  launch, so usage reports count people who only use the terminal UI. The event
+  carries `surface` (`web` or `tui`) so reports can tell the two apart.
+  `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
+
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.

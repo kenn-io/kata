@@ -162,8 +162,10 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 }
 
 func isBrowserRequest(r *http.Request) bool {
-	if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") ||
-		r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" ||
+	// The TUI reports app_opened through the browser's operation, so this path alone marks nothing.
+	uiPath := strings.HasPrefix(r.URL.Path, "/api/v1/ui/") &&
+		(r.Method != http.MethodPost || r.URL.Path != "/api/v1/ui/telemetry")
+	if uiPath || r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" ||
 		r.Header.Get(webCSRFHeader) != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 		return true
 	}
@@ -176,12 +178,11 @@ func isBrowserRequest(r *http.Request) bool {
 	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml"
 }
 
-// ordinaryAPIBearerRequest classifies CLI and federation traffic, leaving
+// ordinaryAPIBearerRequest classifies CLI, TUI and federation traffic, leaving
 // credential validation to the normal daemon authentication stack. Browser
 // evidence always takes precedence over a bearer header.
 func ordinaryAPIBearerRequest(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/api/v1/") &&
-		!strings.HasPrefix(r.URL.Path, "/api/v1/ui/") &&
 		hasBearerHeader(r.Header.Get(authHeader)) &&
 		r.Header.Get("Cookie") == "" && !isBrowserRequest(r)
 }

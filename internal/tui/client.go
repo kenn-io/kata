@@ -122,6 +122,22 @@ func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 	return resp, nil
 }
 
+// ReportAppOpened sends app_opened with surface=tui to the connected daemon,
+// which applies its own allowlist and opt-out before anything leaves the machine.
+func (c *Client) ReportAppOpened(ctx context.Context) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
+		Body: &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "tui"}},
+	})
+	if wire == nil {
+		return callErr
+	}
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
 // ListTokens returns the daemon's redacted credential audit inventory and
 // the instant at which the daemon classified each token's state.
 func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {
