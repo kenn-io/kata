@@ -241,6 +241,7 @@ func TestMCPServeHTTPPerRequestProtocolListsSessionVersions(t *testing.T) {
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	request.Header.Set("Authorization", "Bearer test-mcp-token")
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = response.Body.Close() })

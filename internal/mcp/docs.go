@@ -216,13 +216,14 @@ func splitDocSections(name, text string) []docSection {
 		})
 	}
 	for line := range strings.SplitSeq(body, "\n") {
-		trimmed := strings.TrimSpace(line)
+		trimmed := strings.TrimLeft(line, " \t")
 		if fence != "" {
-			if strings.HasPrefix(trimmed, fence) {
+			if strings.HasPrefix(trimmed, fence) && strings.Trim(strings.TrimLeft(trimmed, fence[:1]), " \t") == "" {
 				fence = ""
 			}
 		} else if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fence = trimmed[:3]
+			info := strings.TrimLeft(trimmed, trimmed[:1])
+			fence = trimmed[:len(trimmed)-len(info)]
 		} else if level, text := docHeading(line); level > 0 {
 			flush()
 			lines, heading, slug = nil, text, ""

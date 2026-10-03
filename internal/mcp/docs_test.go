@@ -74,3 +74,24 @@ func TestDocSectionsSkipFencedHeadingsAndNumberRepeats(t *testing.T) {
 	require.Len(t, untitled, 2)
 	require.Equal(t, "Plain page", untitled[1].document, "a page without frontmatter takes its title from the leading heading")
 }
+
+func TestDocSectionsRespectClosingFences(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		block string
+	}{
+		{"nested backticks", "````text\n```text\n# not a heading\n```\n````"},
+		{"tagged backticks", "```text\n```text\n# not a heading\n```"},
+		{"nested tildes", "~~~~text\n~~~\n# not a heading\n~~~~"},
+		{"different character and longer closer", "```text\n~~~\n# not a heading\n````` \t"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sections := splitDocSections("guide/example.md", "# Example\n\n## Sample\n\n"+tt.block+"\n\n## After\n\nText.\n")
+			require.Len(t, sections, 3)
+			require.Equal(t, "guide/example.md#sample", sections[1].id)
+			require.Contains(t, sections[1].content, "# not a heading")
+			require.Equal(t, "guide/example.md#after", sections[2].id)
+			require.NotContains(t, sections[1].content, "## After")
+		})
+	}
+}

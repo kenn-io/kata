@@ -105,7 +105,12 @@ func TestAssignStatusAndUnassignRoundTripAgainstDaemon(t *testing.T) {
 	status = callAdministrationTool(t, session, "kata.status", map[string]any{"ref": ref})
 	require.Equal(t, "unassigned", status["hold"])
 
-	callToolError(t, session, "kata.status", map[string]any{"ref": "other-project#abcd"})
+	outside, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.status", Arguments: map[string]any{"ref": "other-project#abcd"},
+	})
+	require.NoError(t, err)
+	require.True(t, outside.IsError)
+	require.Contains(t, string(mustJSON(t, outside)), "outside the MCP startup scope")
 }
 
 func TestInboxReadsAttentionRequestsAgainstDaemon(t *testing.T) {
