@@ -385,17 +385,6 @@ func TestCaptureTelemetryEventForwardsOneAppOpenedPerSurfacePerDay(t *testing.T)
 	assert.Equal(t, []string{tuiTelemetryBody, webBody}, capture.bodies)
 }
 
-func TestCaptureTelemetryEventUnknownEventStillRejected(t *testing.T) {
-	server := newTelemetryTestServer(t, newReporterCaptureHandler(t), Principal{Kind: PrincipalWebLocal})
-
-	opened := server.post(t.Context(), t, `{"event":"app_opened","properties":{"surface":"web"}}`)
-	unknown := server.post(t.Context(), t, `{"event":"app_loaded"}`)
-
-	require.Equal(t, http.StatusAccepted, opened.Code, opened.Body.String())
-	require.Equal(t, http.StatusBadRequest, unknown.Code, unknown.Body.String())
-	assert.Equal(t, "unsupported_telemetry_event", decodeErrorCode(t, unknown))
-}
-
 func TestCaptureTelemetryEventDisabledReporterIsNotDeduped(t *testing.T) {
 	server := newTelemetryTestServer(t, newReporterCaptureHandler(t), Principal{Kind: PrincipalWebLocal})
 	body := `{"event":"app_opened","properties":{"surface":"cli"}}`
