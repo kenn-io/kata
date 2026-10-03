@@ -3,6 +3,9 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 
 	"go.kenn.io/kata/internal/telemetry"
 )
@@ -23,4 +26,12 @@ func main() {
 		return
 	}
 	fmt.Println("disabled")
+
+	// Only a disabled reporter reaches this capture, so the program never sends anything.
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ui/telemetry",
+		strings.NewReader(`{"event":"app_opened","properties":{"surface":"tui"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	telemetry.CaptureHandler(reporter).ServeHTTP(recorder, request)
+	fmt.Println("capture", recorder.Code, strings.TrimSpace(recorder.Body.String()))
 }

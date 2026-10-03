@@ -25,7 +25,10 @@ test('the web UI reports app_opened once per UTC day to the serving daemon', asy
   const first = await firstResponse
   expect(first.status()).toBe(202)
   expect(await first.json()).toEqual({ status: 'disabled' })
-  expect(first.request().postDataJSON()).toEqual({ event: 'app_opened' })
+  expect(first.request().postDataJSON()).toEqual({
+    event: 'app_opened',
+    properties: { surface: 'web' },
+  })
   expect(new URL(first.url()).origin).toBe(kata.origin)
 
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -37,6 +40,9 @@ test('the web UI reports app_opened once per UTC day to the serving daemon', asy
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   const second = await secondResponse
   expect(second.status()).toBe(202)
-  expect(second.request().postDataJSON()).toEqual({ event: 'app_opened' })
+  expect(second.request().postDataJSON()).toEqual({
+    event: 'app_opened',
+    properties: { surface: 'web' },
+  })
   expect(requests).toHaveLength(2)
 })

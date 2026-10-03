@@ -19,7 +19,7 @@ function harness(start: string, session: string | null = 'session-a') {
   const send = vi.fn<Send>(
     (body) =>
       new Promise<captureTelemetryEventResponse>((resolve, reject) => {
-        expect(body).toEqual({ event: 'app_opened' })
+        expect(body).toEqual({ event: 'app_opened', properties: { surface: 'web' } })
         requests.push({
           day: clock.toISOString().slice(0, 10),
           session: current,
@@ -54,7 +54,10 @@ describe('app_opened reporter', () => {
     const withSession = harness('2026-10-02T12:00:00Z')
     withSession.reporter.opened()
     expect(withSession.send).toHaveBeenCalledTimes(1)
-    expect(withSession.send).toHaveBeenCalledWith({ event: 'app_opened' })
+    expect(withSession.send).toHaveBeenCalledWith({
+      event: 'app_opened',
+      properties: { surface: 'web' },
+    })
 
     const anonymous = harness('2026-10-02T12:00:00Z', null)
     anonymous.reporter.opened()

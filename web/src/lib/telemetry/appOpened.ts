@@ -27,7 +27,7 @@ export function createAppOpenedReporter(
     const day = armedDay
     reportedDay = day
     armedDay = ''
-    send({ event: 'app_opened' })
+    send({ event: 'app_opened', properties: { surface: 'web' } })
       .then((response) => {
         if (response.status !== 401 || reportedDay !== day) return
         reportedDay = ''

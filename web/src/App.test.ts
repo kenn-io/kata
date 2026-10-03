@@ -2276,7 +2276,10 @@ describe('App', () => {
       expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
       expect(telemetry).toHaveLength(1)
       expectServingDaemonPost(telemetry[0])
-      await expect(telemetry[0]!.json()).resolves.toEqual({ event: 'app_opened' })
+      await expect(telemetry[0]!.json()).resolves.toEqual({
+        event: 'app_opened',
+        properties: { surface: 'web' },
+      })
     })
 
     it('a failing target snapshot still reports the opening', async () => {
