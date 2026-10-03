@@ -494,7 +494,7 @@ kata mcp serve \
   --http-token-env KATA_MCP_HTTP_TOKEN
 ```
 
-The server starts with 14 section loaders. An agent loads only the detailed
+The server starts with 16 section loaders. An agent loads only the detailed
 issue, project, administration, automation, or event tools needed for its task.
 Pass `--workspace` or `--project` for an explicit project, `--projects` for a
 fixed allowlist, or `--all` to use every project visible to the

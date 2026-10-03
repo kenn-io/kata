@@ -35,6 +35,25 @@ type ProjectsOutput struct {
 	Projects []ProjectSummary `json:"projects"`
 }
 
+// ProjectShowInput selects one project in the startup scope.
+type ProjectShowInput struct {
+	Project string `json:"project,omitempty" jsonschema:"Project name; omit in single-project mode"`
+}
+
+// ProjectAliasSummary is one workspace identity bound to a project.
+type ProjectAliasSummary struct {
+	ID        int64  `json:"id"`
+	Identity  string `json:"identity"`
+	Kind      string `json:"kind"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ProjectShowOutput contains one project and its aliases.
+type ProjectShowOutput struct {
+	Project ProjectSummary        `json:"project"`
+	Aliases []ProjectAliasSummary `json:"aliases"`
+}
+
 // ProjectCreateInput names a path-free project to create.
 type ProjectCreateInput struct {
 	Name string `json:"name"`
@@ -125,6 +144,7 @@ func registerProjectTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.project_purge", "Purge project", "Irreversibly purge an archived project after exact confirmation.", mutating, handlers.projectPurge)
 	addTool(server, "kata.project_remove", "Archive project", "Archive an in-scope project.", mutating, handlers.projectRemove)
 	addTool(server, "kata.project_restore", "Restore project", "Restore an archived in-scope project.", additive, handlers.projectRestore)
+	addTool(server, "kata.project_show", "Show project", "Read one project with its metadata and workspace aliases.", read, handlers.projectShow)
 	addTool(server, "kata.project_update", "Update project", "Rename, patch metadata, rewrite authors, or detach an alias.", mutating, handlers.projectUpdate)
 	addTool(server, "kata.projects", "List projects", "List or select projects inside the startup scope.", read, handlers.projects)
 }
@@ -169,6 +189,24 @@ func (h toolHandlers) projects(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return nil, ProjectsOutput{}, errors.New("no projects in the MCP startup scope are available")
 	}
 	return successResult(), ProjectsOutput{Projects: result}, nil
+}
+
+func (h toolHandlers) projectShow(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectShowInput) (*sdkmcp.CallToolResult, ProjectShowOutput, error) {
+	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
+	if err != nil {
+		return nil, ProjectShowOutput{}, err
+	}
+	response, err := h.options.Client.ShowProject(ctx, &generated.ShowProjectRequestOptions{
+		PathParams: &generated.ShowProjectPath{ProjectID: project.ID},
+	})
+	if err != nil {
+		return nil, ProjectShowOutput{}, err
+	}
+	aliases := make([]ProjectAliasSummary, 0, len(response.Aliases))
+	for _, alias := range response.Aliases {
+		aliases = append(aliases, ProjectAliasSummary{ID: alias.ID, Identity: alias.AliasIdentity, Kind: alias.AliasKind, CreatedAt: formatTime(alias.CreatedAt)})
+	}
+	return successResult(), ProjectShowOutput{Project: projectSummaryOut(response.Project), Aliases: aliases}, nil
 }
 
 func (h toolHandlers) projectInFixedScope(project generated.ProjectOut) bool {

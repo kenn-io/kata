@@ -99,6 +99,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   it reports as too long or refused by policy is skipped and the rest keep
   indexing, instead of every later index pass stopping at that issue.
 
+- Hand work between agents over MCP: `kata.load_coordination` adds
+  `kata.assign`, `kata.unassign` with an `expected_owner` guard, `kata.inbox`,
+  and `kata.status`. `kata.project_show` reads one project with its aliases,
+  and `kata.load_docs` adds `kata.search_docs` and `kata.read_doc` over the
+  documentation bundled in the binary. The server now uses MCP Go SDK 1.8.0;
+  clients on older protocol versions keep working. See the
+  [MCP reference](reference/mcp.md#progressive-tool-catalog).
+
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
   with `kata agent-hook install --all`; Codex requires trust through `/hooks`.

@@ -83,6 +83,7 @@ tmp_config_base=""
     --exclude './website' \
     --exclude './overrides' \
     --exclude './llms.txt' \
+    --exclude './*.go' \
     --exclude '*/__pycache__' \
     --exclude '*/__pycache__/*' \
     --exclude '*/.idea' \

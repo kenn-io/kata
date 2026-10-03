@@ -538,7 +538,7 @@ by default. `--workspace` or `--project` selects one explicit project.
 `--projects` fixes an allowlist of project names, pinned by immutable project
 UID. `--all` follows every project in the selected daemon catalog.
 The startup scope and actor apply to every tool call. The initial catalog
-contains 14 section loaders that progressively expose the detailed typed
+contains 16 section loaders that progressively expose the detailed typed
 tools. Optional `--storage-root` and repeatable `--storage-target
 alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
 [MCP reference](mcp.md) for transport configuration, the complete catalog,
