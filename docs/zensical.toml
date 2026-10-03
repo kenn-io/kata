@@ -44,6 +44,7 @@ nav = [
     {"Sharing models" = "workflows/sharing.md"},
   ]},
   {"Operations" = [
+    {"Diagnosing setup" = "operations/doctor.md"},
     {"Remote daemon" = "operations/remote-daemon.md"},
     {"Local daemon profiles" = "operations/local-daemon-profiles.md"},
     {"GitHub sync" = "operations/github-sync.md"},

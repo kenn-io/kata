@@ -6,11 +6,16 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestLocalProfileIdentityProbeHonorsTimeout(t *testing.T) {
@@ -35,6 +40,38 @@ func TestLocalProfileIdentityProbeHonorsTimeout(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("profile identity probe exceeded configured request timeout")
 	}
+}
+
+func TestNamedReadOnlyProfileDiscoveryDefersIdentityProbe(t *testing.T) {
+	profile, _ := localProfileFixture(t)
+	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+
+	var identityCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ping":
+			_, _ = fmt.Fprint(w, `{"ok":true,"service":"kata","version":"test"}`)
+		case "/api/v1/instance":
+			identityCalls.Add(1)
+			<-r.Context().Done()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
+
+	resolved, err := resolveNamedDaemonMode(t.Context(), "work", namedDiscoverTargetReadOnly)
+	require.NoError(t, err, "read-only named discovery defers profile identity checks to the caller's bounded client")
+	require.Equal(t, profile.InstanceUID, resolved.LocalProfile.InstanceUID)
+	require.Equal(t, server.URL, resolved.BaseURL)
+	require.Zero(t, identityCalls.Load(), "discovery must not make an identity request with KATA_HTTP_TIMEOUT")
 }
 
 func TestLocalProfileStorageProbeHonorsTimeout(t *testing.T) {

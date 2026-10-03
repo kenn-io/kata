@@ -91,6 +91,23 @@ func (e *LocalProfileIdentityError) Error() string {
 func (e *LocalProfileIdentityError) Unwrap() error { return ErrProfileIdentityMismatch }
 
 func discoverLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	return discoverLocalProfileUsing(ctx, selection, liveDaemons)
+}
+
+func discoverLocalProfileUsing(ctx context.Context, selection DaemonSelection, scan liveDaemonScanner) (ResolvedDaemon, bool, error) {
+	return discoverLocalProfileWithVerifier(ctx, selection, scan, verifyLocalProfileInstance)
+}
+
+func discoverLocalProfileUsingWithoutIdentityProbe(ctx context.Context, selection DaemonSelection, scan liveDaemonScanner) (ResolvedDaemon, bool, error) {
+	return discoverLocalProfileWithVerifier(ctx, selection, scan, nil)
+}
+
+func discoverLocalProfileWithVerifier(
+	ctx context.Context,
+	selection DaemonSelection,
+	scan liveDaemonScanner,
+	verify func(context.Context, ResolvedDaemon) error,
+) (ResolvedDaemon, bool, error) {
 	resolved := selection.Resolved
 	if _, err := os.Stat(resolved.LocalProfile.DataDir); errors.Is(err, os.ErrNotExist) {
 		return resolved, false, nil
@@ -101,7 +118,7 @@ func discoverLocalProfile(ctx context.Context, selection DaemonSelection) (Resol
 		return resolved, false, err
 	}
 	var unreachable error
-	for candidate, err := range liveDaemons(ctx, resolved.LocalProfile.DataDir) {
+	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
 		if err != nil {
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				unreachable = err
@@ -111,8 +128,10 @@ func discoverLocalProfile(ctx context.Context, selection DaemonSelection) (Resol
 		}
 		resolved = resolved.WithRunning(runningDaemonForLive(candidate))
 		resolved.UnixSocket = candidate.UnixSocket
-		if err := verifyLocalProfileInstance(ctx, resolved); err != nil {
-			return resolved, false, err
+		if verify != nil {
+			if err := verify(ctx, resolved); err != nil {
+				return resolved, false, err
+			}
 		}
 		return resolved, true, nil
 	}

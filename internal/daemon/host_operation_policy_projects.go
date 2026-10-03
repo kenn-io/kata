@@ -23,7 +23,7 @@ func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
 		restricted: true,
-	}, "getIssueSyncStatus")
+	}, "getIssueSyncStatus", "doctor")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
 		Mutation: true, restricted: true,
