@@ -1,4 +1,6 @@
 ---
+title: "Data model and durability"
+description: "Understand issue identity, the event log, purge cursors, idempotency, and storage durability."
 last_edited: 2026-09-13
 ---
 

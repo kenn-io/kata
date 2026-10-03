@@ -1,3 +1,8 @@
+---
+title: "Plane project sync"
+description: "Understand Plane source identity, pagination, state mapping, and two-way status delivery."
+last_edited: 2026-10-01
+---
 # Plane project sync
 
 **Status: implemented v1.** Plane uses the provider-neutral issue-sync runner

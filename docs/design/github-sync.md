@@ -1,3 +1,8 @@
+---
+title: "GitHub Sync"
+description: "Understand the daemon-owned GitHub issue mirror, imported fields, and design boundaries."
+last_edited: 2026-09-29
+---
 # GitHub Sync
 
 GitHub sync is a shipped v1 integration for mirroring GitHub issues into a

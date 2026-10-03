@@ -1,3 +1,8 @@
+---
+title: "Auto-start daemon idle shutdown"
+description: "Understand when automatically started local daemons shut down and how activity keeps them alive."
+last_edited: 2026-08-21
+---
 # Auto-start daemon idle shutdown
 
 Kata clients automatically start a local daemon when no compatible local

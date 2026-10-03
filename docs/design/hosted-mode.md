@@ -1,3 +1,8 @@
+---
+title: "Kata hosted mode (`$PORT` convention)"
+description: "Understand the hosted PORT binding contract, required environment, health probes, and shutdown."
+last_edited: 2026-09-01
+---
 # Kata hosted mode (`$PORT` convention)
 
 When no `--listen` flag and no config `listen` are set, the daemon binds

@@ -1,4 +1,6 @@
 ---
+title: "Issue-scoped credentials"
+description: "Understand the authorization boundary and lifecycle of credentials for one issue and its descendants."
 last_edited: 2026-09-20
 ---
 

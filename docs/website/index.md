@@ -1,3 +1,8 @@
+---
+title: "kata カタ: the issue tracker that runs inside the loop"
+description: "Explore how Kata helps humans and coding agents track, coordinate, and supervise local issue work."
+last_edited: 2026-09-17
+---
 # kata カタ: the issue tracker that runs inside the loop
 
 kata is a local-first issue ledger for coding agents and the humans steering

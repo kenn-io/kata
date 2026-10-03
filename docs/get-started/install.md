@@ -1,3 +1,8 @@
+---
+title: "Install"
+description: "Install or upgrade Kata using packages, release archives, installers, or source builds."
+last_edited: 2026-09-17
+---
 # Install
 
 kata is a single Go binary. It has no runtime service dependency beyond the

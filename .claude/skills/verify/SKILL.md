@@ -1,6 +1,8 @@
 ---
-name: verify
+title: "Verifying kata changes"
 description: Build and drive the kata CLI/TUI to verify changes at the real terminal surface
+last_edited: 2026-08-07
+name: verify
 ---
 
 # Verifying kata changes

@@ -1,3 +1,8 @@
+---
+title: "Contributing"
+description: "Build and check Kata, follow documentation standards, and contribute with evidence."
+last_edited: 2026-10-02
+---
 # Contributing
 
 kata is a Go project with a local daemon, CLI, TUI, SQLite store, JSONL

@@ -1,6 +1,7 @@
 ---
 title: Embedding kata in Go
 description: Mount kata's HTTP service inside a Go application.
+last_edited: 2026-09-30
 ---
 
 # Embedding kata in Go

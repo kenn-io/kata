@@ -1,4 +1,6 @@
 ---
+title: "Semantic search technical notes"
+description: "Understand semantic search design, embedding privacy, backend indexes, and lexical fallback."
 last_edited: 2026-10-01
 ---
 

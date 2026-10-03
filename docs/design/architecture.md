@@ -1,3 +1,8 @@
+---
+title: "Architecture and design principles"
+description: "Understand Kata's architecture, design principles, identity, and trust boundaries."
+last_edited: 2026-09-01
+---
 # Architecture and design principles
 
 This note records why kata is shaped the way it is: the goals it optimizes for,

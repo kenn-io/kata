@@ -1,3 +1,8 @@
+---
+title: "Sharing models"
+description: "Choose local shared projects, remote daemons, federation, or hosted deployment for your workflow."
+last_edited: 2026-05-31
+---
 # Sharing models
 
 kata has three sharing shapes. Pick the smallest one that fits the workflow.

@@ -1,3 +1,8 @@
+---
+title: "Deploying docs"
+description: "Configure Vercel, build the public documentation site, and publish rendered pages and Markdown sources."
+last_edited: 2026-08-09
+---
 # Deploying docs
 
 The public docs site is a static Zensical build. Vercel does not need native

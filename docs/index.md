@@ -1,6 +1,7 @@
 ---
 title: kata カタ documentation
 description: Documentation for kata, the local-first issue tracker for humans and coding agents.
+last_edited: 2026-09-30
 ---
 
 # kata documentation

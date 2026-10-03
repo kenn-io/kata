@@ -1,4 +1,6 @@
 ---
+title: "PostgreSQL forward migrations"
+description: "Register approved forward PostgreSQL migrations and preserve immutable released migration assets."
 last_edited: 2026-08-20
 ---
 

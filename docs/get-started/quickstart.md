@@ -1,4 +1,6 @@
 ---
+title: "Quickstart"
+description: "Install Kata, bind a workspace, create and inspect issues, and close work with evidence."
 last_edited: 2026-10-02
 ---
 

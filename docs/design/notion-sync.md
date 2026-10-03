@@ -1,3 +1,8 @@
+---
+title: "Notion task sync"
+description: "Understand the Notion task adapter, shared sync lifecycle, import rules, and deferred capabilities."
+last_edited: 2026-09-29
+---
 # Notion task sync
 
 **Status: implemented v1.** The daemon-owned Notion adapter uses the shared

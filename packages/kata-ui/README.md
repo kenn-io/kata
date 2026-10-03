@@ -1,3 +1,8 @@
+---
+title: "@kenn-io/kata-ui"
+description: "Embed read-only Kata issue details in trusted Svelte hosts with schema checks and host-owned navigation."
+last_edited: 2026-09-26
+---
 # `@kenn-io/kata-ui`
 
 Kata-owned Svelte presentation components for embedding read-only Kata issue details in trusted hosts.

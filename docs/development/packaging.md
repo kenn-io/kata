@@ -1,3 +1,8 @@
+---
+title: "Packaging kata"
+description: "Package Kata with distribution ownership, reproducible version metadata, and production browser assets."
+last_edited: 2026-09-04
+---
 # Packaging kata
 
 ## Release ownership

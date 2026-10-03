@@ -1,6 +1,8 @@
 ---
-name: testing-without-tautologies
+title: "Testing Without Tautologies"
 description: Use when creating, editing, fixing, or reviewing tests; when adding assertions, fakes, unit tests, testenv integration tests, e2e tests, CLI tests, TUI golden snapshots, or changing tests after failures.
+last_edited: 2026-07-03
+name: testing-without-tautologies
 ---
 
 # Testing Without Tautologies

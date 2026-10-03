@@ -1,3 +1,8 @@
+---
+title: "The kata: a nine-stop tour of the operating loop"
+description: "Practice the nine-step Kata operating loop from workspace binding to owning the issue ledger."
+last_edited: 2026-09-17
+---
 # The kata: a nine-stop tour of the operating loop
 
 A kata is a form you practice until it disappears. These are the nine moves

@@ -1,3 +1,8 @@
+---
+title: "Docs screenshots"
+description: "Generate documentation screenshots from disposable fixtures and maintain the generated asset branch."
+last_edited: 2026-08-09
+---
 # Docs screenshots
 
 The documentation screenshots are generated from disposable synthetic Kata

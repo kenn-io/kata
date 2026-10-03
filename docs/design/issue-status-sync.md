@@ -1,3 +1,8 @@
+---
+title: "Two-way issue status sync for Notion, GitHub, and Plane"
+description: "Understand two-way issue status delivery and recovery across Notion, GitHub, and Plane."
+last_edited: 2026-10-01
+---
 # Two-way issue status sync for Notion, GitHub, and Plane
 
 **Status: implemented.** This document defines the status-sync contract and its

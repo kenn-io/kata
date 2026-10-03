@@ -1,4 +1,6 @@
 ---
+title: "Agent workflows"
+description: "Set up agent contracts and hooks, coordinate workers, preserve notes, and close issues with evidence."
 last_edited: 2026-10-02
 ---
 

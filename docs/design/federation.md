@@ -1,3 +1,8 @@
+---
+title: "Kata Federation"
+description: "Understand federation protocols, trust boundaries, replication, leases, and consistency limits."
+last_edited: 2026-09-06
+---
 # Kata Federation
 
 Federation lets multiple kata daemons share selected projects while each user

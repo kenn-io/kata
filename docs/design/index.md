@@ -1,4 +1,6 @@
 ---
+title: "Design Notes"
+description: "Find technical design notes explaining architecture, implementation choices, and operational constraints."
 last_edited: 2026-10-01
 ---
 

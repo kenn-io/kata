@@ -1,3 +1,8 @@
+---
+title: "PostgreSQL migrations"
+description: "Follow approval, immutable migration history, and upgrade checks for PostgreSQL schema changes."
+last_edited: 2026-10-01
+---
 # PostgreSQL migrations
 
 Kata installs a new PostgreSQL database from the current canonical schema. The
