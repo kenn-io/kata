@@ -1,8 +1,9 @@
-// Package telemetry emits anonymous, opt-out daemon usage events.
+// Package telemetry emits anonymous, opt-out daemon and web UI usage events.
 package telemetry
 
 import (
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -44,10 +45,12 @@ func EnabledFromEnv() bool {
 	return !testing.Testing() && kittelemetry.PostHogTelemetryEnabledFromEnv(envPrefix)
 }
 
-// NewReporter builds an enabled reporter or returns a disabled reporter when opted out.
+// NewReporter builds an enabled reporter, or a disabled one that keeps the
+// allowlist when telemetry is opted out or running under go test.
 func NewReporter(opts Options) (*Reporter, error) {
-	if !EnabledFromEnv() {
-		return DisabledReporter(), nil
+	if testing.Testing() {
+		// Go tests never send telemetry; kit's disabled reporter still admits allowed events.
+		kittelemetry.DisablePostHogTelemetry()
 	}
 
 	return kittelemetry.NewPostHogReporter(kittelemetry.PostHogOptions{
@@ -67,12 +70,20 @@ func NewReporter(opts Options) (*Reporter, error) {
 		kittelemetry.WithAllowedEvent("daemon_started",
 			kittelemetry.AllowTelemetryProperty("project_count", kittelemetry.AllowTelemetryNumber),
 		),
+		kittelemetry.WithAllowedEvent("app_opened"),
 	)
 }
 
 // DisabledReporter returns a reporter that drops events without network calls.
 func DisabledReporter() *Reporter {
 	return kittelemetry.DisabledPostHogReporter()
+}
+
+// CaptureHandler lets the web UI report allowlisted events through client.
+// A client that is not a *Reporter admits no event.
+func CaptureHandler(client Client) http.Handler {
+	reporter, _ := client.(*Reporter)
+	return kittelemetry.NewPostHogCaptureHandler(reporter)
 }
 
 // NewReporterOrDisabled builds a reporter and falls back to a disabled reporter on errors.

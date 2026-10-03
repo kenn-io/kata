@@ -827,6 +827,15 @@ A new database records when it created its `instance_uid` in the `meta` key
 installs from established ones. Databases created before kata recorded this
 time send events without it.
 
+The web UI reports an anonymous `app_opened` event to the daemon serving it
+when the page loads, and again on the first window focus of each later UTC day.
+Background refreshes of an open tab do not count. The daemon sends the event to
+PostHog with the same fields, distinct ID, and opt-out as its own events; the
+browser never contacts PostHog, and the event carries no properties. Only
+signed-in sessions with write access on the serving daemon are counted.
+Delivery is best effort, and a new tab can report again the same day, so count
+distinct installs rather than events.
+
 Disable telemetry with:
 
 ```sh

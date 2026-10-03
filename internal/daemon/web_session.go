@@ -445,7 +445,7 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
 		return r.Method == http.MethodDelete
-	case "/api/v1/projects":
+	case "/api/v1/projects", "/api/v1/ui/telemetry":
 		return r.Method == http.MethodPost
 	}
 	if strings.HasPrefix(r.URL.Path, webDaemonProxyPrefix+"/") {

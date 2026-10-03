@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,4 +68,42 @@ func TestNewReporterDisabledDuringGoTests(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, reporter.Enabled())
+}
+
+func postCaptureEvent(t *testing.T, handler http.Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/ui/telemetry", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestCaptureHandlerAdmitsAppOpenedUnderGoTest(t *testing.T) {
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv(EnabledEnv, "1")
+
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	assert.False(t, reporter.Enabled())
+
+	handler := CaptureHandler(reporter)
+	accepted := postCaptureEvent(t, handler, `{"event":"app_opened"}`)
+	assert.Equal(t, http.StatusAccepted, accepted.Code)
+	assert.JSONEq(t, `{"status":"disabled"}`, accepted.Body.String())
+
+	rejected := postCaptureEvent(t, handler, `{"event":"app_loaded"}`)
+	assert.Equal(t, http.StatusBadRequest, rejected.Code)
+}
+
+type stubClient struct{}
+
+func (stubClient) Enabled() bool                        { return true }
+func (stubClient) Capture(string, map[string]any) error { return nil }
+func (stubClient) Close() error                         { return nil }
+
+func TestCaptureHandlerRejectsNonReporterClient(t *testing.T) {
+	recorder := postCaptureEvent(t, CaptureHandler(stubClient{}), `{"event":"app_opened"}`)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 }

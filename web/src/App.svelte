@@ -42,6 +42,7 @@
   } from './lib/api/generated'
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
+  import { createAppOpenedReporter } from './lib/telemetry/appOpened'
   import {
     AuthenticationRequiredError,
     clearSessionCredentials,
@@ -155,6 +156,7 @@
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
+  const appOpened = createAppOpenedReporter()
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
@@ -202,7 +204,10 @@
       scheduler.visibilityChanged(!document.hidden)
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }
-    const focus = () => scheduler.focused()
+    const focus = () => {
+      scheduler.focused()
+      appOpened.opened()
+    }
     const environment = () => scheduler.environmentChanged()
     const showVersionMismatch = () => {
       versionMismatch = true
@@ -226,6 +231,7 @@
     const credentialRefreshTimer = window.setInterval(() => {
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }, 30_000)
+    appOpened.opened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()
@@ -269,6 +275,7 @@
   }
 
   async function navigateAfterAuthentication(target: string): Promise<boolean> {
+    appOpened.sessionAvailable()
     const parsed = new URL(target, window.location.origin)
     const canonicalTarget =
       parsed.pathname === '/'

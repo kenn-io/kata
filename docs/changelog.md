@@ -77,6 +77,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   normalize an older incomplete entry with `kata agent-hooks install codex`
   before rerunning init.
 
+- The web UI reports an anonymous `app_opened` event through the daemon when it
+  loads and on the first focus of each later UTC day, so usage reports can
+  count installs where someone opened the UI. `KATA_TELEMETRY_ENABLED=0` turns
+  it off with the daemon heartbeat.
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.

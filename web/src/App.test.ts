@@ -42,6 +42,7 @@ describe('App', () => {
           input instanceof Request ? input.url : String(input),
           window.location.origin,
         )
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
         paths.push(target.pathname)
         if (target.pathname === '/api/v1/ui/session/local') {
           return new Response(
@@ -112,6 +113,7 @@ describe('App', () => {
         if (path.endsWith('/api/v1/ui/references')) {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
         selected.push(request.headers.get('X-Kata-Web-Daemon'))
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),
@@ -216,6 +218,7 @@ describe('App', () => {
         if (path.endsWith('/api/v1/ui/references')) {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
         selected.push(request.headers.get('X-Kata-Web-Daemon'))
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
       }),
@@ -908,6 +911,7 @@ describe('App', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
         paths.push(target.pathname)
         if (target.pathname === '/api/v1/ui/daemons') return roster
         return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
@@ -1149,6 +1153,7 @@ describe('App', () => {
           window.location.origin,
         )
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
         snapshotReads += 1
         if (snapshotReads > 1) return new Promise<Response>(() => {})
         return new Response(JSON.stringify(snapshot()), {
@@ -2217,6 +2222,270 @@ describe('App', () => {
     )
   })
 
+  describe('app_opened telemetry', () => {
+    const telemetryPath = '/api/v1/ui/telemetry'
+    const storeSession = (session = 'tab-session', csrf = 'tab-csrf') =>
+      sessionStorage.setItem('kata.web.session.v1', JSON.stringify({ session, csrf }))
+    const remoteRoster = () => ({
+      daemons: [
+        ...daemonRoster().daemons,
+        {
+          id: 'example-remote',
+          url: 'https://daemon.example',
+          default: false,
+          auth: 'token',
+          health: 'connected',
+        },
+      ],
+    })
+    const references = () => Response.json({ issues: [], labels: [], owners: [], projects: [] })
+
+    function expectServingDaemonPost(
+      request: Request | undefined,
+      session = 'tab-session',
+      csrf = 'tab-csrf',
+    ) {
+      expect(request).toBeDefined()
+      expect(request!.method).toBe('POST')
+      expect(new URL(request!.url).pathname).toBe(telemetryPath)
+      expect(request!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+      expect(request!.headers.get('X-Kata-Web-Session')).toBe(session)
+      expect(request!.headers.get('X-Kata-CSRF')).toBe(csrf)
+    }
+
+    it('reports app_opened once on load', async () => {
+      storeSession()
+      const telemetry: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      expect(telemetry).toHaveLength(1)
+      expectServingDaemonPost(telemetry[0])
+      await expect(telemetry[0]!.json()).resolves.toEqual({ event: 'app_opened' })
+    })
+
+    it('a failing target snapshot still reports the opening', async () => {
+      history.replaceState(null, '', '/kata#daemon=example-remote')
+      storeSession()
+      const telemetry: Request[] = []
+      const snapshotPaths: string[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(remoteRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          snapshotPaths.push(path)
+          return Response.json(
+            { status: 502, error: { code: 'daemon_unavailable', message: 'unavailable' } },
+            { status: 502 },
+          )
+        }),
+      )
+
+      render(App)
+
+      await waitFor(() => expect(snapshotPaths.length).toBeGreaterThan(0))
+      await waitFor(() => expect(telemetry).toHaveLength(1))
+      expectServingDaemonPost(telemetry[0])
+    })
+
+    it('a read-only selected target still reports to the serving daemon', async () => {
+      history.replaceState(null, '', '/kata#daemon=example-remote')
+      storeSession()
+      const telemetry: Request[] = []
+      const readOnly = snapshot()
+      readOnly.capabilities.writable = false
+      readOnly.capabilities.actor_policy = 'readonly'
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(remoteRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(readOnly, { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      expect(telemetry).toHaveLength(1)
+      expectServingDaemonPost(telemetry[0])
+    })
+
+    it('an anonymous viewer sends no app_opened', async () => {
+      const telemetry: Request[] = []
+      const anonymous = snapshot()
+      anonymous.capabilities.writable = false
+      anonymous.capabilities.actor_policy = 'readonly'
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/session/local') return new Response('', { status: 404 })
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(anonymous, { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      window.dispatchEvent(new Event('focus'))
+      await tick()
+      expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      expect(telemetry).toHaveLength(0)
+    })
+
+    it('a background refresh after UTC midnight is not an opening', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+      history.replaceState(null, '', '/kata#direct=1')
+      storeSession()
+      const live = snapshot()
+      live.capabilities.updates = 'sse'
+      const telemetry: Request[] = []
+      let snapshotReads = 0
+      let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/events/stream') {
+            return new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  stream = controller
+                },
+              }),
+              { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+            )
+          }
+          if (path === '/api/v1/ui/references') return references()
+          snapshotReads += 1
+          live.cursor = 11 + snapshotReads
+          return Response.json(live, { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      await waitFor(() => expect(stream).toBeDefined())
+      expect(telemetry).toHaveLength(1)
+      const readsBeforeMidnight = snapshotReads
+
+      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
+      stream!.enqueue(new TextEncoder().encode('id: 13\nevent: issue.updated\ndata: {}\n\n'))
+      await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeMidnight))
+      await tick()
+      expect(telemetry).toHaveLength(1)
+
+      window.dispatchEvent(new Event('focus'))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      expectServingDaemonPost(telemetry[1])
+    })
+
+    it('a delayed 401 from an old session does not block the next day', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+      history.replaceState(null, '', '/kata#direct=1')
+      storeSession()
+      const telemetry: Request[] = []
+      let releaseHeld: ((response: Response) => void) | undefined
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            if (telemetry.length === 1) {
+              return new Promise<Response>((resolve) => {
+                releaseHeld = resolve
+              })
+            }
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/session/local') {
+            return Response.json({
+              session: 'renewed-session',
+              csrf: 'renewed-csrf',
+              return_path: '/kata',
+              writable: true,
+              updates: 'poll',
+              actor_policy: 'request',
+            })
+          }
+          if (path === '/api/v1/ui/references') return references()
+          snapshotReads += 1
+          if (snapshotReads === 1) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-2"' } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+      expect(telemetry).toHaveLength(1)
+      expect(telemetry[0]!.headers.get('X-Kata-Web-Session')).toBe('tab-session')
+
+      releaseHeld!(new Response('', { status: 401 }))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      expectServingDaemonPost(telemetry[1], 'renewed-session', 'renewed-csrf')
+
+      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
+      window.dispatchEvent(new Event('focus'))
+      await waitFor(() => expect(telemetry).toHaveLength(3))
+      expectServingDaemonPost(telemetry[2], 'renewed-session', 'renewed-csrf')
+      expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    })
+  })
+
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
     render(App)
 
@@ -2290,4 +2559,14 @@ function daemonRoster() {
       },
     ],
   }
+}
+
+function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
+  return input instanceof Request
+    ? input
+    : new Request(new URL(String(input), window.location.origin), init)
+}
+
+function telemetryAccepted(): Response {
+  return Response.json({ status: 'disabled' }, { status: 202 })
 }
