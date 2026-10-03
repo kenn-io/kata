@@ -444,6 +444,7 @@ func writeHubAdminCatalogEntry(t *testing.T, home, hubURL, token string) {
 }
 
 func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -462,6 +463,7 @@ func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t
 		"federation", "enroll",
 		"--spoke-instance", spokeUID,
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm",
 	})
 	cmd.SetContext(contextWithBaseURL(ctx, spoke.URL))
@@ -487,7 +489,76 @@ func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestFederationEnrollCLIExplicitHubTokenIgnoresBrokenLocalAuthFile(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	testenv.New(t)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-local-token"))
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", "01HZZZZZZZZZZZZZZZZZZZZZ01",
+		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
+		"--capabilities", "pull",
+		"--actor", "operator",
+	})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+
+	enrollments, err := hub.DB.ListFederationEnrollments(context.Background())
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+}
+
+func TestFederationEnrollCLIUsesCatalogTokenWhenLocalAuthFileIsBroken(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	localTokenFile := filepath.Join(t.TempDir(), "missing-local-token")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", localTokenFile)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	configBody := fmt.Sprintf(`[auth]
+token_file = %q
+trust_private_network = true
+
+[[daemon]]
+name = "hub"
+url = %q
+token = "hub-token"
+`, localTokenFile, hub.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(spoke.Home, "config.toml"), []byte(configBody), 0o600))
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", "01HZZZZZZZZZZZZZZZZZZZZZ01",
+		"--hub-url", hub.URL,
+		"--capabilities", "pull",
+		"--actor", "operator",
+	})
+
+	require.NoError(t, cmd.Execute())
+	enrollments, err := hub.DB.ListFederationEnrollments(context.Background())
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+}
+
 func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -506,6 +577,7 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm",
 	})
 
@@ -525,6 +597,7 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 }
 
 func TestFederationEnrollCLIUsesNamedSpokeCatalogAuthForAdoption(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
@@ -552,6 +625,7 @@ token = "hub-token"
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm",
 	})
 
@@ -661,6 +735,7 @@ token = "hub-token"
 }
 
 func TestFederationEnrollCLIActiveLegacyLocalUsesSelectedSpokeToken(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	const spokeUID = "01HZZZZZZZZZZZZZZZZZZZZZ01"
@@ -711,6 +786,7 @@ token = "hub-token"
 		"federation", "enroll",
 		"--spoke-instance", spokeUID,
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "operator",
 	})
 	err := cmd.Execute()
@@ -728,6 +804,7 @@ token = "hub-token"
 }
 
 func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
@@ -746,6 +823,7 @@ func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "operator",
 	})
 
@@ -761,6 +839,7 @@ func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
 }
 
 func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -782,6 +861,7 @@ func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t 
 		"federation", "enroll",
 		"--spoke-instance", otherSpokeUID,
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "operator",
 	})
 
@@ -796,6 +876,7 @@ func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t 
 }
 
 func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -814,6 +895,7 @@ func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "operator",
 	})
 
@@ -828,6 +910,7 @@ func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing
 }
 
 func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -846,6 +929,7 @@ func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameS
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm",
 		"--adopt-existing",
 	})
@@ -866,6 +950,7 @@ func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameS
 }
 
 func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -879,6 +964,7 @@ func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) {
 		"--actor", "wesm",
 		"--capabilities", "pull",
 		"--adopt-existing",
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 	})
 
 	err := cmd.Execute()
@@ -916,14 +1002,63 @@ func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 
 func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHostname(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
-	client, err := federationEnrollHTTPClient(context.Background(), "http://hub.internal:7787", false)
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+	client, _, err := federationEnrollHTTPClientPolicy(context.Background(), "http://hub.internal:7787", false, "EXAMPLE_HUB_TOKEN")
 
 	require.Error(t, err)
 	assert.Nil(t, client)
 	assert.Contains(t, err.Error(), "refusing to attach bearer token")
+}
+
+func TestFederationEnrollHTTPClientDoesNotSendLocalFileTokenToHub(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+	require.NoError(t, os.Unsetenv("KATA_AUTH_TOKEN_FILE"))
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	tokenFile := filepath.Join(home, "local-token")
+	writePrivateCredentialFixture(t, tokenFile, "local-token-fixture\n")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte(fmt.Sprintf("[auth]\ntoken_file = %q\n", tokenFile)), 0o600))
+
+	var gotAuthorization string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hub.Close)
+
+	client, err := federationEnrollHTTPClient(context.Background(), hub.URL, false)
+	require.NoError(t, err)
+	request, err := http.NewRequest(http.MethodGet, hub.URL+"/probe", nil)
+	require.NoError(t, err)
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+
+	assert.Equal(t, http.StatusNoContent, response.StatusCode)
+	assert.Empty(t, gotAuthorization)
+}
+
+func TestFederationEnrollCLIUsesHubTokenEnv(t *testing.T) {
+	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("hub-admin-fixture"))
+	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-fixture")
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-admin-fixture")
+
+	_, err := runCLICapture(t, env, dir,
+		"federation", "enroll",
+		"--project", "hub-project",
+		"--spoke-instance", "01HZNQ7VFPK1XGD8R5MABCD4EF",
+		"--hub-url", env.URL,
+		"--capabilities", "pull",
+		"--actor", "example-actor",
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
+		"--allow-insecure")
+	require.NoError(t, err)
 }
 
 func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) {
@@ -941,8 +1076,8 @@ func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) {
 }
 
 func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	env, dir, _ := setupCLIWorkspace(t)
-	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	_, err := runCLICapture(t, env, dir,
@@ -950,6 +1085,7 @@ func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing
 		"federation", "enroll",
 		"--spoke-instance", "01HZNQ7VFPK1XGD8R5MABCD4EF",
 		"--hub-url", "http://8.8.8.8:7787",
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm")
 
 	require.Error(t, err)
@@ -958,9 +1094,9 @@ func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing
 }
 
 func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T) {
-	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
-
-	client, err := federationEnrollHTTPClient(context.Background(), "http://8.8.8.8:7787", true)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+	client, _, err := federationEnrollHTTPClientPolicy(context.Background(), "http://8.8.8.8:7787", true, "EXAMPLE_HUB_TOKEN")
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -1734,10 +1870,11 @@ func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthPrecedence(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "explicit")
 	cat := &config.DaemonConfig{Daemons: []config.CatalogDaemonConfig{
 		{Name: "hub-daemon", URL: "http://hub.example:7777", Token: "catalog-tok", AllowInsecure: true},
 	}}
-	got, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777", hubName: "hub-daemon", hubToken: "explicit"})
+	got, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777", hubName: "hub-daemon", hubTokenEnv: "EXAMPLE_HUB_TOKEN"}) //nolint:gosec // G101: environment variable name, not a credential.
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -1774,6 +1911,7 @@ func TestResolveHubAdminAuthPrecedence(t *testing.T) {
 // hub project) and records revoke calls so a test can assert revoke-first
 // behavior. spokeInstanceUID and hubProjectID are matched by the command.
 type fakeLeaveHub struct {
+	authToken        string
 	spokeInstanceUID string
 	hubProjectID     int64
 	enrollmentID     int64
@@ -1788,6 +1926,10 @@ func newFakeLeaveHub(t *testing.T, spokeInstanceUID string, hubProjectID int64) 
 	t.Helper()
 	h := &fakeLeaveHub{spokeInstanceUID: spokeInstanceUID, hubProjectID: hubProjectID, enrollmentID: 7}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.authToken != "" && r.Header.Get("Authorization") != "Bearer "+h.authToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		switch {
 		case r.URL.Path == "/api/v1/ping":
 			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
@@ -1871,6 +2013,32 @@ func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
 	_, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	assert.Contains(t, out, "standalone")
+}
+
+func TestFederationLeaveUsesHubTokenEnv(t *testing.T) {
+	for _, value := range []string{"hub-admin-fixture", ""} {
+		t.Run(value, func(t *testing.T) {
+			resetFlags(t)
+			env := testenv.New(t)
+			t.Setenv("EXAMPLE_HUB_TOKEN", value)
+			hub, hubServer := newFakeLeaveHub(t, env.DB.InstanceUID(), 42)
+			hub.authToken = "hub-admin-fixture"
+			project := seedLeaveSpoke(t, env, "spoke-project", hubServer.URL, 42)
+			_, err := runCmdOutput(t, env, "federation", "leave",
+				"--project", "spoke-project", "--hub-token-env", "EXAMPLE_HUB_TOKEN", "--yes")
+			if value == "" {
+				require.ErrorContains(t, err, "EXAMPLE_HUB_TOKEN is unset or empty")
+				require.Empty(t, hub.revokedIDs)
+				_, err = env.DB.FederationBindingByProject(t.Context(), project.ID)
+				require.NoError(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+			_, err = env.DB.FederationBindingByProject(t.Context(), project.ID)
+			require.ErrorIs(t, err, db.ErrNotFound)
+		})
+	}
 }
 
 // TestFederationLeaveAbortsOnEnrollmentUIDMismatch: when no active enrollment
@@ -2072,8 +2240,13 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 }
 
 func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-admin-token")
 	resetFlags(t)
-	t.Setenv("KATA_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-local-token"))
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/enrollments" {
 			_, _ = w.Write([]byte(`not-json`))
@@ -2086,7 +2259,7 @@ func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) 
 	_, err := revokeSpokeEnrollmentsOnHub(t.Context(), spokeLeaveTarget{
 		instanceUID:  "spoke-instance",
 		hubProjectID: 42,
-	}, hubAuthInputs{hubURL: hub.URL, hubToken: "hub-admin-token"})
+	}, hubAuthInputs{hubURL: hub.URL, hubTokenEnv: "EXAMPLE_HUB_TOKEN"}) //nolint:gosec // G101: environment variable name, not a credential.
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "hub revoke failed")
@@ -2269,9 +2442,10 @@ func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
 // TestFederationLeaveAllowInsecureFlag covers the partial-leave recovery state
 // where the credential (and with it the recorded allow_insecure opt-in) is
 // gone but the binding to a plaintext-hostname overlay hub remains. Without a
-// restored opt-in the bearer transport refuses --hub-token before any I/O;
+// restored opt-in the bearer transport refuses --hub-token-env before any I/O;
 // --allow-insecure is the explicit leave-time escape hatch.
 func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "admin-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	seed := func(t *testing.T, env *testenv.Env) {
@@ -2298,7 +2472,7 @@ func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
 		seed(t, env)
 
 		_, err := runCmdOutput(t, env, "federation", "leave",
-			"--project", "spoke-project", "--hub-token", "admin-token", "--yes")
+			"--project", "spoke-project", "--hub-token-env", "EXAMPLE_HUB_TOKEN", "--yes")
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "refusing to attach bearer token",
@@ -2311,7 +2485,7 @@ func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
 		seed(t, env)
 
 		_, err := runCmdOutput(t, env, "federation", "leave",
-			"--project", "spoke-project", "--hub-token", "admin-token", "--allow-insecure", "--yes")
+			"--project", "spoke-project", "--hub-token-env", "EXAMPLE_HUB_TOKEN", "--allow-insecure", "--yes")
 
 		// hub.invalid never resolves, so the revoke still fails — but at the
 		// network layer, past the bearer-transport refusal.
@@ -2628,6 +2802,7 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 // this federation), enroll must not auto-mark adoption — the printed join is
 // a plain rejoin that rebinds without rewriting local event history.
 func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -2648,6 +2823,7 @@ func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
 		"federation", "enroll",
 		"--spoke-instance", spoke.DB.InstanceUID(),
 		"--hub-url", hub.URL,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "operator",
 	})
 
@@ -2971,7 +3147,7 @@ func TestFederationEnrollCLIUnauthorizedExplainsHubCredentials(t *testing.T) {
 				_, err = runCmdOutput(t, env, "--project", "hub-project", "federation", "enroll", "--hub-url", hub.URL, "--spoke-instance", env.DB.InstanceUID(), "--capabilities", "pull")
 				require.Error(t, err)
 				cli := cliErrorForErr(err, true)
-				assert.Contains(t, cli.Message, "--hub-token")
+				assert.Contains(t, cli.Message, "--hub-token-env")
 				assert.Contains(t, cli.Message, "catalog")
 				assert.Contains(t, cli.Message, "KATA_AUTH_TOKEN")
 			})
@@ -2988,4 +3164,20 @@ func TestPrintFederationEnrollmentExplainsMissingJoinCommand(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), "join command unavailable")
 	assert.Contains(t, out.String(), "issued-token")
+}
+
+func TestPrintFederationEnrollmentAgentKeepsRowsWhenJoinCommandMissing(t *testing.T) {
+	resetFlags(t)
+	cmd := newRootCmd()
+	flags.Mode = outputAgent
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err := printFederationEnrollment(cmd, "hub-project", "spoke", api.FederationEnrollmentOut{ID: 7, Token: "issued-token"}, federationJoinBundle{Token: "issued-token"})
+	require.NoError(t, err)
+	require.Contains(t, out.String(), "- project=hub-project spoke_instance=spoke enrollment_id=7\n")
+	require.Contains(t, out.String(), "- join_command=\"\"\n")
+	require.Contains(t, out.String(), "- note=")
+	require.Contains(t, out.String(), "join command unavailable")
+	require.NotContains(t, out.String(), "issued-token")
+	require.NotContains(t, out.String(), "{")
 }

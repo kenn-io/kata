@@ -40,6 +40,7 @@ func newMCPServeCmd() *cobra.Command {
 	var enableTokenAdmin bool
 	var httpAddress string
 	var httpTokenEnv string
+	var httpTokenFile string
 	var trustPrivateNetwork bool
 	command := &cobra.Command{
 		Use:   "serve",
@@ -61,7 +62,7 @@ func newMCPServeCmd() *cobra.Command {
 			if enableTokenAdmin && !allProjects {
 				return errors.New("--enable-token-admin requires --all")
 			}
-			httpToken, err := resolveMCPHTTPToken(httpAddress, httpTokenEnv, trustPrivateNetwork)
+			httpToken, err := resolveMCPHTTPToken(httpAddress, httpTokenFile, httpTokenEnv, trustPrivateNetwork)
 			if err != nil {
 				return err
 			}
@@ -197,6 +198,7 @@ func newMCPServeCmd() *cobra.Command {
 	command.Flags().BoolVar(&enableTokenAdmin, "enable-token-admin", false, "enable daemon token administration tools")
 	command.Flags().StringVar(&httpAddress, "http", "", "serve streamable HTTP on host:port instead of stdio")
 	command.Flags().StringVar(&httpTokenEnv, "http-token-env", "", "require an inbound bearer read from this environment variable")
+	command.Flags().StringVar(&httpTokenFile, "http-token-file", "", "require an inbound bearer read from this owner-only secret file (wins over --http-token-env)")
 	command.Flags().BoolVar(&trustPrivateNetwork, "trust-private-network", false, "trust plaintext MCP HTTP on a non-loopback private network")
 	return command
 }

@@ -179,6 +179,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	require.NotEmpty(t, spokeIdentity.InstanceUID)
 
 	bootstrapEnrollEnv := append(spokeDirs.env(),
+		"EXAMPLE_HUB_TOKEN="+identityBootstrapToken,
 		"KATA_AUTH_TOKEN="+identityBootstrapToken,
 		"KATA_AUTHOR=e2e-client",
 		"KATA_HTTP_TIMEOUT=10s",
@@ -187,12 +188,13 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 		"federation", "enroll", projectName,
 		"--spoke-instance", spokeIdentity.InstanceUID,
 		"--hub-url", "http://"+hubAddr,
-		"--hub-token", identityBootstrapToken,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--actor", "wesm")
 	require.Error(t, bootstrapErr, "bootstrap token must not create identity-mode federation enrollments")
 	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
 
 	enrollEnv := append(spokeDirs.env(),
+		"EXAMPLE_HUB_TOKEN="+userToken,
 		"KATA_AUTH_TOKEN="+userToken,
 		"KATA_AUTHOR=e2e-client",
 		"KATA_HTTP_TIMEOUT=10s",
@@ -201,7 +203,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 		"federation", "enroll", projectName,
 		"--spoke-instance", spokeIdentity.InstanceUID,
 		"--hub-url", "http://"+hubAddr,
-		"--hub-token", userToken,
+		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
 		"--capabilities", "pull,push,lease",
 		"--actor", "mallory")
 	joinCommand := extractFederationJoinCommand(t, enrollOut)

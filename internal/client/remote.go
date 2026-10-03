@@ -265,7 +265,7 @@ func buildNamedDaemonTarget(
 	if name == "" {
 		return namedDaemonTarget{}, false, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return namedDaemonTarget{}, false, err
 	}
@@ -349,7 +349,7 @@ func namedDaemonTargetForBaseURL(name, baseURL string) (namedDaemonTarget, error
 	if name == "" {
 		return namedDaemonTarget{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return namedDaemonTarget{}, err
 	}
@@ -408,7 +408,7 @@ func namedDaemonTargetFromCatalog(
 }
 
 func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return activeRemoteTarget{}, false, err
 	}
@@ -470,7 +470,10 @@ func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAut
 	if err != nil {
 		return TargetAuth{}, false, err
 	}
-	auth := resolveAuthConfig()
+	auth, err := config.ReadAuthConfigForPolicy()
+	if err != nil {
+		return TargetAuth{}, false, err
+	}
 	return TargetAuth{
 		Token:               token,
 		AllowInsecure:       target.AllowInsecure,

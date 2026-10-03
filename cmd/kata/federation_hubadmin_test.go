@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,11 +21,12 @@ func catalog(entries ...config.CatalogDaemonConfig) *config.DaemonConfig {
 }
 
 // TestResolveHubAdminAuthExplicitTokenKeepsBindingURL asserts an explicit
-// --hub-token wins and the target URL stays the binding's hub URL.
+// --hub-token-env wins and the target URL stays the binding's hub URL.
 func TestResolveHubAdminAuthExplicitTokenKeepsBindingURL(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "explicit")
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://other.example", Token: "catalog-token",
-	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub", hubToken: "explicit"})
+	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub", hubTokenEnv: "EXAMPLE_HUB_TOKEN"}) //nolint:gosec // G101: environment variable name, not a credential.
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -32,15 +34,24 @@ func TestResolveHubAdminAuthExplicitTokenKeepsBindingURL(t *testing.T) {
 		t.Fatalf("url should be the binding hub URL, got %q", out.url)
 	}
 	if out.token != "explicit" {
-		t.Fatalf("token should be the explicit --hub-token, got %q", out.token)
+		t.Fatalf("token should be the explicit --hub-token-env, got %q", out.token)
 	}
+}
+
+func TestResolveHubAdminAuthEmptyExplicitEnvDoesNotFallBack(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "")
+	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+		Name: "hub", URL: "https://hub.example", Token: "catalog-token",
+	}), hubAuthInputs{hubURL: "https://hub.example", hubTokenEnv: "EXAMPLE_HUB_TOKEN"}) //nolint:gosec // G101: environment variable name, not a credential.
+	require.ErrorIs(t, err, config.ErrCredentialSource)
+	require.Empty(t, out.token)
 }
 
 // TestResolveHubAdminAuthNamedEntryURLMismatchErrors: a --hub <name> entry
 // whose URL differs from the binding's hub URL must be rejected. Attaching its
 // token while targeting the binding URL would send that entry's admin token to
 // a foreign origin (the binding hub); deliberate cross-origin token use is
-// --hub-token only.
+// --hub-token-env only.
 func TestResolveHubAdminAuthNamedEntryURLMismatchErrors(t *testing.T) {
 	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://trusted.example", Token: "catalog-token",
@@ -292,11 +303,13 @@ func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) {
 
 func TestHubAdminClientHonorsTrustPrivateNetwork(t *testing.T) {
 	home := t.TempDir()
+	localTokenFile := filepath.Join(home, "missing-local-token")
 	t.Setenv("KATA_HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[auth]
-trust_private_network = true
-`), 0o600))
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", localTokenFile)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	configBody := fmt.Sprintf("[auth]\ntrust_private_network = true\ntoken_file = %q\n", localTokenFile)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(configBody), 0o600))
 
 	hc, err := hubAdminClient(context.Background(), hubAdminAuth{
 		url:   "http://100.64.0.5:7373",
@@ -308,6 +321,7 @@ trust_private_network = true
 }
 
 func TestResolveHubAdminAuthExplicitTokenWithSharedOrigin(t *testing.T) {
+	t.Setenv("EXAMPLE_HUB_TOKEN", "explicit")
 	cat := catalog(
 		config.CatalogDaemonConfig{Name: "a", URL: "https://hub.example", TokenEnv: "UNSET_HUB_TOKEN", AllowInsecure: true}, //nolint:gosec // G101: synthetic environment-variable name, not a credential.
 		config.CatalogDaemonConfig{Name: "b", URL: "https://hub.example", Token: "unused"},
@@ -315,7 +329,7 @@ func TestResolveHubAdminAuthExplicitTokenWithSharedOrigin(t *testing.T) {
 	t.Setenv("UNSET_HUB_TOKEN", "")
 	for _, name := range []string{"a", "b", ""} {
 		t.Run(name, func(t *testing.T) {
-			out, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "https://hub.example", hubToken: "explicit", hubName: name})
+			out, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "https://hub.example", hubTokenEnv: "EXAMPLE_HUB_TOKEN", hubName: name}) //nolint:gosec // G101: environment variable name, not a credential.
 			require.NoError(t, err)
 			assert.Equal(t, "explicit", out.token)
 			assert.Equal(t, name == "a", out.allowInsecure)

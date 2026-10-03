@@ -3,6 +3,8 @@ package telemetry
 
 import (
 	"log/slog"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 const (
 	applicationName = "kata"
 	envPrefix       = "KATA"
-	// EnabledEnv controls anonymous telemetry; set it to "0" to disable reporting.
+	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.
 	EnabledEnv = "KATA_TELEMETRY_ENABLED"
 	// PostHog project API keys are public ingest identifiers, not credentials.
 	postHogAPIKey   = "phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf" // #nosec G101
@@ -41,7 +43,16 @@ type Options struct {
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
 func EnabledFromEnv() bool {
-	return !testing.Testing() && kittelemetry.PostHogTelemetryEnabledFromEnv(envPrefix)
+	return !testing.Testing() && !optedOut(os.Getenv(EnabledEnv)) && kittelemetry.PostHogTelemetryEnabledFromEnv(envPrefix)
+}
+
+func optedOut(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "0", "false", "no", "off":
+		return true
+	default:
+		return false
+	}
 }
 
 // NewReporter builds an enabled reporter or returns a disabled reporter when opted out.

@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/**"
       - ".goreleaser.yaml"
+      - "docker/release/**"
       - "cmd/release-artifacts/**"
       - "go.mod"
       - "go.sum"
@@ -54,6 +55,12 @@ jobs:
       - name: Install frozen web dependencies
         run: make web-install
 
+      - name: Set up image emulation
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up image builder
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       # `goreleaser check` intentionally exits nonzero for the pinned, deprecated
       # `brews` pipe. Executing the full snapshot validates that pipe and every
       # artifact ID without publishing.
@@ -67,6 +74,51 @@ jobs:
           KATA_HOME: ${{ runner.temp }}/kata-release-snapshot/home
           KATA_DB: ${{ runner.temp }}/kata-release-snapshot/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-release-snapshot/workspace
+
+      - name: Exercise the native release image
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) architecture=amd64 ;;
+            aarch64) architecture=arm64 ;;
+            *) exit 1 ;;
+          esac
+          image=""
+          while IFS= read -r candidate; do
+            if [ "$(docker image inspect "$candidate" --format '{{.Architecture}}')" = "$architecture" ]; then
+              image="$candidate"
+              break
+            fi
+          done < <(docker image ls ghcr.io/kenn-io/kata --format '{{.Repository}}:{{.Tag}}')
+          test -n "$image"
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" = '1000:1000'
+          docker run --rm -e KATA_HOME=/data -e KATA_DB=/data/kata.db "$image" version --json
+          data_dir=$(mktemp -d)
+          sudo chown 1000:1000 "$data_dir"
+          container=""
+          trap 'if [ -n "$container" ]; then docker stop "$container"; fi' EXIT
+          container=$(docker run -d --rm \
+            -v "$data_dir:/data" -p 127.0.0.1::7777 \
+            -e KATA_HOME=/data -e KATA_DB=/data/kata.db \
+            -e KATA_LISTEN=0.0.0.0:7777 -e KATA_TRUST_PRIVATE_NETWORK=1 \
+            -e KATA_WEB_PUBLIC_ORIGIN=http://127.0.0.1:7777 \
+            -e KATA_BACKUP_DIR=/data/backups -e KATA_BACKUP_INTERVAL=1s \
+            -e KATA_BACKUP_RETAIN=1h -e KATA_TELEMETRY_ENABLED=off "$image")
+          port=$(docker port "$container" 7777/tcp)
+          curl --fail --retry 60 --retry-delay 1 --retry-connrefused \
+            -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/ping"
+          curl --fail -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/health"
+          test "$(docker exec "$container" id -u)" = 1000
+          test "$(docker exec "$container" stat -c '%a' /data/auth-token)" = 600
+          docker exec "$container" test ! -e /data/config.toml
+          for ((attempt=0; attempt<30; attempt++)); do
+            if [ -n "$(docker exec "$container" find /data/backups -name '*.jsonl' -type f)" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$(docker exec "$container" find /data/backups -name '*.jsonl' -type f)"
 
       - name: Retain snapshot release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

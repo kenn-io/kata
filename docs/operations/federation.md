@@ -65,25 +65,34 @@ not match the enrollment actor.
 Enrollment tokens are not general daemon API tokens.
 
 `kata federation enroll` is a normal daemon API call to the hub, not a
-spoke-to-hub transport call. The command sends the hub API request to
-`--hub-url` and uses `--hub-token` or an admin credential from a daemon catalog
-entry whose URL matches the hub origin. The local daemon's global
-`KATA_AUTH_TOKEN` or `[auth].token` is never forwarded to the hub. The CLI's
-default daemon should be the spoke being enrolled; that spoke can be the
-implicit local daemon or a remote daemon selected by `KATA_SERVER` or
-`.kata.local.toml`. `enroll` uses the default/spoke daemon only to detect
-whether the named project already exists on the spoke and should print
-`--adopt-existing`. The generated token printed in the `kata federation join
-...` command is a separate spoke transport credential.
+spoke-to-hub transport call. The command sends that hub API call to
+`--hub-url` and authenticates it with `--hub-token-env` or a daemon-catalog
+credential whose URL has the same origin. With neither configured, the request
+is unauthenticated. The local daemon's global `KATA_AUTH_TOKEN` or
+`[auth].token` is never sent to the hub. The CLI's default daemon should be the
+spoke being enrolled; that spoke can be the implicit local daemon or a remote
+daemon selected by `KATA_SERVER` or `.kata.local.toml`. `enroll` uses the
+default/spoke daemon only to detect whether the named project already exists
+on the spoke and should print `--adopt-existing`. The generated token printed
+in the `kata federation join ...` command is a separate spoke transport
+credential.
 
 On hubs configured with `[auth].require_token_identity = true`, authenticate
-`kata federation enroll` with a DB-backed personal token for the actor doing
-the setup. The bootstrap token can mint personal tokens, but it cannot perform
-the attributed federation-enable step that `enroll` runs. In identity mode the
-daemon derives the enrollment actor from the token actor and ignores
-client-supplied actor strings such as `--actor`, `--as`, or `KATA_AUTHOR`.
-If you only have the bootstrap token, first mint a personal token as described
-in [Identity tokens](remote-daemon.md#identity-tokens).
+`kata federation enroll` with the hub's DB-backed personal token for the actor
+doing the setup. Export the token and pass the variable name with
+`--hub-token-env HUB_ADMIN_TOKEN`, or select it through a same-origin
+daemon-catalog `token` or `token_env` entry. The bootstrap token can mint
+personal tokens, but it cannot perform the attributed federation-enable step
+that `enroll` runs. In identity mode the daemon derives the enrollment actor
+from the token actor and ignores client-supplied actor strings such as
+`--actor`, `--as`, or `KATA_AUTHOR`. If you only have the bootstrap token,
+first mint a personal token as described in
+[Identity tokens](remote-daemon.md#identity-tokens).
+
+`--hub-token-env` replaces `--hub-token` for enrollment and leave. Pass only
+an environment variable's name; Kata reads its value inside the process.
+An unset or empty selected variable is an error and does not fall back to
+catalog credentials.
 
 ## External-agent onboarding without hooks
 
@@ -464,16 +473,18 @@ instance: <spoke-instance-uid>
 
 Step 2: create the hub enrollment from the same machine. Leave normal kata
 commands pointed at the spoke daemon; `--hub-url` is the explicit hub API
-target for this command. Pass the hub's personal identity token with
-`--hub-token`, or configure a daemon catalog entry for the same hub URL. If
-`<hub-project>` does not already exist on the hub, this command creates it
-before enabling federation and creating the enrollment:
+target for this command. Authenticate with `--hub-token-env` or a same-origin
+daemon-catalog credential; the spoke daemon's global token is not sent to the
+hub. If `<hub-project>` does not already exist on the hub, this command creates
+it before enabling federation and creating the enrollment:
 
 ```sh
+export HUB_ADMIN_TOKEN="<personal-identity-token>"
+
 kata federation enroll --project <hub-project> \
   --spoke-instance <spoke-instance-uid> \
   --hub-url <hub-api-url> \
-  --hub-token <personal-identity-token> \
+  --hub-token-env HUB_ADMIN_TOKEN \
   --actor <actor>
 ```
 
@@ -541,10 +552,12 @@ lease requests. Use this only on trusted private networks; use HTTPS for public
 networks.
 
 ```sh
+export HUB_ADMIN_TOKEN="<personal-identity-token>"
+
 kata federation enroll --project <hub-project> \
   --spoke-instance <spoke-instance-uid> \
   --hub-url http://hub.internal:7787 \
-  --hub-token <personal-identity-token> \
+  --hub-token-env HUB_ADMIN_TOKEN \
   --actor <actor> \
   --allow-insecure
 ```
@@ -589,18 +602,17 @@ Get each spoke's instance UID from that spoke daemon:
 kata federation identity
 ```
 
-Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon
-for this command. The hub API request uses `--hub-token` or a daemon catalog
-credential whose URL matches the hub origin; the local daemon's global token
-is not forwarded. If you previously exported `KATA_AUTH_TOKEN` for enrollment,
-pass that hub credential with `--hub-token` or store it in a matching catalog
-entry instead. A hub `401` explains these options:
+Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon for
+this command. Supply the hub's admin credential with `--hub-token-env`, or add a
+same-origin daemon-catalog entry with `token` or `token_env`. The spoke's
+global daemon token is never sent to the hub:
 
 ```sh
+export HUB_ADMIN_TOKEN="<personal-identity-token>"
 kata federation enroll --project fedlab \
   --spoke-instance 01H... \
   --hub-url http://100.64.0.5:7787 \
-  --hub-token <personal-identity-token> \
+  --hub-token-env HUB_ADMIN_TOKEN \
   --actor wesm
 ```
 
@@ -767,16 +779,16 @@ after the revoke), so an issue opened in that small window can still land the
 spoke "hub-revoked, locally intact"; re-running `leave --delete --local-only`
 (or `--force`) completes that teardown.
 
-Hub admin auth for the revoke is resolved, in order: `--hub-token`, the
+Hub admin auth for the revoke is resolved, in order: `--hub-token-env`, the
 `--hub <name>` daemon-catalog entry, then the catalog entry whose URL matches
 the binding's hub URL. With no hub credential the revoke request is sent
 **unauthenticated**: the local daemon's global `KATA_AUTH_TOKEN` /
 `[auth].token` is never sent to the hub origin implicitly, so a token-protected
-hub requires `--hub-token`, a catalog entry, or `--local-only`. The hub URL
+hub requires `--hub-token-env`, a catalog entry, or `--local-only`. The hub URL
 itself always comes from the binding, and a catalog token is only ever sent to
 the origin its entry is configured for: a `--hub <name>` entry that is missing
 or whose URL does not match the binding's hub URL is rejected, so a catalog
-admin token cannot leak to a different hub. Use `--hub-token` when you
+admin token cannot leak to a different hub. Use `--hub-token-env` when you
 deliberately need to present a token the catalog does not associate with that
 hub.
 
@@ -954,7 +966,7 @@ violation in that owning project.
 kata federation identity
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--allow-insecure]
+  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation enroll --project <project> --spoke-instance <uid> \

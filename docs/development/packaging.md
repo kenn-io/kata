@@ -6,6 +6,26 @@ Releases happen externally. This repository keeps build and packaging tools
 and checks snapshot builds in pull requests. Pushing a tag here does not
 publish a release. Release operators should use the external release process.
 
+## Container image
+
+The GoReleaser `dockers_v2` pipe selects the ordinary `kata` release binary and
+builds `ghcr.io/kenn-io/kata:<version>` for Linux amd64 and arm64. Its Dockerfile
+copies the prebuilt binary from the platform-specific context and runs it
+directly as UID/GID `1000`, with `/data` as the Kata home. Runtime setup belongs
+to Kata's env/flag interface; the image has no entrypoint wrapper or config seed.
+
+The external publisher must provision Docker buildx, arm64 emulation when
+needed, and write access to that GHCR repository. Publish through the existing
+external release process. The repository's snapshot check builds local images
+and exercises their version, user, env-only foreground startup, health probes,
+token permissions, and scheduled backups without publishing. `goreleaser check`
+also validates the configuration but still exits nonzero for the existing,
+deprecated `brews` pipe; the snapshot check exercises that pipe too.
+
+See [containers](../operations/containers.md) for operator setup. These image
+and environment features require a matching upstream release before an app
+store can remove its packaging hooks and select the published image.
+
 ## Building packages
 
 Package managers must identify themselves in the Kata binary so `kata update`

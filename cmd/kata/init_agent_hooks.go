@@ -45,6 +45,7 @@ func planInitAgentHookSelection(names []string, start string, attention bool, ap
 		return combined, nil, err
 	}
 	dir := config.WriteDestination(discovered, start)
+	combined.ProjectRoot = dir
 	targets, err := selectNativeAgentHookTargets(names, false, "project", "", dir)
 	if err != nil {
 		return combined, nil, err

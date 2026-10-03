@@ -9,10 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/mcpdiscovery"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,10 +20,14 @@ import (
 
 const mcpHTTPShutdownTimeout = 10 * time.Second
 
-func resolveMCPHTTPToken(address, tokenEnv string, trustPrivateNetwork bool) (string, error) {
+func resolveMCPHTTPToken(address, tokenFile, tokenEnv string, trustPrivateNetwork bool) (string, error) {
 	address = strings.TrimSpace(address)
+	tokenFile = strings.TrimSpace(tokenFile)
 	tokenEnv = strings.TrimSpace(tokenEnv)
 	if address == "" {
+		if tokenFile != "" {
+			return "", errors.New("--http-token-file requires --http")
+		}
 		if tokenEnv != "" {
 			return "", errors.New("--http-token-env requires --http")
 		}
@@ -37,15 +41,15 @@ func resolveMCPHTTPToken(address, tokenEnv string, trustPrivateNetwork bool) (st
 		return "", fmt.Errorf("invalid --http address %q: expected host:port", address)
 	}
 
-	var token string
-	if tokenEnv != "" {
-		token = strings.TrimSpace(os.Getenv(tokenEnv))
-		if token == "" {
-			return "", fmt.Errorf("--http-token-env %q is unset or empty", tokenEnv)
+	token, _, err := config.ResolveSecret("", tokenFile, tokenEnv)
+	if err != nil {
+		if tokenFile != "" {
+			return "", fmt.Errorf("--http-token-file: %w", err)
 		}
+		return "", fmt.Errorf("--http-token-env: %w", err)
 	}
 	if token == "" {
-		return "", errors.New("--http listeners require --http-token-env")
+		return "", errors.New("--http listeners require --http-token-file or --http-token-env")
 	}
 	if mcpHTTPHostRequiresToken(host) {
 		if !trustPrivateNetwork {

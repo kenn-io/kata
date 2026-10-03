@@ -113,6 +113,24 @@ builds:
       - amd64
       - arm64
 
+dockers_v2:
+  - id: kata
+    ids:
+      - kata
+    dockerfile: docker/release/Dockerfile
+    images:
+      - ghcr.io/kenn-io/kata
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.source: https://github.com/kenn-io/kata
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MIT
+
 archives:
   - id: kata
     ids:

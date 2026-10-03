@@ -58,6 +58,28 @@ func TestEnabledFromEnvDisabledDuringGoTests(t *testing.T) {
 	assert.False(t, EnabledFromEnv())
 }
 
+// Exercise the standalone product wrapper: Go tests deliberately disable
+// telemetry regardless of environment, so an in-process check is insufficient.
+func TestStandaloneTelemetryOptOutSpellings(t *testing.T) {
+	scratch := t.TempDir()
+	binary := filepath.Join(scratch, "telemetry-opt-out")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	for _, value := range []string{"0", "false", "no", "off", " FALSE ", "No", "OFF"} {
+		t.Run(value, func(t *testing.T) {
+			command := exec.Command(binary) //nolint:gosec // test-owned standalone fixture
+			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"="+value)
+			output, err := command.CombinedOutput()
+			require.NoError(t, err, string(output))
+			require.Equal(t, "disabled", strings.TrimSpace(string(output)))
+		})
+	}
+}
+
 func TestNewReporterDisabledDuringGoTests(t *testing.T) {
 	t.Setenv("TELEMETRY_ENABLED", "1")
 	t.Setenv(EnabledEnv, "1")

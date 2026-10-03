@@ -125,3 +125,40 @@ func TestWebEndpointAllowsTrustedProxySessionOnlyOnNamedListener(t *testing.T) {
 		TrustedProxyListeners: []string{"127.0.0.1:27124"},
 	}}))
 }
+
+func TestWebEndpointMatchesExpandedIPv6ListenerToCanonicalTrustedEntry(t *testing.T) {
+	endpoint := WebEndpoint{
+		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "[fd00:0:0:0:0:0:0:5]:27123"},
+		Origin:   "https://daemon.example",
+	}
+	assert.True(t, endpoint.AllowsTrustedProxySession(config.AuthConfig{Proxy: config.ProxyConfig{
+		TrustedActorHeader:    "X-Kata-Actor",
+		TrustedProxyListeners: []string{"[fd00::5]:27123"},
+	}}))
+}
+
+func TestWebEndpointDoesNotTreatWildcardAsTrustedProxyListener(t *testing.T) {
+	endpoint := WebEndpoint{
+		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "0.0.0.0:27123"},
+		Origin:   "https://daemon.example",
+	}
+	assert.False(t, endpoint.AllowsTrustedProxySession(config.AuthConfig{Proxy: config.ProxyConfig{
+		TrustedActorHeader:    "X-Kata-Actor",
+		TrustedProxyListeners: []string{"0.0.0.0:27123"},
+	}}))
+}
+
+func TestWebEndpointRequiresCanonicalTrustedProxyListenerAddress(t *testing.T) {
+	for _, address := range []string{"127.0.0.1:027123", "[2001:0db8::1]:27123"} {
+		t.Run(address, func(t *testing.T) {
+			endpoint := WebEndpoint{
+				Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: address},
+				Origin:   "https://daemon.example",
+			}
+			assert.False(t, endpoint.AllowsTrustedProxySession(config.AuthConfig{Proxy: config.ProxyConfig{
+				TrustedActorHeader:    "X-Kata-Actor",
+				TrustedProxyListeners: []string{address},
+			}}))
+		})
+	}
+}

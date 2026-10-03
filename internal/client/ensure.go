@@ -70,6 +70,7 @@ type RunningDaemon struct {
 	Network          string
 	Scheme           string
 	ConfiguredRemote bool
+	PersistedAuth    bool
 }
 
 const (
@@ -231,7 +232,10 @@ func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, er
 }
 
 func runningDaemonForLive(candidate liveDaemon) RunningDaemon {
-	return localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
+	running := localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
+	source := candidate.Record.Metadata["config_auth_source"]
+	running.PersistedAuth = source == "generated_file" || source == "persisted_file"
+	return running
 }
 
 func daemonVersionCheckSkipped() bool {

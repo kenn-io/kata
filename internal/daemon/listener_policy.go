@@ -187,10 +187,19 @@ func ordinaryAPIBearerRequest(r *http.Request) bool {
 }
 
 // CheckWebStartup applies the daemon's existing remote-access policy to a
-// configured browser bind and additionally refuses public literals/hostnames.
-func CheckWebStartup(listen string, auth config.AuthConfig, insecureReadonly bool) error {
+// configured browser bind, additionally refuses public literals/hostnames,
+// and accepts a tokenless listener only when its trusted-proxy session is
+// configured on an explicitly trusted private network.
+func CheckWebStartup(listen string, auth config.AuthConfig, insecureReadonly, trustedProxySession bool) error {
 	if err := ValidateNonPublicAddress(listen); err != nil {
 		return err
 	}
-	return CheckAuthStartup(listen, auth, insecureReadonly)
+	return checkAuthStartup(listen, authPolicy{
+		Token:                                    auth.Token,
+		TrustPrivateNetwork:                      auth.TrustPrivateNetwork,
+		AllowUnauthenticatedPrivateNetworkWrites: auth.AllowUnauthenticatedPrivateNetworkWrites,
+		InsecureReadonly:                         insecureReadonly,
+		RequireTokenIdentity:                     auth.RequireTokenIdentity,
+		TrustedProxySession:                      trustedProxySession,
+	})
 }

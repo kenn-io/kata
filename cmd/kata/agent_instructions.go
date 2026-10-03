@@ -137,10 +137,11 @@ selected daemon, exact recipient %q, and notification destination before enablin
 Kata does not install cron or create the task. Cancel it in Muse before uninstalling.
 
 Choose authentication with the human before running any poll. Neither option is selected:
-- Provision a token file with owner-only mode 0600 in a 0700 directory; a private
-  launcher reads it into KATA_AUTH_TOKEN for CLI calls. Never echo it, enable shell
-  tracing, pass the token on argv, or store it in poll state. There is no client
-  auth.token_file setting. This exposes the secret to the local process and filesystem.
+- Provision a token file with owner-only mode 0600 in a 0700 directory. The CLI can
+  read it through [auth].token_file or KATA_AUTH_TOKEN_FILE; a private launcher may
+  instead read it into KATA_AUTH_TOKEN. Never echo it, enable shell tracing, pass
+  the token on argv, or store it in poll state. This exposes the secret to the local
+  process and filesystem.
 - Configure a custom connector to an HTTPS endpoint hosting kata mcp serve --http.
   Supply the separate inbound MCP bearer through the connector's secret settings;
   the bridge keeps its daemon credential server-side. Follow Kata's MCP HTTP transport

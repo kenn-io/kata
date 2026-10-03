@@ -128,9 +128,9 @@ func federationEnableCmd() *cobra.Command {
 func federationEnrollCmd() *cobra.Command {
 	var spokeInstance string
 	var hubURL string
-	var hubToken string
 	var capabilities string
 	var token string
+	var hubTokenEnv string
 	var actor string
 	var allowInsecure bool
 	var adoptExistingFlag bool
@@ -163,7 +163,7 @@ func federationEnrollCmd() *cobra.Command {
 				}
 			}
 			hubBaseURL := strings.TrimRight(hubURL, "/")
-			hubClient, effectiveAllowInsecure, err := federationEnrollHTTPClientPolicy(ctx, hubBaseURL, allowInsecure, hubToken)
+			hubClient, effectiveAllowInsecure, err := federationEnrollHTTPClientPolicy(ctx, hubBaseURL, allowInsecure, hubTokenEnv)
 			if err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
@@ -231,9 +231,9 @@ func federationEnrollCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
 	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
-	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit admin token for the target hub (use when no matching catalog credential is configured)")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease (claim is the API name for lease)")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
+	cmd.Flags().StringVar(&hubTokenEnv, "hub-token-env", "", "environment variable containing the hub admin token (highest precedence)")
 	cmd.Flags().StringVar(&actor, "actor", "", "actor bound to this spoke enrollment")
 	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow plaintext HTTP hub URL for enrollment and later spoke transport")
 	cmd.Flags().BoolVar(&adoptExistingFlag, "adopt-existing", false, "mark enrollment for adopting an existing spoke project")
@@ -245,14 +245,14 @@ func federationEnrollHTTPClient(ctx context.Context, hubBaseURL string, allowIns
 	return client, err
 }
 
-func federationEnrollHTTPClientPolicy(ctx context.Context, hubBaseURL string, allowInsecure bool, hubToken string) (*http.Client, bool, error) {
+func federationEnrollHTTPClientPolicy(ctx context.Context, hubBaseURL string, allowInsecure bool, hubTokenEnv string) (*http.Client, bool, error) {
 	// Hub credentials come only from hub-specific catalog entries whose origin
 	// matches this target. The local daemon's global token never authorizes a hub.
-	cat, err := config.ReadDaemonConfig()
+	cat, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return nil, false, err
 	}
-	in := hubAuthInputs{hubURL: hubBaseURL, hubToken: hubToken, allowInsecure: allowInsecure}
+	in := hubAuthInputs{hubURL: hubBaseURL, hubTokenEnv: hubTokenEnv, allowInsecure: allowInsecure}
 	if selected := catalogByName(cat, flags.Daemon); selected != nil {
 		// --daemon selects the spoke; reuse its credential only for the same hub endpoint.
 		selectedBaseURL, selectedErr := canonicalHubBaseURL(selected.URL)
@@ -286,7 +286,7 @@ func federationEnrollHTTPClientError(err error) error {
 	}
 	if cli, ok := errors.AsType[*cliError](err); ok && cli.HTTPStatus == http.StatusUnauthorized {
 		hint := *cli
-		hint.Message += "; pass --hub-token or configure a daemon catalog entry matching --hub-url; KATA_AUTH_TOKEN is for the selected daemon and is not sent to the hub"
+		hint.Message += "; pass --hub-token-env or configure a daemon catalog entry matching --hub-url; KATA_AUTH_TOKEN is for the selected daemon and is not sent to the hub"
 		return &hint
 	}
 	if strings.Contains(err.Error(), "refusing to attach bearer token to plaintext non-loopback URL") {
@@ -749,7 +749,7 @@ func federationLeaveCmd() *cobra.Command {
 		force         bool
 		localOnly     bool
 		hubName       string
-		hubToken      string
+		hubTokenEnv   string
 		allowInsecure bool
 		yes           bool
 	)
@@ -869,9 +869,9 @@ func federationLeaveCmd() *cobra.Command {
 						textsafe.Line(target.hubURL))
 				} else {
 					globals, err := revokeSpokeEnrollmentsOnHub(ctx, target, hubAuthInputs{
-						hubURL:   target.hubURL,
-						hubName:  hubName,
-						hubToken: hubToken,
+						hubURL:      target.hubURL,
+						hubName:     hubName,
+						hubTokenEnv: hubTokenEnv,
 						// Union of opt-ins: the binding/status flag (which can be
 						// lost with the credential during a partial-leave
 						// recovery) and the explicit leave-time flag.
@@ -910,7 +910,7 @@ func federationLeaveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "with --delete, override the open-issue refusal")
 	cmd.Flags().BoolVar(&localOnly, "local-only", false, "skip the hub revoke when the hub is unreachable (leaves the token valid)")
 	cmd.Flags().StringVar(&hubName, "hub", "", "named daemon catalog entry for hub admin auth (its URL must match the binding's hub URL)")
-	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit hub admin token (highest precedence)")
+	cmd.Flags().StringVar(&hubTokenEnv, "hub-token-env", "", "environment variable containing the hub admin token (highest precedence)")
 	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow the hub revoke to send a bearer token to a plaintext HTTP hub hostname (private overlay networks); restores the join-time opt-in when it was lost with the credential")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the interactive confirmation")
 	return cmd
@@ -1005,7 +1005,7 @@ func resolveSpokeForLeave(a daemonAPI, args []string) (spokeLeaveTarget, error) 
 // the caller warns about them. Any hub transport/auth failure aborts before
 // local teardown and instructs the operator to retry with --local-only.
 func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, in hubAuthInputs) ([]int64, error) {
-	cat, err := config.ReadDaemonConfig()
+	cat, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return nil, err
 	}
@@ -1397,14 +1397,6 @@ func printFederationEnrollment(
 			Join       federationJoinBundle        `json:"join"`
 		}{Enrollment: enrollment, Join: bundle})
 	}
-	if bundle.JoinCommand == "" {
-		// Preserve the issued credential so the operator can finish joining manually.
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "join command unavailable: incomplete or invalid enrollment data; use the details below to join manually"); err != nil {
-			return err
-		}
-		return emitJSON(cmd.OutOrStdout(), bundle)
-	}
-
 	if currentOutputMode() == outputAgent {
 		if err := writeAgentKVRow(cmd.OutOrStdout(),
 			agentRowField("project", projectName),
@@ -1413,9 +1405,24 @@ func printFederationEnrollment(
 		); err != nil {
 			return err
 		}
-		return writeAgentKVRow(cmd.OutOrStdout(),
-			agentRowField("join_command", bundle.JoinCommand))
+		if bundle.JoinCommand == "" {
+			if err := writeAgentKVRow(cmd.OutOrStdout(), agentRowField("join_command", "")); err != nil {
+				return err
+			}
+			return writeAgentKVRow(cmd.OutOrStdout(), agentRowField(
+				"note", "join command unavailable: incomplete or invalid enrollment data; use --json to inspect join details",
+			))
+		}
+		return writeAgentKVRow(cmd.OutOrStdout(), agentRowField("join_command", bundle.JoinCommand))
 	}
+	if bundle.JoinCommand == "" {
+		// Preserve the issued credential so the operator can finish joining manually.
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "join command unavailable: incomplete or invalid enrollment data; use the details below to join manually"); err != nil {
+			return err
+		}
+		return emitJSON(cmd.OutOrStdout(), bundle)
+	}
+
 	if flags.Quiet {
 		return nil
 	}

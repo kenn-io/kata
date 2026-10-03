@@ -210,6 +210,7 @@ The [docs site](docs/) is the definitive reference:
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·
+  [Containers](docs/operations/containers.md) ·
   [PostgreSQL](docs/operations/postgres.md) ·
   [Backup and restore](docs/operations/backup-restore.md)
 - Development: [Embedding kata in Go](docs/development/embedding.md) ·

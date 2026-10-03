@@ -325,6 +325,7 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 func NewHTTPClientWithBearer(ctx context.Context, baseURL, token string, opts Opts) (*http.Client, error) {
 	auth := resolveAuthConfig()
 	auth.Token = token
+	auth.CredentialError = nil // This caller selected its own credential source.
 	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 }
 
@@ -351,6 +352,9 @@ func NewHTTPClientForTarget(ctx context.Context, baseURL string, auth TargetAuth
 // construction does not re-read remote configuration, catalog credentials,
 // or global authentication policy.
 func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) (*http.Client, error) {
+	if d.credentialError != nil {
+		return nil, d.credentialError
+	}
 	if d.BaseURL == "" {
 		return nil, errors.New("resolved daemon has no base URL")
 	}
@@ -383,6 +387,9 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 }
 
 func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.AuthConfig, opts Opts) (*http.Client, error) {
+	if auth.CredentialError != nil {
+		return nil, auth.CredentialError
+	}
 	c, err := newHTTPClientWithoutAuth(ctx, baseURL, opts)
 	if err != nil {
 		return nil, err

@@ -34,6 +34,9 @@ type authPolicy struct {
 	AllowUnauthenticatedPrivateNetworkWrites bool
 	InsecureReadonly                         bool
 	RequireTokenIdentity                     bool
+	// TrustedProxySession is set only by the browser-listener startup check
+	// after the listener matches the configured trusted-proxy allowlist.
+	TrustedProxySession bool
 
 	// SelfAuthenticatedRoutes is the set of routes whose handler owns
 	// authentication; the middleware must not pre-empt them with a daemon-token
@@ -212,6 +215,7 @@ func isTokenAdminPath(path string) bool {
 //	Token != "" && !TrustPrivateNetwork                -> REFUSE (token would travel in cleartext)
 //	Token == "" && AllowUnauthenticatedPrivateNetworkWrites -> permit only on literal private IP binds
 //	Token == "" &&  InsecureReadonly                   -> permit (dev-only GET access)
+//	Token == "" && TrustedProxySession && TrustPrivateNetwork -> permit for its dedicated browser listener
 //	Token == "" && !InsecureReadonly                   -> REFUSE (would expose mutations to the LAN)
 //
 // The daemon does not terminate TLS, so a bearer token on plaintext non-
@@ -255,6 +259,9 @@ func checkAuthStartup(listen string, p authPolicy) error {
 			"tunnel via SSH or a TLS-terminating reverse proxy", listen)
 	}
 	if p.InsecureReadonly {
+		return nil
+	}
+	if p.TrustedProxySession && p.TrustPrivateNetwork {
 		return nil
 	}
 	return fmt.Errorf("non-loopback TCP listen %q is not supported — "+

@@ -203,7 +203,7 @@ Triage security findings against that model:
 - **Real, fix them: credential misrouting and partial/stranded state.**
   A bearer token must only reach the origin it was configured for: the
   local daemon's global token never goes to a hub, and a catalog entry's
-  admin token never goes to a different hub origin (`--hub-token` is the
+  admin token never goes to a different hub origin (`--hub-token-env` is the
   only deliberate cross-origin path). Teardown/retry paths must not
   strand state (archive-before-detach; leave's idempotent resume still
   runs daemon-side credential cleanup).

@@ -153,7 +153,7 @@ mode = "validate"
 schema_owner = "runtime_schema_owner"
 `), 0o600))
 
-	startup, err := preflightDaemonStartup(context.Background(), "127.0.0.1:0", false)
+	startup, err := preflightDaemonStartup(context.Background(), "127.0.0.1:0", false, false)
 	require.NoError(t, err)
 	assert.Equal(t, "runtime_store", startup.StoreConfig.Postgres.Schema)
 	assert.Equal(t, "validate", string(startup.StoreConfig.Postgres.SchemaMode))

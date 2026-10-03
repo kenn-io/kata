@@ -276,6 +276,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/containers/",
+      "destination": "/docs/operations/containers/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/containers.md",
+      "destination": "/docs/operations/containers.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/hosted-mode/",
       "destination": "/docs/operations/hosted-mode/",
       "permanent": true
