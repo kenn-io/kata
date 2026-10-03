@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-01
+last_edited: 2026-10-02
 ---
 
 # Agent workflows
@@ -89,48 +89,194 @@ does not enroll an agent, initialize a project, or configure embeddings.
 Load Kata's contract in every coding-agent session on this machine:
 
 ```sh
-kata agent-hooks install --all
+kata agent-hooks install
 ```
 
 These commands are available on `main`; they are not included in 0.18.0.
-The installer adds user-level hooks where harness config roots already exist.
+User scope is the default. Bare installation discovers configured agents and
+installs their contract plus every available attention direction. Dedicated agent
+configuration directories count as evidence; `.github/` and `.agents/` alone do
+not. `--all` uses the same discovery. Name agents to select them explicitly, even
+when their configuration does not exist yet.
 
-Name a harness explicitly, such as `kata agent-hooks install claude codex`,
-to create its config when needed. Kata supports Claude Code, Codex, Copilot,
-Cursor, Gemini CLI, Hermes and Qwen Code. After installing a Codex hook, open
-Codex and run `/hooks` to trust it. Kata does not automate that trust.
+Use selected agents, project scope, or project initialization:
 
-Most harnesses load the contract at SessionStart. Hermes uses its first-turn
-`pre_llm_call` hook because its SessionStart event does not inject context.
-The payload must contain a nonempty text `extra.user_message`;
-`extra.is_first_turn: true` selects the first turn. See the
-[Hermes payload limits](../reference/cli.md#contract-injection). The contract
-text is the same inside and outside Kata workspaces.
-Attention hooks stay workspace-only.
+```sh
+kata agent-hooks install codex pi
+kata agent-hooks install codex --local
+kata init --agent-hooks=codex,pi
+kata agent-hooks install codex --contract-only
+```
 
-For a second Codex home, select its config file:
+`init --agent-hooks` accepts comma-separated names and installs a project contract
+plus available attention directions. Add `--contract-only` to omit attention.
+`--local` is shorthand for `--scope project`; automatic local setup can use
+configured user agents as evidence, selecting only project-capable targets.
+Conflicting scope or component flags fail before writes.
+
+Use `--contract-only` or `--attention=false` when a script only needs the
+contract; `--attention` remains accepted. Repeatable `init --with-agent-hooks`
+also installs project bundles. The older `--with-hooks` and
+`--with-codex-hooks` retain their commands and trust identities. Do not combine
+another hook selector with `--agent-hooks`.
+
+Project hooks use `kata` from each teammate's PATH. Use `--executable` on
+`agent-hooks install` to choose another executable explicitly; user setup
+defaults to an absolute path. If init reports a hook error after creating or
+binding the project, the binding remains. Fix the error and rerun init. Its
+[structured error](../reference/cli.md#workspace-initialization) records the
+completed project result separately from the hook failure.
+
+Most contract hooks use SessionStart; Hermes uses first-turn
+`pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
+PreInvocation. Pi, Amp, OpenCode and OpenClaw use native code extensions.
+The contract also loads outside Kata workspaces. Attention requires a tracked
+issue in `KATA_REF` and uses the native workspace for routing.
+
+### Hook target coverage
+
+These are native capabilities. Runtime trust, permissions and environment
+policy can prevent a configured hook from running.
+
+| Harness name | Contract | Attention start | Native terminal end | Scope notes |
+| --- | --- | --- | --- | --- |
+| `claude` | Yes | Yes | Yes | User/project; project trust required |
+| `codex` | Yes | Yes | Yes | User/project; trust through `/hooks`; current SessionEnd runtime required |
+| `gemini` | Yes | Yes | Yes | User/project |
+| `copilot` | Yes | Yes | Yes | User/project |
+| `cursor` | Yes | Yes | Yes | User/project; editor session hooks differ from cloud agents |
+| `qwen` | Yes | Yes | Yes | User/project |
+| `hermes` | Yes | Yes | Yes | User only; `on_session_finalize` ends a session, `on_session_reset` starts its replacement |
+| `droid` (`factory`) | Yes | Yes | Yes | User/project; native hooks.json with settings.json fallback |
+| `antigravity` (`agy`) | Yes | Launcher | Launcher | User/project; first-invocation context |
+| `amp` | Yes | Yes | Launcher | User or project installations; simultaneous owned user/project configurations rejected |
+| `opencode` | Yes | Yes | Launcher | User/project; runtime version selects the matching v1/v2 API |
+| `pi` | Yes | Yes | Yes | User/project; Pi 0.99.1 or newer; graceful quit only |
+| `openclaw` | Yes | Yes | Yes | User/project; OpenClaw 2026.9.7 or newer; authorized workspace capture required |
+| `kimi-code` | Yes | Yes | Yes | User only; UserPromptSubmit context |
+| `kimi` | No | Yes | Yes | Archived Kimi CLI; user only; use committed AGENTS.md for context |
+| `muse` | Yes | Opt-in/launcher | Opt-in/launcher | User/project contract; managed attention requires explicit user opt-in |
+| `grok` | No | Yes | Yes | Official xAI Grok; user/project; avoid duplicate Claude/Cursor compatibility hooks |
+| `zcode` | Yes | Yes | Launcher | Official Z.ai ZCode; user only |
+
+`--contract-only` skips attention-only targets during automatic discovery.
+Muse needs permission to forward Kata environment variables for native attention;
+without that permission, setup reports a partial contract-only result. Stop,
+agent-end, idle and ordinary completed turns
+never count as terminal exits. Abrupt process death cannot run native cleanup.
+Use the [launcher recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+for targets without a terminal hook and older runtimes.
+
+Code extensions refresh the selected exact-recipient inbox at prompt boundaries.
+Cleared requests or read failures remove stale current inbox text. Loaded project
+extensions take precedence per capability where the native host permits it.
+Amp plugins run in separate processes, so Kata instead rejects conflicting owned
+user/project installations and records project scopes in a local scope index.
+Multiple Amp project installations are supported.
+
+### Native extension setup
+
+```sh
+kata agent-hooks install pi openclaw
+kata agent-hooks install opencode
+kata agent-hooks install muse --managed-attention
+kata agent-hooks status pi --json
+```
+
+Pi uses its structured extension API; reload extensions or restart Pi and
+complete project trust. Amp hidden context requires plugin SDK
+`0.0.0-20260526003443-g9106a62` (May 26, 2026) or newer; there is no separately
+verified numeric Amp CLI floor. OpenCode v1 uses `@opencode-ai/plugin` with the
+system-transform API (1.0.154 or newer); v2 uses `@opencode/plugin` (2.0.0 or
+newer) and a separate generator. V1 discovers `plugin/kata-user.js` or
+`plugin/kata-project.js` under its native config root; v2 uses
+`plugins/kata-user/` or `plugins/kata-project/` packages. Setup probes the selected
+`opencode --version` with a bounded timeout and chooses a supported stable v1 or
+v2 release. Prerelease, unsupported, or ambiguous output does not select an API.
+Use `--api v1|v2` as an advanced override when runtime detection is unavailable;
+it cannot override a known incompatible runtime. Reinstall preserves owned API
+metadata and discovery paths, including when the runtime probe is unavailable.
+A runtime/API mismatch fails before writes;
+uninstall the existing bundle before changing its API. Follow the installed
+plugin's dependency/reload guidance. An exact owned v2 package manifest retains
+registration ownership if its generated entrypoint is missing, so repair and
+removal can recover safely. Edited or ambiguous artifacts remain preserved.
+
+OpenClaw installs a native package and its discovery/permission registration.
+Prompt/workspace capture must be authorized even for attention-only setup.
+Existing deny policies remain in place; status reports unavailable components.
+Kata manages standard JSON configs. JSON5 comments, `$include`, Nix and
+read-only setups need native OpenClaw plugin management; Kata rejects those
+mutations before writing instead of flattening operator configuration.
+Gateway session reset/new RPC and graceful shutdown were exercised against
+2026.9.7; channel-specific slash-command routing is not asserted by installation.
+
+Ordinary Muse hooks clear inherited Kata environment. An explicit single-Muse
+user installation at a terminal can ask once to forward the required variable
+names. Muse passes the user-wide `managed_hooks_env_vars` allowlist to every
+managed hook, including hooks installed by other tools; it includes
+`KATA_AUTH_TOKEN` when set. Review all managed hooks before granting.
+`--managed-attention` supplies that grant for automation and implies attention.
+A valid existing managed path and sufficient allowlist can be reused without
+another grant. Automatic discovery, project setup, JSON, agent output, and
+noninteractive runs never prompt or expand user policy; they report `partial`
+when attention needs permission. The grant stores no credential values,
+preserves existing operator paths/policy, and retains that policy on uninstall.
+Remove the names from Muse settings to revoke it. Its launching environment
+must supply `KATA_REF` and the usual Kata routing/identity variables. Project
+Muse hooks use launcher attention. Native project discovery for Hermes, Kimi
+CLI, Kimi Code and ZCode
+is unverified, so `--scope project` is rejected for them.
+
+### Inspect, customize and remove
 
 ```sh
 kata agent-hooks install codex --config /path/to/second-codex-home/hooks.json
 kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json
+kata agent-hooks install pi --source ./agent-prompt.txt
+kata agent-hooks uninstall pi
+kata agent-hooks uninstall pi --contract-only
 ```
 
-`status` reports the selected user config and the current workspace without a
-daemon. If a workspace also has a Codex contract hook, run
-`kata init --with-codex-hooks` there to apply the
+`status` stays offline and reports capabilities separately from owned configured
+contract/start/end components. It cannot prove loading, trust or permissions.
+Bare `status` shows both scopes; a named target defaults to user scope. Bare JSON
+keeps user rows in `harnesses` and project rows in `workspace.harnesses`.
+`--local` or `--scope project` inspects the selected workspace configuration.
+OpenCode status and uninstall never run a version probe.
+An unreadable or malformed selected config makes status exit nonzero after
+collecting the other targets. JSON puts that partial report in `error.data`;
+each failed row identifies the config path in `inspection_error`.
+`--config` requires one target and a supported native config-file override;
+Pi and Amp auto-discovered extensions reject it. An executable override can pin
+stable Kata commands. Installer `--source` is data for owned code extensions;
+command-hook installers reject it and preserve authored custom-source commands.
+Relative user-scope source paths are saved as absolute paths from the install
+command's working directory. Project-scope source paths stay relative to the
+selected workspace.
+
+Contract-only reinstall is additive and leaves existing attention enabled.
+Default uninstall removes the full owned bundle; `uninstall --contract-only`
+(or `--attention=false`) removes contracts while preserving independent
+attention, including attention-only extensions where needed. Generated code
+records a digest so unchanged extensions remain upgradeable and removable
+when Kata's templates change. Foreign hooks and edited code, metadata or
+package manifests are preserved.
+Automatic skips and Muse partial setup return success with per-target reasons.
+Bare installation and `--all` with no configured agents return a successful
+skipped report and make no changes. Explicit OpenCode detection failures and
+foreign artifacts are errors.
+All targets are planned before publication. The shared publisher snapshots,
+locks and stages artifacts, then rolls back its unchanged writes after failure;
+it reports retained artifacts when external changes prevent safe rollback.
+Runtime locks stay in the OS temporary directory, outside workspace configs.
+
+If user and workspace Codex contract hooks overlap, run
+`kata init --agent-hooks=codex` or `kata init --with-codex-hooks` there for the
 [workspace deduplication rules](../reference/cli.md#workspace-initialization).
-Kata leaves committed managed guidance in place and reports its overlap as
-informational. Other Codex homes and other workspaces are not edited.
-
-To remove user hooks, run `kata agent-hooks uninstall <harness>...` or
-`kata agent-hooks uninstall --all`. Workspaces initialized while the Codex
-user hook existed may have skipped their contract hook. Rerun
-`kata init --with-codex-hooks` in those workspaces to restore it.
-
-See [user installation and removal](../reference/cli.md#user-installation-and-removal)
-for config overrides, stable executable selection, no-write repeat installs,
-and output fields. The [agent-hooks reference](../reference/cli.md#agent-hooks)
-explains how coding-agent hooks differ from daemon event hooks.
+Tracked workspace hooks remain for teammates. Removing a user contract may
+require rerunning that init flag to restore a previously skipped workspace hook.
+See the [CLI reference](../reference/cli.md#agent-hooks) for output fields.
 
 ## Session start
 
@@ -215,9 +361,10 @@ Guidance files produce tendency, not contract: an agent can still end a session
 without updating its issue. For Claude Code workspaces,
 `kata init --with-hooks` additionally installs the
 [attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
-as two command-hook lifecycle entries: `SessionStart` runs `kata agent-hooks attention
-start` for new, resumed, and cleared sessions (but not context compaction), and
-`SessionEnd` runs `kata agent-hooks attention end` only for terminal exits rather
+as two command-hook lifecycle entries: `SessionStart` runs
+`kata attention-hook start` for new, resumed, and cleared sessions (but not
+context compaction), and
+`SessionEnd` runs `kata attention-hook end` only for terminal exits rather
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 
@@ -225,12 +372,29 @@ For Codex CLI workspaces, `kata init --with-codex-hooks` installs attention and,
 when needed, contract `SessionStart` hooks in `.codex/hooks.json`. The contract
 hook injects the canonical briefing on startup, resume, clear, and context
 compaction. The attention hook runs
-`kata agent-hooks attention start` on startup, resume, and clear (but not compaction),
-using the same launcher-provided `KATA_REF`. Codex has no stable session-end
-hook event yet, so pair the attention hook with a launcher wrapper that runs
-`kata agent-hooks attention end` after the Codex invocation exits; see
+`kata attention-hook start` on startup, resume, and clear (but not compaction),
+using the same launcher-provided `KATA_REF`. It also installs
+`kata attention-hook end` on genuine SessionEnd. Older Codex runtimes without
+that event need launcher cleanup; see
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
+
+For direct Codex prompt injection, `kata agent-contract-hook` emits the default
+SessionStart response without reading stdin. An optional local prompt replaces
+the entire briefing:
+
+```sh
+kata agent-contract-hook --source ./agent-prompt.txt
+```
+
+A missing file uses the built-in contract; an empty file supplies an empty
+prompt. Invalid text or unreadable paths fail before any response. The native
+`kata agent-hooks contract <harness>` form accepts the same file option.
+Attention hooks do not inject prompts. New installs use bare commands; the
+visible attention commands continue to accept only the exact legacy ownership
+marker for their mode. See the [CLI reference](../reference/cli.md#workspace-attention)
+for the supported forms and the
+[contract reference](../reference/cli.md#contract-injection) for file semantics.
 
 ## Teammate heads-up
 

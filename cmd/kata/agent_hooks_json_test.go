@@ -10,7 +10,7 @@ import (
 func TestAgentHookInspectionPreservesJSONNumberSemantics(t *testing.T) {
 	parse := func(value string) []agentHookEntry {
 		t.Helper()
-		entries, err := parseAgentHookEntries(agenthook.AgentCodex, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata --source kata-agent-contract-hook","timeout":`+value+`}]}]}}`))
+		entries, err := parseAgentHookEntries(agenthook.AgentCodex, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook","timeout":`+value+`}]}]}}`))
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 		return entries

@@ -227,13 +227,15 @@ contract in long form.
 On `main`, install the contract in every coding-agent session on this machine:
 
 ```sh
-kata agent-hooks install --all
+kata agent-hooks install
 ```
 
 For Codex, open Codex and run `/hooks` to trust the new hook. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
-for supported harnesses, Hermes's first-turn behavior, and additional Codex
-homes. These commands are not included in 0.18.0.
+for all 18 targets, runtime requirements, attention capabilities and additional
+Codex homes. Contract and available attention hooks are enabled by default;
+use `--contract-only` to opt out of attention, or
+`kata init --agent-hooks=codex,pi` for project setup. These commands are not included in 0.18.0.
 
 Print the shorter managed briefing without changing the repository:
 
@@ -257,6 +259,11 @@ if test -f "$CLAUDE_PROJECT_DIR/.kata.toml"; then
   kata quickstart --format contract --workspace "$CLAUDE_PROJECT_DIR"
 fi
 ```
+
+For a Codex SessionStart response without a stdin payload, run
+`kata agent-contract-hook`. To replace the prompt, use
+`kata agent-contract-hook --source ./agent-prompt.txt`; a missing file uses the
+built-in contract and an empty file supplies an empty prompt.
 
 Codex SessionStart hooks require structured JSON rather than plain contract
 stdout. For workspace hooks, use `kata init --with-codex-hooks`; see the

@@ -170,27 +170,7 @@ func TestAttentionHooks_IgnoreEmptyAndDashLeadingRefs(t *testing.T) {
 	}
 }
 
-func TestParseAttentionHookArgs_AcceptsDirectAndManagedInvocations(t *testing.T) {
-	tests := []struct {
-		args []string
-		mode string
-		ok   bool
-	}{
-		{args: []string{"start"}, mode: "start", ok: true},
-		{args: []string{"end"}, mode: "end", ok: true},
-		{args: []string{"start", "--source", "kata-agent-hook-start"}, mode: "start", ok: true},
-		{args: []string{"end", "--source", "kata-agent-hook-end"}, mode: "end", ok: true},
-		{args: []string{"start", "--source", "other"}},
-		{args: []string{"start", "--source"}},
-	}
-	for _, tt := range tests {
-		mode, ok := parseAttentionHookArgs(tt.args)
-		assert.Equal(t, tt.mode, mode)
-		assert.Equal(t, tt.ok, ok)
-	}
-}
-
-func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t *testing.T) {
+func TestAttentionHookCommand_InvalidInvocationsSilentlySkipDaemonActivity(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
@@ -205,6 +185,8 @@ func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t 
 		{"-bogus"},
 		{"start", "extra"},
 		{"end", "extra"},
+		{"start", "--source", "other"},
+		{"end", "--source", "kata-agent-hook-start"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			resetFlags(t)

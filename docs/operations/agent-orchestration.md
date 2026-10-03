@@ -1,7 +1,7 @@
 ---
 title: Agent orchestration
 description: Coordinate agent work through Kata issues, attention metadata, branches, and fan-out/join workflows.
-last_edited: 2026-09-28
+last_edited: 2026-10-01
 ---
 
 # Agent orchestration
@@ -28,6 +28,16 @@ The coordination substrate is the `work.*` metadata convention documented in the
 
 All names below are neutral placeholders: `spoke-project` is the kata project,
 `agent-a` an actor, and `hub.example` / `daemon.example` daemon hosts.
+
+Contract injection and attention tracking serve different purposes.
+`kata agent-contract-hook` emits the canonical Codex context directly; optional
+`--source ./agent-prompt.txt` replaces it with a local UTF-8 prompt file. A
+relative source stays within the current directory: `..` paths and symlink
+targets that escape it fail. Absolute paths use the specified file. A missing
+file falls back to the default, while an empty file supplies an empty prompt.
+The native multi-harness contract form accepts the same option.
+`kata attention-hook start|end` only tracks lifecycle metadata and has no
+prompt-source option. Daemon event hooks in `hooks.toml` are independent of both.
 
 ## Roles
 
@@ -75,7 +85,8 @@ work.branch agent/widget-export` is equivalent and safe to retry.
 To load the contract in every session, use
 [`kata agent-hooks install --all`](../workflows/agents.md#contract-in-every-session).
 The [agent-hooks reference](../reference/cli.md#agent-hooks) covers user contract
-hooks and workspace attention hooks. Attention hooks stay workspace-only.
+hooks and attention bundles in user or project scope. Add `--attention` to the
+installer; the launcher must provide the tracked issue in `KATA_REF`.
 
 The recommended default is **not** to rely on the agent remembering to update
 attention. Agents forget to clear or raise it, and an issue stuck at a stale
@@ -124,8 +135,8 @@ whichever fired most recently is the state coordinators see.
 
 For Claude Code workspaces, `kata init --with-hooks` additively installs two
 command hooks in `.claude/settings.json`: `SessionStart` runs
-`kata agent-hooks attention start` for new, resumed, and cleared sessions (but not
-context compaction), and `SessionEnd` runs `kata agent-hooks attention end` only for
+`kata attention-hook start` for new, resumed, and cleared sessions (but not
+context compaction), and `SessionEnd` runs `kata attention-hook end` only for
 terminal exits rather than clear/resume transitions.
 Both use the launcher-provided `KATA_REF` and intentionally do nothing when it
 is absent. The hook logic lives in the installed `kata` binary, so the approved
@@ -136,9 +147,9 @@ owns the additive config mutation and preserves unrelated hook entries.
 
 For Codex CLI workspaces, `kata init --with-codex-hooks` installs attention and,
 when needed, contract `SessionStart` hooks in `.codex/hooks.json`. The contract hook injects the
-canonical marker-free agent briefing through `kata agent-hooks contract codex`
+canonical marker-free agent briefing through `kata agent-contract-hook`
 on startup, resume, clear, and context compaction. The attention hook runs
-`kata agent-hooks attention start` on startup, resume, and clear, but not
+`kata attention-hook start` on startup, resume, and clear, but not
 compaction, using the same launcher-provided
 `KATA_REF` and command as the Claude Code wiring. Codex prompts to
 trust project-layer hooks the first time it loads them, so expect one
@@ -155,18 +166,21 @@ requires re-trust through `/hooks`. If the user hook is removed, re-run init to 
 contract injection. See the [init reference](../reference/cli.md#workspace-initialization) for
 ownership, config selection, and the tracked-file exception.
 
-Codex has no stable session-end hook event yet (the upstream event exists but
-is not yet in a stable Codex release), so `--with-codex-hooks` does not wire an
-end half, and wiring it once Codex ships a stable release is tracked as a
-follow-up. Until then, cover the end half with a launcher wrapper around the
-`codex` invocation (this also works for `codex exec`, since hook subprocesses
-inherit the parent environment). Run the end hook from an `EXIT` trap so it
-still fires if `codex` exits non-zero (or under `set -e`), and let the wrapper
-propagate Codex's own exit status rather than the hook's:
+The Codex init flag now installs `kata attention-hook end` on genuine native
+SessionEnd. Existing start commands retain their trust identities. For
+session-aware ownership fencing, use `kata agent-hooks install codex --scope
+project --attention` or `kata init --with-agent-hooks codex`.
 
+Older runtimes and targets without native terminal events need launcher
+cleanup. Use one tracked session per issue with the compatible bare-hook
+wrapper. Run cleanup synchronously in an `EXIT` trap and propagate the agent's
+exit status. Native hook failures stay silent; abrupt launcher death cannot
+execute a trap. Amp, OpenCode and ZCode can supply their native start half;
+Antigravity needs launcher start as well. For example:
 ```sh
 export KATA_REF=abc4
-trap 'status=$?; kata agent-hooks attention end; exit "$status"' EXIT
+kata attention-hook start
+trap 'status=$?; kata attention-hook end; exit "$status"' EXIT
 codex ...
 ```
 

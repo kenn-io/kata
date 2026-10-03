@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,8 +18,8 @@ import (
 // the work.attention convention. The launcher supplies the tracked issue in
 // KATA_REF for both hooks. No session payload or local state is involved.
 //
-// Hooks must never break the harness: every mode exits zero and silently
-// ignores invalid refs, unavailable daemons, stale revisions, and other
+// Legacy invocations exit zero and silently
+// ignore invalid arguments, invalid refs, unavailable daemons, stale revisions, and other
 // internal failures.
 
 const (
@@ -26,43 +27,28 @@ const (
 	attnValueNeedsHuman = "needs-human"
 	attnHandoffMsg      = "session ended without hand-off"
 	attnWriteAttempts   = 2
-	attentionHookSource = "kata-agent-hook-"
 )
 
 func newAttentionHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:                "attention-hook <start|end>",
-		Short:              "legacy launcher attention lifecycle plumbing",
+		Short:              "Track attention at session start and end",
+		Long:               "Track work.attention for the issue in KATA_REF.\nStdin is ignored; daemon failures remain silent.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Treat every malformed invocation as a silent no-op. In particular,
-			// dash-leading args must not reach Cobra's non-zero flag-error path.
-			mode, ok := parseAttentionHookArgs(args)
-			if !ok {
+			// Released launchers use an optional ownership marker and expect
+			// malformed lifecycle calls to remain silent, including unknown flags.
+			if len(args) == 0 || (args[0] != "start" && args[0] != "end") {
 				return nil
 			}
-			runAttentionHook(cmd, mode)
+			if len(args) != 1 && !slices.Equal(args[1:], []string{"--source", legacyAttentionHookSource + args[0]}) {
+				return nil
+			}
+			runAttentionHook(cmd, args[0])
 			return nil
 		},
 	}
-}
-
-func parseAttentionHookArgs(args []string) (string, bool) {
-	if len(args) == 0 {
-		return "", false
-	}
-	mode := args[0]
-	if mode != "start" && mode != "end" {
-		return "", false
-	}
-	if len(args) == 1 {
-		return mode, true
-	}
-	if len(args) != 3 || args[1] != "--source" || args[2] != attentionHookSource+mode {
-		return "", false
-	}
-	return mode, true
 }
 
 func runAttentionHook(cmd *cobra.Command, mode string) {
@@ -96,6 +82,7 @@ const (
 type attnLookup struct {
 	kind      attnLookupKind
 	attention string
+	session   string
 	revision  int64
 }
 
@@ -202,6 +189,7 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	return attnLookup{
 		kind:      lookupOpen,
 		attention: decodeJSONString(response.Issue.Metadata[attentionKey]),
+		session:   decodeJSONString(response.Issue.Metadata[attentionSessionKey]),
 		revision:  response.Issue.Revision,
 	}
 }

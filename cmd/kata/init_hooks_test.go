@@ -23,7 +23,7 @@ func readSettings(t *testing.T, dir string) map[string]any {
 func expectedHookHandler(mode string) map[string]any {
 	return map[string]any{
 		"type":    "command",
-		"command": "kata agent-hooks attention " + mode + " --source kata-agent-hook-" + mode,
+		"command": "kata attention-hook " + mode,
 	}
 }
 
@@ -64,7 +64,7 @@ func TestApplyClaudeHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	claudeDir := filepath.Join(dir, ".claude")
 	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
 	userCommand := "notify-wrapper kata attention-hook start"
-	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start","timeout":5}]}]}}`
+	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start --source custom.txt","timeout":5}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0o644)) //nolint:gosec // test fixture under TempDir
 
 	_, err := applyClaudeHooks(dir)
@@ -73,7 +73,7 @@ func TestApplyClaudeHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	groups := hooks["SessionStart"].([]any)
 	assert.Equal(t, []any{
 		map[string]any{"type": "command", "command": userCommand},
-		map[string]any{"type": "command", "command": "kata attention-hook start", "timeout": float64(5)},
+		map[string]any{"type": "command", "command": "kata attention-hook start --source custom.txt", "timeout": float64(5)},
 	}, groups[0].(map[string]any)["hooks"])
 }
 
@@ -108,21 +108,17 @@ func TestApplyClaudeHooks_RefusesSymlinks(t *testing.T) {
 	})
 }
 
-func TestMigrateLegacyAgentHooksKeepsConfigFileMode(t *testing.T) {
+func TestApplyClaudeHooksKeepsConfigFileMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission bits")
 	}
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "settings.json")
-	legacyHandler := map[string]any{"type": "command", "command": "kata", "args": []any{"attention-hook", "start"}}
+	configPath := filepath.Join(dir, ".claude", "settings.json")
+	require.NoError(t, os.Mkdir(filepath.Dir(configPath), 0o700))
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"kata","args":["attention-hook","start"]},{"type":"command","command":"notify-session"}]}]}}`), 0o600))
 	require.NoError(t, os.Chmod(configPath, 0o640)) //nolint:gosec // exercise preservation of a non-default mode
 
-	changed, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{{
-		event:    "SessionStart",
-		matcher:  "startup",
-		handlers: []map[string]any{legacyHandler},
-	}})
+	changed, err := applyClaudeHooks(dir)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -131,6 +127,7 @@ func TestMigrateLegacyAgentHooksKeepsConfigFileMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
 	data, err := os.ReadFile(configPath) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
-	assert.NotContains(t, string(data), "attention-hook")
+	assert.Contains(t, string(data), "kata attention-hook start")
+	assert.NotContains(t, string(data), "args")
 	assert.Contains(t, string(data), "notify-session")
 }

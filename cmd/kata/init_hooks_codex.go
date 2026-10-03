@@ -1,15 +1,75 @@
 package main
 
 import (
-	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kit/agenthook"
 )
+
+// Keep init's user-contract and tracked-workspace policy while publishing the
+// complete native bundle together with the other selected integrations.
+func planInitCodexHooks(opts nativeAgentHookOptions) (nativeAgentHookPlan, error) {
+	userPath, err := codexUserContractPath(opts.ConfigPath)
+	if err != nil {
+		return nativeAgentHookPlan{}, err
+	}
+	tracked := false
+	if userPath != "" {
+		tracked, err = codexHookFileTracked(opts.Dir)
+		if err != nil {
+			return nativeAgentHookPlan{}, err
+		}
+		if !tracked {
+			opts.Contract = false
+		}
+	}
+	plan, err := planNativeAgentHooks(opts, false)
+	if err != nil {
+		return plan, err
+	}
+	root, err := os.OpenRoot(opts.Dir)
+	if err != nil {
+		return plan, err
+	}
+	defer func() { _ = root.Close() }()
+	plan.Warnings = append(plan.Warnings, codexConfigHooksWarnings(root)...)
+	if userPath == "" {
+		return plan, nil
+	}
+	if tracked {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("kept workspace contract hook: .codex/hooks.json is tracked; %s also injects it", userPath))
+		return plan, nil
+	}
+	change := &plan.Changes[0]
+	removal, err := planOwnedAgentHookSnapshot(agenthook.AgentCodex, change.Path, change.Content, !change.Remove, contractHook, nil)
+	if err != nil {
+		return plan, err
+	}
+	plan.Contract = false
+	if !removal.result.Changed {
+		return plan, nil
+	}
+	change.Content = removal.result.Data
+	plan.Warnings = append(plan.Warnings, fmt.Sprintf("removed workspace contract hook: %s already injects it", userPath))
+	var before, after map[string]any
+	if err := json.Unmarshal(change.Original, &before, jsonutil.PreserveNumberLiterals()); err != nil {
+		return plan, err
+	}
+	if err := json.Unmarshal(change.Content, &after, jsonutil.PreserveNumberLiterals()); err != nil {
+		return plan, err
+	}
+	shifted, err := codexHookIndexesShifted(before, after)
+	if shifted {
+		plan.Warnings = append(plan.Warnings, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
+	}
+	return plan, err
+}
 
 // `kata init --with-codex-hooks` wires the work.attention lifecycle into a
 // Codex CLI workspace. Kit owns config parsing, hook ownership, and updates.
@@ -17,6 +77,7 @@ import (
 const (
 	codexSessionStartMatcher         = "startup|resume|clear"
 	codexContractSessionStartMatcher = "startup|resume|clear|compact"
+	codexDefaultContractTimeoutSecs  = 10
 )
 
 func applyCodexHooks(dir string) (bool, []string, error) {
@@ -74,15 +135,15 @@ func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []s
 	if err != nil {
 		return false, nil, err
 	}
-	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+	contractResult, err := installOwnedAgentHooks(agenthook.AgentCodex, agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"agent-hooks", "contract", "codex", "--source", agentContractHookSource},
-		Marker:     "--source " + agentContractHookSource,
+		Arguments:  []string{"agent-contract-hook"},
+		Marker:     "agent-contract-hook",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
 			Matcher: codexContractSessionStartMatcher,
-			Timeout: 10 * time.Second,
+			Timeout: codexDefaultContractTimeoutSecs * time.Second,
 		}},
 	})
 	if err != nil {
@@ -92,39 +153,11 @@ func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []s
 }
 
 func installCodexAttentionHook(configPath string, before map[string]any) (bool, error) {
-	legacyHandlers := []map[string]any{
-		{
-			"type":    "command",
-			"command": "kata attention-hook start",
-			"timeout": jsontext.Value("10"),
-		},
-		{
-			"type":           "command",
-			"command":        "kata attention-hook start",
-			"commandWindows": "kata attention-hook start",
-			"timeout":        jsontext.Value("10"),
-		},
-	}
-	migrated, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{
-		{
-			event:         agenthook.EventSessionStart,
-			matcherAbsent: true,
-			handlers:      legacyHandlers,
-		},
-		{
-			event:    agenthook.EventSessionStart,
-			matcher:  codexSessionStartMatcher,
-			handlers: legacyHandlers,
-		},
-	})
-	if err != nil {
-		return false, err
-	}
 	attentionOptions := agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"agent-hooks", "attention", "start", "--source", attentionHookSource + "start"},
-		Marker:     "--source " + attentionHookSource + "start",
+		Arguments:  []string{"attention-hook", "start"},
+		Marker:     "attention-hook start",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
 			Matcher: codexSessionStartMatcher,
@@ -132,20 +165,25 @@ func installCodexAttentionHook(configPath string, before map[string]any) (bool, 
 		}},
 	}
 	var attentionResult agenthook.Result
+	var err error
 	if !codexAttentionHookCurrent(before) {
-		attentionResult, err = agenthook.Install(agenthook.AgentCodex, attentionOptions)
+		attentionResult, err = installOwnedAgentHooks(agenthook.AgentCodex, attentionOptions)
 		if err != nil {
 			return false, err
 		}
 	}
-	return migrated || attentionResult.Changed, nil
+	endResult, err := installOwnedAgentHooks(agenthook.AgentCodex, agenthook.InstallOptions{
+		ConfigPath: configPath, Executable: "kata", Arguments: []string{"attention-hook", "end"}, Marker: "attention-hook end",
+		Hooks: []agenthook.Hook{{Event: agenthook.EventSessionEnd, Timeout: 10 * time.Second}},
+	})
+	return attentionResult.Changed || endResult.Changed, err
 }
 
 func dedupeCodexContractHook(configPath, userPath string, before map[string]any) (bool, []string, error) {
 	var result agenthook.Result
 	if codexConfigHasContract(before, false) {
 		var err error
-		result, err = agenthook.Uninstall(agenthook.AgentCodex, configPath, "--source "+agentContractHookSource)
+		result, err = uninstallOwnedAgentHooks(agenthook.AgentCodex, configPath, contractHook)
 		if err != nil {
 			return false, nil, err
 		}

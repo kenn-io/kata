@@ -31,6 +31,11 @@ func contractHookPayload(agent agenthook.Agent) string {
 
 func assertNativeContract(t *testing.T, agent agenthook.Agent, output string) {
 	t.Helper()
+	assertNativePrompt(t, agent, output, agentContractText)
+}
+
+func assertNativePrompt(t *testing.T, agent agenthook.Agent, output, expected string) {
+	t.Helper()
 	var response map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(output), &response))
 	var text string
@@ -50,11 +55,12 @@ func assertNativeContract(t *testing.T, agent agenthook.Agent, output string) {
 		assert.Equal(t, "SessionStart", specific.Event)
 		text = specific.Text
 	}
-	assert.Equal(t, agentContractText, text)
+	assert.Equal(t, expected, text)
 }
 
 func executeAgentHook(t *testing.T, input io.Reader, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	resetFlags(t)
 	return executeAgentHookRoot(t, newRootCmd(), input, args...)
 }
 
@@ -73,6 +79,7 @@ func executeAgentHookRoot(t *testing.T, cmd *cobra.Command, input io.Reader, arg
 }
 
 func TestAgentHooksContractTerminal(t *testing.T) {
+	resetFlags(t)
 	root := newRootCmd()
 	group, _, err := root.Find([]string{"agent-hooks"})
 	require.NoError(t, err)
@@ -153,8 +160,8 @@ func TestAgentHooksContractUsage(t *testing.T) {
 		"missing harness": {},
 		"extra harness":   {"claude", "codex"},
 		"unknown harness": {"unknown"},
-		"droid":           {"droid"},
-		"foreign source":  {"claude", "--source", "foreign"},
+		"attention only":  {"kimi"},
+		"missing source":  {"claude", "--source"},
 		"empty source":    {"claude", "--source="},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -167,9 +174,6 @@ func TestAgentHooksContractUsage(t *testing.T) {
 				for _, profile := range agenthook.Profiles() {
 					assert.Contains(t, stderr, string(profile.Agent))
 				}
-			}
-			if name == "droid" {
-				assert.Equal(t, "kata: Factory Droid hooks do not support SessionStart\n", stderr)
 			}
 		})
 	}
@@ -216,7 +220,7 @@ func TestAgentHooksHelp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 	assert.Equal(t, 1, strings.Count(stdout, "agent-hooks"))
-	assert.NotContains(t, stdout, "agent-contract-hook")
+	assert.Contains(t, stdout, "agent-contract-hook")
 	assert.NotContains(t, stdout, "attention-hook")
 }
 
@@ -227,7 +231,7 @@ func TestAgentHooksCompletion(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"agent-hooks", "contract", ""}, []string{"claude", "codex", "copilot", "cursor", "gemini", "hermes", "qwen"}},
+		{[]string{"agent-hooks", "contract", ""}, []string{"claude", "codex", "copilot", "cursor", "gemini", "hermes", "qwen", "droid", "antigravity", "kimi-code", "muse", "zcode"}},
 		{[]string{"agent-hooks", "contract", "c"}, []string{"claude", "codex", "copilot", "cursor"}},
 		{[]string{"agent-hooks", "contract", "claude", ""}, nil},
 		{[]string{"agent-hooks", "attention", "start", ""}, nil},

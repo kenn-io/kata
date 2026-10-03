@@ -62,6 +62,20 @@ func TestE2E_AttentionHook_StartSetsOnlyAttentionFromKataRef(t *testing.T) {
 	assert.Equal(t, "existing context", message)
 }
 
+func TestE2E_AttentionHook_LegacySourceMarkersTrackAttention(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "legacy launcher work")
+	t.Setenv("KATA_REF", ref)
+	for _, tc := range []struct{ mode, want string }{
+		{"start", "ok"}, {"end", "needs-human"},
+	} {
+		require.NoError(t, runAttnHook(t, env, dir, "attention-hook", tc.mode, "--source", "kata-agent-hook-"+tc.mode))
+		value, exists := attnMetaValue(t, env, pid, ref, attentionKey)
+		require.True(t, exists)
+		assert.Equal(t, tc.want, value)
+	}
+}
+
 func TestE2E_AttentionHook_EndEscalatesDirectlyFromKataRefWithoutState(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "unhanded-off work")

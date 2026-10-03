@@ -56,6 +56,7 @@ func attentionSnapshot(t *testing.T, env *testenv.Env, pid int64, ref string) ag
 
 func executeAttentionAtDaemon(t *testing.T, env *testenv.Env, input io.Reader, args ...string) (string, string, error) {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
 	var stdout, stderr bytes.Buffer
@@ -102,7 +103,7 @@ func TestE2E_AgentHooksAttentionParity(t *testing.T) {
 				}
 				before := attentionSnapshot(t, env, pid, ref)
 				t.Setenv("KATA_REF", ref)
-				args := []string{"attention-hook", scenario.mode, "--source", "kata-agent-hook-" + scenario.mode}
+				args := []string{"attention-hook", scenario.mode}
 				if visible {
 					args = []string{"agent-hooks", "attention", scenario.mode}
 				}

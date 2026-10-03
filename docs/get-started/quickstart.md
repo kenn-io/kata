@@ -157,13 +157,15 @@ With a build from `main`, load Kata's contract in every coding-agent session
 on this machine:
 
 ```sh
-kata agent-hooks install --all
+kata agent-hooks install
 ```
 
 For Codex, open Codex and run `/hooks` to trust the new hook. See
 [Contract in every session](../workflows/agents.md#contract-in-every-session)
 for harness selection, Hermes's first-turn behavior, and additional Codex
-homes. These commands are not included in 0.18.0.
+homes. Available attention hooks are included by default; use `--contract-only`
+to opt out, `--local` for this workspace, or `kata init --agent-hooks=codex,pi`
+when initializing it. These commands are not included in 0.18.0.
 
 ## External agents without session hooks
 
