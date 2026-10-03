@@ -27,7 +27,7 @@ func TestMuseManagedRemoteCommandFixture(_ *testing.T) {
 			break
 		}
 	}
-	if strings.Join(argv, " ") != "agent-hooks attention-native muse start" {
+	if strings.Join(argv, " ") != "agent-hook attention-native muse start" {
 		fmt.Fprintln(os.Stderr, "unexpected managed hook argv")
 		os.Exit(2)
 	}

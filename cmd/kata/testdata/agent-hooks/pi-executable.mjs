@@ -8,4 +8,4 @@ if(args[0]==='agent-contract-hook') {
 } else if(args[0]==='inbox') {
  if(state.failInbox)process.exit(1);
  process.stdout.write(state.inbox);
-} else if(args[0]!=='agent-hooks')process.exit(2);
+} else if(args[0]!=='agent-hook')process.exit(2);

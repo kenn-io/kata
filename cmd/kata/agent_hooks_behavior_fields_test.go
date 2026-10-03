@@ -17,7 +17,7 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
 			planned, err := agenthook.PlanInstall(agenthook.AgentClaude, agenthook.InstallOptions{
-				ConfigPath: path, Executable: os.Args[0], Arguments: []string{"agent-hooks", "contract", "claude", "--source", legacyAgentContractHookSource},
+				ConfigPath: path, Executable: os.Args[0], Arguments: []string{"agent-hook", "contract", "claude", "--source", legacyAgentContractHookSource},
 				Marker: agentContractMarker, Hooks: []agenthook.Hook{contractRegistrationHook(agenthook.AgentClaude)},
 			})
 			require.NoError(t, err)
@@ -35,7 +35,7 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 			data, err := json.Marshal(document)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(path, data, 0o600))
-			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "--contract-only", "claude", "--config", path, "--executable", os.Args[0])
+			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "--contract-only", "claude", "--config", path, "--executable", os.Args[0])
 			require.NoError(t, err, stderr)
 			require.Contains(t, out, "installed")
 			require.Contains(t, out, "re-trust")

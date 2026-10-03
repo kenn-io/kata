@@ -41,7 +41,7 @@ func TestDroidUsesSettingsFallbackWithoutShadowing(t *testing.T) {
 func TestExtraJSONOwnershipPreservesForeignHandlers(t *testing.T) {
 	opts := extraOptions(t, "droid")
 	opts.ConfigPath = filepath.Join(opts.Home, "hooks.json")
-	foreign := []byte(`{"SessionStart":[{"hooks":[{"command":"kata agent-hooks contract droid --source authored.txt"},{"command":"kata agent-hooks contract droid","commandWindows":"echo foreign"},{"command":"kata agent-hooks contract droid && echo custom"},{"command":"kata agent-hooks contract droid","args":["--source","authored.txt"]}]}],"Stop":[{"hooks":[{"command":"echo stop"}]}]}`)
+	foreign := []byte(`{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract droid --source authored.txt"},{"command":"kata agent-hook contract droid","commandWindows":"echo foreign"},{"command":"kata agent-hook contract droid && echo custom"},{"command":"kata agent-hook contract droid","args":["--source","authored.txt"]}]}],"Stop":[{"hooks":[{"command":"echo stop"}]}]}`)
 	require.NoError(t, os.WriteFile(opts.ConfigPath, foreign, 0600))
 	plan, err := planExtraAgentHooks(opts, false)
 	require.NoError(t, err)

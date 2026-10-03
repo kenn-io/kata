@@ -10,7 +10,7 @@ import (
 const hooklessQuickstartText = `
 # Hookless consumer Muse
 
-Preview setup: kata agent-hooks instructions install muse --home <path> --actor <actor> --dry.
+Preview setup: kata agent-hook instructions install muse --home <path> --actor <actor> --dry.
 This generates standing instructions, a skill and a scheduled poll spec. It relies on
 instruction-following, not enforcement, and provides no native attention support.
 Choose authentication explicitly; create the scheduled task through Muse itself.
@@ -290,9 +290,9 @@ func newQuickstartCmd() *cobra.Command {
 Default: full instructions for agents using kata.
 --agent: concise instructions for agent logs.
 --json: instructions in a JSON response.
---format contract: the canonical managed contract, exactly what kata agent-hooks contract injects.
+--format contract: the canonical managed contract, exactly what kata agent-hook contract injects.
 
-Run kata agent-hooks install --all to load the contract in every session on this machine.
+Run kata agent-hook install --all to load the contract in every session on this machine.
 Without hooks, run kata quickstart at session start.
 Setup guides cover federation enrollment and optional embeddings.
 The managed contract format stays static.

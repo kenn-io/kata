@@ -13,7 +13,7 @@ func TestMuseWindowsAliasOwnershipPreservesForeignVariants(t *testing.T) {
 		opts := extraOptions(t, "muse")
 		opts.Attention = false
 		opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
-		before := []byte(`{"schema_version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","command_windows":` + variant + `,"timeout":10}]}]}}`)
+		before := []byte(`{"schema_version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","command_windows":` + variant + `,"timeout":10}]}]}}`)
 		require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
 		plan, err := planExtraAgentHooks(opts, true)
 		require.NoError(t, err)
@@ -32,13 +32,13 @@ func TestExtraJSONStatusAndRepairHonorNativeEligibility(t *testing.T) {
 		target, event, group, handler string
 		contract, start, end          bool
 	}{
-		{"droid", "SessionStart", `"matcher":"^never$",`, `"type":"command","command":"kata agent-hooks contract droid","timeout":10`, true, false, false},
-		{"droid", "SessionStart", "", `"type":"command","command":"kata agent-hooks attention-native droid start","timeout":10,"enabled":false`, false, true, false},
-		{"droid", "SessionStart", "", `"type":"command","commandWindows":"kata agent-hooks contract droid","timeout":10`, true, false, false},
-		{"grok", "SessionEnd", `"matcher":"^never$",`, `"type":"command","command":"kata agent-hooks attention-native grok end","timeout":10`, false, false, true},
-		{"muse", "SessionStart", "", `"type":"command","command":"kata agent-hooks contract muse","timeout":10,"async":true`, true, false, false},
-		{"muse", "SessionStart", "", `"type":"command","command":"kata agent-hooks contract muse","timeout":10,"if":"condition"`, true, false, false},
-		{"antigravity", "PreInvocation", "", `"type":"command","command":"kata agent-hooks contract antigravity","timeout":10,"enabled":false`, true, false, false},
+		{"droid", "SessionStart", `"matcher":"^never$",`, `"type":"command","command":"kata agent-hook contract droid","timeout":10`, true, false, false},
+		{"droid", "SessionStart", "", `"type":"command","command":"kata agent-hook attention-native droid start","timeout":10,"enabled":false`, false, true, false},
+		{"droid", "SessionStart", "", `"type":"command","commandWindows":"kata agent-hook contract droid","timeout":10`, true, false, false},
+		{"grok", "SessionEnd", `"matcher":"^never$",`, `"type":"command","command":"kata agent-hook attention-native grok end","timeout":10`, false, false, true},
+		{"muse", "SessionStart", "", `"type":"command","command":"kata agent-hook contract muse","timeout":10,"async":true`, true, false, false},
+		{"muse", "SessionStart", "", `"type":"command","command":"kata agent-hook contract muse","timeout":10,"if":"condition"`, true, false, false},
+		{"antigravity", "PreInvocation", "", `"type":"command","command":"kata agent-hook contract antigravity","timeout":10,"enabled":false`, true, false, false},
 	} {
 		t.Run(tc.target+tc.handler, func(t *testing.T) {
 			opts := extraOptions(t, tc.target)
@@ -102,7 +102,7 @@ func TestExtraJSONStatusAndRepairHonorNativeEligibility(t *testing.T) {
 func TestExtraZCodePreservesExplicitDisabledGlobalPolicy(t *testing.T) {
 	opts := extraOptions(t, "zcode")
 	opts.ConfigPath = filepath.Join(opts.Home, "config.json")
-	before := []byte(`{"hooks":{"enabled":false,"events":{"SessionStart":[{"hooks":[{"type":"process","command":"kata","args":["agent-hooks","contract","zcode"],"timeoutMs":10000}]}]}}}`)
+	before := []byte(`{"hooks":{"enabled":false,"events":{"SessionStart":[{"hooks":[{"type":"process","command":"kata","args":["agent-hook","contract","zcode"],"timeoutMs":10000}]}]}}}`)
 	require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
 	inspect := opts
 	inspect.Contract = false
@@ -175,7 +175,7 @@ func TestExtraTOMLStatusAndReinstallHonorRestrictiveMatcher(t *testing.T) {
 		if tc.mode == "contract" {
 			arguments = "contract kimi-code"
 		}
-		before := []byte("[[hooks]]\nevent='" + tc.event + "'\nmatcher='^never$'\ncommand='kata agent-hooks " + arguments + "'\ntimeout=10\n")
+		before := []byte("[[hooks]]\nevent='" + tc.event + "'\nmatcher='^never$'\ncommand='kata agent-hook " + arguments + "'\ntimeout=10\n")
 		require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
 		inspect := opts
 		inspect.Contract = false
@@ -227,11 +227,11 @@ func TestMuseRepairsInactiveManagedContractsWithoutDuplication(t *testing.T) {
 		opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
 		settings := `{"schema_version":1,"managed_hooks_path":"managed.json"}`
 		if ordinaryOwned {
-			settings = `{"schema_version":1,"managed_hooks_path":"managed.json","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10,"if":"disabled"}]}]}}`
+			settings = `{"schema_version":1,"managed_hooks_path":"managed.json","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10,"if":"disabled"}]}]}}`
 		}
 		require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(settings), 0600))
 		managedPath := filepath.Join(opts.Home, "managed.json")
-		require.NoError(t, os.WriteFile(managedPath, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10,"async":true}]}]}}`), 0600))
+		require.NoError(t, os.WriteFile(managedPath, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10,"async":true}]}]}}`), 0600))
 		plan, err := planExtraAgentHooks(opts, false)
 		require.NoError(t, err)
 		require.False(t, plan.CurrentContract)

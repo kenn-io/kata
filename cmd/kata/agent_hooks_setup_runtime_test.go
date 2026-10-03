@@ -130,11 +130,11 @@ func runMuseSetup(t *testing.T, terminal bool, input io.Reader, args ...string) 
 	t.Helper()
 	resetFlags(t)
 	root := newRootCmd()
-	group, _, err := root.Find([]string{"agent-hooks"})
+	group, _, err := root.Find([]string{"agent-hook"})
 	require.NoError(t, err)
 	root.RemoveCommand(group)
 	root.AddCommand(newAgentHooksCmdWithTerminalCheck(func(io.Reader) bool { return terminal }))
-	return executeAgentHookRoot(t, root, input, append([]string{"agent-hooks", "install"}, args...)...)
+	return executeAgentHookRoot(t, root, input, append([]string{"agent-hook", "install"}, args...)...)
 }
 
 func TestAgentHooksMuseSetupConsent(t *testing.T) {

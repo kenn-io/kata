@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// `kata agent-hooks attention <start|end>` is lifecycle plumbing for
+// `kata agent-hook attention <start|end>` is lifecycle plumbing for
 // the work.attention convention. The launcher supplies the tracked issue in
 // KATA_REF for both hooks. No session payload or local state is involved.
 //

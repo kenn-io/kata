@@ -11,7 +11,7 @@ import (
 	"encoding/json/v2"
 )
 
-var errMuseAttentionPermission = errors.New("Muse attention needs permission to forward Kata variables; run kata agent-hooks install muse --managed-attention in user scope, or use launcher attention") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing permission error.
+var errMuseAttentionPermission = errors.New("Muse attention needs permission to forward Kata variables; run kata agent-hook install muse --managed-attention in user scope, or use launcher attention") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing permission error.
 
 var extraMuseEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 

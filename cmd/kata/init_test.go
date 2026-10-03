@@ -30,7 +30,7 @@ func TestInit_HelpExplainsAgentSetupScopes(t *testing.T) {
 			for _, text := range []string{
 				"--with-agents: committed guidance for everyone on the repo",
 				"--with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks",
-				"kata agent-hooks install: discover configured agents and install contract plus available attention hooks",
+				"kata agent-hook install: discover configured agents and install contract plus available attention hooks",
 				"If a user-level hook exists, --with-codex-hooks skips the workspace contract hook",
 				"unless the workspace config is tracked",
 			} {

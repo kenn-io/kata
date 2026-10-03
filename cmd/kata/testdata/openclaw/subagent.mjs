@@ -35,7 +35,7 @@ const reconciliation=registrations.get('subagent_spawned')?.(
 async function waitForParentStarts(count) {
  for (let attempt=0;attempt<100;attempt++) {
   const calls=fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-  if(calls.filter(call=>call.args[0]==='agent-hooks'&&call.args[1]==='attention-native'&&call.args[3]==='start'&&call.args[5]==='parent-session').length>=count)return;
+  if(calls.filter(call=>call.args[0]==='agent-hook'&&call.args[1]==='attention-native'&&call.args[3]==='start'&&call.args[5]==='parent-session').length>=count)return;
   await new Promise(resolve=>setTimeout(resolve,10));
  }
  assert.fail('timed out waiting for parent attention reassertion');
@@ -75,7 +75,7 @@ await registrations.get('session_end')(
 );
 
 const calls=fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-const attention=calls.filter(call=>call.args[0]==='agent-hooks'&&call.args[1]==='attention-native');
+const attention=calls.filter(call=>call.args[0]==='agent-hook'&&call.args[1]==='attention-native');
 assert.deepEqual(attention.map(call=>call.args.slice(3,6)),[
  ['start','--session','parent-session'],
  ['start','--session','progress-child-session'],
@@ -90,6 +90,6 @@ assert.deepEqual(attention.map(call=>call.args.slice(3,6)),[
  ['end','--session','failed-child-session'],
 ]);
 const completed=fs.readFileSync(path.join(root,'attention-completions.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-const parentCompletions=completed.filter(call=>call.args[0]==='agent-hooks'&&call.args[1]==='attention-native'&&call.args[5]==='parent-session').map(call=>call.args[3]);
+const parentCompletions=completed.filter(call=>call.args[0]==='agent-hook'&&call.args[1]==='attention-native'&&call.args[5]==='parent-session').map(call=>call.args[3]);
 assert.deepEqual(parentCompletions.slice(-2),['start','end']);
 console.log('subagent attention isolation passed');

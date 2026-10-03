@@ -39,10 +39,10 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 		}
 		var install *agenthook.InstallOptions
 		if !remove {
-			args := []string{"agent-hooks", "contract", opts.Agent}
+			args := []string{"agent-hook", "contract", opts.Agent}
 			hook := contractRegistrationHook(agent)
 			if kind != contractHook {
-				args = []string{"agent-hooks", "attention-native", opts.Agent, string(kind)}
+				args = []string{"agent-hook", "attention-native", opts.Agent, string(kind)}
 				hook = agenthook.Hook{Event: agenthook.EventSessionStart, Timeout: 10 * time.Second}
 				if kind == attentionEndHook {
 					hook.Event = agenthook.EventSessionEnd

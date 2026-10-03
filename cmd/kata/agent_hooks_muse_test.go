@@ -133,7 +133,7 @@ func TestMuseRejectsUnsupportedManagedPoliciesBeforeWrites(t *testing.T) {
 func TestMuseStatusAndUninstallPreserveExistingProviderAllowlist(t *testing.T) {
 	opts := extraOptions(t, "muse")
 	opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
-	before := []byte(`{"schema_version":1,"managed_hooks_env_vars":["ANTHROPIC_API_KEY"],"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10}]}]}}`)
+	before := []byte(`{"schema_version":1,"managed_hooks_env_vars":["ANTHROPIC_API_KEY"],"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10}]}]}}`)
 	require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
 
 	status, err := planExtraAgentHooks(opts, true)
@@ -184,7 +184,7 @@ func TestMuseExistingManagedContractUsesSharedOwnership(t *testing.T) {
 	opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
 	require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(`{"schema_version":1,"managed_hooks_path":"operator.json"}`), 0600))
 	managedPath := filepath.Join(opts.Home, "operator.json")
-	require.NoError(t, os.WriteFile(managedPath, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10}]}]}}`), 0600))
+	require.NoError(t, os.WriteFile(managedPath, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10}]}]}}`), 0600))
 	plan, err := planExtraAgentHooks(opts, false)
 	require.NoError(t, err)
 	require.True(t, plan.CurrentContract)
@@ -226,7 +226,7 @@ func TestMuseReinstallReconcilesDuplicateOwnedContracts(t *testing.T) {
 	opts := extraOptions(t, "muse")
 	opts.Attention = false
 	opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
-	contract := `{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10}]}]}`
+	contract := `{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10}]}]}`
 	require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(`{"schema_version":1,"managed_hooks_path":"operator.json","hooks":`+contract+`}`), 0600))
 	managedPath := filepath.Join(opts.Home, "operator.json")
 	require.NoError(t, os.WriteFile(managedPath, []byte(`{"hooks":`+contract+`}`), 0600))

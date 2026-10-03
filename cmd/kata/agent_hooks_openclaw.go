@@ -551,7 +551,7 @@ async function command(args,cwd,timeout=600,executable=options.executable) {
  return run(executable,args,{cwd,env:process.env,timeout,maxBuffer:16*1024*1024,windowsHide:true});
 }
 function attentionArgs(mode,row) {
- return ['agent-hooks','attention-native','openclaw',mode,'--session',row.session,'--host-pid',String(process.pid),'--ref',row.ref,'--workspace',row.workspace];
+ return ['agent-hook','attention-native','openclaw',mode,'--session',row.session,'--host-pid',String(process.pid),'--ref',row.ref,'--workspace',row.workspace];
 }
 export default {
  id:options.id,
@@ -613,7 +613,7 @@ export default {
     const [contractRead,inboxRead]=await Promise.allSettled([command(source,workspace),recipient?command(['inbox','--for',recipient,'--context'],workspace):Promise.resolve({stdout:''})]);
     ctx.hookInvocation?.assertActive();
     if(!owns(workspace,'contract'))return;
-    let system='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hooks status openclaw.';
+    let system='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hook status openclaw.';
     if(contractRead.status==='fulfilled')try {const text=JSON.parse(contractRead.value.stdout).hookSpecificOutput?.additionalContext;if(typeof text==='string')system=text}catch{}
     const inbox=inboxRead.status==='fulfilled'?inboxRead.value.stdout:'Kata inbox unavailable for this prompt.';
     return {prependSystemContext:system,prependContext:inbox};

@@ -13,12 +13,12 @@ func TestAgentHooksUninstallPreservesUnmarkedExecutableWrappers(t *testing.T) {
 	for _, target := range []string{"claude", "droid", "zcode"} {
 		t.Run(target, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "hooks.json")
-			before := []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/wrappers/notify agent-hooks contract claude"},{"command":"/opt/wrappers/notify agent-hooks attention start"}]}]}}`)
+			before := []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/wrappers/notify agent-hook contract claude"},{"command":"/opt/wrappers/notify agent-hook attention start"}]}]}}`)
 			switch target {
 			case "droid":
-				before = []byte(`{"SessionStart":[{"hooks":[{"command":"/opt/wrappers/notify agent-hooks contract droid"},{"command":"/opt/wrappers/notify agent-hooks attention-native droid start"}]}]}`)
+				before = []byte(`{"SessionStart":[{"hooks":[{"command":"/opt/wrappers/notify agent-hook contract droid"},{"command":"/opt/wrappers/notify agent-hook attention-native droid start"}]}]}`)
 			case "zcode":
-				before = []byte(`{"hooks":{"events":{"SessionStart":[{"hooks":[{"type":"process","command":"C:\\wrappers\\notify.exe","args":["agent-hooks","contract","zcode"]}]}]}}}`)
+				before = []byte(`{"hooks":{"events":{"SessionStart":[{"hooks":[{"type":"process","command":"C:\\wrappers\\notify.exe","args":["agent-hook","contract","zcode"]}]}]}}}`)
 			}
 			require.NoError(t, os.WriteFile(path, before, 0o600))
 			opts := nativeAgentHookOptions{Agent: target, ConfigPath: path, Contract: true, Attention: true}

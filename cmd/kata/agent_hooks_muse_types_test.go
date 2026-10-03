@@ -21,7 +21,7 @@ func TestMuseMalformedOwnedTypedFieldsRequireRepair(t *testing.T) {
 			opts := extraOptions(t, "muse")
 			opts.Attention = false
 			opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
-			handler := `"command":"kata agent-hooks contract muse",` + field
+			handler := `"command":"kata agent-hook contract muse",` + field
 			if !strings.HasPrefix(field, `"type":`) {
 				handler = `"type":"command",` + handler
 			}
@@ -69,7 +69,7 @@ func TestMuseForeignMalformedHandlerPoisonsWholeSource(t *testing.T) {
 				foreignFields = `"command":"echo operator",` + foreignFields
 			}
 			foreign := `{` + foreignFields + `}`
-			before := []byte(`{"schema_version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10}]}],"PreToolUse":[{"hooks":[` + foreign + `]}]}}`)
+			before := []byte(`{"schema_version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract muse","timeout":10}]}],"PreToolUse":[{"hooks":[` + foreign + `]}]}}`)
 			require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
 			inspect := opts
 			inspect.Contract = false

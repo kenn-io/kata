@@ -115,7 +115,7 @@ func TestKitAgentHookClaudeTerminalMatcherCountsAsCoverage(t *testing.T) {
 
 func TestKitAgentHookBundlePreservesForeignHandlers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	foreign := []byte(`{"theme":"authored","hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo authored-before"},{"command":"kata agent-hooks attention-native claude start && echo custom"}]}],"SessionEnd":[{"hooks":[{"command":"echo authored-end"}]}]}}`)
+	foreign := []byte(`{"theme":"authored","hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo authored-before"},{"command":"kata agent-hook attention-native claude start && echo custom"}]}],"SessionEnd":[{"hooks":[{"command":"echo authored-end"}]}]}}`)
 	require.NoError(t, os.WriteFile(path, foreign, 0600))
 	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestKitAgentHookBundlePreservesForeignHandlers(t *testing.T) {
 			commands = append(commands, entry.Command)
 		}
 	}
-	require.Equal(t, []string{"echo authored-end", "echo authored-before", "kata agent-hooks attention-native claude start && echo custom"}, commands)
+	require.Equal(t, []string{"echo authored-end", "echo authored-before", "kata agent-hook attention-native claude start && echo custom"}, commands)
 }
 
 func TestKitAgentHookHermesReplacementStart(t *testing.T) {
@@ -151,7 +151,7 @@ func TestKitAgentHookHermesReplacementStart(t *testing.T) {
 
 func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hooks contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"kata agent-hooks attention-native claude start"}]}]}}`), 0600))
+	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
 	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
 	require.NoError(t, err)
 	require.False(t, plan.CurrentContract)
@@ -164,7 +164,7 @@ func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 
 func TestKitAgentHookConfiguredRejectsRestrictiveMatchers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"matcher":"^never$","hooks":[{"command":"kata agent-hooks contract claude"},{"command":"kata agent-hooks attention-native claude start"}]}]}}`), 0600))
+	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"matcher":"^never$","hooks":[{"command":"kata agent-hook contract claude"},{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
 	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
 	require.NoError(t, err)
 	require.False(t, plan.CurrentContract)

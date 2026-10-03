@@ -13,10 +13,10 @@ For consumer Muse, generate standing instructions, a Kata skill, and a recurring
 poll specification. This support is unreleased.
 
 ```sh
-kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
-kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent
-kata agent-hooks instructions status muse --home /path/to/muse-home
-kata agent-hooks instructions uninstall muse --home /path/to/muse-home
+kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
+kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent
+kata agent-hook instructions status muse --home /path/to/muse-home
+kata agent-hook instructions uninstall muse --home /path/to/muse-home
 ```
 
 `--home` is required and names the Muse home directory. The installer manages a
@@ -89,7 +89,7 @@ does not enroll an agent, initialize a project, or configure embeddings.
 Load Kata's contract in every coding-agent session on this machine:
 
 ```sh
-kata agent-hooks install
+kata agent-hook install
 ```
 
 These commands are available on `main`; they are not included in 0.18.0.
@@ -102,10 +102,10 @@ when their configuration does not exist yet.
 Use selected agents, project scope, or project initialization:
 
 ```sh
-kata agent-hooks install codex pi
-kata agent-hooks install codex --local
+kata agent-hook install codex pi
+kata agent-hook install codex --local
 kata init --agent-hooks=codex,pi
-kata agent-hooks install codex --contract-only
+kata agent-hook install codex --contract-only
 ```
 
 `init --agent-hooks` accepts comma-separated names and installs a project contract
@@ -121,7 +121,7 @@ also installs project bundles. The older `--with-hooks` and
 another hook selector with `--agent-hooks`.
 
 Project hooks use `kata` from each teammate's PATH. Use `--executable` on
-`agent-hooks install` to choose another executable explicitly; user setup
+`agent-hook install` to choose another executable explicitly; user setup
 defaults to an absolute path. If init reports a hook error after creating or
 binding the project, the binding remains. Fix the error and rerun init. Its
 [structured error](../reference/cli.md#workspace-initialization) records the
@@ -177,10 +177,10 @@ Multiple Amp project installations are supported.
 ### Native extension setup
 
 ```sh
-kata agent-hooks install pi openclaw
-kata agent-hooks install opencode
-kata agent-hooks install muse --managed-attention
-kata agent-hooks status pi --json
+kata agent-hook install pi openclaw
+kata agent-hook install opencode
+kata agent-hook install muse --managed-attention
+kata agent-hook status pi --json
 ```
 
 Pi uses its structured extension API; reload extensions or restart Pi and
@@ -231,11 +231,11 @@ is unverified, so `--scope project` is rejected for them.
 ### Inspect, customize and remove
 
 ```sh
-kata agent-hooks install codex --config /path/to/second-codex-home/hooks.json
-kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json
-kata agent-hooks install pi --source ./agent-prompt.txt
-kata agent-hooks uninstall pi
-kata agent-hooks uninstall pi --contract-only
+kata agent-hook install codex --config /path/to/second-codex-home/hooks.json
+kata agent-hook status codex --config /path/to/second-codex-home/hooks.json
+kata agent-hook install pi --source ./agent-prompt.txt
+kata agent-hook uninstall pi
+kata agent-hook uninstall pi --contract-only
 ```
 
 `status` stays offline and reports capabilities separately from owned configured
@@ -276,7 +276,7 @@ If user and workspace Codex contract hooks overlap, run
 [workspace deduplication rules](../reference/cli.md#workspace-initialization).
 Tracked workspace hooks remain for teammates. Removing a user contract may
 require rerunning that init flag to restore a previously skipped workspace hook.
-See the [CLI reference](../reference/cli.md#agent-hooks) for output fields.
+See the [CLI reference](../reference/cli.md#agent-hook) for output fields.
 
 ## Session start
 
@@ -389,7 +389,7 @@ kata agent-contract-hook --source ./agent-prompt.txt
 
 A missing file uses the built-in contract; an empty file supplies an empty
 prompt. Invalid text or unreadable paths fail before any response. The native
-`kata agent-hooks contract <harness>` form accepts the same file option.
+`kata agent-hook contract <harness>` form accepts the same file option.
 Attention hooks do not inject prompts. New installs use bare commands; the
 visible attention commands continue to accept only the exact legacy ownership
 marker for their mode. See the [CLI reference](../reference/cli.md#workspace-attention)

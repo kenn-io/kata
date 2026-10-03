@@ -48,8 +48,8 @@ func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 				"--agent: concise instructions for agent logs",
 				"--json: instructions in a JSON response",
 				"--format contract: the canonical managed contract",
-				"exactly what kata agent-hooks contract injects",
-				"kata agent-hooks install --all",
+				"exactly what kata agent-hook contract injects",
+				"kata agent-hook install --all",
 				"Without hooks, run kata quickstart at session start",
 				"Setup guides cover federation enrollment and optional embeddings",
 			} {

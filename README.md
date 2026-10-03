@@ -227,7 +227,7 @@ contract in long form.
 On `main`, install the contract in every coding-agent session on this machine:
 
 ```sh
-kata agent-hooks install
+kata agent-hook install
 ```
 
 For Codex, open Codex and run `/hooks` to trust the new hook. See

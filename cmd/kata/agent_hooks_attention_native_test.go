@@ -26,7 +26,7 @@ func TestE2E_NativeAttentionExplicitIdentity(t *testing.T) {
 	invoke := func(mode, session string) {
 		t.Helper()
 		resetFlags(t)
-		out, stderr, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hooks", "attention-native", "pi", mode, "--session", session, "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir, "--source", "kata-agent-hook-"+mode)
+		out, stderr, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hook", "attention-native", "pi", mode, "--session", session, "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir, "--source", "kata-agent-hook-"+mode)
 		require.NoError(t, err)
 		require.Empty(t, out)
 		require.Empty(t, stderr)
@@ -57,7 +57,7 @@ func TestE2E_NativeAttentionExplicitIdentity(t *testing.T) {
 func TestNativeAttentionInvalidPayloadIsSilent(t *testing.T) {
 	t.Setenv("KATA_REF", "")
 	for _, payload := range []string{"", `{`, `[]`, `{"session_id":3}`, `{"session_id":"one","sessionId":"two"}`} {
-		out, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hooks", "attention-native", "claude", "start")
+		out, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "attention-native", "claude", "start")
 		require.NoError(t, err)
 		require.Empty(t, out)
 		require.Empty(t, stderr)
@@ -87,7 +87,7 @@ func TestNativeAttentionReportsTransientDaemonLookupFailure(t *testing.T) {
 
 	workspace := t.TempDir()
 	stderr, err := executeNativeAttentionForTest(t, server.URL,
-		"agent-hooks", "attention-native", "pi", "start", "--session", "retry-session",
+		"agent-hook", "attention-native", "pi", "start", "--session", "retry-session",
 		"--host-pid", strconv.Itoa(os.Getpid()), "--ref", "abc4", "--workspace", workspace)
 	require.EqualValuesf(t, 1, issueLookups.Load(), "stderr=%q err=%v", stderr, err)
 	require.ErrorContains(t, err, "native attention start: issue lookup unavailable")
@@ -135,7 +135,7 @@ func TestNativeAttentionReportsTransientMetadataWriteFailure(t *testing.T) {
 
 			workspace := t.TempDir()
 			stderr, err := executeNativeAttentionForTest(t, server.URL,
-				"agent-hooks", "attention-native", "pi", mode, "--session", session,
+				"agent-hook", "attention-native", "pi", mode, "--session", session,
 				"--host-pid", strconv.Itoa(hostPID), "--ref", "abc4", "--workspace", workspace)
 			require.EqualValuesf(t, 1, metadataWrites.Load(), "stderr=%q err=%v", stderr, err)
 			want := "native attention " + mode + ": metadata update failed"
@@ -245,7 +245,7 @@ func TestNativeAttentionAmbiguousWorkspaceStopsBeforeDaemonLookup(t *testing.T) 
 
 	stderr, err := executeNativeAttentionPayloadForTest(t, server.URL,
 		nativeAttentionTestPayload(t, map[string]any{"session_id": "native-session", "hook_event_name": "SessionStart", "workspace_roots": []string{one, two}}),
-		"agent-hooks", "attention-native", "pi", "start")
+		"agent-hook", "attention-native", "pi", "start")
 	require.NoError(t, err)
 	require.Empty(t, stderr)
 	require.Zero(t, requests.Load(), "ambiguous native workspace must fail closed before daemon lookup")
@@ -320,7 +320,7 @@ func TestNativeAttentionExplicitHostResumeWithoutLauncherOverride(t *testing.T) 
 	invoke := func(mode string, host int) {
 		t.Helper()
 		resetFlags(t)
-		_, _, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hooks", "attention-native", "pi", mode, "--session", "resumed-id", "--host-pid", strconv.Itoa(host), "--ref", ref, "--workspace", dir)
+		_, _, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hook", "attention-native", "pi", mode, "--session", "resumed-id", "--host-pid", strconv.Itoa(host), "--ref", ref, "--workspace", dir)
 		require.NoError(t, err)
 	}
 	invoke("start", os.Getpid())
@@ -344,7 +344,7 @@ func TestE2E_NativeAttentionRejectsWrongEventAndSubagent(t *testing.T) {
 	t.Setenv("KATA_SESSION_ID", "event-launch")
 	t.Setenv("KATA_REF", ref)
 	resetFlags(t)
-	_, _, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hooks", "attention-native", "grok", "start", "--session", "parent-session", "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir)
+	_, _, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hook", "attention-native", "grok", "start", "--session", "parent-session", "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir)
 	require.NoError(t, err)
 	for _, payload := range []string{
 		`{"sessionId":"parent-session","hookEventName":"Stop"}`,
@@ -353,13 +353,13 @@ func TestE2E_NativeAttentionRejectsWrongEventAndSubagent(t *testing.T) {
 		`{"sessionId":"parent-session"}`,
 	} {
 		resetFlags(t)
-		_, _, err = executeAttentionAtDaemon(t, env, strings.NewReader(payload), "agent-hooks", "attention-native", "grok", "end", "--workspace", dir)
+		_, _, err = executeAttentionAtDaemon(t, env, strings.NewReader(payload), "agent-hook", "attention-native", "grok", "end", "--workspace", dir)
 		require.NoError(t, err)
 		got, _ := attnMetaValue(t, env, pid, ref, attentionKey)
 		require.Equal(t, "ok", got, payload)
 	}
 	resetFlags(t)
-	_, _, err = executeAttentionAtDaemon(t, env, strings.NewReader(`{"sessionId":"parent-session","hookEventName":"SessionEnd"}`), "agent-hooks", "attention-native", "grok", "end", "--workspace", dir)
+	_, _, err = executeAttentionAtDaemon(t, env, strings.NewReader(`{"sessionId":"parent-session","hookEventName":"SessionEnd"}`), "agent-hook", "attention-native", "grok", "end", "--workspace", dir)
 	require.NoError(t, err)
 	got, _ := attnMetaValue(t, env, pid, ref, attentionKey)
 	require.Equal(t, "needs-human", got)

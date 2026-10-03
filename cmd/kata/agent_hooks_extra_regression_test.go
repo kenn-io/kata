@@ -75,7 +75,7 @@ func TestExtraZCodeUsesArgvAndEnablesNativeHooks(t *testing.T) {
 	require.Equal(t, true, hooks["enabled"])
 	events := hooks["events"].(map[string]any)
 	groups := events["SessionStart"].([]any)
-	for i, want := range [][]any{{"agent-hooks", "contract", "zcode", "--source", "kata-agent-contract-hook"}, {"agent-hooks", "attention-native", "zcode", "start", "--source", "kata-agent-hook-start"}} {
+	for i, want := range [][]any{{"agent-hook", "contract", "zcode", "--source", "kata-agent-contract-hook"}, {"agent-hook", "attention-native", "zcode", "start", "--source", "kata-agent-hook-start"}} {
 		handler := groups[i].(map[string]any)["hooks"].([]any)[0].(map[string]any)
 		require.Equal(t, "process", handler["type"])
 		require.Equal(t, opts.Executable, handler["command"])
@@ -119,13 +119,13 @@ func TestExtraPlansNeverClaimUnsupportedPreexistingDirections(t *testing.T) {
 		var input string
 		switch target {
 		case "kimi":
-			input = "[[hooks]]\nevent='SessionStart'\ncommand='kata agent-hooks contract kimi'\n"
+			input = "[[hooks]]\nevent='SessionStart'\ncommand='kata agent-hook contract kimi'\n"
 		case "grok":
-			input = `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hooks contract grok"}]}]}}`
+			input = `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract grok"}]}]}}`
 		case "antigravity":
-			input = `{"old":{"PreInvocation":[{"command":"kata agent-hooks attention-native antigravity start"}]}}`
+			input = `{"old":{"PreInvocation":[{"command":"kata agent-hook attention-native antigravity start"}]}}`
 		case "zcode":
-			input = `{"hooks":{"events":{"SessionEnd":[{"hooks":[{"type":"process","command":"kata","args":["agent-hooks","attention-native","zcode","end"]}]}]}}}`
+			input = `{"hooks":{"events":{"SessionEnd":[{"hooks":[{"type":"process","command":"kata","args":["agent-hook","attention-native","zcode","end"]}]}]}}}`
 		}
 		require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(input), 0600))
 		plan, err := planExtraAgentHooks(opts, false)
