@@ -36,6 +36,10 @@ func reportsCLIUse(cmd *cobra.Command) bool {
 	if os.Getenv(hooks.HookVersionEnv) != "" {
 		return false
 	}
+	// --context emits bounded output for an agent harness, such as inbox --context.
+	if flag := cmd.Flags().Lookup("context"); flag != nil && flag.Changed {
+		return false
+	}
 	fields := strings.Fields(cmd.CommandPath())
 	if len(fields) == 0 {
 		return true

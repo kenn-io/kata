@@ -114,6 +114,7 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 			{name: "agent flag", args: []string{"projects", "list", "--agent"}},
 			{name: "agent format", args: []string{"projects", "list", "--format", "agent"}},
 			{name: "daemon hook child", hook: "1", args: []string{"projects", "list"}},
+			{name: "harness context", args: []string{"inbox", "--context", "--all", "--for", "actor/teammate"}},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				capture := &cliUseCapture{status: "disabled"}
