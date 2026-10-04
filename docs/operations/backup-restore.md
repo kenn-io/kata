@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-04
 ---
 
 # Backup and restore
@@ -21,7 +21,14 @@ mode, so recent writes can live in `kata.db-wal`; a plain file copy can look
 successful while missing recent data.
 
 The `kata.db.bak.*` files created by schema cutover are temporary rollback
-files, not scheduled backups.
+files, not scheduled backups. Cutover runs SQLite `integrity_check` on the
+source before export and copying, on the copied backup, and on the replacement
+database before installation. An unhealthy source stops the upgrade without
+replacing it; repair or recover it before retrying. The physical backup includes
+committed WAL data and retains the old schema for use with the matching binary.
+Keep all other database users stopped throughout cutover.
+When the database path is a symlink, cutover replaces its resolved target and
+keeps the link. The daemon lock continues to protect the same database path.
 
 SQLite schema cutover preserves a moved issue's audit events in their original
 projects. Before replacing the database, it checks the imported event count
@@ -89,9 +96,14 @@ Restore into a fresh SQLite database file:
 kata import --input backups/kata-20260531.jsonl --target ~/.kata/restored.db
 ```
 
-The target must not exist unless `--force` is set. To use the restored
-database, stop the daemon, point `KATA_DSN` or `KATA_DB` at the restored file,
-or move it into `KATA_HOME` as `kata.db`, then restart.
+The target must not exist unless `--force` is set. For a symlink target, forced
+import replaces the resolved database and leaves the link in place.
+
+SQLite import takes the target's canonical database lock before replacement
+and refuses if a daemon holds it, including through a symlink or another
+home. Stop that daemon before retrying. To use the restored database, stop
+the daemon, then point `KATA_DSN` or `KATA_DB` at the restored file, or move
+it into `KATA_HOME` as `kata.db`. Then restart the daemon.
 
 Without `--merge`, `kata import` creates a target database from the input
 snapshot. It does not add records to an existing database.

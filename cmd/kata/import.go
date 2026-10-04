@@ -13,9 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/pathresolve"
 )
 
 func newImportCmd() *cobra.Command {
@@ -139,6 +141,12 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if merge {
 		return runSQLiteJSONLMerge(cmd, input, target)
 	}
+	// Replace the database behind a symlink, with staging beside that database.
+	if resolved, err := pathresolve.EvalSymlinks(target); err == nil {
+		target = resolved
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("resolve import target: %w", err)
+	}
 	targetExists, err := sqliteFileSetExists(target)
 	if err != nil {
 		return fmt.Errorf("stat import target: %w", err)
@@ -159,12 +167,7 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if err != nil {
 		return err
 	}
-	installed := false
-	defer func() {
-		if !installed {
-			cleanupTmp()
-		}
-	}()
+	defer cleanupTmp()
 	d, err := storeopen.Open(cmd.Context(), tmpTarget)
 	if err != nil {
 		return err
@@ -182,7 +185,6 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if err := installImportedTarget(tmpTarget, target, force); err != nil {
 		return err
 	}
-	installed = true
 	return writeImportSuccess(cmd, target)
 }
 
@@ -355,10 +357,21 @@ func prepareImportTempTarget(target string) (string, func(), error) {
 		return "", nil, fmt.Errorf("close import target placeholder: %w", err)
 	}
 	_ = removeSQLiteFileSetMain(tmpTarget)
-	return tmpTarget, func() { _ = removeSQLiteFileSetMain(tmpTarget) }, nil
+	return tmpTarget, func() {
+		_ = removeSQLiteFileSetMain(tmpTarget)
+		// This unique temporary path is private to the import, and its store
+		// is closed before cleanup. No other opener can depend on this lock.
+		_ = os.Remove(tmpTarget + ".daemon.lock") //nolint:gosec // G703: tmpTarget comes from os.CreateTemp above.
+	}, nil
 }
 
 func installImportedTarget(tmpTarget, target string, force bool) error {
+	lock, err := sqlitelock.Acquire(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
 	if !force {
 		targetExists, err := sqliteFileSetExists(target)
 		if err != nil {

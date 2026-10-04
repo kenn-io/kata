@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -37,7 +38,15 @@ const (
 // are replaced with that backend's standalone defaults.
 type Config struct {
 	Postgres pgstore.Config
+	// RequireMigrationConsent refuses upgrades of existing SQLite databases.
+	// The CLI sets this for development builds without explicit consent.
+	// Library callers retain automatic upgrades with the zero value.
+	RequireMigrationConsent bool
 }
+
+// ErrMigrationConsentRequired means startup policy refused an existing SQLite
+// schema upgrade. The caller supplies instructions for granting consent.
+var ErrMigrationConsentRequired = errors.New("SQLite migration requires consent")
 
 // InstalledFreshPostgresSchema reports whether store's open created its
 // configured Postgres schema. False is the safe answer for other backends and
@@ -118,7 +127,7 @@ func OpenWithConfig(ctx context.Context, dsn string, openConfig Config, opts ...
 	if hasScheme {
 		path = strings.TrimPrefix(dsn, "sqlite://")
 	}
-	return openSQLite(ctx, path, cfg, opts)
+	return openSQLite(ctx, path, cfg, opts, openConfig.RequireMigrationConsent)
 }
 
 // PeekSchemaVersion reads a target's schema version without applying
@@ -146,6 +155,22 @@ func PeekSchemaVersion(ctx context.Context, dsn string) (int, error) {
 		path = strings.TrimPrefix(dsn, "sqlite://")
 	}
 	return sqlitestore.PeekSchemaVersion(ctx, path)
+}
+
+// CheckMigrationConsent checks SQLite upgrade eligibility without creating or
+// changing the database. Callers use it before stopping a running daemon; Open
+// checks the same policy again while holding the database lock.
+func CheckMigrationConsent(ctx context.Context, dsn string) error {
+	backend, err := BackendForDSN(dsn)
+	if err != nil || backend != BackendSQLite {
+		return err
+	}
+	path := strings.TrimPrefix(dsn, "sqlite://")
+	ver, needed, err := sqliteMigrationNeeded(ctx, path)
+	if err != nil || !needed {
+		return err
+	}
+	return sqliteMigrationConsentError(path, ver)
 }
 
 // RemoveFreshPostgresTarget rolls back a schema installed for a failed first
@@ -177,40 +202,67 @@ func OpenReadOnly(ctx context.Context, dsn string, opts ...db.OpenOption) (db.St
 	return Open(ctx, dsn, append(opts, db.ReadOnly())...)
 }
 
-func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption) (db.Storage, error) {
+func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption, requireConsent bool) (db.Storage, error) {
 	if cfg.ReadOnly {
 		return sqlitestore.Open(ctx, path, opts...)
 	}
-	ver, peekErr := sqlitestore.PeekSchemaVersion(ctx, path)
-	switch {
-	case peekErr == nil && ver > db.CurrentSchemaVersion():
-		return nil, fmt.Errorf("schema_version %d at %s is newer than binary schema %d; use a newer kata binary",
-			ver, path, db.CurrentSchemaVersion())
-	case peekErr == nil && ver < db.CurrentSchemaVersion():
-		if ver == 0 {
-			hasTables, err := sqlitestore.HasUserTables(ctx, path)
-			if err != nil {
-				return nil, err
-			}
-			if !hasTables {
-				break
-			}
+	lock, err := sqlitelock.Acquire(path)
+	if err != nil {
+		return nil, err
+	}
+	storage, err := openSQLiteDatabase(ctx, path, opts, requireConsent)
+	if err != nil {
+		lock.Release()
+		return nil, err
+	}
+	return &lockedStorage{Store: storage, lock: lock}, nil
+}
+
+func openSQLiteDatabase(ctx context.Context, path string, opts []db.OpenOption, requireConsent bool) (*sqlitestore.Store, error) {
+	ver, needed, err := sqliteMigrationNeeded(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	if needed {
+		if requireConsent {
+			return nil, sqliteMigrationConsentError(path, ver)
 		}
-		// Pre-current SQLite gets upgraded through JSONL cutover, which
-		// exports the legacy shape and re-imports it into a fresh
-		// baseline-shaped DB. Re-peek afterwards to confirm the cutover
-		// landed; the error from peek surfaces if the on-disk state is
-		// somehow worse than the source was.
+		// Recheck after cutover before handing the replacement to the caller.
 		if err := jsonl.AutoCutover(ctx, path); err != nil {
 			return nil, err
 		}
 		if _, err := sqlitestore.PeekSchemaVersion(ctx, path); err != nil {
 			return nil, fmt.Errorf("peek after cutover: %w", err)
 		}
-	case peekErr != nil && !isFileNotExist(peekErr):
-		return nil, peekErr
 	}
 	return sqlitestore.Open(ctx, path, opts...)
+}
+
+func sqliteMigrationConsentError(path string, ver int) error {
+	return fmt.Errorf("%w: database %s from schema %d to %d", ErrMigrationConsentRequired, path, ver, db.CurrentSchemaVersion())
+}
+
+func sqliteMigrationNeeded(ctx context.Context, path string) (int, bool, error) {
+	ver, peekErr := sqlitestore.PeekSchemaVersion(ctx, path)
+	switch {
+	case peekErr == nil && ver > db.CurrentSchemaVersion():
+		return ver, false, fmt.Errorf("schema_version %d at %s is newer than binary schema %d; use a newer kata binary",
+			ver, path, db.CurrentSchemaVersion())
+	case peekErr == nil && ver < db.CurrentSchemaVersion():
+		if ver == 0 {
+			hasTables, err := sqlitestore.HasUserTables(ctx, path)
+			if err != nil {
+				return ver, false, err
+			}
+			if !hasTables {
+				break
+			}
+		}
+		return ver, true, nil
+	case peekErr != nil && !isFileNotExist(peekErr):
+		return ver, false, peekErr
+	}
+	return ver, false, nil
 }
 
 func isFileNotExist(err error) bool {

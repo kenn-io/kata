@@ -508,7 +508,7 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 	daemonCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- runDaemonWithListen(daemonCtx, "127.0.0.1:0", false, false)
+		done <- runDaemonWithListen(daemonCtx, "127.0.0.1:0", false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -636,7 +636,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	exited := make(chan struct{})
 	go func() {
 		defer close(exited)
-		done <- runDaemonWithListen(ctx, "", false, false)
+		done <- runDaemonWithListen(ctx, "", false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -700,7 +700,7 @@ model = "example-model"
 	exited := make(chan struct{})
 	go func() {
 		defer close(exited)
-		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -737,14 +737,17 @@ model = "example-model"
 }
 
 type daemonRuntimeRecordJSON struct {
-	Network string `json:"network"`
-	Address string `json:"address"`
+	Network  string            `json:"network"`
+	Address  string            `json:"address"`
+	Metadata map[string]string `json:"metadata"`
 }
 
 func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Namespace, daemonRuntimeRecordJSON) {
 	t.Helper()
 	resetFlags(t)
-	setupKataEnv(t)
+	home := setupKataEnv(t)
+	t.Chdir(home)
+	t.Setenv("KATA_DB", "kata.db")
 	t.Setenv("PORT", "")
 	t.Setenv(daemon.AutoStartMarkerEnv, "1")
 
@@ -757,7 +760,7 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runDaemonWithListen(ctx, listen, false, false)
+		done <- runDaemonWithListen(ctx, listen, false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -784,6 +787,12 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
+	require.True(t, filepath.IsAbs(got.Metadata["db_path"]), "runtime paths must remain usable from another working directory")
+	wantDB, err := os.Stat(filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	gotDB, err := os.Stat(got.Metadata["db_path"])
+	require.NoError(t, err)
+	require.True(t, os.SameFile(wantDB, gotDB), "runtime record must identify the opened database")
 	return ns, got
 }
 
@@ -814,7 +823,7 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	t.Cleanup(func() { startDetachedDaemon = oldStart })
 	var gotListen string
 	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly bool, _, _ bool) (daemonStartOutput, error) {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
 		return daemonStartOutput{
@@ -912,7 +921,7 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 
 	orig := launchDetachedDaemon
 	t.Cleanup(func() { launchDetachedDaemon = orig })
-	launchDetachedDaemon = func(context.Context, string, string, bool, bool) (daemonStartOutput, error) {
+	launchDetachedDaemon = func(context.Context, string, string, bool, bool, bool) (daemonStartOutput, error) {
 		select {
 		case <-exited:
 			return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
@@ -921,7 +930,7 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 		}
 	}
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "replaced", out.Action)
@@ -938,11 +947,11 @@ func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) {
 
 	orig := launchDetachedDaemon
 	t.Cleanup(func() { launchDetachedDaemon = orig })
-	launchDetachedDaemon = func(context.Context, string, string, bool, bool) (daemonStartOutput, error) {
+	launchDetachedDaemon = func(context.Context, string, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{}, errors.New("resident daemon must not be replaced")
 	}
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -955,7 +964,7 @@ func TestDaemonStart_ReportsReplacedDaemon(t *testing.T) {
 	setupKataEnv(t)
 	oldStart := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = oldStart })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{
 			Action: "replaced", PID: 1234, ReplacedPID: 1111, Address: "127.0.0.1:7777",
 		}, nil
@@ -973,7 +982,7 @@ func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -987,7 +996,7 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -1001,7 +1010,7 @@ func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("listen =\n"), 0o600))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -1016,7 +1025,7 @@ func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
 		[]byte(`listen = "100.64.0.5:7777"`+"\n"), 0o600))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -1031,7 +1040,7 @@ func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -1050,13 +1059,13 @@ func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
 		runDaemonForeground = oldRun
 	})
 	var detachedCalled bool
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		detachedCalled = true
 		return daemonStartOutput{}, nil
 	}
 	var gotListen string
 	var gotInsecureReadonly bool
-	runDaemonForeground = func(_ context.Context, listen string, insecureReadonly, _ bool) error {
+	runDaemonForeground = func(_ context.Context, listen string, insecureReadonly bool, _, _ bool) error {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
 		return nil
@@ -1189,7 +1198,7 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{
 			Action:  "started",
 			PID:     4242,
@@ -1230,7 +1239,7 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		select {
 		case <-exited:
 			return daemonStartOutput{
@@ -1280,7 +1289,7 @@ func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{Action: "started", PID: 4244, Address: "127.0.0.1:7777"}, nil
 	}
 
@@ -1299,7 +1308,7 @@ func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{
 			Action: "started", PID: 4242, Address: "127.0.0.1:7777",
 			WebURL: "http://127.0.0.1:28888",
@@ -1333,7 +1342,7 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 		return daemonStartOutput{
 			Action: "started", PID: 4242, Address: "127.0.0.1:7777",
 			WebURL: "http://127.0.0.1:28888",
@@ -1354,7 +1363,7 @@ func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
 	t.Cleanup(func() { startDetachedDaemon = orig })
 	var gotListen string
 	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly bool, _, _ bool) (daemonStartOutput, error) {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
 		return daemonStartOutput{Action: "started", PID: 4242, Address: listen}, nil
@@ -1423,7 +1432,7 @@ model = "example-model"
 			orig := startDetachedDaemon
 			t.Cleanup(func() { startDetachedDaemon = orig })
 			startCalled := false
-			startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+			startDetachedDaemon = func(context.Context, string, bool, bool, bool) (daemonStartOutput, error) {
 				startCalled = true
 				return daemonStartOutput{}, errors.New("replacement startup attempted")
 			}
@@ -1680,7 +1689,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -2245,7 +2254,7 @@ private_key_path = "/secure/example.pem"
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -2509,7 +2518,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false) }()
 
 	namespace, err := daemon.NewNamespace()
 	require.NoError(t, err)
@@ -2557,7 +2566,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", true, false) }()
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", true, false, false) }()
 
 	namespace, err := daemon.NewNamespace()
 	require.NoError(t, err)
@@ -3131,7 +3140,7 @@ func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
 	started := time.Now()
-	err = runDaemonWithListen(context.Background(), occupied.Addr().String(), false, false)
+	err = runDaemonWithListen(context.Background(), occupied.Addr().String(), false, false, false)
 	require.Error(t, err)
 	assert.Less(t, time.Since(started), 3*time.Second,
 		"runner shutdown must cancel before waiting when startup returns with a live parent context")
@@ -3158,7 +3167,7 @@ func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false) }()
 
 	select {
 	case runner := <-captured:
@@ -3207,7 +3216,7 @@ func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *te
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -3258,7 +3267,7 @@ command = %q
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

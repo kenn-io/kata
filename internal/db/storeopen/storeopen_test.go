@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/testenv"
@@ -46,6 +47,26 @@ func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	_, err = store.CreateProject(ctx, "sqlite-scheme-project")
 	require.NoError(t, err)
+}
+
+func TestOpenWritableSQLitePreservesOptionalStorageInterfaces(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, err := storeopen.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, ok := store.(db.UIStore)
+	require.True(t, ok, "writable SQLite storage must preserve its UIStore capability")
+	_, ok = store.(db.IssueStatusReader)
+	require.True(t, ok, "writable SQLite storage must preserve issue status reads")
+	_, ok = store.(db.IssueStatusWriter)
+	require.True(t, ok, "writable SQLite storage must preserve issue status writes")
+	_, ok = store.(db.IssueStatusSummaryReader)
+	require.True(t, ok, "writable SQLite storage must preserve issue status summaries")
+	_, ok = store.(db.IssueStatusScanStore)
+	require.True(t, ok, "writable SQLite storage must preserve issue status scans")
+	_, ok = store.(db.IssueStatusLocatorStore)
+	require.True(t, ok, "writable SQLite storage must preserve issue status locators")
 }
 
 func TestValidateAcceptsPostgresSchemes(t *testing.T) {
@@ -170,6 +191,39 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	v, err := s.SchemaVersion(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, db.CurrentSchemaVersion(), v)
+}
+
+func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "kata.db")
+	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
+
+	before, err := os.ReadFile(path) //nolint:gosec // G304: fixture path under t.TempDir.
+	require.NoError(t, err)
+	lock, err := sqlitelock.Acquire(path)
+	require.NoError(t, err)
+	store, err := storeopen.Open(t.Context(), path)
+	if store != nil {
+		require.NoError(t, store.Close())
+	}
+	after, readErr := os.ReadFile(path) //nolint:gosec // G304: fixture path under t.TempDir.
+	require.NoError(t, readErr)
+	require.ErrorContains(t, err, "daemon already running")
+	require.Equal(t, before, after, "a locked source must not be cut over")
+	lock.Release()
+
+	store, err = storeopen.Open(t.Context(), path)
+	require.NoError(t, err)
+	secondLock, err := sqlitelock.Acquire(path)
+	if secondLock != nil {
+		secondLock.Release()
+	}
+	require.ErrorContains(t, err, "daemon already running", "the returned writable handle owns its lock")
+	require.NoError(t, store.Close())
+
+	lock, err = sqlitelock.Acquire(path)
+	require.NoError(t, err)
+	lock.Release()
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {

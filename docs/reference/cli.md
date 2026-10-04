@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # CLI reference
@@ -1393,7 +1393,7 @@ after login. Kata never puts a remote token or another credential in the URL.
 ## Daemon and diagnostics
 
 ```sh
-kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
+kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly] [--allow-dev-migration]
 kata daemon status
 kata daemon locate [--json | --agent]
 kata daemon diagnose [--expect-project-uid <uid>] [--json | --agent]
@@ -1471,6 +1471,29 @@ returns an error identifying the installed version and directs you to
 `kata daemon restart` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.
 
+Development CLI daemons refuse to upgrade an existing older SQLite database and
+report its database and `KATA_HOME` paths. Use an isolated temporary home and
+database for manual checks; see [Building](../development/contributing.md#building).
+To deliberately upgrade an existing database, stop its daemon and pass
+`daemon start --allow-dev-migration`, or set `KATA_ALLOW_DEV_MIGRATION=1` for
+that invocation. This consent does not bypass integrity checks. Fresh databases
+and databases already at the binary's schema need no opt-in. Clean release
+versions keep automatic upgrades. Tagged Go module installs count as releases;
+Go pseudo-versions, snapshot builds, and bare commit hashes still require
+development migration consent. This CLI policy does not apply to programs
+embedding `kata.Service` or to explicit `kata import` operations. It covers
+SQLite; PostgreSQL retains its configured schema startup policy.
+
+Each SQLite daemon locks the canonical database path before opening or
+migrating it. Another daemon cannot start against that file through a different
+home, socket, or TCP listener. Stop the existing daemon before switching builds;
+leave the `.daemon.lock` file in place. The OS releases the lock when the process
+exits. Startup also checks live runtime records for older releases that predate
+this lock. If a live older daemon in the same home recorded a relative database
+path, startup cannot verify which database it owns and asks you to stop it first.
+New runtime records use absolute canonical paths. Stop older daemons before
+using their database from another home.
+
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
 background daemon and returns after startup is confirmed. If the running local
 daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
@@ -1479,9 +1502,11 @@ PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
 setup where the daemon process should stay attached to the terminal. `daemon
 restart` gracefully stops any running local daemon, waits for it to exit, and
-starts a replacement using the configured listener. It validates replacement
-settings before stopping the current daemon; use the restart flags to repeat
-transient startup overrides. Background start and restart output reports the
+starts a replacement using the configured listener. Restart and idle-daemon
+replacement check development migration consent before stopping the current
+daemon. Set `KATA_ALLOW_DEV_MIGRATION=1` for a deliberate restart upgrade.
+Restart also validates replacement settings before stopping; use its flags to
+repeat transient startup overrides. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.

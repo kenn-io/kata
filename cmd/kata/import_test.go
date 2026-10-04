@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 )
 
@@ -38,6 +39,9 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
 	assert.Contains(t, out, target)
+	temps, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".target.db.import-*"))
+	require.NoError(t, err)
+	require.Empty(t, temps, "successful import must remove temporary files, including locks")
 }
 
 func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
@@ -111,6 +115,58 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, err = runCmdOutput(t, nil, "import", "--input", input, "--target", target)
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "target already exists")
+}
+
+func TestImportForceRefusesActiveSQLiteTarget(t *testing.T) {
+	for _, alias := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "symlink"}[alias], func(t *testing.T) {
+			_, input, target := setupImportTest(t)
+			active, err := storeopen.Open(t.Context(), target)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = active.Close() })
+			_, err = active.CreateProject(t.Context(), "existing-project")
+			require.NoError(t, err)
+			importTarget := target
+			if alias {
+				importTarget = filepath.Join(t.TempDir(), "alias.db")
+				if err := os.Symlink(target, importTarget); err != nil {
+					t.Skipf("SQLite database symlinks unavailable: %v", err)
+				}
+			}
+			before, err := os.Stat(importTarget)
+			require.NoError(t, err)
+
+			_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", importTarget)
+			require.ErrorContains(t, err, "database lock")
+			after, err := os.Stat(importTarget)
+			require.NoError(t, err)
+			require.True(t, os.SameFile(before, after), "refused import must keep the active database")
+			_, err = active.CreateProject(t.Context(), "after-refusal")
+			require.NoError(t, err)
+			// Read the writer's path so this assertion uses its WAL snapshot.
+			// The alias still identifying that file is checked above.
+			observed, err := storeopen.OpenReadOnly(t.Context(), target)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = observed.Close() })
+			_, err = observed.ProjectByName(t.Context(), "after-refusal")
+			require.NoError(t, err, "writes must remain visible in the active database")
+			require.NoError(t, observed.Close())
+
+			require.NoError(t, active.Close())
+			_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", importTarget)
+			require.NoError(t, err)
+			if alias {
+				link, err := os.Readlink(importTarget)
+				require.NoError(t, err, "forced import must preserve the target symlink")
+				require.Equal(t, target, link)
+			}
+			imported, err := storeopen.Open(t.Context(), target)
+			require.NoError(t, err, "completed import must release the target lock")
+			defer func() { _ = imported.Close() }()
+			_, err = imported.ProjectByName(t.Context(), "kata")
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestImportMergeRejectsReplacementFlags(t *testing.T) {
@@ -490,6 +546,9 @@ func TestImportFailureRemovesNewPartialTarget(t *testing.T) {
 
 	_, statErr := os.Stat(target)
 	assert.True(t, os.IsNotExist(statErr), "failed import must not leave a partial target DB")
+	temps, err := filepath.Glob(filepath.Join(home, ".target.db.import-*"))
+	require.NoError(t, err)
+	require.Empty(t, temps, "failed import must remove temporary files, including locks")
 }
 
 func TestInstallImportedTargetForcePreservesUserDirectoryAtDeterministicBackupSidecarPath(t *testing.T) {
