@@ -2300,6 +2300,45 @@ describe('App', () => {
       expect(telemetry).toHaveLength(0)
     })
 
+    it('reports app_opened with the renewed session when the stored one is stale', async () => {
+      storeSession('stale-session', 'stale-csrf')
+      const telemetry: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) telemetry.push(request)
+          if (path === '/api/v1/ui/session/local') {
+            return Response.json({
+              session: 'local-session',
+              csrf: 'local-csrf',
+              return_path: '/kata',
+              writable: true,
+              updates: 'poll',
+              actor_policy: 'request',
+            })
+          }
+          if (request.headers.get('X-Kata-Web-Session') === 'stale-session') {
+            return Response.json(
+              { status: 401, error: { code: 'unauthorized', message: 'session expired' } },
+              { status: 401, headers: { 'X-Kata-Web-Authentication': 'loopback' } },
+            )
+          }
+          if (path === telemetryPath) return telemetryAccepted()
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+
+      render(App)
+
+      expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      expectServingDaemonPost(telemetry[1], 'local-session', 'local-csrf')
+    })
+
     it('a background refresh after UTC midnight is not an opening', async () => {
       vi.useFakeTimers({ toFake: ['Date'] })
       vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))

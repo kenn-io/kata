@@ -22,8 +22,12 @@ const (
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 
-// Client is the daemon-facing telemetry reporter contract.
-type Client = posthog.Client
+// Client is the daemon-facing telemetry reporter contract. EventAllowed lets
+// the UI capture route reject events outside the allowlist.
+type Client interface {
+	posthog.Client
+	EventAllowed(event string) bool
+}
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
 type Reporter = posthog.Reporter
@@ -37,11 +41,6 @@ type Options struct {
 	InstalledAt time.Time
 	Version     string
 	Commit      string
-}
-
-// EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
-func EnabledFromEnv() bool {
-	return !testing.Testing() && posthog.EnabledFromEnv(envPrefix)
 }
 
 // NewReporter builds an enabled reporter, or a disabled one that keeps the

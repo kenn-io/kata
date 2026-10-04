@@ -163,8 +163,19 @@
     stopAppOpened ??= startAppOpenedReporting({
       route: '/api/v1/ui/telemetry',
       surface: 'web',
-      post: (_route, event) => captureTelemetryEvent(event),
+      post: async (_route, event) => {
+        const response = await captureTelemetryEvent(event)
+        if (response.status === 401) restartAppOpenedAfterAuthentication()
+        return response
+      },
     })
+  }
+  // Stopping before the 401 resolves keeps the day unrecorded; the renewed
+  // session, now or after navigateAfterAuthentication, reports it instead.
+  function restartAppOpenedAfterAuthentication(): void {
+    stopAppOpened?.()
+    stopAppOpened = undefined
+    if (!destroyed && loadSessionCredentials() !== undefined) reportAppOpened()
   }
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
