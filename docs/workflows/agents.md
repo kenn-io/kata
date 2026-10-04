@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # Agent workflows
@@ -152,7 +152,7 @@ policy can prevent a configured hook from running.
 | `amp` | Yes | Yes | Launcher | User or project installations; simultaneous owned user/project configurations rejected |
 | `opencode` | Yes | Yes | Launcher | User/project; runtime version selects the matching v1/v2 API |
 | `pi` | Yes | Yes | Yes | User/project; Pi 0.99.1 or newer; graceful quit only |
-| `openclaw` | Yes | Yes | Yes | User/project; OpenClaw 2026.9.7 or newer; authorized workspace capture required |
+| `openclaw` | Yes | Yes | Yes | User/project; OpenClaw 2026.9.7 or newer; authorized workspace capture required; shared inbox is opt-in |
 | `kimi-code` | Yes | Yes | Yes | User only; UserPromptSubmit context |
 | `kimi` | No | Yes | Yes | Archived Kimi CLI; user only; use committed AGENTS.md for context |
 | `muse` | Yes | Opt-in/launcher | Opt-in/launcher | User/project contract; managed attention requires explicit user opt-in |
@@ -167,9 +167,11 @@ never count as terminal exits. Abrupt process death cannot run native cleanup.
 Use the [launcher recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for targets without a terminal hook and older runtimes.
 
-Code extensions refresh the selected exact-recipient inbox at prompt boundaries.
-Cleared requests or read failures remove stale current inbox text. Loaded project
-extensions take precedence per capability where the native host permits it.
+When inbox context is enabled, code extensions refresh the selected
+exact-recipient inbox at prompt boundaries. Cleared requests or read failures
+remove stale inbox text. OpenClaw defaults this behavior off and requires
+`--share-inbox`. Loaded project extensions take precedence per capability where
+the native host permits it.
 Amp plugins run in separate processes, so Kata instead rejects conflicting owned
 user/project installations and records project scopes in a local scope index.
 Multiple Amp project installations are supported.
@@ -205,6 +207,15 @@ removal can recover safely. Edited or ambiguous artifacts remain preserved.
 OpenClaw installs a native package and its discovery/permission registration.
 Prompt/workspace capture must be authorized even for attention-only setup.
 Existing deny policies remain in place; status reports unavailable components.
+Inbox context is off by default. `kata agent-hook install openclaw --share-inbox`
+opts in to adding the Gateway's `KATA_INBOX_USER` inbox to every
+prompt handled by the Kata plugin. This is shared across conversations on that
+Gateway; installation and status warn about that scope. Use
+`--share-inbox=false` to disable it without removing the other hooks.
+Reinstalling without the option preserves
+a choice made with this option. Older bundles have no recorded opt-in and are
+updated with sharing off. The recipient is read from the Gateway environment at
+runtime rather than stored in OpenClaw config.
 Kata manages standard JSON configs. JSON5 comments, `$include`, Nix and
 read-only setups need native OpenClaw plugin management; Kata rejects those
 mutations before writing instead of flattening operator configuration.

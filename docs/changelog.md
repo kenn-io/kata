@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -16,6 +16,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `kata agent-hook install <harness> --local` or the `kata init` hook option
   that installed them. Reinstalling replaces hooks that still call the plural
   command. See the [agent-hook reference](reference/cli.md#agent-hook).
+
+- Keep OpenClaw inbox context off by default. Reinstalling older managed
+  bundles that predate the opt-in turns sharing off. Enable it with the
+  single-target `kata agent-hook install openclaw --share-inbox` only when every
+  prompt handled by that plugin may receive the Gateway's `KATA_INBOX_USER`
+  inbox. Use `--share-inbox=false` to disable it without removing other hooks.
 
 - Set up consumer Muse with standing instructions, a Kata skill, and a recurring
   poll specification using `kata agent-hook instructions install muse --home <path>`.
