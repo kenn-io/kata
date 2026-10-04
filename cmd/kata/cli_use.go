@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/hooks"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -17,6 +21,9 @@ import (
 
 // cliUseReportTimeout bounds the use report on the command's exit path; var so tests can shorten it.
 var cliUseReportTimeout = time.Second
+
+// cliUseNow picks the UTC day a report counts for; var so tests can move it.
+var cliUseNow = time.Now
 
 // cliUseTarget is the resolved daemon this invocation built its own client from.
 var cliUseTarget atomic.Pointer[client.ResolvedDaemon]
@@ -30,6 +37,10 @@ func recordCLIUseTarget(resolved client.ResolvedDaemon) {
 
 // reportsCLIUse reports whether a successful cmd counts as a person's use.
 func reportsCLIUse(cmd *cobra.Command) bool {
+	// A person at a prompt reads stdout on a terminal; agents and scripts read it through a pipe.
+	if !isTTY(os.Stdout) {
+		return false
+	}
 	if mode := currentOutputMode(); mode == outputAgent || mode == outputContract {
 		return false
 	}
@@ -40,24 +51,34 @@ func reportsCLIUse(cmd *cobra.Command) bool {
 	if flag := cmd.Flags().Lookup("context"); flag != nil && flag.Changed {
 		return false
 	}
+	return !isAgentFacingCommand(cmd)
+}
+
+func isAgentFacingCommand(cmd *cobra.Command) bool {
 	fields := strings.Fields(cmd.CommandPath())
 	if len(fields) == 0 {
-		return true
+		return false
 	}
 	path := strings.Join(fields[1:], " ")
 	for _, agentFacing := range agentFacingCommands {
 		if path == agentFacing || strings.HasPrefix(path, agentFacing+" ") {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
-// reportCLIUse sends app_opened with surface cli to the daemon the command used.
-// It never resolves or starts a daemon, and drops every outcome.
+// reportCLIUse sends app_opened with surface cli to the daemon the command used,
+// at most once per UTC day per daemon once that daemon accepts it. It never
+// resolves or starts a daemon, and drops every outcome.
 func reportCLIUse(cmd *cobra.Command) {
 	target := cliUseTarget.Load()
 	if target == nil || !reportsCLIUse(cmd) {
+		return
+	}
+	day := cliUseNow().UTC().Format(time.DateOnly)
+	marker := cliUseMarkerPath(*target)
+	if readCLIUseDay(marker) == day {
 		return
 	}
 	parent := cmd.Context()
@@ -75,7 +96,43 @@ func reportCLIUse(cmd *cobra.Command) {
 	if err != nil {
 		return
 	}
-	_, _ = apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
+	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
 		Body: &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}},
 	})
+	if err == nil && resp.JSON202 != nil {
+		recordCLIUseDay(marker, day)
+	}
+}
+
+// cliUseMarkerPath names the file holding the last UTC day target accepted a
+// report from this KATA_HOME, or "" when there is no home to keep it in.
+func cliUseMarkerPath(target client.ResolvedDaemon) string {
+	home, err := config.KataHome()
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(target.BaseURL + "\n" + target.UnixSocket))
+	return filepath.Join(home, "telemetry", "cli-opened-"+hex.EncodeToString(sum[:8]))
+}
+
+func readCLIUseDay(path string) string {
+	if path == "" {
+		return ""
+	}
+	day, err := os.ReadFile(path) //nolint:gosec // G304: path is derived from KATA_HOME, not user input.
+	if err != nil {
+		return ""
+	}
+	return string(day)
+}
+
+// recordCLIUseDay is best effort: without the marker the next command reports again.
+func recordCLIUseDay(path, day string) {
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(day), 0o600)
 }

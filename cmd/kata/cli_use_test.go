@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,10 +49,12 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 
 var cliSurface = []map[string]any{{"surface": "cli"}}
 
-// newCLIUseEnv boots a daemon whose reporter is reporter, with no hook marker inherited.
+// newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
+// terminal with no hook marker inherited.
 func newCLIUseEnv(t *testing.T, reporter daemon.TelemetryReporter) *testenv.Env {
 	t.Helper()
 	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	return testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = reporter })
 }
@@ -142,6 +147,7 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 
 	t.Run("command classification", func(t *testing.T) {
 		t.Setenv(hooks.HookVersionEnv, "")
+		stubIsTTY(t, true)
 		for _, test := range []struct {
 			path []string
 			want bool
@@ -245,4 +251,88 @@ func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	reportCLIUse(cmd)
 
 	assert.Equal(t, cliSurface, capture.recorded())
+}
+
+// cliUseDaemon is a daemon stand-in that counts app_opened posts and answers with status.
+type cliUseDaemon struct {
+	url    string
+	status atomic.Int32
+	posts  atomic.Int32
+}
+
+func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
+	t.Helper()
+	d := &cliUseDaemon{}
+	d.status.Store(http.StatusAccepted)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/ui/telemetry" {
+			http.NotFound(w, r)
+			return
+		}
+		d.posts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(int(d.status.Load()))
+		_, _ = w.Write([]byte(`{"status":"queued"}`))
+	}))
+	t.Cleanup(server.Close)
+	d.url = server.URL
+	return d
+}
+
+func setCLIUseClock(t *testing.T, now time.Time) {
+	t.Helper()
+	saved := cliUseNow
+	cliUseNow = func() time.Time { return now }
+	t.Cleanup(func() { cliUseNow = saved })
+}
+
+// reportCLIUseTo runs the use report for a typed command that used the daemon at url.
+func reportCLIUseTo(t *testing.T, url string) {
+	t.Helper()
+	cmd := findCommand(t, "projects", "list")
+	cmd.SetContext(context.Background())
+	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: url})
+	t.Cleanup(func() { cliUseTarget.Store(nil) })
+	reportCLIUse(cmd)
+}
+
+func TestCLIUseReportsOncePerDayPerDaemon(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	first, second := newCLIUseDaemon(t), newCLIUseDaemon(t)
+	setCLIUseClock(t, time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC))
+
+	reportCLIUseTo(t, first.url)
+	reportCLIUseTo(t, first.url)
+	reportCLIUseTo(t, second.url)
+	assert.Equal(t, int32(1), first.posts.Load(), "a later command the same day sends nothing")
+	assert.Equal(t, int32(1), second.posts.Load(), "each daemon counts its own day")
+
+	setCLIUseClock(t, time.Date(2026, 10, 3, 0, 1, 0, 0, time.UTC))
+	reportCLIUseTo(t, first.url)
+	assert.Equal(t, int32(2), first.posts.Load(), "the next UTC day reports again")
+}
+
+func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	target := newCLIUseDaemon(t)
+	target.status.Store(http.StatusServiceUnavailable)
+
+	reportCLIUseTo(t, target.url)
+	target.status.Store(http.StatusAccepted)
+	reportCLIUseTo(t, target.url)
+	reportCLIUseTo(t, target.url)
+
+	assert.Equal(t, int32(2), target.posts.Load(), "only an accepted report ends the day's reporting")
+}
+
+func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, false)
+
+	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")),
+		"agents and scripts read output through a pipe")
 }

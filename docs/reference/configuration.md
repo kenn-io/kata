@@ -865,14 +865,20 @@ daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
 connects to, after connecting. Switching daemons inside the TUI sends nothing
 more.
 
-Typed CLI commands such as `kata create` or `kata list` report `app_opened`
-with `surface: cli` to the daemon they used, after the command succeeds. The
-report never starts a daemon, waits at most one second and prints nothing.
-Probes and local commands such as `kata health` or `kata version` send
-nothing. Agent output mode (`--agent`, `--format agent`), `kata mcp serve`,
-agent hooks and daemon hook children send nothing either. kata recognizes an
-agent only by agent output mode or the daemon hook marker, so a script or agent
-that runs ordinary commands without `--agent` counts like a person.
+CLI commands such as `kata create` or `kata list` that a person runs in a
+terminal report `app_opened` with `surface: cli` to the daemon they used,
+after the command succeeds. Each `KATA_HOME` reports at most once per UTC day
+to each daemon: once the daemon accepts the report, kata records the day under
+`<KATA_HOME>/telemetry/` and later commands that day send nothing. A report
+that fails is retried by the next command. The report never starts a daemon,
+waits at most one second and prints nothing.
+
+Only a command whose standard output is a terminal counts, because agents and
+scripts read kata's output through a pipe. Probes and local commands such as
+`kata health` or `kata version` send nothing. Agent output mode (`--agent`,
+`--format agent`), `kata mcp serve`, agent hooks and daemon hook children send
+nothing either. An agent that runs commands in a terminal without `--agent`
+counts like a person.
 
 Each client's event goes through the daemon it used, so that daemon's install
 ID and its `KATA_TELEMETRY_ENABLED` setting apply, and a TUI or CLI pointed at
