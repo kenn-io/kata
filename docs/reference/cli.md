@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-03
+last_edited: 2026-10-04
 ---
 
 # CLI reference
@@ -1421,6 +1421,7 @@ kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
 kata daemon logs --hooks [--tail]
 kata health
+kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
 kata whoami
 kata quickstart
 kata version [--json]
@@ -1432,6 +1433,23 @@ kata tui [issue-ref]
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
 [TUI preferences](configuration.md#tui-preferences).
+
+### Diagnosing setup
+
+Start with `kata doctor` when commands cannot reach the daemon, a workspace
+points at the wrong project, or hooks and integrations stop working. It reports
+local configuration problems, the selected daemon's health and version, project
+visibility, active hook availability and retained failures, embeddings, and
+declarative federation mapping convergence. Each finding includes a suggested
+fix. See the [doctor troubleshooting guide](../operations/doctor.md).
+
+Doctor never starts or restarts a daemon, opens storage, runs hooks, repairs
+bindings, or edits configuration. Existing daemon authentication and access
+logging may still record the request. `--json` emits one report with stable
+check IDs, `ok`/`info`/`warn`/`fail` statuses, and summary counts. Failed checks
+exit **1** with error kind `checks_failed`; warnings alone exit **0**. `--quiet`
+hides successful and informational findings in text output; JSON always
+contains the full report.
 
 `kata version --json` is a local-only machine-readable version check. It does
 not require a workspace or a running daemon. The output is a single JSON object:
