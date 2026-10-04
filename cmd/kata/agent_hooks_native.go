@@ -22,6 +22,7 @@ type nativeAgentHookOptions struct {
 	ManagedAttention                                        bool
 	SourceSet, Contract, Attention                          bool
 	ConfigPathExplicit                                      bool
+	ShareInbox, ShareInboxSet                               bool
 }
 type nativeAgentHookChange struct {
 	Path                   string
