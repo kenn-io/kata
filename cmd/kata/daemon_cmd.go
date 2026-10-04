@@ -42,6 +42,7 @@ import (
 	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/pathresolve"
 	"go.kenn.io/kit/safefileio"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -307,6 +308,13 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
 			return daemonStartOutputFromRecord("already_running", rec), nil
 		}
+		startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
+		if err != nil {
+			return daemonStartOutput{}, err
+		}
+		if err := preflightDaemonMigration(ctx, startup, allowDevMigration); err != nil {
+			return daemonStartOutput{}, err
+		}
 		if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
 			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
 		}
@@ -530,7 +538,14 @@ func liveSQLiteDaemonRecord(dataDir, dbPath string) (kitdaemon.RuntimeRecord, bo
 			if !daemon.RuntimeProcessAlive(rec) {
 				continue
 			}
-			recordedPath, ok := sqliteRuntimePath(rec.Metadata["db_path"])
+			recordedDSN := rec.Metadata["db_path"]
+			backend, err := storeopen.BackendForDSN(recordedDSN)
+			if recordedDSN != "" && err == nil && backend == storeopen.BackendSQLite && !filepath.IsAbs(strings.TrimPrefix(recordedDSN, "sqlite://")) {
+				// The replacement's working directory cannot identify the old
+				// daemon's relative path, even when a file exists there.
+				return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("daemon pid=%d has a relative database path %q; stop it before starting another SQLite daemon", rec.PID, recordedDSN)
+			}
+			recordedPath, ok := sqliteRuntimePath(recordedDSN)
 			if !ok {
 				continue
 			}
@@ -785,6 +800,10 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("restart: validate replacement: %w", err)
 			}
+			allowDevMigration := os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1"
+			if err := preflightDaemonMigration(cmd.Context(), startup, allowDevMigration); err != nil {
+				return fmt.Errorf("restart: validate replacement: %w", err)
+			}
 			ns := startup.Namespace
 			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
@@ -803,7 +822,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
 				return err
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken, os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1")
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken, allowDevMigration)
 			if err != nil {
 				return err
 			}
@@ -968,6 +987,20 @@ type daemonRestartOutput struct {
 	Address string `json:"address"`
 	DBPath  string `json:"db_path,omitempty"`
 	WebURL  string `json:"web_url,omitempty"`
+}
+
+func preflightDaemonMigration(ctx context.Context, startup daemonStartupPreflight, allowDevMigration bool) error {
+	if !version.IsDevelopment() || allowDevMigration {
+		return nil
+	}
+	return daemonMigrationError(startup.KataHome, storeopen.CheckMigrationConsent(ctx, startup.DBPath))
+}
+
+func daemonMigrationError(home string, err error) error {
+	if errors.Is(err, storeopen.ErrMigrationConsentRequired) {
+		return fmt.Errorf("development build %s refuses to migrate in KATA_HOME %s: %w; use a temporary KATA_HOME and KATA_DB, or explicitly opt in with --allow-dev-migration or KATA_ALLOW_DEV_MIGRATION=1", version.Version, home, err)
+	}
+	return err
 }
 
 func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Duration) error {
@@ -1164,10 +1197,7 @@ func runDaemonProcess(
 	startup.StoreConfig.RequireMigrationConsent = version.IsDevelopment() && !allowDevMigration
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
-		if errors.Is(err, storeopen.ErrMigrationConsentRequired) {
-			return fmt.Errorf("development build %s refuses to migrate in KATA_HOME %s: %w; use a temporary KATA_HOME and KATA_DB, or explicitly opt in with --allow-dev-migration or KATA_ALLOW_DEV_MIGRATION=1", version.Version, startup.KataHome, err)
-		}
-		return err
+		return daemonMigrationError(startup.KataHome, err)
 	}
 	defer func() {
 		if closeDependencies {
@@ -1287,6 +1317,13 @@ func runDaemonProcess(
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
 	for key, source := range dcfg.Sources {
 		rec.Metadata["config_"+key+"_source"] = source
+	}
+	if path, ok := sqliteRuntimePath(dbPath); ok {
+		canonical, err := pathresolve.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("resolve runtime database path: %w", err)
+		}
+		rec.Metadata["db_path"] = canonical
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	if restart != nil {

@@ -737,14 +737,17 @@ model = "example-model"
 }
 
 type daemonRuntimeRecordJSON struct {
-	Network string `json:"network"`
-	Address string `json:"address"`
+	Network  string            `json:"network"`
+	Address  string            `json:"address"`
+	Metadata map[string]string `json:"metadata"`
 }
 
 func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Namespace, daemonRuntimeRecordJSON) {
 	t.Helper()
 	resetFlags(t)
-	setupKataEnv(t)
+	home := setupKataEnv(t)
+	t.Chdir(home)
+	t.Setenv("KATA_DB", "kata.db")
 	t.Setenv("PORT", "")
 	t.Setenv(daemon.AutoStartMarkerEnv, "1")
 
@@ -784,6 +787,12 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
+	require.True(t, filepath.IsAbs(got.Metadata["db_path"]), "runtime paths must remain usable from another working directory")
+	wantDB, err := os.Stat(filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	gotDB, err := os.Stat(got.Metadata["db_path"])
+	require.NoError(t, err)
+	require.True(t, os.SameFile(wantDB, gotDB), "runtime record must identify the opened database")
 	return ns, got
 }
 

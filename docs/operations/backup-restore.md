@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # Backup and restore
@@ -96,9 +96,12 @@ Restore into a fresh SQLite database file:
 kata import --input backups/kata-20260531.jsonl --target ~/.kata/restored.db
 ```
 
-The target must not exist unless `--force` is set. To use the restored
-database, stop the daemon, point `KATA_DSN` or `KATA_DB` at the restored file,
-or move it into `KATA_HOME` as `kata.db`, then restart.
+The target must not exist unless `--force` is set. SQLite import takes the
+target's canonical database lock before replacement and refuses if a daemon
+holds it, including through a symlink or another home. Stop that daemon before
+retrying. To use the restored database, stop the daemon, then point `KATA_DSN`
+or `KATA_DB` at the restored file, or move it into `KATA_HOME` as `kata.db`.
+Then restart the daemon.
 
 Without `--merge`, `kata import` creates a target database from the input
 snapshot. It does not add records to an existing database.

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -182,4 +185,98 @@ func TestDaemonRefusesDatabaseHeldOutsideHome(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	require.ErrorContains(t, runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false), "daemon already running")
+}
+
+func TestDaemonRefusesAmbiguousLegacyRelativePath(t *testing.T) {
+	home := setupKataEnv(t)
+	path := filepath.Join(home, "kata.db")
+	s, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	defer func() { _ = s.Close() }()
+	_, err = s.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	oldCWD := t.TempDir()
+	if err := os.Symlink(path, filepath.Join(oldCWD, "alias.db")); err != nil {
+		t.Skipf("database symlinks unavailable: %v", err)
+	}
+	t.Chdir(oldCWD)
+	t.Setenv("KATA_DB", "alias.db")
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1",
+		Metadata: map[string]string{"db_path": "alias.db"},
+	})
+	require.NoError(t, err)
+	t.Chdir(t.TempDir())
+	t.Setenv("KATA_DB", path)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err = runDaemonWithListen(ctx, "127.0.0.1:0", false, false, true)
+	require.ErrorContains(t, err, "relative database path")
+	ver, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion()-1, ver)
+	_, err = s.CreateProject(t.Context(), "still-writable")
+	require.NoError(t, err)
+	reopened, err := sqlitestore.Open(t.Context(), path, db.ReadOnly())
+	require.NoError(t, err)
+	defer func() { _ = reopened.Close() }()
+	_, err = reopened.ProjectByName(t.Context(), "still-writable")
+	require.NoError(t, err, "the legacy daemon must still write to the installed database")
+}
+
+func TestDaemonReplacementChecksConsentBeforeStopping(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sleep helper does not handle Windows stop events")
+	}
+	for _, action := range []string{"restart", "start"} {
+		for _, consent := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/consent=%t", action, consent), func(t *testing.T) {
+				home := setupKataEnv(t)
+				t.Setenv("KATA_ALLOW_DEV_MIGRATION", "")
+				if consent {
+					t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
+				}
+				originalVersion := version.Version
+				version.Version = "dev"
+				t.Cleanup(func() { version.Version = originalVersion })
+				path := filepath.Join(home, "kata.db")
+				s, err := sqlitestore.Open(t.Context(), path)
+				require.NoError(t, err)
+				_, err = s.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, db.CurrentSchemaVersion()-1)
+				require.NoError(t, err)
+				require.NoError(t, s.Close())
+				child := startSleepProcess(t)
+				exited := make(chan struct{})
+				go func() {
+					_ = child.Wait()
+					close(exited)
+				}()
+				t.Cleanup(func() {
+					_ = child.Process.Kill()
+					<-exited
+				})
+				server := writeIdleDaemonHealthServer(t, true)
+				writeRuntimeRecordFor(t, home, strings.TrimPrefix(server.URL, "http://"), child.Process.Pid)
+				originalLaunch := launchDetachedDaemon
+				t.Cleanup(func() { launchDetachedDaemon = originalLaunch })
+				launched := false
+				launchDetachedDaemon = func(context.Context, string, string, bool, bool, bool) (daemonStartOutput, error) {
+					launched = true
+					return daemonStartOutput{}, errors.New("test replacement launch reached")
+				}
+				_, _, err = executeRootCapture(t, t.Context(), "daemon", action)
+				if consent {
+					require.ErrorContains(t, err, "test replacement launch reached")
+					require.True(t, launched)
+					return
+				}
+				require.ErrorIs(t, err, storeopen.ErrMigrationConsentRequired)
+				require.False(t, launched)
+				require.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "refused replacement must leave the old daemon running")
+			})
+		}
+	}
 }
