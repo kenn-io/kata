@@ -102,6 +102,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   carries `surface` (`web` or `tui`) so reports can tell the two apart.
   `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
 
+- CLI commands run in a terminal now report an anonymous `app_opened` event
+  with `surface: cli` through the daemon they used, so usage reports count
+  people who only use the command line. Each `KATA_HOME` reports once per UTC
+  day to each daemon, so later commands that day send nothing. Piped output,
+  agent-mode commands, the MCP server and hooks send nothing.
+  `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
+
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.

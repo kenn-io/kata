@@ -309,6 +309,11 @@ func TestBridgeUnbindResolvesArchivedQualifiedProject(t *testing.T) {
 	var requests []externalCLIRequest
 	f := &externalCLIFixture{t: t}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/telemetry" {
+			// The use report after a successful command is not part of the command's request contract.
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		requests = append(requests, externalCLIRequest{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery})
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
