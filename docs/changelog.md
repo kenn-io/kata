@@ -11,8 +11,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Diagnose setup with `kata doctor`: read-only checks, stable JSON findings,
   suggested fixes, active hook availability and sampled hook failure counts.
-  Stopped daemons are diagnosed without starting or repairing them. Failed
-  checks use `checks_failed`; reaching the history scan limit is informational.
+  Doctor never starts or repairs a daemon; a stopped local daemon is
+  informational. Failed checks use `checks_failed`; reaching the history scan
+  limit is informational.
 
 - Manage coding-agent hooks with `kata agent-hook`, matching Roborev and Forge.
   **Breaking rename:** `kata agent-hooks` now fails as an unknown command;

@@ -15,6 +15,18 @@ import (
 	"go.kenn.io/kit/safefileio"
 )
 
+// PrivateDirError reports a local runtime or profile directory that failed
+// private-directory validation. Read-only discovery returns it instead of
+// repairing the directory, so callers can tell it apart from a stopped or
+// unreachable daemon. Its message is the validation error's message.
+type PrivateDirError struct {
+	Err error
+}
+
+func (e *PrivateDirError) Error() string { return e.Err.Error() }
+
+func (e *PrivateDirError) Unwrap() error { return e.Err }
+
 // readRuntimeRecords preserves RuntimeStore.List's ordering, filename/PID and
 // ownership checks without its implicit directory creation or permission repair.
 // Kit has no read-only listing API. Replace this reader when one is available;
@@ -27,7 +39,7 @@ func readRuntimeRecords(dir string) ([]kitdaemon.RuntimeRecord, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, &PrivateDirError{Err: err}
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

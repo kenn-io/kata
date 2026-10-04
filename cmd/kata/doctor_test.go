@@ -77,6 +77,7 @@ func TestDoctorFailedChecksHaveTheirOwnErrorKind(t *testing.T) {
 	for _, mode := range []string{"--agent", "--json"} {
 		t.Run(mode, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
+			t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 			_, stderr, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, mode)
 			require.Error(t, err)
 			require.Equal(t, 1, exitCodeForErr(err, true))
@@ -119,8 +120,7 @@ func TestDoctorWarningsExitSuccessfullyAndInvalidModesKeepCLIError(t *testing.T)
 func TestDoctorStoppedDaemonReportsWithoutCreatingFiles(t *testing.T) {
 	home, workspace := doctorTestEnv(t)
 	out, _, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, "--json")
-	require.Error(t, err)
-	require.Equal(t, 1, exitCodeForErr(err, true))
+	require.NoError(t, err, "ordinary commands start a stopped local daemon, so doctor must not exit 1")
 	var report struct {
 		Version int `json:"version"`
 		Checks  []struct {
@@ -134,7 +134,7 @@ func TestDoctorStoppedDaemonReportsWithoutCreatingFiles(t *testing.T) {
 	for _, check := range report.Checks {
 		if check.ID == "daemon.connection" {
 			found = true
-			require.EqualValues(t, "fail", check.Status)
+			require.EqualValues(t, "info", check.Status)
 		}
 	}
 	require.True(t, found)
@@ -150,11 +150,12 @@ func TestDoctorDoesNotRepairRuntimeDirectoryPermissions(t *testing.T) {
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 
 	out, _, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, "--json")
-	require.Error(t, err)
+	require.NoError(t, err, "ordinary commands repair runtime permissions, so doctor must not exit 1")
 	var report struct {
 		Checks []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
+			ID      string `json:"id"`
+			Status  string `json:"status"`
+			Summary string `json:"summary"`
 		} `json:"checks"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &report), out)
@@ -162,9 +163,10 @@ func TestDoctorDoesNotRepairRuntimeDirectoryPermissions(t *testing.T) {
 	for _, check := range report.Checks {
 		if check.ID == "daemon.connection" {
 			found = true
-			require.EqualValues(t, "fail", check.Status)
+			require.EqualValues(t, "warn", check.Status)
+			require.Contains(t, check.Summary, "runtime directory")
 		}
 	}
-	require.True(t, found, "doctor must report the unavailable local runtime")
+	require.True(t, found, "doctor must report the unverified local runtime directory")
 	assertUnchanged()
 }

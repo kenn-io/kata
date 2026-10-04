@@ -115,7 +115,7 @@ func discoverLocalProfileWithVerifier(
 		return resolved, false, err
 	}
 	if err := safefileio.ValidatePrivateDir(resolved.LocalProfile.DataDir); err != nil {
-		return resolved, false, err
+		return resolved, false, &PrivateDirError{Err: err}
 	}
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {

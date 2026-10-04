@@ -250,7 +250,9 @@ func TestDoctorStoppedLocalProfileDoesNotCreateFiles(t *testing.T) {
 	config := fmt.Sprintf("[[daemon]]\nname='example-local'\nlocal=true\nhome=%q\ninstance_uid='01HZZZZZZZZZZZZZZZZZZZZZ01'\n", profileHome)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
+	report := collectDoctor(context.Background())
+	require.EqualValues(t, "info", doctorFinding(t, report, "daemon.connection").Status)
+	require.False(t, report.Failed(), "a stopped local profile starts on its next command")
 	_, err := os.Stat(profileHome)
 	require.ErrorIs(t, err, os.ErrNotExist, "doctor must not create profile storage or runtime directories")
 }
@@ -361,8 +363,23 @@ func TestDoctorNamedLocalDiscoveryDoesNotRepairRuntimePermissions(t *testing.T) 
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname='example-local'\nlocal=true\n"), 0600))
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
 
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
+	require.EqualValues(t, "warn", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status)
 	assertUnchanged()
+}
+
+func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1",
+	})
+	require.NoError(t, err)
+	flags = globalFlags{Workspace: workspace}
+
+	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(context.Background()), "daemon.connection").Status,
+		"a live runtime record whose endpoint does not answer is a real failure, not a stopped daemon")
 }
 
 func TestDoctorDiscoveryRejectsRedirects(t *testing.T) {

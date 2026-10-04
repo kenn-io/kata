@@ -23,6 +23,14 @@ local runtime discovery. The local override can select a URL or a named local
 profile. Doctor validates the closest honored `.kata.local.toml` between the
 start directory and its workspace boundary, including subdirectory overrides.
 An unavailable configured target does not fall back to a local daemon.
+
+A stopped local daemon or local profile is informational: the next ordinary
+`kata` command starts it, so doctor skips the daemon checks without failing.
+Run `kata daemon start` and rerun doctor to check the daemon itself. A local
+runtime directory without owner-only permissions is a warning; doctor does not
+inspect or repair it, and the next ordinary command restores its permissions.
+A configured target that does not answer, or a live local runtime record whose
+endpoint does not answer, fails.
 Every doctor API request has a five-second deadline and response bodies are
 capped at eight MiB. Local runtime discovery uses a separate one-second ping
 before the API client is created; its response is not subject to that cap.
@@ -41,7 +49,7 @@ files; remote process findings come from the selected daemon.
 | `config.daemon` | Local daemon/display config and environment overrides | Check spelling, types, URLs and supported fields in `<KATA_HOME>/config.toml`. |
 | `config.workspace` | Workspace path, project binding and local override syntax; ignored keys | Correct `.kata.toml`/`.kata.local.toml`, or supply `--project`. |
 | `config.hooks` | Local `hooks.toml` validation, including events that can fire | Correct events, commands, timeouts and tunable fields. |
-| `daemon.connection` | Exact selected endpoint identifies as Kata | Check target selection or explicitly start the intended local daemon. |
+| `daemon.connection` | Exact selected endpoint identifies as Kata | Check target selection; start a stopped local daemon to run the remaining checks. |
 | `daemon.health` | The daemon's storage schema is readable | Inspect daemon logs and storage/credential configuration on its host. |
 | `daemon.version` | CLI/daemon version and API contract | Align versions; explicitly restart an upgraded daemon. |
 | `workspace.project` | Effective name exists in the visible active project catalog | Check target and name; use `kata init` to repair a stale/renamed binding. |

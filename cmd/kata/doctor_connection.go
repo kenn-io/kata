@@ -12,7 +12,10 @@ import (
 	kataapi "go.kenn.io/kata/pkg/client"
 )
 
-var errDoctorWorkspaceUnavailable = errors.New("workspace resolution failed")
+var (
+	errDoctorWorkspaceUnavailable = errors.New("workspace resolution failed")
+	errDoctorNoRunningDaemon      = errors.New("no running local daemon")
+)
 
 func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedDaemon, error) {
 	injectedURL, _ := ctx.Value(client.BaseURLKey{}).(string)
@@ -33,24 +36,44 @@ func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedD
 		}
 	}
 	if namedDaemon != "" {
-		return client.DiscoverResolvedNamedTargetReadOnly(ctx, namedDaemon)
+		resolved, err := client.DiscoverResolvedNamedTargetReadOnly(ctx, namedDaemon)
+		if err == nil && resolved.BaseURL == "" {
+			err = errDoctorNoRunningDaemon
+		}
+		return resolved, err
 	}
 	resolved, found, err := client.DiscoverResolvedReadOnlyInWorkspace(ctx, s.workspace)
 	if err == nil && !found {
-		err = errors.New("no running daemon")
+		err = errDoctorNoRunningDaemon
 	}
 	return resolved, err
+}
+
+// doctorDiscoveryCheck maps a discovery error to its finding. A stopped local
+// daemon and a runtime directory with loose permissions are normal states that
+// the next ordinary command resolves, so neither is a failure.
+func doctorDiscoveryCheck(err error) diagnostics.Check {
+	if errors.Is(err, errDoctorWorkspaceUnavailable) {
+		return skippedDoctorCheck("Workspace resolution failed")
+	}
+	if errors.Is(err, errDoctorNoRunningDaemon) {
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No local daemon is running; the next kata command starts it", Fix: "Run kata daemon start, then rerun kata doctor to check the daemon."}
+	}
+	if _, ok := errors.AsType[*client.PrivateDirError](err); ok {
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Local runtime directory is not private; doctor did not inspect it", Fix: "Run any kata command, such as kata list, to restore owner-only permissions. If the warning remains, check the ownership of <KATA_HOME>/runtime and that it is not a symlink."}
+	}
+	return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected daemon is unavailable or its target configuration is invalid", Fix: "Check --daemon, KATA_SERVER, .kata.local.toml and active_daemon; for an unreachable local daemon, inspect kata daemon status and its logs."}
 }
 
 func (s *doctorState) connectDoctorDaemon(ctx context.Context) (*kataapi.Client, bool, diagnostics.Check) {
 	probe, cancel := context.WithTimeout(ctx, doctorRequestTimeout)
 	defer cancel()
 	resolved, err := s.resolveDoctorDaemon(probe)
-	if errors.Is(err, errDoctorWorkspaceUnavailable) {
-		return nil, false, skippedDoctorCheck("Workspace resolution failed")
+	if err == nil && resolved.BaseURL == "" {
+		err = errors.New("resolved daemon has no base URL")
 	}
-	if err != nil || resolved.BaseURL == "" {
-		return nil, false, diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected daemon is unavailable or its target configuration is invalid", Fix: "Check --daemon, KATA_SERVER, .kata.local.toml and active_daemon; for a stopped local daemon, run kata daemon start."}
+	if err != nil {
+		return nil, false, doctorDiscoveryCheck(err)
 	}
 	hc, err := client.NewHTTPClientForResolved(probe, resolved, client.Opts{Timeout: doctorRequestTimeout})
 	if err != nil {
