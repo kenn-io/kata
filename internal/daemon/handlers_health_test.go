@@ -181,6 +181,23 @@ func TestHealth_KeylessDaemonRejectsExplicitInvalidAuthorizationBeforeDiagnostic
 	assert.NotContains(t, string(body), "federation")
 }
 
+func TestHealthReportsEmbeddingTransportErrorWithoutDetails(t *testing.T) {
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now,
+		ReconcilerHealth: func() daemon.ReconcilerHealth {
+			return daemon.ReconcilerHealth{Configured: true, LastError: "secret-token transport failure"}
+		},
+	})
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotContains(t, string(bs), "secret-token")
+	var body struct {
+		Embeddings map[string]any `json:"embeddings"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	require.Equal(t, true, body.Embeddings["error_present"])
+}
+
 func TestHealthFederationConfigOmitsBlockWhenUnconfigured(t *testing.T) {
 	ts, _ := startDefaultTestServer(t)
 

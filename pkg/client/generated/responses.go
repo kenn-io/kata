@@ -36,6 +36,10 @@ type DigestGlobalResponse = DigestResponseBody
 
 type DigestGlobalErrorResponse = ErrorEnvelope
 
+type DoctorResponse = DoctorResponseBody
+
+type DoctorErrorResponse = ErrorEnvelope
+
 type PollEventsResponse = PollEventsBody
 
 type PollEventsErrorResponse = ErrorEnvelope
@@ -479,6 +483,13 @@ type DigestGlobalResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DigestGlobalResponse
+}
+
+type DoctorResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DoctorResponse
 }
 
 type PollEventsResp struct {

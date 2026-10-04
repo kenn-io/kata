@@ -287,12 +287,28 @@ func PrepareResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, err
 // version-checks a local daemon or opens storage. ok is false when no remote is configured and
 // no live local runtime exists.
 func DiscoverResolvedInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, bool, error) {
+	return discoverResolvedInWorkspace(ctx, workspaceStart, liveDaemons, true)
+}
+
+// DiscoverResolvedReadOnlyInWorkspace resolves the same target as
+// DiscoverResolvedInWorkspace but never creates or repairs local runtime
+// metadata and defers local-profile identity verification until the caller
+// can apply a bounded transport. It is intended for diagnostics that promise
+// not to change files.
+func DiscoverResolvedReadOnlyInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, bool, error) {
+	return discoverResolvedInWorkspace(ctx, workspaceStart, liveDaemonsReadOnly, false)
+}
+
+func discoverResolvedInWorkspace(ctx context.Context, workspaceStart string, scan liveDaemonScanner, verifyProfileIdentity bool) (ResolvedDaemon, bool, error) {
 	selection, err := InspectSelection(ctx, workspaceStart, "")
 	if err != nil {
 		return ResolvedDaemon{}, false, err
 	}
 	if selection.Profile != nil {
-		return discoverLocalProfile(ctx, selection)
+		if verifyProfileIdentity {
+			return discoverLocalProfileUsing(ctx, selection, scan)
+		}
+		return discoverLocalProfileUsingWithoutIdentityProbe(ctx, selection, scan)
 	}
 	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, remoteRequestTarget); err != nil || ok {
 		return resolved, ok, err
@@ -301,14 +317,24 @@ func DiscoverResolvedInWorkspace(ctx context.Context, workspaceStart string) (Re
 	if err != nil {
 		return ResolvedDaemon{}, false, err
 	}
-	return DiscoverResolved(ctx, namespace.DataDir)
+	return discoverResolved(ctx, namespace.DataDir, scan)
 }
 
 // DiscoverResolved returns the first live local runtime with its exact
 // endpoint and preserves store, cancellation, and unreachable-daemon errors.
 func DiscoverResolved(ctx context.Context, dataDir string) (ResolvedDaemon, bool, error) {
+	return discoverResolved(ctx, dataDir, liveDaemons)
+}
+
+// DiscoverResolvedReadOnly finds a live local runtime without creating or
+// repairing runtime metadata. Diagnostics use this to preserve file state.
+func DiscoverResolvedReadOnly(ctx context.Context, dataDir string) (ResolvedDaemon, bool, error) {
+	return discoverResolved(ctx, dataDir, liveDaemonsReadOnly)
+}
+
+func discoverResolved(ctx context.Context, dataDir string, scan liveDaemonScanner) (ResolvedDaemon, bool, error) {
 	var unreachable error
-	for candidate, err := range liveDaemons(ctx, dataDir) {
+	for candidate, err := range scan(ctx, dataDir) {
 		if err == nil {
 			return localRuntimeResolved(candidate), true, nil
 		}
@@ -327,15 +353,45 @@ func DiscoverResolved(ctx context.Context, dataDir string) (ResolvedDaemon, bool
 // starting a local daemon or opening storage. A configured local entry with no live runtime
 // returns the zero value and no error while preserving all resolver errors.
 func DiscoverResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, error) {
+	return discoverResolvedNamed(ctx, name, namedDiscoverOnly, liveDaemons)
+}
+
+// DiscoverResolvedNamedTargetReadOnly resolves a named catalog selection
+// without creating or repairing local runtime metadata and without probing a
+// remote endpoint. The caller can make the first request with its own bounded
+// transport.
+func DiscoverResolvedNamedTargetReadOnly(ctx context.Context, name string) (ResolvedDaemon, error) {
+	return discoverResolvedNamed(ctx, name, namedDiscoverTargetReadOnly, liveDaemonsReadOnly)
+}
+
+func discoverNamedLocalProfile(
+	ctx context.Context,
+	selection DaemonSelection,
+	mode namedResolutionMode,
+	scan liveDaemonScanner,
+) (ResolvedDaemon, bool, error) {
+	if mode == namedDiscoverTargetReadOnly {
+		return discoverLocalProfileUsingWithoutIdentityProbe(ctx, selection, scan)
+	}
+	return discoverLocalProfileUsing(ctx, selection, scan)
+}
+
+func discoverResolvedNamed(ctx context.Context, name string, mode namedResolutionMode, scan liveDaemonScanner) (ResolvedDaemon, error) {
 	selection, err := InspectSelection(ctx, "", name)
 	if err != nil {
 		return ResolvedDaemon{}, err
 	}
 	if selection.Profile != nil {
-		resolved, _, err := discoverLocalProfile(ctx, selection)
+		resolved, _, err := discoverNamedLocalProfile(ctx, selection, mode, scan)
 		return resolved, err
 	}
-	target, ok, err := discoverNamedDaemonTarget(ctx, name)
+	var target namedDaemonTarget
+	var ok bool
+	if mode == namedDiscoverOnly {
+		target, ok, err = discoverNamedDaemonTarget(ctx, name)
+	} else {
+		target, ok, err = buildNamedDaemonTarget(ctx, name, mode)
+	}
 	if err != nil {
 		return ResolvedDaemon{}, err
 	}

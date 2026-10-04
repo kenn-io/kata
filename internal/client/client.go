@@ -99,14 +99,31 @@ type liveDaemon struct {
 	Info       PingInfo
 }
 
+type runtimeRecordReader func(string) ([]kitdaemon.RuntimeRecord, error)
+
+type liveDaemonScanner func(context.Context, string) iter.Seq2[liveDaemon, error]
+
 // liveDaemons scans the namespace's runtime records lazily. A successful
 // result contains a live daemon; an error result preserves store, context, or
 // unreachable-endpoint failures for callers that must distinguish them from
 // an empty store. Laziness is load bearing: Discover runs on every CLI
 // invocation and must stop after the first live record.
 func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, error] {
+	return liveDaemonsUsing(ctx, dataDir, func(dir string) ([]kitdaemon.RuntimeRecord, error) {
+		return (kitdaemon.RuntimeStore{Dir: dir}).List()
+	}, probeAddressWithError)
+}
+
+// liveDaemonsReadOnly scans runtime records without creating or repairing
+// their directory. Diagnostics use this path so inspection cannot change
+// runtime state.
+func liveDaemonsReadOnly(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, error] {
+	return liveDaemonsUsing(ctx, dataDir, readRuntimeRecords, probeAddressReadOnly)
+}
+
+func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRecordReader, probe func(context.Context, string) (string, PingInfo, error)) iter.Seq2[liveDaemon, error] {
 	return func(yield func(liveDaemon, error) bool) {
-		recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+		recs, err := readRecords(dataDir)
 		if err != nil {
 			yield(liveDaemon{}, err)
 			return
@@ -117,7 +134,7 @@ func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, erro
 			}
 			ep := r.Endpoint()
 			address := ep.ConfigAddress()
-			url, info, probeErr := probeAddressWithError(ctx, address)
+			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
 				if err := ctx.Err(); err != nil {
 					yield(liveDaemon{}, err)
@@ -184,6 +201,15 @@ func probeAddressWithError(ctx context.Context, address string) (string, PingInf
 		return "", PingInfo{}, err
 	}
 	return base, info, nil
+}
+
+// Diagnostic discovery must inspect the recorded endpoint without following
+// redirects. Ordinary discovery keeps its existing redirect behavior.
+func probeAddressReadOnly(ctx context.Context, address string) (string, PingInfo, error) {
+	client, base := LocalHTTPClient(address)
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	info, err := Probe(ctx, client, base)
+	return base, info, err
 }
 
 // LocalHTTPClient returns a short-timeout client and request base for a local

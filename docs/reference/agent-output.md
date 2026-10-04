@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-09-17
+last_edited: 2026-10-04
 ---
 
 # Agent output format
@@ -83,7 +83,9 @@ Hint: pass --body, --body-file, or --body-stdin
   qualified refs, for example
   `ERR create conflict: 1 existing issue matches this title (example-project#abc4)`.
 - `<kind>` reuses the CLI error taxonomy: `usage`, `validation`, `not_found`,
-  `conflict`, `confirm`, `daemon_unavailable`, `internal`.
+  `conflict`, `confirm`, `daemon_unavailable`, `checks_failed`, `internal`.
+  `checks_failed` means `kata doctor` completed and found failed checks;
+  consult its findings for the setup problems and suggested fixes.
 - Optional follow-up lines use fixed field names such as `Hint:`, `Code:`, and
   `Exit-Code:`.
 - A top-level parse error, before any subcommand runs, uses `kata` as the

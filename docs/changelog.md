@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Diagnose setup with `kata doctor`: read-only checks, stable JSON findings,
+  suggested fixes, active hook availability and sampled hook failure counts.
+  Doctor never starts or repairs a daemon; a stopped local daemon is
+  informational. Failed checks use `checks_failed`; reaching the history scan
+  limit is informational.
+
 - Manage coding-agent hooks with `kata agent-hook`, matching Roborev and Forge.
   **Breaking rename:** `kata agent-hooks` now fails as an unknown command;
   there is no alias. Update scripts and reinstall user hooks with
@@ -95,11 +101,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - The web UI reports an anonymous `app_opened` event through the daemon when it
   loads and on the first focus of each later UTC day, so usage reports can
   count installs where someone opened the UI. `KATA_TELEMETRY_ENABLED=0` turns
-  it off with the daemon heartbeat.
+  it off with the daemon heartbeat. Uses Kit v0.31.1.
 
 - `kata tui` reports an anonymous `app_opened` event through the daemon once per
   launch, so usage reports count people who only use the terminal UI. The event
   carries `surface` (`web` or `tui`) so reports can tell the two apart.
+  `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
+
+- CLI commands run in a terminal now report an anonymous `app_opened` event
+  with `surface: cli` through the daemon they used, so usage reports count
+  people who only use the command line. Each `KATA_HOME` reports once per UTC
+  day to each daemon, so later commands that day send nothing. Piped output,
+  agent-mode commands, the MCP server and hooks send nothing.
   `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
 
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.

@@ -18,6 +18,7 @@ const (
 	authHeader           = "Authorization"
 	pathPing             = "/api/v1/ping"
 	pathHealth           = "/api/v1/health"
+	pathDoctor           = "/api/v1/doctor"
 	pathEventsStreamPath = "/api/v1/events/stream"
 )
 

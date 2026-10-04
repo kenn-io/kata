@@ -43,6 +43,7 @@ func newRootCmd() *cobra.Command {
 	flags = globalFlags{}
 	runEEntered = false
 	errorCommandName = ""
+	cliUseTarget.Store(nil)
 	cmd := &cobra.Command{
 		Use:           "kata",
 		Short:         "kata — lightweight issue tracker for agents",
@@ -75,6 +76,11 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
+			return nil
+		},
+		// Cobra runs this only after the command's RunE succeeded.
+		PersistentPostRunE: func(cmd *cobra.Command, _ []string) error {
+			reportCLIUse(cmd)
 			return nil
 		},
 	}
@@ -148,6 +154,7 @@ func newRootCmd() *cobra.Command {
 		newQuickstartCmd(),
 		newWhoamiCmd(),
 		newHealthCmd(),
+		newDoctorCmd(),
 		newOpenAPICmd(),
 		newProjectsCmd(),
 		newTokensCmd(),

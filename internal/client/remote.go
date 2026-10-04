@@ -254,6 +254,7 @@ type namedResolutionMode int
 
 const (
 	namedDiscoverOnly namedResolutionMode = iota
+	namedDiscoverTargetReadOnly
 	namedEnsureRunning
 	namedRequestTarget
 )
@@ -275,7 +276,7 @@ func buildNamedDaemonTarget(
 		}
 		if d.Local {
 			var running RunningDaemon
-			if mode != namedDiscoverOnly {
+			if mode == namedEnsureRunning || mode == namedRequestTarget {
 				running, err = EnsureLocalRunningTarget(ctx)
 			} else {
 				var ns *daemon.Namespace
@@ -283,7 +284,11 @@ func buildNamedDaemonTarget(
 				if err == nil {
 					var ok bool
 					var resolved ResolvedDaemon
-					resolved, ok, err = DiscoverResolved(ctx, ns.DataDir)
+					if mode == namedDiscoverTargetReadOnly {
+						resolved, ok, err = DiscoverResolvedReadOnly(ctx, ns.DataDir)
+					} else {
+						resolved, ok, err = DiscoverResolved(ctx, ns.DataDir)
+					}
 					if err == nil && !ok {
 						return namedDaemonTarget{}, false, nil
 					}
@@ -304,7 +309,7 @@ func buildNamedDaemonTarget(
 		if err != nil {
 			return namedDaemonTarget{}, false, err
 		}
-		if mode != namedRequestTarget && !probeRemote(ctx, target.BaseURL) {
+		if mode != namedRequestTarget && mode != namedDiscoverTargetReadOnly && !probeRemote(ctx, target.BaseURL) {
 			return namedDaemonTarget{}, false, fmt.Errorf("%w: %s (%s daemon %q)",
 				ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), d.Name)
 		}
@@ -323,8 +328,12 @@ func resolveNamedDaemonMode(ctx context.Context, name string, mode namedResoluti
 		return ResolvedDaemon{}, err
 	}
 	if selection.Profile != nil {
-		if mode == namedDiscoverOnly {
-			resolved, _, err := discoverLocalProfile(ctx, selection)
+		if mode == namedDiscoverOnly || mode == namedDiscoverTargetReadOnly {
+			scan := liveDaemons
+			if mode == namedDiscoverTargetReadOnly {
+				scan = liveDaemonsReadOnly
+			}
+			resolved, _, err := discoverNamedLocalProfile(ctx, selection, mode, scan)
 			return resolved, err
 		}
 		return ensureLocalProfile(ctx, selection)
@@ -551,6 +560,15 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		return err == nil && u == baseURL
 	}
 	return activeAllows()
+}
+
+// LocalConfigPathInWorkspace returns the local override honored by daemon
+// selection, including its workspace boundary and Git provenance checks.
+// An empty path means no override is honored. It does not decode the file,
+// contact a daemon or modify the workspace.
+func LocalConfigPathInWorkspace(start string) (string, error) {
+	_, path, _, err := findLocalConfig(start)
+	return path, err
 }
 
 // findLocalConfig walks upward from start looking for .kata.local.toml,

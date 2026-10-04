@@ -49,6 +49,13 @@ func newExternalCLIFixture(t *testing.T) *externalCLIFixture {
 }
 
 func (f *externalCLIFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/telemetry" {
+		// The use report after a successful command is not part of the command's request contract.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		writeExternalCLITestJSON(f.t, w, map[string]any{"status": "queued"})
+		return
+	}
 	delayBridge := f.delay && (strings.Contains(r.URL.Path, "/bridge/actions/") || r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/bridge"))
 	delayConnector := f.connectorDelay && (r.URL.Path == "/api/v1/connectors" ||
 		r.URL.Path == "/api/v1/connectors/example-connector" ||

@@ -226,6 +226,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/doctor/",
+      "destination": "/docs/operations/doctor/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/doctor.md",
+      "destination": "/docs/operations/doctor.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/remote-daemon/",
       "destination": "/docs/operations/remote-daemon/",
       "permanent": true
