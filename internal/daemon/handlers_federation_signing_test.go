@@ -135,6 +135,58 @@ func TestConfigureFederationSigningRequiresOwnerAuthority(t *testing.T) {
 	}
 }
 
+// Contract: selecting daemon-held signing secrets during replica creation
+// requires the same owner authority as configure-signing, before the daemon
+// reveals whether a referenced source exists.
+func TestCreateFederationReplicaSigningReferencesRequireOwnerAuthority(t *testing.T) {
+	t.Setenv("TEST_PRESENT_SIGNING_KEY", strings.Repeat("k", 64))
+	t.Setenv("TEST_ABSENT_SIGNING_KEY", "")
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		setup   func(*daemon.ServerConfig)
+	}{
+		{
+			name:    "identity user token",
+			headers: bearer("user-token"),
+			setup: func(cfg *daemon.ServerConfig) {
+				cfg.Auth.Token = "admin-token"
+				cfg.Auth.RequireTokenIdentity = true
+			},
+		},
+		{
+			name: "unauthenticated private-network writer",
+			setup: func(cfg *daemon.ServerConfig) {
+				cfg.Auth.AllowUnauthenticatedPrivateNetworkWrites = true
+			},
+		},
+	} {
+		for _, keyEnv := range []string{"TEST_PRESENT_SIGNING_KEY", "TEST_ABSENT_SIGNING_KEY"} {
+			t.Run(tc.name+"/"+keyEnv, func(t *testing.T) {
+				credentials := newReplicaCredentialStore()
+				env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+					cfg.FederationCredentials = credentials
+					tc.setup(cfg)
+				})
+				if tc.headers != nil {
+					_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+						PlaintextToken: "user-token", Actor: "example-actor", AdminActor: db.BootstrapActor,
+					})
+					require.NoError(t, err)
+				}
+				resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+					"hub_url": "https://hub.example", "hub_project_id": 42,
+					"hub_project_uid": replicaHubProjectUID, "project_name": "spoke-project",
+					"replay_horizon_event_id": 1, "token": "enrollment-secret",
+					"signing_key_id": "key-a", "signing_key_env": keyEnv,
+				}, tc.headers)
+				assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_signing_admin_forbidden")
+				require.Zero(t, credentials.storeCalls)
+			})
+		}
+	}
+}
+
 func TestConfigureFederationSigningRejectsBrowserAuthority(t *testing.T) {
 	credentials := newReplicaCredentialStore()
 	current := config.FederationCredential{HubURL: "https://hub.example", Token: "keep-token"}

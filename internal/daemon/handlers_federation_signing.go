@@ -14,19 +14,27 @@ import (
 	"go.kenn.io/kata/internal/httpurl"
 )
 
+// requireSigningSourceAuthority admits only the daemon owner to select
+// daemon filesystem or environment secrets as signing sources.
+func requireSigningSourceAuthority(ctx context.Context) error {
+	_, attributed := PrincipalFromContext(ctx)
+	if webSessionAuthenticated(ctx) || insecureReadonlyRequest(ctx) ||
+		unauthenticatedPrivateNetworkRequest(ctx) ||
+		(!attributed && !ownerLocalTransport(ctx)) || ensureTokenAdminAllowed(ctx) != nil {
+		return api.NewError(http.StatusForbidden, "federation_signing_admin_forbidden",
+			"signing configuration requires daemon owner authority", "", nil)
+	}
+	return nil
+}
+
 func registerFederationSigningHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "configureFederationSigning",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/federation/replicas/{project_uid}/actions/configure-signing",
 	}, func(ctx context.Context, in *api.ConfigureFederationSigningRequest) (*struct{}, error) {
-		// Selecting daemon filesystem/environment secrets requires owner authority.
-		_, attributed := PrincipalFromContext(ctx)
-		if webSessionAuthenticated(ctx) || insecureReadonlyRequest(ctx) ||
-			unauthenticatedPrivateNetworkRequest(ctx) ||
-			(!attributed && !ownerLocalTransport(ctx)) || ensureTokenAdminAllowed(ctx) != nil {
-			return nil, api.NewError(http.StatusForbidden, "federation_signing_admin_forbidden",
-				"signing configuration requires daemon owner authority", "", nil)
+		if err := requireSigningSourceAuthority(ctx); err != nil {
+			return nil, err
 		}
 		store := cfg.federationCredentialStore()
 		current, found, err := store.FederationCredential(ctx, in.ProjectUID)

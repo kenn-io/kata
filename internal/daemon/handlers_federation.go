@@ -352,6 +352,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.CreateFederationReplicaRequest) (*api.CreateFederationReplicaResponse, error) {
 		var signing *federationsigning.Source
 		if in.Body.SigningKeyID != "" || in.Body.SigningKeyFile != "" || in.Body.SigningKeyEnv != "" {
+			if err := requireSigningSourceAuthority(ctx); err != nil {
+				return nil, err
+			}
 			canonical, err := httpurl.CanonicalHTTPBaseURL(in.Body.HubURL)
 			if err != nil {
 				return nil, api.NewError(400, "validation", "invalid signing hub URL", "", nil)
