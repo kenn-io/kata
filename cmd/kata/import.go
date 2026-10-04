@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kit/atomicfile"
@@ -358,6 +359,12 @@ func prepareImportTempTarget(target string) (string, func(), error) {
 }
 
 func installImportedTarget(tmpTarget, target string, force bool) error {
+	lock, err := sqlitelock.Acquire(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
 	if !force {
 		targetExists, err := sqliteFileSetExists(target)
 		if err != nil {
