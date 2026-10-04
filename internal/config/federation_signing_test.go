@@ -215,3 +215,34 @@ not_after = %d`, id, id, enrollmentID, notAfter)
 		})
 	}
 }
+
+// Contract: the default replay-state file belongs to the home whose
+// configuration is read, as an absolute path even for a relative KATA_HOME.
+func TestFederationSigningDefaultReplayStateUsesConfigHome(t *testing.T) {
+	signingConfig := []byte(`[federation.signing]
+external_url = "https://hub.example"
+[[federation.signing.key]]
+key_id = "key-a"
+key_env = "TEST_SIGNING_KEY"
+enrollment_id = 1
+`)
+	t.Run("selected home", func(t *testing.T) {
+		t.Setenv("KATA_HOME", t.TempDir())
+		home := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), signingConfig, 0600))
+		cfg, err := config.ReadDaemonConfigForHome(home)
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(home, "federation-signing-replay.state"), cfg.Federation.Signing.ReplayStateFile)
+	})
+	t.Run("relative KATA_HOME", func(t *testing.T) {
+		workdir := t.TempDir()
+		t.Chdir(workdir)
+		require.NoError(t, os.Mkdir("relative-home", 0700))
+		require.NoError(t, os.WriteFile(filepath.Join("relative-home", "config.toml"), signingConfig, 0600))
+		t.Setenv("KATA_HOME", "relative-home")
+		cfg, err := config.ReadDaemonConfig()
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(workdir, "relative-home", "federation-signing-replay.state"),
+			cfg.Federation.Signing.ReplayStateFile)
+	})
+}

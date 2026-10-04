@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -25,7 +26,9 @@ type FederationIngressConfig struct {
 	Listen  string `toml:"listen"`
 }
 
-func normalizeFederationSigning(cfg *DaemonConfig) error {
+// normalizeFederationSigning validates signing policy. home is the directory
+// of the configuration file being read and owns the default replay state.
+func normalizeFederationSigning(cfg *DaemonConfig, home string) error {
 	s := &cfg.Federation.Signing
 	if s.Required || s.ExternalURL != "" || len(s.Keys) > 0 || s.ReplayStateFile != "" {
 		if s.ExternalURL == "" {
@@ -38,11 +41,11 @@ func normalizeFederationSigning(cfg *DaemonConfig) error {
 			return err
 		}
 		if s.ReplayStateFile == "" {
-			home, err := KataHome()
+			absoluteHome, err := filepath.Abs(home)
 			if err != nil {
-				return err
+				return fmt.Errorf("resolve federation signing replay state home: %w", err)
 			}
-			s.ReplayStateFile = filepath.Join(home, "federation-signing-replay.state")
+			s.ReplayStateFile = filepath.Join(absoluteHome, "federation-signing-replay.state")
 		}
 		if !filepath.IsAbs(s.ReplayStateFile) {
 			return errors.New("federation.signing.replay_state_file must be absolute")
