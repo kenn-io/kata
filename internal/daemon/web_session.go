@@ -514,6 +514,11 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 	if r.URL.Path == pathPing || r.URL.Path == pathHealth || isWebSessionBootstrapRequest(r) {
 		return false
 	}
+	if r.URL.Path == pathDoctor &&
+		(policy.Kind == ListenerBrowser || isBrowserRequest(r)) &&
+		!ordinaryAPIBearerRequest(r) {
+		return true
+	}
 	if !manager.Writable() && r.Method == http.MethodGet && r.URL.Path != pathEventsStreamPath {
 		return r.Header.Get(webSessionHeader) != ""
 	}

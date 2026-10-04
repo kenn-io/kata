@@ -13,6 +13,7 @@ export interface EmbeddingsHealth {
   /** Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value. */
   credential_source?: string
   embedded: number
+  error_present?: boolean
   eta_seconds?: number
   /** Sanitized credential rejection; cleared after the next successful embedding call. */
   last_error?: string

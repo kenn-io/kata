@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-02
+last_edited: 2026-10-04
 ---
 
 # HTTP API schema
@@ -330,6 +330,31 @@ These are the current intentions, not a contractual guarantee:
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far
 the compatibility guarantees are taken.
+
+## Operator diagnostics
+
+`GET /api/v1/doctor` supplies the daemon-side hook findings used by
+[`kata doctor`](../operations/doctor.md). Its `hooks` block includes current
+executable/working-directory availability, queue capacity and occupancy,
+process-lifetime dropped events, and counts of runs and failures from the last
+seven days found in scanned history. `history_truncated` marks a scan limited
+by the eight-MiB or 64-rotated-file budget; counts may omit recent runs.
+`history_incomplete` marks missing, unreadable, or malformed history. These
+flags are independent: a capped scan can also encounter a read error.
+Arguments, environment, hook output and raw errors are
+never returned. `available: false` means the hook sink does not supply
+diagnostics.
+
+The endpoint requires owner-local or configured static/bootstrap-token
+authority. Mounted hosts authorize it as a non-mutating
+`integration_administration` operation with the `manage` capability. Ordinary
+identity tokens, browser sessions, trusted-proxy principals and unauthenticated
+private-network modes cannot access these process diagnostics. A 404 can mean
+the endpoint is unsupported or hidden from this principal.
+
+The optional `/health` embeddings block also includes `error_present` when the
+reconciler has an error, including failures without a provider HTTP status.
+This boolean does not disclose the provider's raw diagnostic text.
 
 ## Browser UI endpoints
 

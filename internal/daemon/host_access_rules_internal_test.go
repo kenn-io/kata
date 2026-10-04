@@ -78,3 +78,9 @@ func TestHostAccessRulesPreserveHandlerResolvedScopes(t *testing.T) {
 			"%s must defer project-scope authorization to its handler", operationID)
 	}
 }
+
+func TestDoctorHostAccessRuleDoesNotRequireProjectScope(t *testing.T) {
+	rule := hostAccessRuleFor("doctor")
+	assert.True(t, rule.NoProjectData, "doctor reads daemon diagnostics without project data")
+	assert.False(t, rule.RequiresAllProjects)
+}

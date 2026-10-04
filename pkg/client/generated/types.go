@@ -1065,6 +1065,23 @@ type DigestTotals struct {
 
 type DisableIssueSyncRequestBody = map[string]any
 
+type DoctorResponseBody struct {
+	Hooks Hooks `json:"hooks"`
+}
+
+func (d DoctorResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.Hooks).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Hooks", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type EditCommentRequestBody struct {
 	Actor string `json:"actor" validate:"required"`
 	Body  string `json:"body" validate:"required"`
@@ -1152,6 +1169,7 @@ type EmbeddingsHealth struct {
 	// CredentialSource Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value.
 	CredentialSource *string `json:"credential_source,omitempty"`
 	Embedded         int64   `json:"embedded"`
+	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
 	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
@@ -1789,6 +1807,45 @@ func (h HealthResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(h.Version, "required"); err != nil {
 		errors = errors.Append("Version", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type Hook struct {
+	Command                   string `json:"command" validate:"required"`
+	ExecutableAvailable       bool   `json:"executable_available"`
+	Index                     int64  `json:"index"`
+	WorkingDirectoryAvailable bool   `json:"working_directory_available"`
+}
+
+func (h Hook) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(h))
+}
+
+type Hooks struct {
+	Available         bool   `json:"available"`
+	Dropped           int64  `json:"dropped"`
+	HistoryIncomplete bool   `json:"history_incomplete"`
+	HistoryTruncated  bool   `json:"history_truncated"`
+	Hooks             []Hook `json:"hooks" validate:"required"`
+	InFlight          int32  `json:"in_flight"`
+	QueueCapacity     int64  `json:"queue_capacity"`
+	QueueLength       int64  `json:"queue_length"`
+	RecentFailures    int64  `json:"recent_failures"`
+	RecentRuns        int64  `json:"recent_runs"`
+}
+
+func (h Hooks) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range h.Hooks {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Hooks[%d]", i), err)
+			}
+		}
 	}
 	if len(errors) == 0 {
 		return nil

@@ -85,6 +85,7 @@ const (
 	kindConfirm       errKind = "confirm"
 	kindDaemonUnavail errKind = "daemon_unavailable"
 	kindInternal      errKind = "internal"
+	kindChecksFailed  errKind = "checks_failed"
 )
 
 // kindForExit maps an exit code to the conventional errKind. Used when
