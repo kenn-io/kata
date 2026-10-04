@@ -169,3 +169,52 @@ func (b *pausedFederationUpload) Read(p []byte) (int, error) {
 }
 
 func (*pausedFederationUpload) Close() error { return nil }
+
+// Contract: on ordinary listeners, an auto-start idle deadline cannot expire
+// while the daemon reads and verifies a signed federation upload.
+func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
+	t.Setenv("TEST_IDLE_SIGNING_KEY", strings.Repeat("k", 64))
+	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_IDLE_SIGNING_KEY"}
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub-project")
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID: &project.ID, Capabilities: "pull,push", Actor: "example-actor",
+	})
+	require.NoError(t, err)
+	raw, err := json.Marshal(federationIngestBody())
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		v, err := federationsigning.NewVerifier("https://hub.example", []federationsigning.Key{
+			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
+		}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, v.Close()) }()
+		time.Sleep(federationsigning.Quarantine)
+		idle := daemon.NewIdleController(time.Hour, func() {})
+		idle.Start()
+		defer idle.Stop()
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v, IdleAdmission: idle})
+		req := httptest.NewRequest(http.MethodPost,
+			"https://hub.example"+projectPath(project.ID)+"/federation/events:ingest", bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		require.NoError(t, federationsigning.Sign(req, source))
+		entered, release := make(chan struct{}, 1), make(chan struct{})
+		req.Body = &pausedFederationUpload{Reader: bytes.NewReader(raw), entered: entered, release: release}
+		done := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			w := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(w, req)
+			done <- w
+		}()
+		<-entered
+		require.Equal(t, daemon.IdleStateForeground, idle.Snapshot().State,
+			"signed body verification must run under a foreground idle lease")
+		close(release)
+		w := <-done
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, daemon.IdleStateArmed, idle.Snapshot().State)
+	})
+}

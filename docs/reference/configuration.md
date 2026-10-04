@@ -313,8 +313,8 @@ For example, mount a `0600` secret file owned by the daemon user and set
 `autostart_idle_timeout` lets an implicitly started, owner-local daemon exit
 after a period without client activity. It is off by default. The setting is
 ignored for explicit daemon starts and for daemons exposed through non-loopback
-listeners, a public web origin, trusted-proxy configuration, or shared-listener
-host aliases. `kata daemon start` replaces a running idle-eligible auto-started
+listeners, a public web origin, trusted-proxy configuration, shared-listener
+host aliases, or an enabled `[federation.ingress]` listener. `kata daemon start` replaces a running idle-eligible auto-started
 daemon with an explicit one so it stays resident, and `kata daemon restart`
 always starts an explicit daemon. The daemon writes one
 `kata daemon: idle shutdown after ...` line to its log when it exits for this

@@ -26,6 +26,11 @@ func AutostartIdleShutdownEligible(
 	if webEndpoint.Shared && len(cfg.Web.AllowedHosts) != 0 {
 		return false
 	}
+	// Spokes reach restricted ingress through a proxy that cannot auto-start
+	// a stopped daemon, so ingress is remote exposure like a TCP listener.
+	if cfg.Federation.Ingress.Enabled {
+		return false
+	}
 	origin, err := url.Parse(webEndpoint.Origin)
 	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") {
 		return false

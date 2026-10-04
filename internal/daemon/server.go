@@ -361,9 +361,11 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if base == nil {
 		base = s.handler
 	} else {
-		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withFederationIngestPreauthorization(s.cfg, base)
 		base = s.withFederationSigning(base, false)
+		// Signed uploads read their body during verification, so the
+		// foreground lease must already cover that work.
+		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withTrustedProxyActor(s.cfg)(base)
 		base = withScopedPrincipalRevalidation(s.cfg.DB, base)
 		base = requireBearer(s.authPolicy, s.cfg.DB)(base)

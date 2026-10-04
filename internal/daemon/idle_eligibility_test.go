@@ -47,6 +47,14 @@ func TestAutostartIdleShutdownRequiresOwnerLocalExposure(t *testing.T) {
 			}}},
 		},
 		{
+			name:   "restricted federation ingress",
+			daemon: localDaemon,
+			web:    localWeb,
+			config: config.DaemonConfig{Federation: config.FederationConfig{
+				Ingress: config.FederationIngressConfig{Enabled: true, Listen: "127.0.0.1:7780"},
+			}},
+		},
+		{
 			name:   "shared listener with proxy host aliases",
 			daemon: localDaemon,
 			web: daemon.WebEndpoint{
