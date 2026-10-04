@@ -26,11 +26,14 @@ An unavailable configured target does not fall back to a local daemon.
 
 A stopped local daemon or local profile is informational: the next ordinary
 `kata` command starts it, so doctor skips the daemon checks without failing.
-Run `kata daemon start` and rerun doctor to check the daemon itself. A local
-runtime directory without owner-only permissions is a warning; doctor does not
-inspect or repair it, and the next ordinary command restores its permissions.
-A configured target that does not answer, or a live local runtime record whose
-endpoint does not answer, fails.
+Run `kata daemon start` and rerun doctor to check the daemon itself. A default
+local runtime directory without owner-only permissions is a warning; doctor does
+not inspect or repair it, and the next ordinary command restores its
+permissions. A local profile's runtime directory without owner-only
+permissions fails, because ordinary commands reject it without repair; restrict
+the directory under `<profile home>/runtime` to its owner by hand. A configured target that does not answer, or a live local
+runtime record whose endpoint does not answer, also fails.
+
 Every doctor API request has a five-second deadline and response bodies are
 capped at eight MiB. Local runtime discovery uses a separate one-second ping
 before the API client is created; its response is not subject to that cap.

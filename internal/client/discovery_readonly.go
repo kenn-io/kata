@@ -15,10 +15,11 @@ import (
 	"go.kenn.io/kit/safefileio"
 )
 
-// PrivateDirError reports a local runtime or profile directory that failed
-// private-directory validation. Read-only discovery returns it instead of
-// repairing the directory, so callers can tell it apart from a stopped or
-// unreachable daemon. Its message is the validation error's message.
+// PrivateDirError reports a local runtime directory that failed
+// private-directory validation. Ordinary discovery repairs that directory;
+// read-only discovery returns this error instead, so callers can tell it apart
+// from a stopped or unreachable daemon. Its message is the validation error's
+// message.
 type PrivateDirError struct {
 	Err error
 }

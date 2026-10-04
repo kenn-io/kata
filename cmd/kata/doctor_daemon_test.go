@@ -367,6 +367,28 @@ func TestDoctorNamedLocalDiscoveryDoesNotRepairRuntimePermissions(t *testing.T) 
 	assertUnchanged()
 }
 
+func TestDoctorFailsForLocalProfileDirectoryWithLoosePermissions(t *testing.T) {
+	home, workspace := doctorTestEnv(t)
+	profileHome := t.TempDir()
+	uid := "01HZZZZZZZZZZZZZZZZZZZZZ01"
+	profileConfig := fmt.Sprintf("[[daemon]]\nname='example-local'\nlocal=true\nhome=%q\ninstance_uid=%q\n", profileHome, uid)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(profileConfig), 0600))
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "example-local", Local: true, Home: profileHome, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
+	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
+
+	report := collectDoctor(context.Background())
+	check := doctorFinding(t, report, "daemon.connection")
+	require.EqualValues(t, "fail", check.Status,
+		"ordinary commands reject a local profile directory with loose permissions instead of repairing it")
+	require.Contains(t, check.Summary, "profile")
+	require.True(t, report.Failed())
+	assertUnchanged()
+}
+
 func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
 	ns, err := daemon.NewNamespace()

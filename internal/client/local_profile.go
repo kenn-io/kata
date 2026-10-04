@@ -90,6 +90,18 @@ func (e *LocalProfileIdentityError) Error() string {
 }
 func (e *LocalProfileIdentityError) Unwrap() error { return ErrProfileIdentityMismatch }
 
+// LocalProfileDirError reports a local profile data directory that failed
+// private-directory validation. Unlike the default runtime directory, ordinary
+// commands reject it without repair. Its message is the validation error's
+// message.
+type LocalProfileDirError struct {
+	Err error
+}
+
+func (e *LocalProfileDirError) Error() string { return e.Err.Error() }
+
+func (e *LocalProfileDirError) Unwrap() error { return e.Err }
+
 func discoverLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	return discoverLocalProfileUsing(ctx, selection, liveDaemons)
 }
@@ -115,7 +127,7 @@ func discoverLocalProfileWithVerifier(
 		return resolved, false, err
 	}
 	if err := safefileio.ValidatePrivateDir(resolved.LocalProfile.DataDir); err != nil {
-		return resolved, false, &PrivateDirError{Err: err}
+		return resolved, false, &LocalProfileDirError{Err: err}
 	}
 	var unreachable error
 	for candidate, err := range scan(ctx, resolved.LocalProfile.DataDir) {
