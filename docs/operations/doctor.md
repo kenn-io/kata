@@ -59,7 +59,9 @@ files; remote process findings come from the selected daemon.
 | `daemon.embeddings` | Existing reconciler error and backlog aggregate | Check model/provider credentials and daemon logs. |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
 
-Project lookup uses an exact name and GET requests only. It does not resolve
+Doctor checks the same project name as ordinary commands: `--project`, then
+`[project].name` in `.kata.toml`. Project lookup uses an exact name and GET
+requests only. It does not resolve
 aliases, follow a renamed binding, or rewrite `.kata.toml`. A principal without
 catalog visibility gets an unverified-project warning. Archived projects do not
 count as usable.

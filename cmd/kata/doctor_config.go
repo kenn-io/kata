@@ -64,7 +64,6 @@ func doctorHookConfig() diagnostics.Check {
 
 func (s *doctorState) workspaceConfig() diagnostics.Check {
 	s.project = strings.TrimSpace(flags.Project)
-	explicitProject := s.project != ""
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
 		return invalidDoctorWorkspace()
@@ -91,12 +90,9 @@ func (s *doctorState) workspaceConfig() diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Workspace local override could not be verified", Fix: "Ensure git is available and the workspace is trusted; keep .kata.local.toml untracked."}
 	}
 	if localPath != "" {
-		localCfg, err := config.ReadLocalConfig(filepath.Dir(localPath))
+		_, err := config.ReadLocalConfig(filepath.Dir(localPath))
 		if err != nil && !errors.Is(err, config.ErrLocalConfigMissing) {
 			return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Workspace .kata.local.toml is invalid", Fix: "Correct version = 1 and the local override fields; keep this file untracked."}
-		}
-		if !explicitProject && localCfg != nil && localCfg.Project.Name != "" {
-			s.project = localCfg.Project.Name
 		}
 		unknown += doctorUnknownProjectKeys(localPath)
 	}

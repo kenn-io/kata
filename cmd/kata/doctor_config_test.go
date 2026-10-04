@@ -69,7 +69,7 @@ func TestDoctorWorkspaceConfiguration(t *testing.T) {
 	}
 }
 
-func TestDoctorUsesLocalProjectOverrideUnlessExplicitlySelected(t *testing.T) {
+func TestDoctorSelectsTheSameProjectAsOrdinaryCommands(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"),
 		[]byte("version=1\n[project]\nname='base-project'\n"), 0600))
@@ -79,7 +79,7 @@ func TestDoctorUsesLocalProjectOverrideUnlessExplicitlySelected(t *testing.T) {
 	for _, tc := range []struct {
 		name, explicitProject, wantProject string
 	}{
-		{name: "local override", wantProject: "local-project"},
+		{name: "workspace binding wins over local project name", wantProject: "base-project"},
 		{name: "explicit selection", explicitProject: "explicit-project", wantProject: "explicit-project"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +88,10 @@ func TestDoctorUsesLocalProjectOverrideUnlessExplicitlySelected(t *testing.T) {
 			finding := state.workspaceConfig()
 			require.EqualValues(t, "ok", finding.Status)
 			require.Equal(t, tc.wantProject, state.project)
+
+			ordinary, _, err := buildResolveRequest(context.Background(), workspace)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantProject, ordinary["name"], "ordinary commands must resolve the same project")
 		})
 	}
 }
