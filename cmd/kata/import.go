@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/pathresolve"
 )
 
 func newImportCmd() *cobra.Command {
@@ -139,6 +140,12 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	}
 	if merge {
 		return runSQLiteJSONLMerge(cmd, input, target)
+	}
+	// Replace the database behind a symlink, with staging beside that database.
+	if resolved, err := pathresolve.EvalSymlinks(target); err == nil {
+		target = resolved
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("resolve import target: %w", err)
 	}
 	targetExists, err := sqliteFileSetExists(target)
 	if err != nil {

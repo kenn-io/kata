@@ -120,7 +120,7 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 func TestImportForceRefusesActiveSQLiteTarget(t *testing.T) {
 	for _, alias := range []bool{false, true} {
 		t.Run(map[bool]string{false: "direct", true: "symlink"}[alias], func(t *testing.T) {
-			home, input, target := setupImportTest(t)
+			_, input, target := setupImportTest(t)
 			active, err := storeopen.Open(t.Context(), target)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = active.Close() })
@@ -128,7 +128,7 @@ func TestImportForceRefusesActiveSQLiteTarget(t *testing.T) {
 			require.NoError(t, err)
 			importTarget := target
 			if alias {
-				importTarget = filepath.Join(home, "alias.db")
+				importTarget = filepath.Join(t.TempDir(), "alias.db")
 				if err := os.Symlink(target, importTarget); err != nil {
 					t.Skipf("SQLite database symlinks unavailable: %v", err)
 				}
@@ -155,7 +155,12 @@ func TestImportForceRefusesActiveSQLiteTarget(t *testing.T) {
 			require.NoError(t, active.Close())
 			_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", importTarget)
 			require.NoError(t, err)
-			imported, err := storeopen.Open(t.Context(), importTarget)
+			if alias {
+				link, err := os.Readlink(importTarget)
+				require.NoError(t, err, "forced import must preserve the target symlink")
+				require.Equal(t, target, link)
+			}
+			imported, err := storeopen.Open(t.Context(), target)
 			require.NoError(t, err, "completed import must release the target lock")
 			defer func() { _ = imported.Close() }()
 			_, err = imported.ProjectByName(t.Context(), "kata")
