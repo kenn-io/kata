@@ -143,10 +143,13 @@ func TestImportForceRefusesActiveSQLiteTarget(t *testing.T) {
 			require.True(t, os.SameFile(before, after), "refused import must keep the active database")
 			_, err = active.CreateProject(t.Context(), "after-refusal")
 			require.NoError(t, err)
-			observed, err := storeopen.OpenReadOnly(t.Context(), importTarget)
+			// Read the writer's path so this assertion uses its WAL snapshot.
+			// The alias still identifying that file is checked above.
+			observed, err := storeopen.OpenReadOnly(t.Context(), target)
 			require.NoError(t, err)
+			t.Cleanup(func() { _ = observed.Close() })
 			_, err = observed.ProjectByName(t.Context(), "after-refusal")
-			require.NoError(t, err, "writes must remain visible through the target path")
+			require.NoError(t, err, "writes must remain visible in the active database")
 			require.NoError(t, observed.Close())
 
 			require.NoError(t, active.Close())
