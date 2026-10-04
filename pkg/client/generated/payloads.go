@@ -16,6 +16,8 @@ type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody
 
 type RebindFederationReplicaBody = RebindFederationReplicaRequestBody
 
+type ConfigureFederationSigningBody = ConfigureFederationSigningRequestBody
+
 type InitProjectBody = InitProjectRequestBody
 
 type ResolveProjectBody = ResolveProjectRequestBody

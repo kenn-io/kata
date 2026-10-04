@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-02
+last_edited: 2026-10-04
 ---
 
 # Configuration
@@ -461,6 +461,20 @@ until a connector call needs them; connector health is observed through
 `kata connector status`. The bridge reconciliation workers always run, so
 durable bindings are still handled when their connector is removed from
 configuration.
+
+### Federation request signing and ingress
+
+`[federation.signing]` configures hub-controlled `required`, the fixed HTTPS
+`external_url` (including a prefix), `replay_state_file`, and `[[federation.signing.key]]`
+entries. Each entry binds `key_id`, `enrollment_id` and exactly one of `key_env`
+or `key_file`; an optional Unix `not_after` bounds retirement overlap.
+
+`[federation.ingress]` enables an independent allowlisted listener with `enabled`
+and a literal private `listen` address. It requires signing configuration and
+valid signatures regardless of `required` on ordinary listeners. It defaults to
+disabled, or `127.0.0.1:0` when enabled without an address. See
+[Federation request signing](../operations/federation-signing.md) for key setup,
+replay initialization, topology, limits and recovery.
 
 ### Declarative federation mappings
 

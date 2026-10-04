@@ -623,6 +623,17 @@ func (c CommentResponseBody) Validate() error {
 	return errors
 }
 
+type ConfigureFederationSigningRequestBody struct {
+	HubURL  *string `json:"hub_url,omitempty"`
+	KeyEnv  *string `json:"key_env,omitempty"`
+	KeyFile *string `json:"key_file,omitempty"`
+	KeyID   string  `json:"key_id" validate:"required"`
+}
+
+func (c ConfigureFederationSigningRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type ConnectorFieldsResponseBody struct {
 	Fields []FieldDescriptor `json:"fields" validate:"required"`
 }
@@ -703,6 +714,9 @@ type CreateFederationReplicaRequestBody struct {
 	ProjectName            string  `json:"project_name" validate:"required"`
 	PushEnabled            *bool   `json:"push_enabled,omitempty"`
 	ReplayHorizonEventID   int64   `json:"replay_horizon_event_id"`
+	SigningKeyEnv          *string `json:"signing_key_env,omitempty"`
+	SigningKeyFile         *string `json:"signing_key_file,omitempty"`
+	SigningKeyID           *string `json:"signing_key_id,omitempty"`
 	Token                  *string `json:"token,omitempty"`
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -43,6 +44,11 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 	c, err := clientpkg.NewHTTPClientWithBearer(ctx, canonicalBaseURL, token, opts)
 	if err != nil {
 		return nil, err
+	}
+	if opts.FederationSigning != nil {
+		if err := federationsigning.ConfigureClient(c, canonicalBaseURL, token, *opts.FederationSigning); err != nil {
+			return nil, err
+		}
 	}
 	return &Client{
 		baseURL: canonicalBaseURL,

@@ -509,6 +509,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}
+	if err := normalizeFederationSigning(&cfg); err != nil {
+		return nil, err
+	}
 	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err
 	}

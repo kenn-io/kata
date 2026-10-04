@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
@@ -1311,37 +1312,49 @@ func runDaemonProcess(
 		idleHealth = idleController.Snapshot
 		idleAdmission = idleController
 	}
+
+	var signingVerifier *federationsigning.Verifier
+	if dcfg.Federation.Signing.ExternalURL != "" {
+		var err error
+		signingVerifier, err = federationsigning.NewVerifier(dcfg.Federation.Signing.ExternalURL, dcfg.Federation.Signing.Keys, dcfg.Federation.Signing.ReplayStateFile)
+		if err != nil {
+			return fmt.Errorf("initialize federation signing: %w", err)
+		}
+		defer func() { _ = signingVerifier.Close() }()
+	}
 	webHandler, err := kataweb.NewEmbeddedHandler()
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
-		DB:                     store,
-		DefaultTimezone:        dcfg.Timezone,
-		StartedAt:              time.Now().UTC(),
-		Endpoint:               &endpoint,
-		Hooks:                  disp,
-		Broadcaster:            broadcaster,
-		FederationWake:         federationWake,
-		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		ActiveWebDaemon:        dcfg.ActiveDaemon,
-		GitHubSyncFetcher:      gitHubSyncFetcher,
-		GitHubSyncConfig:       dcfg.GitHubSync,
-		GitHubSyncWake:         gitHubSyncWake,
-		GitHubSyncProgress:     gitHubSyncProgress,
-		NotionSyncFetcher:      notionSyncFetcher,
-		NotionSyncConfig:       dcfg.NotionSync,
-		NotionSyncWake:         notionSyncWake,
-		NotionSyncProgress:     notionSyncProgress,
-		PlaneSyncFetcher:       planeSyncFetcher,
-		PlaneSyncConfig:        dcfg.PlaneSync,
-		PlaneSyncWake:          planeSyncWake,
-		PlaneSyncProgress:      planeSyncProgress,
-		ExternalRootRegistry:   externalRootRegistry,
-		ExternalRootService:    externalRootService,
-		ExternalRootReconciler: externalRootReconciler,
-		ExternalRootWake:       externalRootWake,
+		FederationSigning:         signingVerifier,
+		FederationSigningRequired: dcfg.Federation.Signing.Required,
+		DB:                        store,
+		DefaultTimezone:           dcfg.Timezone,
+		StartedAt:                 time.Now().UTC(),
+		Endpoint:                  &endpoint,
+		Hooks:                     disp,
+		Broadcaster:               broadcaster,
+		FederationWake:            federationWake,
+		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebDaemons:                append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:           dcfg.ActiveDaemon,
+		GitHubSyncFetcher:         gitHubSyncFetcher,
+		GitHubSyncConfig:          dcfg.GitHubSync,
+		GitHubSyncWake:            gitHubSyncWake,
+		GitHubSyncProgress:        gitHubSyncProgress,
+		NotionSyncFetcher:         notionSyncFetcher,
+		NotionSyncConfig:          dcfg.NotionSync,
+		NotionSyncWake:            notionSyncWake,
+		NotionSyncProgress:        notionSyncProgress,
+		PlaneSyncFetcher:          planeSyncFetcher,
+		PlaneSyncConfig:           dcfg.PlaneSync,
+		PlaneSyncWake:             planeSyncWake,
+		PlaneSyncProgress:         planeSyncProgress,
+		ExternalRootRegistry:      externalRootRegistry,
+		ExternalRootService:       externalRootService,
+		ExternalRootReconciler:    externalRootReconciler,
+		ExternalRootWake:          externalRootWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -1415,6 +1428,17 @@ func runDaemonProcess(
 			},
 		})
 	}
+
+	var federationIngressAddress string
+	if dcfg.Federation.Ingress.Enabled {
+		ingress, err := net.Listen("tcp", dcfg.Federation.Ingress.Listen)
+		if err != nil {
+			return fmt.Errorf("listen for restricted federation: %w", err)
+		}
+		defer func() { _ = ingress.Close() }()
+		federationIngressAddress = ingress.Addr().String()
+		bindings = append(bindings, daemon.ListenerBinding{Listener: ingress, Policy: daemon.ListenerPolicy{Kind: daemon.ListenerFederation}})
+	}
 	var runtimeFile string
 	defer func() {
 		if runtimeFile != "" {
@@ -1428,6 +1452,9 @@ func runDaemonProcess(
 				return err
 			}
 			runtimeFile = path
+			if federationIngressAddress != "" {
+				fmt.Fprintf(os.Stderr, "federation ingress listening at %s\n", federationIngressAddress)
+			}
 			if idleController != nil {
 				idleController.Start()
 			}

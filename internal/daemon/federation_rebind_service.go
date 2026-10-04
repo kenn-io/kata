@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 )
 
 const (
@@ -207,7 +208,9 @@ func RebindFederationReplica(
 
 	fetchMetadata := p.FetchMetadata
 	if fetchMetadata == nil {
-		fetchMetadata = fetchFederationRebindMetadata
+		fetchMetadata = func(ctx context.Context, base, token string, id int64) (api.ProjectFederationBody, error) {
+			return fetchFederationRebindMetadata(ctx, base, token, id, credential.Signing)
+		}
 	}
 	metadata, err := fetchMetadata(
 		ctx, targetURL, credential.Token, binding.HubProjectID,
@@ -499,6 +502,7 @@ func fetchFederationRebindMetadata(
 	hubURL string,
 	token string,
 	hubProjectID int64,
+	signing *federationsigning.Source,
 ) (api.ProjectFederationBody, error) {
 	httpClient, err := newFederationRebindHTTPClient(ctx, hubURL, token)
 	if err != nil {
@@ -514,6 +518,22 @@ func fetchFederationRebindMetadata(
 			"configure replacement hub redirect policy",
 			"check the HTTPS catalog endpoint",
 		)
+	}
+	if signing != nil {
+		if signing.HubURL != "" {
+			pinnedHubURL, pinErr := canonicalFederationRebindBaseURL(signing.HubURL)
+			requestedHubURL, requestedErr := canonicalFederationRebindBaseURL(hubURL)
+			if pinErr == nil && requestedErr == nil && pinnedHubURL != requestedHubURL {
+				return api.ProjectFederationBody{}, federationReplicaError(
+					ErrFederationReplicaInvalidInput,
+					"federation signing source is pinned to a different hub base",
+					"Run kata federation signing configure --project-uid <local-project-uid> with the existing --key-id and --key-env or --key-file, and --hub-url <new-https-base>, then retry.",
+				)
+			}
+		}
+		if err := federationsigning.ConfigureClient(httpClient, hubURL, token, *signing); err != nil {
+			return api.ProjectFederationBody{}, err
+		}
 	}
 	apiClient, err := generated.NewDefaultClient(hubURL, runtime.WithHTTPClient(boundedProbeDoer{client: httpClient, limit: federationRebindResponseLimit}))
 	if err != nil {

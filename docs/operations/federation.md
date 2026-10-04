@@ -1,13 +1,16 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # Federation
 
 Federation lets multiple kata daemons share selected projects while each user
 keeps a local daemon and local database. It is opt-in per project.
+
+For independent request signing and a restricted proxy listener, see
+[Federation request signing](federation-signing.md).
 
 The hub and each spoke may independently use SQLite or PostgreSQL. Federation
 does not negotiate storage backends and needs no backend-specific flags: all

@@ -73,6 +73,8 @@ type RebindFederationReplicaResponse = RebindFederationReplicaResponseBody
 
 type RebindFederationReplicaErrorResponse = ErrorEnvelope
 
+type ConfigureFederationSigningErrorResponse = ErrorEnvelope
+
 type GetFederationStatusResponse = FederationStatusBody
 
 type GetFederationStatusErrorResponse = ErrorEnvelope
@@ -539,6 +541,12 @@ type RebindFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RebindFederationReplicaResponse
+}
+
+type ConfigureFederationSigningResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
 }
 
 type GetFederationStatusResp struct {

@@ -61,7 +61,7 @@ func reconcileProviderMapping(
 		_, finishErr := finish(ctx, 0)
 		resultErr = errors.Join(resultErr, finishErr)
 	}()
-	client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{Timeout: defaultFederationClientTimeout})
+	client, err := NewClient(ctx, credential.HubURL, credential.Token, clientOptsForCredential(clientpkg.Opts{Timeout: defaultFederationClientTimeout}, credential))
 	if err != nil {
 		return reconcileError(ErrConfigurationConflict, "invalid federation provider endpoint")
 	}

@@ -27,6 +27,11 @@ type FederationProviderCredential struct {
 // Equal compares the whole retained credential by value, including optional
 // provider state. Pointer equality would reject exact retries after a file read.
 func (credential FederationCredential) Equal(other FederationCredential) bool {
+	ls, rs := credential.Signing, other.Signing
+	credential.Signing, other.Signing = nil, nil
+	if (ls == nil) != (rs == nil) || (ls != nil && *ls != *rs) {
+		return false
+	}
 	left, right := credential.Provider, other.Provider
 	credential.Provider, other.Provider = nil, nil
 	if credential != other {

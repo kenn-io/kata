@@ -60,6 +60,14 @@ type RebindFederationReplicaPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type ConfigureFederationSigningPath struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (c ConfigureFederationSigningPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type ShowIssueByUIDPath struct {
 	UID string `json:"uid" validate:"required"`
 }

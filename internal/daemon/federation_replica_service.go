@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
@@ -699,6 +700,17 @@ func ensureFederationReplicaState(
 	if err := ensureFederationReplicaCredentialRekey(ctx, store, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
+	// Rejoin without new source references retains the explicit signing choice.
+	// Target conflicts have already been rejected above.
+	if credentials != nil && p.Credential.Token != "" && p.Credential.Signing == nil {
+		existing, found, err := credentials.FederationCredential(ctx, p.HubProjectUID)
+		if err != nil {
+			return EnsureFederationReplicaResult{}, credentialIOError("read federation signing selection")
+		}
+		if found && existing.Signing != nil {
+			p.Credential.Signing = existing.Signing
+		}
+	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
 	if result.CreatedEvent != nil && p.ProjectEventSink != nil {
@@ -858,6 +870,17 @@ func normalizeFederationReplicaParams(
 		)
 	}
 	p.HubURL = hubBaseURL
+	if source := p.Credential.Signing; source != nil {
+		canonicalSource := *source
+		if canonicalSource.HubURL != "" {
+			canonicalSource.HubURL, err = normalizeFederationHubBaseURL(canonicalSource.HubURL)
+		}
+		if err != nil || (canonicalSource.HubURL != "" && canonicalSource.HubURL != hubBaseURL) || federationsigning.ValidatePolicy(hubBaseURL, []federationsigning.Key{{Source: canonicalSource, EnrollmentID: 1}}) != nil {
+			return EnsureFederationReplicaParams{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid or unavailable federation signing source", "")
+		}
+		p.Credential.Signing = &canonicalSource
+	}
+
 	if !katauid.Valid(p.HubProjectUID) {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			ErrFederationReplicaInvalidInput, "hub_project_uid must be a valid UID", "",

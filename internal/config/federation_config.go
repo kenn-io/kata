@@ -12,6 +12,8 @@ import (
 
 // FederationConfig is the [federation] block of <KATA_HOME>/config.toml.
 type FederationConfig struct {
+	Signing  FederationSigningConfig   `toml:"signing"`
+	Ingress  FederationIngressConfig   `toml:"ingress"`
 	Projects []FederationProjectConfig `toml:"project"`
 }
 

@@ -430,6 +430,20 @@ components:
         - event
         - changed
       type: object
+    ConfigureFederationSigningRequestBody:
+      additionalProperties: false
+      properties:
+        hub_url:
+          type: string
+        key_env:
+          type: string
+        key_file:
+          type: string
+        key_id:
+          type: string
+      required:
+        - key_id
+      type: object
     ConnectorFieldsResponseBody:
       additionalProperties: true
       properties:
@@ -530,6 +544,12 @@ components:
         replay_horizon_event_id:
           format: int64
           type: integer
+        signing_key_env:
+          type: string
+        signing_key_file:
+          type: string
+        signing_key_id:
+          type: string
         token:
           type: string
       required:
@@ -5296,6 +5316,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/RebindFederationReplicaResponseBody"
           description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/replicas/{project_uid}/actions/configure-signing:
+    post:
+      operationId: configureFederationSigning
+      parameters:
+        - in: path
+          name: project_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigureFederationSigningRequestBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
         default:
           content:
             application/json:
