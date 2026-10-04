@@ -42,6 +42,7 @@ type OperationKind string
 // Operation kinds group routes by their data and administration boundary.
 const (
 	OperationServiceRead               OperationKind = "service_read"
+	OperationServiceMutation           OperationKind = "service_mutation"
 	OperationProjectRead               OperationKind = "project_read"
 	OperationTaskRead                  OperationKind = "task_read"
 	OperationTaskMutation              OperationKind = "task_mutation"

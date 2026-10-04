@@ -1348,6 +1348,7 @@ func runDaemonProcess(
 		},
 		Auth:                   dcfg.Auth,
 		WebSessions:            webSessions,
+		Telemetry:              telemetryReporter,
 		WebHandler:             webHandler,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,

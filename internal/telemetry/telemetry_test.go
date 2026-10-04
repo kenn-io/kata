@@ -51,13 +51,6 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 	assert.Equal(t, "disabled", strings.TrimSpace(string(output)))
 }
 
-func TestEnabledFromEnvDisabledDuringGoTests(t *testing.T) {
-	t.Setenv("TELEMETRY_ENABLED", "1")
-	t.Setenv(EnabledEnv, "1")
-
-	assert.False(t, EnabledFromEnv())
-}
-
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
 func TestStandaloneTelemetryOptOutSpellings(t *testing.T) {

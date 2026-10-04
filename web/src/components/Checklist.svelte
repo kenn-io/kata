@@ -319,7 +319,7 @@
 
   .add-checklist-button:disabled {
     cursor: default;
-    opacity: 0.62;
+    opacity: var(--opacity-disabled);
   }
 
   .add-checklist-button:not(:disabled):hover {

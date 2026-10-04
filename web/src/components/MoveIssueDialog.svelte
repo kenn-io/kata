@@ -392,7 +392,7 @@
   }
 
   .move-options button:disabled {
-    opacity: 0.62;
+    opacity: var(--opacity-disabled);
   }
 
   .move-project-name {

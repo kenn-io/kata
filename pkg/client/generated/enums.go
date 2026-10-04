@@ -46,6 +46,23 @@ func (a ActionRequestBodySource) Validate() error {
 	}
 }
 
+type CaptureTelemetryEventResponseBodyStatus string
+
+const (
+	Disabled CaptureTelemetryEventResponseBodyStatus = "disabled"
+	Queued   CaptureTelemetryEventResponseBodyStatus = "queued"
+)
+
+// Validate checks if the CaptureTelemetryEventResponseBodyStatus value is valid
+func (c CaptureTelemetryEventResponseBodyStatus) Validate() error {
+	switch c {
+	case Disabled, Queued:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CaptureTelemetryEventResponseBodyStatus value, got: %v", c))
+	}
+}
+
 type CloseActionRequestBodyReason string
 
 const (

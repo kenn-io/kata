@@ -905,3 +905,57 @@ func containsInt64(values []int64, want int64) bool {
 func containsString(values []string, want string) bool {
 	return slices.Contains(values, want)
 }
+
+func TestServiceTelemetryCaptureIsUnavailableToEmbeddedHosts(t *testing.T) {
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	serve := func(service *kata.Service) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/ui/telemetry",
+			bytes.NewBufferString(`{"event":"app_opened"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request = request.WithContext(kata.WithPrincipal(request.Context(), principal))
+		response := httptest.NewRecorder()
+		service.Handler().ServeHTTP(response, request)
+		return response
+	}
+
+	t.Run("full profile", func(t *testing.T) {
+		controller := &recordingAccessController{}
+		service, err := kata.New(context.Background(), kata.Config{
+			DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+		response := serve(service)
+
+		assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+		assert.JSONEq(t, `{"status":503,"error":{"code":"telemetry_unavailable","message":"telemetry capture is unavailable"}}`,
+			response.Body.String())
+		requests := controller.snapshot()
+		require.Len(t, requests, 1)
+		assert.Equal(t, kata.Operation{
+			ID: "captureTelemetryEvent", Method: http.MethodPost, Path: "/api/v1/ui/telemetry",
+			PathParams: map[string]string{},
+			Policy: kata.OperationPolicy{
+				Kind: kata.OperationServiceMutation, Capability: kata.CapabilityWrite, Mutation: true,
+			},
+		}, requests[0].Operation)
+		assert.Empty(t, requests[0].Operation.ProjectIDs)
+		assert.False(t, requests[0].Operation.AllProjects)
+	})
+
+	t.Run("restricted profile", func(t *testing.T) {
+		controller := &recordingAccessController{}
+		service, err := kata.New(context.Background(), kata.Config{
+			DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+			Profile: kata.EmbeddingProfileRestricted,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+		response := serve(service)
+
+		assert.Equal(t, http.StatusNotFound, response.Code)
+		assert.Empty(t, controller.snapshot(), "restricted operations must fail before host authorization")
+	})
+}

@@ -223,7 +223,7 @@
   .daemon-row:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
-    opacity: 0.6;
+    opacity: var(--opacity-disabled);
   }
 
   .daemon-row.selected {

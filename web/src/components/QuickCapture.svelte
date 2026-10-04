@@ -154,7 +154,7 @@
 
   .change-inbox:disabled {
     cursor: default;
-    opacity: 0.55;
+    opacity: var(--opacity-disabled);
   }
 
   .capture-input:focus {

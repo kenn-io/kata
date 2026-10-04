@@ -1,0 +1,175 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/telemetry"
+)
+
+const telemetryTestOrigin = "http://127.0.0.1:27123"
+
+type telemetryTestServer struct {
+	handler http.Handler
+	session IssuedWebSession
+	manager *WebSessionManager
+}
+
+func newTelemetryTestServer(t *testing.T, reporter TelemetryReporter, principal Principal) telemetryTestServer {
+	t.Helper()
+	store := openAuthTestDB(t)
+	manager := newDeterministicSessionManager(t, telemetryTestOrigin, "instance_a")
+	server := NewServer(ServerConfig{
+		DB: store, StartedAt: time.Now().UTC(), WebSessions: manager, Telemetry: reporter,
+	})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{
+		Kind: ListenerBrowser, Origin: telemetryTestOrigin,
+		RequireBrowserSession: true, AllowLocalSession: true,
+	})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(principal, "/kata")
+	require.NoError(t, err)
+	return telemetryTestServer{handler: handler, session: issued, manager: manager}
+}
+
+// newDisabledReporter is the go-test reporter: disabled, with kata's allowlist.
+func newDisabledReporter(t *testing.T) TelemetryReporter {
+	t.Helper()
+	reporter, err := telemetry.NewReporter(telemetry.Options{})
+	require.NoError(t, err)
+	return reporter
+}
+
+type fakeTelemetryReporter struct {
+	captured []map[string]any
+}
+
+func (*fakeTelemetryReporter) EventAllowed(event string) bool { return event == "app_opened" }
+func (*fakeTelemetryReporter) Enabled() bool                  { return true }
+func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+	f.captured = append(f.captured, properties)
+	return nil
+}
+
+type telemetryRequestOption func(*http.Request)
+
+func withoutSessionHeaders(r *http.Request) {
+	r.Header.Del(webSessionHeader)
+	r.Header.Del(webCSRFHeader)
+}
+
+func withoutCSRF(r *http.Request) { r.Header.Del(webCSRFHeader) }
+
+func withHeader(name, value string) telemetryRequestOption {
+	return func(r *http.Request) { r.Header.Set(name, value) }
+}
+
+func (s telemetryTestServer) post(ctx context.Context, t *testing.T, body string, options ...telemetryRequestOption) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, telemetryTestOrigin+"/api/v1/ui/telemetry", strings.NewReader(body))
+	request.Host = "127.0.0.1:27123"
+	request.RemoteAddr = "127.0.0.1:40123"
+	request.Header.Set("Origin", telemetryTestOrigin)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(s.manager.Cookie(s.session.Cookie))
+	request.Header.Set(webSessionHeader, s.session.Session)
+	request.Header.Set(webCSRFHeader, s.session.CSRF)
+	for _, option := range options {
+		option(request)
+	}
+	response := httptest.NewRecorder()
+	s.handler.ServeHTTP(response, request)
+	return response
+}
+
+func decodeErrorCode(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope), response.Body.String())
+	return envelope.Error.Code
+}
+
+func TestCaptureTelemetryEventAcceptsAppOpened(t *testing.T) {
+	server := newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal})
+
+	response := server.post(t.Context(), t, `{"event":"app_opened"}`)
+
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
+}
+
+func TestCaptureTelemetryEventRejectsUnknownEventWithEnvelope(t *testing.T) {
+	server := newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal})
+
+	response := server.post(t.Context(), t, `{"event":"app_loaded"}`)
+
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	assert.Equal(t, "unsupported_telemetry_event", decodeErrorCode(t, response))
+}
+
+func TestCaptureTelemetryEventRejectsOversizedBody(t *testing.T) {
+	server := newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal})
+	body := `{"event":"app_opened","properties":{"padding":"` + strings.Repeat("x", 16<<10) + `"}}`
+
+	response := server.post(t.Context(), t, body)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, response.Code, response.Body.String())
+}
+
+func TestCaptureTelemetryEventRequiresBrowserGuards(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		principal Principal
+		option    telemetryRequestOption
+		want      int
+	}{
+		{name: "no session headers", principal: Principal{Kind: PrincipalWebLocal}, option: withoutSessionHeaders, want: http.StatusUnauthorized},
+		{name: "no csrf", principal: Principal{Kind: PrincipalWebLocal}, option: withoutCSRF, want: http.StatusForbidden},
+		{name: "origin on another port", principal: Principal{Kind: PrincipalWebLocal}, option: withHeader("Origin", "http://127.0.0.1:27124"), want: http.StatusForbidden},
+		{name: "plain text body", principal: Principal{Kind: PrincipalWebLocal}, option: withHeader("Content-Type", "text/plain"), want: http.StatusUnsupportedMediaType},
+		{name: "read-only principal", principal: Principal{Kind: PrincipalBootstrap}, option: func(*http.Request) {}, want: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reporter := &fakeTelemetryReporter{}
+			server := newTelemetryTestServer(t, reporter, test.principal)
+
+			response := server.post(t.Context(), t, `{"event":"app_opened"}`, test.option)
+
+			assert.Equal(t, test.want, response.Code, response.Body.String())
+			assert.Empty(t, reporter.captured, "guards must reject before capture")
+		})
+	}
+}
+
+func TestCaptureTelemetryEventUnavailableWithoutCaptureHandler(t *testing.T) {
+	server := newTelemetryTestServer(t, nil, Principal{Kind: PrincipalWebLocal})
+
+	response := server.post(t.Context(), t, `{"event":"app_opened"}`)
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	assert.Equal(t, "telemetry_unavailable", decodeErrorCode(t, response))
+}
+
+func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
+	reporter := &fakeTelemetryReporter{}
+	server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+
+	response := server.post(t.Context(), t, `{"event":"app_opened","properties":{"surface":"web"}}`)
+
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+}

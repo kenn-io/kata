@@ -419,6 +419,10 @@ type ReadUIReferencesResponse = UIReferencesResponseBody
 
 type ReadUISnapshotResponse = UISnapshotResponseBody
 
+type CaptureTelemetryEventResponse = CaptureTelemetryEventResponseBody
+
+type CaptureTelemetryEventErrorResponse = ErrorEnvelope
+
 type AuditClosesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1236,4 +1240,11 @@ type ReadUISnapshotResp struct {
 	StatusCode   int
 	JSON200      *ReadUISnapshotResponse
 	Headers200   *ReadUISnapshotResp200Headers
+}
+
+type CaptureTelemetryEventResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON202      *CaptureTelemetryEventResponse
 }
