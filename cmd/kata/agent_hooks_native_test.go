@@ -196,7 +196,12 @@ func TestNativeAgentHookRemoveRollbackRestoresPermissions(t *testing.T) {
 	}
 	for _, mode := range []os.FileMode{0644, 0755} {
 		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
-			root := t.TempDir()
+			// The publisher renames to resolved paths; resolve root so the injected
+			// failure matches on hosts where TempDir has a symlinked prefix.
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			removed := filepath.Join(root, "owned.js")
 			second := filepath.Join(root, "config.json")
 			before := []byte("owned extension\n")
@@ -287,7 +292,12 @@ func TestNativeAgentHookPublishRevalidatesUnchangedArtifactsAfterStaging(t *test
 	for _, absent := range []bool{false, true} {
 		for _, configFirst := range []bool{false, true} {
 			t.Run(fmt.Sprintf("absent=%t/config-first=%t", absent, configFirst), func(t *testing.T) {
-				root := t.TempDir()
+				// Resolve root so the staging guard compares against the resolved paths
+				// the publisher stages.
+				root, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
 				config := filepath.Join(root, "config.json")
 				extension := filepath.Join(root, "extension.js")
 				configChange := nativeAgentHookChange{Path: config, Remove: true}
