@@ -377,6 +377,13 @@ type advancingBody struct {
 func (b *advancingBody) Read(p []byte) (int, error) { b.advance(); return b.Reader.Read(p) }
 func (*advancingBody) Close() error                 { return nil }
 
+type closeRecordingBody struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (b *closeRecordingBody) Close() error { b.closed.Store(true); return nil }
+
 // Property: malformed signature input never admits or panics, regardless of bytes.
 func FuzzSignatureInput(f *testing.F) {
 	f.Add("sig1=(\"@method\");created=0")
@@ -482,9 +489,7 @@ func TestClientClosesBodyOnSigningTransportRejection(t *testing.T) {
 			defer hub.Close()
 			client := hub.Client()
 			require.NoError(t, ConfigureClient(client, hub.URL, "enrollment", source))
-			body, err := os.CreateTemp(t.TempDir(), "request-body")
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = body.Close() })
+			body := &closeRecordingBody{Reader: strings.NewReader(`{}`)}
 			req, err := http.NewRequest(http.MethodPost, hub.URL, body)
 			require.NoError(t, err)
 			want := ErrInvalid
@@ -503,8 +508,7 @@ func TestClientClosesBodyOnSigningTransportRejection(t *testing.T) {
 			}
 			require.ErrorIs(t, err, want)
 			require.Zero(t, calls)
-			_, err = body.Stat()
-			require.ErrorIs(t, err, os.ErrClosed)
+			require.True(t, body.closed.Load(), "rejected request body must be closed")
 		})
 	}
 }
