@@ -36,6 +36,10 @@ func registerFederationSigningHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireSigningSourceAuthority(ctx); err != nil {
 			return nil, err
 		}
+		// Rejoin rewrites the whole credential under this lock; holding it keeps
+		// a concurrent rejoin from restoring the previous signing selection.
+		ensureFederationReplicaMu.Lock()
+		defer ensureFederationReplicaMu.Unlock()
 		store := cfg.federationCredentialStore()
 		current, found, err := store.FederationCredential(ctx, in.ProjectUID)
 		if err != nil {
