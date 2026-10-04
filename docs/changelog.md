@@ -95,7 +95,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - The web UI reports an anonymous `app_opened` event through the daemon when it
   loads and on the first focus of each later UTC day, so usage reports can
   count installs where someone opened the UI. `KATA_TELEMETRY_ENABLED=0` turns
-  it off with the daemon heartbeat.
+  it off with the daemon heartbeat. Uses Kit v0.31.1.
 
 - `kata tui` reports an anonymous `app_opened` event through the daemon once per
   launch, so usage reports count people who only use the terminal UI. The event
