@@ -857,10 +857,17 @@ The web UI reports an anonymous `app_opened` event to the daemon serving it
 when the page loads, and again on the first window focus of each later UTC day.
 Background refreshes of an open tab do not count. The daemon sends the event to
 PostHog with the same fields, distinct ID, and opt-out as its own events; the
-browser never contacts PostHog, and the event carries no properties. Only
-signed-in sessions with write access on the serving daemon are counted.
-Delivery is best effort, and tabs opened together can each report, so count
-distinct installs rather than events.
+browser never contacts PostHog. Only signed-in sessions with write access on the
+serving daemon are counted. Delivery is best effort, and tabs opened together
+can each report, so count distinct installs rather than events.
+
+`app_opened` carries one property, `surface`, set to `web` or `tui`; the daemon
+drops any other value. `kata tui` sends `app_opened` once per launch to the
+daemon it connects to, after connecting. It goes through that daemon the same
+way the web UI's event does, so the daemon's install ID and the daemon's
+`KATA_TELEMETRY_ENABLED` setting apply, and a TUI pointed at a shared daemon
+counts that daemon's install. Switching daemons inside the TUI sends nothing
+more. Delivery is best effort and never shows in the terminal.
 
 Disable telemetry with:
 

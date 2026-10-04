@@ -50,3 +50,9 @@ type federationEnrollmentAPI interface {
 type credentialAuditAPI interface {
 	ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error)
 }
+
+// appOpenedAPI reports that the TUI opened. It is optional so test doubles
+// that do not implement it simply send nothing.
+type appOpenedAPI interface {
+	ReportAppOpened(ctx context.Context) error
+}

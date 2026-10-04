@@ -68,7 +68,9 @@ func NewReporter(opts Options) (*Reporter, error) {
 		posthog.WithAllowedEvent("daemon_started",
 			posthog.AllowProperty("project_count", posthog.AllowNumber),
 		),
-		posthog.WithAllowedEvent("app_opened"),
+		posthog.WithAllowedEvent("app_opened",
+			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
+		),
 	)
 }
 

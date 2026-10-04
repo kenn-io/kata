@@ -266,7 +266,8 @@ func (m Model) Init() tea.Cmd {
 	// tea.BackgroundColorMsg answer lands.
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.api != nil {
-		cmds = append(cmds, m.fetchAuthCapabilities())
+		// Init runs once per launch; daemon switches and reconnects never reach it.
+		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
 	}
 	if activeColorMode == colorAuto {
 		cmds = append(cmds, tea.RequestBackgroundColor)
