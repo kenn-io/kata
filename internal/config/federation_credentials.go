@@ -292,7 +292,11 @@ func readFederationCredentials() (*FederationCredentials, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME
+	return readFederationCredentialsFile(path)
+}
+
+func readFederationCredentialsFile(path string) (*FederationCredentials, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is derived from a Kata home
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &FederationCredentials{Projects: map[string]FederationCredential{}}, nil
