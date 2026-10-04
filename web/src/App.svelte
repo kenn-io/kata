@@ -163,6 +163,7 @@
     stopAppOpened ??= startAppOpenedReporting({
       route: '/api/v1/ui/telemetry',
       surface: 'web',
+      storageKey: 'kata.web.app-opened.v1',
       post: async (_route, event) => {
         const response = await captureTelemetryEvent(event)
         if (response.status === 401) restartAppOpenedAfterAuthentication()
