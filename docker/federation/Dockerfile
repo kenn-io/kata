@@ -2,6 +2,9 @@ FROM golang:1.27.0-bookworm AS build
 
 WORKDIR /src
 
+# "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
+ENV GOPROXY="https://proxy.golang.org|direct"
+
 COPY go.mod go.sum ./
 RUN go mod download
 
