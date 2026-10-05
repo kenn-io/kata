@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+
+	"go.kenn.io/kit/atomicfile"
 )
 
 // runsAppender owns one *os.File and a mutex. Append marshals one
@@ -110,7 +112,7 @@ func (a *runsAppender) rotateLocked() error {
 		a.reopenActive()
 		return err
 	}
-	if err := os.Rename(a.path, a.path+".1"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := atomicfile.Replace(a.path, a.path+".1"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		a.reopenActive()
 		return fmt.Errorf("rename active -> .1: %w", err)
 	}
@@ -139,7 +141,7 @@ func (a *runsAppender) shiftRotated() error {
 			continue
 		}
 		to := fmt.Sprintf("%s.%d", a.path, i+1)
-		if err := os.Rename(from, to); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := atomicfile.Replace(from, to); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("rename %s -> %s: %w", from, to, err)
 		}
 	}
