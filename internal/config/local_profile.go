@@ -198,10 +198,12 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		"KATA_AUTHOR", "KATA_TEAMMATE", "KATA_INBOX_USER", "KATA_REF", "KATA_COLOR_MODE", "KATA_TELEMETRY_ENABLED",
 		"KATA_TEST_FEDERATION_FAILPOINTS", "KATA_GITHUB_SYNC_ALLOWED_HOSTS",
 	}
+	copied := map[string]bool{}
 	for _, key := range references {
-		if key == "" {
+		if key == "" || copied[key] {
 			continue
 		}
+		copied[key] = true
 		upper := strings.ToUpper(key)
 		_, osKey := values[key]
 		if !environmentNamePattern.MatchString(key) || osKey || strings.HasPrefix(upper, "PG") || slices.Contains(reserved, upper) || upper == "PORT" || strings.HasSuffix(upper, "_PROXY") || upper == "ALL_PROXY" || upper == "NO_PROXY" {

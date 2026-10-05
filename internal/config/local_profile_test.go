@@ -426,3 +426,32 @@ key_env = "EXAMPLE_SPOKE_SIGNING_KEY"
 	assert.Contains(t, env, "EXAMPLE_HUB_SIGNING_KEY=hub-signing-secret")
 	assert.Contains(t, env, "EXAMPLE_SPOKE_SIGNING_KEY=spoke-signing-secret")
 }
+
+// Contract: credential references that share one environment variable are
+// copied once instead of being mistaken for reserved OS variables.
+func TestLocalProfileEnvironmentAllowsSharedCredentialReferences(t *testing.T) {
+	t.Setenv("EXAMPLE_SHARED_SIGNING_KEY", "shared-signing-secret")
+	home := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(home, "credentials.toml"), []byte(`
+[projects.01HZNQ7VFPK1XGD8R5MABCD4EX]
+hub_url = "https://daemon.example"
+[projects.01HZNQ7VFPK1XGD8R5MABCD4EX.signing]
+key_id = "key-a"
+key_env = "EXAMPLE_SHARED_SIGNING_KEY"
+[projects.01HZNQ7VFPK1XGD8R5MABCD4EY]
+hub_url = "https://daemon.example"
+[projects.01HZNQ7VFPK1XGD8R5MABCD4EY.signing]
+key_id = "key-b"
+key_env = "EXAMPLE_SHARED_SIGNING_KEY"
+`), 0o600))
+	profile := config.LocalProfileConfig{Home: home, Config: &config.DaemonConfig{}}
+
+	env, err := config.LocalProfileEnvironment(profile, true)
+
+	require.NoError(t, err)
+	assert.Contains(t, env, "EXAMPLE_SHARED_SIGNING_KEY=shared-signing-secret")
+	_, err = config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{
+		Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: "PATH"}},
+	}}, true)
+	require.Error(t, err, "an OS allowlist variable remains reserved")
+}
