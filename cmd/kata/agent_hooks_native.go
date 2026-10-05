@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gofrs/flock"
+	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/pathresolve"
 )
 
@@ -122,7 +123,7 @@ func verifyNativeAgentHookChange(change nativeAgentHookChange) error {
 }
 
 func publishNativeAgentHookPlan(plan nativeAgentHookPlan) (bool, error) {
-	return publishNativeAgentHookPlanWithRename(plan, os.Rename)
+	return publishNativeAgentHookPlanWithRename(plan, atomicfile.Replace)
 }
 
 func publishNativeAgentHookPlanWithRename(plan nativeAgentHookPlan, rename func(string, string) error) (bool, error) {
