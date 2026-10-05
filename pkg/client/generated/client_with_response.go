@@ -1155,6 +1155,57 @@ func (c *Client) RebindFederationReplicaWithResponse(ctx context.Context, option
 	}
 }
 
+func (c *Client) ConfigureFederationSigningWithResponse(ctx context.Context, options *ConfigureFederationSigningRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ConfigureFederationSigningResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/federation/replicas/{project_uid}/actions/configure-signing",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/federation/replicas/{project_uid}/actions/configure-signing")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ConfigureFederationSigningResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 204:
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ConfigureFederationSigningErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ConfigureFederationSigningErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) GetFederationStatusWithResponse(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{

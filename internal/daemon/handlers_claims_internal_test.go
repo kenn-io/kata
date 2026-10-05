@@ -51,7 +51,7 @@ func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	client, err := newClaimHubClient(context.Background(), "http://100.64.0.5:7787", "enrollment-token", false)
+	client, err := newClaimHubClient(context.Background(), "http://100.64.0.5:7787", "enrollment-token", false, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -59,7 +59,7 @@ func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 }
 
 func TestNewClaimHubClientHonorsAllowInsecureHostnameOptIn(t *testing.T) {
-	client, err := newClaimHubClient(context.Background(), "http://tailnet-hub.internal:7787", "enrollment-token", true)
+	client, err := newClaimHubClient(context.Background(), "http://tailnet-hub.internal:7787", "enrollment-token", true, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -83,7 +83,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 	}))
 	t.Cleanup(hub.Close)
 
-	client, err := newClaimHubClient(context.Background(), hub.URL, "enrollment-token", false)
+	client, err := newClaimHubClient(context.Background(), hub.URL, "enrollment-token", false, nil)
 	require.NoError(t, err)
 
 	actions := []struct {
@@ -166,7 +166,7 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	client, err := newClaimHubClient(context.Background(), "http://kata.invalid", "enrollment-token", false)
+	client, err := newClaimHubClient(context.Background(), "http://kata.invalid", "enrollment-token", false, nil)
 	require.NoError(t, err)
 	_, err = client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
 

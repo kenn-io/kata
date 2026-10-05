@@ -25,6 +25,8 @@ import type {
   CloseIssuePathParameters,
   CommentRequestBody,
   CommentResponseBody,
+  ConfigureFederationSigningPathParameters,
+  ConfigureFederationSigningRequestBody,
   ConnectorFieldsResponseBody,
   ConnectorListResponseBody,
   ConnectorOut,
@@ -997,6 +999,57 @@ export const rebindFederationReplica = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(rebindFederationReplicaRequestBody),
   })
+}
+
+export type configureFederationSigningResponse204 = {
+  data: void
+  status: 204
+}
+
+export type configureFederationSigningResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 204>
+}
+
+export type configureFederationSigningResponseSuccess = configureFederationSigningResponse204 & {
+  headers: Headers
+}
+export type configureFederationSigningResponseError = configureFederationSigningResponseDefault & {
+  headers: Headers
+}
+
+export type configureFederationSigningResponse =
+  | configureFederationSigningResponseSuccess
+  | configureFederationSigningResponseError
+
+export const getConfigureFederationSigningUrl = ({
+  projectUid,
+}: ConfigureFederationSigningPathParameters) => {
+  return `/api/v1/federation/replicas/${encodeURIComponent(String(projectUid))}/actions/configure-signing`
+}
+
+export const configureFederationSigning = async (
+  { projectUid }: ConfigureFederationSigningPathParameters,
+  configureFederationSigningRequestBody: ConfigureFederationSigningRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<configureFederationSigningResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<configureFederationSigningResponse>(
+    getConfigureFederationSigningUrl({ projectUid }),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(configureFederationSigningRequestBody),
+    },
+  )
 }
 
 export type getFederationStatusResponse200 = {

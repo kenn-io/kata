@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -478,7 +479,7 @@ func claimForwardClient(
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
 	)
-	client, err := newClaimHubClient(ctx, cred.HubURL, cred.Token, cred.AllowInsecure)
+	client, err := newClaimHubClient(ctx, cred.HubURL, cred.Token, cred.AllowInsecure, cred.Signing)
 	if err != nil {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", err.Error(), "", nil)
 	}
@@ -599,7 +600,12 @@ func (e *claimHubStatusError) Error() string {
 
 var errClaimHubTransportUnavailable = errors.New("claim hub transport unavailable")
 
-func newClaimHubClient(ctx context.Context, baseURL, token string, allowInsecure bool) (*claimHubClient, error) {
+func newClaimHubClient(
+	ctx context.Context,
+	baseURL, token string,
+	allowInsecure bool,
+	signing *federationsigning.Source,
+) (*claimHubClient, error) {
 	httpClient, err := newClaimHubHTTPClient(ctx, baseURL)
 	if err != nil {
 		if errors.Is(err, errClaimHubTransportUnavailable) {
@@ -613,6 +619,11 @@ func newClaimHubClient(ctx context.Context, baseURL, token string, allowInsecure
 	}
 	if err := configureClaimHubBearerClient(httpClient, baseURL, token, allowInsecure); err != nil {
 		return nil, err
+	}
+	if signing != nil {
+		if err := federationsigning.ConfigureClient(httpClient, baseURL, token, *signing); err != nil {
+			return nil, err
+		}
 	}
 	return &claimHubClient{
 		baseURL: strings.TrimRight(baseURL, "/"),

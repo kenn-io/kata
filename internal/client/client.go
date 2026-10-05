@@ -21,6 +21,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/federationsigning"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -271,6 +272,7 @@ const SSEHandshakeTimeout = 10 * time.Second
 // Opts shapes both NewHTTPClient and NewStreamingClient. ResponseHeaderTimeout
 // is non-zero only for SSE clients.
 type Opts struct {
+	FederationSigning     *federationsigning.Source
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool

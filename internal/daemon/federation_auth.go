@@ -11,6 +11,7 @@ import (
 )
 
 type federationPrincipal struct {
+	ScopedProjectID              int64
 	EnrollmentID                 int64
 	SpokeInstanceUID             string
 	Capabilities                 string
@@ -156,9 +157,14 @@ func evaluateFederationRequest(
 			sanitizeFederationTransactionFence(decision.TransactionFence),
 		)
 	}
+	scopedProjectID := int64(0)
+	if enrollment.ProjectID != nil {
+		scopedProjectID = *enrollment.ProjectID
+	}
 	return federationAuthorization{
 		principal: federationPrincipal{
 			EnrollmentID:                 enrollment.ID,
+			ScopedProjectID:              scopedProjectID,
 			SpokeInstanceUID:             enrollment.SpokeInstanceUID,
 			Capabilities:                 enrollment.Capabilities,
 			Actor:                        enrollment.Actor,

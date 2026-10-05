@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
@@ -30,6 +31,7 @@ import (
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
+	"golang.org/x/net/netutil"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -38,7 +40,9 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB db.Storage
+	FederationSigning         *federationsigning.Verifier
+	FederationSigningRequired bool
+	DB                        db.Storage
 	// UIStore supplies coherent browser projections. Nil defaults to DB when
 	// the configured storage backend implements db.UIStore.
 	UIStore db.UIStore
@@ -217,11 +221,13 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	cfg         ServerConfig
-	baseHandler http.Handler
-	handler     http.Handler
-	api         huma.API
-	authPolicy  authPolicy
+	federationIngestAdmission  chan struct{}
+	federationControlAdmission chan struct{}
+	cfg                        ServerConfig
+	baseHandler                http.Handler
+	handler                    http.Handler
+	api                        huma.API
+	authPolicy                 authPolicy
 
 	shutdownTimeout time.Duration
 }
@@ -297,7 +303,11 @@ func NewServer(cfg ServerConfig) *Server {
 	withHostAccess(humaAPI, cfg.HostAccess)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
-	s := &Server{cfg: cfg, api: humaAPI}
+	s := &Server{
+		cfg: cfg, api: humaAPI,
+		federationIngestAdmission:  make(chan struct{}, 2),
+		federationControlAdmission: make(chan struct{}, 16),
+	}
 	registerRoutes(humaAPI, mux, cfg)
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
@@ -344,12 +354,18 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 // HandlerFor returns the shared route stack wrapped for one listener.
 func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
+	if policy.Kind == ListenerFederation {
+		return s.withFederationSigning(s.baseHandler, true), nil
+	}
 	base := s.baseHandler
 	if base == nil {
 		base = s.handler
 	} else {
-		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withFederationIngestPreauthorization(s.cfg, base)
+		base = s.withFederationSigning(base, false)
+		// Signed uploads read their body during verification, so the
+		// foreground lease must already cover that work.
+		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withTrustedProxyActor(s.cfg)(base)
 		base = withScopedPrincipalRevalidation(s.cfg.DB, base)
 		base = requireBearer(s.authPolicy, s.cfg.DB)(base)
@@ -372,9 +388,14 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 // API returns the underlying huma.API for handler registration in tests.
 func (s *Server) API() huma.API { return s.api }
 
-// Close releases server-owned resources. Currently a no-op since the DB is
-// owned by the caller.
-func (s *Server) Close() error { return nil }
+// Close releases signing replay ownership. Call it after HTTP handlers drain;
+// the database remains owned by the caller.
+func (s *Server) Close() error {
+	if s.cfg.FederationSigning != nil {
+		return s.cfg.FederationSigning.Close()
+	}
+	return nil
+}
 
 func registerOpenAPIYAML(mux *http.ServeMux, hostAccess HostAccessController) {
 	mux.HandleFunc(http.MethodGet+" /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
@@ -419,7 +440,7 @@ func (s *Server) Run(ctx context.Context) error {
 // Useful for tests that bind their own loopback listener (avoiding the
 // listener-close-then-reopen TOCTOU window).
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
-	return s.serve(ctx, l, s.handler, nil)
+	return s.serve(ctx, l, s.handler, nil, false)
 }
 
 func (s *Server) serve(
@@ -427,6 +448,7 @@ func (s *Server) serve(
 	l net.Listener,
 	handler http.Handler,
 	onExit func(error),
+	restricted bool,
 ) error {
 	serveCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -436,6 +458,13 @@ func (s *Server) serve(
 		// BaseContext roots every request in the daemon ctx so long-lived
 		// SSE handlers exit on Shutdown via r.Context().Done().
 		BaseContext: func(net.Listener) context.Context { return serveCtx },
+	}
+	if restricted {
+		httpSrv.MaxHeaderBytes = federationsigning.MaxHeaderBytes
+		httpSrv.ReadTimeout = 60 * time.Second
+		httpSrv.WriteTimeout = 60 * time.Second
+		httpSrv.IdleTimeout = 10 * time.Second
+		l = netutil.LimitListener(l, 16)
 	}
 	shutdownDone := make(chan error, 1)
 	go func() {
@@ -544,7 +573,7 @@ func (s *Server) ServeListenersWithLifecycle(
 	for i, binding := range bindings {
 		handler := handlers[i]
 		go func(binding ListenerBinding, handler http.Handler) {
-			results <- s.serve(runCtx, binding.Listener, handler, stopAll)
+			results <- s.serve(runCtx, binding.Listener, handler, stopAll, binding.Policy.Kind == ListenerFederation)
 		}(binding, handler)
 	}
 

@@ -276,6 +276,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/federation-signing/",
+      "destination": "/docs/operations/federation-signing/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/federation-signing.md",
+      "destination": "/docs/operations/federation-signing.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/agent-orchestration/",
       "destination": "/docs/operations/agent-orchestration/",
       "permanent": true
