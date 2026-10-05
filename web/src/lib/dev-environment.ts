@@ -148,6 +148,7 @@ const inheritedProcessEnvironment = [
   'GOMODCACHE',
   'GOCACHE',
   'GOTOOLCHAIN',
+  'GOPROXY',
   'XDG_CACHE_HOME',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
