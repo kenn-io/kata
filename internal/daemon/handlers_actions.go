@@ -392,7 +392,8 @@ func closeIdempotencyResponse(
 }
 
 func scopedCloseRefusal(ctx context.Context, unrestricted, scoped string) string {
-	if issueScopeFromContext(ctx) != nil {
+	_, restricted := db.AuthorizedProjects(ctx)
+	if restricted || issueScopeFromContext(ctx) != nil {
 		return scoped
 	}
 	return unrestricted
@@ -402,8 +403,14 @@ func scopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
 	scope := issueScopeFromContext(ctx)
-	if event == nil || scope == nil {
+	if event == nil {
 		return event, nil
+	}
+	if scope == nil {
+		if _, restricted := db.AuthorizedProjects(ctx); !restricted {
+			return event, nil
+		}
+		return projectScopedMutationEvent(ctx, store, event)
 	}
 	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
 	if err != nil {
@@ -414,6 +421,46 @@ func scopedMutationEvent(
 		return nil, nil
 	}
 	return &projected, nil
+}
+
+// projectScopedMutationEvent applies the event-read reference boundary to
+// close mutation receipts. A caller can close an issue in an accessible
+// project after its parent project becomes inaccessible, so the close-time
+// parent snapshot must be checked independently from the subject project.
+func projectScopedMutationEvent(
+	ctx context.Context, store db.Storage, event *db.Event,
+) (*db.Event, error) {
+	if event.Type != "issue.closed" || event.Payload == "" {
+		return event, nil
+	}
+	var payload struct {
+		ParentUID     *string `json:"parent_uid"`
+		ParentShortID *string `json:"parent_short_id"`
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		return nil, nil
+	}
+	parentUID := ""
+	if payload.ParentUID != nil {
+		parentUID = *payload.ParentUID
+	}
+	parentShortID := ""
+	if payload.ParentShortID != nil {
+		parentShortID = *payload.ParentShortID
+	}
+	if parentUID == "" {
+		if parentShortID != "" {
+			return nil, nil
+		}
+		return event, nil
+	}
+	if _, err := store.IssueByUID(ctx, parentUID, db.IncludeDeletedYes); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return event, nil
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for

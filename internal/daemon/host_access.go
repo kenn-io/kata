@@ -174,7 +174,7 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 
 func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context {
 	ctx = huma.WithValue(ctx, hostAccessStateContextKey{}, state)
-	fenced := db.WithTransactionFence(ctx.Context(), func(
+	fenced := db.WithAdditionalTransactionFence(ctx.Context(), func(
 		fenceCtx context.Context,
 		transaction db.Transaction,
 	) error {
@@ -205,6 +205,31 @@ func authorizeHostProjectScope(
 	projectUIDs []string,
 	allProjects bool,
 ) (context.Context, error) {
+	if projectDecision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); projectDecision != nil {
+		for _, id := range projectIDs {
+			if id <= 0 {
+				continue
+			}
+			project, err := projectDecision.store.ProjectByID(ctx, id)
+			if err != nil || authorizeProjectTarget(ctx, project.UID) != nil {
+				return ctx, projectAccessDenied()
+			}
+		}
+		for _, uid := range projectUIDs {
+			if err := authorizeProjectTarget(ctx, uid); err != nil {
+				return ctx, err
+			}
+		}
+		if allProjects {
+			// A global operation may depend on any project in the actor's
+			// authorized set, so revalidate that set inside its transaction.
+			for _, uid := range projectDecision.ProjectUIDs {
+				if err := authorizeProjectTarget(ctx, uid); err != nil {
+					return ctx, err
+				}
+			}
+		}
+	}
 	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
 	if !ok {
 		return ctx, nil

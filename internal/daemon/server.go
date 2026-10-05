@@ -43,6 +43,10 @@ type ServerConfig struct {
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
+	// RootAttributionSigner is private local signing material. Nil leaves an
+	// embedded server without a signing authority; daemon startup loads its
+	// owner-only key. It is never exposed through API configuration or status.
+	RootAttributionSigner *db.RootAttributionSigner
 	// UIStore supplies coherent browser projections. Nil defaults to DB when
 	// the configured storage backend implements db.UIStore.
 	UIStore db.UIStore
@@ -51,11 +55,13 @@ type ServerConfig struct {
 	UIClock func() time.Time
 	// DefaultTimezone applies to civil schedules without an issue-level
 	// timezone. Empty preserves the UTC default.
-	DefaultTimezone               string
-	StartedAt                     time.Time
-	Endpoint                      *kitdaemon.Endpoint
-	Broadcaster                   *EventBroadcaster
-	FederationWake                func()
+	DefaultTimezone string
+	StartedAt       time.Time
+	Endpoint        *kitdaemon.Endpoint
+	Broadcaster     *EventBroadcaster
+	FederationWake  func()
+	// EmbeddingWake notifies the existing local worker after artifact commit.
+	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
 	FederationCatalog             []config.CatalogDaemonConfig
 	FederationRebindFetchMetadata FederationRebindMetadataFetcher
@@ -138,6 +144,11 @@ type ServerConfig struct {
 	// HostAccess enables in-process authentication and authorization supplied
 	// by a mounting application. It is nil for the standalone daemon.
 	HostAccess HostAccessController
+
+	// TrustCallerAuthentication is the embedding Service's explicit promise
+	// that its mounting application already authenticates this handler. It is
+	// not inferred from HTTP headers and never overrides HostAccess.
+	TrustCallerAuthentication bool
 
 	// HostFederationAccess optionally adds host-owned authorization after Kata
 	// authenticates a project-scoped federation enrollment.
@@ -228,6 +239,7 @@ type Server struct {
 	handler                    http.Handler
 	api                        huma.API
 	authPolicy                 authPolicy
+	noProjectDataRoutes        noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -301,6 +313,8 @@ func NewServer(cfg ServerConfig) *Server {
 	humaAPI := huma.NewAPI(humaConfig, api.WrapErrorAdapter(humago.NewAdapter(mux, "")))
 	withEmbeddingProfile(humaAPI, cfg.EmbeddingProfile)
 	withHostAccess(humaAPI, cfg.HostAccess)
+	withProjectOperationAuthorization(humaAPI, cfg.DB)
+	withRootAttribution(humaAPI, cfg.RootAttributionSigner)
 	withExternalRootAdministration(humaAPI, cfg.Auth.AllowIdentityConnectorAdministration)
 
 	s := &Server{
@@ -322,6 +336,8 @@ func NewServer(cfg ServerConfig) *Server {
 	policy := cfg.authPolicy()
 	policy.SelfAuthenticatedRoutes = newSelfAuthenticatedRouteMatcher(
 		selfAuthenticatedRoutes(humaAPI.OpenAPI()))
+	s.noProjectDataRoutes = newNoProjectDataRouteMatcher(
+		noProjectDataRoutes(humaAPI.OpenAPI()))
 	s.authPolicy = policy
 
 	s.baseHandler = mux
@@ -366,6 +382,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		// Signed uploads read their body during verification, so the
 		// foreground lease must already cover that work.
 		base = withIdleAdmission(s.cfg.IdleAdmission, base)
+		base = withProjectAuthorization(s.cfg.DB, s.cfg.HostAccess != nil, s.cfg.TrustCallerAuthentication, s.authPolicy.SelfAuthenticatedRoutes, s.noProjectDataRoutes, base)
 		base = withTrustedProxyActor(s.cfg)(base)
 		base = withScopedPrincipalRevalidation(s.cfg.DB, base)
 		base = requireBearer(s.authPolicy, s.cfg.DB)(base)
@@ -643,6 +660,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerDoctorHandlers(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
 	registerTokenHandlers(humaAPI, cfg)
+	registerProjectAccessHandlers(humaAPI, cfg)
 	registerProjects(humaAPI, cfg)
 	registerIssues(humaAPI, cfg)
 	registerImportsHandlers(humaAPI, cfg)

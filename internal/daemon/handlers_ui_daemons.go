@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/pkg/client/generated"
 
@@ -48,6 +49,7 @@ type webDaemonResponse struct {
 	ID      string `json:"id"`
 	URL     string `json:"url"`
 	Default bool   `json:"default"`
+	Local   bool   `json:"local"`
 	Auth    string `json:"auth"`
 	Health  string `json:"health"`
 	Hint    string `json:"hint,omitempty"`
@@ -104,6 +106,17 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 
 func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	catalog := g.effectiveCatalog()
+	if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
+		// No project delegation protocol exists for configured target tokens.
+		// Do not expose or probe another daemon's authority on this user's behalf.
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if configured.Local {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
 	if insecureReadonlyRequest(r.Context()) {
 		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
 		for _, configured := range catalog {
@@ -143,7 +156,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Daemons = append(out.Daemons, webDaemonResponse{
 			ID: configured.Name, URL: redactWebDaemonURL(d.baseURL),
-			Default: configured.Name == defaultID, Auth: auth,
+			Default: configured.Name == defaultID, Local: d.local, Auth: auth,
 			Health: states[i], Hint: hint,
 		})
 	}
@@ -178,6 +191,12 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.local {
+		if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
+			// Configured target credentials carry no delegated project grant.
+			// A source with project policy cannot borrow their wider authority.
+			writeWebDaemonError(w, http.StatusForbidden, "project_authority_not_delegated")
+			return
+		}
 		policy = delegatedWebDaemonSourcePolicy(policy)
 		if isMutation(r.Method) && !readOnlyProjectRequest && !policy.writable {
 			writeWebDaemonError(w, http.StatusForbidden, "read_only")
@@ -696,6 +715,7 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	// Target credentials stay server-side and may not upgrade the source
 	// browser into a token-audit principal.
 	capabilities.TokenAuditRead = false
+	capabilities.AccessAdmin = false
 	encodedCapabilities, err := json.Marshal(capabilities)
 	if err != nil {
 		return fmt.Errorf("encode daemon capabilities: %w", err)
@@ -760,6 +780,11 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	// Project sync status is a source-origin read. Target credentials must not
+	// expose federation topology through the ordinary SPA gateway.
+	if strings.Contains(path, "/federation/") {
+		return false
+	}
 	if strings.HasPrefix(path, webDaemonProxyPrefix) {
 		return false
 	}

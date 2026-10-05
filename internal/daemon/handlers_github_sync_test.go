@@ -406,7 +406,8 @@ func TestGitHubSyncHandlers_OnceRejectsMissingAndDisabledBindings(t *testing.T) 
 // TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy locks the
 // write-attribution guard on the three mutating routes: on a trusted listener
 // that omits the actor header the principal is PrincipalTrustedProxyAbsent, so
-// enable/disable/once must fail with 400 actor_header_required before touching
+// administrative mutations require owner authority and return generic 404
+// before touching
 // the fetcher, the wake channel, or the runner.
 func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T) {
 	t.Run("enable", func(t *testing.T) {
@@ -417,7 +418,7 @@ func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T
 				"repo":  "example-repo",
 			},
 		})
-		assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "actor_header_required")
+		assertAPIError(t, resp.StatusCode, body, http.StatusNotFound, "not_found")
 		assert.Equal(t, 0, h.fetcher.repositoryCalls)
 		assert.Equal(t, 0, h.wakeCount())
 	})
@@ -427,7 +428,7 @@ func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T
 		binding := h.mustUpsertBinding(t, true)
 
 		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "disable"), map[string]any{})
-		assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "actor_header_required")
+		assertAPIError(t, resp.StatusCode, body, http.StatusNotFound, "not_found")
 
 		stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
 		require.NoError(t, err)
@@ -443,7 +444,7 @@ func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T
 		h.mustUpsertBinding(t, true)
 
 		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "once"), map[string]any{})
-		assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "actor_header_required")
+		assertAPIError(t, resp.StatusCode, body, http.StatusNotFound, "not_found")
 		assert.Equal(t, 0, h.runnerRunCount())
 	})
 }

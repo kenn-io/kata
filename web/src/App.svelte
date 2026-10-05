@@ -187,6 +187,34 @@
     refresh: refreshMutationAuthority,
     onAuthenticationRequired: requireAuthentication,
   })
+  const accessMutations = new MutationController({
+    authority: () => ({
+      canMutate: canAdministerAccess(),
+      actorPolicy: authority?.snapshot?.capabilities.actor_policy ?? 'readonly',
+    }),
+    refresh: async () => {
+      await refreshSnapshot(true)
+      return canAdministerAccess()
+    },
+    onAuthenticationRequired: requireAuthentication,
+  })
+
+  function canAdministerAccess(): boolean {
+    const expiresAt = authority?.snapshot?.capabilities.expires_at
+    return (
+      authority?.snapshot?.capabilities.access_admin === true &&
+      !authority.stale &&
+      !authority.loading &&
+      !authority.authenticationRequired &&
+      !daemonSwitching &&
+      !daemonError &&
+      !liveUpdatesReconnecting &&
+      (!expiresAt || Date.parse(expiresAt) > Date.now()) &&
+      (!activeDaemonID ||
+        daemonInfos.find((daemon) => daemon.id === activeDaemonID)?.local === true)
+    )
+  }
+
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
     connect: (cursor, signal) => openEventStream(browserFetch, cursor, signal),
@@ -741,11 +769,12 @@
   async function runMutation(
     options: { draft?: unknown; revision?: string; createKey?: string },
     mutate: (context: MutationContext) => Promise<MutationResult>,
+    controller: MutationController = mutations,
   ): Promise<boolean> {
     mutationPending = true
     try {
-      const result = await mutations.execute(options, mutate)
-      mutationState = { ...mutations.state }
+      const result = await controller.execute(options, mutate)
+      mutationState = { ...controller.state }
       return result !== false
     } finally {
       mutationPending = false
@@ -1168,6 +1197,7 @@
         {credentialTokens}
         {credentialLoading}
         {credentialError}
+        onAccessMutation={(draft, mutate) => runMutation({ draft }, mutate, accessMutations)}
         onRefreshCredentials={refreshCredentials}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}

@@ -15,7 +15,7 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const commentSelect = `SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments`
+const commentSelect = `SELECT ` + commentColumns + ` FROM comments`
 
 // CreateComment appends a comment and its issue.commented event atomically.
 func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams) (db.Comment, db.Event, error) {
@@ -25,6 +25,13 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	var comment db.Comment
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		projectUID, err := issueProjectUIDTx(ctx, tx, params.IssueID)
+		if err != nil {
+			return err
+		}
+		if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+			return err
+		}
 		issue, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -44,7 +51,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		comment, err = scanComment(tx.QueryRowContext(ctx,
 			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate)
 			 VALUES($1,$2,$3,$4,$5,NULLIF($6, ''))
-			 RETURNING id, uid, issue_id, author, body, created_at, teammate`,
+			 RETURNING `+commentColumns,
 			commentUID, issue.ID, effectiveActor, params.Body, createdAt, params.Teammate,
 		))
 		if err != nil {
@@ -76,6 +83,10 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		}
 		event, err = s.insertEventTx(ctx, tx,
 			issueEventInput(issue, project, "issue.commented", effectiveActor, string(payload)))
+		if err != nil {
+			return err
+		}
+		comment, err = scanComment(tx.QueryRowContext(ctx, commentSelect+` WHERE id=$1`, comment.ID))
 		return err
 	})
 	return comment, event, err
@@ -138,7 +149,7 @@ func (s *Store) editComment(
 		editedAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
 			`UPDATE comments SET body = $1 WHERE id = $2
-			 RETURNING id, uid, issue_id, author, body, created_at, teammate`, params.Body, comment.ID))
+			 RETURNING `+commentColumns, params.Body, comment.ID))
 		if err != nil {
 			return err
 		}
@@ -316,7 +327,7 @@ func scanComment(row rowScanner) (db.Comment, error) {
 	var createdAt string
 	var teammate sql.NullString
 	err := row.Scan(
-		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &createdAt, &teammate,
+		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &createdAt, &teammate, &comment.AttributionView,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
@@ -329,6 +340,7 @@ func scanComment(row rowScanner) (db.Comment, error) {
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("parse comment created_at: %w", err)
 	}
+	comment.SourceFallback(comment.Author, comment.Teammate)
 	return comment, nil
 }
 

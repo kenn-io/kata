@@ -6,6 +6,7 @@
   } from '@kenn-io/kit-ui/utils/time'
 
   import type { KataIssueDetailModel } from '../types.js'
+  import CreationAttribution from './CreationAttribution.svelte'
 
   interface Props {
     comments: KataIssueDetailModel['comments']
@@ -35,6 +36,7 @@
               >{timeAgo(comment.createdAt)}</time
             >
           </header>
+          <CreationAttribution creation={comment.creation} />
           <Markdown source={comment.body} class="comment-body" />
         </li>
       {/each}

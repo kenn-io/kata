@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"iter"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,7 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 	if err := writeRecord(enc, KindMeta, metaRecord{Key: "export_version", Value: version}); err != nil {
 		return err
 	}
-	if err := exportMeta(ctx, d, enc); err != nil {
+	if err := exportMeta(ctx, d, enc, opts); err != nil {
 		return err
 	}
 	if err := exportProjects(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
@@ -161,6 +162,61 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 	if err := exportSQLiteSequence(ctx, d, enc); err != nil {
 		return err
 	}
+	if sourceSchemaVersion >= 31 && opts.ProjectID == 0 {
+		// Schema31 introduced hub-local policy. Cutover opens a native SQLite
+		// store even for older sources, so use its existing owner-backup exporter.
+		// Older versions have no policy tables and never enter this branch.
+		exporter, ok := d.(interface {
+			ExportProjectAccess(context.Context) iter.Seq2[db.ImportRecord, error]
+		})
+		if !ok {
+			return fmt.Errorf("cutover source cannot export project access policy")
+		}
+		for record, err := range exporter.ExportProjectAccess(ctx) {
+			if err != nil {
+				return err
+			}
+			if err := writeRecord(enc, Kind(record.ImportKind()), record); err != nil {
+				return err
+			}
+		}
+	}
+	if sourceSchemaVersion >= 32 {
+		exporter, ok := d.(interface {
+			ExportAttribution(context.Context, db.ExportFilter) iter.Seq2[db.ImportRecord, error]
+		})
+		if !ok {
+			return fmt.Errorf("cutover source cannot export root provenance")
+		}
+		filter := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
+		if opts.ProjectID > 0 {
+			filter.ProjectID = &opts.ProjectID
+		}
+		if err := exportAttribution(ctx, enc, exporter, filter); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 33 && opts.ProjectID == 0 {
+		exporter, ok := d.(interface {
+			ExportRelayState(context.Context) iter.Seq2[db.ImportRecord, error]
+		})
+		if !ok {
+			return fmt.Errorf("cutover source cannot export relay delivery state")
+		}
+		if err := exportRelayState(ctx, enc, exporter); err != nil {
+			return err
+		}
+	}
+
+	if sourceSchemaVersion >= 34 {
+		filter := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
+		if opts.ProjectID > 0 {
+			filter.ProjectID = &opts.ProjectID
+		}
+		if err := exportEmbeddingArtifacts(ctx, enc, d, filter); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -177,7 +233,23 @@ func schemaVersion(ctx context.Context, d exportQuerier) (string, error) {
 	return version, nil
 }
 
-func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder) error {
+func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	var selectedProjectUID string
+	if opts.ProjectID != 0 {
+		version, err := schemaVersion(ctx, d)
+		if err != nil {
+			return err
+		}
+		number, err := strconv.Atoi(version)
+		if err != nil {
+			return err
+		}
+		if number >= 32 {
+			if err := d.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, opts.ProjectID).Scan(&selectedProjectUID); err != nil {
+				return err
+			}
+		}
+	}
 	rows, err := d.QueryContext(ctx, `SELECT key, value FROM meta ORDER BY key ASC`)
 	if err != nil {
 		return fmt.Errorf("export meta: %w", err)
@@ -188,6 +260,16 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder) error {
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return fmt.Errorf("scan meta: %w", err)
 		}
+		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
+			continue
+		}
+		if opts.ProjectID != 0 && rec.Key == "project_access_revision" {
+			continue
+		}
+		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix) && (selectedProjectUID == "" || !strings.HasPrefix(rec.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".")) {
+			continue
+		}
+
 		if err := writeRecord(enc, KindMeta, rec); err != nil {
 			return err
 		}
@@ -1258,21 +1340,22 @@ func exportFederationBindings(
 	sourceSchemaVersion int,
 ) error {
 	type record struct {
-		ProjectID            int64   `json:"project_id"`
-		Role                 string  `json:"role"`
-		HubURL               string  `json:"hub_url"`
-		HubProjectID         int64   `json:"hub_project_id"`
-		HubProjectUID        string  `json:"hub_project_uid"`
-		ReplayHorizonEventID int64   `json:"replay_horizon_event_id"`
-		PullCursorEventID    int64   `json:"pull_cursor_event_id"`
-		PushEnabled          bool    `json:"push_enabled"`
-		PushCursorEventID    int64   `json:"push_cursor_event_id"`
-		Actor                string  `json:"bound_actor,omitempty"`
-		AllowInsecure        bool    `json:"allow_insecure,omitzero"`
-		Enabled              bool    `json:"enabled"`
-		CreatedAt            string  `json:"created_at"`
-		UpdatedAt            string  `json:"updated_at"`
-		LastSyncAt           *string `json:"last_sync_at,omitempty"`
+		RelayConfig          *db.RelayBindingConfig `json:"relay_config,omitempty"`
+		ProjectID            int64                  `json:"project_id"`
+		Role                 string                 `json:"role"`
+		HubURL               string                 `json:"hub_url"`
+		HubProjectID         int64                  `json:"hub_project_id"`
+		HubProjectUID        string                 `json:"hub_project_uid"`
+		ReplayHorizonEventID int64                  `json:"replay_horizon_event_id"`
+		PullCursorEventID    int64                  `json:"pull_cursor_event_id"`
+		PushEnabled          bool                   `json:"push_enabled"`
+		PushCursorEventID    int64                  `json:"push_cursor_event_id"`
+		Actor                string                 `json:"bound_actor,omitempty"`
+		AllowInsecure        bool                   `json:"allow_insecure,omitzero"`
+		Enabled              bool                   `json:"enabled"`
+		CreatedAt            string                 `json:"created_at"`
+		UpdatedAt            string                 `json:"updated_at"`
+		LastSyncAt           *string                `json:"last_sync_at,omitempty"`
 	}
 	actorSelect := `''`
 	if sourceSchemaVersion >= 13 {
@@ -1282,11 +1365,15 @@ func exportFederationBindings(
 	if sourceSchemaVersion >= 15 {
 		allowInsecureSelect = `allow_insecure`
 	}
+	relayConfigSelect := `NULL`
+	if sourceSchemaVersion >= 33 && opts.ProjectID <= 0 {
+		relayConfigSelect = `relay_config`
+	}
 	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, ` + actorSelect + `, ` + allowInsecureSelect + `, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT)
+	                 CAST(last_sync_at AS TEXT), ` + relayConfigSelect + `
 	          FROM federation_bindings`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -1300,11 +1387,16 @@ func exportFederationBindings(
 	}
 	return scanRecords(rows, KindFederationBinding, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
+		var relayConfig *string
 		var enabled, pushEnabled, allowInsecure int
 		err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 			&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 			&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt)
+			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig)
+		if err != nil {
+			return rec, err
+		}
+		rec.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
 		rec.PushEnabled = pushEnabled == 1
 		rec.AllowInsecure = allowInsecure == 1
 		rec.Enabled = enabled == 1
@@ -1400,6 +1492,12 @@ func exportFederationEnrollments(
 	sourceSchemaVersion int,
 ) error {
 	type record struct {
+		RelayBindingUID      *string `json:"relay_binding_uid,omitempty"`
+		RelayProtocolVersion int     `json:"relay_protocol_version,omitzero"`
+		ParentTokenID        *int64  `json:"parent_token_id,omitempty"`
+		RelayResetEpoch      int64   `json:"relay_reset_epoch,omitzero"`
+		RelayServeDownstream bool    `json:"relay_serve_downstream,omitzero"`
+
 		ID                                int64   `json:"id"`
 		TokenHash                         string  `json:"token_hash"`
 		SpokeInstanceUID                  string  `json:"spoke_instance_uid"`
@@ -1430,11 +1528,15 @@ func exportFederationEnrollments(
 		adoptionBaselineNextSourceEventIDSelect = `adoption_baseline_next_source_event_id`
 		adoptionBaselineEndSourceEventIDSelect = `adoption_baseline_end_source_event_id`
 	}
+	relaySelect := `NULL,0,NULL,1,0`
+	if sourceSchemaVersion >= 33 {
+		relaySelect = `relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream`
+	}
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
 	                 ` + actorSelect + `, ` + allowAdoptionSnapshotAuthorsSelect + `,
 	                 ` + adoptionBaselineOpenSelect + `, ` + adoptionBaselineNextSourceEventIDSelect + `,
 	                 ` + adoptionBaselineEndSourceEventIDSelect + `,
-	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT),` + relaySelect + `
 	          FROM federation_enrollments`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -1449,14 +1551,15 @@ func exportFederationEnrollments(
 	return scanRecords(rows, KindFederationEnrollment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
 		var allowAdoptionSnapshotAuthors int
-		var adoptionBaselineOpen int
+		var adoptionBaselineOpen, serveDownstream int
 		err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
 			&rec.Capabilities, &rec.Actor, &allowAdoptionSnapshotAuthors,
 			&adoptionBaselineOpen, &rec.AdoptionBaselineNextSourceEventID,
 			&rec.AdoptionBaselineEndSourceEventID, &rec.CreatedAt,
-			&rec.UpdatedAt, &rec.RevokedAt)
+			&rec.UpdatedAt, &rec.RevokedAt, &rec.RelayBindingUID, &rec.RelayProtocolVersion, &rec.ParentTokenID, &rec.RelayResetEpoch, &serveDownstream)
 		rec.AllowAdoptionSnapshotAuthors = allowAdoptionSnapshotAuthors != 0
 		rec.AdoptionBaselineOpen = adoptionBaselineOpen != 0
+		rec.RelayServeDownstream = serveDownstream != 0
 		return rec, err
 	})
 }

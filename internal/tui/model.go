@@ -192,6 +192,9 @@ type Model struct {
 	authCapabilitiesReady    bool
 	authCapabilitiesRequired bool
 	tokenAuditRead           bool
+	activeAuth               AuthInfo
+	activeAuthError          string
+	activeAuthRejected       bool
 	undoHistory              undoHistory
 	undoInFlight             bool
 	undoCloseEntryID         uint64
@@ -546,6 +549,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if capabilities, ok := msg.(authCapabilitiesMsg); ok {
 		return m.handleAuthCapabilities(capabilities)
+	}
+	if expired, ok := msg.(activeCredentialExpiredMsg); ok {
+		if expired.connGen == m.connGen && m.activeAuth.ExpiresAt != nil &&
+			m.activeAuth.ExpiresAt.Equal(expired.expiresAt) && !m.toastNow().Before(expired.expiresAt) {
+			m.authCapabilitiesReady = false
+			m.input = inputState{}
+		}
+		return m, nil
 	}
 	if loaded, ok := msg.(credentialsLoadedMsg); ok {
 		return m.handleCredentialsLoaded(loaded)
@@ -3207,11 +3218,11 @@ func (m Model) viewContent() string {
 		default:
 			body = renderTooNarrow(m.width, m.height)
 		}
-		body = m.appendNonListDetailExtras(body)
+		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
 		return m.overlayInputAndModal(body)
 	}
 	body := m.viewBody()
-	body = m.appendNonListDetailExtras(body)
+	body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
 	if m.input.kind.isCenteredForm() || m.modal != modalNone {
 		return m.overlayInputAndModal(body)
 	}

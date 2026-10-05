@@ -32,6 +32,13 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	projectUID, err := issueProjectUIDTx(ctx, tx, p.IssueID)
+	if err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
@@ -253,6 +260,13 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if !hasExisting || existing.ToIssueID != target.ID {
 			recordedRemoval := false
 			if hasExisting {
+				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
+				if uidErr != nil {
+					return changed, uidErr
+				}
+				if err := db.CheckProjectAccessTransaction(ctx, tx, parentProjectUID); err != nil {
+					return changed, err
+				}
 				// Capture the OLD parent's identity so the change payload
 				// surfaces a parent_removed entry. Use the soft-delete-
 				// tolerant lookup: the peer of an existing link may have
@@ -724,4 +738,38 @@ func singlePeerForLinksChangedTx(ctx context.Context, tx *sql.Tx, c db.AtomicEdi
 		return nil, nil, fmt.Errorf("resolve single peer uid %s: %w", only, err)
 	}
 	return &id, &only, nil
+}
+
+func issueProjectUIDTx(ctx context.Context, tx *sql.Tx, issueID int64) (string, error) {
+	var projectUID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`,
+		issueID,
+	).Scan(&projectUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup issue project uid: %w", err)
+	}
+	return projectUID, nil
+}
+
+func linkedParentProjectUIDTx(ctx context.Context, tx *sql.Tx, issueID int64) (string, error) {
+	var projectUID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ?`,
+		issueID,
+	).Scan(&projectUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup existing parent project uid: %w", err)
+	}
+	return projectUID, nil
 }

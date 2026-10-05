@@ -230,6 +230,16 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 	if err := rejectActiveExternalRootIssuePurge(ctx, conn, issue.ID); err != nil {
 		return db.PurgeLog{}, err
 	}
+	// A live peer's emitted manifest must remain downloadable. Permanent
+	// deletion waits for its current namespace to drain; retired epochs and
+	// explicitly revoked enrollments retain history without blocking cleanup.
+	var pendingRelay bool
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o JOIN federation_enrollments e ON e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch WHERE o.project_uid=? AND o.acknowledged=0 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_enrollments e JOIN meta m ON m.key=? || e.relay_binding_uid WHERE e.project_id=? AND e.revoked_at IS NULL AND json_extract(m.value,'$.translation.authority.epoch')>e.relay_reset_epoch)`, issue.ProjectUID, db.RelayResetMetadataPrefix+issue.ProjectUID+".", issue.ProjectID).Scan(&pendingRelay); err != nil {
+		return db.PurgeLog{}, err
+	}
+	if pendingRelay {
+		return db.PurgeLog{}, db.ErrFederationResetBlockedByPendingPush
+	}
 
 	purgeLogID, err := purgeCascade(ctx, conn, issue, projectName, actor, reason, d.instanceUID)
 	if err != nil {
@@ -436,6 +446,11 @@ func purgeCascade(
 		return 0, fmt.Errorf("purge_log last id: %w", err)
 	}
 
+	// Portable vectors are issue data even when their input is stale.
+	if _, err := c.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=? AND issue_uid=?`, issue.ProjectUID, issue.UID); err != nil {
+		return 0, fmt.Errorf("delete embedding artifacts: %w", err)
+	}
+
 	// Step 7: remove the issues row. The issues_ad_fts trigger fires here and
 	// drops the matching FTS row.
 	if _, err := c.ExecContext(ctx,
@@ -507,12 +522,7 @@ func scanPurgeLog(ctx context.Context, r sqlReader, id int64) (db.PurgeLog, erro
 // does NOT filter out soft-deleted rows — it's the right primitive for the
 // destructive ladder verbs that need to operate on deleted issues.
 func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64) (db.Issue, string, error) {
-	const q = `
-		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
-		       i.metadata, i.revision,
-		       i.recurrence_id, i.occurrence_key,
-		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
+	const q = `SELECT ` + issueColumns + `, p.name
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
 		WHERE i.id = ?`
@@ -525,7 +535,7 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author,
 			&i.Metadata, &i.Revision,
 			&i.RecurrenceID, &i.OccurrenceKey,
-			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &projectName)
+			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -535,6 +545,8 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 	if err := ensureProjectWritableTx(ctx, r, i.ProjectID); err != nil {
 		return db.Issue{}, "", err
 	}
+	handle, _ := db.IssueTeammate(i.Metadata)
+	i.SourceFallback(i.Author, handle)
 	return i, projectName, nil
 }
 

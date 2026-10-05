@@ -180,6 +180,9 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.issueScoped = false
 	m.scopedWritable = false
 	m.authCapabilitiesReady = false
+	m.activeAuth = AuthInfo{}
+	m.activeAuthError = ""
+	m.activeAuthRejected = false
 	m.authCapabilitiesRequired = true
 	m.tokenAuditRead = false
 	m.sseStatus = sseConnected

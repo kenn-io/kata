@@ -153,6 +153,9 @@ func (s *Store) LeaveFederationReplica(ctx context.Context, projectID int64) (db
 		if binding.Role != db.FederationRoleSpoke {
 			return db.ErrFederationNotSpoke
 		}
+		if err := s.validateRelayLifecycleTx(ctx, tx, projectID); err != nil {
+			return err
+		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
 			`DELETE FROM federation_sync_status WHERE project_id=$1`,

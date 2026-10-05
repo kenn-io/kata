@@ -282,16 +282,10 @@ func TestTrustedProxyHeader_ModeOffUnchanged(t *testing.T) {
 		"mode off: header is ignored, body actor wins")
 }
 
-// TestTrustedProxyHeader_TokenAdminForbidden locks the cross-mode boundary:
-// even on a trusted listener, the trusted-proxy header cannot mint or list
-// tokens. The middleware overwrites whatever principal upstream set with
-// PrincipalTrustedProxy; ensureTokenAdminAllowed (PR #65) only admits
-// PrincipalBootstrap, PrincipalStaticToken, or no-principal, so the request
-// is rejected with 403 token_admin_forbidden.
-//
-// Without this test, a future change to ensureTokenAdminAllowed could silently
-// promote PrincipalTrustedProxy into the token-admin allowlist and the only
-// signal would be the absence of a test failure.
+// TestTrustedProxyHeader_TokenAdminForbidden pins the trusted-proxy boundary.
+// Project-operation authorization rejects token administration with 404
+// not_found before dispatch. The handler retains ensureTokenAdminAllowed as
+// a second check; a trusted actor header never grants token administration.
 func TestTrustedProxyHeader_TokenAdminForbidden(t *testing.T) {
 	ts := startTrustedProxyTestServer(t, "X-Kata-Actor")
 
@@ -301,7 +295,7 @@ func TestTrustedProxyHeader_TokenAdminForbidden(t *testing.T) {
 	}
 	resp, raw := doReq(t, ts, "POST", "/api/v1/tokens",
 		body, map[string]string{"X-Kata-Actor": "alice"})
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "body: %s", raw)
 
 	var env struct {
 		Error struct {
@@ -309,28 +303,23 @@ func TestTrustedProxyHeader_TokenAdminForbidden(t *testing.T) {
 		} `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &env))
-	assert.Equal(t, "token_admin_forbidden", env.Error.Code,
+	assert.Equal(t, "not_found", env.Error.Code,
 		"trusted-proxy principals must not be allowed to mint or revoke tokens")
 
 	// And the same boundary holds for list and revoke.
 	resp, raw = doReq(t, ts, "GET", "/api/v1/tokens", nil,
 		map[string]string{"X-Kata-Actor": "alice"})
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "list body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "list body: %s", raw)
 
 	resp, raw = doReq(t, ts, "POST", "/api/v1/tokens/42/actions/revoke", nil,
 		map[string]string{"X-Kata-Actor": "alice"})
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "revoke body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "revoke body: %s", raw)
 }
 
-// TestTrustedProxyHeader_TokenAdminForbiddenWithoutHeader covers the absent-
-// header variant of the same boundary. A request on a trusted listener that
-// omits the actor header lands in PrincipalTrustedProxyAbsent, and
-// ensureTokenAdminAllowed must reject it just as firmly as the header-present
-// case. Without this test, a future change that allowed the absent-header
-// principal to bypass token admin (perhaps under the rationale "no actor was
-// claimed, so it's safe") would slip through. The header-present test and this
-// one together pin both trusted-proxy principal variants out of the token-admin
-// allowlist.
+// TestTrustedProxyHeader_TokenAdminForbiddenWithoutHeader pins the same
+// boundary for PrincipalTrustedProxyAbsent. Project-operation authorization
+// returns 404 not_found before dispatch, and ensureTokenAdminAllowed remains
+// a second check in the handler for both trusted-proxy principal variants.
 func TestTrustedProxyHeader_TokenAdminForbiddenWithoutHeader(t *testing.T) {
 	ts := startTrustedProxyTestServer(t, "X-Kata-Actor")
 
@@ -339,7 +328,7 @@ func TestTrustedProxyHeader_TokenAdminForbiddenWithoutHeader(t *testing.T) {
 		"name":  "test-token",
 	}
 	resp, raw := doReq(t, ts, "POST", "/api/v1/tokens", body, nil)
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "body: %s", raw)
 
 	var env struct {
 		Error struct {
@@ -347,14 +336,14 @@ func TestTrustedProxyHeader_TokenAdminForbiddenWithoutHeader(t *testing.T) {
 		} `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &env))
-	assert.Equal(t, "token_admin_forbidden", env.Error.Code,
+	assert.Equal(t, "not_found", env.Error.Code,
 		"trusted-proxy absent principals must also be rejected from token admin")
 
 	resp, raw = doReq(t, ts, "GET", "/api/v1/tokens", nil, nil)
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "list body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "list body: %s", raw)
 
 	resp, raw = doReq(t, ts, "POST", "/api/v1/tokens/42/actions/revoke", nil, nil)
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, "revoke body: %s", raw)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, "revoke body: %s", raw)
 }
 
 // TestTrustedProxyHeader_TUIBypassRequiresCloseValidation keeps the trusted-

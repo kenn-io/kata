@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+import { setGeneratedFetch } from '../lib/api/client'
+import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { UISnapshot } from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
@@ -10,6 +12,129 @@ describe('AppShell', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
   })
+
+  test('shows the current browser hub when no catalog daemon is selected', () => {
+    vi.stubGlobal('location', new URL('https://daemon.example/workspace?token=never-display'))
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Hub: daemon.example')
+    expect(summary.textContent).not.toContain('Local daemon')
+    expect(summary.textContent).not.toContain('never-display')
+  })
+
+  test('offers project sync status from the current project without credential inventory authority', () => {
+    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    const current = snapshot()
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: current.catalog[0]!.project.uid,
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+  })
+
+  test('keeps project sync readable for a current read-only project member', () => {
+    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    const current = snapshot()
+    current.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: current.catalog[0]!.project.uid,
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+  })
+
+  test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
+    'fences project sync display when authority is %s',
+    async (reason) => {
+      let signal: AbortSignal | undefined
+      const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+        signal = init?.signal ?? undefined
+        return Response.json({ statuses: [] })
+      })
+      setGeneratedFetch(fetcher)
+      const current = snapshot()
+      const props = {
+        route: {
+          kind: 'kata' as const,
+          projectUID: current.catalog[0]!.project.uid,
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      }
+      const view = render(AppShell, { props })
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+      const next = snapshot()
+      if (reason === 'expired') next.capabilities.expires_at = '2020-01-01T00:00:00Z'
+      if (reason === 'removed') next.catalog = []
+      await view.rerender({
+        ...props,
+        snapshot: next,
+        stale: reason === 'stale',
+        daemonSwitching: reason === 'daemonSwitching',
+        reconnecting: reason === 'reconnecting',
+        activeDaemonID: reason === 'remote' ? 'other-hub' : undefined,
+        daemons:
+          reason === 'remote'
+            ? [
+                {
+                  id: 'other-hub',
+                  url: 'https://other.example',
+                  default: true,
+                  auth: 'token',
+                  health: 'connected',
+                  local: false,
+                },
+              ]
+            : [],
+      })
+      expect(screen.queryByRole('region', { name: 'Project sync' })).toBeNull()
+      expect(signal?.aborted).toBe(true)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+    },
+  )
 
   test('renders the workspace header through the kit-ui top bar', () => {
     const { container } = render(AppShell, {
@@ -33,6 +158,90 @@ describe('AppShell', () => {
     expect(header?.classList.contains('kit-top-bar')).toBe(true)
     expect(within(header as HTMLElement).getByRole('heading', { name: 'Kata' })).not.toBeNull()
     expect(within(header as HTMLElement).getByRole('button', { name: 'New task' })).not.toBeNull()
+  })
+
+  test('shows only the active hub account and clears identity while switching', async () => {
+    const current = snapshot()
+    Object.assign(current.capabilities, { account: 'member-one', token_audit_read: false })
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+      daemons: [
+        {
+          id: 'hub-one',
+          url: 'https://daemon.example',
+          default: true,
+          auth: 'token' as const,
+          health: 'connected' as const,
+        },
+      ],
+      activeDaemonID: 'hub-one',
+    }
+    const view = render(AppShell, { props })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('hub-one')
+    expect(summary.textContent).toContain('member-one')
+    expect(summary.textContent).toContain('Connected')
+    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+    await view.rerender({ ...props, daemonSwitching: true })
+    expect(summary.textContent).toContain('Connecting')
+    expect(summary.textContent).not.toContain('member-one')
+    const next = snapshot()
+    Object.assign(next.capabilities, { account: 'member-two', token_audit_read: false })
+    await view.rerender({
+      ...props,
+      snapshot: next,
+      activeDaemonID: 'hub-two',
+      daemons: [{ ...props.daemons[0]!, id: 'hub-two' }],
+      daemonSwitching: false,
+    })
+    expect(summary.textContent).toContain('hub-two')
+    expect(summary.textContent).toContain('member-two')
+    expect(summary.textContent).not.toContain('member-one')
+    await view.rerender({ ...props, stale: true, reconnecting: true })
+    expect(summary.textContent).toContain('Reconnecting')
+    expect(summary.textContent).not.toContain('member-one')
+  })
+
+  test('active connection expires without requiring credential inventory', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    const current = snapshot()
+    Object.assign(current.capabilities, {
+      account: 'expiring-member',
+      expires_at: '2026-01-01T00:00:02Z',
+      token_audit_read: false,
+    })
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        view: 'all-open' as const,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Connected')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(summary.textContent).toContain('Credential expired')
+    await view.rerender({ ...props, stale: true, daemonError: 'Authentication required' })
+    expect(summary.textContent).toContain('Authentication required')
+    expect(summary.textContent).not.toContain('expiring-member')
   })
 
   test('connects the ported navigation, filters, and collection to canonical routes', async () => {
@@ -141,10 +350,354 @@ describe('AppShell', () => {
     )
   })
 
+  test('identity bootstrap administers access while ordinary issue writes remain disabled', async () => {
+    setGeneratedFetch(async () => Response.json({ teams: [] }))
+    const onAccessMutation = vi.fn(executeAccessMutation)
+    const props = accessProps(onAccessMutation)
+    Object.assign(props.snapshot.capabilities, { access_admin: true, writable: false })
+    render(AppShell, { props: { ...props, canMutate: false, readOnly: true } })
+    expect(screen.getByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
+    await fireEvent.input(screen.getByLabelText('New team name'), {
+      target: { value: 'Example team' },
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    )
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+  })
+
+  test('offers team and visibility management in the authorized credential screen', () => {
+    const authorized = snapshot()
+    authorized.capabilities.token_audit_read = true
+    authorized.capabilities.access_admin = true
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'credentials',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: authorized,
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    expect(screen.getByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
+  })
+
+  test('creates a team through the existing mutation authority and refreshes the list', async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = []
+    let created = false
+    setGeneratedFetch(async (input, init) => {
+      calls.push({ url: String(input), init })
+      if (init?.method === 'POST') {
+        created = true
+        return Response.json({ team: { uid: 'team-one', name: 'Example team', revision: 1 } })
+      }
+      return Response.json({
+        teams: created ? [{ uid: 'team-one', name: 'Example team', revision: 1 }] : [],
+      })
+    })
+    const onAccessMutation = vi.fn(async (_draft, mutate) => {
+      const result = await mutate({ headers: new Headers({ 'X-Test-Authority': 'current' }) })
+      return result.status === 200
+    })
+    const current = snapshot()
+    current.capabilities.token_audit_read = true
+    current.capabilities.access_admin = true
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'credentials',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps(),
+        onAccessMutation,
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await fireEvent.input(screen.getByLabelText('New team name'), {
+      target: { value: 'Example team' },
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull())
+    expect(onAccessMutation).toHaveBeenCalledOnce()
+    const write = calls.find((call) => call.init?.method === 'POST')!
+    expect(new URL(write.url).pathname).toBe('/api/v1/teams')
+    expect(JSON.parse(String(write.init?.body))).toEqual({ name: 'Example team' })
+    expect(new Headers(write.init?.headers).get('X-Test-Authority')).toBe('current')
+    expect(calls.filter((call) => call.init?.method === 'GET').length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('manages selected team membership and deletion through owner mutation authority', async () => {
+    const writes: { path: string; method: string }[] = []
+    let members = ['existing-member']
+    let deleted = false
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (init?.method !== 'GET') {
+        writes.push({ path, method: init!.method! })
+        if (path.endsWith('/members/new-member')) members = [...members, 'new-member']
+        else if (path.endsWith('/members/existing-member'))
+          members = members.filter((member) => member !== 'existing-member')
+        else deleted = true
+        return Response.json({ changed: true })
+      }
+      return Response.json(
+        path === '/api/v1/teams'
+          ? { teams: deleted ? [] : [{ uid: 'team-one', name: 'Example team', revision: 1 }] }
+          : { team: { uid: 'team-one', name: 'Example team', revision: 1 }, members },
+      )
+    })
+    vi.stubGlobal('confirm', () => true)
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await screen.findByText('existing-member')
+    await fireEvent.input(screen.getByLabelText('Member account'), {
+      target: { value: 'new-member' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add member' }))
+    await screen.findByText('new-member')
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove existing-member' }))
+    await waitFor(() => expect(screen.queryByText('existing-member')).toBeNull())
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete team' }))
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'Example team' })).toBeNull())
+    expect(writes).toEqual([
+      { path: '/api/v1/teams/team-one/members/new-member', method: 'PUT' },
+      { path: '/api/v1/teams/team-one/members/existing-member', method: 'DELETE' },
+      { path: '/api/v1/teams/team-one', method: 'DELETE' },
+    ])
+  })
+
+  test('updates visibility with the loaded policy revision and selected teams', async () => {
+    let write: unknown
+    setGeneratedFetch(async (input, init) => {
+      if (init?.method === 'PUT') {
+        write = JSON.parse(String(init.body))
+        return Response.json({
+          policy: {
+            project_uid: '01J00000000000000000000002',
+            visibility: 'teams',
+            team_uids: ['team-one'],
+            revision: 5,
+          },
+        })
+      }
+      return Response.json(
+        new URL(String(input)).pathname === '/api/v1/teams'
+          ? { teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] }
+          : {
+              policy: {
+                project_uid: '01J00000000000000000000002',
+                visibility: 'all',
+                team_uids: [],
+                revision: 4,
+              },
+            },
+      )
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Project visibility'), { target: { value: '7' } })
+    await waitFor(() =>
+      expect((screen.getByLabelText('Visibility') as HTMLSelectElement).disabled).toBe(false),
+    )
+    await fireEvent.change(screen.getByLabelText('Visibility'), { target: { value: 'teams' } })
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Save visibility' }))
+    await waitFor(() =>
+      expect(write).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 }),
+    )
+  })
+
+  test('does not refresh an old team scene after authority changes during a write', async () => {
+    let reads = 0
+    setGeneratedFetch(async () => {
+      reads++
+      return Response.json({ teams: [] })
+    })
+    let finish!: (value: boolean) => void
+    const onAccessMutation = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const props = accessProps(onAccessMutation)
+    const view = render(AppShell, { props })
+    await fireEvent.input(screen.getByLabelText('New team name'), {
+      target: { value: 'Example team' },
+    })
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Create team' }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
+    await waitFor(() => expect(onAccessMutation).toHaveBeenCalledOnce())
+    await view.rerender({ ...props, daemonSwitching: true })
+    finish(true)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(reads).toBe(1)
+    expect(screen.queryByLabelText('New team name')).toBeNull()
+  })
+
+  test('retains a visibility draft after a revision conflict instead of silently overwriting it', async () => {
+    const writes: unknown[] = []
+    setGeneratedFetch(async (input, init) => {
+      if (init?.method === 'PUT') {
+        writes.push(JSON.parse(String(init.body)))
+        return Response.json({ code: 'revision_conflict' }, { status: 409 })
+      }
+      return Response.json(
+        new URL(String(input)).pathname === '/api/v1/teams'
+          ? { teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] }
+          : {
+              policy: {
+                project_uid: '01J00000000000000000000002',
+                visibility: 'all',
+                team_uids: [],
+                revision: 4,
+              },
+            },
+      )
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Project visibility'), { target: { value: '7' } })
+    await waitFor(() =>
+      expect((screen.getByLabelText('Visibility') as HTMLSelectElement).disabled).toBe(false),
+    )
+    await fireEvent.change(screen.getByLabelText('Visibility'), { target: { value: 'teams' } })
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Example team' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Save visibility' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect((screen.getByLabelText('Visibility') as HTMLSelectElement).value).toBe('teams')
+    expect(
+      (screen.getByRole('checkbox', { name: 'Example team' }) as HTMLInputElement).checked,
+    ).toBe(true)
+    expect(writes[0]).toEqual({ visibility: 'teams', team_uids: ['team-one'], revision: 4 })
+  })
+
+  test('discards late member and policy reads after switching selections', async () => {
+    let finishMembers!: (response: Response) => void
+    let finishPolicy!: (response: Response) => void
+    setGeneratedFetch(async (input) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/v1/teams/team-one')
+        return new Promise<Response>((resolve) => {
+          finishMembers = resolve
+        })
+      if (path === '/api/v1/projects/7/access')
+        return new Promise<Response>((resolve) => {
+          finishPolicy = resolve
+        })
+      return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await fireEvent.change(screen.getByLabelText('Project visibility'), { target: { value: '7' } })
+    await waitFor(() => {
+      expect(finishMembers).toBeTypeOf('function')
+      expect(finishPolicy).toBeTypeOf('function')
+    })
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: '' } })
+    await fireEvent.change(screen.getByLabelText('Project visibility'), { target: { value: '' } })
+    finishMembers(Response.json({ members: ['late-private-member'] }))
+    finishPolicy(
+      Response.json({
+        policy: {
+          project_uid: 'old-project',
+          visibility: 'teams',
+          team_uids: ['late-private-team'],
+          revision: 8,
+        },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.queryByText('late-private-member')).toBeNull()
+    expect(screen.queryByLabelText('Visibility')).toBeNull()
+    expect((screen.getByLabelText('Team') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('Project visibility') as HTMLSelectElement).value).toBe('')
+  })
+
+  test('preserves access selections with disabled controls during a same-authority snapshot refresh', async () => {
+    setGeneratedFetch(async (input) =>
+      Response.json(
+        new URL(String(input)).pathname === '/api/v1/teams'
+          ? { teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] }
+          : { members: ['existing-member'] },
+      ),
+    )
+    const props = accessProps(executeAccessMutation)
+    const view = render(AppShell, { props })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await screen.findByText('existing-member')
+    await view.rerender({ ...props, loading: true, canMutate: false })
+    expect((screen.getByLabelText('Team') as HTMLSelectElement).value).toBe('team-one')
+    expect((screen.getByRole('button', { name: 'Add member' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    await view.rerender({ ...props, loading: false, canMutate: true })
+    expect((screen.getByLabelText('Team') as HTMLSelectElement).value).toBe('team-one')
+    await view.rerender({ ...props, loading: false, canMutate: false, stale: true })
+    expect(screen.queryByLabelText('Team')).toBeNull()
+  })
+
+  test.each(['nonadmin', 'readonly', 'stale', 'expired', 'switching', 'remote', 'reconnecting'])(
+    'withholds access management from %s authority',
+    (kind) => {
+      const current = snapshot()
+      current.capabilities.token_audit_read = kind !== 'nonadmin'
+      current.capabilities.access_admin = kind !== 'nonadmin' && kind !== 'readonly'
+      if (kind === 'readonly') current.capabilities.writable = false
+      if (kind === 'expired') current.capabilities.expires_at = '2000-01-01T00:00:00Z'
+      render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view: 'credentials',
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          stale: kind === 'stale',
+          daemonSwitching: kind === 'switching',
+          reconnecting: kind === 'reconnecting',
+          activeDaemonID: kind === 'remote' ? 'remote-hub' : undefined,
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+      expect(screen.queryByRole('heading', { name: 'Teams and visibility' })).toBeNull()
+    },
+  )
+
   test('gates credential audit navigation on the advertised capability', async () => {
     const onNavigate = vi.fn()
     const authorized = snapshot()
     authorized.capabilities.token_audit_read = true
+    authorized.capabilities.access_admin = true
     const view = render(AppShell, {
       props: {
         route: {
@@ -178,6 +731,7 @@ describe('AppShell', () => {
     const onBackFromCredentials = vi.fn()
     const authorized = snapshot()
     authorized.capabilities.token_audit_read = true
+    authorized.capabilities.access_admin = true
     render(AppShell, {
       props: {
         route: {
@@ -710,9 +1264,9 @@ describe('AppShell', () => {
       },
     })
 
-    expect(within(view.container).getByRole('status').textContent).toContain(
-      'unavailable from the current authority',
-    )
+    expect(
+      within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
+    ).toContain('unavailable from the current authority')
 
     const archived = snapshot()
     archived.selected = {
@@ -725,7 +1279,9 @@ describe('AppShell', () => {
     }
     await view.rerender({ snapshot: archived })
 
-    expect(within(view.container).getByRole('status').textContent).toContain('archived')
+    expect(
+      within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
+    ).toContain('archived')
   })
 
   test('honors issue-scoped allowed actions without exposing project-wide controls', async () => {
@@ -876,4 +1432,37 @@ function snapshot(): UISnapshot {
     ],
     collection_links: [],
   }
+}
+
+function accessProps(
+  onAccessMutation: (
+    draft: unknown,
+    mutate: (context: MutationContext) => Promise<MutationResult>,
+  ) => Promise<boolean>,
+) {
+  const current = snapshot()
+  current.capabilities.token_audit_read = true
+  current.capabilities.access_admin = true
+  return {
+    route: {
+      kind: 'kata' as const,
+      view: 'credentials' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    },
+    snapshot: current,
+    loading: false,
+    ...mutationProps(),
+    onAccessMutation,
+    onNavigate: vi.fn(),
+    onCreateProject: vi.fn(async () => ({ changed: true })),
+  }
+}
+
+async function executeAccessMutation(
+  _draft: unknown,
+  mutate: (context: MutationContext) => Promise<MutationResult>,
+): Promise<boolean> {
+  const response = await mutate({ headers: new Headers(), body: (value) => value })
+  return response.status === 200
 }

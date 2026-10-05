@@ -45,13 +45,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Version = version.Version
 		out.Body.StartedAt = cfg.StartedAt
 		out.Body.Uptime = time.Since(cfg.StartedAt).Round(time.Second).String()
-		principal, authenticated := PrincipalFromContext(ctx)
-		diagnostics := ownerLocalTransport(ctx)
-		if authenticated {
-			// An explicit principal always wins over transport convenience: a
-			// scoped bearer remains scoped even when used from loopback.
-			diagnostics = principal.Scope == nil
-		}
+		diagnostics := projectDiagnosticOwnerAuthority(ctx)
 		if diagnostics {
 			out.Body.DBPath = cfg.DB.Path()
 		}

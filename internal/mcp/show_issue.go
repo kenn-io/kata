@@ -8,6 +8,11 @@ import "go.kenn.io/kata/pkg/client/generated"
 // because show callers read the top-level labels array.
 func issueFromShow(shown generated.ShowIssueOut) generated.Issue {
 	return generated.Issue{
+		AccountableActor:    shown.AccountableActor,
+		AuthorityUID:        shown.AuthorityUID,
+		SourceActor:         shown.SourceActor,
+		Teammate:            shown.Teammate,
+		Verification:        (*generated.IssueVerification)(shown.Verification),
 		AssignmentExpiresOn: shown.AssignmentExpiresOn,
 		Author:              shown.Author,
 		Body:                shown.Body,

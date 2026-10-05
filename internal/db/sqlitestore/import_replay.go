@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -341,16 +342,18 @@ func validateFreshReplayTarget(
 	tables []string,
 	expectedInstanceUID string,
 ) error {
-	var instanceUID, schemaVersion string
-	var metaRows int
+	var instanceUID, schemaVersion, policyRevision string
+	var metaRows, unknownKeys int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(MAX(CASE WHEN key='instance_uid' THEN value END), ''),
-		       COALESCE(MAX(CASE WHEN key='schema_version' THEN value END), '')
-		FROM meta WHERE key<>?`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
+		       COALESCE(MAX(CASE WHEN key='schema_version' THEN value END), ''),
+ COALESCE(MAX(CASE WHEN key='project_access_revision' THEN value END), ''),
+ COALESCE(SUM(CASE WHEN key NOT IN ('instance_uid','schema_version','created_by_version','project_access_revision') THEN 1 ELSE 0 END),0)
+		FROM meta WHERE key<>?`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion, &policyRevision, &unknownKeys); err != nil {
 		return fmt.Errorf("inspect fresh import metadata: %w", err)
 	}
-	if metaRows != 3 || instanceUID != expectedInstanceUID ||
+	if metaRows != 4 || unknownKeys != 0 || policyRevision != "1" || instanceUID != expectedInstanceUID ||
 		schemaVersion != strconv.Itoa(db.CurrentSchemaVersion()) {
 		return fmt.Errorf("import requires a fresh target: metadata changed")
 	}
@@ -401,6 +404,36 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	switch rec := r.(type) {
 	case *db.MetaKV:
 		return linkSkipNone, importMeta(ctx, tx, rec, opts)
+	case *db.EmbeddingArtifactExport:
+		return linkSkipNone, importEmbeddingArtifact(ctx, tx, rec)
+	case *db.RootKeyPin:
+		active := 1
+		if rec.Retired {
+			active = 0
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key,active) VALUES(?,?,?, ?,?)`, rec.ProjectUID, rec.AuthorityUID, rec.KeyID, base64.StdEncoding.EncodeToString(rec.PublicKey), active)
+		return linkSkipNone, err
+	case *db.AttributionReceipt:
+		return linkSkipNone, persistReceiptTx(db.WithRelayStateCapture(ctx), tx, *rec, nil, false)
+	case *db.EntityProvenance:
+		_, err := tx.ExecContext(ctx, `INSERT INTO federation_entity_provenance(project_uid,kind,entity_uid,event_uid) VALUES(?,?,?,?)`, rec.ProjectUID, rec.Kind, rec.EntityUID, rec.EventUID)
+		return linkSkipNone, err
+	case *db.Team:
+		_, err := tx.ExecContext(ctx, `INSERT INTO teams(uid,name,revision) VALUES(?,?,?)`, rec.UID, rec.Name, rec.Revision)
+		return linkSkipNone, err
+	case *db.TeamMembership:
+		_, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES(?,?)`, rec.TeamUID, rec.Actor)
+		return linkSkipNone, err
+	case *db.ProjectAccessPolicy:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES(?,?,?)`, rec.ProjectUID, rec.Visibility, rec.Revision); err != nil {
+			return linkSkipNone, err
+		}
+		for _, teamUID := range rec.TeamUIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_teams(project_uid,team_uid) VALUES(?,?)`, rec.ProjectUID, teamUID); err != nil {
+				return linkSkipNone, err
+			}
+		}
+		return linkSkipNone, nil
 	case *db.ProjectExport:
 		return linkSkipNone, importProject(ctx, tx, rec)
 	case *db.AliasExport:
@@ -431,6 +464,8 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		)
 	case *db.ExternalFieldStateExport:
 		return linkSkipNone, importExternalFieldState(ctx, tx, rec)
+	case *db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
+		return linkSkipNone, importRelayState(ctx, tx, rec)
 	case *db.FederationBindingExport:
 		return linkSkipNone, importFederationBinding(ctx, tx, rec)
 	case *db.FederationSyncStatusExport:
@@ -1009,18 +1044,22 @@ func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBi
 	if b.AllowInsecure {
 		allowInsecure = 1
 	}
-	_, err := tx.ExecContext(ctx,
+	raw, err := db.EncodeRelayBindingConfig(b.RelayConfig)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO federation_bindings(
 		   project_id, role, hub_url, hub_project_id, hub_project_uid,
 		   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 		   push_cursor_event_id, bound_actor, allow_insecure, enabled,
-		   created_at, updated_at, last_sync_at
+		   created_at, updated_at, last_sync_at, relay_config
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ProjectID, b.Role, b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled,
 		b.PushCursorEventID, actor, allowInsecure, enabled,
-		b.CreatedAt, b.UpdatedAt, b.LastSyncAt)
+		b.CreatedAt, b.UpdatedAt, b.LastSyncAt, raw)
 	return wrapImportErr(db.ImportKindFederationBinding, err)
 }
 
@@ -1062,13 +1101,13 @@ func importFederationEnrollment(ctx context.Context, tx *sql.Tx, e *db.Federatio
 		   bound_actor, allow_adoption_snapshot_authors,
 		   adoption_baseline_open, adoption_baseline_next_source_event_id,
 		   adoption_baseline_end_source_event_id,
-		   created_at, updated_at, revoked_at
+		   created_at, updated_at, revoked_at,relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?)`,
 		e.ID, e.TokenHash, e.SpokeInstanceUID, e.ProjectID, e.Capabilities,
 		actor, e.AllowAdoptionSnapshotAuthors, e.AdoptionBaselineOpen,
 		e.AdoptionBaselineNextSourceEventID, e.AdoptionBaselineEndSourceEventID,
-		e.CreatedAt, e.UpdatedAt, e.RevokedAt)
+		e.CreatedAt, e.UpdatedAt, e.RevokedAt, e.RelayBindingUID, e.RelayProtocolVersion, e.ParentTokenID, relayExportEpoch(e.RelayResetEpoch), e.RelayServeDownstream)
 	return wrapImportErr(db.ImportKindFederationEnrollment, err)
 }
 
@@ -1447,7 +1486,7 @@ func upsertSequence(ctx context.Context, tx *sql.Tx, name string, seq int64) err
 }
 
 func reconcileSequences(ctx context.Context, tx *sql.Tx) error {
-	for _, table := range []string{"projects", "project_aliases", "issue_sync_bindings", "issues", "comments", "links", "import_mappings", "events", "purge_log", "project_purge_log", "api_tokens", "federation_enrollments"} {
+	for _, table := range []string{"projects", "project_aliases", "issue_sync_bindings", "issues", "comments", "links", "import_mappings", "events", "purge_log", "project_purge_log", "api_tokens", "federation_enrollments", "federation_relay_outbox"} {
 		var maxID int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM `+table).Scan(&maxID); err != nil {
@@ -1556,4 +1595,11 @@ func checkForeignKeyViolations(ctx context.Context, tx *sql.Tx) error {
 		sb.WriteString("\n  (output capped at 20 rows per table)")
 	}
 	return errors.New(sb.String())
+}
+
+func relayExportEpoch(epoch int64) int64 {
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }

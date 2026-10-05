@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -114,12 +116,27 @@ func (s *Store) patchProjectMetadata(
 		if err := ensureProjectWritableTx(ctx, tx, current.ID); err != nil {
 			return err
 		}
+		if _, producerChange := input.Patch[db.ProjectEmbeddingMetadataKey]; producerChange {
+			var role string
+			err := tx.QueryRowContext(ctx, `SELECT role FROM federation_bindings WHERE project_id=$1`, current.ID).Scan(&role)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if role == string(db.FederationRoleSpoke) {
+				return errors.Join(db.ErrFederatedReadOnly, db.ErrFederatedSpokeUnsupported)
+			}
+		}
 		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
 		updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
 		if err != nil {
 			return err
+		}
+		if _, changed := input.Patch[db.ProjectEmbeddingMetadataKey]; changed {
+			if _, err := db.ProjectEmbeddingProducerFromMetadata(db.JSONBlob(string(updated))); err != nil {
+				return fmt.Errorf("%w: invalid embedding producer configuration", metadata.ErrInvalidValue)
+			}
 		}
 		if len(diff) == 0 {
 			output.Project = current
@@ -194,6 +211,7 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 			return &db.RevisionConflictError{CurrentRevision: target.Revision}
 		}
 
+		authorizedProjects, restricted := db.AuthorizedProjects(ctx)
 		for _, project := range projects {
 			role := jsontext.Value(`null`)
 			if project.ID == input.ProjectID {
@@ -206,6 +224,9 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 				if string(current["role"]) != `"inbox"` {
 					continue
 				}
+			}
+			if restricted && !slices.Contains(authorizedProjects, project.UID) {
+				return db.ErrNotFound
 			}
 			if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 				return err

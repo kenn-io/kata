@@ -23,13 +23,13 @@ type APITokenScope struct {
 	RootIssueUID string            `json:"root_issue_uid"`
 }
 
-// ValidateAPITokenGrant validates the all-null unscoped form or the complete,
+// ValidateAPITokenGrant validates optional expiry on an unscoped token or the complete,
 // finite issue-subtree form. Domain existence and project role are checked by
 // the daemon when it mints and uses a scoped token.
 func ValidateAPITokenGrant(scope *APITokenScope, expiresAt *time.Time) error {
 	if scope == nil {
-		if expiresAt != nil {
-			return errors.New("token expiration requires a scope")
+		if expiresAt != nil && expiresAt.IsZero() {
+			return errors.New("token expiration must be a finite timestamp")
 		}
 		return nil
 	}
@@ -49,13 +49,23 @@ func ValidateAPITokenGrant(scope *APITokenScope, expiresAt *time.Time) error {
 }
 
 // ActiveAPITokenGrantMatches reports whether current is still the exact live
-// credential admitted at request authentication time.
+// credential admitted at request authentication time. Unscoped tokens may have
+// no expiry; scoped grants require matching, unexpired expiry values.
 func ActiveAPITokenGrantMatches(current, admitted APIToken, now time.Time) bool {
 	if current.ID == 0 || current.ID != admitted.ID || current.Actor != admitted.Actor ||
-		current.RevokedAt != nil || current.Scope == nil || admitted.Scope == nil ||
-		current.ExpiresAt == nil || admitted.ExpiresAt == nil ||
-		*current.Scope != *admitted.Scope {
+		current.RevokedAt != nil {
 		return false
+	}
+	if current.Scope == nil || admitted.Scope == nil {
+		if current.Scope != nil || admitted.Scope != nil {
+			return false
+		}
+	} else if *current.Scope != *admitted.Scope {
+		return false
+	}
+	if current.ExpiresAt == nil || admitted.ExpiresAt == nil {
+		return current.Scope == nil && admitted.Scope == nil &&
+			current.ExpiresAt == nil && admitted.ExpiresAt == nil
 	}
 	return current.ExpiresAt.Equal(*admitted.ExpiresAt) && now.UTC().Before(current.ExpiresAt.UTC())
 }

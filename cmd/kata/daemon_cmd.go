@@ -1082,6 +1082,11 @@ func runDaemonProcess(
 		}
 	}()
 
+	rootSigner, err := daemon.LoadRootAttributionSigner(ctx, store, filepath.Join(ns.DataDir, "federation-root.key"))
+	if err != nil {
+		return fmt.Errorf("load root attribution signing key: %w", err)
+	}
+
 	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
 	if err != nil {
@@ -1203,7 +1208,7 @@ func runDaemonProcess(
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
-		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog,
+		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
 		return err
@@ -1237,7 +1242,7 @@ func runDaemonProcess(
 		})
 	}
 	federationWake := startFederationRunner(
-		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog,
+		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, embeddingWake,
 	)
 	startDueNotificationSweeper(
 		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
@@ -1330,12 +1335,14 @@ func runDaemonProcess(
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,
+		RootAttributionSigner:     &rootSigner,
 		DefaultTimezone:           dcfg.Timezone,
 		StartedAt:                 time.Now().UTC(),
 		Endpoint:                  &endpoint,
 		Hooks:                     disp,
 		Broadcaster:               broadcaster,
 		FederationWake:            federationWake,
+		EmbeddingWake:             embeddingWake,
 		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 		WebDaemons:                append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 		ActiveWebDaemon:           dcfg.ActiveDaemon,
@@ -1687,6 +1694,7 @@ func startFederationRunner(
 	store db.Storage,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
+	onSyncComplete ...func(),
 ) func() {
 	wake := make(chan struct{}, 1)
 	wakeRunner := func() {
@@ -1724,6 +1732,9 @@ func startFederationRunner(
 		OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
 			publisher.EventsFrom(projectID, events, fork)
 		},
+	}
+	if len(onSyncComplete) > 0 {
+		runner.OnSyncComplete = onSyncComplete[0]
 	}
 	workers.Go(func() {
 		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -1826,6 +1837,7 @@ func startEmbeddingReconciler(
 	store db.Storage,
 	bcast *daemon.EventBroadcaster,
 	daemonLog *log.Logger,
+	publishers ...daemon.EventPublisher,
 ) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
 	if embedder == nil {
 		return nil, nil, nil, nil, nil
@@ -1834,10 +1846,21 @@ func startEmbeddingReconciler(
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("embedding index: %w", err)
 	}
+	publisher := daemon.NewEventPublisher(bcast, nil)
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
 		BatchSize:      ec.BatchSize,
 		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
 		DrainAdmission: drainAdmission,
+		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, fork activity.Admission, syncArtifacts bool) (bool, error) {
+			if !syncArtifacts {
+				return federation.EmbeddingProducerAuthorized(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)
+			}
+			return federation.EmbeddingProducerConnected(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe, func(projectID int64, events []db.Event) { publisher.EventsFrom(projectID, events, fork) })
+		},
 	})
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

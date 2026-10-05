@@ -449,6 +449,16 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 	if actor == "" {
 		return principal
 	}
+	if binding.RelayConfig != nil {
+		// Each authenticated hop binds the existing holder tuple into an opaque
+		// client identity before replacing the account with its upstream account.
+		// A caller-supplied client label cannot impersonate another leaf instance.
+		identity, _ := json.Marshal([3]string{principal.HolderInstanceUID, principal.Holder, principal.ClientKind})
+		digest := sha256.Sum256(append([]byte("kata:relay-claim-holder:v1\x00"), identity...))
+		principal.ClientKind = "relay:v1:" + base64.RawURLEncoding.EncodeToString(digest[:])
+		principal.Holder = actor
+		return principal
+	}
 	// Existing clients keep their established actor/client-kind identity.
 	// Mounted callers carry an opaque subject-bound identity through the shared
 	// spoke credential so one subject cannot control another subject's lease.
@@ -472,6 +482,9 @@ func claimForwardClient(
 	cred, _, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
 	if err != nil {
 		return nil, config.FederationCredential{}, internalAPIError(err)
+	}
+	if cred.RelayEnrollmentPending {
+		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "relay enrollment pending", "finish bridge enrollment before forwarding claims", nil)
 	}
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)

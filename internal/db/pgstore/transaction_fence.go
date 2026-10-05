@@ -23,7 +23,11 @@ func (s *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, erro
 	if opts != nil && opts.ReadOnly {
 		return tx, nil
 	}
-	if err := db.ApplyTransactionFence(ctx, tx); err != nil {
+	err = db.ApplyTransactionFence(ctx, tx)
+	if err == nil {
+		err = db.ApplyRootAttributionFence(ctx, s, tx)
+	}
+	if err != nil {
 		rollbackErr := tx.Rollback()
 		return nil, db.FinishTransactionRollback(ctx, err, rollbackErr)
 	}

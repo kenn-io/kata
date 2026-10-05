@@ -26,6 +26,18 @@ var expiringAssignmentsMigrationSQL string
 //go:embed migrations/000030_issue_status_sync.up.sql
 var issueStatusSyncMigrationSQL string
 
+//go:embed migrations/000031_project_access.up.sql
+var projectAccessMigrationSQL string
+
+//go:embed migrations/000032_federation_provenance.up.sql
+var federationProvenanceMigrationSQL string
+
+//go:embed migrations/000033_project_relay.up.sql
+var projectRelayMigrationSQL string
+
+//go:embed migrations/000034_embedding_artifacts.up.sql
+var embeddingArtifactsMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -70,6 +82,10 @@ var migrationAssets = []Migration{
 		Name:        "000030_issue_status_sync.up.sql",
 		SQL:         issueStatusSyncMigrationSQL,
 	},
+	{FromVersion: 30, ToVersion: 31, Name: "000031_project_access.up.sql", SQL: projectAccessMigrationSQL},
+	{FromVersion: 31, ToVersion: 32, Name: "000032_federation_provenance.up.sql", SQL: federationProvenanceMigrationSQL},
+	{FromVersion: 32, ToVersion: 33, Name: "000033_project_relay.up.sql", SQL: projectRelayMigrationSQL},
+	{FromVersion: 33, ToVersion: 34, Name: "000034_embedding_artifacts.up.sql", SQL: embeddingArtifactsMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
@@ -31,6 +32,10 @@ type ReconcilerConfig struct {
 	MaxBackoff     time.Duration // default 5m
 	Now            func() time.Time
 	DrainAdmission activity.WaitableAdmission
+	OnProjectEvent func(db.Event, activity.Admission)
+	// The final argument requests artifact synchronization before authorization.
+	// Later documents in the same fill need only fresh authority checks.
+	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -252,6 +257,7 @@ func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
 		}
 	}
 	defer lease.Release()
+	ctx = context.WithValue(ctx, producerAdmissionContextKey{}, activity.Admission(lease.Fork))
 	return true, r.reconcileOnce(ctx)
 }
 
@@ -283,8 +289,8 @@ func requestRejected(apiErr *embedclient.APIError) bool {
 
 // reconcileOnce refreshes the mirror, drains the fill for the desired
 // generation, cuts over when the fill completes, and updates health. Fill
-// loops internally until no documents are pending, so a successful return
-// means the desired generation is fully populated and active.
+// loops internally until no eligible documents remain. Deferred shared content
+// stays pending; only a complete generation replaces an existing active one.
 //
 // Cold start (no active generation: fresh sidecar or first upgrade) cuts the
 // new generation over immediately, before the fill, so search serves partial
@@ -312,6 +318,21 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 	}
+	var portableRecipe *embedding.ArtifactIdentity
+	if portable, ok := r.emb.(interface {
+		ArtifactIdentity(string, string, string) (embedding.ArtifactIdentity, error)
+	}); ok {
+		recipe, err := portable.ArtifactIdentity("", "", r.store.InstanceUID())
+		if err != nil {
+			r.markError(err)
+			return err
+		}
+		portableRecipe = &recipe
+		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe); err != nil {
+			r.markError(err)
+			return err
+		}
+	}
 	// Publish the pending count before the fill so /health reports the real
 	// backlog during a long backfill instead of the previous cycle's value.
 	embedded, skipped, backlog, err := r.idx.Coverage(ctx, key)
@@ -320,14 +341,30 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		return err
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
-	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled); err != nil {
+	var fillErr error
+	if portableRecipe != nil {
+		// Reconcile each project's upstream artifacts once per fill. A failed
+		// connection defers its remaining documents until the next fill, while
+		// successful connections still revalidate live authority per document.
+		checked := make(map[string]bool)
+		_, fillErr = r.idx.FillWithArtifacts(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
+			previous, exists := checked[projectUID]
+			if exists && !previous {
+				return false, nil
+			}
+			allowed, err := r.projectGenerationAllowed(ctx, projectUID, *portableRecipe, !exists)
+			if err == nil {
+				checked[projectUID] = allowed
+			}
+			return allowed, err
+		})
+	} else {
+		_, fillErr = r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled)
+	}
+	if err := fillErr; err != nil {
 		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
 			r.setCoverage(key, embedded, skipped, backlog)
 		}
-		r.markError(err)
-		return err
-	}
-	if err := r.idx.CutOver(ctx, key); err != nil {
 		r.markError(err)
 		return err
 	}
@@ -335,6 +372,12 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		r.markError(err)
 		return err
+	}
+	if backlog == 0 {
+		if err := r.idx.CutOver(ctx, key); err != nil {
+			r.markError(err)
+			return err
+		}
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
 	r.markSuccess()

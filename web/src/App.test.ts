@@ -1319,6 +1319,7 @@ describe('App', () => {
         if (target.pathname === '/api/v1/ui/references') {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
+        if (target.pathname === '/api/v1/teams') return Response.json({ teams: [] })
         if (target.pathname === '/api/v1/tokens') {
           tokenReads += 1
           if (tokenReads > 1) return new Response('', { status: 403 })

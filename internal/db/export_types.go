@@ -285,21 +285,22 @@ func (*ExternalFieldStateExport) ImportKind() string { return ImportKindExternal
 
 // FederationBindingExport is one federation_bindings row in export shape.
 type FederationBindingExport struct {
-	ProjectID            int64   `json:"project_id"`
-	Role                 string  `json:"role"`
-	HubURL               string  `json:"hub_url"`
-	HubProjectID         int64   `json:"hub_project_id"`
-	HubProjectUID        string  `json:"hub_project_uid"`
-	ReplayHorizonEventID int64   `json:"replay_horizon_event_id"`
-	PullCursorEventID    int64   `json:"pull_cursor_event_id"`
-	PushEnabled          bool    `json:"push_enabled"`
-	PushCursorEventID    int64   `json:"push_cursor_event_id"`
-	Actor                string  `json:"bound_actor,omitempty"`
-	AllowInsecure        bool    `json:"allow_insecure,omitzero"`
-	Enabled              bool    `json:"enabled"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
-	LastSyncAt           *string `json:"last_sync_at,omitempty"`
+	RelayConfig          *RelayBindingConfig `json:"relay_config,omitempty"`
+	ProjectID            int64               `json:"project_id"`
+	Role                 string              `json:"role"`
+	HubURL               string              `json:"hub_url"`
+	HubProjectID         int64               `json:"hub_project_id"`
+	HubProjectUID        string              `json:"hub_project_uid"`
+	ReplayHorizonEventID int64               `json:"replay_horizon_event_id"`
+	PullCursorEventID    int64               `json:"pull_cursor_event_id"`
+	PushEnabled          bool                `json:"push_enabled"`
+	PushCursorEventID    int64               `json:"push_cursor_event_id"`
+	Actor                string              `json:"bound_actor,omitempty"`
+	AllowInsecure        bool                `json:"allow_insecure,omitzero"`
+	Enabled              bool                `json:"enabled"`
+	CreatedAt            string              `json:"created_at"`
+	UpdatedAt            string              `json:"updated_at"`
+	LastSyncAt           *string             `json:"last_sync_at,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.
@@ -340,6 +341,12 @@ func (*FederationQuarantineExport) ImportKind() string { return ImportKindFedera
 
 // FederationEnrollmentExport is one federation_enrollments row in export shape.
 type FederationEnrollmentExport struct {
+	RelayBindingUID      *string `json:"relay_binding_uid,omitempty"`
+	RelayProtocolVersion int     `json:"relay_protocol_version,omitzero"`
+	ParentTokenID        *int64  `json:"parent_token_id,omitempty"`
+	RelayResetEpoch      int64   `json:"relay_reset_epoch,omitzero"`
+	RelayServeDownstream bool    `json:"relay_serve_downstream,omitzero"`
+
 	ID                                int64   `json:"id"`
 	TokenHash                         string  `json:"token_hash"`
 	SpokeInstanceUID                  string  `json:"spoke_instance_uid"`

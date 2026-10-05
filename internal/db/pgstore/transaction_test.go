@@ -227,3 +227,42 @@ func TestTransactionFencePostgresFailureKeepsErrorCategory(t *testing.T) {
 	_, err = store.ProjectByName(ctx, "rejected-project")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
+
+// R5: a receipt reset and ordinary source events share commit ordering as well
+// as an identity sequence. Otherwise a later event can hide a late proof reset.
+func TestAttributionUIResetWaitsForEventSequenceFence(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := OpenWithConfig(ctx, dsn, Config{Schema: "receipt_fence_store", SchemaMode: SchemaModeBootstrap})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "receipt-fence-project")
+	require.NoError(t, err)
+	blocker, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = blocker.Rollback() }()
+	require.NoError(t, lockEventSequenceTx(ctx, blocker))
+	reserved, err := store.reserveIdentityValue(ctx, blocker, "events", "id")
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		done <- store.withSerializableTx(ctx, func(tx *sql.Tx) error {
+			return reserveAttributionUIResetTx(ctx, tx, project.UID)
+		})
+	}()
+	<-started
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		t.Fatal("receipt reset committed while the source event sequence fence was held")
+	case <-time.After(250 * time.Millisecond):
+	}
+	require.NoError(t, blocker.Commit())
+	require.NoError(t, <-done)
+	cursor, err := store.UIEventCursor(ctx)
+	require.NoError(t, err)
+	require.Greater(t, cursor, reserved)
+}

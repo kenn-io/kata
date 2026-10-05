@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # Backup and restore
@@ -48,6 +48,35 @@ For an online backup on the same host:
 ```sh
 kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
 ```
+
+Current main (schema 34) preserves hub-local teams, memberships and project
+visibility policies in a full backup. Project-scoped exports omit those local
+access rules. Both forms retain signed attribution receipts, entity creation
+references and public root keys, including retired verification keys. Restore
+checks signatures before replacing target data. Legacy rows remain unattributed.
+Full backups also retain old-key-signed rotation records. Project-scoped exports
+retain only that project's rotation history. Restore validates those records
+before replacing target data.
+Full backups retain signed relay checkpoints, binding-local stream baselines and
+original inbox/outbox mappings. Restore verifies the checkpoints before replacing
+data and preserves their retry identities without generating new deliveries.
+Project exports omit these local checkpoint and delivery records. Signed
+snapshots retain original creation receipts across compaction; snapshot authors
+alone remain legacy attribution.
+
+Both backup forms retain complete portable embedding artifacts, including their
+original float32 bytes and chunk manifests. Project exports include only the
+selected project's artifacts. Restore validates them before replacing data and
+preserves vectors above the recipient's index limit without requesting new
+embeddings. Legacy index embeddings remain excluded. Temporary pre-content
+staging is excluded; unacknowledged sender deliveries retry those artifacts.
+
+Full backups retain local browser reset cursors for late creation receipts.
+Project exports omit those local cursors. Receiving a new creation receipt
+invalidates the browser snapshot; an idle event stream requests a refresh on
+its next heartbeat.
+Signing keys are separate owner-only files; include them in your secret backup
+mechanism to keep the restored root able to sign with its known identity. The daemon stores this secret in `federation-root.key` in its namespace data directory. Startup checks it against every active local root pin. A missing or changed key stops startup and requires restoring the secret backup or explicit repinning. Foreign and retired public keys remain verification history; they do not require local signing secrets.
 
 ## Scheduled backups
 
@@ -203,6 +232,11 @@ already exists. As a result, re-importing the same snapshot is not an
 incremental refresh. Run one merge per scoped snapshot when restoring several
 projects; use a full-database export when cross-project links must also be
 restored.
+
+Merge refuses snapshots containing hub-local teams, memberships or visibility
+policies. It also refuses root pins and verified provenance: a project merge
+cannot establish a federation authority. Restore a proof-bearing archive into a
+fresh target or use a full backup restore.
 
 Imported issue-sync bindings remain disabled until re-enabled locally. Imported
 federation state is discarded so the project must join federation again with

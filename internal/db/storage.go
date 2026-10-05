@@ -16,6 +16,38 @@ import (
 // Production entry points hold a db.Storage; backend selection happens
 // through the storeopen DSN dispatcher.
 type Storage interface {
+	ExportRelayState(ctx context.Context) iter.Seq2[ImportRecord, error]
+	AcceptRelayDeliveries(ctx context.Context, bindingUID string, batch RelayBatch) (RelayAcceptance, error)
+	SetRelayBindingConfig(ctx context.Context, projectID int64, config RelayBindingConfig, expected ...RelayBindingConfig) (FederationBinding, error)
+	CreateRelayEnrollment(ctx context.Context, p CreateRelayEnrollmentParams) (CreatedFederationEnrollment, error)
+	PendingRelayDeliveries(ctx context.Context, bindingUID, stream string, limit int) ([]RelayEnvelope, error)
+	AckRelayDeliveries(ctx context.Context, bindingUID string, epoch int64, stream string, through int64, digest string) error
+	// root acceptance proofs, independent of compactable event history
+	RotateRootAuthority(ctx context.Context, transition RootKeyTransition) error
+	RootKeyTransitions(ctx context.Context, projectUID string) ([]RootKeyTransition, error)
+	PinRootAuthority(ctx context.Context, pin RootKeyPin) error
+	RootAuthority(ctx context.Context, projectUID string) (RootKeyPin, error)
+	RecordRootAttribution(ctx context.Context, enrollmentID int64, event RemoteEvent, signer RootAttributionSigner) (AttributionReceipt, error)
+	ApplyUpstreamAttribution(ctx context.Context, pin RootKeyPin, receipt AttributionReceipt) error
+	EntityAttribution(ctx context.Context, projectUID, kind, entityUID string) (AttributionReceipt, error)
+	AttributionReceiptsAfter(ctx context.Context, projectUID string, epoch, after int64, limit int) ([]AttributionReceipt, error)
+	ExportAttribution(ctx context.Context, filter ExportFilter) iter.Seq2[ImportRecord, error]
+	// teams and project visibility; intersects other native grants
+
+	CreateTeam(ctx context.Context, name, adminActor string) (Team, Event, error)
+	TeamByUID(ctx context.Context, teamUID string) (Team, error)
+	ListTeams(ctx context.Context) ([]Team, error)
+	DeleteTeam(ctx context.Context, teamUID, adminActor string) (Event, error)
+	TeamMembers(ctx context.Context, teamUID string) ([]string, error)
+	SetTeamMembership(ctx context.Context, teamUID, actor string, present bool, adminActor string) (Event, error)
+	MigrateTeamActor(ctx context.Context, fromActor, toActor, adminActor string) (Event, error)
+	ProjectAccessPolicy(ctx context.Context, projectUID string) (ProjectAccessPolicy, error)
+	SetProjectAccessPolicy(ctx context.Context, policy ProjectAccessPolicy, adminActor string) (ProjectAccessPolicy, Event, error)
+	AccessibleProjectUIDs(ctx context.Context, actor string) ([]string, error)
+	AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error)
+	ProjectAccessRevision(ctx context.Context) (int64, error)
+	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
+	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 	// identity / lifecycle
 	InstanceUID() string
 	RefreshInstanceUID(ctx context.Context) error

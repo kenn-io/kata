@@ -1,5 +1,15 @@
 components:
   schemas:
+    AccessAdministrationResponseBody:
+      additionalProperties: true
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+      required:
+        - changed
+      type: object
     ActionRequestBody:
       additionalProperties: false
       properties:
@@ -67,6 +77,58 @@ components:
       required:
         - identity
         - kind
+      type: object
+    ArtifactIdentity:
+      additionalProperties: true
+      properties:
+        dimensions:
+          format: int64
+          type: integer
+        encoding:
+          type: string
+        input_hash:
+          type: string
+        input_type:
+          type: string
+        issue_uid:
+          type: string
+        model:
+          type: string
+        model_revision:
+          type: string
+        normalization:
+          type: string
+        preprocessing:
+          type: string
+        producer_instance_uid:
+          type: string
+        project_uid:
+          type: string
+        provider:
+          type: string
+        recipe_fingerprint:
+          type: string
+        recipe_version:
+          format: int64
+          type: integer
+        split_max_runes:
+          format: int64
+          type: integer
+        split_overlap:
+          format: int64
+          type: integer
+      required:
+        - recipe_fingerprint
+        - provider
+        - model
+        - dimensions
+        - input_type
+        - normalization
+        - preprocessing
+        - recipe_version
+        - split_max_runes
+        - split_overlap
+        - encoding
       type: object
     AssignRequestBody:
       additionalProperties: false
@@ -196,6 +258,25 @@ components:
       required:
         - open
         - total
+      type: object
+    ChunkArtifact:
+      additionalProperties: false
+      properties:
+        index:
+          format: int64
+          type: integer
+        input_hash:
+          type: string
+        vector_bytes:
+          contentEncoding: base64
+          type: string
+        vector_digest:
+          type: string
+      required:
+        - index
+        - input_hash
+        - vector_digest
+        - vector_bytes
       type: object
     ClaimActionBody:
       additionalProperties: true
@@ -376,7 +457,11 @@ components:
     Comment:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         author:
+          type: string
+        authority_uid:
           type: string
         body:
           type: string
@@ -389,9 +474,17 @@ components:
         issue_id:
           format: int64
           type: integer
+        source_actor:
+          type: string
         teammate:
           type: string
         uid:
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
       required:
         - id
@@ -443,6 +536,29 @@ components:
           type: string
       required:
         - key_id
+      type: object
+    ConnectFederationBridgeRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        hub_catalog:
+          minLength: 1
+          type: string
+        hub_project:
+          minLength: 1
+          type: string
+        preflight:
+          type: boolean
+        project_name:
+          minLength: 1
+          type: string
+        serve_downstream:
+          type: boolean
+      required:
+        - hub_catalog
+        - hub_project
+        - project_name
       type: object
     ConnectorFieldsResponseBody:
       additionalProperties: true
@@ -507,6 +623,8 @@ components:
           type:
             - integer
             - "null"
+        relay:
+          $ref: "#/components/schemas/RelayEnrollmentOptions"
         spoke_instance_uid:
           type: string
         token:
@@ -689,6 +807,16 @@ components:
       required:
         - recurrence
       type: object
+    CreateTeamRequestBody:
+      additionalProperties: false
+      properties:
+        name:
+          maxLength: 256
+          minLength: 1
+          type: string
+      required:
+        - name
+      type: object
     CreateTokenRequestBody:
       additionalProperties: false
       properties:
@@ -701,6 +829,11 @@ components:
           type: string
         scope:
           $ref: "#/components/schemas/TokenScopeIn"
+        team_uids:
+          items:
+            type: string
+          maxItems: 256
+          type: array
       required:
         - actor
       type: object
@@ -880,6 +1013,28 @@ components:
     DisableIssueSyncRequestBody:
       additionalProperties: false
       type: object
+    DisconnectFederationBridgeRequestBody:
+      additionalProperties: false
+      properties:
+        preflight:
+          type: boolean
+      type: object
+    DisconnectRelayRequestBody:
+      additionalProperties: false
+      properties:
+        spoke_instance_uid:
+          type: string
+      required:
+        - spoke_instance_uid
+      type: object
+    DisconnectRelayResponseBody:
+      additionalProperties: true
+      properties:
+        revoked:
+          type: boolean
+      required:
+        - revoked
+      type: object
     DoctorResponseBody:
       additionalProperties: true
       properties:
@@ -937,6 +1092,66 @@ components:
         - issue
         - event
         - changed
+      type: object
+    EmbeddingArtifact:
+      additionalProperties: false
+      properties:
+        chunks:
+          items:
+            $ref: "#/components/schemas/ChunkArtifact"
+          type: array
+        digest:
+          type: string
+        dimensions:
+          format: int64
+          type: integer
+        encoding:
+          type: string
+        input_hash:
+          type: string
+        input_type:
+          type: string
+        issue_uid:
+          type: string
+        model:
+          type: string
+        model_revision:
+          type: string
+        normalization:
+          type: string
+        preprocessing:
+          type: string
+        producer_instance_uid:
+          type: string
+        project_uid:
+          type: string
+        provider:
+          type: string
+        recipe_fingerprint:
+          type: string
+        recipe_version:
+          format: int64
+          type: integer
+        split_max_runes:
+          format: int64
+          type: integer
+        split_overlap:
+          format: int64
+          type: integer
+      required:
+        - chunks
+        - digest
+        - recipe_fingerprint
+        - provider
+        - model
+        - dimensions
+        - input_type
+        - normalization
+        - preprocessing
+        - recipe_version
+        - split_max_runes
+        - split_overlap
+        - encoding
       type: object
     EmbeddingsHealth:
       additionalProperties: true
@@ -1417,6 +1632,113 @@ components:
         - created_at
         - updated_at
       type: object
+    FederationBridgeBody:
+      additionalProperties: true
+      properties:
+        direction:
+          enum:
+            - bidirectional
+          type: string
+        hub_catalog:
+          type: string
+        hub_instance_uid:
+          type: string
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+        local_account:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        status:
+          enum:
+            - ready
+            - connected
+          type: string
+        upstream_account:
+          type: string
+      required:
+        - hub_catalog
+        - hub_url
+        - hub_instance_uid
+        - hub_project_uid
+        - hub_project_id
+        - project_name
+        - local_account
+        - upstream_account
+        - direction
+        - status
+      type: object
+    FederationBridgeDisconnectResult:
+      additionalProperties: true
+      properties:
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        status:
+          enum:
+            - ready
+            - disconnected
+          type: string
+      required:
+        - project_name
+        - status
+      type: object
+    FederationBridgeStatusBody:
+      additionalProperties: true
+      properties:
+        credential_status:
+          type: string
+        direction:
+          enum:
+            - bidirectional
+            - pull_only
+          type: string
+        federation:
+          $ref: "#/components/schemas/FederationProjectStatus"
+        hub_catalog:
+          type: string
+        hub_url:
+          type: string
+        local_account:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        relay:
+          $ref: "#/components/schemas/RelayBindingConfig"
+        state:
+          enum:
+            - connected
+            - enrollment_pending
+            - paused
+            - offline
+            - revoked
+          type: string
+        upstream_account:
+          type: string
+      required:
+        - project_uid
+        - project_name
+        - hub_url
+        - local_account
+        - upstream_account
+        - direction
+        - state
+        - credential_status
+      type: object
     FederationConfigHealth:
       additionalProperties: true
       properties:
@@ -1449,6 +1771,44 @@ components:
         - pending
         - conflicted
       type: object
+    FederationEmbeddingArtifactStatus:
+      additionalProperties: true
+      properties:
+        digest:
+          type: string
+        issue_uid:
+          type: string
+        reason:
+          type: string
+        state:
+          type: string
+      required:
+        - issue_uid
+        - digest
+        - state
+      type: object
+    FederationEmbeddingStatus:
+      additionalProperties: true
+      properties:
+        artifact_limit:
+          format: int64
+          type: integer
+        artifacts:
+          items:
+            $ref: "#/components/schemas/FederationEmbeddingArtifactStatus"
+          type: array
+        limited:
+          type: boolean
+        producer:
+          $ref: "#/components/schemas/ProjectEmbeddingProducer"
+        state:
+          type: string
+      required:
+        - state
+        - artifact_limit
+        - limited
+        - artifacts
+      type: object
     FederationEnrollmentOut:
       additionalProperties: true
       properties:
@@ -1469,6 +1829,8 @@ components:
           type:
             - integer
             - "null"
+        relay:
+          $ref: "#/components/schemas/RelayHandshake"
         revoked_at:
           format: date-time
           type: string
@@ -1638,6 +2000,8 @@ components:
           type: string
         credential_status:
           type: string
+        embedding:
+          $ref: "#/components/schemas/FederationEmbeddingStatus"
         enabled:
           type: boolean
         enrollment_count:
@@ -2174,12 +2538,21 @@ components:
       properties:
         auth:
           $ref: "#/components/schemas/AuthInfoOut"
+        embedding_artifact_protocol_version:
+          format: int64
+          type: integer
         instance_uid:
           type: string
         issue_status_sync:
           type: boolean
         issue_subtree_tokens:
           type: boolean
+        provenance_protocol_version:
+          format: int64
+          type: integer
+        relay_protocol_version:
+          format: int64
+          type: integer
         schema_version:
           format: int64
           type: integer
@@ -2201,10 +2574,14 @@ components:
     Issue:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         body:
           type: string
@@ -2245,7 +2622,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -2253,6 +2634,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
       required:
         - id
@@ -2356,10 +2743,14 @@ components:
     IssueOut:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         blocked:
           type: boolean
@@ -2424,7 +2815,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -2432,6 +2827,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
         web_url:
           description: Browser URL for this issue in the owning daemon.
@@ -2813,10 +3214,14 @@ components:
     ListGlobalIssueOut:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         blocked:
           type: boolean
@@ -2883,7 +3288,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -2891,6 +3300,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
         web_url:
           description: Browser URL for this issue in the owning daemon.
@@ -2940,6 +3355,16 @@ components:
           type: array
       required:
         - recurrences
+      type: object
+    ListTeamsResponseBody:
+      additionalProperties: true
+      properties:
+        teams:
+          items:
+            $ref: "#/components/schemas/Team"
+          type: array
+      required:
+        - teams
       type: object
     ListTokensResponseBody:
       additionalProperties: true
@@ -3299,6 +3724,36 @@ components:
         - revision
         - created_at
       type: object
+    ProjectAccessPolicy:
+      additionalProperties: true
+      properties:
+        project_uid:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        team_uids:
+          items:
+            type: string
+          type: array
+        visibility:
+          type: string
+      required:
+        - project_uid
+        - visibility
+        - team_uids
+        - revision
+      type: object
+    ProjectAccessResponseBody:
+      additionalProperties: true
+      properties:
+        event:
+          $ref: "#/components/schemas/Event"
+        policy:
+          $ref: "#/components/schemas/ProjectAccessPolicy"
+      required:
+        - policy
+      type: object
     ProjectAlias:
       additionalProperties: true
       properties:
@@ -3322,6 +3777,17 @@ components:
         - alias_kind
         - created_at
       type: object
+    ProjectEmbeddingProducer:
+      additionalProperties: true
+      properties:
+        producer_instance_uid:
+          type: string
+        recipe:
+          $ref: "#/components/schemas/ArtifactIdentity"
+      required:
+        - producer_instance_uid
+        - recipe
+      type: object
     ProjectFederationBody:
       additionalProperties: true
       properties:
@@ -3335,6 +3801,8 @@ components:
           type: string
         project_uid:
           type: string
+        relay:
+          $ref: "#/components/schemas/RelayHandshake"
         replay_horizon_event_id:
           format: int64
           type: integer
@@ -3627,10 +4095,14 @@ components:
     ReachableGraphNode:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         body:
           type: string
@@ -3673,7 +4145,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -3681,6 +4157,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
       required:
         - qualified_id
@@ -3753,10 +4235,14 @@ components:
     ReadyGlobalIssueOut:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         blocked:
           type: boolean
@@ -3823,7 +4309,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -3831,6 +4321,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
         web_url:
           description: Browser URL for this issue in the owning daemon.
@@ -4019,6 +4515,290 @@ components:
         title:
           type: string
       type: object
+    RelayAcceptance:
+      additionalProperties: true
+      properties:
+        digest:
+          type: string
+        missing_digests:
+          items:
+            type: string
+          type: array
+        through:
+          format: int64
+          type: integer
+      required:
+        - through
+        - digest
+      type: object
+    RelayAckRequestBody:
+      additionalProperties: false
+      properties:
+        digest:
+          type: string
+        epoch:
+          format: int64
+          minimum: 1
+          type: integer
+        stream:
+          enum:
+            - events
+            - receipts
+            - artifacts
+          type: string
+        through:
+          format: int64
+          minimum: 1
+          type: integer
+      required:
+        - stream
+        - epoch
+        - through
+        - digest
+      type: object
+    RelayAckResponseBody:
+      additionalProperties: true
+      properties:
+        acknowledged:
+          type: boolean
+      required:
+        - acknowledged
+      type: object
+    RelayBatch:
+      additionalProperties: false
+      properties:
+        after:
+          format: int64
+          type: integer
+        artifacts:
+          items:
+            $ref: "#/components/schemas/EmbeddingArtifact"
+          type: array
+        envelopes:
+          items:
+            $ref: "#/components/schemas/RelayEnvelope"
+          type: array
+        stream:
+          type: string
+      required:
+        - stream
+        - after
+        - envelopes
+      type: object
+    RelayBindingConfig:
+      additionalProperties: true
+      properties:
+        authority_uid:
+          type: string
+        binding_uid:
+          type: string
+        hub_path:
+          items:
+            type: string
+          type: array
+        local_actor:
+          type: string
+        protocol_version:
+          format: int64
+          type: integer
+        reset_epoch:
+          format: int64
+          type: integer
+        serve_downstream:
+          type: boolean
+        upstream_instance_uid:
+          type: string
+        upstream_revoked:
+          type: boolean
+      required:
+        - protocol_version
+        - binding_uid
+        - upstream_instance_uid
+        - authority_uid
+        - hub_path
+        - local_actor
+        - serve_downstream
+        - reset_epoch
+        - upstream_revoked
+      type: object
+    RelayEnrollmentOptions:
+      additionalProperties: false
+      properties:
+        protocol_version:
+          format: int64
+          type: integer
+        rebind_parent:
+          description: Explicitly rebind the retained relay token to this live same-account API credential, preserving its binding and cursors.
+          type: boolean
+        serve_downstream:
+          type: boolean
+      required:
+        - protocol_version
+        - serve_downstream
+      type: object
+    RelayEnvelope:
+      additionalProperties: false
+      properties:
+        authority_uid:
+          type: string
+        binding_uid:
+          type: string
+        body:
+          contentEncoding: base64
+          type: string
+        digest:
+          type: string
+        epoch:
+          format: int64
+          type: integer
+        path:
+          items:
+            type: string
+          type: array
+        project_uid:
+          type: string
+        receiver_instance_uid:
+          type: string
+        sender_instance_uid:
+          type: string
+        sequence:
+          format: int64
+          type: integer
+        source_hash:
+          type: string
+        source_uid:
+          type: string
+        stream:
+          type: string
+        version:
+          format: int64
+          type: integer
+      required:
+        - version
+        - binding_uid
+        - project_uid
+        - authority_uid
+        - sender_instance_uid
+        - receiver_instance_uid
+        - epoch
+        - sequence
+        - stream
+        - path
+        - source_uid
+        - source_hash
+        - body
+        - digest
+      type: object
+    RelayHandshake:
+      additionalProperties: true
+      properties:
+        binding_uid:
+          type: string
+        embedding_producer:
+          $ref: "#/components/schemas/ProjectEmbeddingProducer"
+        enrollment_root:
+          $ref: "#/components/schemas/RootKeyPin"
+        hub_path:
+          items:
+            type: string
+          type: array
+        protocol_version:
+          format: int64
+          type: integer
+        reset_epoch:
+          format: int64
+          type: integer
+        reset_required:
+          type: boolean
+        root:
+          $ref: "#/components/schemas/RootKeyPin"
+        root_key_transitions:
+          items:
+            $ref: "#/components/schemas/RootKeyTransition"
+          type: array
+        upstream_instance_uid:
+          type: string
+      required:
+        - protocol_version
+        - binding_uid
+        - upstream_instance_uid
+        - reset_epoch
+        - reset_required
+        - hub_path
+        - root
+      type: object
+    RelayHopAuthority:
+      additionalProperties: true
+      properties:
+        authority_uid:
+          type: string
+        binding_uid:
+          type: string
+        epoch:
+          format: int64
+          type: integer
+        project_uid:
+          type: string
+        receiver_instance_uid:
+          type: string
+        sender_instance_uid:
+          type: string
+      required:
+        - binding_uid
+        - project_uid
+        - authority_uid
+        - sender_instance_uid
+        - receiver_instance_uid
+        - epoch
+      type: object
+    RelayResetCheckpoint:
+      additionalProperties: true
+      properties:
+        manifest:
+          $ref: "#/components/schemas/RootResetManifest"
+        snapshot:
+          $ref: "#/components/schemas/RootResetSnapshot"
+        translation:
+          $ref: "#/components/schemas/RelayResetTranslation"
+      required:
+        - manifest
+        - snapshot
+        - translation
+      type: object
+    RelayResetTranslation:
+      additionalProperties: true
+      properties:
+        authority:
+          $ref: "#/components/schemas/RelayHopAuthority"
+        hop_baselines:
+          $ref: "#/components/schemas/RelayStreamCursors"
+        snapshot_digest:
+          type: string
+        snapshot_uid:
+          type: string
+      required:
+        - authority
+        - snapshot_uid
+        - snapshot_digest
+        - hop_baselines
+      type: object
+    RelayStreamCursors:
+      additionalProperties: true
+      properties:
+        artifacts:
+          format: int64
+          type: integer
+        events:
+          format: int64
+          type: integer
+        receipts:
+          format: int64
+          type: integer
+      required:
+        - events
+        - receipts
+        - artifacts
+      type: object
     RemoveProjectResponseBody:
       additionalProperties: true
       properties:
@@ -4176,6 +4956,102 @@ components:
         - link_authors
         - total
       type: object
+    RootKeyPin:
+      additionalProperties: true
+      properties:
+        authority_uid:
+          type: string
+        key_id:
+          type: string
+        project_uid:
+          type: string
+        public_key:
+          contentEncoding: base64
+          type: string
+        retired:
+          type: boolean
+      required:
+        - project_uid
+        - authority_uid
+        - key_id
+        - public_key
+      type: object
+    RootKeyTransition:
+      additionalProperties: true
+      properties:
+        next:
+          $ref: "#/components/schemas/RootKeyPin"
+        previous_key_id:
+          type: string
+        signature:
+          contentEncoding: base64
+          type: string
+        version:
+          format: int64
+          type: integer
+      required:
+        - version
+        - previous_key_id
+        - next
+      type: object
+    RootResetManifest:
+      additionalProperties: true
+      properties:
+        authority_uid:
+          type: string
+        history_event_id:
+          format: int64
+          type: integer
+        key_id:
+          type: string
+        project_uid:
+          type: string
+        reset_epoch:
+          format: int64
+          type: integer
+        root_baselines:
+          $ref: "#/components/schemas/RelayStreamCursors"
+        signature:
+          contentEncoding: base64
+          type: string
+        snapshot_digest:
+          type: string
+        snapshot_uid:
+          type: string
+        version:
+          format: int64
+          type: integer
+      required:
+        - version
+        - project_uid
+        - authority_uid
+        - key_id
+        - reset_epoch
+        - snapshot_uid
+        - snapshot_digest
+        - root_baselines
+      type: object
+    RootResetSnapshot:
+      additionalProperties: true
+      properties:
+        artifacts:
+          contentEncoding: base64
+          type: string
+        entities:
+          contentEncoding: base64
+          type: string
+        events:
+          contentEncoding: base64
+          type: string
+        provenance:
+          contentEncoding: base64
+          type: string
+      required:
+        - events
+        - entities
+        - provenance
+        - artifacts
+      type: object
     RotateFederationEnrollmentRequestBody:
       additionalProperties: false
       properties:
@@ -4260,13 +5136,38 @@ components:
         - mode
         - results
       type: object
+    SetProjectAccessRequestBody:
+      additionalProperties: false
+      properties:
+        revision:
+          format: int64
+          minimum: 0
+          type: integer
+        team_uids:
+          items:
+            type: string
+          maxItems: 256
+          type: array
+        visibility:
+          enum:
+            - all
+            - teams
+          type: string
+      required:
+        - visibility
+        - team_uids
+      type: object
     ShowIssueOut:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         body:
           type: string
@@ -4311,7 +5212,11 @@ components:
           type: integer
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -4319,6 +5224,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
       required:
         - labels
@@ -4420,6 +5331,19 @@ components:
       required:
         - recurrence
       type: object
+    ShowTeamResponseBody:
+      additionalProperties: true
+      properties:
+        members:
+          items:
+            type: string
+          type: array
+        team:
+          $ref: "#/components/schemas/Team"
+      required:
+        - team
+        - members
+      type: object
     SkipFederationQuarantineRequestBody:
       additionalProperties: false
       properties:
@@ -4429,6 +5353,31 @@ components:
           type: string
       required:
         - actor
+      type: object
+    Team:
+      additionalProperties: true
+      properties:
+        name:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        uid:
+          type: string
+      required:
+        - uid
+        - name
+        - revision
+      type: object
+    TeamResponseBody:
+      additionalProperties: true
+      properties:
+        event:
+          $ref: "#/components/schemas/Event"
+        team:
+          $ref: "#/components/schemas/Team"
+      required:
+        - team
       type: object
     TokenOut:
       additionalProperties: true
@@ -4510,6 +5459,10 @@ components:
     UICapabilities:
       additionalProperties: true
       properties:
+        access_admin:
+          type: boolean
+        account:
+          type: string
         actor_policy:
           type: string
         allowed_actions:
@@ -4599,10 +5552,14 @@ components:
     UIIssue:
       additionalProperties: true
       properties:
+        accountable_actor:
+          type: string
         assignment_expires_on:
           format: date-time
           type: string
         author:
+          type: string
+        authority_uid:
           type: string
         body:
           type: string
@@ -4655,7 +5612,11 @@ components:
           type: string
         short_id:
           type: string
+        source_actor:
+          type: string
         status:
+          type: string
+        teammate:
           type: string
         title:
           type: string
@@ -4663,6 +5624,12 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        verification:
+          enum:
+            - verified
+            - pending
+            - legacy
           type: string
       required:
         - project_name
@@ -5239,6 +6206,81 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
       summary: Stream events
+  /api/v1/federation/bridges:
+    post:
+      operationId: connectFederationBridge
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectFederationBridgeRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationBridgeBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Connect one project to a configured hub
+  /api/v1/federation/bridges/{project_name}:
+    get:
+      operationId: getFederationBridgeStatus
+      parameters:
+        - in: path
+          name: project_name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationBridgeStatusBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Read one local bridge's recorded connection state
+  /api/v1/federation/bridges/{project_name}/disconnect:
+    post:
+      operationId: disconnectFederationBridge
+      parameters:
+        - in: path
+          name: project_name
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisconnectFederationBridgeRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationBridgeDisconnectResult"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Revoke a selected bridge grant and detach its local replica
   /api/v1/federation/enrollments:
     get:
       operationId: listFederationEnrollments
@@ -5772,6 +6814,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/access:
+    get:
+      operationId: getProjectAccess
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAccessResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    put:
+      operationId: setProjectAccess
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetProjectAccessRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAccessResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/actions/purge:
     post:
       operationId: purgeProject
@@ -6179,6 +7272,193 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/federation/relay:
+    get:
+      operationId: offerRelayDeliveries
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: stream
+          schema:
+            enum:
+              - events
+              - receipts
+              - artifacts
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 1024
+            minimum: 1
+            type: integer
+        - explode: true
+          in: query
+          name: artifact_digest
+          schema:
+            items:
+              type: string
+            maxItems: 32
+            type: array
+        - explode: false
+          in: query
+          name: epoch
+          schema:
+            format: int64
+            minimum: 0
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelayBatch"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/relay/reset:
+    get:
+      operationId: getRelayReset
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelayResetCheckpoint"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/relay:accept:
+    post:
+      operationId: acceptRelayDeliveries
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RelayBatch"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelayAcceptance"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/relay:ack:
+    post:
+      operationId: ackRelayDeliveries
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RelayAckRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelayAckResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/relay:disconnect:
+    post:
+      operationId: disconnectRelayEnrollment
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisconnectRelayRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisconnectRelayResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Revoke only the presented relay transport grant
   /api/v1/projects/{project_id}/federation/status:
     get:
       operationId: getProjectFederationStatus
@@ -8307,6 +9587,139 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyGlobalResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/teams:
+    get:
+      operationId: listTeams
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTeamsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: createTeam
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/teams/{team_uid}:
+    delete:
+      operationId: deleteTeam
+      parameters:
+        - in: path
+          name: team_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessAdministrationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    get:
+      operationId: showTeam
+      parameters:
+        - in: path
+          name: team_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowTeamResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/teams/{team_uid}/members/{actor}:
+    delete:
+      operationId: removeTeamMember
+      parameters:
+        - in: path
+          name: team_uid
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessAdministrationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    put:
+      operationId: addTeamMember
+      parameters:
+        - in: path
+          name: team_uid
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessAdministrationResponseBody"
           description: OK
         default:
           content:

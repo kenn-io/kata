@@ -642,6 +642,9 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 				"alias "+info.Identity+" points at an archived project",
 				`run "kata init" to bind this workspace to an active project`, nil)
 		}
+		if err := authorizeIssueScopedProject(ctx, project); err != nil {
+			return nil, err
+		}
 		return &api.ProjectResolveBody{
 			Project: dbProjectToOut(project),
 			Alias:   alias,
@@ -671,12 +674,18 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return nil, err
+	}
 	// First-seen attach: bind the supplied alias to the matched project
 	// so subsequent resolves hit the alias path. Reassign=false matches
 	// resolve's strict-lookup contract; an existing alias bound
 	// elsewhere surfaces as 409 rather than silently moving.
 	attached, err := attachAlias(ctx, store, project.ID, info, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
 		return nil, err
 	}
 	return &api.ProjectResolveBody{
@@ -701,6 +710,9 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
+	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return nil, err
 	}
 	return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
 }
@@ -741,8 +753,14 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 	if err != nil {
 		return nil, false, internalAPIError(err)
 	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return nil, false, err
+	}
 	alias, err := upsertAliasFor(ctx, store, project.ID, disc, false)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
 		return nil, false, err
 	}
 	return &api.ProjectResolveBody{
@@ -771,6 +789,9 @@ func resolveByAliasIfAvailable(ctx context.Context, store db.Storage, disc confi
 	if err != nil {
 		return nil, false, internalAPIError(err)
 	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return nil, false, err
+	}
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
 		Alias:         alias,
@@ -797,6 +818,9 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 	project, err := store.ProjectByID(ctx, alias.ProjectID)
 	if err != nil {
 		return nil, internalAPIError(err)
+	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return nil, err
 	}
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
@@ -1005,12 +1029,18 @@ func pickInitName(ctx context.Context, req *api.InitProjectRequest, disc config.
 func upsertProject(ctx context.Context, store db.Storage, name, actor string) (db.Project, *db.Event, bool, error) {
 	got, err := store.ProjectByName(ctx, name)
 	if err == nil {
+		if err := authorizeIssueScopedProject(ctx, got); err != nil {
+			return db.Project{}, nil, false, err
+		}
 		return got, nil, false, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
 		return db.Project{}, nil, false, internalAPIError(err)
 	}
 	if archived, archErr := store.ProjectByNameIncludingArchived(ctx, name); archErr == nil && archived.DeletedAt != nil {
+		if err := authorizeIssueScopedProject(ctx, archived); err != nil {
+			return db.Project{}, nil, false, err
+		}
 		return db.Project{}, nil, false, api.NewError(409, "project_archived",
 			"project with this name was archived via `kata projects remove`",
 			`run "kata projects restore `+name+`" or pick a different name`,
@@ -1019,6 +1049,9 @@ func upsertProject(ctx context.Context, store db.Storage, name, actor string) (d
 	created, event, err := store.CreateProjectAndEvent(ctx, name, actor)
 	if err != nil {
 		return db.Project{}, nil, false, internalAPIError(err)
+	}
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		decision.ProjectUIDs = append(decision.ProjectUIDs, created.UID)
 	}
 	return created, &event, true, nil
 }
@@ -1039,6 +1072,13 @@ func upsertAliasFor(ctx context.Context, store db.Storage, projectID int64, disc
 // it). When called after preflightAliasConflict, the conflict branch is
 // unreachable but kept for callers that haven't preflit.
 func attachAlias(ctx context.Context, store db.Storage, projectID int64, info config.AliasInfo, reassign bool) (db.ProjectAlias, error) {
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return db.ProjectAlias{}, internalAPIError(err)
+	}
+	if err := authorizeIssueScopedProject(ctx, project); err != nil {
+		return db.ProjectAlias{}, err
+	}
 	existing, err := store.AliasByIdentity(ctx, info.Identity)
 	if err == nil {
 		return applyExistingAlias(ctx, store, projectID, info, existing, reassign)
@@ -1070,6 +1110,13 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 // concurrent inits. Otherwise the alias is either moved (reassign=true) or a
 // 409 is returned.
 func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, info config.AliasInfo, existing db.ProjectAlias, reassign bool) (db.ProjectAlias, error) {
+	source, err := store.ProjectByID(ctx, existing.ProjectID)
+	if err != nil {
+		return db.ProjectAlias{}, internalAPIError(err)
+	}
+	if err := authorizeIssueScopedProject(ctx, source); err != nil {
+		return db.ProjectAlias{}, err
+	}
 	if existing.ProjectID == projectID {
 		return existing, nil
 	}
@@ -1106,6 +1153,9 @@ func preflightAliasConflict(ctx context.Context, store db.Storage, info config.A
 	existingProject, err := store.ProjectByID(ctx, existing.ProjectID)
 	if err != nil {
 		return internalAPIError(err)
+	}
+	if err := authorizeIssueScopedProject(ctx, existingProject); err != nil {
+		return err
 	}
 	if existingProject.Name == targetName {
 		return nil

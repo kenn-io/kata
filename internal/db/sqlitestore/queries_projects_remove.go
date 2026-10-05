@@ -41,6 +41,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		return db.Project{}, nil, db.ErrProjectAlreadyArchived
 	}
 
+	if err := d.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+		return db.Project{}, nil, err
+	}
 	openIssues, err := countOpenIssues(ctx, tx, project.ID)
 	if err != nil {
 		return db.Project{}, nil, err

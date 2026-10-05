@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -12,8 +13,8 @@ import (
 // truncates. Runes approximate tokens loosely; 2000 runes keeps chunks well
 // under common embedding-model context limits.
 const (
-	splitMaxRunes = 2000
-	splitOverlap  = 200
+	splitMaxRunes = embedding.RecipeSplitMaxRunes
+	splitOverlap  = embedding.RecipeSplitOverlap
 )
 
 // Fill embeds every pending mirror document into the generation keyed by key.
@@ -27,9 +28,13 @@ const (
 // fill, so the reconciler backs off instead of stamping the corpus as
 // skipped. An auth failure never stamps anything.
 func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool)) (kitvec.FillStats, error) {
+	return fill(ctx, ix.flowStore, key, enc, scanBatch, batchOptions, onDocument)
+}
+
+func fill(ctx context.Context, backing kitvec.Store[string, string], key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), prepare ...func(context.Context, kitvec.Pending[string]) ([]kitvec.PreparedChunk, error)) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
-	store := progressStore{Store: ix.flowStore, onDocument: onDocument}
-	return kitvec.Fill(ctx, store, key, enc,
+	store := progressStore{Store: backing, onDocument: onDocument}
+	options := []kitvec.FillOption[string]{
 		kitvec.WithFillScanBatch[string](scanBatch),
 		kitvec.WithFillSplit[string](split),
 		kitvec.WithFillBatch[string](batchOptions...),
@@ -37,7 +42,11 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 		kitvec.WithFillEncodeError[string](func(_ string, err error) bool {
 			return isInputRejected(err)
 		}),
-	)
+	}
+	if len(prepare) > 0 && prepare[0] != nil {
+		options = append(options, kitvec.WithFillPrepared[string](prepare[0]))
+	}
+	return kitvec.Fill(ctx, store, key, enc, options...)
 }
 
 func isInputRejected(err error) bool {

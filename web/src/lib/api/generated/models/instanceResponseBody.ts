@@ -6,9 +6,12 @@ import type { UICapabilities } from './uICapabilities.ts'
 
 export interface InstanceResponseBody {
   auth: AuthInfoOut
+  embedding_artifact_protocol_version?: number
   instance_uid: string
   issue_status_sync: boolean
   issue_subtree_tokens: boolean
+  provenance_protocol_version?: number
+  relay_protocol_version?: number
   schema_version: number
   version: string
   web_ui_capabilities: UICapabilities

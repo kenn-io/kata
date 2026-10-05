@@ -32,6 +32,9 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		author := padToWidth(commentAuthorStyle(commentAttribution(c)), authorW)
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
 		lines := []string{applyActivityCursor(header, i == cursor)}
+		for _, row := range creationAttributionLines(c.AttributionView, c.Author, c.Teammate, max(1, width-2)) {
+			lines = append(lines, "  "+subtleStyle.Render(row))
+		}
 		for _, ln := range renderMarkdownLines(c.Body, max(1, width-2)) {
 			lines = append(lines, "  "+ln)
 		}

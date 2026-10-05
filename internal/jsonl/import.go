@@ -195,6 +195,48 @@ func collectProjectUIDs(envs []Envelope) (map[int64]string, error) {
 
 func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, projectUIDByID map[int64]string) (db.ImportRecord, error) {
 	switch env.Kind {
+	case KindEmbeddingArtifact:
+		var record db.EmbeddingArtifactExport
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindRootKey:
+		var record db.RootKeyPin
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindEventProvenance:
+		var record db.AttributionReceipt
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindEntityProvenance:
+		var record db.EntityProvenance
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindTeam:
+		var record db.Team
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindTeamMembership:
+		var record db.TeamMembership
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindProjectAccessPolicy:
+		var record db.ProjectAccessPolicy
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
 	case KindMeta:
 		var rec metaRecord
 		if err := decodeData(env, &rec); err != nil {
@@ -375,6 +417,25 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		return &rec, nil
+	case KindRelayOutbox:
+		var r db.RelayOutboxExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+	case KindRelayInbox:
+		var r db.RelayInboxExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+	case KindRelayCursors:
+		var r db.RelayCursorExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+
 	case KindFederationEnrollment:
 		var rec db.FederationEnrollmentExport
 		if err := decodeData(env, &rec); err != nil {

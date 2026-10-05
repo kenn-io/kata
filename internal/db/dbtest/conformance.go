@@ -39,6 +39,38 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries"}, run: func(t *testing.T, store db.Storage) error { RunRelayIngressAtomicity(t, store); return nil }},
+	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
+	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
+	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayOutboxAtomicity(t, store)
+		seen := 0
+		for record, err := range store.ExportRelayState(t.Context()) {
+			require.NoError(t, err)
+			require.NoError(t, db.ValidateRelayDeliveryRecord(record))
+			seen++
+		}
+		require.Positive(t, seen)
+		return nil
+	}},
+
+	{name: "root key rotation", methods: []string{"RotateRootAuthority", "RootKeyTransitions"}, run: func(t *testing.T, store db.Storage) error {
+		RunRootKeyRotation(t, store)
+		return nil
+	}},
+
+	{name: "root attribution", methods: []string{"PinRootAuthority", "RootAuthority", "RecordRootAttribution", "ApplyUpstreamAttribution", "EntityAttribution", "AttributionReceiptsAfter", "ExportAttribution"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayAttribution(t, store)
+		RunUpstreamAttribution(t, store)
+		return nil
+	}},
+	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "AnonymousAccessibleProjectUIDs", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
+		RunProjectAccessMergeIsolation(t, store)
+		RunProjectAccessConformance(t, store)
+		RunProjectAccessTokenEnrollment(t, store)
+		return nil
+	}},
+
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},
 	{name: "issue status native intent", methods: []string{"CloseIssueWithEvents", "ReopenIssue", "CreateIssue", "UpsertIssueSyncBinding"}, runWithBackend: checkIssueStatusNativeIntent},
@@ -169,6 +201,17 @@ var storageScenarios = []scenario{
 			"MaxLocalOriginEventID",
 		},
 		run: checkEventQueries,
+	},
+	{
+		name: "event reference project scope",
+		methods: []string{
+			"CloseIssueWithEvents", "CreateIssue", "CreateLink", "CreateProject", "EventsAfter",
+			"EventsInWindow", "InsertRemoteEvent",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunEventReferenceProjectScope(t, store)
+			return nil
+		},
 	},
 	{
 		name: "issue create envelope",

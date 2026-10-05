@@ -53,6 +53,7 @@ func (s *Store) MaxEventID(ctx context.Context) (int64, error) {
 func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
 	conditions := []string{"e.id > $1", "p.name <> $2"}
 	args := []any{params.AfterID, db.SystemProjectName}
+	conditions = append(conditions, authorizedEventPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
 		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
@@ -130,6 +131,7 @@ func (s *Store) EventsByUIDs(ctx context.Context, projectID int64, uids []string
 func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowParams) ([]db.Event, error) {
 	conditions := []string{"e.created_at >= $1", "e.created_at <= $2", "p.name <> $3"}
 	args := []any{params.Since, params.Until, db.SystemProjectName}
+	conditions = append(conditions, authorizedEventPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
 		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
@@ -342,7 +344,21 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	if err != nil {
 		return db.Event{}, mapSQLError(err, nil)
 	}
-	return scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id = $1`, eventID))
+	event, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id = $1`, eventID))
+	if err != nil {
+		return db.Event{}, err
+	}
+	if input.ContentHash == "" {
+		if err := s.recordNativeRootAttributionTx(ctx, tx, event); err != nil {
+			return db.Event{}, err
+		}
+	} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
+		return db.Event{}, err
+	}
+	if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+		return db.Event{}, err
+	}
+	return event, nil
 }
 
 func effectiveLocalEventActorTx(
@@ -362,7 +378,7 @@ func effectiveLocalMutationActorTx(
 ) (string, error) {
 	var actor string
 	err := tx.QueryRowContext(ctx, `SELECT bound_actor FROM federation_bindings
-WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
+WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1 AND relay_config IS NULL`,
 		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return requestedActor, nil
@@ -376,7 +392,7 @@ WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
 	return requestedActor, nil
 }
 
-func lockEventSequenceTx(ctx context.Context, tx *sql.Tx) error {
+func lockEventSequenceTx(ctx context.Context, tx db.Transaction) error {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashtext('events_sequence'))`); err != nil {
 		return mapSQLError(err, nil)

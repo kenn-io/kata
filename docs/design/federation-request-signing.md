@@ -68,10 +68,12 @@ An opt-in private listener reuses native route handlers through an explicit
 operation allowlist. It requires signing configuration, valid signatures and
 project-scoped enrollments, and cannot expose UI, administrator, enrollment
 creation, force-release or arbitrary API routes.
-The same verifier protects all daemon listeners. Native connection, header,
-body, duration and concurrent admission limits bound work before execution.
+Relay reset, offer, accept, acknowledgement, and self-disconnect operations
+use the same signer and their existing pull or push capability. The same
+verifier protects all daemon listeners. Native connection, header, body,
+duration and concurrent admission limits bound work before execution.
 
 The [operator guide](../operations/federation-signing.md) owns the exact wire
-profile, limits, configuration, rotation and recovery procedures. Future hub
-relay endpoints must be explicitly reviewed before entering this allowlist;
-using the common native client transport will sign their outbound requests.
+profile, limits, configuration, rotation and recovery procedures. Additional
+federation routes must be explicitly reviewed before entering this allowlist;
+using the common native client transport signs their outbound requests.

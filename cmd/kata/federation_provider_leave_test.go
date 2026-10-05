@@ -72,6 +72,8 @@ func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) {
 
 func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) {
 	resetFlags(t)
+	// The HTTP request must cover the external helper's bounded attempt.
+	t.Setenv("KATA_HTTP_TIMEOUT", (2 * federationprovider.AttemptTimeout).String())
 	env := testenv.New(t)
 	t.Setenv("KATA_TEST_LEAVE_PROVIDER", "1")
 	t.Setenv("KATA_TEST_LEAVE_DECISION", "unavailable")

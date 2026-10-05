@@ -1245,6 +1245,12 @@ func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {
 
 func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.Issue) IssueSummary {
 	return IssueSummary{
+		Author:              issue.Author,
+		AccountableActor:    issue.AccountableActor,
+		SourceActor:         issue.SourceActor,
+		AuthorityUID:        issue.AuthorityUID,
+		Teammate:            issue.Teammate,
+		Verification:        (*string)(issue.Verification),
 		UID:                 issue.UID,
 		Ref:                 issue.ShortID,
 		QualifiedRef:        project.Name + "#" + issue.ShortID,
@@ -1267,6 +1273,12 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		qualified = project.Name + "#" + issue.ShortID
 	}
 	return IssueSummary{
+		Author:              issue.Author,
+		AccountableActor:    issue.AccountableActor,
+		SourceActor:         issue.SourceActor,
+		AuthorityUID:        issue.AuthorityUID,
+		Teammate:            issue.Teammate,
+		Verification:        (*string)(issue.Verification),
 		WebURL:              issue.WebURL,
 		UID:                 issue.UID,
 		Ref:                 issue.ShortID,
@@ -1289,8 +1301,14 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		WebURL: issue.WebURL,
-		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		Author:           issue.Author,
+		AccountableActor: issue.AccountableActor,
+		SourceActor:      issue.SourceActor,
+		AuthorityUID:     issue.AuthorityUID,
+		Teammate:         issue.Teammate,
+		Verification:     (*string)(issue.Verification),
+		WebURL:           issue.WebURL,
+		UID:              issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner,
 		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn), Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
@@ -1302,8 +1320,14 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 
 func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		WebURL: issue.WebURL,
-		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		Author:           issue.Author,
+		AccountableActor: issue.AccountableActor,
+		SourceActor:      issue.SourceActor,
+		AuthorityUID:     issue.AuthorityUID,
+		Teammate:         issue.Teammate,
+		Verification:     (*string)(issue.Verification),
+		WebURL:           issue.WebURL,
+		UID:              issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner,
 		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn), Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
@@ -1344,11 +1368,15 @@ func commentSummary(comment generated.Comment) CommentSummary {
 		handle = *comment.Teammate
 	}
 	return CommentSummary{
-		Teammate:  handle,
-		UID:       comment.UID,
-		Author:    comment.Author,
-		Body:      comment.Body,
-		CreatedAt: formatTime(comment.CreatedAt),
+		AccountableActor: comment.AccountableActor,
+		SourceActor:      comment.SourceActor,
+		AuthorityUID:     comment.AuthorityUID,
+		Verification:     (*string)(comment.Verification),
+		Teammate:         handle,
+		UID:              comment.UID,
+		Author:           comment.Author,
+		Body:             comment.Body,
+		CreatedAt:        formatTime(comment.CreatedAt),
 	}
 }
 

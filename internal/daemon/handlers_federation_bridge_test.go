@@ -1,0 +1,196 @@
+package daemon_test
+
+import (
+	"crypto/ed25519"
+	"encoding/json/v2"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+)
+
+// R1/R3/R4: self-enrollment narrows a live ordinary user credential to one
+// chosen project and returns the root pin through the existing enrollment API.
+func TestRelayEnrollmentHTTPAccountAndHandshake(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		ctx := t.Context()
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: f.private.ID, Role: db.FederationRoleHub, HubProjectID: f.private.ID, HubProjectUID: f.private.UID, Enabled: true})
+		require.NoError(t, err)
+		pub, _, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		pin := db.RootKeyPin{ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(pub), PublicKey: pub}
+		require.NoError(t, store.PinRootAuthority(ctx, pin))
+		//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
+		body := map[string]any{"spoke_instance_uid": "00000000000000000000000006", "project_id": f.private.ID, "capabilities": "pull,push,claim", "actor": "member", "token": "http-relay-test-token", "relay": map[string]any{"protocol_version": 1, "serve_downstream": true}}
+		status, _, raw := f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "member", body, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var response struct {
+			Actor string `json:"actor"`
+			Token string `json:"token"`
+			Relay struct {
+				ProtocolVersion     int           `json:"protocol_version"`
+				BindingUID          string        `json:"binding_uid"`
+				UpstreamInstanceUID string        `json:"upstream_instance_uid"`
+				ResetEpoch          int64         `json:"reset_epoch"`
+				HubPath             []string      `json:"hub_path"`
+				Root                db.RootKeyPin `json:"root"`
+			} `json:"relay"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &response))
+		require.Equal(t, 1, response.Relay.ProtocolVersion, string(raw))
+		require.Equal(t, "member", response.Actor)
+		require.Equal(t, pin, response.Relay.Root)
+		require.Equal(t, store.InstanceUID(), response.Relay.UpstreamInstanceUID)
+		require.Equal(t, int64(1), response.Relay.ResetEpoch)
+		require.Equal(t, []string{store.InstanceUID(), "00000000000000000000000006"}, response.Relay.HubPath)
+		grant, err := store.AuthorizeFederationToken(ctx, response.Token, f.private.ID, "push")
+		require.NoError(t, err)
+		require.Equal(t, response.Relay.BindingUID, grant.RelayBindingUID)
+		parent, err := store.ResolveAPIToken(ctx, "member-test-token")
+		require.NoError(t, err)
+		require.Equal(t, &parent.ID, grant.ParentTokenID)
+		status, _, retry := f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "member", body, nil)
+		require.Equal(t, http.StatusOK, status, string(retry))
+		require.JSONEq(t, string(raw), string(retry))
+		body["actor"] = "nonmember"
+		status, _, raw = f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "nonmember", body, nil)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		body["actor"] = "impostor"
+		status, _, raw = f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "member", body, nil)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		body["actor"] = "member"
+		body["relay"] = map[string]any{"protocol_version": 2}
+		status, _, raw = f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "member", body, nil)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		body["relay"] = map[string]any{"protocol_version": 1}
+		body["project_id"] = nil
+		status, _, raw = f.request(t, http.MethodPost, "/api/v1/federation/enrollments", "member", body, nil)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+	})
+}
+
+type relayCountingBody struct {
+	reader io.Reader
+	reads  int
+}
+
+func (b *relayCountingBody) Read(p []byte) (int, error) { b.reads++; return b.reader.Read(p) }
+func (*relayCountingBody) Close() error                 { return nil }
+
+// R3: transport authentication precedes decoding attacker-controlled bodies,
+// including on the small ACK route. Scope is resolved from the URL and grant.
+func TestRelayHTTPAuthenticatesBeforeReadingBody(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		server := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		for _, suffix := range []string{":accept", ":ack"} {
+			t.Run(suffix, func(t *testing.T) {
+				body := &relayCountingBody{reader: strings.NewReader(`{"stream":"events","after":0,"envelopes":[]}`)}
+				if suffix == ":ack" {
+					body.reader = strings.NewReader(`{"stream":"events","epoch":1,"through":1,"digest":"digest"}`)
+				}
+				request := httptest.NewRequest(http.MethodPost, "http://localhost/api/v1/projects/1/federation/relay"+suffix, body)
+				request.Header.Set("Authorization", "Bearer invalid-relay-test-token")
+				request.Header.Set("Content-Type", "application/json")
+				response := httptest.NewRecorder()
+				server.Handler().ServeHTTP(response, request)
+				require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+				require.Zero(t, body.reads, "invalid credentials must not read the relay body")
+			})
+		}
+	})
+}
+
+// R4/R5: each transport route authenticates the selected live grant, retains
+// emitted bytes across lost replies and commits source/proof before acceptance.
+func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		ctx := t.Context()
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: f.private.ID, Role: db.FederationRoleHub, HubProjectID: f.private.ID, HubProjectUID: f.private.UID, Enabled: true})
+		require.NoError(t, err)
+		pub, private, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		pin := db.RootKeyPin{ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(pub), PublicKey: pub}
+		require.NoError(t, store.PinRootAuthority(ctx, pin))
+		signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}
+		server := daemon.NewServer(daemon.ServerConfig{DB: store, RootAttributionSigner: &signer, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		httpServer := httptest.NewServer(server.Handler())
+		t.Cleanup(httpServer.Close)
+		f.server = httpServer
+		parent, err := store.ResolveAPIToken(ctx, "member-test-token")
+		require.NoError(t, err)
+		//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
+		grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: f.private.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: 1, Token: "relay-http-transport-test-token", ServeDownstream: true})
+		require.NoError(t, err)
+		headers := bearer(grant.Token)
+		_, offered, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: f.private.ID, Author: "member", Title: "Offered task"})
+		require.NoError(t, err)
+		base := projectPath(f.private.ID) + "/federation/relay"
+		status, _, raw := f.request(t, http.MethodGet, base+"?stream=events&limit=1024", "", nil, headers)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var offer db.RelayBatch
+		require.NoError(t, json.Unmarshal(raw, &offer))
+		require.Len(t, offer.Envelopes, 2, "bootstrap history precedes the later live write")
+		require.Equal(t, grant.Enrollment.RelayBindingUID, offer.Envelopes[0].BindingUID)
+		seeded, err := db.DecodeRelaySourceEvent(offer.Envelopes[0].Body)
+		require.NoError(t, err)
+		require.Equal(t, f.issue.UID, *seeded.IssueUID)
+		require.Equal(t, offered.UID, offer.Envelopes[1].SourceUID)
+		status, _, retry := f.request(t, http.MethodGet, base+"?stream=events&limit=1024", "", nil, headers)
+		require.Equal(t, http.StatusOK, status, string(retry))
+		require.JSONEq(t, string(raw), string(retry))
+		last := offer.Envelopes[len(offer.Envelopes)-1]
+		ack := map[string]any{"stream": "events", "epoch": int64(1), "through": last.Sequence, "digest": last.Digest}
+		ack["digest"] = "wrong"
+		status, _, raw = f.request(t, http.MethodPost, base+":ack", "", ack, headers)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		ack["digest"] = last.Digest
+		status, _, raw = f.request(t, http.MethodPost, base+":ack", "", ack, headers)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		status, _, raw = f.request(t, http.MethodGet, base+"?stream=events&limit=1", "", nil, headers)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &offer))
+		require.Empty(t, offer.Envelopes)
+		event := federationRemoteIssueCreatedEvent(t, f.private, "00000000000000000000000007")
+		body, err := db.EncodeRelaySourceEvent(event)
+		require.NoError(t, err)
+		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: 1, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: grant.Enrollment.SpokeInstanceUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 1, Sequence: 15, Stream: db.RelayStreamEvent, Path: []string{event.OriginInstanceUID, grant.Enrollment.SpokeInstanceUID}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
+		require.NoError(t, err)
+		batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}}
+		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", batch, headers)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var accepted db.RelayAcceptance
+		require.NoError(t, json.Unmarshal(raw, &accepted))
+		require.Equal(t, int64(15), accepted.Through)
+		require.Equal(t, envelope.Digest, accepted.Digest)
+		proof, err := store.EntityAttribution(ctx, f.private.UID, "issue", *event.IssueUID)
+		require.NoError(t, err)
+		require.Equal(t, "member", proof.AccountableActor)
+		require.Equal(t, "tester", proof.SourceActor)
+		require.NoError(t, db.VerifyRootReceipt(pin, proof))
+		status, _, retry = f.request(t, http.MethodPost, base+":accept", "", batch, headers)
+		require.Equal(t, http.StatusOK, status, string(retry))
+		require.JSONEq(t, string(raw), string(retry))
+		// The project in the URL is authority; a body cannot widen it.
+		status, _, raw = f.request(t, http.MethodGet, projectPath(f.public.ID)+"/federation/relay?stream=events", "", nil, headers)
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		_, _, err = store.RevokeAPIToken(ctx, parent.ID, "admin")
+		require.NoError(t, err)
+		for _, route := range []struct {
+			method, path string
+			body         any
+		}{{http.MethodGet, base + "?stream=events", nil}, {http.MethodPost, base + ":ack", ack}, {http.MethodPost, base + ":accept", batch}} {
+			status, _, raw = f.request(t, route.method, route.path, "", route.body, headers)
+			require.Equal(t, http.StatusForbidden, status, string(raw))
+		}
+	})
+}

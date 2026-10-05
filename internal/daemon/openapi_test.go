@@ -560,15 +560,18 @@ func TestMetadataPatchGuardSchemaRequiresExactlyOneCondition(t *testing.T) {
 }
 
 // TestAllResponseSchemasAllowAdditionalProperties is the policy invariant: every
-// object schema reachable from any response must permit unknown fields, so
+// response-only object schema must permit unknown fields, so
 // additive response evolution never breaks a client that strict-validates
 // against the published schema. It walks responses independently of the
-// production relaxation pass to cross-check that pass's coverage.
+// production relaxation pass to cross-check that pass's coverage. Shared request
+// types stay strict, as checked by TestSchemaSharedByRequestAndResponseStaysStrict.
 func TestAllResponseSchemasAllowAdditionalProperties(t *testing.T) {
 	doc := OpenAPIDocument()
 	reg := doc.Components.Schemas
 	seen := map[*huma.Schema]struct{}{}
 	var strict []string
+	requestSchemas := map[*huma.Schema]struct{}{}
+	collectingRequests := true
 
 	var walk func(name string, schema *huma.Schema)
 	walk = func(name string, schema *huma.Schema) {
@@ -583,8 +586,14 @@ func TestAllResponseSchemasAllowAdditionalProperties(t *testing.T) {
 			return
 		}
 		seen[schema] = struct{}{}
-		if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
-			strict = append(strict, name)
+		if collectingRequests {
+			requestSchemas[schema] = struct{}{}
+		} else {
+			if _, shared := requestSchemas[schema]; !shared {
+				if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
+					strict = append(strict, name)
+				}
+			}
 		}
 		for _, prop := range schema.Properties {
 			walk(name, prop)
@@ -609,6 +618,20 @@ func TestAllResponseSchemasAllowAdditionalProperties(t *testing.T) {
 		if item == nil {
 			continue
 		}
+		for _, op := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Options, item.Head, item.Patch, item.Trace} {
+			if op != nil && op.RequestBody != nil {
+				for _, mt := range op.RequestBody.Content {
+					walk("", mt.Schema)
+				}
+			}
+		}
+	}
+	collectingRequests = false
+	clear(seen)
+	for _, item := range doc.Paths {
+		if item == nil {
+			continue
+		}
 		for _, op := range []*huma.Operation{
 			item.Get, item.Put, item.Post, item.Delete,
 			item.Options, item.Head, item.Patch, item.Trace,
@@ -624,7 +647,7 @@ func TestAllResponseSchemasAllowAdditionalProperties(t *testing.T) {
 		}
 	}
 
-	require.Empty(t, strict, "response-reachable schemas must permit unknown fields")
+	require.Empty(t, strict, "response-only schemas must permit unknown fields")
 }
 
 // TestSchemaSharedByRequestAndResponseStaysStrict ensures relaxing responses

@@ -29,11 +29,20 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT name FROM projects WHERE id = $1`, issue.ProjectID).Scan(&projectName); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, issue.ProjectID); err != nil {
 			return err
 		}
 		if err := rejectActiveExternalRootIssuePurge(ctx, tx, issue.ID); err != nil {
 			return err
+		}
+		// Keep manifests downloadable until the current live peer namespace
+		// drains. Retired epochs and revoked enrollments remain history.
+		var pendingRelay bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o JOIN federation_enrollments e ON e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch WHERE o.project_uid=$1 AND o.acknowledged=0 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_enrollments e JOIN meta m ON m.key=$2 || e.relay_binding_uid WHERE e.project_id=$3 AND e.revoked_at IS NULL AND (m.value::jsonb->'translation'->'authority'->>'epoch')::bigint>e.relay_reset_epoch)`, issue.ProjectUID, db.RelayResetMetadataPrefix+issue.ProjectUID+".", issue.ProjectID).Scan(&pendingRelay); err != nil {
+			return err
+		}
+		if pendingRelay {
+			return db.ErrFederationResetBlockedByPendingPush
 		}
 
 		var minEventID, maxEventID sql.NullInt64
@@ -127,6 +136,10 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
+		// Portable vectors are issue data even when their input is stale.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=$1 AND issue_uid=$2`, issue.ProjectUID, issue.UID); err != nil {
+			return mapSQLError(err, nil)
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = $1`, issue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -186,7 +199,11 @@ func (s *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 	if err := s.QueryRowContext(ctx, query, args...).Scan(&value); err != nil {
 		return 0, mapSQLError(err, nil)
 	}
-	return value.Int64, nil
+	attributionReset, err := s.attributionUIResetAfter(ctx, afterID, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return max(value.Int64, attributionReset), nil
 }
 
 func scanPurgeLog(row rowScanner) (db.PurgeLog, error) {

@@ -198,8 +198,10 @@ func (s *Store) listProjects(ctx context.Context, includeArchived bool) ([]db.Pr
 	if !includeArchived {
 		query += ` AND deleted_at IS NULL`
 	}
+	args := []any{db.SystemProjectName}
+	query += " AND " + authorizedProjectPredicate(ctx, "uid", &args)
 	query += ` ORDER BY id ASC`
-	rows, err := s.QueryContext(ctx, query, db.SystemProjectName)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

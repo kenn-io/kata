@@ -333,6 +333,25 @@ func (m *WebSessionManager) CanWrite(principal Principal) bool {
 	return m.writable && principalAllowsWebWrites(principal)
 }
 
+// CanAdministerAccess reports narrow source-daemon team and project-policy authority.
+// It never grants ordinary attributed writes or target-daemon administration.
+func (m *WebSessionManager) CanAdministerAccess(principal Principal) bool {
+	return m.writable && (principal.Kind == PrincipalBootstrap || principal.Kind == PrincipalStaticToken)
+}
+
+func browserAccessAdministrationRequest(r *http.Request) bool {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "v1" {
+		return false
+	}
+	if parts[2] == "teams" {
+		return (len(parts) == 3 && r.Method == http.MethodPost) ||
+			(len(parts) == 4 && r.Method == http.MethodDelete) ||
+			(len(parts) == 6 && parts[4] == "members" && (r.Method == http.MethodPut || r.Method == http.MethodDelete))
+	}
+	return len(parts) == 5 && parts[2] == "projects" && parts[4] == "access" && r.Method == http.MethodPut
+}
+
 func principalAllowsWebWrites(principal Principal) bool {
 	switch principal.Kind {
 	case PrincipalBootstrap, PrincipalTrustedProxyAbsent:
@@ -421,7 +440,8 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 		}
 		if isMutation(r.Method) {
 			isLogout := r.Method == http.MethodDelete && r.URL.Path == "/api/v1/ui/session"
-			if !isLogout && !manager.CanWrite(principal) {
+			canWrite := manager.CanWrite(principal) || (manager.CanAdministerAccess(principal) && browserAccessAdministrationRequest(r))
+			if !isLogout && !canWrite {
 				writeWebSessionError(w, http.StatusForbidden, "read_only", manager.Origin(), policy)
 				return
 			}
@@ -466,6 +486,8 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	}
 
 	switch parts[1] {
+	case "federation":
+		return len(parts) == 3 && parts[2] == "status" && r.Method == http.MethodGet
 	case "metadata":
 		return len(parts) == 2 && r.Method == http.MethodPost
 	case "recurrences":

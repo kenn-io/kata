@@ -201,8 +201,9 @@ func (s *Store) LinkByEndpoints(
 
 // LinksByIssue returns every edge involving an issue in insertion order.
 func (s *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, error) {
-	rows, err := s.QueryContext(ctx,
-		linkSelect+` WHERE from_issue_id = $1 OR to_issue_id = $1 ORDER BY id ASC`, issueID)
+	args := []any{issueID}
+	statement := linkSelect + ` WHERE (from_issue_id = $1 OR to_issue_id = $1) AND ` + authorizedLinkPredicate(ctx, "", &args) + ` ORDER BY id ASC`
+	rows, err := s.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -244,6 +245,9 @@ func prepareLinkInsertTx(
 ) error {
 	if params.FromIssueID == params.ToIssueID {
 		return db.ErrSelfLink
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return err
 	}
 	if params.Type != "parent" {
 		return nil

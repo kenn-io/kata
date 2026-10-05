@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/tui/markdownrender"
 )
@@ -107,6 +108,11 @@ func printShowHuman(
 		textsafe.Line(b.Issue.Author)); err != nil {
 		return err
 	}
+	if attribution := showCreationAttribution(b.Issue.AttributionView, b.Issue.Author); attribution != "" {
+		if _, err := fmt.Fprintln(out, "creation: "+attribution); err != nil {
+			return err
+		}
+	}
 	if b.Issue.Owner != nil && *b.Issue.Owner != "" {
 		if _, err := fmt.Fprintf(out, "owner: %s%s\n", textsafe.Line(*b.Issue.Owner),
 			assignmentExpiryTimeSuffix(b.Issue.AssignmentExpiresOn)); err != nil {
@@ -140,6 +146,11 @@ func printShowHuman(
 			return err
 		}
 		for i, c := range b.Comments {
+			if attribution := showCreationAttribution(c.AttributionView, c.Author); attribution != "" {
+				if _, err := fmt.Fprintln(out, "creation "+textsafe.Line(c.UID)+": "+attribution); err != nil {
+					return err
+				}
+			}
 			prefix := showCommentPrefix(c.UID, c.Author, c.Teammate)
 			if rendered != nil {
 				if err := writeRenderedPrefixedLines(out, prefix, rendered.comments[i]); err != nil {
@@ -244,12 +255,13 @@ func compactJSON(raw jsontext.Value) string {
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
 	Issue struct {
-		ShortID             string                    `json:"short_id"`
-		UID                 string                    `json:"uid"`
-		Title               string                    `json:"title"`
-		Body                string                    `json:"body"`
-		Status              string                    `json:"status"`
-		Author              string                    `json:"author"`
+		ShortID string `json:"short_id"`
+		UID     string `json:"uid"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Status  string `json:"status"`
+		Author  string `json:"author"`
+		db.AttributionView
 		Owner               *string                   `json:"owner"`
 		AssignmentExpiresOn *time.Time                `json:"assignment_expires_on"`
 		Priority            *int64                    `json:"priority"`
@@ -257,9 +269,9 @@ type showResponseForCLI struct {
 		Metadata            map[string]jsontext.Value `json:"metadata"`
 	} `json:"issue"`
 	Comments []struct {
+		db.AttributionView
 		UID       string `json:"uid"`
 		Author    string `json:"author"`
-		Teammate  string `json:"teammate,omitempty"`
 		Body      string `json:"body"`
 		CreatedAt string `json:"created_at"`
 	} `json:"comments"`
@@ -334,6 +346,27 @@ func showCommentPrefix(uid, author, teammate string) string {
 	return textsafe.Line(uid) + " " + textsafe.Line(commentAttribution(author, teammate)) + ": "
 }
 
+// The daemon verifies stored receipts. Pending and legacy source labels never
+// supply accountable identity, including responses with stray actor fields.
+func showCreationAttribution(view db.AttributionView, author string) string {
+	if view.Verification == "" {
+		return ""
+	}
+	state := view.Verification
+	if state != "verified" && state != "pending" {
+		state = "legacy"
+	}
+	source := view.SourceActor
+	if source == "" {
+		source = author
+	}
+	value := "attribution=" + state + " source=" + textsafe.Line(commentAttribution(source, view.Teammate))
+	if state == "verified" && view.AccountableActor != "" {
+		value += " accountable=" + textsafe.Line(view.AccountableActor)
+	}
+	return value
+}
+
 func commentAttribution(author, teammate string) string {
 	if teammate == "" {
 		return author
@@ -378,6 +411,11 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			return err
 		}
 	}
+	if attribution := showCreationAttribution(b.Issue.AttributionView, b.Issue.Author); attribution != "" {
+		if err := writeAgentField(w, "Creation", agentValue(attribution)); err != nil {
+			return err
+		}
+	}
 	if err := writeAgentField(w, "Revision", fmt.Sprint(b.Issue.Revision)); err != nil {
 		return err
 	}
@@ -414,6 +452,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			}
 			if c.Teammate != "" {
 				fields = append(fields, agentRowField("teammate", c.Teammate))
+			}
+			if attribution := showCreationAttribution(c.AttributionView, c.Author); attribution != "" {
+				fields = append(fields, agentRowField("creation", attribution))
 			}
 			fields = append(fields, agentRowField("created_at", c.CreatedAt))
 			if err := writeAgentKVRow(w, fields...); err != nil {

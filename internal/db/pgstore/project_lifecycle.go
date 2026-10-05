@@ -36,6 +36,9 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if project.DeletedAt != nil {
 			return db.ErrProjectAlreadyArchived
 		}
+		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
 		var openIssues, aliasCount int64
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues
           WHERE project_id = $1 AND status = 'open' AND deleted_at IS NULL`, project.ID).Scan(&openIssues); err != nil {

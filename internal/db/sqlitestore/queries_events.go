@@ -42,6 +42,7 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	args = append(args, p.AfterID)
 	conds = append(conds, "p.name <> ?")
 	args = append(args, db.SystemProjectName)
+	conds = append(conds, authorizedEventPredicate(ctx, &args))
 	if p.ProjectID != 0 {
 		conds = append(conds, "e.project_id = ?")
 		args = append(args, p.ProjectID)
@@ -153,6 +154,7 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 	args = append(args, p.Until)
 	conds = append(conds, "p.name <> ?")
 	args = append(args, db.SystemProjectName)
+	conds = append(conds, authorizedEventPredicate(ctx, &args))
 	if p.ProjectID != 0 {
 		conds = append(conds, "e.project_id = ?")
 		args = append(args, p.ProjectID)
@@ -370,10 +372,11 @@ func (d *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 	if err := d.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("purge reset check: %w", err)
 	}
-	if !n.Valid {
-		return 0, nil
+	attributionReset, err := d.attributionUIResetAfter(ctx, afterID, projectID)
+	if err != nil {
+		return 0, err
 	}
-	return n.Int64, nil
+	return max(n.Int64, attributionReset), nil
 }
 
 // purgeResetProjectFilter returns a SQL fragment that filters purge_log or

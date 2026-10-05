@@ -719,6 +719,10 @@ type RecordFederationQuarantineParams struct {
 	EventUIDs    []string
 	Error        string
 	CreatedAt    time.Time
+	// Negotiated relay failures use hop sequences and must still belong to the
+	// live upstream binding/epoch when the rejection is recorded.
+	RelayBindingUID string
+	RelayResetEpoch int64
 }
 
 // SkipFederationQuarantineParams resolves an active quarantine by advancing the
@@ -731,7 +735,7 @@ type SkipFederationQuarantineParams struct {
 	Now       time.Time
 }
 
-// RetryFederationQuarantineParams resolves an active push quarantine without
+// RetryFederationQuarantineParams resolves an active supported quarantine without
 // advancing the cursor, so the quarantined batch is retried on the next sync.
 type RetryFederationQuarantineParams struct {
 	ID        int64
@@ -751,6 +755,8 @@ type AdoptProjectIntoFederationParams struct {
 	ReplayHorizonEventID int64
 	Actor                string
 	AllowInsecure        bool
+	// RelayProtocolVersion records the authenticated negotiated adoption mode.
+	RelayProtocolVersion int
 	// EmptyOnly attaches an empty project without importing its local history.
 	EmptyOnly bool
 }
@@ -866,6 +872,8 @@ type APIToken struct {
 
 // CreateAPITokenParams carries the inputs for minting an API token.
 type CreateAPITokenParams struct {
+	// TeamUIDs enroll the canonical actor atomically with token creation.
+	TeamUIDs       []string
 	PlaintextToken string
 	Actor          string
 	Name           *string

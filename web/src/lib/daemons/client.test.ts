@@ -79,6 +79,40 @@ describe('web daemon transport', () => {
     expect(request.headers.has('X-Kata-Web-Daemon')).toBe(false)
   })
 
+  test.each(['example-local', 'example-remote'])(
+    'keeps team and visibility administration on the browser origin with %s selected',
+    async (target) => {
+      const upstream = vi.fn<typeof fetch>(async () => new Response('{}'))
+      const fetcher = createDaemonFetch(() => target, upstream)
+      const paths = [
+        '/api/v1/teams',
+        '/api/v1/teams/team-one/members/member-one',
+        '/api/v1/projects/7/access',
+      ]
+      for (const path of paths) await fetcher(path, { method: 'PUT' })
+      expect(
+        upstream.mock.calls.map(([input, init]) => {
+          const request = new Request(new URL(String(input), window.location.origin), init)
+          expect(request.headers.has('X-Kata-Web-Daemon')).toBe(false)
+          return new URL(request.url).pathname
+        }),
+      ).toEqual(paths)
+    },
+  )
+
+  test.each(['example-local', 'example-remote'])(
+    'keeps scoped project sync on the source origin with %s selected',
+    async (target) => {
+      const upstream = vi.fn<typeof fetch>(async () => new Response('{}'))
+      const fetcher = createDaemonFetch(() => target, upstream)
+      await fetcher('/api/v1/projects/7/federation/status')
+      const [input, init] = upstream.mock.calls[0]!
+      const request = new Request(new URL(String(input), window.location.origin), init)
+      expect(new URL(request.url).pathname).toBe('/api/v1/projects/7/federation/status')
+      expect(request.headers.has('X-Kata-Web-Daemon')).toBe(false)
+    },
+  )
+
   test('accepts only a sanitized daemon roster', async () => {
     const fetcher = vi.fn(async () =>
       Response.json({
@@ -115,6 +149,33 @@ describe('web daemon transport', () => {
       expect.objectContaining({ id: 'example-remote', auth: 'token', health: 'auth_required' }),
       expect.objectContaining({ id: 'example-legacy', health: 'upgrade_required' }),
     ])
+  })
+
+  test('retains explicit native local authority and treats absent local metadata as remote', async () => {
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        daemons: [
+          {
+            id: 'owner-target',
+            url: '',
+            default: true,
+            auth: 'none',
+            health: 'connected',
+            local: true,
+          },
+          {
+            id: 'other-target',
+            url: 'https://daemon.example',
+            default: false,
+            auth: 'token',
+            health: 'connected',
+          },
+        ],
+      }),
+    )
+    const daemons = await fetchWebDaemons(fetcher)
+    expect(daemons[0]).toMatchObject({ local: true })
+    expect(daemons[1]).toMatchObject({ local: false })
   })
 
   test('classifies authentication-required roster responses', async () => {

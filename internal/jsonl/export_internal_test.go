@@ -215,3 +215,62 @@ func TestExportSnapshotProjectIncludesActiveMappingBeforeStateExists(t *testing.
 	assert.Equal(t, "connector-one", mappings[0].ConnectorInstance)
 	assert.Equal(t, "field-one", mappings[0].ExternalFieldID)
 }
+
+// Schema31 cutover exports must retain hub-local restrictions in owner backups
+// and exclude those local objects and their epoch from project transfers.
+func TestProjectAccessLegacyCutoverPreservesPolicy(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "restricted-project")
+	require.NoError(t, err)
+	team, _, err := source.CreateTeam(ctx, "engineering", "admin")
+	require.NoError(t, err)
+	_, err = source.SetTeamMembership(ctx, team.UID, "member", true, "admin")
+	require.NoError(t, err)
+	before, _, err := source.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin")
+	require.NoError(t, err)
+	empty, err := source.CreateProject(ctx, "empty-policy-project")
+	require.NoError(t, err)
+	emptyBefore, _, err := source.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: empty.UID, Visibility: "teams", TeamUIDs: []string{}}, "admin")
+	require.NoError(t, err)
+	var backup bytes.Buffer
+	require.NoError(t, exportForCutover(ctx, source, &backup, ExportOptions{IncludeDeleted: true}))
+	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	require.NoError(t, Import(ctx, bytes.NewReader(backup.Bytes()), target))
+	after, err := target.ProjectAccessPolicy(ctx, project.UID)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	emptyAfter, err := target.ProjectAccessPolicy(ctx, empty.UID)
+	require.NoError(t, err)
+	assert.Equal(t, emptyBefore, emptyAfter)
+	members, err := target.TeamMembers(ctx, team.UID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"member"}, members)
+	allowed, err := target.AccessibleProjectUIDs(ctx, "outsider")
+	require.NoError(t, err)
+	assert.Empty(t, allowed)
+	allowed, err = target.AccessibleProjectUIDs(ctx, "member")
+	require.NoError(t, err)
+	assert.Equal(t, []string{project.UID}, allowed)
+	var scoped bytes.Buffer
+	require.NoError(t, exportForCutover(ctx, source, &scoped, ExportOptions{ProjectID: project.ID}))
+	assert.NotContains(t, scoped.String(), `"project_access_revision"`)
+	for _, kind := range []string{`"kind":"team"`, `"kind":"team_membership"`, `"kind":"project_access_policy"`} {
+		assert.NotContains(t, scoped.String(), kind)
+	}
+}
+
+func TestProjectAccessLegacyScopedExportHidesPolicyEpoch(t *testing.T) {
+	source, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(t.Context(), "source-project")
+	require.NoError(t, err)
+	var scoped bytes.Buffer
+	require.NoError(t, exportForCutover(t.Context(), source, &scoped, ExportOptions{ProjectID: project.ID}))
+	assert.NotContains(t, scoped.String(), `"project_access_revision"`)
+}

@@ -605,8 +605,12 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 	require.NoError(t, err)
 	resolvedUIDs := []string{firstIssueUID, secondIssueUID}
 	slices.Sort(resolvedUIDs)
-	projectUID, err := uid.New()
+	dbh := openTestDB(t)
+	firstProject, err := dbh.db.CreateProject(t.Context(), "restricted-project")
 	require.NoError(t, err)
+	secondProject, err := dbh.db.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	projectUID := firstProject.UID
 	reference := db.UIIssueReference{
 		UID: firstIssueUID, ProjectUID: projectUID, ProjectName: "restricted-project",
 		ShortID: "a1", QualifiedID: "restricted-project#a1", Title: "Restricted issue", Status: "open",
@@ -617,11 +621,10 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 		hydration: db.UIReferenceHydration{
 			References:   db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
 			ResolvedUIDs: resolvedUIDs,
-			ProjectIDs:   []int64{42, 84},
+			ProjectIDs:   []int64{firstProject.ID, secondProject.ID},
 		},
 	}
 	access := &scopedUIReferencesHostAccess{}
-	dbh := openTestDB(t)
 	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
 		Origin: "https://daemon.example", OriginStable: true, InstanceID: "example",
 		Auth: config.AuthConfig{}, DB: dbh.db,
@@ -644,7 +647,7 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 	etag := first.Header.Get("ETag")
 	require.NotEmpty(t, etag)
 
-	access.deniedProjectID = 84
+	access.deniedProjectID = secondProject.ID
 	second, body := getUIReferences(t, ts, query, etag)
 	require.Equal(t, http.StatusNotFound, second.StatusCode, string(body))
 	require.JSONEq(t,
@@ -654,7 +657,7 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 	require.Equal(t, 2, store.hydrationReads)
 	require.Zero(t, store.referenceReads)
 	require.Len(t, access.requests, 2)
-	require.Equal(t, []int64{42, 84}, access.requests[1].Operation.ProjectIDs)
+	require.Equal(t, []int64{firstProject.ID, secondProject.ID}, access.requests[1].Operation.ProjectIDs)
 	require.False(t, access.requests[1].Operation.AllProjects)
 }
 

@@ -1049,7 +1049,7 @@ func TestRenameProject_MissingIs404(t *testing.T) {
 	resp, bs := patchJSON(t, ts, "/api/v1/projects/9999", map[string]any{
 		"name": "Missing", "actor": "user-a",
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestMergeProject_SourceMovesIntoSurvivingTarget(t *testing.T) {
@@ -1100,7 +1100,7 @@ func TestMergeProject_SystemProjectReturns404(t *testing.T) {
 	resp, bs = postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/merge", map[string]any{
 		"source_project_id": target.ID, "actor": "user-a",
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 // TestRemoveProject_ArchivesAndDropsAliases pins #24's wire shape: DELETE

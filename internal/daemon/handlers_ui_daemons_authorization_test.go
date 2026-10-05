@@ -89,7 +89,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 			ContractVersion: api.UISnapshotContractVersion,
 			Cursor:          7,
 			Capabilities: api.UICapabilities{
-				Writable: true, Updates: "sse", ActorPolicy: "request", TokenAuditRead: true,
+				Writable: true, Updates: "sse", ActorPolicy: "request", TokenAuditRead: true, AccessAdmin: true,
 			},
 		})
 	}))
@@ -109,6 +109,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.False(t, snapshot.Capabilities.Writable)
 	assert.Equal(t, "poll", snapshot.Capabilities.Updates)
 	assert.False(t, snapshot.Capabilities.TokenAuditRead)
+	assert.False(t, snapshot.Capabilities.AccessAdmin)
 	gatewayETag := first.Header().Get("ETag")
 	require.NotEmpty(t, gatewayETag)
 	assert.NotEqual(t, `"remote-snapshot"`, gatewayETag)
@@ -120,9 +121,10 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.Equal(t, 2, snapshotReads)
 }
 
-func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
-	var mutationCalls int
+func TestWebDaemonGatewayRejectsUndelegatedIdentityProjectAuthority(t *testing.T) {
+	var calls, mutationCalls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		if isMutation(r.Method) {
 			mutationCalls++
 			w.WriteHeader(http.StatusNoContent)
@@ -147,16 +149,25 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 
 	snapshotResponse := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet,
 		"/api/v1/ui/snapshot", nil, "")
-	require.Equal(t, http.StatusOK, snapshotResponse.Code, snapshotResponse.Body.String())
-	var snapshot api.UISnapshotResponseBody
-	require.NoError(t, json.Unmarshal(snapshotResponse.Body.Bytes(), &snapshot))
-	assert.False(t, snapshot.Capabilities.Writable)
-	assert.Equal(t, "identity", snapshot.Capabilities.ActorPolicy)
+	require.Equal(t, http.StatusForbidden, snapshotResponse.Code, snapshotResponse.Body.String())
+	require.Contains(t, snapshotResponse.Body.String(), "project_authority_not_delegated")
 
 	mutationResponse := authorizedGatewayRequest(t, handler, manager, issued, http.MethodDelete,
 		"/api/v1/projects/7/recurrences/01J00000000000000000000001", nil, "")
 	assert.Equal(t, http.StatusForbidden, mutationResponse.Code, mutationResponse.Body.String())
 	assert.Equal(t, 0, mutationCalls)
+	assert.Equal(t, 0, calls, "source project policy must reject before forwarding target credentials")
+}
+
+// The lower gateway layer also preserves identity policy when a trusted host
+// supplies an otherwise admitted source; a target never upgrades it to writes.
+func TestDelegatedWebDaemonPolicyPreservesIdentitySourceAttribution(t *testing.T) {
+	gateway := &webDaemonGateway{}
+	source := gateway.sourcePolicy(WithPrincipal(t.Context(), Principal{Kind: PrincipalTrustedProxy, Actor: "user-a"}))
+	require.True(t, source.writable)
+	delegated := delegatedWebDaemonSourcePolicy(source)
+	assert.Equal(t, "identity", delegated.actorPolicy)
+	assert.False(t, delegated.writable)
 }
 
 func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {

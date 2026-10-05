@@ -30,21 +30,24 @@ type FederationCredentials struct {
 // UID. Tokens intentionally live outside SQLite and outside committed
 // workspace config.
 type FederationCredential struct {
-	Signing             *federationsigning.Source     `toml:"signing,omitempty"`
-	HubURL              string                        `toml:"hub_url"`
-	HubProjectID        int64                         `toml:"hub_project_id"`
-	Token               string                        `toml:"token"`
-	Capabilities        string                        `toml:"capabilities,omitempty"`
-	Actor               string                        `toml:"actor,omitempty"`
-	AllowInsecure       bool                          `toml:"allow_insecure,omitempty"`
-	ManagedByConfig     bool                          `toml:"managed_by_config,omitempty"`
-	HubCatalog          string                        `toml:"hub_catalog,omitempty"`
-	HubProjectName      string                        `toml:"hub_project_name,omitempty"`
-	RequestedActor      string                        `toml:"requested_actor,omitempty"`
-	SpokeProjectName    string                        `toml:"spoke_project_name,omitempty"`
-	LeavePending        bool                          `toml:"leave_pending,omitempty"`
-	PendingEnrollmentID int64                         `toml:"pending_enrollment_id,omitempty"`
-	Provider            *FederationProviderCredential `toml:"provider,omitempty"`
+	Signing          *federationsigning.Source `toml:"signing,omitempty"`
+	HubURL           string                    `toml:"hub_url"`
+	HubProjectID     int64                     `toml:"hub_project_id"`
+	Token            string                    `toml:"token"`
+	Capabilities     string                    `toml:"capabilities,omitempty"`
+	Actor            string                    `toml:"actor,omitempty"`
+	AllowInsecure    bool                      `toml:"allow_insecure,omitempty"`
+	ManagedByConfig  bool                      `toml:"managed_by_config,omitempty"`
+	HubCatalog       string                    `toml:"hub_catalog,omitempty"`
+	HubProjectName   string                    `toml:"hub_project_name,omitempty"`
+	RequestedActor   string                    `toml:"requested_actor,omitempty"`
+	SpokeProjectName string                    `toml:"spoke_project_name,omitempty"`
+	LeavePending     bool                      `toml:"leave_pending,omitempty"`
+	// Retain a candidate token for exact enrollment retry before activating
+	// transport. PendingEnrollmentID below tracks leave cleanup instead.
+	RelayEnrollmentPending bool                          `toml:"relay_enrollment_pending,omitempty"`
+	PendingEnrollmentID    int64                         `toml:"pending_enrollment_id,omitempty"`
+	Provider               *FederationProviderCredential `toml:"provider,omitempty"`
 }
 
 // FederationTransportCredential combines secret-bearing credential metadata
@@ -347,6 +350,9 @@ func (c FederationCredential) Metadata() FederationCredentialMetadata {
 		HubProjectName:   c.HubProjectName,
 		RequestedActor:   c.RequestedActor,
 		SpokeProjectName: c.SpokeProjectName,
+	}
+	if c.RelayEnrollmentPending {
+		metadata.Status = "enrollment_pending"
 	}
 	if c.Provider != nil {
 		metadata.ProviderStatus = string(c.Provider.Status)

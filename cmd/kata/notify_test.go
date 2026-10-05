@@ -74,9 +74,10 @@ func TestNotifyUsesAuthenticatedActor(t *testing.T) {
 func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 	for _, kind := range []string{"close", "other recipient"} {
 		t.Run(kind, func(t *testing.T) {
-			env, dir, pid, ref := setupWorkspaceWithIssue(t, "concurrent recipients")
-			issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+			env, dir, pid := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("notify-proxy-owner-test-token"))
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "concurrent recipients", Author: "tester"})
 			require.NoError(t, err)
+			ref := issue.ShortID
 			target, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(target)
@@ -98,6 +99,7 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 							return
 						}
 						request.Header.Set("Content-Type", "application/json")
+						request.Header.Set("Authorization", "Bearer notify-proxy-owner-test-token")
 						closeResponse, requestErr := env.HTTP.Do(request)
 						if requestErr != nil {
 							interleaveErr = requestErr

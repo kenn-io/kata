@@ -43,6 +43,7 @@ var sectionLoaderNames = []string{
 	"kata.load_storage",
 	"kata.load_sync",
 	"kata.load_system",
+	"kata.load_teams",
 	"kata.load_tokens",
 }
 
@@ -166,6 +167,9 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.edit",
 		"kata.edit_comment",
 		"kata.events",
+		"kata.federation_bridge_connect",
+		"kata.federation_bridge_disconnect",
+		"kata.federation_bridge_status",
 		"kata.federation_enrollment_revoke",
 		"kata.federation_leave",
 		"kata.federation_quarantine",
@@ -210,6 +214,13 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.sync_status",
 		"kata.sync_update",
 		"kata.system",
+		"kata.project_access_set",
+		"kata.project_access_show",
+		"kata.team_create",
+		"kata.team_delete",
+		"kata.team_member_set",
+		"kata.team_show",
+		"kata.teams",
 		"kata.token_create",
 		"kata.token_revoke",
 		"kata.tokens",
@@ -220,6 +231,8 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
 	projectSelectors := map[string]bool{
+		"kata.federation_bridge_connect": true, "kata.federation_bridge_disconnect": true, "kata.federation_bridge_status": true,
+		"kata.project_access_set": true, "kata.project_access_show": true,
 		"kata.audit_closes": true,
 		"kata.create":       true, "kata.digest": true, "kata.events": true,
 		"kata.federation_leave": true, "kata.federation_quarantine": true, "kata.federation_rebind": true,
@@ -230,6 +243,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
 	}
 	openWorld := map[string]bool{
+		"kata.federation_bridge_connect": true, "kata.federation_bridge_disconnect": true, "kata.federation_bridge_status": true,
 		"kata.bridge_bind":                  true,
 		"kata.bridge_reconcile":             true,
 		"kata.bridge_resolve_comment":       true,
@@ -284,6 +298,8 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
+		"kata.federation_bridge_status": true,
+		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,
 		"kata.bridge_show":       true,
 		"kata.connector_fields":  true,
@@ -317,11 +333,13 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	// Mixed-mode tools with any overwriting or removing input (forced
 	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
-		"kata.comment": true, "kata.create": true,
+		"kata.team_create": true,
+		"kata.comment":     true, "kata.create": true,
 		"kata.project_create": true, "kata.project_restore": true,
 		"kata.restore": true, "kata.token_create": true,
 	}
 	nonIdempotentTools := map[string]bool{
+		"kata.team_create": true,
 		// Identical retries mint new records: no idempotency key or natural
 		// unique key deduplicates these creations.
 		"kata.token_create":      true,

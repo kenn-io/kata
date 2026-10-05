@@ -701,6 +701,9 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	if !ok {
 		return
 	}
+	if revalidateEventStreamAuthority(hctx.Context(), cfg.DB) != nil {
+		return
+	}
 	hctx.SetHeader("Content-Type", "text/event-stream")
 	hctx.SetHeader("Cache-Control", "private, no-cache")
 	hctx.SetHeader("Connection", "keep-alive")
@@ -874,6 +877,23 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 			if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 				return
 			}
+			// A late receipt can change creation proof without another event
+			// wakeup. The durable reset also covers reconnects and missed notices.
+			resetProjectID := projectID
+			if issueScopeFromContext(ctx) != nil {
+				resetProjectID = 0
+			}
+			resetTo, err := deps.cfg.DB.PurgeResetCheck(ctx, lastSent, resetProjectID)
+			if err != nil {
+				return
+			}
+			if resetTo > 0 {
+				if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
+					return
+				}
+				_ = writeSSEFrame(deps.w, deps.flusher, resetFrameBytes(resetTo))
+				return
+			}
 			if !writeSSEFrame(deps.w, deps.flusher, []byte(": keepalive\n\n")) {
 				return
 			}
@@ -998,6 +1018,15 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 }
 
 func revalidateEventStreamAuthority(ctx context.Context, store db.Storage) error {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		revision, err := store.ProjectAccessRevision(ctx)
+		if err != nil {
+			return err
+		}
+		if revision != decision.PolicyRevision {
+			return projectAccessDenied()
+		}
+	}
 	if err := revalidateSSEAuthority(ctx); err != nil {
 		return err
 	}

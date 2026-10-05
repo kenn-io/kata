@@ -531,19 +531,28 @@ func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter)
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, bound_actor, allow_insecure, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT)
+	                 CAST(last_sync_at AS TEXT), relay_config
 	          FROM federation_bindings`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY project_id ASC`
 	return streamRows(ctx, d.readQ, "federation_bindings", query, args,
 		func(rows *sql.Rows) (db.FederationBindingExport, error) {
 			var rec db.FederationBindingExport
+			var relayConfig *string
 			var enabled, pushEnabled, allowInsecure int
 			if err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 				&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 				&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt); err != nil {
+				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig); err != nil {
 				return db.FederationBindingExport{}, scanError("federation_binding", err)
+			}
+			var err error
+			rec.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
+			if err != nil {
+				return db.FederationBindingExport{}, err
+			}
+			if f.ProjectID != nil {
+				rec.RelayConfig = nil
 			}
 			rec.PushEnabled = pushEnabled == 1
 			rec.AllowInsecure = allowInsecure == 1
@@ -604,7 +613,7 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 	                 allow_adoption_snapshot_authors,
 	                 adoption_baseline_open, adoption_baseline_next_source_event_id,
 	                 adoption_baseline_end_source_event_id,
-	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT),relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream
 	          FROM federation_enrollments`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY id ASC`
@@ -612,15 +621,16 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 		func(rows *sql.Rows) (db.FederationEnrollmentExport, error) {
 			var rec db.FederationEnrollmentExport
 			var allow int
-			var baselineOpen int
+			var baselineOpen, serveDownstream int
 			if err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
 				&rec.Capabilities, &rec.Actor, &allow, &baselineOpen,
 				&rec.AdoptionBaselineNextSourceEventID, &rec.AdoptionBaselineEndSourceEventID,
-				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt); err != nil {
+				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt, &rec.RelayBindingUID, &rec.RelayProtocolVersion, &rec.ParentTokenID, &rec.RelayResetEpoch, &serveDownstream); err != nil {
 				return db.FederationEnrollmentExport{}, scanError("federation_enrollment", err)
 			}
 			rec.AllowAdoptionSnapshotAuthors = allow != 0
 			rec.AdoptionBaselineOpen = baselineOpen != 0
+			rec.RelayServeDownstream = serveDownstream != 0
 			return rec, nil
 		})
 }

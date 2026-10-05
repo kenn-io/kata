@@ -48,6 +48,22 @@ func (m MapConnectorFieldPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(m))
 }
 
+type GetFederationBridgeStatusPath struct {
+	ProjectName string `json:"project_name" validate:"required"`
+}
+
+func (g GetFederationBridgeStatusPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
+type DisconnectFederationBridgePath struct {
+	ProjectName string `json:"project_name" validate:"required"`
+}
+
+func (d DisconnectFederationBridgePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type RevokeFederationEnrollmentPath struct {
 	EnrollmentID int64 `json:"enrollment_id"`
 }
@@ -85,6 +101,14 @@ type ShowProjectPath struct {
 }
 
 type RenameProjectPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type GetProjectAccessPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type SetProjectAccessPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
@@ -137,6 +161,26 @@ type RetryFederationQuarantinePath struct {
 type SkipFederationQuarantinePath struct {
 	ProjectID    int64 `json:"project_id"`
 	QuarantineID int64 `json:"quarantine_id"`
+}
+
+type OfferRelayDeliveriesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type GetRelayResetPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type AcceptRelayDeliveriesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type AckRelayDeliveriesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type DisconnectRelayEnrollmentPath struct {
+	ProjectID int64 `json:"project_id"`
 }
 
 type GetProjectFederationStatusPath struct {
@@ -565,6 +609,40 @@ type RestoreProjectPath struct {
 
 type SearchIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
+}
+
+type DeleteTeamPath struct {
+	TeamUID string `json:"team_uid" validate:"required"`
+}
+
+func (d DeleteTeamPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type ShowTeamPath struct {
+	TeamUID string `json:"team_uid" validate:"required"`
+}
+
+func (s ShowTeamPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type RemoveTeamMemberPath struct {
+	TeamUID string `json:"team_uid" validate:"required"`
+	Actor   string `json:"actor" validate:"required"`
+}
+
+func (r RemoveTeamMemberPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type AddTeamMemberPath struct {
+	TeamUID string `json:"team_uid" validate:"required"`
+	Actor   string `json:"actor" validate:"required"`
+}
+
+func (a AddTeamMemberPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
 type RevokeTokenPath struct {

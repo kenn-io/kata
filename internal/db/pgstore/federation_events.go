@@ -108,6 +108,10 @@ func (s *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
+	if count, highWater, negotiated, err := s.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
+		return count, highWater, err
+	}
+
 	var count int64
 	var highWater sql.NullInt64
 	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
@@ -121,6 +125,9 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushE
 
 // InsertRemoteEvent preserves one portable event while assigning only its local row identity.
 func (s *Store) InsertRemoteEvent(ctx context.Context, projectID int64, remote db.RemoteEvent) (bool, error) {
+	// Serialize source/proof arrival before event-sequence locks. Serializable
+	// retries resolve overlapping snapshots without leaving creation unattached.
+	ctx = db.WithAdditionalTransactionFence(ctx, lockProjectAccess)
 	payload, createdAt, err := db.ValidateRemoteEventContentHash(remote)
 	if err != nil {
 		return false, err

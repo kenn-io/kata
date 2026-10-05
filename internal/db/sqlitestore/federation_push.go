@@ -108,6 +108,10 @@ func (d *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
+	if count, highWater, negotiated, err := d.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
+		return count, highWater, err
+	}
+
 	var count int64
 	var maxID sql.NullInt64
 	if err := d.QueryRowContext(ctx, `
@@ -257,7 +261,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		return fmt.Errorf("begin guarded federated reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
 

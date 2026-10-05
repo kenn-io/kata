@@ -45,7 +45,14 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		spokeDB, err := sqlitestore.Open(t.Context(), filepath.Join(home, "spoke.db"))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, spokeDB.Close()) })
-		spokeServer := daemon.NewServer(daemon.ServerConfig{DB: spokeDB, FederationCredentials: credentials})
+		_, _, err = spokeDB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "spoke-user-token", Actor: "enrolled-actor", AdminActor: db.BootstrapActor,
+		})
+		require.NoError(t, err)
+		spokeServer := daemon.NewServer(daemon.ServerConfig{
+			DB: spokeDB, FederationCredentials: credentials,
+			Auth: config.AuthConfig{Token: "spoke-owner-token", RequireTokenIdentity: true},
+		})
 		spokeHTTP := httptest.NewTestServer(t, spokeServer.Handler())
 		spoke := &testenv.Env{DB: spokeDB, URL: "http://spoke.example", HTTP: spokeHTTP.Client()}
 		project, issue := createClaimHubIssueNamed(t, env, "hub-project")
@@ -100,6 +107,8 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		metadata, err := client.ProjectFederation(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.Equal(t, project.UID, metadata.ProjectUID)
+		_, err = client.RelayReset(t.Context(), project.ID)
+		require.ErrorContains(t, err, "403", "signed relay operations are admitted, then checked for relay enrollment scope")
 		mainHandler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://daemon.example"})
 		require.NoError(t, err)
 		headRequest := httptest.NewRequest(http.MethodHead, "https://daemon.example"+projectPath(project.ID)+"/federation/metadata", nil)
@@ -156,13 +165,14 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		_, err = client.ReleaseClaim(t.Context(), project.ID, issue.ShortID, claim)
 		require.NoError(t, err)
 		// The spoke's real local API forwards with its saved signing source.
+		spokeAuth := map[string]string{"Authorization": "Bearer spoke-user-token"}
 		for _, action := range []string{"acquire", "renew", "release"} {
-			resp, raw := envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/%s", replica.Project.ID, mirrored.ShortID, action), map[string]any{"holder": "enrolled-actor", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 300, "purpose": "edit"}, nil)
+			resp, raw := envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/%s", replica.Project.ID, mirrored.ShortID, action), map[string]any{"holder": "enrolled-actor", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 300, "purpose": "edit"}, spokeAuth)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		}
-		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", replica.Project.ID, mirrored.ShortID), nil, nil)
+		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", replica.Project.ID, mirrored.ShortID), nil, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-		resp, raw = envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.Project.ID, mirrored.ShortID), map[string]any{"actor": "enrolled-actor", "ttl_seconds": 300}, nil)
+		resp, raw = envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.Project.ID, mirrored.ShortID), map[string]any{"actor": "enrolled-actor", "ttl_seconds": 300}, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		// Valid MACs cannot widen the bearer capability or global project scope.
 		globalClient, err := federation.NewClient(t.Context(), base, globalEnrollment.Token, clientpkg.Opts{FederationSigning: &globalSource})

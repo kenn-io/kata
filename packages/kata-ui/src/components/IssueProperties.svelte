@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KataIssueDetailModel } from '../types.js'
+  import CreationAttribution from './CreationAttribution.svelte'
 
   interface Props {
     issue: KataIssueDetailModel['issue']
@@ -25,6 +26,7 @@
     </div>
   {/if}
 </div>
+<CreationAttribution creation={issue.creation} />
 
 <style>
   .properties,

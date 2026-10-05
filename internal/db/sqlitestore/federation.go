@@ -225,6 +225,18 @@ func (d *Store) recordFederationQuarantine(
 		return db.FederationQuarantine{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if p.RelayBindingUID != "" {
+		if err := lockProjectAccess(ctx, tx); err != nil {
+			return db.FederationQuarantine{}, err
+		}
+		grant, err := d.upstreamRelayGrantTx(ctx, tx, p.RelayBindingUID)
+		if err != nil {
+			return db.FederationQuarantine{}, err
+		}
+		if grant.ProjectID == nil || *grant.ProjectID != p.ProjectID || grant.RelayResetEpoch != p.RelayResetEpoch {
+			return db.FederationQuarantine{}, db.ErrNotFound
+		}
+	}
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO federation_quarantine(
@@ -331,11 +343,18 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 		return db.FederationQuarantine{}, fmt.Errorf("begin skip federation quarantine: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	relay, err := d.quarantineRelayBindingTx(ctx, tx, p.ProjectID)
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
 	q, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
 		federationQuarantineSelect+` WHERE id = ? AND project_id = ? AND skipped_at IS NULL`,
 		p.ID, p.ProjectID))
 	if err != nil {
 		return db.FederationQuarantine{}, err
+	}
+	if relay {
+		return db.FederationQuarantine{}, db.ErrRelayQuarantineSkipUnsupported
 	}
 	switch q.Direction {
 	case db.FederationQuarantineDirectionPush:
@@ -375,8 +394,8 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	return updated, nil
 }
 
-// RetryFederationQuarantine marks a push quarantine resolved without advancing
-// the outbound cursor. The same local events remain pending and will be sent
+// RetryFederationQuarantine marks a legacy push or negotiated relay quarantine
+// resolved without advancing cursors. The same retained events will be sent
 // again on the next sync. The existing skipped_* columns are the physical
 // resolved marker until a future schema adds explicit resolution columns.
 func (d *Store) RetryFederationQuarantine(ctx context.Context, p db.RetryFederationQuarantineParams) (db.FederationQuarantine, error) {
@@ -399,13 +418,17 @@ func (d *Store) retryFederationQuarantine(ctx context.Context, p db.RetryFederat
 		return db.FederationQuarantine{}, fmt.Errorf("begin retry federation quarantine: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	relay, err := d.quarantineRelayBindingTx(ctx, tx, p.ProjectID)
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
 	q, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
 		federationQuarantineSelect+` WHERE id = ? AND project_id = ? AND skipped_at IS NULL`,
 		p.ID, p.ProjectID))
 	if err != nil {
 		return db.FederationQuarantine{}, err
 	}
-	if q.Direction != db.FederationQuarantineDirectionPush {
+	if q.Direction != db.FederationQuarantineDirectionPush && !relay {
 		return db.FederationQuarantine{}, fmt.Errorf("%w: %s", db.ErrFederationQuarantineRetryUnsupportedDirection, q.Direction)
 	}
 	reason := strings.TrimSpace(p.Reason)
@@ -493,6 +516,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	}
 	previous, err := federationBindingTransitionState(ctx, tx, b.ProjectID)
 	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := db.CheckRelayBindingUpdate(previous, b); err != nil {
 		return db.FederationBinding{}, err
 	}
 	allowInsecure := 0
@@ -587,6 +613,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64) (db
 	if binding.Role != db.FederationRoleSpoke {
 		return db.LeaveFederationResult{}, db.ErrFederationNotSpoke
 	}
+	if err := d.validateRelayLifecycleTx(ctx, tx, projectID); err != nil {
+		return db.LeaveFederationResult{}, err
+	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
 		`DELETE FROM federation_sync_status WHERE project_id = ?`,
@@ -616,7 +645,8 @@ func (d *Store) boundFederationActorTx(ctx context.Context, tx *sql.Tx, projectI
 		 WHERE project_id = ?
 		   AND role = ?
 		   AND enabled = 1
-		   AND push_enabled = 1`,
+		   AND push_enabled = 1
+           AND relay_config IS NULL`,
 		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
@@ -683,6 +713,9 @@ func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 // InsertRemoteEvent appends a hub event to the local log while preserving every
 // portable field. Only the local events.id is assigned by the spoke database.
 func (d *Store) InsertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
+	// Serialize source/proof arrival before event-sequence locks. Serializable
+	// retries resolve overlapping snapshots without leaving creation unattached.
+	ctx = db.WithAdditionalTransactionFence(ctx, lockProjectAccess)
 	return retryWrite1(ctx, d, func() (bool, error) {
 		return d.insertRemoteEvent(ctx, projectID, ev)
 	})
@@ -1135,7 +1168,7 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 		return fmt.Errorf("begin federated reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, projectID); err != nil {
@@ -1167,7 +1200,17 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	return nil
 }
 
-func rejectFederationResetExternalRootHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var relayConfig *string
+	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=?`, projectID).Scan(&relayConfig); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		return err
+	}
+	if relayConfig != nil {
+		return db.ErrRelayResetRequiresRootProof
+	}
 	var bindingID int64
 	err := tx.QueryRowContext(ctx,
 		`SELECT id FROM external_root_bindings WHERE project_id = ? LIMIT 1`, projectID).Scan(&bindingID)
@@ -1237,7 +1280,7 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs .
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
        replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
-       bound_actor, allow_insecure, enabled, created_at, updated_at, last_sync_at
+       bound_actor, allow_insecure, enabled, created_at, updated_at, last_sync_at, relay_config
   FROM federation_bindings`
 
 func federationBindingByProject(ctx context.Context, q sqlReader, projectID int64) (db.FederationBinding, error) {
@@ -1253,11 +1296,16 @@ func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
 		pushEnabled   int
 		allowInsecure int
 		lastSyncAt    sql.NullTime
+		relayConfig   *string
 	)
 	err := r.Scan(&b.ProjectID, &role, &b.HubURL, &b.HubProjectID, &b.HubProjectUID,
 		&b.ReplayHorizonEventID, &b.PullCursorEventID, &pushEnabled,
-		&b.PushCursorEventID, &b.Actor, &allowInsecure, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt)
+		&b.PushCursorEventID, &b.Actor, &allowInsecure, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt, &relayConfig)
 	if err == nil {
+		b.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
+		if err != nil {
+			return db.FederationBinding{}, err
+		}
 		b.Role = db.FederationRole(role)
 		b.PushEnabled = pushEnabled == 1
 		b.AllowInsecure = allowInsecure == 1
@@ -2564,6 +2612,18 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("adopt project into federation: project %d is archived", p.ProjectID)
 	}
 
+	if p.RelayProtocolVersion != 0 {
+		if p.RelayProtocolVersion != db.RelayProtocolVersion {
+			return db.AdoptProjectIntoFederationResult{}, db.ErrFederationIngestValidation
+		}
+		if !db.ProjectAttributionVisible(ctx, project.UID) {
+			return db.AdoptProjectIntoFederationResult{}, db.ErrNotFound
+		}
+		if err := rejectRelayProjectLinksTx(ctx, tx, project.ID); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+	}
+
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, p.ProjectID))
 	if err == nil {
@@ -2756,6 +2816,9 @@ func federationAdoptionPushFloor(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid string) error {
+	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS trg_projects_uid_immutable`); err != nil {
 		return fmt.Errorf("drop project uid immutability trigger for adoption: %w", err)
 	}
@@ -2771,7 +2834,7 @@ func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid s
 		END`); err != nil {
 		return fmt.Errorf("restore project uid immutability trigger after adoption: %w", err)
 	}
-	return nil
+	return restoreArtifactAdoptionTx(ctx, tx, uid)
 }
 
 func clearProjectClaimStateTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
@@ -2784,4 +2847,16 @@ func clearProjectClaimStateTx(ctx context.Context, tx *sql.Tx, projectID int64) 
 		}
 	}
 	return nil
+}
+
+// Disposition cannot reinterpret a relay hop sequence as a legacy event cursor.
+func (d *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return false, err
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	return binding.RelayConfig != nil, err
 }

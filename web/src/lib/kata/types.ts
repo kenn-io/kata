@@ -1,3 +1,5 @@
+import type { KataCreationAttributionWire } from '@kenn-io/kata-ui'
+
 export type KataTaskViewName = 'inbox' | 'today' | 'delegated' | 'scheduled' | 'all' | 'logbook'
 
 export interface KataTaskChecklistItem {
@@ -45,7 +47,7 @@ export interface KataTaskLinkPeer extends KataLinkPeer {
   status: 'open' | 'closed'
 }
 
-export interface KataTaskSummary {
+export interface KataTaskSummary extends KataCreationAttributionWire {
   id: number
   uid: string
   project_id: number
@@ -131,11 +133,10 @@ export interface KataReachableGraphResponse {
   fetched_at: string
 }
 
-export interface KataComment {
+export interface KataComment extends KataCreationAttributionWire {
   id: number
   issue_id: number
   author: string
-  teammate?: string
   body: string
   created_at: string
 }

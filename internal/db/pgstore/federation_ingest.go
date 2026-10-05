@@ -65,6 +65,9 @@ func (s *Store) IngestFederationEvents(
 			); err != nil {
 				return err
 			}
+			if err := db.ValidateEmbeddingProducerEvent(event, ""); err != nil {
+				return err
+			}
 			if boundActor != "" && event.Actor != boundActor {
 				return fmt.Errorf("%w: event %s actor %q does not match bound actor",
 					db.ErrFederationIngestValidation, event.EventUID, event.Actor)
@@ -345,6 +348,7 @@ func validateFederationProjectEvent(
 	spokeInstanceUID string,
 	event db.RemoteEvent,
 	knownIssueUIDs map[string]struct{},
+	allowLocalLifecycle ...bool,
 ) error {
 	if event.ProjectUID != projectUID {
 		return fmt.Errorf("%w: event %s targets project %s",
@@ -363,6 +367,18 @@ func validateFederationProjectEvent(
 			db.ErrFederationIngestValidation, event.Type)
 	}
 	payload := db.PayloadMap(event.Payload)
+	// Relay lifecycle records audit one instance's local archive/restore.
+	// The issue fold never applies them to another node's project catalog.
+	// Legacy direct-spoke ingress retains its original strict allowlist.
+	if len(allowLocalLifecycle) > 0 && allowLocalLifecycle[0] && (event.Type == "project.removed" || event.Type == "project.restored") {
+		if event.IssueUID != nil || event.RelatedIssueUID != nil {
+			return db.ErrFederationIngestValidation
+		}
+		if target, ok := db.StringValue(payload["project_uid"]); ok && target != projectUID {
+			return db.ErrFederationIngestValidation
+		}
+		return nil
+	}
 	if event.Type == "project.metadata_updated" {
 		if payloadProjectUID, ok := db.StringValue(payload["project_uid"]); ok && payloadProjectUID != projectUID {
 			return fmt.Errorf("%w: project metadata payload targets %s",

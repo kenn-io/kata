@@ -40,6 +40,17 @@ func (s *Store) AdoptProjectIntoFederation(
 		if project.DeletedAt != nil {
 			return fmt.Errorf("adopt project into federation: project %d is archived", params.ProjectID)
 		}
+		if params.RelayProtocolVersion != 0 {
+			if params.RelayProtocolVersion != db.RelayProtocolVersion {
+				return db.ErrFederationIngestValidation
+			}
+			if !db.ProjectAttributionVisible(ctx, project.UID) {
+				return db.ErrNotFound
+			}
+			if err := rejectRelayProjectLinksTx(ctx, tx, project.ID); err != nil {
+				return err
+			}
+		}
 		existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, params.ProjectID))
 		if err == nil {
@@ -204,11 +215,14 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND `+pgFederationPushEventTypeCo
 }
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
+	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`SELECT rewrite_project_uid_for_adoption($1, $2)`, projectID, projectUID); err != nil {
 		return fmt.Errorf("rewrite project uid for adoption: %w", mapSQLError(err, nil))
 	}
-	return nil
+	return restoreArtifactAdoptionTx(ctx, tx, projectUID)
 }
 
 func clearProjectClaimStateTx(ctx context.Context, tx *sql.Tx, projectID int64) error {

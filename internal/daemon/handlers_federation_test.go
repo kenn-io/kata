@@ -381,6 +381,10 @@ func TestFederationRebindHandlerRejectsUnknownOrDuplicateCatalog(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := openTestDB(t)
+			project, err := d.db.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			_, err = d.db.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
+			require.NoError(t, err)
 			fetchCalls := 0
 			ts := startTestServer(t, daemon.ServerConfig{
 				DB: d.db, StartedAt: d.now, FederationCatalog: tc.catalog,
@@ -391,7 +395,7 @@ func TestFederationRebindHandlerRejectsUnknownOrDuplicateCatalog(t *testing.T) {
 			})
 
 			resp, body := doReq(t, ts, http.MethodPost,
-				"/api/v1/federation/replicas/1/actions/rebind",
+				fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", project.ID),
 				map[string]any{"hub_catalog": "primary-hub"}, nil)
 
 			assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
@@ -2291,9 +2295,12 @@ func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Ordinary user credentials enroll a chosen project; wildcard grants require owner authority.
+	project, err := env.DB.CreateProject(t.Context(), "shared-project")
+	require.NoError(t, err)
 	request := map[string]any{
 		"spoke_instance_uid": federationTestSpokeUID,
-		"project_id":         nil,
+		"project_id":         project.ID,
 		"capabilities":       "pull",
 		"token":              "identity-enrollment-token",
 		"actor":              "mallory",
@@ -3821,8 +3828,8 @@ func TestCreateFederationReplicaRejoinNameMismatchIsActionable(t *testing.T) {
 }
 
 // TestLeaveFederationReplicaRouteMissingProjectReturns404 confirms the leave
-// route maps a missing project to 404 project_not_found (the storage layer now
-// surfaces db.ErrNotFound from the UID lookup) rather than a 500.
+// route returns the generic project-authorization 404 for a missing target,
+// without exposing handler-specific project metadata.
 func TestLeaveFederationReplicaRouteMissingProjectReturns404(t *testing.T) {
 	env := testenv.New(t)
 
@@ -3832,8 +3839,8 @@ func TestLeaveFederationReplicaRouteMissingProjectReturns404(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("want 404 for missing project, got %d body=%s", resp.StatusCode, raw)
 	}
-	if !strings.Contains(string(raw), "project_not_found") {
-		t.Fatalf("want project_not_found code in body, got %s", raw)
+	if !strings.Contains(string(raw), `"code":"not_found"`) {
+		t.Fatalf("want generic not_found code in body, got %s", raw)
 	}
 }
 

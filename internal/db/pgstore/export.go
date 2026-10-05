@@ -89,7 +89,7 @@ func (s *Store) ExportSequences(ctx context.Context) iter.Seq2[db.SequenceExport
 ('projects'),('project_aliases'),('recurrences'),('issue_sync_bindings'),('issues'),
 ('comments'),('links'),('import_mappings'),('events'),('purge_log'),
 ('project_purge_log'),('api_tokens'),('federation_quarantine'),
-('federation_enrollments'),('issue_claims'),('pending_claim_requests'),
+('federation_enrollments'),('federation_relay_outbox'),('issue_claims'),('pending_claim_requests'),
 ('external_root_bindings'),('external_field_mappings')
 )
 SELECT t.name, COALESCE(s.last_value,0)
@@ -629,18 +629,27 @@ func (s *Store) ExportFederationBindings(ctx context.Context, filter db.ExportFi
 	query, args := pgProjectFilter(`SELECT project_id, role, hub_url, hub_project_id,
        hub_project_uid, replay_horizon_event_id, pull_cursor_event_id, push_enabled,
        push_cursor_event_id, bound_actor, allow_insecure, enabled, created_at,
-       updated_at, last_sync_at FROM federation_bindings`, "project_id", filter)
+       updated_at, last_sync_at, relay_config FROM federation_bindings`, "project_id", filter)
 	query += ` ORDER BY project_id ASC`
 	return streamExportRows(ctx, s, "federation_bindings", query, args,
 		func(rows *sql.Rows) (db.FederationBindingExport, error) {
 			var record db.FederationBindingExport
+			var relayConfig *string
 			var pushEnabled, allowInsecure, enabled int
 			if err := rows.Scan(&record.ProjectID, &record.Role, &record.HubURL,
 				&record.HubProjectID, &record.HubProjectUID, &record.ReplayHorizonEventID,
 				&record.PullCursorEventID, &pushEnabled, &record.PushCursorEventID,
 				&record.Actor, &allowInsecure, &enabled, &record.CreatedAt,
-				&record.UpdatedAt, &record.LastSyncAt); err != nil {
+				&record.UpdatedAt, &record.LastSyncAt, &relayConfig); err != nil {
 				return db.FederationBindingExport{}, pgExportScanError("federation_binding", err)
+			}
+			var err error
+			record.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
+			if err != nil {
+				return db.FederationBindingExport{}, err
+			}
+			if filter.ProjectID != nil {
+				record.RelayConfig = nil
 			}
 			record.PushEnabled = pushEnabled == 1
 			record.AllowInsecure = allowInsecure == 1
@@ -696,7 +705,7 @@ func (s *Store) ExportFederationEnrollments(ctx context.Context, filter db.Expor
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
        bound_actor, allow_adoption_snapshot_authors, adoption_baseline_open,
        adoption_baseline_next_source_event_id, adoption_baseline_end_source_event_id,
-       created_at, updated_at, revoked_at FROM federation_enrollments`
+       created_at, updated_at, revoked_at,relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream FROM federation_enrollments`
 	var args []any
 	if filter.ProjectID != nil {
 		query += ` WHERE project_id=$1`
@@ -706,16 +715,17 @@ func (s *Store) ExportFederationEnrollments(ctx context.Context, filter db.Expor
 	return streamExportRows(ctx, s, "federation_enrollments", query, args,
 		func(rows *sql.Rows) (db.FederationEnrollmentExport, error) {
 			var record db.FederationEnrollmentExport
-			var allowAuthors, baselineOpen int
+			var allowAuthors, baselineOpen, serveDownstream int
 			if err := rows.Scan(&record.ID, &record.TokenHash, &record.SpokeInstanceUID,
 				&record.ProjectID, &record.Capabilities, &record.Actor, &allowAuthors,
 				&baselineOpen, &record.AdoptionBaselineNextSourceEventID,
 				&record.AdoptionBaselineEndSourceEventID, &record.CreatedAt,
-				&record.UpdatedAt, &record.RevokedAt); err != nil {
+				&record.UpdatedAt, &record.RevokedAt, &record.RelayBindingUID, &record.RelayProtocolVersion, &record.ParentTokenID, &record.RelayResetEpoch, &serveDownstream); err != nil {
 				return db.FederationEnrollmentExport{}, pgExportScanError("federation_enrollment", err)
 			}
 			record.AllowAdoptionSnapshotAuthors = allowAuthors == 1
 			record.AdoptionBaselineOpen = baselineOpen == 1
+			record.RelayServeDownstream = serveDownstream == 1
 			return record, nil
 		})
 }

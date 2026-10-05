@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-26
+last_edited: 2026-10-04
 ---
 
 # Web UI
@@ -135,6 +135,19 @@ Use `kata ui --daemon <name>` when you want to open one configured target
 directly instead. See [Configuration](../reference/configuration.md#daemon-config)
 for catalog settings and [Remote daemon](../operations/remote-daemon.md) for
 network, authentication, and proxy setup.
+
+## Check the current connection
+
+The yellow summary at the top shows the active hub, account, and credential
+status. It stays visible while you navigate and wraps on narrow screens.
+The TUI shows the same information in its existing header row.
+
+Account-bound credentials show their canonical actor. A direct connection
+without an account identity shows **Local connection**. Switching daemons or
+losing current authority clears the previous account while reconnection is
+pending. Finite credentials show **Credential expired** when their lifetime
+ends. These summaries never show token values and do not load the
+administrator credential inventory.
 
 ## Audit provisioned credentials
 

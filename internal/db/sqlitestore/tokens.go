@@ -92,6 +92,7 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 	if err := db.ValidateTokenActor(p.Actor); err != nil {
 		return db.APIToken{}, db.Event{}, err
 	}
+	p.Actor = strings.TrimSpace(p.Actor)
 	if strings.TrimSpace(p.AdminActor) == "" {
 		return db.APIToken{}, db.Event{}, fmt.Errorf("admin actor must be non-empty")
 	}
@@ -105,6 +106,11 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 	if err := db.ValidateAPITokenGrant(p.Scope, p.ExpiresAt); err != nil {
 		return db.APIToken{}, db.Event{}, err
 	}
+	initialTeams, err := db.NormalizeInitialTeams(p.TeamUIDs)
+	if err != nil {
+		return db.APIToken{}, db.Event{}, err
+	}
+	p.TeamUIDs = initialTeams
 	if p.ExpiresAt != nil {
 		expiresAt := p.ExpiresAt.UTC()
 		p.ExpiresAt = &expiresAt
@@ -118,6 +124,12 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 		return db.APIToken{}, db.Event{}, fmt.Errorf("begin create api token: %w", err)
 	}
 	defer rollbackUnlessCommitted(tx)
+
+	if len(initialTeams) > 0 {
+		if err := lockProjectAccess(ctx, tx); err != nil {
+			return db.APIToken{}, db.Event{}, err
+		}
+	}
 
 	hash := tokenHash(p.PlaintextToken)
 	var scopeKind, scopeProjectUID, scopeRootIssueUID any
@@ -143,7 +155,27 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 	if err != nil {
 		return db.APIToken{}, db.Event{}, err
 	}
+
+	for _, teamUID := range initialTeams {
+		result, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES(?,?) ON CONFLICT DO NOTHING`, teamUID, p.Actor)
+		if err != nil {
+			return db.APIToken{}, db.Event{}, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return db.APIToken{}, db.Event{}, err
+		}
+		if changed > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE teams SET revision=revision+1 WHERE uid=?`, teamUID); err != nil {
+				return db.APIToken{}, db.Event{}, err
+			}
+			if err := bumpProjectAccess(ctx, tx); err != nil {
+				return db.APIToken{}, db.Event{}, err
+			}
+		}
+	}
 	payload, err := json.Marshal(db.ReplayTokenCreated{
+		TeamUIDs:    initialTeams,
 		TokenID:     tok.ID,
 		TokenHash:   tok.TokenHash,
 		TargetActor: tok.Actor,
@@ -356,7 +388,7 @@ func scanAPIToken(r rowScanner) (db.APIToken, error) {
 	if err != nil {
 		return db.APIToken{}, fmt.Errorf("scan api token: %w", err)
 	}
-	if scopeKind.Valid || scopeProjectUID.Valid || scopeRootIssueUID.Valid || tok.ExpiresAt != nil {
+	if scopeKind.Valid || scopeProjectUID.Valid || scopeRootIssueUID.Valid {
 		tok.Scope = &db.APITokenScope{
 			Kind:         db.APITokenScopeKind(scopeKind.String),
 			ProjectUID:   scopeProjectUID.String,

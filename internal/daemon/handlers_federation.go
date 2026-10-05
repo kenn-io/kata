@@ -23,6 +23,10 @@ import (
 
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	registerFederationSigningHandlers(humaAPI, cfg)
+	registerRelayHandlers(humaAPI, cfg)
+	registerFederationBridgeConnect(humaAPI, cfg)
+	registerFederationBridgeStatus(humaAPI, cfg)
+	registerFederationBridgeDisconnect(humaAPI, cfg)
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "enableProjectFederation",
 		Method:      "POST",
@@ -67,6 +71,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := addFederationEmbeddingStatus(ctx, cfg, &body); err != nil {
+			return nil, err
+		}
 		return &api.FederationStatusResponse{Body: body}, nil
 	})
 
@@ -77,6 +84,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.ProjectFederationStatusRequest) (*api.FederationStatusResponse, error) {
 		body, err := federationStatusBody(ctx, cfg.DB, cfg.federationCredentialStore(), &in.ProjectID, false)
 		if err != nil {
+			return nil, err
+		}
+		if err := addFederationEmbeddingStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
 		return &api.FederationStatusResponse{Body: body}, nil
@@ -103,6 +113,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(http.StatusNotFound, "federation_quarantine_not_found", "federation quarantine not found", "", nil)
+		}
+		if errors.Is(err, db.ErrRelayQuarantineSkipUnsupported) {
+			return nil, api.NewError(http.StatusConflict, "federation_quarantine_skip_unsupported",
+				"relay quarantine requires retry after compatible recovery; skip is unsupported", "", nil)
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -134,7 +148,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if errors.Is(err, db.ErrFederationQuarantineRetryUnsupportedDirection) {
 			return nil, api.NewError(http.StatusConflict, "federation_quarantine_retry_unsupported",
-				"federation quarantine retry only supports push quarantines", "", nil)
+				"legacy federation quarantine retry only supports push quarantines", "", nil)
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -148,10 +162,29 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/federation/metadata",
 	}, func(ctx context.Context, in *api.FederationProjectMetadataRequest) (*api.ProjectFederationResponse, error) {
 		var err error
-		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+		var principal federationPrincipal
+		ctx, principal, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
 			federationTransportOperation("getFederationProjectMetadata"))
 		if err != nil {
 			return nil, err
+		}
+		if principal.RelayProtocolVersion == db.RelayProtocolVersion {
+			body, err := buildProjectFederationBody(ctx, cfg.DB, in.ProjectID, false)
+			if err != nil {
+				return nil, err
+			}
+			handshake, err := relayHandshake(ctx, cfg.DB, in.ProjectID, principal.SpokeInstanceUID, principal.RelayServeDownstream)
+			if err != nil {
+				return nil, err
+			}
+			handshake.BindingUID = principal.RelayBindingUID
+			handshake.ResetEpoch = principal.RelayResetEpoch
+			handshake.ResetRequired, err = relayEnrollmentNeedsReset(ctx, cfg.DB, handshake.BindingUID)
+			if err != nil {
+				return nil, relayTransportError(err)
+			}
+			body.Relay = handshake
+			return &api.ProjectFederationResponse{Body: body}, nil
 		}
 		body, err := enabledHubFederationBody(ctx, cfg.DB, in.ProjectID)
 		if err != nil {
@@ -167,6 +200,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Summary:     "Create a federation enrollment",
 		Description: "Creates a hub-side transport grant. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.",
 	}, func(ctx context.Context, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
+		if in.Body.Relay != nil {
+			return createRelayEnrollment(ctx, cfg, in)
+		}
 		if !katauid.Valid(in.Body.SpokeInstanceUID) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_instance_uid must be a valid instance UID", "", nil)
 		}
@@ -176,6 +212,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.AllowAdoptionSnapshotAuthors && in.Body.ProjectID == nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation",
 				"allow_adoption_snapshot_authors requires project_id", "", nil)
+		}
+		if in.Body.ProjectID == nil && !projectOwnerAuthority(ctx) {
+			return nil, projectAccessDenied()
 		}
 		var projectIDs []int64
 		if in.Body.ProjectID != nil {
@@ -483,6 +522,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if binding.Role != db.FederationRoleSpoke {
 				return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
 			}
+			if lifecycle, ok := cfg.DB.(db.RelayLifecycleStore); ok {
+				if err := lifecycle.ValidateRelayLifecycle(ctx, in.ProjectID); err != nil {
+					return nil, federationReplicaAPIError(err)
+				}
+			} else if binding.RelayConfig != nil {
+				return nil, api.NewError(http.StatusConflict, "federation_lifecycle_unavailable", "relay lifecycle preflight is unavailable", "", nil)
+			}
 		} else if !errors.Is(bErr, db.ErrNotFound) {
 			return nil, internalAPIError(bErr)
 		}
@@ -597,7 +643,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				// the project fill below uses ProjectByID, which includes
 				// archived rows.
 			case err != nil:
-				return nil, internalAPIError(err)
+				return nil, federationReplicaAPIError(err)
 			default:
 				cfg.Publish().Event(project.ID, *evt)
 				body.Project = dbProjectToOut(project)
@@ -811,6 +857,9 @@ func federationIngestError(err error) error {
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByDownstream) {
+		return api.NewError(http.StatusConflict, "federation_lifecycle_blocked", "federation change requires resolved deliveries and detached downstream enrollments", "sync retained work through root acceptance and explicitly revoke or detach descendants, then retry", nil)
+	}
 	if errors.Is(err, db.ErrFederationNotSpoke) {
 		return api.NewError(
 			http.StatusConflict, "not_a_spoke",
@@ -1244,6 +1293,10 @@ func enabledHubFederationBody(ctx context.Context, store db.Storage, projectID i
 }
 
 func projectFederationBody(ctx context.Context, store db.Storage, projectID int64) (api.ProjectFederationBody, error) {
+	return buildProjectFederationBody(ctx, store, projectID, true)
+}
+
+func buildProjectFederationBody(ctx context.Context, store db.Storage, projectID int64, refreshBaseline bool) (api.ProjectFederationBody, error) {
 	project, err := activeProjectByID(ctx, store, projectID)
 	if err != nil {
 		return api.ProjectFederationBody{}, err
@@ -1252,7 +1305,7 @@ func projectFederationBody(ctx context.Context, store db.Storage, projectID int6
 	if err != nil {
 		return api.ProjectFederationBody{}, federationError(err)
 	}
-	if binding.Role == db.FederationRoleHub && binding.Enabled {
+	if refreshBaseline && binding.Role == db.FederationRoleHub && binding.Enabled {
 		resetTo, err := store.PurgeResetCheck(ctx, binding.ReplayHorizonEventID, projectID)
 		if err != nil {
 			return api.ProjectFederationBody{}, internalAPIError(err)

@@ -742,6 +742,12 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
+	Author              string    `json:"author,omitempty"`
+	AccountableActor    *string   `json:"accountable_actor,omitempty"`
+	SourceActor         *string   `json:"source_actor,omitempty"`
+	AuthorityUID        *string   `json:"authority_uid,omitempty"`
+	Teammate            *string   `json:"teammate,omitempty"`
+	Verification        *string   `json:"verification,omitempty"`
 	WebURL              *string   `json:"web_url,omitempty" jsonschema:"Browser URL for this issue; use this URL when linking to it."`
 	UID                 string    `json:"uid"`
 	Ref                 string    `json:"ref"`
@@ -803,11 +809,15 @@ type LabelsOutput struct {
 
 // CommentSummary is a bounded comment representation.
 type CommentSummary struct {
-	Teammate  string `json:"teammate,omitempty"`
-	UID       string `json:"uid"`
-	Author    string `json:"author"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"`
+	AccountableActor *string `json:"accountable_actor,omitempty"`
+	SourceActor      *string `json:"source_actor,omitempty"`
+	AuthorityUID     *string `json:"authority_uid,omitempty"`
+	Verification     *string `json:"verification,omitempty"`
+	Teammate         string  `json:"teammate,omitempty"`
+	UID              string  `json:"uid"`
+	Author           string  `json:"author"`
+	Body             string  `json:"body"`
+	CreatedAt        string  `json:"created_at"`
 }
 
 // LinkSummary identifies a relationship endpoint.

@@ -158,6 +158,7 @@ func newRootCmd() *cobra.Command {
 		newOpenAPICmd(),
 		newProjectsCmd(),
 		newTokensCmd(),
+		newTeamsCmd(),
 		newUICmd(),
 		newTUICmd(),
 		newUpdateCmd(),
