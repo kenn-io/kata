@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kit/atomicfile"
 )
 
 // ErrCutoverInProgress means a previous JSONL cutover left temp files behind.
@@ -61,11 +62,11 @@ func AutoCutover(ctx context.Context, path string) error {
 	}
 
 	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.Rename(path, backup); err != nil {
+	if err := atomicfile.Replace(path, backup); err != nil {
 		return fmt.Errorf("backup source db: %w", err)
 	}
-	if err := os.Rename(tmpDB, path); err != nil {
-		_ = os.Rename(backup, path)
+	if err := atomicfile.Replace(tmpDB, path); err != nil {
+		_ = atomicfile.Replace(backup, path)
 		return fmt.Errorf("install cutover db: %w", err)
 	}
 	cleanupTemps = false
