@@ -498,6 +498,7 @@ func TestSameOriginRedirectFinalBodyCloseStopsRequestBudget(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	select {
 	case <-state.ctx.Done():
+		require.ErrorIs(t, state.ctx.Err(), context.Canceled, "the 1s client timeout ended the budget, not the body close")
 	case <-time.After(5 * time.Second):
 		t.Fatal("request budget did not stop when final response body closed")
 	}
