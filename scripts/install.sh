@@ -7,6 +7,7 @@ set -euo pipefail
 REPO="kenn-io/kata"
 BINARY_NAME="kata"
 KATA_INSTALL_TMPDIR=""
+KATA_DOWNLOAD_PID=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -69,55 +70,112 @@ Check your network connection and run the installer again, install with Homebrew
   done
 }
 
+# The limits live in arrays, not only in wrapper functions, so a background
+# download can start curl or wget itself and its PID can be stopped on exit.
+# A transfer slower than 1 KB/s for STALL_SECONDS counts as stalled.
+CURL_LIMITS=(--connect-timeout "$CONNECT_TIMEOUT" --speed-limit 1024 --speed-time "$STALL_SECONDS")
+WGET_LIMITS=()
+
 curl_limited() {
-  # A transfer slower than 1 KB/s for STALL_SECONDS counts as stalled.
-  curl --connect-timeout "$CONNECT_TIMEOUT" --speed-limit 1024 --speed-time "$STALL_SECONDS" "$@"
+  curl "${CURL_LIMITS[@]}" "$@"
 }
 
 is_gnu_wget() {
   [[ "$(wget --version 2>/dev/null)" == *"GNU Wget"* ]]
 }
 
-wget_limited() {
+set_wget_limits() {
   if is_gnu_wget; then
-    wget --dns-timeout="$CONNECT_TIMEOUT" --connect-timeout="$CONNECT_TIMEOUT" \
-      --read-timeout="$STALL_SECONDS" --tries=1 "$@"
+    WGET_LIMITS=(--dns-timeout="$CONNECT_TIMEOUT" --connect-timeout="$CONNECT_TIMEOUT"
+      --read-timeout="$STALL_SECONDS" --tries=1)
   else
     # BusyBox wget has one timeout that covers connecting and each read.
-    wget -T "$STALL_SECONDS" "$@"
+    WGET_LIMITS=(-T "$STALL_SECONDS")
   fi
 }
 
+wget_limited() {
+  set_wget_limits
+  wget "${WGET_LIMITS[@]}" "$@"
+}
+
+file_size() {
+  if [[ -f "$1" ]]; then
+    wc -c <"$1" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
+# Print the last Content-Length in a header dump, or 0 before the final
+# response arrives. Redirect responses come first and may carry their own.
+content_length() {
+  awk 'tolower($1)=="content-length:" {n=$2+0} END {print n+0}' "$1"
+}
+
+print_progress() {
+  local received="$1"
+  local total="$2"
+  awk -v got="$received" -v total="$total" 'BEGIN {
+    if (total > 0) printf "\r  %.1f of %.1f MB (%d%%)\033[K", got/1048576, total/1048576, got*100/total
+    else printf "\r  %.1f MB\033[K", got/1048576
+  }' >&2
+}
+
+# One download attempt that redraws a single progress line on stderr. The
+# clients' own progress bars animate noise until they learn the file size.
+# wget gives no header dump here, so its line shows bytes received only.
+fetch_with_progress() {
+  local url="$1"
+  local output="$2"
+  local headers="${output}.headers"
+  local errors="${output}.errors"
+  : >"$headers"
+  : >"$errors"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl "${CURL_LIMITS[@]}" -fsSL -D "$headers" -o "$output" "$url" 2>"$errors" &
+  else
+    set_wget_limits
+    wget "${WGET_LIMITS[@]}" -q -O "$output" "$url" 2>"$errors" &
+  fi
+  KATA_DOWNLOAD_PID=$!
+
+  while kill -0 "$KATA_DOWNLOAD_PID" 2>/dev/null; do
+    print_progress "$(file_size "$output")" "$(content_length "$headers")"
+    sleep 0.5
+  done
+  local status=0
+  wait "$KATA_DOWNLOAD_PID" || status=$?
+  KATA_DOWNLOAD_PID=""
+
+  if ((status == 0)); then
+    print_progress "$(file_size "$output")" "$(content_length "$headers")"
+    printf '\n' >&2
+  else
+    printf '\r\033[K' >&2
+    cat "$errors" >&2
+  fi
+  rm -f "$headers" "$errors"
+  return "$status"
+}
+
 # download URL OUTPUT [progress]
-# With "progress", show a progress bar when stderr is a terminal. It still is
+# With "progress", show a progress line when stderr is a terminal. It still is
 # under `curl ... | bash`, where only stdin is the pipe.
 download() {
   local url="$1"
   local output="$2"
-  local show_progress=false
-  if [[ "${3-}" == "progress" && -t 2 ]]; then
-    show_progress=true
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    error "Neither curl nor wget found"
   fi
 
-  local args
-  if command -v curl >/dev/null 2>&1; then
-    args=(-fL -o "$output")
-    if $show_progress; then
-      args+=(--progress-bar)
-    else
-      args+=(-sS)
-    fi
-    retry "$url" curl_limited "${args[@]}" "$url"
-  elif command -v wget >/dev/null 2>&1; then
-    args=(-O "$output")
-    if ! $show_progress; then
-      args+=(-q)
-    elif is_gnu_wget; then
-      args+=(-q --show-progress)
-    fi
-    retry "$url" wget_limited "${args[@]}" "$url"
+  if [[ "${3-}" == "progress" && -t 2 ]]; then
+    retry "$url" fetch_with_progress "$url" "$output"
+  elif command -v curl >/dev/null 2>&1; then
+    retry "$url" curl_limited -fsSL -o "$output" "$url"
   else
-    error "Neither curl nor wget found"
+    retry "$url" wget_limited -q -O "$output" "$url"
   fi
 }
 
@@ -231,6 +289,15 @@ verify_release_binary() {
   fi
 }
 
+# A background download ignores Ctrl-C because non-interactive bash starts
+# background jobs with SIGINT ignored, so stop it here.
+cleanup_install() {
+  if [[ -n "$KATA_DOWNLOAD_PID" ]]; then
+    kill "$KATA_DOWNLOAD_PID" 2>/dev/null || true
+  fi
+  rm -rf "$KATA_INSTALL_TMPDIR"
+}
+
 install_from_release() {
   local os="$1"
   local arch="$2"
@@ -255,7 +322,7 @@ install_from_release() {
   local tmpdir
   tmpdir="$(mktemp -d)"
   KATA_INSTALL_TMPDIR="$tmpdir"
-  trap 'rm -rf "$KATA_INSTALL_TMPDIR"' EXIT
+  trap cleanup_install EXIT
 
   local archive_path="$tmpdir/release.tar.gz"
   if [[ "$os" == "windows" ]]; then
