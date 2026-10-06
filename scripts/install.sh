@@ -113,18 +113,26 @@ content_length() {
   awk 'tolower($1)=="content-length:" {n=$2+0} END {print n+0}' "$1"
 }
 
+# Draw a curl-style bar once the size is known. Before the first byte arrives
+# draw nothing; if the server sends no size, show megabytes received.
 print_progress() {
   local received="$1"
   local total="$2"
   awk -v got="$received" -v total="$total" 'BEGIN {
-    if (total > 0) printf "\r  %.1f of %.1f MB (%d%%)\033[K", got/1048576, total/1048576, got*100/total
-    else printf "\r  %.1f MB\033[K", got/1048576
+    if (total > 0) {
+      width = 50
+      bar = ""
+      for (i = 0; i < int(got * width / total); i++) bar = bar "#"
+      printf "\r%-" width "s %5.1f%%\033[K", bar, got * 100 / total
+    } else if (got > 0) {
+      printf "\r%.1f MB\033[K", got / 1048576
+    }
   }' >&2
 }
 
-# One download attempt that redraws a single progress line on stderr. The
-# clients' own progress bars animate noise until they learn the file size.
-# wget gives no header dump here, so its line shows bytes received only.
+# One download attempt that redraws a single progress line on stderr. curl's
+# own bar animates `#=#=-#` noise until it learns the file size, so the script
+# draws the bar itself from the response headers and the bytes on disk.
 fetch_with_progress() {
   local url="$1"
   local output="$2"
@@ -136,8 +144,15 @@ fetch_with_progress() {
   if command -v curl >/dev/null 2>&1; then
     curl "${CURL_LIMITS[@]}" -fsSL -D "$headers" -o "$output" "$url" 2>"$errors" &
   else
+    # wget -S writes the response headers, indented, to stderr along with
+    # any error. GNU wget's -q would hide the headers too, so it gets -nv.
     set_wget_limits
-    wget "${WGET_LIMITS[@]}" -q -O "$output" "$url" 2>"$errors" &
+    local quiet=-q
+    if is_gnu_wget; then
+      quiet=-nv
+    fi
+    wget "${WGET_LIMITS[@]}" "$quiet" -S -O "$output" "$url" 2>"$headers" &
+    errors="$headers"
   fi
   KATA_DOWNLOAD_PID=$!
 
@@ -154,7 +169,8 @@ fetch_with_progress() {
     printf '\n' >&2
   else
     printf '\r\033[K' >&2
-    cat "$errors" >&2
+    # Drop wget's indented header lines and keep the error.
+    awk '!/^ /' "$errors" >&2
   fi
   rm -f "$headers" "$errors"
   return "$status"
