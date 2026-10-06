@@ -277,10 +277,14 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
 	var connects atomic.Int32
 	var secondHeader atomic.Value
+	secondConnected := make(chan struct{})
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		n := connects.Add(1)
 		if n >= 2 {
 			secondHeader.Store(r.Header.Get("Last-Event-ID"))
+			if n == 2 {
+				close(secondConnected)
+			}
 			// Hold so the test has time to see the header.
 			<-r.Context().Done()
 			return
@@ -314,20 +318,11 @@ Reconnect:
 	// Wait for the SSE goroutine to reconnect (second connect arrives
 	// after the 1s reconnect backoff). The test deadline must outlast
 	// that — we use 4s for slack.
-	deadline = time.After(4 * time.Second)
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case <-deadline:
-			t.Fatal("second connect never arrived")
-		case <-tick.C:
-			if connects.Load() >= 2 {
-				goto Done
-			}
-		}
+	select {
+	case <-time.After(4 * time.Second):
+		t.Fatal("second connect never arrived")
+	case <-secondConnected:
 	}
-Done:
 	cancel()
 	<-done
 	// The second connect carries Last-Event-ID: 5.
