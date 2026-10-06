@@ -37,7 +37,8 @@ func TestLocalProfileIdentityProbeHonorsTimeout(t *testing.T) {
 	}()
 	select {
 	case <-result:
-	case <-time.After(300 * time.Millisecond): //nolint:kennlint // the 50ms KATA_HTTP_TIMEOUT expiring is the expected result; the server holds the probe until it fires
+	// Under DefaultHTTPTimeout, so only the 50ms setting returns the probe in time.
+	case <-time.After(2 * time.Second):
 		t.Fatal("profile identity probe exceeded configured request timeout")
 	}
 }

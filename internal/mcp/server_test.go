@@ -348,7 +348,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 	t.Run("rate", func(t *testing.T) {
 		var calls atomic.Int64
-		handler := toolAdmissionMiddleware(rate.NewLimiter(1, 1), make(chan struct{}, 1))(
+		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), make(chan struct{}, 1))(
 			func(context.Context, string, sdkmcp.Request) (sdkmcp.Result, error) {
 				calls.Add(1)
 				return nil, nil
