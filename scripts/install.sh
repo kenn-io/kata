@@ -46,31 +46,105 @@ find_install_dir() {
   fi
 }
 
+# Every network request gets the same limits: give up on a connection after
+# CONNECT_TIMEOUT seconds, abort a transfer that stalls for STALL_SECONDS, and
+# try it NETWORK_ATTEMPTS times before failing.
+CONNECT_TIMEOUT=15
+STALL_SECONDS=30
+NETWORK_ATTEMPTS=3
+RETRY_DELAY=2
+
+retry() {
+  local url="$1"
+  shift
+  local attempt
+  for ((attempt = 1; ; attempt++)); do
+    "$@" && return 0
+    if ((attempt == NETWORK_ATTEMPTS)); then
+      error "Could not download ${url} after ${NETWORK_ATTEMPTS} attempts.
+Check your network connection and run the installer again, install with Homebrew (brew install kata), or download the release manually from https://github.com/${REPO}/releases"
+    fi
+    warn "Could not download ${url}; retrying in ${RETRY_DELAY}s (attempt $((attempt + 1)) of ${NETWORK_ATTEMPTS})..." >&2
+    sleep "$RETRY_DELAY"
+  done
+}
+
+curl_limited() {
+  # A transfer slower than 1 KB/s for STALL_SECONDS counts as stalled.
+  curl --connect-timeout "$CONNECT_TIMEOUT" --speed-limit 1024 --speed-time "$STALL_SECONDS" "$@"
+}
+
+is_gnu_wget() {
+  [[ "$(wget --version 2>/dev/null)" == *"GNU Wget"* ]]
+}
+
+wget_limited() {
+  if is_gnu_wget; then
+    wget --dns-timeout="$CONNECT_TIMEOUT" --connect-timeout="$CONNECT_TIMEOUT" \
+      --read-timeout="$STALL_SECONDS" --tries=1 "$@"
+  else
+    # BusyBox wget has one timeout that covers connecting and each read.
+    wget -T "$STALL_SECONDS" "$@"
+  fi
+}
+
+# download URL OUTPUT [progress]
+# With "progress", show a progress bar when stderr is a terminal. It still is
+# under `curl ... | bash`, where only stdin is the pipe.
 download() {
   local url="$1"
   local output="$2"
+  local show_progress=false
+  if [[ "${3-}" == "progress" && -t 2 ]]; then
+    show_progress=true
+  fi
+
+  local args
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$output"
+    args=(-fL -o "$output")
+    if $show_progress; then
+      args+=(--progress-bar)
+    else
+      args+=(-sS)
+    fi
+    retry "$url" curl_limited "${args[@]}" "$url"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O "$output"
+    args=(-O "$output")
+    if ! $show_progress; then
+      args+=(-q)
+    elif is_gnu_wget; then
+      args+=(-q --show-progress)
+    fi
+    retry "$url" wget_limited "${args[@]}" "$url"
   else
     error "Neither curl nor wget found"
   fi
 }
 
-get_latest_version() {
-  local url="https://github.com/${REPO}/releases/latest"
-  local final_url=""
+# Print the URL a redirect chain ends at. A failed attempt prints nothing, so
+# retry's caller never captures output from an earlier attempt.
+resolve_redirect() {
+  local url="$1"
+  local final_url
   if command -v curl >/dev/null 2>&1; then
-    final_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url")" || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    final_url="$(wget --spider -S "$url" 2>&1 \
+    final_url="$(curl_limited -fsSLI -o /dev/null -w '%{url_effective}' "$url")" || return 1
+  else
+    final_url="$(wget_limited --spider -S "$url" 2>&1)" || return 1
+    final_url="$(printf '%s\n' "$final_url" \
       | awk 'tolower($1)=="location:" {print $2}' \
       | tail -1 \
-      | tr -d '\r\n')" || return 1
-  else
+      | tr -d '\r\n')"
+  fi
+  printf '%s' "$final_url"
+}
+
+get_latest_version() {
+  local url="https://github.com/${REPO}/releases/latest"
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     return 1
   fi
+  local final_url
+  final_url="$(retry "$url" resolve_redirect "$url")" || return 1
 
   case "$final_url" in
     */releases/tag/*) echo "${final_url##*/releases/tag/}" ;;
@@ -189,7 +263,7 @@ install_from_release() {
   fi
 
   info "Downloading ${filename}..."
-  download "${base_url}/${filename}" "$archive_path"
+  download "${base_url}/${filename}" "$archive_path" progress
 
   download "${base_url}/SHA256SUMS" "$tmpdir/SHA256SUMS"
   verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"
