@@ -266,7 +266,7 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 	select {
 	case msg := <-ch:
 		t.Fatalf("expected no message, got %T = %+v", msg, msg)
-	case <-time.After(50 * time.Millisecond):
+	default:
 		// Expected: no message on the channel.
 	}
 }
@@ -315,11 +315,13 @@ Reconnect:
 	// after the 1s reconnect backoff). The test deadline must outlast
 	// that — we use 4s for slack.
 	deadline = time.After(4 * time.Second)
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		select {
 		case <-deadline:
 			t.Fatal("second connect never arrived")
-		case <-time.After(50 * time.Millisecond):
+		case <-tick.C:
 			if connects.Load() >= 2 {
 				goto Done
 			}

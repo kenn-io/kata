@@ -388,7 +388,7 @@ func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
 	select {
 	case err := <-serveDone:
 		t.Fatalf("server returned before its in-flight handler completed: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; release holds the in-flight handler, so Serve must not return
 	}
 	close(release)
 	require.NoError(t, <-serveDone)

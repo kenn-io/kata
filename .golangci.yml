@@ -25,7 +25,7 @@ linters:
     custom:
       kennlint:
         type: module
-        description: Kit's sleep-in-tests analyzer.
+        description: Kit's sleep-in-tests and sub-second test deadline analyzers.
         original-url: go.kenn.io/kit/lint
         settings:
           sleeptest:

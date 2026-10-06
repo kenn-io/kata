@@ -3412,7 +3412,7 @@ func TestLeaveFederationReplicaWaitsForEnsureCredentialPersistence(t *testing.T)
 	select {
 	case leave = <-leaveDone:
 		returnedBeforePersistence = true
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; releaseStore holds credential persistence, so leave must not return
 	}
 	credentials.releaseStore()
 	require.NoError(t, <-ensureDone)

@@ -128,7 +128,7 @@ func TestPostgresFederationRunnerRecoversAfterLeaseSessionLoss(t *testing.T) {
 		require.FailNow(t, "former leader exited instead of rejoining standby", runErr.Error())
 	case runErr := <-secondDone:
 		require.FailNow(t, "standby exited during lease failover", runErr.Error())
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond): //nolint:kennlint // absence window; neither runner may exit during lease failover before cancel
 	}
 
 	cancelFirst()

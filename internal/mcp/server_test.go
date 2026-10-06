@@ -356,7 +356,7 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 		)
 		_, err := handler(t.Context(), "tools/call", nil)
 		require.NoError(t, err)
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the spent rate permit makes the limiter refuse to wait past it
 		defer cancel()
 		_, err = handler(ctx, "tools/call", nil)
 		require.ErrorContains(t, err, "deadline")
@@ -381,7 +381,7 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 			firstDone <- err
 		}()
 		<-started
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the only concurrency slot until it fires
 		defer cancel()
 		_, err := handler(ctx, "tools/call", nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -392,18 +392,19 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 	t.Run("concurrency wait does not consume rate permit", func(t *testing.T) {
 		concurrent := make(chan struct{}, 1)
 		concurrent <- struct{}{}
-		handler := toolAdmissionMiddleware(rate.NewLimiter(1, 1), concurrent)(
+		// An hour-long refill makes a spent permit fail the admitted call at once.
+		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), concurrent)(
 			func(context.Context, string, sdkmcp.Request) (sdkmcp.Result, error) {
 				return nil, nil
 			},
 		)
-		blockedContext, cancelBlocked := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		blockedContext, cancelBlocked := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the filled concurrency channel blocks admission until it fires
 		defer cancelBlocked()
 		_, err := handler(blockedContext, "tools/call", nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		<-concurrent
 
-		admittedContext, cancelAdmitted := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		admittedContext, cancelAdmitted := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancelAdmitted()
 		_, err = handler(admittedContext, "tools/call", nil)
 		require.NoError(t, err)

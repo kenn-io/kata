@@ -23,7 +23,7 @@ func TestEmbeddingCredentialFIFOIsRejectedWithoutBlocking(t *testing.T) {
 		if c.Key != "" || !strings.Contains(c.Reason, "regular file") {
 			t.Fatalf("unexpected reason %q", c.Reason)
 		}
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		// Release an implementation that blocked in open before failing the test.
 		f, err := os.OpenFile(path, os.O_RDWR, 0600) //nolint:gosec // G304: test-owned FIFO under t.TempDir.
 		if err != nil {
@@ -62,7 +62,7 @@ func TestOpenEmbeddingCredentialFileFIFOIsNonblocking(t *testing.T) {
 		if info.Mode().IsRegular() {
 			t.Fatal("FIFO opened as a regular file")
 		}
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		// Release an implementation that opened the FIFO in blocking mode.
 		writer, err := os.OpenFile(path, os.O_RDWR, 0600) //nolint:gosec // G304: test-owned FIFO under t.TempDir.
 		if err != nil {

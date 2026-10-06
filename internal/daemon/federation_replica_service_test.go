@@ -2281,7 +2281,7 @@ func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
 	select {
 	case call := <-prepared:
 		t.Fatalf("prepare returned before the held hub operation drained: %v", call.err)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the held hub operation keeps preparation in its drain wait
 	}
 
 	for range churnCount {
