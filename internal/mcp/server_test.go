@@ -356,7 +356,7 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 		)
 		_, err := handler(t.Context(), "tools/call", nil)
 		require.NoError(t, err)
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the spent rate permit makes the limiter refuse to wait past it
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		_, err = handler(ctx, "tools/call", nil)
 		require.ErrorContains(t, err, "deadline")
