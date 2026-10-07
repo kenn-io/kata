@@ -58,7 +58,8 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 	}
 	// Probe unsupported hosts before forcing a backfill REST pass. Otherwise
 	// their permanently pending marker would force full issue reads every run.
-	preflightParents := binding.LastCursorAt == nil || ghConfig.NeedsParentLinkBackfill()
+	filteredBootstrap := binding.LastCursorAt == nil && cutoff != nil
+	preflightParents := !filteredBootstrap && (binding.LastCursorAt == nil || ghConfig.NeedsParentLinkBackfill())
 	var parentData ParentData
 	if preflightParents {
 		reportProgress(ctx, "parents", 0, 0)
@@ -97,18 +98,32 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 				numbers = append(numbers, issue.Number)
 			}
 		}
-		childrenOf, err := r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
-		if err != nil {
-			return issuesync.Prepared{Binding: binding}, err
+		request := ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers}
+		if filteredBootstrap {
+			covered, err := r.selectedIssuesCoverImports(ctx, binding, issues)
+			if err != nil {
+				return issuesync.Prepared{Binding: binding}, err
+			}
+			if !covered {
+				// Config changes can clear the cursor while keeping old imports.
+				// Their parent-only changes still need authoritative coverage.
+				request = ParentRequest{}
+			}
+		} else {
+			request.ChildrenOf, err = r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
+			if err != nil {
+				return issuesync.Prepared{Binding: binding}, err
+			}
 		}
-		reportProgress(ctx, "parents", 0, len(numbers))
+		reportProgress(ctx, "parents", 0, len(request.IssueNumbers))
 		// Relationship changes do not update updatedAt. Event discovery uses the
 		// cursor overlap even if the issue cutoff excludes an already imported child.
-		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers, ChildrenOf: childrenOf})
+		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), request)
 		if err != nil {
 			return issuesync.Prepared{Binding: binding}, err
 		}
 	}
+	parentLinkBackfill = ghConfig.NeedsParentLinkBackfill() && parentData.Scan == ParentScanComplete
 	comments, err := r.fetchComments(ctx, fetcher, ghConfig, issues)
 	if err != nil {
 		return issuesync.Prepared{Binding: binding}, err
@@ -156,6 +171,32 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		}
 	}
 	return prepared, nil
+}
+
+// selectedIssuesCoverImports permits a scoped bootstrap only when every
+// previously imported child is selected. A nil cursor can mean a config reset
+// or a partial import retry, so it alone does not prove the binding is fresh.
+func (r *adapter) selectedIssuesCoverImports(ctx context.Context, binding db.IssueSyncBinding, issues []Issue) (bool, error) {
+	mappings, err := r.config.Store.ImportMappingsByProjectSource(ctx, binding.ProjectID, binding.SourceKey)
+	if err != nil {
+		return false, fmt.Errorf("lookup github bootstrap imports: %w", err)
+	}
+	selected := make(map[string]bool, len(issues))
+	for _, issue := range issues {
+		if IsPullRequestIssue(issue) || issue.Number <= 0 {
+			continue
+		}
+		selected[issueExternalID(issue)] = true
+		for _, alias := range issueLegacyExternalIDs(issue) {
+			selected[alias] = true
+		}
+	}
+	for _, mapping := range mappings {
+		if mapping.ObjectType == "issue" && !selected[mapping.ExternalID] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (r *adapter) refreshRepository(ctx context.Context, binding db.IssueSyncBinding, ghConfig Config, repo Repository, startedAt time.Time) (db.IssueSyncBinding, Config, error) {
