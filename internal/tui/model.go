@@ -270,7 +270,7 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
-		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened(), m.reportScreenViewed(m.screenName()))
+		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
 	}
 	if activeColorMode == colorAuto {
 		cmds = append(cmds, tea.RequestBackgroundColor)

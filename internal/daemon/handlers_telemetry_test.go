@@ -380,3 +380,11 @@ func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed, "opt-out consumes no daily claim")
 }
+
+func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
+	reporter, err := telemetry.NewReporter(telemetry.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return reporter.SanitizeProperties(event, properties)
+}

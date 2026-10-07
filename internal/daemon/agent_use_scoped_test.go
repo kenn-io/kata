@@ -16,6 +16,9 @@ type scopedAgentReporter struct{ events []string }
 
 func (*scopedAgentReporter) Enabled() bool            { return true }
 func (*scopedAgentReporter) EventAllowed(string) bool { return true }
+func (*scopedAgentReporter) SanitizeProperties(string, map[string]any) (map[string]any, error) {
+	return nil, nil
+}
 func (r *scopedAgentReporter) Capture(event string, _ map[string]any) error {
 	r.events = append(r.events, event)
 	return nil

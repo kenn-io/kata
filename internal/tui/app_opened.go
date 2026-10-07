@@ -24,7 +24,7 @@ func (m Model) reportAppOpened() tea.Cmd {
 }
 
 func (m Model) screenName() string {
-	if m.width < 80 {
+	if m.width == 0 || (m.width < 80 && m.view != viewProjects && m.view != viewFederation && m.view != viewCredentials) {
 		return ""
 	}
 	switch m.view {

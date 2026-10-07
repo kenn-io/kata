@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -224,4 +225,27 @@ func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
 	runCmd(cmd)
 	require.Equal(t, "empty", screens[len(screens)-1])
 	require.Equal(t, uint64(1), m.connGen)
+}
+
+func TestScreenNameMatchesNarrowView(t *testing.T) {
+	m := initialModel(Options{})
+	m.width, m.height = 70, 30
+	for _, test := range []struct {
+		view   viewID
+		screen string
+	}{
+		{viewList, ""}, {viewDetail, ""}, {viewHelp, ""}, {viewEmpty, ""}, {viewDaemons, ""},
+		{viewProjects, "projects"}, {viewFederation, "federation"}, {viewCredentials, "credentials"},
+	} {
+		m.view = test.view
+		require.Equal(t, test.screen, m.screenName())
+	}
+}
+
+func (*recordingTelemetry) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
+	reporter, err := telemetry.NewReporter(telemetry.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return reporter.SanitizeProperties(event, properties)
 }

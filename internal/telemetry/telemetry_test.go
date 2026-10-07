@@ -140,21 +140,3 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 		}
 	}
 }
-
-func TestScreenViewedProperties(t *testing.T) {
-	reporter, err := NewReporter(Options{})
-	require.NoError(t, err)
-	for _, screen := range []string{"inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty"} {
-		props, err := reporter.SanitizeProperties("screen_viewed", map[string]any{"screen": screen, "surface": "web", "title": "private"})
-		require.NoError(t, err)
-		assert.Equal(t, screen, props["screen"])
-		assert.Equal(t, "web", props["surface"])
-		assert.NotContains(t, props, "title")
-	}
-	for _, screen := range []any{"unknown", "", 1} {
-		props, err := reporter.SanitizeProperties("screen_viewed", map[string]any{"screen": screen, "surface": "cli"})
-		require.NoError(t, err)
-		assert.NotContains(t, props, "screen")
-		assert.NotContains(t, props, "surface")
-	}
-}

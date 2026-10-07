@@ -23,6 +23,7 @@ import (
 type TelemetryReporter interface {
 	EventAllowed(event string) bool
 	Enabled() bool
+	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 	Capture(event string, properties map[string]any) error
 }
 
@@ -161,9 +162,10 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
 		case "screen_viewed":
-			properties := telemetry.ScreenViewedProperties(in.Body.Properties)
+			var properties map[string]any
+			properties, err = reporter.SanitizeProperties(in.Body.Event, in.Body.Properties)
 			screen, _ := properties["screen"].(string)
-			if screen != "" {
+			if err == nil && screen != "" {
 				day := time.Now().UTC().Format(time.DateOnly)
 				var claimed bool
 				claimed, err = cfg.DB.ClaimScreenView(ctx, screen, day)
