@@ -162,6 +162,7 @@
   let stopSessionEnded: (() => void) | undefined
   // Only a signed-in tab counts as an opening; anonymous viewers send nothing.
   function reportAppOpened(): void {
+    if (destroyed || loadSessionCredentials() === undefined) return
     stopSessionEnded ??= startSessionEndedReporting((duration) =>
       captureTelemetryEvent(
         {
