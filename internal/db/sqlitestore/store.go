@@ -491,3 +491,29 @@ func (d *Store) hasUserTables(ctx context.Context) (bool, error) {
 
 // SQLite opens a URI, so literal #/?/% in a filesystem path must be escaped.
 func sqliteURIPath(path string) string { return (&url.URL{Path: filepath.ToSlash(path)}).EscapedPath() }
+
+// ClaimScreenView atomically claims one screen's day across all clients sharing this database.
+func (d *Store) ClaimScreenView(ctx context.Context, screen, day string) (bool, error) {
+	var claimed bool
+	err := d.RetryTransient(ctx, func() error {
+		result, err := d.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?, ?)
+   ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE meta.value <> excluded.value`,
+			"screen_viewed:"+screen, d.instanceUID+":"+day)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		claimed = count == 1
+		return err
+	})
+	return claimed, err
+}
+
+// ReleaseScreenView preserves newer claims when an earlier enqueue fails.
+func (d *Store) ReleaseScreenView(ctx context.Context, screen, day string) error {
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `DELETE FROM meta WHERE key=? AND value=?`,
+			"screen_viewed:"+screen, d.instanceUID+":"+day)
+		return err
+	})
+}

@@ -150,6 +150,21 @@ func (c *Client) reportUsage(ctx context.Context, event string, properties map[s
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
+// ReportScreenViewed sends the visible screen to the connected daemon.
+func (c *Client) ReportScreenViewed(ctx context.Context, screen string) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
+		Body: &generated.CaptureTelemetryEventBody{Event: "screen_viewed", Properties: map[string]any{"surface": "tui", "screen": screen}},
+	})
+	if wire == nil {
+		return callErr
+	}
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
 // ListTokens returns the daemon's redacted credential audit inventory and
 // the instant at which the daemon classified each token's state.
 func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {

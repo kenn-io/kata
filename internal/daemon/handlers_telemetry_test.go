@@ -27,9 +27,12 @@ type telemetryTestServer struct {
 	manager *WebSessionManager
 }
 
-func newTelemetryTestServer(t *testing.T, reporter TelemetryReporter, principal Principal) telemetryTestServer {
+func newTelemetryTestServer(t *testing.T, reporter TelemetryReporter, principal Principal, stores ...db.Storage) telemetryTestServer {
 	t.Helper()
-	store := openAuthTestDB(t)
+	var store db.Storage = openAuthTestDB(t)
+	if len(stores) > 0 {
+		store = stores[0]
+	}
 	manager := newDeterministicSessionManager(t, telemetryTestOrigin, "instance_a")
 	server := NewServer(ServerConfig{
 		DB: store, StartedAt: time.Now().UTC(), WebSessions: manager, Telemetry: reporter,
@@ -59,7 +62,8 @@ type fakeTelemetryReporter struct {
 }
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
-	return strings.TrimSpace(event) == "app_opened" || strings.TrimSpace(event) == "session_ended"
+	event = strings.TrimSpace(event)
+	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
 func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
@@ -321,4 +325,58 @@ func TestCaptureTelemetryEventCapturesOneAppOpenedPerSurfacePerDay(t *testing.T)
 	}
 	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "web"}}, reporter.captured,
 		"a failed capture leaves the day open; later duplicates are dropped")
+}
+
+func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
+	reporter := &fakeTelemetryReporter{failNext: true}
+	server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+	for _, body := range []string{`{"event":"screen_viewed"}`, `{"event":"screen_viewed","properties":{"screen":"unknown"}}`} {
+		response := server.post(t.Context(), t, body)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	}
+	assert.Empty(t, reporter.captured)
+	body := `{"event":"screen_viewed","properties":{"screen":"issues","surface":"web","title":"private"}}`
+	failed := server.post(t.Context(), t, body)
+	require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
+	for _, body := range []string{body, `{"event":"screen_viewed","properties":{"screen":"issues","surface":"tui"}}`, `{"event":"screen_viewed","properties":{"screen":"help","surface":"tui"}}`} {
+		response := server.post(t.Context(), t, body)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	}
+	assert.Equal(t, []map[string]any{{"screen": "issues", "surface": "web"}, {"screen": "help", "surface": "tui"}}, reporter.captured)
+}
+
+func TestScreenViewsPersistAcrossServerRestartAndUTCDate(t *testing.T) {
+	store := openAuthTestDB(t)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	claimed, err := store.ClaimScreenView(t.Context(), "inbox", yesterday)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	reporter := &fakeTelemetryReporter{}
+	body := `{"event":"screen_viewed","properties":{"screen":"inbox","surface":"web"}}`
+	for range 2 {
+		server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal}, store)
+		response := server.post(t.Context(), t, body)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	}
+	require.Len(t, reporter.captured, 1)
+}
+
+type failingScreenStore struct{ db.Storage }
+
+func (failingScreenStore) ClaimScreenView(context.Context, string, string) (bool, error) {
+	return false, errors.New("storage unavailable")
+}
+func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
+	store := openAuthTestDB(t)
+	body := `{"event":"screen_viewed","properties":{"screen":"inbox","surface":"web"}}`
+	server := newTelemetryTestServer(t, &fakeTelemetryReporter{}, Principal{Kind: PrincipalWebLocal}, failingScreenStore{store})
+	response := server.post(t.Context(), t, body)
+	require.Equal(t, http.StatusInternalServerError, response.Code, response.Body.String())
+	server = newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal}, store)
+	response = server.post(t.Context(), t, body)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
+	claimed, err := store.ClaimScreenView(t.Context(), "inbox", time.Now().UTC().Format(time.DateOnly))
+	require.NoError(t, err)
+	require.True(t, claimed, "opt-out consumes no daily claim")
 }

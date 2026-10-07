@@ -12,12 +12,18 @@ test('the web UI reports app_opened once per UTC day to the serving daemon', asy
 }) => {
   const requests: Request[] = []
   page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === telemetryPath) {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === telemetryPath &&
+      request.postDataJSON().event === 'app_opened'
+    ) {
       requests.push(request)
     }
   })
   const isTelemetry = (response: { url(): string; request(): Request }) =>
-    new URL(response.url()).pathname === telemetryPath && response.request().method() === 'POST'
+    new URL(response.url()).pathname === telemetryPath &&
+    response.request().method() === 'POST' &&
+    response.request().postDataJSON().event === 'app_opened'
   await page.clock.install({ time: Date.now() })
 
   const firstResponse = page.waitForResponse(isTelemetry)

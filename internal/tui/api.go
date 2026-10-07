@@ -56,3 +56,8 @@ type credentialAuditAPI interface {
 type appOpenedAPI interface {
 	ReportAppOpened(ctx context.Context) error
 }
+
+// screenViewedAPI is optional for clients without telemetry support.
+type screenViewedAPI interface {
+	ReportScreenViewed(ctx context.Context, screen string) error
+}

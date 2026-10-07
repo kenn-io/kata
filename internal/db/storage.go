@@ -17,6 +17,9 @@ import (
 // through the storeopen DSN dispatcher.
 type Storage interface {
 	// identity / lifecycle
+	// ClaimScreenView records one installation/screen/UTC-day visit; Release clears a rejected enqueue.
+	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
+	ReleaseScreenView(ctx context.Context, screen, day string) error
 	InstanceUID() string
 	RefreshInstanceUID(ctx context.Context) error
 	// InstanceCreatedAt reports when InstanceUID was generated, or zero when

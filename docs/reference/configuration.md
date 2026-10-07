@@ -941,6 +941,15 @@ currently reached companion bucket. Reports share the daemon's install ID and
 opt-out and send buckets rather than exact counts, paths, tool names, or actor
 names.
 
+The browser and TUI also report `screen_viewed` when a screen opens. The fixed
+names are `inbox`, `today`, `delegated`, `scheduled`, `issues`, `logbook`,
+`issue`, `graph`, `credentials`, `projects`, `daemons`, `federation`, `help`,
+and `empty`. Unknown names are dropped. `surface` is `web` or `tui`, whichever
+reaches that screen first that UTC day. One claim per screen in the database
+shares the daily count across interfaces, hosts, and daemon restarts. A changed
+installation ID starts a fresh count. Later-day browser focus or terminal input
+counts another visit. Delivery is best effort; a rejected enqueue can retry.
+
 Disable telemetry with:
 
 ```sh

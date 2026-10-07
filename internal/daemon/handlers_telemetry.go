@@ -160,6 +160,22 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			err = agentGate.capture(reporter)
 		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
+		case "screen_viewed":
+			properties := telemetry.ScreenViewedProperties(in.Body.Properties)
+			screen, _ := properties["screen"].(string)
+			if screen != "" {
+				day := time.Now().UTC().Format(time.DateOnly)
+				var claimed bool
+				claimed, err = cfg.DB.ClaimScreenView(ctx, screen, day)
+				if err == nil && claimed {
+					err = reporter.Capture(in.Body.Event, properties)
+					if err != nil {
+						releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+						_ = cfg.DB.ReleaseScreenView(releaseCtx, screen, day)
+						cancel()
+					}
+				}
+			}
 		default:
 			capture()
 		}

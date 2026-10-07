@@ -82,6 +82,10 @@ func NewReporter(opts Options) (*Reporter, error) {
 		posthog.WithAllowedEvent("agent_call_count",
 			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
 		),
+		posthog.WithAllowedEvent("screen_viewed",
+			posthog.AllowProperty("screen", screenNames),
+			posthog.AllowProperty("surface", screenSurfaces),
+		),
 	)
 }
 
@@ -131,4 +135,27 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 		return DisabledReporter()
 	}
 	return reporter
+}
+
+var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
+var screenSurfaces = posthog.AllowStringValues("web", "tui")
+
+// ScreenViewedProperties shares the reporter's filters with the persistent daily gate.
+func ScreenViewedProperties(properties map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range properties {
+		key = strings.TrimSpace(key)
+		filter := screenNames
+		switch key {
+		case "screen":
+		case "surface":
+			filter = screenSurfaces
+		default:
+			continue
+		}
+		if kept, ok := filter(value); ok {
+			out[key] = kept
+		}
+	}
+	return out
 }

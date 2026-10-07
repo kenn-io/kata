@@ -44,6 +44,9 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
+	telemetryScreen     string
+	telemetryConnGen    uint64
+	telemetryDay        string
 	opts                Options
 	api                 KataAPI
 	scope               scope
@@ -267,7 +270,7 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
-		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
+		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened(), m.reportScreenViewed(m.screenName()))
 	}
 	if activeColorMode == colorAuto {
 		cmds = append(cmds, tea.RequestBackgroundColor)
@@ -395,10 +398,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
 		m.pendingDetailFollow = false
 		if len(m.detail.navStack) == 0 {
-			return m.followSearchResultIfNeeded(cmd)
+			m, cmd = m.followSearchResultIfNeeded(cmd)
 		}
 	}
-	return m, cmd
+	visit := false
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.FocusMsg:
+		visit = true
+	}
+	screenCmd := m.screenViewCommand(visit)
+	return m, tea.Batch(cmd, screenCmd)
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -3156,6 +3165,7 @@ func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) 
 func (m Model) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = true
+	v.ReportFocus = true
 	if m.opts.Mouse {
 		// Opt-in only: mouse tracking blocks native text selection in
 		// many terminals. CellMotion captures clicks/releases/wheel

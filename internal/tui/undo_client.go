@@ -294,3 +294,11 @@ func (c *undoClient) ClaimTimedAssignment(ctx context.Context, projectID int64, 
 		return c.KataAPI.ClaimTimedAssignment(ctx, projectID, ref, actor, ttl)
 	})
 }
+
+func (c *undoClient) ReportScreenViewed(ctx context.Context, screen string) error {
+	reporter, ok := c.KataAPI.(screenViewedAPI)
+	if !ok {
+		return errors.New("telemetry client unavailable")
+	}
+	return reporter.ReportScreenViewed(ctx, screen)
+}

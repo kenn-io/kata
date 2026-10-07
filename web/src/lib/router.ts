@@ -128,3 +128,11 @@ function isSystemView(value: string | undefined): value is SystemView {
 function validUID(value: string): boolean {
   return /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(value)
 }
+
+export function screenNameForRoute(route: KataRoute): string | undefined {
+  if (route.kind === 'route-error') return undefined
+  if (route.view === 'credentials') return 'credentials'
+  if (route.issueUID) return route.graph ? 'graph' : 'issue'
+  if (route.view) return route.view === 'all-open' ? 'issues' : route.view
+  return route.projectUID ? 'issues' : 'inbox'
+}
