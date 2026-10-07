@@ -28,6 +28,7 @@ var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 type Client interface {
 	posthog.Client
 	EventAllowed(event string) bool
+	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 }
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
@@ -82,6 +83,10 @@ func NewReporter(opts Options) (*Reporter, error) {
 		posthog.WithAllowedEvent("agent_call_count",
 			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
 		),
+		posthog.WithAllowedEvent("screen_viewed",
+			posthog.AllowProperty("screen", screenNames),
+			posthog.AllowProperty("surface", screenSurfaces),
+		),
 	)
 }
 
@@ -132,3 +137,6 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 	}
 	return reporter
 }
+
+var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
+var screenSurfaces = posthog.AllowStringValues("web", "tui")

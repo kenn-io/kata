@@ -43,6 +43,8 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
+	"ClaimScreenView":                      true, // store.go
+	"ReleaseScreenView":                    true, // store.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go
 	"ActiveFederationQuarantine":           true, // federation_quarantine.go
 	"ActiveFederationQuarantinesByProject": true, // federation_quarantine.go

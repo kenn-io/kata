@@ -150,11 +150,21 @@ func newTestModel() Model {
 	return m
 }
 
-// updateModel pipes msg through m.Update and unwraps the returned
-// tea.Model interface back to the concrete Model struct.
+// updateModel consumes screen telemetry so callers inspect only the view commands.
 func updateModel(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	out, cmd := m.Update(msg)
-	return out.(Model), cmd
+	next := out.(Model)
+	_, reportsScreens := next.api.(screenViewedAPI)
+	changed := next.telemetryScreen != m.telemetryScreen || next.telemetryDay != m.telemetryDay || next.telemetryConnGen != m.telemetryConnGen
+	if reportsScreens && changed && cmd != nil {
+		if batch, ok := cmd().(tea.BatchMsg); ok {
+			runCmd(batch[len(batch)-1])
+			cmd = tea.Batch(batch[:len(batch)-1]...)
+		} else {
+			cmd = nil
+		}
+	}
+	return next, cmd
 }
 
 // sendRune dispatches a single-rune KeyMsg through m.Update and returns

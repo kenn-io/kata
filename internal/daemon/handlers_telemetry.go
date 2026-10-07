@@ -23,6 +23,7 @@ import (
 type TelemetryReporter interface {
 	EventAllowed(event string) bool
 	Enabled() bool
+	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 	Capture(event string, properties map[string]any) error
 }
 
@@ -160,6 +161,23 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			err = agentGate.capture(reporter)
 		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
+		case "screen_viewed":
+			var properties map[string]any
+			properties, err = reporter.SanitizeProperties(in.Body.Event, in.Body.Properties)
+			screen, _ := properties["screen"].(string)
+			if err == nil && screen != "" {
+				day := time.Now().UTC().Format(time.DateOnly)
+				var claimed bool
+				claimed, err = cfg.DB.ClaimScreenView(ctx, screen, day)
+				if err == nil && claimed {
+					err = reporter.Capture(in.Body.Event, properties)
+					if err != nil {
+						releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+						_ = cfg.DB.ReleaseScreenView(releaseCtx, screen, day)
+						cancel()
+					}
+				}
+			}
 		default:
 			capture()
 		}

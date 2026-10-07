@@ -1513,7 +1513,8 @@ describe('App', () => {
             : new Request(new URL(String(input), window.location.origin), init)
         const path = new URL(request.url).pathname
         if (path === '/api/v1/ui/telemetry') {
-          telemetry.push(request)
+          const event = (await request.clone().json()).event
+          if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
           return telemetryAccepted()
         }
         if (path === '/api/v1/ui/daemons') {
@@ -2258,6 +2259,57 @@ describe('App', () => {
       expect(request!.headers.get('X-Kata-CSRF')).toBe(csrf)
     }
 
+    it('reports accepted screens through the serving daemon and revisits on UTC focus', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+      storeSession()
+      const telemetry: Request[] = []
+      let rejectedSnapshots = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          const path = target.pathname
+          if (
+            path.endsWith('/api/v1/ui/snapshot') &&
+            target.searchParams.get('view') === 'delegated'
+          ) {
+            rejectedSnapshots += 1
+            return new Response('', { status: 503 })
+          }
+          if (path === telemetryPath) {
+            if ((await request.clone().json()).event === 'screen_viewed') telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await waitFor(() => expect(telemetry).toHaveLength(1))
+      expectServingDaemonPost(telemetry[0])
+      await expect(telemetry[0]!.clone().json()).resolves.toEqual({
+        event: 'screen_viewed',
+        properties: { screen: 'inbox', surface: 'web' },
+      })
+      history.pushState(null, '', '/kata?view=today')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      history.pushState(null, '', '/kata?view=delegated')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() => expect(rejectedSnapshots).toBeGreaterThan(0))
+      await tick()
+      expect(telemetry).toHaveLength(2)
+      window.dispatchEvent(new Event('focus'))
+      await tick()
+      expect(telemetry).toHaveLength(2)
+      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
+      window.dispatchEvent(new Event('focus'))
+      await waitFor(() => expect(telemetry).toHaveLength(3))
+    })
+
     it('reports app_opened once on load', async () => {
       let now = 0
       vi.spyOn(performance, 'now').mockImplementation(() => now)
@@ -2270,7 +2322,8 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            telemetry.push(request)
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
@@ -2341,7 +2394,10 @@ describe('App', () => {
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
-          if (path === telemetryPath) telemetry.push(request)
+          if (path === telemetryPath) {
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
+          }
           if (path === '/api/v1/ui/session/local') {
             return Response.json({
               session: 'local-session',
@@ -2392,7 +2448,7 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            telemetry.push(request)
+            if ((await request.clone().json()).event === 'app_opened') telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/events/stream') {

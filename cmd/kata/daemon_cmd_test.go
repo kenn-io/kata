@@ -2620,6 +2620,10 @@ func (f *fakeTelemetryReporter) Enabled() bool { return true }
 
 func (f *fakeTelemetryReporter) EventAllowed(string) bool { return false }
 
+func (*fakeTelemetryReporter) SanitizeProperties(string, map[string]any) (map[string]any, error) {
+	return nil, telemetry.ErrUnsupportedEvent
+}
+
 func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

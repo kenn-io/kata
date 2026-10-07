@@ -26,7 +26,13 @@ import (
 // cleanup, and returns a daemon Client pointed at it.
 func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ui/telemetry" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		handler(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return NewClient(srv.URL, srv.Client())
 }

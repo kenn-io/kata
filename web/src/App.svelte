@@ -63,7 +63,7 @@
     RefreshScheduler,
   } from './lib/events/controller'
   import { openEventStream } from './lib/events/sse'
-  import { parseRoute, serializeRoute, type KataRoute } from './lib/router'
+  import { parseRoute, serializeRoute, screenNameForRoute, type KataRoute } from './lib/router'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -192,6 +192,30 @@
     stopAppOpened = undefined
     reportAppOpened()
   }
+  let reportedScreen: string | undefined
+  let reportedScreenDay: string | undefined
+  function reportScreenViewed(visit = false): void {
+    if (destroyed || mode !== 'ready' || !acceptedRoute || !loadSessionCredentials()) return
+    const screen = screenNameForRoute(acceptedRoute)
+    const day = new Date().toISOString().slice(0, 10)
+    if (!screen || (reportedScreen === screen && (reportedScreenDay === day || !visit))) return
+    reportedScreen = screen
+    reportedScreenDay = day
+    void captureTelemetryEvent(
+      { event: 'screen_viewed', properties: { screen, surface: 'web' } },
+      { signal: AbortSignal.timeout(1000) },
+    )
+      .then((response) => {
+        if (response.status >= 400 && reportedScreen === screen && reportedScreenDay === day)
+          reportedScreen = undefined
+      })
+      .catch(() => {
+        if (reportedScreen === screen && reportedScreenDay === day) reportedScreen = undefined
+      })
+  }
+  $effect(() => {
+    reportScreenViewed()
+  })
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
@@ -239,7 +263,10 @@
       scheduler.visibilityChanged(!document.hidden)
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }
-    const focus = () => scheduler.focused()
+    const focus = () => {
+      scheduler.focused()
+      reportScreenViewed(true)
+    }
     const environment = () => scheduler.environmentChanged()
     const showVersionMismatch = () => {
       versionMismatch = true

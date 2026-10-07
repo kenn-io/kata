@@ -125,3 +125,19 @@ func backdateCommentCreated(ctx context.Context, store db.Storage, commentID int
 		createdAt.UTC().Format(time.RFC3339Nano), commentID)
 	return err
 }
+
+func TestScreenViewClaimSurvivesFreshHandle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kata.db")
+	first, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	claimed, err := first.ClaimScreenView(t.Context(), "issues", "2026-10-02")
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, first.Close())
+	second, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	defer func() { _ = second.Close() }()
+	claimed, err = second.ClaimScreenView(t.Context(), "issues", "2026-10-02")
+	require.NoError(t, err)
+	require.False(t, claimed)
+}

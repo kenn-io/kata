@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -34,6 +35,9 @@ func (*cliUseTelemetry) EventAllowed(event string) bool {
 	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
+func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]any, error) {
+	return nil, telemetry.ErrUnsupportedEvent
+}
 func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error {
 	if c.block != nil {
 		<-c.block
