@@ -20,7 +20,8 @@ const server=createServer(async(req,res)=>{
  else if(url.pathname==='/api/v1/projects/42/issues'){
   assert.equal(url.searchParams.get('meta'),'notify.YWN0b3IvdGVhbW1hdGU');assert.equal(url.searchParams.get('status'),'open');
   if(failInbox){res.statusCode=503;respond({error:'temporarily unavailable'});}else respond({issues:request?[{short_id:'abc4',title:'example task',metadata:{'notify.YWN0b3IvdGVhbW1hdGU':{from:'coordinator',message:request}}}]:[]});
- } else if(url.pathname==='/health')respond({status:'ok',api_version:1});
+ } else if(req.method==='POST'&&url.pathname==='/api/v1/ui/telemetry'&&body.event==='agent_active'){res.statusCode=202;respond({status:'queued'});}
+ else if(url.pathname==='/health')respond({status:'ok',api_version:1});
  else {errors.push(req.method+' '+url.pathname);res.statusCode=404;respond({error:'unexpected route'});}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));process.env.KATA_SERVER=`http://127.0.0.1:${server.address().port}`;process.env.KATA_REF='abc4';process.env.KATA_INBOX_USER='actor/teammate';process.env.KATA_AUTHOR='actor';process.env.KATA_TEAMMATE='teammate';delete process.env.KATA_SESSION_ID;
