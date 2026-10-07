@@ -28,6 +28,7 @@ var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 type Client interface {
 	posthog.Client
 	EventAllowed(event string) bool
+	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 }
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
