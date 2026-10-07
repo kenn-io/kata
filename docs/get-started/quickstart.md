@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-02
+last_edited: 2026-10-06
 ---
 
 # Quickstart
@@ -13,7 +13,7 @@ brew install kata
 On Linux, install the release binary with:
 
 ```sh
-curl -fsSL https://katatracker.com/install.sh | bash
+curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash
 ```
 
 If you already use

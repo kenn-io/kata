@@ -100,9 +100,9 @@
             <code>brew install kata</code>
             <button class="button install-copy" type="button" data-install-copy>Copy</button>
           </div>
-          <div class="install-row" data-install-command data-command="curl -fsSL https://katatracker.com/install.sh | bash">
+          <div class="install-row" data-install-command data-command="curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash">
             <span class="install-label">Linux</span>
-            <code>curl -fsSL https://katatracker.com/install.sh | bash</code>
+            <code>curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash</code>
             <button class="button install-copy" type="button" data-install-copy>Copy</button>
           </div>
           <div class="install-row" data-install-command data-command="irm https://katatracker.com/install.ps1 | iex">

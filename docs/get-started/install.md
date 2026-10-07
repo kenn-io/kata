@@ -29,7 +29,7 @@ The formula may trail a newly published GitHub release. On Linux, or to install
 an ordinary release archive on macOS instead:
 
 ```sh
-curl -fsSL https://katatracker.com/install.sh | bash
+curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash
 ```
 
 Linux and WSL 2 users who already use
@@ -97,6 +97,33 @@ owning package manager. Packagers can read the complete
 [packaging contract](../development/packaging.md). Installing with `go install`
 remains supported, and building from a clone is still useful for development
 builds.
+
+## If a shell installation stalls
+
+The shell installer prints each step and keeps the downloader's output visible
+for the release archive and its checksums. Curl and GNU wget show a progress
+meter; BusyBox wget uses its native output. If it fails, the error names the
+operation or file; check your connection to GitHub and retry. A failed download or validation leaves
+an existing installation in place.
+
+The initial `curl` fetches the installer before Bash can print `Installing kata...`.
+The command above shows that fetch's progress, allows 15 seconds to connect, and
+stops after 120 seconds. If no installer banner appears, check this first fetch.
+A plain `curl | bash` pipeline reports Bash's exit status, which can be zero even
+when curl failed. To keep that failure visible, download the script first and
+run it only after curl succeeds:
+
+```sh
+curl -fL --connect-timeout 15 --max-time 120 \
+  https://katatracker.com/install.sh -o kata-install.sh && bash kata-install.sh
+```
+
+Inside the installer, curl allows 15 seconds to connect and 60 seconds for
+release lookup. Archive and checksum downloads stop if they transfer less than
+1024 bytes per second for 60 seconds; downloads above that rate have no total
+time limit. The wget fallback uses a 30-second network inactivity timeout.
+The installer makes one attempt per request; rerun it after resolving the
+reported connection problem.
 
 ## Upgrading to 0.18.0
 

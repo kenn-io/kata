@@ -41,7 +41,7 @@ brew install kata
 Linux, or macOS without Homebrew:
 
 ```sh
-curl -fsSL https://katatracker.com/install.sh | bash
+curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash
 ```
 
 Linux and WSL 2 users who already use

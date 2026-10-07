@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kata installer
-# Usage: curl -fsSL https://katatracker.com/install.sh | bash
+# Usage: curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash
 
 set -euo pipefail
 
@@ -50,9 +50,16 @@ download() {
   local url="$1"
   local output="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$output"
+    curl -fL --progress-bar --connect-timeout 15 \
+      --speed-limit 1024 --speed-time 60 "$url" -o "$output" \
+      || error "Could not download ${url##*/} from GitHub. Check your connection and retry."
   elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O "$output"
+    local wget_args=(-T 30)
+    if wget --version >/dev/null 2>&1; then
+      wget_args+=(--progress=bar:force --tries=1)
+    fi
+    wget "${wget_args[@]}" "$url" -O "$output" \
+      || error "Could not download ${url##*/} from GitHub. Check your connection and retry."
   else
     error "Neither curl nor wget found"
   fi
@@ -62,13 +69,24 @@ get_latest_version() {
   local url="https://github.com/${REPO}/releases/latest"
   local final_url=""
   if command -v curl >/dev/null 2>&1; then
-    final_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url")" || return 1
+    final_url="$(curl -fsSLI --connect-timeout 15 --max-time 60 \
+      -o /dev/null -w '%{url_effective}' "$url")" || return 1
   elif command -v wget >/dev/null 2>&1; then
-    final_url="$(wget --spider -S "$url" 2>&1 \
+    local response
+    local wget_args=(-T 30)
+    if wget --version >/dev/null 2>&1; then
+      wget_args+=(--tries=1)
+    fi
+    if ! response="$(wget "${wget_args[@]}" --spider -S "$url" 2>&1)"; then
+      printf '%s\n' "$response" >&2
+      return 1
+    fi
+    final_url="$(printf '%s\n' "$response" \
       | awk 'tolower($1)=="location:" {print $2}' \
       | tail -1 \
       | tr -d '\r\n')" || return 1
   else
+    printf '%s\n' "Install curl or wget to fetch the latest release." >&2
     return 1
   fi
 
@@ -164,8 +182,8 @@ install_from_release() {
 
   info "Fetching latest release..."
   local version
-  version="$(get_latest_version)"
-  [[ -n "$version" ]] || return 1
+  version="$(get_latest_version)" || error "Could not fetch the latest release from GitHub. Check your connection and retry."
+  [[ -n "$version" ]] || error "GitHub returned an empty latest release. Check your connection and retry."
 
   info "Found version: $version"
 
@@ -191,7 +209,9 @@ install_from_release() {
   info "Downloading ${filename}..."
   download "${base_url}/${filename}" "$archive_path"
 
+  info "Downloading SHA256SUMS..."
   download "${base_url}/SHA256SUMS" "$tmpdir/SHA256SUMS"
+  info "Verifying checksum..."
   verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"
 
   info "Extracting..."
@@ -199,6 +219,7 @@ install_from_release() {
 
   [[ -f "$tmpdir/$binary" ]] || error "Downloaded release did not contain $binary"
   verify_release_binary "$tmpdir/$binary" "$version"
+  info "Installing binary..."
   install_binary "$tmpdir/$binary" "$install_dir" "$binary"
 }
 

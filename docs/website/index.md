@@ -16,7 +16,7 @@ kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c
 Install:
 
 - macOS: `brew install kata`
-- Linux: `curl -fsSL https://katatracker.com/install.sh | bash`
+- Linux: `curl -fL --connect-timeout 15 --max-time 120 https://katatracker.com/install.sh | bash`
 - Windows: `irm https://katatracker.com/install.ps1 | iex`
 
 One Go binary, no runtime dependencies. See
