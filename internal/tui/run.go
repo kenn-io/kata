@@ -120,13 +120,9 @@ func Run(ctx context.Context, opts Options) error {
 		startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
 	started := time.Now()
-	final, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run()
+	_, err = tea.NewProgram(m, programOpts(ctx, opts)...).Run()
 	elapsed := time.Since(started)
-	if fm, ok := final.(Model); ok {
-		fm.reportSessionEnded(elapsed)
-	} else {
-		m.reportSessionEnded(elapsed)
-	}
+	_ = c.ReportSessionEnded(elapsed)
 	return err
 }
 

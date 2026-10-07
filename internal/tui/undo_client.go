@@ -77,14 +77,6 @@ func (c *undoClient) ReportAppOpened(ctx context.Context) error {
 	return reporter.ReportAppOpened(ctx)
 }
 
-func (c *undoClient) ReportSessionEnded(ctx context.Context, elapsed time.Duration) error {
-	reporter, ok := c.KataAPI.(sessionEndedAPI)
-	if !ok {
-		return errors.New("telemetry client unavailable")
-	}
-	return reporter.ReportSessionEnded(ctx, elapsed)
-}
-
 // Writes wait until the model has recorded the preceding response. Undo must
 // refuse a busy client because its history entry was selected before waiting.
 func (c *undoClient) begin(ctx context.Context, wait bool) (*undoAttempt, error) {

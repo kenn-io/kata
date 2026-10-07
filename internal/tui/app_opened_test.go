@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -45,30 +44,33 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 	assert.Equal(t, []map[string]any{{"surface": "tui"}}, recorder.captured)
 }
 
-func TestReportSessionEndedUsesCurrentClient(t *testing.T) {
-	recorder := &recordingTelemetry{}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	m := initialModel(Options{})
-	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-	m.reportSessionEnded(2 * time.Minute)
-	recorder.mu.Lock()
-	defer recorder.mu.Unlock()
-	assert.Equal(t, []map[string]any{{"surface": "tui", "duration_bucket": "1_to_5m"}}, recorder.captured)
-}
-
-type stalledSessionEndedAPI struct{ KataAPI }
-
-func (stalledSessionEndedAPI) ReportSessionEnded(ctx context.Context, _ time.Duration) error {
-	<-ctx.Done()
-	return ctx.Err()
+func TestReportSessionEndedKeepsOpeningDaemonAfterSwitch(t *testing.T) {
+	opening, selected := &recordingTelemetry{}, &recordingTelemetry{}
+	envA := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = opening })
+	envB := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = selected })
+	boot := NewClient(envA.URL, envA.HTTP)
+	m := buildRunModel(Options{}, boot, bootInit{})
+	runCmd(m.reportAppOpened())
+	m, _ = m.installDaemonConnection(daemonConnection{api: NewClient(envB.URL, envB.HTTP)})
+	assert.NotSame(t, boot, m.api.(*undoClient).KataAPI)
+	require.NoError(t, boot.ReportSessionEnded(2*time.Minute))
+	opening.mu.Lock()
+	defer opening.mu.Unlock()
+	selected.mu.Lock()
+	defer selected.mu.Unlock()
+	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "tui", "duration_bucket": "1_to_5m"}}, opening.captured)
+	assert.Empty(t, selected.captured)
 }
 
 func TestReportSessionEndedBoundsDelivery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		m := initialModel(Options{})
-		m.api = stalledSessionEndedAPI{}
+		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+		c := NewClient("http://127.0.0.1:7777", hc)
 		started := time.Now()
-		m.reportSessionEnded(time.Minute)
+		assert.Error(t, c.ReportSessionEnded(time.Minute))
 		assert.Equal(t, time.Second, time.Since(started))
 	})
 }

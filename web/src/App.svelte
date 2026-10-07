@@ -190,7 +190,7 @@
     sessionEnded?.pause()
     stopAppOpened?.()
     stopAppOpened = undefined
-    if (!destroyed && loadSessionCredentials() !== undefined) reportAppOpened()
+    reportAppOpened()
   }
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
@@ -263,7 +263,7 @@
     const credentialRefreshTimer = window.setInterval(() => {
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }, 30_000)
-    if (loadSessionCredentials() !== undefined) reportAppOpened()
+    reportAppOpened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()

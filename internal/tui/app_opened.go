@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -21,14 +20,4 @@ func (m Model) reportAppOpened() tea.Cmd {
 		_ = reporter.ReportAppOpened(ctx)
 		return nil
 	}
-}
-
-func (m Model) reportSessionEnded(elapsed time.Duration) {
-	reporter, ok := m.api.(sessionEndedAPI)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_ = reporter.ReportSessionEnded(ctx, elapsed)
 }
