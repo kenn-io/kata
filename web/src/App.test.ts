@@ -1513,7 +1513,8 @@ describe('App', () => {
             : new Request(new URL(String(input), window.location.origin), init)
         const path = new URL(request.url).pathname
         if (path === '/api/v1/ui/telemetry') {
-          telemetry.push(request)
+          const event = (await request.clone().json()).event
+          if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
           return telemetryAccepted()
         }
         if (path === '/api/v1/ui/daemons') {
@@ -2321,7 +2322,8 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            if ((await request.clone().json()).event === 'app_opened') telemetry.push(request)
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
@@ -2361,7 +2363,7 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            if ((await request.clone().json()).event === 'app_opened') telemetry.push(request)
+            telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/ui/session/local') return new Response('', { status: 404 })
@@ -2392,8 +2394,10 @@ describe('App', () => {
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
-          if (path === telemetryPath)
-            if ((await request.clone().json()).event === 'app_opened') telemetry.push(request)
+          if (path === telemetryPath) {
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
+          }
           if (path === '/api/v1/ui/session/local') {
             return Response.json({
               session: 'local-session',
