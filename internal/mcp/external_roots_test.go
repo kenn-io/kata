@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -95,7 +96,7 @@ func TestExternalRootInputSchemasBoundEnumsAndCommentModes(t *testing.T) {
 
 func TestConnectorToolsUseTypedDaemonRoutes(t *testing.T) {
 	requests := make([]externalRootRequest, 0, 5)
-	httpServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if r.Body != nil {
 			data, err := io.ReadAll(r.Body)
@@ -159,7 +160,7 @@ func TestConnectorToolsUseTypedDaemonRoutes(t *testing.T) {
 
 func TestBridgeToolsUseScopedIssueRoutesAndServerActor(t *testing.T) {
 	requests := make([]externalRootRequest, 0, 8)
-	httpServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if r.Body != nil {
 			data, err := io.ReadAll(r.Body)
@@ -221,7 +222,7 @@ func TestBridgeToolsUseScopedIssueRoutesAndServerActor(t *testing.T) {
 
 func TestBridgeUnbindResolvesArchivedProjectWithinStartupScope(t *testing.T) {
 	requests := make([]externalRootRequest, 0, 2)
-	httpServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, externalRootRequest{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery})
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
@@ -281,7 +282,7 @@ func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 
 func TestConnectorMetadataRequiresAllProjectsScopeBeforeDaemonRequest(t *testing.T) {
 	var requests atomic.Int64
-	httpServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		writeExternalRootJSON(t, w, map[string]any{"connectors": []any{externalConnectorFixture()}})
@@ -311,7 +312,7 @@ func TestConnectorMetadataRequiresAllProjectsScopeBeforeDaemonRequest(t *testing
 
 func TestBridgeBindRequiresAllProjectsScopeBeforeUsingConnectorCredentials(t *testing.T) {
 	var requests atomic.Int64
-	httpServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		writeExternalRootJSON(t, w, externalBridgeFixture())
@@ -333,7 +334,7 @@ func TestBridgeBindRequiresAllProjectsScopeBeforeUsingConnectorCredentials(t *te
 
 func TestExternalConnectorCallsUseLongRunningClient(t *testing.T) {
 	var defaultRequests atomic.Int64
-	defaultServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	defaultServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defaultRequests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/projects" {
@@ -353,7 +354,7 @@ func TestExternalConnectorCallsUseLongRunningClient(t *testing.T) {
 	require.NoError(t, err)
 
 	var longRequests atomic.Int64
-	longServer := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	longServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		longRequests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		switch {

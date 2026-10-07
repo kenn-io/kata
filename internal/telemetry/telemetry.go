@@ -77,10 +77,10 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("duration_bucket", posthog.AllowStringValues("under_1m", "1_to_5m", "5_to_30m", "over_30m")),
 		),
 		posthog.WithAllowedEvent("agent_active",
-			posthog.AllowProperty("call_count_bucket", posthog.AllowStringValues("1-10", "11-100", "over-100")),
+			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
 		),
 		posthog.WithAllowedEvent("agent_call_count",
-			posthog.AllowProperty("call_count_bucket", posthog.AllowStringValues("1-10", "11-100", "over-100")),
+			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
 		),
 	)
 }
@@ -98,6 +98,8 @@ func DurationBucket(elapsed time.Duration) string {
 		return "over_30m"
 	}
 }
+
+var agentCallCountBuckets = posthog.AllowStringValues("1-10", "11-100", "over-100")
 
 // appOpenedSurfaces is the app_opened surface filter shared by the allowlist and the daemon's daily gate.
 var appOpenedSurfaces = posthog.AllowStringValues("web", "tui", "cli")

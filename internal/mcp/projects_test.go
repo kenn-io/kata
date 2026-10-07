@@ -224,7 +224,7 @@ func TestProjectUpdateDoesNotReadProjectAfterMutationCommit(t *testing.T) {
 			var mutationCommitted atomic.Bool
 			var postMutationReads atomic.Int32
 			daemonHandler := daemonServer.Handler()
-			httpServer := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if mutationCommitted.Load() && request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects" {
 					postMutationReads.Add(1)
 					http.Error(writer, "project catalog unavailable", http.StatusInternalServerError)

@@ -908,24 +908,36 @@ so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
-`agent_active` to its daemon. Successful contract and attention hooks, and commands
-run as daemon hook children, report the same event. Hook installation and status
-commands send nothing. Reports wait at most one second, preserve command output
-and exit status, and never start a daemon. Ordinary piped commands send nothing.
+`agent_active` to its daemon. Initialization and tool listing send nothing.
+Successful contract and attention hooks, and commands run as daemon hook children,
+report the same event. Human-triggered hook children count as hook execution.
+Hook installation, status, and version/help probes without a resolved daemon target
+send nothing. Generic hook children report only to the daemon their command used;
+named execution hooks may discover an existing daemon without starting one.
+Ordinary piped commands send nothing.
 
-The daemon counts these observations together for each install and UTC day. It
-sends `agent_active` on the first observation with `call_count_bucket: 1-10`, then
-`agent_call_count` at calls 11 and 101 with `11-100` and `over-100`. Later calls in
-the same bucket send nothing. Use distinct `agent_active` installs for daily agent
-activity, separately from human `app_opened` counts. The highest bucket across
-both agent event names gives the total observed daily volume.
+MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
+without waiting; overflow and queued work at shutdown are discarded. Each report
+has a separate one-second deadline. Shutdown cancels and joins the worker. CLI
+hook reports wait at most one second after successful execution. Delivery is best
+effort and preserves command output, results, and exit status.
+
+The daemon counts these observations for each install and UTC day. It sends one
+`agent_active` with `call_count_bucket: 1-10`, then `agent_call_count` at calls 11
+and 101 with `11-100` and `over-100`. Later calls in the same bucket send nothing.
+Use distinct `agent_active` installs for daily hook and MCP activity, separately
+from human `app_opened` counts. The highest bucket across both agent event names
+gives the total observed daily volume.
 
 The daemon keeps the day, count capped at 101, and last queued threshold in a
 private instance-specific file under `<KATA_HOME>/telemetry/`, so ordinary restarts
-retain the count. A new UTC day resets it on the next observation. Failed captures
-retry the current bucket on the next observation, with `agent_active` if the first
-capture is still pending. Reports share the daemon's install ID and opt-out and
-send buckets rather than exact counts, paths, tool names, or actor names.
+retain the count. Counts cover one serving daemon per install; daemons sharing a
+PostgreSQL database do not combine their local counters. A new UTC day resets the
+count on the next observation. Failed captures retry on the next observation.
+A delayed first capture still sends `agent_active` with `1-10`, followed by the
+currently reached companion bucket. Reports share the daemon's install ID and
+opt-out and send buckets rather than exact counts, paths, tool names, or actor
+names.
 
 Disable telemetry with:
 

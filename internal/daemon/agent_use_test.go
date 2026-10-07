@@ -51,6 +51,12 @@ func TestAgentUseDailyThresholds(t *testing.T) {
 	if os.PathSeparator != '\\' {
 		require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
+	past := time.Unix(1, 0)
+	require.NoError(t, os.Chtimes(path, past, past))
+	require.NoError(t, gate.capture(r))
+	info, err = os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, past, info.ModTime(), "saturated state is not rewritten")
 	now = now.Add(time.Minute).In(time.FixedZone("west", -5*60*60))
 	require.NoError(t, gate.capture(r))
 	require.Equal(t, "agent_active", r.events[3])
@@ -120,6 +126,6 @@ func TestAgentUseFirstCaptureRetriesReachedBucket(t *testing.T) {
 		require.Error(t, gate.capture(r))
 	}
 	require.NoError(t, gate.capture(r))
-	require.Equal(t, []string{"agent_active"}, r.events)
-	require.Equal(t, []map[string]any{{"call_count_bucket": "11-100"}}, r.captured)
+	require.Equal(t, []string{"agent_active", "agent_call_count"}, r.events)
+	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}, {"call_count_bucket": "11-100"}}, r.captured)
 }

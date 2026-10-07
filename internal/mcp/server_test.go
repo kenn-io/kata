@@ -46,17 +46,6 @@ var sectionLoaderNames = []string{
 	"kata.load_tokens",
 }
 
-// Tool-route fixtures reject telemetry before their request assertions or blocking handlers.
-func newToolTestDaemon(handler http.Handler) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		handler.ServeHTTP(w, r)
-	}))
-}
-
 func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
 		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
@@ -580,7 +569,7 @@ func TestRecurrencePatchSchemaRequiresRevision(t *testing.T) {
 
 func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 	requests := make(chan capturedRequest, 20)
-	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, err := io.ReadAll(request.Body)
 		require.NoError(t, err)
 		requests <- capturedRequest{
@@ -871,7 +860,7 @@ func TestListLikeToolsProbeOneExtraResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				require.Equal(t, tt.path, request.URL.Path)
 				require.Equal(t, "3", request.URL.Query().Get("limit"))
 				writer.Header().Set("Content-Type", "application/json")
@@ -931,7 +920,7 @@ func TestBoundRelationshipRefCanonicalizesQualifiedRef(t *testing.T) {
 
 func TestToolValidationStopsBeforeDaemonRequest(t *testing.T) {
 	var calls atomic.Int64
-	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		http.Error(writer, "unexpected request", http.StatusInternalServerError)
 	}))
@@ -985,7 +974,7 @@ func TestUnknownToolIsProtocolErrorAndBadArgumentsAreToolError(t *testing.T) {
 
 func TestSetLabelAbsentUsesDeleteWithBoundActor(t *testing.T) {
 	requestSeen := make(chan capturedRequest, 1)
-	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		requestSeen <- capturedRequest{Method: request.Method, Path: request.URL.Path, Query: request.URL.RawQuery, Body: body}
 		writer.Header().Set("Content-Type", "application/json")
@@ -1012,7 +1001,7 @@ func TestSetLabelAbsentUsesDeleteWithBoundActor(t *testing.T) {
 }
 
 func TestDaemonErrorsBecomeToolExecutionErrors(t *testing.T) {
-	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusConflict)
 		_, _ = writer.Write([]byte(`{"status":409,"error":{"code":"owner_conflict","message":"issue is owned by another actor"}}`))
@@ -1033,7 +1022,7 @@ func TestDaemonErrorsBecomeToolExecutionErrors(t *testing.T) {
 func TestToolCancellationStopsDaemonRequest(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
-	daemon := newToolTestDaemon(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		close(started)
 		<-request.Context().Done()
 		close(cancelled)
@@ -1226,7 +1215,7 @@ func schemaObject(t *testing.T, schema any) map[string]any {
 }
 
 func TestListPreservesIssueBrowserURL(t *testing.T) {
-	server := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/projects/42/issues", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","short_id":"5fav","web_url":"https://tasks.example/kata?issue=01ARZ3NDEKTSV4RRFFQ69G5FAV"}]}`))

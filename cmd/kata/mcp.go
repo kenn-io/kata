@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newMCPCmd() *cobra.Command {
@@ -150,8 +151,11 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient)
+			defer stopReporting()
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,
+				ObserveToolCall:   observe,
 				LongRunningClient: longRunningAPIClient,
 				Scope:             scope,
 				ProjectID:         projectID,
@@ -201,6 +205,40 @@ func newMCPServeCmd() *cobra.Command {
 	command.Flags().StringVar(&httpTokenFile, "http-token-file", "", "require an inbound bearer read from this owner-only secret file (wins over --http-token-env)")
 	command.Flags().BoolVar(&trustPrivateNetwork, "trust-private-network", false, "trust plaintext MCP HTTP on a non-loopback private network")
 	return command
+}
+
+func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (func(), context.CancelFunc) {
+	reportCtx, cancel := context.WithCancel(ctx)
+	queue := make(chan struct{}, 128)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-reportCtx.Done():
+				return
+			case <-queue:
+				if reportCtx.Err() != nil {
+					return
+				}
+				callCtx, stop := context.WithTimeout(reportCtx, time.Second)
+				_, _ = client.CaptureTelemetryEventWithResponse(callCtx, &generated.CaptureTelemetryEventRequestOptions{
+					Body: &generated.CaptureTelemetryEventBody{Event: "agent_active"},
+				})
+				stop()
+			}
+		}
+	}()
+	observe := func() {
+		if reportCtx.Err() != nil {
+			return
+		}
+		select {
+		case queue <- struct{}{}:
+		default:
+		}
+	}
+	return observe, func() { cancel(); <-done }
 }
 
 func startMCPIdleKeepalive(

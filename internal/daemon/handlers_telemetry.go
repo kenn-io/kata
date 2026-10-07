@@ -79,6 +79,7 @@ func newAgentUseGate(path string, now func() time.Time) *agentUseGate {
 func (g *agentUseGate) capture(reporter TelemetryReporter) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	previous := g.state
 	if day := g.now().UTC().Format(time.DateOnly); day != g.state.Day {
 		g.state.Day, g.state.Count, g.state.Sent = day, 0, 0
 	}
@@ -92,17 +93,19 @@ func (g *agentUseGate) capture(reporter TelemetryReporter) error {
 		threshold, bucket = 11, "11-100"
 	}
 	var err error
-	if g.state.Sent < threshold {
-		event := "agent_call_count"
-		if g.state.Sent == 0 {
-			event = "agent_active"
+	if g.state.Sent == 0 {
+		err = reporter.Capture("agent_active", map[string]any{"call_count_bucket": "1-10"})
+		if err == nil {
+			g.state.Sent = 1
 		}
-		err = reporter.Capture(event, map[string]any{"call_count_bucket": bucket})
+	}
+	if err == nil && g.state.Sent < threshold {
+		err = reporter.Capture("agent_call_count", map[string]any{"call_count_bucket": bucket})
 		if err == nil {
 			g.state.Sent = threshold
 		}
 	}
-	if g.path != "" {
+	if g.path != "" && g.state != previous {
 		if data, marshalErr := json.Marshal(g.state); marshalErr == nil {
 			if os.MkdirAll(filepath.Dir(g.path), 0o700) == nil {
 				_ = atomicfile.WriteFile(g.path, data, atomicfile.WithPerm(0o600))
@@ -117,7 +120,7 @@ func (g *agentUseGate) capture(reporter TelemetryReporter) error {
 func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 	gate := newAppOpenedGate(time.Now)
 	path := ""
-	if home, err := config.KataHome(); err == nil {
+	if home, err := config.KataHome(); err == nil && cfg.DB != nil {
 		path = filepath.Join(home, "telemetry", "agent-use-"+cfg.DB.InstanceUID()+".json")
 	}
 	agentGate := newAgentUseGate(path, time.Now)
@@ -128,13 +131,16 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Summary:       "Report a browser telemetry event",
 		DefaultStatus: http.StatusAccepted,
 		MaxBodyBytes:  16 << 10,
-	}, func(_ context.Context, in *api.CaptureTelemetryEventRequest) (*api.CaptureTelemetryEventResponse, error) {
+	}, func(ctx context.Context, in *api.CaptureTelemetryEventRequest) (*api.CaptureTelemetryEventResponse, error) {
 		reporter := cfg.Telemetry
 		if reporter == nil {
 			return nil, api.NewError(http.StatusServiceUnavailable, "telemetry_unavailable",
 				"telemetry capture is unavailable", "", nil)
 		}
 		event := strings.TrimSpace(in.Body.Event)
+		if principal, ok := PrincipalFromContext(ctx); ok && principal.Scope != nil && event != "agent_active" {
+			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden", "issue-scoped credentials may report only agent activity", "", nil)
+		}
 		if event == "agent_call_count" || !reporter.EventAllowed(event) {
 			return nil, api.NewError(http.StatusBadRequest, "unsupported_telemetry_event",
 				"unsupported telemetry event", "", nil)

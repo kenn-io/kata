@@ -114,9 +114,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - CLI commands run in a terminal now report an anonymous `app_opened` event
   with `surface: cli` through the daemon they used, so usage reports count
   people who only use the command line. Each `KATA_HOME` reports once per UTC
-  day to each daemon, so later commands that day send nothing. Piped output,
-  agent-mode commands, the MCP server and hooks send nothing.
+  day to each daemon, so later commands that day send nothing. Piped output
+  and ordinary agent-mode commands send nothing.
   `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
+
+- See daily hook and MCP activity separately from human use. Successful execution
+  hooks, daemon hook children, and admitted MCP calls now send `agent_active` once
+  per UTC day, plus `agent_call_count` at calls 11 and 101. The highest bucket
+  gives observed daily volume. MCP reports use a bounded queue without delaying
+  tools; hook exit reports wait at most one second. Version/help probes without
+  a daemon target send nothing. Reports share the daemon's anonymous install ID
+  and `KATA_TELEMETRY_ENABLED` opt-out. See [telemetry](https://github.com/kenn-io/kata/blob/main/docs/reference/configuration.md#telemetry)
+  for delivery limits and restart behavior.
 
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are

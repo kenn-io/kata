@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -115,7 +116,7 @@ func TestInitializeNegotiatesHandshakeCompatibleVersion(t *testing.T) {
 
 func TestWireCancellationSuppressesLateToolResponse(t *testing.T) {
 	started := make(chan struct{})
-	daemon := newToolTestDaemon(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		close(started)
 		<-request.Context().Done()
 	}))

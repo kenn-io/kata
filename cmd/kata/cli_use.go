@@ -74,7 +74,7 @@ func reportsAgentUse(cmd *cobra.Command) bool {
 	case "agent-hook contract", "agent-hook attention start", "agent-hook attention end", "agent-hook attention-native", "attention-hook", "agent-contract-hook":
 		return true
 	}
-	return !isAgentFacingCommand(cmd) && os.Getenv(hooks.HookVersionEnv) != ""
+	return !isAgentFacingCommand(cmd) && os.Getenv(hooks.HookVersionEnv) != "" && cliUseTarget.Load() != nil
 }
 
 // reportCLIUse discovers an existing target for hooks; human reports use the command's target.

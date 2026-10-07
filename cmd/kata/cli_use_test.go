@@ -27,19 +27,21 @@ type cliUseTelemetry struct {
 	block    chan struct{}
 	mu       sync.Mutex
 	captured []map[string]any
+	events   []string
 }
 
 func (*cliUseTelemetry) EventAllowed(event string) bool {
 	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
-func (c *cliUseTelemetry) Capture(_ string, properties map[string]any) error {
+func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error {
 	if c.block != nil {
 		<-c.block
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.captured = append(c.captured, properties)
+	c.events = append(c.events, event)
 	return nil
 }
 
@@ -396,4 +398,17 @@ func TestAgentContractUseWithoutDaemon(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	_, err = discoverDaemon(context.Background())
 	require.ErrorContains(t, err, "no daemon running")
+}
+
+func TestHookChildProbesWithoutTargetSendNothing(t *testing.T) {
+	capture := &cliUseTelemetry{}
+	env := newCLIUseEnv(t, capture)
+	t.Setenv(hooks.HookVersionEnv, "1")
+	t.Setenv("KATA_SERVER", env.URL)
+	for _, args := range [][]string{{"version"}, {"projects", "list", "--help"}} {
+		cliUseTarget.Store(nil)
+		_, err := runCmdOutput(t, env, args...)
+		require.NoError(t, err)
+		require.Empty(t, capture.recorded())
+	}
 }
