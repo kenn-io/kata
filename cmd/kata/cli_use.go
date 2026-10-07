@@ -22,6 +22,9 @@ import (
 // cliUseReportTimeout bounds the use report on the command's exit path; var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
+// agentUseReportTimeout keeps exit reports within installed hook deadlines.
+var agentUseReportTimeout = 100 * time.Millisecond
+
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
 var cliUseNow = time.Now
 
@@ -71,13 +74,15 @@ func isAgentFacingCommand(cmd *cobra.Command) bool {
 func reportsAgentUse(cmd *cobra.Command) bool {
 	path := strings.Join(strings.Fields(cmd.CommandPath())[1:], " ")
 	switch path {
-	case "agent-hook contract", "agent-hook attention start", "agent-hook attention end", "agent-hook attention-native", "attention-hook", "agent-contract-hook":
+	case "agent-hook contract", "agent-contract-hook":
 		return true
+	case "mcp serve":
+		return false
 	}
-	return !isAgentFacingCommand(cmd) && os.Getenv(hooks.HookVersionEnv) != "" && cliUseTarget.Load() != nil
+	return cliUseTarget.Load() != nil && (isAgentFacingCommand(cmd) || os.Getenv(hooks.HookVersionEnv) != "")
 }
 
-// reportCLIUse discovers an existing target for hooks; human reports use the command's target.
+// reportCLIUse discovers an existing target only for contract hooks.
 func reportCLIUse(cmd *cobra.Command) {
 	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
@@ -90,7 +95,11 @@ func reportCLIUse(cmd *cobra.Command) {
 		parent = context.Background()
 	}
 	// Detached so a command that ends by cancelling its own context still reports.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cliUseReportTimeout)
+	timeout := cliUseReportTimeout
+	if agent {
+		timeout = agentUseReportTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
 	if target == nil {
 		resolved, err := discoverDaemonResolved(ctx)
@@ -106,7 +115,7 @@ func reportCLIUse(cmd *cobra.Command) {
 			return
 		}
 	}
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: cliUseReportTimeout})
+	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 	if err != nil {
 		return
 	}

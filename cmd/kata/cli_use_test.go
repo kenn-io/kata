@@ -345,22 +345,34 @@ func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
 		"agents and scripts read output through a pipe")
 }
 
-func TestAgentUseHookClassification(t *testing.T) {
+func TestAttentionHooksWithoutDaemonWorkSendNothing(t *testing.T) {
+	capture := &cliUseTelemetry{}
+	env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = capture })
 	t.Setenv(hooks.HookVersionEnv, "")
-	for _, test := range []struct {
-		path []string
-		want bool
-	}{
-		{[]string{"agent-hook", "contract"}, true},
-		{[]string{"agent-hook", "attention-native"}, true},
-		{[]string{"agent-hook", "attention", "end"}, true},
-		{[]string{"agent-hook", "status"}, false},
-		{[]string{"agent-hook", "install"}, false},
-		{[]string{"mcp", "serve"}, false},
-		{[]string{"projects", "list"}, false},
+	t.Setenv("KATA_SERVER", env.URL)
+	t.Setenv("KATA_REF", "")
+	t.Setenv("CLAUDE_PROJECT_DIR", dir)
+	t.Cleanup(func() { cliUseTarget.Store(nil) })
+	for _, args := range [][]string{
+		{"attention-hook", "--help"},
+		{"attention-hook", "foo"},
+		{"attention-hook", "start"},
+		{"agent-hook", "attention", "start"},
 	} {
-		require.Equal(t, test.want, reportsAgentUse(findCommand(t, test.path...)), test.path)
+		_, _, err := runCmdCapture(t, env, args...)
+		require.NoError(t, err)
+		require.Nil(t, cliUseTarget.Load(), args)
+		require.Empty(t, capture.recorded(), args)
 	}
+	_, _, err := executeAgentHook(t, strings.NewReader(`{}`), "agent-hook", "attention-native", "claude", "start")
+	require.NoError(t, err)
+	require.Nil(t, cliUseTarget.Load())
+	require.Empty(t, capture.recorded())
+	t.Setenv("KATA_REF", createIssue(t, env, pid, "tracked work"))
+	_, _, err = runCmdCapture(t, env, "attention-hook", "start")
+	require.NoError(t, err)
+	require.NotNil(t, cliUseTarget.Load())
+	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
 func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
@@ -375,7 +387,6 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 		require.Empty(t, stderr)
 	}
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}, {"call_count_bucket": "11-100"}}, capture.recorded())
-	shortenCLIUseReportTimeout(t, 50*time.Millisecond)
 	hung := &cliUseTelemetry{block: make(chan struct{})}
 	env = newCLIUseEnv(t, hung)
 	t.Cleanup(func() { close(hung.block) })
@@ -384,7 +395,7 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
-	require.Less(t, time.Since(start), time.Second)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestAgentContractUseWithoutDaemon(t *testing.T) {

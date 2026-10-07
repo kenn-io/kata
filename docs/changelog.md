@@ -122,8 +122,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   hooks, daemon hook children, and admitted MCP calls now send `agent_active` once
   per UTC day, plus `agent_call_count` at calls 11 and 101. The highest bucket
   gives observed daily volume. MCP reports use a bounded queue without delaying
-  tools; hook exit reports wait at most one second. Version/help probes without
-  a daemon target send nothing. Reports share the daemon's anonymous install ID
+  tools; hook exit reports wait at most 100 ms. Attention hooks and daemon hook
+  children require a daemon target from their operation. Version/help probes
+  without a target send nothing. Reports share the daemon's anonymous install ID
   and `KATA_TELEMETRY_ENABLED` opt-out. See [telemetry](https://github.com/kenn-io/kata/blob/main/docs/reference/configuration.md#telemetry)
   for delivery limits and restart behavior.
 

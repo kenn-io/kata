@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+
+const [plugin,workspace,contract]=process.argv.slice(2);
+const registrations=new Map();
+const api={config:{plugins:{entries:{'kata-hooks-user':{enabled:true,hooks:{allowConversationAccess:true}}}}},on:(name,handler)=>registrations.set(name,handler),registerService(){}};
+const mod=await import(pathToFileURL(plugin));mod.default.register(api);
+const ctx={agentId:'example-agent',sessionId:'one',sessionKey:'agent:example-agent:main',workspaceDir:workspace,hookInvocation:{assertActive(){}}};
+const prompt=await registrations.get('before_prompt_build')({prompt:'work',messages:[]},ctx);
+const host=globalThis[Symbol.for('kata.openclaw.hooks.v1')];
+assert.equal(host.sessions.size,1,'attention start must retain its session after slow telemetry');
+const state=path.join(os.tmpdir(),'kata-openclaw-'+String(process.getuid?.() ?? 'owner')+'-'+host.launch,'sessions.json');
+const rows=JSON.parse(fs.readFileSync(state,'utf8'));
+assert.equal(rows.length,1);
+assert.equal(rows[0].session,'one');
+assert.equal(rows[0].started,true);
+assert.equal(prompt.prependSystemContext,fs.readFileSync(contract,'utf8'));
+await registrations.get('session_end')({sessionId:'one',sessionKey:ctx.sessionKey,reason:'reset'},ctx);
+assert.equal(host.sessions.size,0,'attention end must release its session');

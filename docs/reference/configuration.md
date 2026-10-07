@@ -909,17 +909,18 @@ shows in the terminal; count distinct installs rather than events.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.
-Successful contract and attention hooks, and commands run as daemon hook children,
-report the same event. Human-triggered hook children count as hook execution.
+Successful contract hooks report the same event. Attention hooks and daemon hook
+children report only when their operation resolves a daemon target.
+Human-triggered hook children count as hook execution.
 Hook installation, status, and version/help probes without a resolved daemon target
 send nothing. Generic hook children report only to the daemon their command used;
-named execution hooks may discover an existing daemon without starting one.
+contract hooks may discover an existing daemon without starting one.
 Ordinary piped commands send nothing.
 
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
 has a separate one-second deadline. Shutdown cancels and joins the worker. CLI
-hook reports wait at most one second after successful execution. Delivery is best
+hook reports wait at most 100 ms after successful execution. Delivery is best
 effort and preserves command output, results, and exit status.
 
 The daemon counts these observations for each install and UTC day. It sends one
