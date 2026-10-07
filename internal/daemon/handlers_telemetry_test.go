@@ -342,7 +342,12 @@ func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
 		response := server.post(t.Context(), t, body)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
-	assert.Equal(t, []map[string]any{{"screen": "issues", "surface": "web"}, {"screen": "help", "surface": "tui"}}, reporter.captured)
+	require.Len(t, reporter.captured, 2)
+	assert.Subset(t, reporter.captured[0], map[string]any{"screen": "issues", "surface": "web"})
+	assert.Subset(t, reporter.captured[1], map[string]any{"screen": "help", "surface": "tui"})
+	for _, properties := range reporter.captured {
+		assert.NotContains(t, properties, "title")
+	}
 }
 
 func TestScreenViewsPersistAcrossServerRestartAndUTCDate(t *testing.T) {
