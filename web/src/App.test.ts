@@ -20,6 +20,7 @@ describe('App', () => {
     document.documentElement.classList.remove('dark')
     vi.unstubAllGlobals()
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('renders the Kata application shell while loading', () => {
@@ -1489,6 +1490,10 @@ describe('App', () => {
   })
 
   it('switches configured daemons in place and restores each daemon route', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const telemetry: Request[] = []
     history.replaceState(null, '', '/kata?view=all-open')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1507,6 +1512,10 @@ describe('App', () => {
             ? input
             : new Request(new URL(String(input), window.location.origin), init)
         const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/telemetry') {
+          telemetry.push(request)
+          return telemetryAccepted()
+        }
         if (path === '/api/v1/ui/daemons') {
           return Response.json({
             daemons: [
@@ -1540,10 +1549,18 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
     expect(window.location.search).toBe('?view=all-open')
+    now += 10_000
+    window.dispatchEvent(new Event('pagehide'))
+    await waitFor(() => expect(telemetry).toHaveLength(2))
+    expect(telemetry[1]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+    await expect(telemetry[1]!.json()).resolves.toMatchObject({
+      properties: { duration_bucket: '1_to_5m' },
+    })
     expect(
       referenceRequests.find(
         (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
@@ -2242,6 +2259,9 @@ describe('App', () => {
     }
 
     it('reports app_opened once on load', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
       storeSession()
       const telemetry: Request[] = []
       vi.stubGlobal(
@@ -2267,6 +2287,15 @@ describe('App', () => {
       await expect(telemetry[0]!.json()).resolves.toEqual({
         event: 'app_opened',
         properties: { surface: 'web' },
+      })
+      now = 120_000
+      window.dispatchEvent(new Event('pagehide'))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      expectServingDaemonPost(telemetry[1])
+      expect(telemetry[1]!.keepalive).toBe(true)
+      await expect(telemetry[1]!.json()).resolves.toEqual({
+        event: 'session_ended',
+        properties: { surface: 'web', duration_bucket: '1_to_5m' },
       })
     })
 
@@ -2297,10 +2326,14 @@ describe('App', () => {
       window.dispatchEvent(new Event('focus'))
       await tick()
       expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      window.dispatchEvent(new Event('pagehide'))
       expect(telemetry).toHaveLength(0)
     })
 
     it('reports app_opened with the renewed session when the stored one is stale', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
       storeSession('stale-session', 'stale-csrf')
       const telemetry: Request[] = []
       vi.stubGlobal(
@@ -2337,6 +2370,10 @@ describe('App', () => {
       expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
       await waitFor(() => expect(telemetry).toHaveLength(2))
       expectServingDaemonPost(telemetry[1], 'local-session', 'local-csrf')
+      now = 120_000
+      window.dispatchEvent(new Event('pagehide'))
+      await waitFor(() => expect(telemetry).toHaveLength(3))
+      expectServingDaemonPost(telemetry[2], 'local-session', 'local-csrf')
     })
 
     it('a background refresh after UTC midnight is not an opening', async () => {

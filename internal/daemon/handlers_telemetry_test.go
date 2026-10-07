@@ -59,7 +59,7 @@ type fakeTelemetryReporter struct {
 }
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
-	return strings.TrimSpace(event) == "app_opened"
+	return strings.TrimSpace(event) == "app_opened" || strings.TrimSpace(event) == "session_ended"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
 func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
@@ -183,6 +183,11 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
 	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+	for range 2 {
+		response := server.post(t.Context(), t, `{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	}
+	assert.Equal(t, []map[string]any{{"surface": "web", "duration_bucket": "1_to_5m"}, {"surface": "web", "duration_bucket": "1_to_5m"}}, reporter.captured[1:])
 }
 
 // A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.

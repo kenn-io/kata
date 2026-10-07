@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -125,12 +126,23 @@ func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 // ReportAppOpened sends app_opened with surface=tui to the connected daemon,
 // which applies its own allowlist and opt-out before anything leaves the machine.
 func (c *Client) ReportAppOpened(ctx context.Context) error {
+	return c.reportUsage(ctx, "app_opened", map[string]any{"surface": "tui"})
+}
+
+// ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
+func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+}
+
+func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return err
 	}
 	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "tui"}},
+		Body: &generated.CaptureTelemetryEventBody{Event: event, Properties: properties},
 	})
 	if wire == nil {
 		return callErr

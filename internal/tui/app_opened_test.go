@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -20,8 +22,10 @@ type recordingTelemetry struct {
 	captured []map[string]any
 }
 
-func (*recordingTelemetry) EventAllowed(event string) bool { return event == "app_opened" }
-func (*recordingTelemetry) Enabled() bool                  { return true }
+func (*recordingTelemetry) EventAllowed(event string) bool {
+	return event == "app_opened" || event == "session_ended"
+}
+func (*recordingTelemetry) Enabled() bool { return true }
 func (r *recordingTelemetry) Capture(_ string, properties map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -33,11 +37,26 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 	recorder := &recordingTelemetry{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 
-	require.NoError(t, NewClient(env.URL, env.HTTP).ReportAppOpened(t.Context()))
+	c := NewClient(env.URL, env.HTTP)
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	require.NoError(t, c.ReportSessionEnded(2*time.Minute))
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
-	assert.Equal(t, []map[string]any{{"surface": "tui"}}, recorder.captured)
+	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "tui", "duration_bucket": "1_to_5m"}}, recorder.captured)
+}
+
+func TestReportSessionEndedBoundsDelivery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+		c := NewClient("http://127.0.0.1:7777", hc)
+		started := time.Now()
+		assert.Error(t, c.ReportSessionEnded(time.Minute))
+		assert.Equal(t, time.Second, time.Since(started))
+	})
 }
 
 // runCmd runs cmd and every command a batch result carries, like Bubble Tea would.

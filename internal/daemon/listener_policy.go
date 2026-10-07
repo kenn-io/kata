@@ -164,7 +164,7 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 }
 
 func isBrowserRequest(r *http.Request) bool {
-	// The TUI reports app_opened through the browser's operation, so this path alone marks nothing.
+	// Terminal telemetry uses the browser's operation, so this path alone marks nothing.
 	uiPath := strings.HasPrefix(r.URL.Path, "/api/v1/ui/") &&
 		(r.Method != http.MethodPost || r.URL.Path != "/api/v1/ui/telemetry")
 	if uiPath || r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" ||
