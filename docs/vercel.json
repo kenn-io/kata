@@ -469,6 +469,16 @@
       "source": "/operations/plane-sync.md",
       "destination": "/docs/operations/plane-sync.md",
       "permanent": true
+    },
+    {
+      "source": "/operations/linear-sync/",
+      "destination": "/docs/operations/linear-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/linear-sync.md",
+      "destination": "/docs/operations/linear-sync.md",
+      "permanent": true
     }
   ]
 }

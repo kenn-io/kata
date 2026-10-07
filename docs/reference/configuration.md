@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-06
+last_edited: 2026-10-07
 ---
 
 # Configuration
@@ -43,6 +43,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_TELEMETRY_ENABLED` | Set to `0`, `false`, `no`, or `off` to disable anonymous PostHog telemetry. Values are case-insensitive and trimmed. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
+| `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
 | `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
@@ -325,7 +326,7 @@ configured interval. Ordinary health probes do not renew the timeout. A running
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
 checks in both stdio and streamable-HTTP modes so the bridge remains usable for
 its full lifetime. Use an explicit daemon service when
-GitHub/Notion/Plane sync, federation, or timed-claim maintenance must remain continuously
+GitHub/Notion/Plane/Linear sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
@@ -989,3 +990,12 @@ are resolved once per run and sent only to the configured API origin through
 `X-API-Key`; redirects are rejected. Binding requests cannot choose origins or
 credentials. Workspace, project UUID, cutoff, interval, and title presentation
 are set with `kata sync plane enable`. See [Plane sync](../operations/plane-sync.md).
+
+## Linear credentials
+
+`[linear_sync]` selects daemon-owned `token_env` (default `KATA_LINEAR_TOKEN`)
+and `auth_type` (`api-key` by default, or `oauth` for an operator-managed Bearer
+token). All requests use `https://api.linear.app/graphql`; redirects are rejected.
+Kata does not refresh OAuth tokens. Workspace/team UUIDs and an optional project
+restriction belong to `kata sync linear enable`. See
+[Linear sync](../operations/linear-sync.md).

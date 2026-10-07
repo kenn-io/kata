@@ -14,6 +14,8 @@ func issueSyncLabel(provider string) string {
 		return "Notion"
 	case "plane":
 		return "Plane"
+	case "linear":
+		return "Linear"
 	default:
 		return provider
 	}

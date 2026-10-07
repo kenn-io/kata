@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
@@ -76,6 +77,10 @@ type ServerConfig struct {
 	PlaneSyncFetcher         planesync.Fetcher
 	PlaneSyncProgress        *issuesync.ProgressTracker
 	PlaneSyncWake            func()
+	LinearSyncConfig         config.LinearSyncConfig
+	LinearSyncFetcher        linearsync.Fetcher
+	LinearSyncProgress       *issuesync.ProgressTracker
+	LinearSyncWake           func()
 	Hooks                    hooks.Sink
 	ExternalRootRegistry     *rootbridge.Registry
 	ExternalRootService      *rootbridge.Service
@@ -250,6 +255,12 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	if cfg.PlaneSyncFetcher == nil {
 		cfg.PlaneSyncFetcher = planeSyncFetcher(cfg)
+	}
+	if cfg.LinearSyncProgress == nil {
+		cfg.LinearSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.LinearSyncFetcher == nil {
+		cfg.LinearSyncFetcher = linearSyncFetcher(cfg)
 	}
 	if cfg.NotionSyncProgress == nil {
 		cfg.NotionSyncProgress = issuesync.NewProgressTracker()
