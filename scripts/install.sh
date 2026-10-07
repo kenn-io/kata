@@ -7,6 +7,7 @@ set -euo pipefail
 REPO="kenn-io/kata"
 BINARY_NAME="kata"
 KATA_INSTALL_TMPDIR=""
+KATA_DOWNLOAD_PID=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,31 +47,178 @@ find_install_dir() {
   fi
 }
 
+# Every network request gets the same limits: give up on a connection after
+# CONNECT_TIMEOUT seconds, abort a transfer that stalls for STALL_SECONDS, and
+# try it NETWORK_ATTEMPTS times before failing.
+CONNECT_TIMEOUT=15
+STALL_SECONDS=30
+NETWORK_ATTEMPTS=3
+RETRY_DELAY=2
+
+retry() {
+  local url="$1"
+  shift
+  local attempt
+  for ((attempt = 1; ; attempt++)); do
+    "$@" && return 0
+    if ((attempt == NETWORK_ATTEMPTS)); then
+      error "Could not download ${url} after ${NETWORK_ATTEMPTS} attempts.
+Check your network connection and run the installer again, install with Homebrew (brew install kata), or download the release manually from https://github.com/${REPO}/releases"
+    fi
+    warn "Could not download ${url}; retrying in ${RETRY_DELAY}s (attempt $((attempt + 1)) of ${NETWORK_ATTEMPTS})..." >&2
+    sleep "$RETRY_DELAY"
+  done
+}
+
+# The limits live in arrays, not only in wrapper functions, so a background
+# download can start curl or wget itself and its PID can be stopped on exit.
+# A transfer slower than 1 KB/s for STALL_SECONDS counts as stalled.
+CURL_LIMITS=(--connect-timeout "$CONNECT_TIMEOUT" --speed-limit 1024 --speed-time "$STALL_SECONDS")
+WGET_LIMITS=()
+
+curl_limited() {
+  curl "${CURL_LIMITS[@]}" "$@"
+}
+
+is_gnu_wget() {
+  [[ "$(wget --version 2>/dev/null)" == *"GNU Wget"* ]]
+}
+
+set_wget_limits() {
+  if is_gnu_wget; then
+    WGET_LIMITS=(--dns-timeout="$CONNECT_TIMEOUT" --connect-timeout="$CONNECT_TIMEOUT"
+      --read-timeout="$STALL_SECONDS" --tries=1)
+  else
+    # BusyBox wget has one timeout that covers connecting and each read.
+    WGET_LIMITS=(-T "$STALL_SECONDS")
+  fi
+}
+
+wget_limited() {
+  set_wget_limits
+  wget "${WGET_LIMITS[@]}" "$@"
+}
+
+file_size() {
+  if [[ -f "$1" ]]; then
+    wc -c <"$1" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
+# Print the last Content-Length in a header dump, or 0 before the final
+# response arrives. Redirect responses come first and may carry their own.
+content_length() {
+  awk 'tolower($1)=="content-length:" {n=$2+0} END {print n+0}' "$1"
+}
+
+# Draw a curl-style bar once the size is known. Before the first byte arrives
+# draw nothing; if the server sends no size, show megabytes received.
+print_progress() {
+  local received="$1"
+  local total="$2"
+  awk -v got="$received" -v total="$total" 'BEGIN {
+    if (total > 0) {
+      width = 50
+      bar = ""
+      for (i = 0; i < int(got * width / total); i++) bar = bar "#"
+      printf "\r%-" width "s %5.1f%%\033[K", bar, got * 100 / total
+    } else if (got > 0) {
+      printf "\r%.1f MB\033[K", got / 1048576
+    }
+  }' >&2
+}
+
+# One download attempt that redraws a single progress line on stderr. curl's
+# own bar animates `#=#=-#` noise until it learns the file size, so the script
+# draws the bar itself from the response headers and the bytes on disk.
+fetch_with_progress() {
+  local url="$1"
+  local output="$2"
+  local headers="${output}.headers"
+  local errors="${output}.errors"
+  : >"$headers"
+  : >"$errors"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl "${CURL_LIMITS[@]}" -fsSL -D "$headers" -o "$output" "$url" 2>"$errors" &
+  else
+    # wget -S writes the response headers, indented, to stderr along with
+    # any error. GNU wget's -q would hide the headers too, so it gets -nv.
+    set_wget_limits
+    local quiet=-q
+    if is_gnu_wget; then
+      quiet=-nv
+    fi
+    wget "${WGET_LIMITS[@]}" "$quiet" -S -O "$output" "$url" 2>"$headers" &
+    errors="$headers"
+  fi
+  KATA_DOWNLOAD_PID=$!
+
+  while kill -0 "$KATA_DOWNLOAD_PID" 2>/dev/null; do
+    print_progress "$(file_size "$output")" "$(content_length "$headers")"
+    sleep 0.5
+  done
+  local status=0
+  wait "$KATA_DOWNLOAD_PID" || status=$?
+  KATA_DOWNLOAD_PID=""
+
+  if ((status == 0)); then
+    print_progress "$(file_size "$output")" "$(content_length "$headers")"
+    printf '\n' >&2
+  else
+    printf '\r\033[K' >&2
+    # Drop wget's indented header lines and keep the error.
+    awk '!/^ /' "$errors" >&2
+  fi
+  rm -f "$headers" "$errors"
+  return "$status"
+}
+
+# download URL OUTPUT [progress]
+# With "progress", show a progress line when stderr is a terminal. It still is
+# under `curl ... | bash`, where only stdin is the pipe.
 download() {
   local url="$1"
   local output="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$output"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O "$output"
-  else
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     error "Neither curl nor wget found"
   fi
+
+  if [[ "${3-}" == "progress" && -t 2 ]]; then
+    retry "$url" fetch_with_progress "$url" "$output"
+  elif command -v curl >/dev/null 2>&1; then
+    retry "$url" curl_limited -fsSL -o "$output" "$url"
+  else
+    retry "$url" wget_limited -q -O "$output" "$url"
+  fi
+}
+
+# Print the URL a redirect chain ends at. A failed attempt prints nothing, so
+# retry's caller never captures output from an earlier attempt.
+resolve_redirect() {
+  local url="$1"
+  local final_url
+  if command -v curl >/dev/null 2>&1; then
+    final_url="$(curl_limited -fsSLI -o /dev/null -w '%{url_effective}' "$url")" || return 1
+  else
+    final_url="$(wget_limited --spider -S "$url" 2>&1)" || return 1
+    final_url="$(printf '%s\n' "$final_url" \
+      | awk 'tolower($1)=="location:" {print $2}' \
+      | tail -1 \
+      | tr -d '\r\n')"
+  fi
+  printf '%s' "$final_url"
 }
 
 get_latest_version() {
   local url="https://github.com/${REPO}/releases/latest"
-  local final_url=""
-  if command -v curl >/dev/null 2>&1; then
-    final_url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$url")" || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    final_url="$(wget --spider -S "$url" 2>&1 \
-      | awk 'tolower($1)=="location:" {print $2}' \
-      | tail -1 \
-      | tr -d '\r\n')" || return 1
-  else
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     return 1
   fi
+  local final_url
+  final_url="$(retry "$url" resolve_redirect "$url")" || return 1
 
   case "$final_url" in
     */releases/tag/*) echo "${final_url##*/releases/tag/}" ;;
@@ -157,6 +305,15 @@ verify_release_binary() {
   fi
 }
 
+# A background download ignores Ctrl-C because non-interactive bash starts
+# background jobs with SIGINT ignored, so stop it here.
+cleanup_install() {
+  if [[ -n "$KATA_DOWNLOAD_PID" ]]; then
+    kill "$KATA_DOWNLOAD_PID" 2>/dev/null || true
+  fi
+  rm -rf "$KATA_INSTALL_TMPDIR"
+}
+
 install_from_release() {
   local os="$1"
   local arch="$2"
@@ -181,7 +338,7 @@ install_from_release() {
   local tmpdir
   tmpdir="$(mktemp -d)"
   KATA_INSTALL_TMPDIR="$tmpdir"
-  trap 'rm -rf "$KATA_INSTALL_TMPDIR"' EXIT
+  trap cleanup_install EXIT
 
   local archive_path="$tmpdir/release.tar.gz"
   if [[ "$os" == "windows" ]]; then
@@ -189,7 +346,7 @@ install_from_release() {
   fi
 
   info "Downloading ${filename}..."
-  download "${base_url}/${filename}" "$archive_path"
+  download "${base_url}/${filename}" "$archive_path" progress
 
   download "${base_url}/SHA256SUMS" "$tmpdir/SHA256SUMS"
   verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"
