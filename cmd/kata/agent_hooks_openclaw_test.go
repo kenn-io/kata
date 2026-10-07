@@ -3,10 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,6 +22,57 @@ func openClawTestOptions(t *testing.T) nativeAgentHookOptions {
 	t.Helper()
 	root := t.TempDir()
 	return nativeAgentHookOptions{Agent: "openclaw", Scope: "user", Home: root, Dir: filepath.Join(root, "workspace"), Executable: "/usr/bin/kata", Contract: true, Attention: true}
+}
+
+func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	env, workspace, _ := setupCLIWorkspace(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var posts atomic.Int32
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/telemetry" {
+			var body struct{ Event string }
+			if json.NewDecoder(r.Body).Decode(&body) == nil && body.Event == "agent_active" {
+				posts.Add(1)
+			}
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	defer close(release)
+	opts := openClawTestOptions(t)
+	opts.Attention = false
+	opts.Dir = workspace
+	opts.Executable = filepath.Join(opts.Home, "kata")
+	if runtime.GOOS == "windows" {
+		opts.Executable += ".exe"
+	}
+	build := exec.CommandContext(t.Context(), "go", "build", "-tags", "kit_posthog_disabled", "-buildvcs=false", "-o", opts.Executable, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed build arguments produce an isolated test executable.
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	plan, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	contract := filepath.Join(opts.Home, "contract")
+	require.NoError(t, os.WriteFile(contract, []byte(agentContractText), 0600))
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/slow-telemetry.mjs", plan.Changes[0].Path, workspace, contract) //nolint:gosec // G204: Node runs a fixed fixture with the generated plugin and test-owned executable.
+	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "USERPROFILE=" + opts.Home, "TEMP=" + opts.Home, "TMP=" + opts.Home, "TMPDIR=" + opts.Home, "KATA_HOME=" + opts.Home, "KATA_SERVER=" + server.URL, "KATA_AUTHOR=user-a"}
+	output, err = cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Equal(t, int32(1), posts.Load(), "contract sends agent activity")
 }
 
 func TestOpenClawGeneratedSourceRemainsData(t *testing.T) {

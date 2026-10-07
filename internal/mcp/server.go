@@ -39,6 +39,8 @@ type Options struct {
 	Version           string
 	StorageAdmin      *storageadmin.Admin
 	EnableTokenAdmin  bool
+	// ObserveToolCall must return immediately; nil disables activity reporting.
+	ObserveToolCall func()
 }
 
 // New creates a tools-only MCP server for one startup project scope.
@@ -92,13 +94,14 @@ func New(options Options) (*sdkmcp.Server, error) {
 	server.AddReceivingMiddleware(toolAdmissionMiddleware(
 		rate.NewLimiter(toolCallsPerSecond, toolCallBurst),
 		make(chan struct{}, toolCallConcurrency),
+		options.ObserveToolCall,
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
 	registerSectionLoaders(server, options)
 	return server, nil
 }
 
-func toolAdmissionMiddleware(limiter *rate.Limiter, concurrent chan struct{}) sdkmcp.Middleware {
+func toolAdmissionMiddleware(limiter *rate.Limiter, concurrent chan struct{}, observe func()) sdkmcp.Middleware {
 	return func(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
 		return func(ctx context.Context, method string, request sdkmcp.Request) (sdkmcp.Result, error) {
 			if method != "tools/call" {
@@ -112,6 +115,9 @@ func toolAdmissionMiddleware(limiter *rate.Limiter, concurrent chan struct{}) sd
 			}
 			if err := limiter.Wait(ctx); err != nil {
 				return nil, err
+			}
+			if observe != nil {
+				observe()
 			}
 			return next(ctx, method, request)
 		}

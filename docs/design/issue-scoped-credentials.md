@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-20
+last_edited: 2026-10-07
 ---
 
 # Issue-scoped credentials
@@ -192,6 +192,7 @@ Unknown routes deny scoped callers.
 | Parent links | Only initial attachment during child creation. No parent changes on an existing issue. |
 | Issue leases | Permit ordinary acquisition, renewal, release, and status within scope under existing holder rules; no force-release. |
 | Events and event streams | Use the shared typed projection defined below, preserving authorized history and changes. |
+| `POST /api/v1/ui/telemetry` | Permit `agent_active` only. The daemon owns call counting and buckets; other events return 403. |
 | Digest, close audits, and issue history | Compute summaries, evidence, counts, and pagination only from authorized issues and safely projected events. |
 | Browser snapshots and references; TUI | Support ordinary issue work with the same effective scope, safe relationships, and allowed-action information. |
 | Browser login and sessions | Preserve the token's scope, actor, expiration, and revocation linkage throughout the session. |

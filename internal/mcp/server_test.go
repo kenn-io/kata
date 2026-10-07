@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -347,28 +348,31 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 
 func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 	t.Run("rate", func(t *testing.T) {
-		var calls atomic.Int64
-		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), make(chan struct{}, 1))(
+		toolError := errors.New("tool failed")
+		var calls, observations atomic.Int64
+		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), make(chan struct{}, 1), func() { observations.Add(1) })(
 			func(context.Context, string, sdkmcp.Request) (sdkmcp.Result, error) {
 				calls.Add(1)
-				return nil, nil
+				return nil, toolError
 			},
 		)
 		_, err := handler(t.Context(), "tools/call", nil)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, toolError)
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		_, err = handler(ctx, "tools/call", nil)
 		require.ErrorContains(t, err, "deadline")
-		_, err = handler(t.Context(), "server/discover", nil)
-		require.NoError(t, err)
+		_, err = handler(t.Context(), "tools/list", nil)
+		require.ErrorIs(t, err, toolError)
 		require.EqualValues(t, 2, calls.Load())
+		require.EqualValues(t, 1, observations.Load())
 	})
 
 	t.Run("concurrency", func(t *testing.T) {
+		var observations atomic.Int64
 		started := make(chan struct{})
 		release := make(chan struct{})
-		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Inf, 1), make(chan struct{}, 1))(
+		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Inf, 1), make(chan struct{}, 1), func() { observations.Add(1) })(
 			func(context.Context, string, sdkmcp.Request) (sdkmcp.Result, error) {
 				close(started)
 				<-release
@@ -387,13 +391,14 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		close(release)
 		require.NoError(t, <-firstDone)
+		require.EqualValues(t, 1, observations.Load())
 	})
 
 	t.Run("concurrency wait does not consume rate permit", func(t *testing.T) {
 		concurrent := make(chan struct{}, 1)
 		concurrent <- struct{}{}
 		// An hour-long refill makes a spent permit fail the admitted call at once.
-		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), concurrent)(
+		handler := toolAdmissionMiddleware(rate.NewLimiter(rate.Every(time.Hour), 1), concurrent, nil)(
 			func(context.Context, string, sdkmcp.Request) (sdkmcp.Result, error) {
 				return nil, nil
 			},

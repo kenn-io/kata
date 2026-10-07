@@ -125,4 +125,18 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 		assert.NotContains(t, props, "surface")
 		assert.NotContains(t, props, "duration_bucket")
 	}
+	for _, event := range []string{"agent_active", "agent_call_count"} {
+		for _, bucket := range []any{"1-10", "11-100", "over-100", "101", 11} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"call_count_bucket": bucket, "actor": "example-agent", "path": "/example", "call_count": 11})
+			require.NoError(t, err)
+			assert.NotContains(t, props, "actor")
+			assert.NotContains(t, props, "path")
+			assert.NotContains(t, props, "call_count")
+			if bucket == "1-10" || bucket == "11-100" || bucket == "over-100" {
+				assert.Equal(t, bucket, props["call_count_bucket"])
+			} else {
+				assert.NotContains(t, props, "call_count_bucket")
+			}
+		}
+	}
 }
