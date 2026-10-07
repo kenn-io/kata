@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-03
+last_edited: 2026-10-07
 ---
 
 # Agent workflows
@@ -679,8 +679,7 @@ Closing as you finish each issue leaves a better audit trail. See
 If work is incomplete:
 
 ```sh
-kata label add abc4 needs-review --agent
-kata comment abc4 --body "Drafted remote-daemon docs; still need token identity verification." --agent
+kata label add abc4 needs-review --comment "Drafted remote-daemon docs; still need token identity verification." --agent
 ```
 
 ## Poll events during long runs

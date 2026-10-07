@@ -19,6 +19,8 @@ func TestValidateCloseInput_DoneRequiresImplementationEvidence(t *testing.T) {
 		"Fixed the bug and ran tests on Safari and Chrome.", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "evidence required")
+	assert.Contains(t, err.Error(), `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.NotContains(t, err.Error(), "edit <ref> --label")
 }
 
 func TestValidateCloseInput_DoneAcceptsCommit(t *testing.T) {
@@ -123,6 +125,8 @@ func TestValidateCloseInput_MessageTrivialDenied(t *testing.T) {
 		[]api.Evidence{{Type: api.EvidenceCommit, SHA: "abc1234"}})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "trivial")
+	assert.Contains(t, err.Error(), `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.NotContains(t, err.Error(), "edit <ref> --label")
 }
 
 // Payload-shape tests: each evidence type must reject its degenerate empty

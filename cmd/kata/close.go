@@ -50,8 +50,7 @@ claim and that the message and evidence should be specific to the issue.
 
 If you have not completed and tested this work, do not close it.
 Instead, label and comment:
-    kata edit <ref> --label needs-review
-    kata comment <ref> --body "what was attempted, what remains"`,
+    kata label add <ref> needs-review --comment "<what remains>"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {
