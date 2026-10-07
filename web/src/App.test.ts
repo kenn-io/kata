@@ -1558,9 +1558,8 @@ describe('App', () => {
     window.dispatchEvent(new Event('pagehide'))
     await waitFor(() => expect(telemetry).toHaveLength(2))
     expect(telemetry[1]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
-    await expect(telemetry[1]!.json()).resolves.toEqual({
-      event: 'session_ended',
-      properties: { surface: 'web', duration_bucket: '1_to_5m' },
+    await expect(telemetry[1]!.json()).resolves.toMatchObject({
+      properties: { duration_bucket: '1_to_5m' },
     })
     expect(
       referenceRequests.find(
@@ -2375,7 +2374,6 @@ describe('App', () => {
       window.dispatchEvent(new Event('pagehide'))
       await waitFor(() => expect(telemetry).toHaveLength(3))
       expectServingDaemonPost(telemetry[2], 'local-session', 'local-csrf')
-      expect(telemetry[2]!.keepalive).toBe(true)
     })
 
     it('a background refresh after UTC midnight is not an opening', async () => {

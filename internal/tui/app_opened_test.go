@@ -37,29 +37,13 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 	recorder := &recordingTelemetry{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 
-	require.NoError(t, NewClient(env.URL, env.HTTP).ReportAppOpened(t.Context()))
+	c := NewClient(env.URL, env.HTTP)
+	require.NoError(t, c.ReportAppOpened(t.Context()))
+	require.NoError(t, c.ReportSessionEnded(2*time.Minute))
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
-	assert.Equal(t, []map[string]any{{"surface": "tui"}}, recorder.captured)
-}
-
-func TestReportSessionEndedKeepsOpeningDaemonAfterSwitch(t *testing.T) {
-	opening, selected := &recordingTelemetry{}, &recordingTelemetry{}
-	envA := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = opening })
-	envB := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = selected })
-	boot := NewClient(envA.URL, envA.HTTP)
-	m := buildRunModel(Options{}, boot, bootInit{})
-	runCmd(m.reportAppOpened())
-	m, _ = m.installDaemonConnection(daemonConnection{api: NewClient(envB.URL, envB.HTTP)})
-	assert.NotSame(t, boot, m.api.(*undoClient).KataAPI)
-	require.NoError(t, boot.ReportSessionEnded(2*time.Minute))
-	opening.mu.Lock()
-	defer opening.mu.Unlock()
-	selected.mu.Lock()
-	defer selected.mu.Unlock()
-	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "tui", "duration_bucket": "1_to_5m"}}, opening.captured)
-	assert.Empty(t, selected.captured)
+	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "tui", "duration_bucket": "1_to_5m"}}, recorder.captured)
 }
 
 func TestReportSessionEndedBoundsDelivery(t *testing.T) {

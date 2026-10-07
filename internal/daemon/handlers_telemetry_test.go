@@ -122,24 +122,6 @@ func TestCaptureTelemetryEventAcceptsAppOpened(t *testing.T) {
 	assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
 }
 
-func TestCaptureSessionEnded(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		var reporter TelemetryReporter = newDisabledReporter(t)
-		fake := &fakeTelemetryReporter{}
-		if enabled {
-			reporter = fake
-		}
-		server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
-		for range 2 {
-			response := server.post(t.Context(), t, `{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`)
-			require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
-		}
-		if enabled {
-			assert.Equal(t, []map[string]any{{"surface": "web", "duration_bucket": "1_to_5m"}, {"surface": "web", "duration_bucket": "1_to_5m"}}, fake.captured)
-		}
-	}
-}
-
 func TestCaptureTelemetryEventRejectsUnknownEventWithEnvelope(t *testing.T) {
 	server := newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal})
 
@@ -201,6 +183,11 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
 	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+	for range 2 {
+		response := server.post(t.Context(), t, `{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	}
+	assert.Equal(t, []map[string]any{{"surface": "web", "duration_bucket": "1_to_5m"}, {"surface": "web", "duration_bucket": "1_to_5m"}}, reporter.captured[1:])
 }
 
 // A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.
