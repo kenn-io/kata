@@ -1560,7 +1560,7 @@ describe('App', () => {
     expect(telemetry[1]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
     await expect(telemetry[1]!.json()).resolves.toEqual({
       event: 'session_ended',
-      properties: { surface: 'web', duration_bucket: 'under_1m' },
+      properties: { surface: 'web', duration_bucket: '1_to_5m' },
     })
     expect(
       referenceRequests.find(

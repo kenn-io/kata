@@ -56,3 +56,7 @@ type credentialAuditAPI interface {
 type appOpenedAPI interface {
 	ReportAppOpened(ctx context.Context) error
 }
+
+type sessionEndedAPI interface {
+	ReportSessionEnded(context.Context, time.Duration) error
+}

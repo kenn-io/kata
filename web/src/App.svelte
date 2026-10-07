@@ -159,11 +159,11 @@
   )
   setGeneratedFetch(browserFetch)
   let stopAppOpened: (() => void) | undefined
-  let stopSessionEnded: (() => void) | undefined
+  let sessionEnded: ReturnType<typeof startSessionEndedReporting> | undefined
   // Only a signed-in tab counts as an opening; anonymous viewers send nothing.
   function reportAppOpened(): void {
     if (destroyed || loadSessionCredentials() === undefined) return
-    stopSessionEnded ??= startSessionEndedReporting((duration) =>
+    sessionEnded ??= startSessionEndedReporting((duration) =>
       captureTelemetryEvent(
         {
           event: 'session_ended',
@@ -172,6 +172,7 @@
         { keepalive: true },
       ),
     )
+    sessionEnded.resume()
     stopAppOpened ??= startAppOpenedReporting({
       route: '/api/v1/ui/telemetry',
       surface: 'web',
@@ -186,8 +187,7 @@
   // Stopping before the 401 resolves keeps the day unrecorded; the renewed
   // session, now or after navigateAfterAuthentication, reports it instead.
   function restartAppOpenedAfterAuthentication(): void {
-    stopSessionEnded?.()
-    stopSessionEnded = undefined
+    sessionEnded?.pause()
     stopAppOpened?.()
     stopAppOpened = undefined
     if (!destroyed && loadSessionCredentials() !== undefined) reportAppOpened()
@@ -280,7 +280,7 @@
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
       window.clearInterval(credentialRefreshTimer)
       stopAppOpened?.()
-      stopSessionEnded?.()
+      sessionEnded?.stop()
       scheduler.stop()
       stream.stop()
       invalidations.stop()
@@ -821,8 +821,7 @@
   }
 
   function rejectCredentialsAndRequireAuthentication(): boolean {
-    stopSessionEnded?.()
-    stopSessionEnded = undefined
+    sessionEnded?.pause()
     fenceCredentialAudit()
     clearSessionCredentials()
     draftFenceGeneration += 1
@@ -983,10 +982,7 @@
     referenceGeneration += 1
     referenceAbort?.abort()
     references = undefined
-    stopSessionEnded?.()
-    stopSessionEnded = undefined
     activeDaemonID = id
-    if (loadSessionCredentials() !== undefined) reportAppOpened()
     route = restored
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
@@ -1011,10 +1007,7 @@
 
     daemonError = `Could not connect to ${id}`
     if (sourceDaemon && sourceRoute) {
-      stopSessionEnded?.()
-      stopSessionEnded = undefined
       activeDaemonID = sourceDaemon
-      if (loadSessionCredentials() !== undefined) reportAppOpened()
       route = sourceRoute
       acceptedRoute = undefined
       history.replaceState(null, '', serializeRoute(sourceRoute))

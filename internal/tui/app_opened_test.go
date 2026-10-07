@@ -1,21 +1,20 @@
 package tui
 
 import (
-	"io"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -24,8 +23,10 @@ type recordingTelemetry struct {
 	captured []map[string]any
 }
 
-func (*recordingTelemetry) EventAllowed(event string) bool { return event == "app_opened" }
-func (*recordingTelemetry) Enabled() bool                  { return true }
+func (*recordingTelemetry) EventAllowed(event string) bool {
+	return event == "app_opened" || event == "session_ended"
+}
+func (*recordingTelemetry) Enabled() bool { return true }
 func (r *recordingTelemetry) Capture(_ string, properties map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,28 +45,32 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 	assert.Equal(t, []map[string]any{{"surface": "tui"}}, recorder.captured)
 }
 
-func TestReportSessionEndedUsesResolvedDaemon(t *testing.T) {
-	t.Setenv(telemetry.EnabledEnv, "1")
-	t.Setenv("TELEMETRY_ENABLED", "1")
-	var body string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, _ := io.ReadAll(r.Body)
-		body = string(data)
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"status":"queued"}`))
-	}))
-	t.Cleanup(srv.Close)
+func TestReportSessionEndedUsesCurrentClient(t *testing.T) {
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 	m := initialModel(Options{})
-	m.activeDaemon.resolved = client.ResolvedDaemon{BaseURL: srv.URL}
+	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 	m.reportSessionEnded(2 * time.Minute)
-	assert.JSONEq(t, `{"event":"session_ended","properties":{"surface":"tui","duration_bucket":"1_to_5m"}}`, body)
-	body = ""
-	t.Setenv(telemetry.EnabledEnv, "0")
-	m.reportSessionEnded(time.Minute)
-	assert.Empty(t, body)
-	t.Setenv(telemetry.EnabledEnv, "1")
-	srv.Close()
-	m.reportSessionEnded(time.Minute)
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	assert.Equal(t, []map[string]any{{"surface": "tui", "duration_bucket": "1_to_5m"}}, recorder.captured)
+}
+
+type stalledSessionEndedAPI struct{ KataAPI }
+
+func (stalledSessionEndedAPI) ReportSessionEnded(ctx context.Context, _ time.Duration) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestReportSessionEndedBoundsDelivery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := initialModel(Options{})
+		m.api = stalledSessionEndedAPI{}
+		started := time.Now()
+		m.reportSessionEnded(time.Minute)
+		assert.Equal(t, time.Second, time.Since(started))
+	})
 }
 
 // runCmd runs cmd and every command a batch result carries, like Bubble Tea would.

@@ -1,13 +1,16 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-03
+last_edited: 2026-10-06
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Anonymous usage reporting includes browser and terminal session duration
+  buckets. Browser time excludes hidden tabs and authentication recovery.
 
 - Diagnose setup with `kata doctor`: read-only checks, stable JSON findings,
   suggested fixes, active hook availability and sampled hook failure counts.

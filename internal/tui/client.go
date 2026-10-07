@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -131,6 +132,21 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 	}
 	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
 		Body: &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "tui"}},
+	})
+	if wire == nil {
+		return callErr
+	}
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
+// ReportSessionEnded sends the completed terminal lifetime to the connected daemon.
+func (c *Client) ReportSessionEnded(ctx context.Context, elapsed time.Duration) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
+		Body: &generated.CaptureTelemetryEventBody{Event: "session_ended", Properties: map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)}},
 	})
 	if wire == nil {
 		return callErr

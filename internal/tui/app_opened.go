@@ -5,11 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/telemetry"
-	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
-	"go.kenn.io/kit/telemetry/posthog"
 )
 
 // reportAppOpened tells the daemon the TUI opened. Init is its only caller, so
@@ -29,21 +24,11 @@ func (m Model) reportAppOpened() tea.Cmd {
 }
 
 func (m Model) reportSessionEnded(elapsed time.Duration) {
-	if !posthog.EnabledFromEnv("KATA") || m.activeDaemon.resolved.BaseURL == "" {
+	reporter, ok := m.api.(sessionEndedAPI)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	hc, err := client.NewHTTPClientForResolved(ctx, m.activeDaemon.resolved, client.Opts{Timeout: time.Second})
-	if err != nil {
-		return
-	}
-	defer hc.CloseIdleConnections()
-	apiClient, err := kataclient.NewWithHTTPClient(m.activeDaemon.resolved.BaseURL, hc)
-	if err != nil {
-		return
-	}
-	_, _ = apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: &generated.CaptureTelemetryEventBody{Event: "session_ended", Properties: map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)}},
-	})
+	_ = reporter.ReportSessionEnded(ctx, elapsed)
 }
