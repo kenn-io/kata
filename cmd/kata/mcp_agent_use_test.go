@@ -65,37 +65,39 @@ func TestMCPCallsReportDailyAgentActivity(t *testing.T) {
 }
 
 func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
-	release := make(chan struct{})
-	started := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			select {
-			case started <- struct{}{}:
-			default:
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		started := make(chan struct{}, 1)
+		server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/ui/telemetry" {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+				<-release
+				return
 			}
-			<-release
-			return
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issues":[]}`))
+		}))
+		t.Cleanup(func() { close(release) })
+		c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+		require.NoError(t, err)
+		session := agentUseMCPSession(t, c)
+		_, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
+		require.NoError(t, err)
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("report did not start")
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"issues":[]}`))
-	}))
-	t.Cleanup(server.Close)
-	t.Cleanup(func() { close(release) })
-	c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
-	require.NoError(t, err)
-	session := agentUseMCPSession(t, c)
-	_, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
-	require.NoError(t, err)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("report did not start")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
+		synctest.Wait()
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+	})
 }
 
 func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
