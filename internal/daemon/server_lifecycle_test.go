@@ -46,7 +46,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 	select {
 	case err := <-done:
 		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
 	}
 
 	close(release)
@@ -99,7 +99,7 @@ func TestServeTreatsConcurrentListenerCloseAsDrained(t *testing.T) {
 	select {
 	case err := <-done:
 		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
 	}
 	close(release)
 
@@ -198,7 +198,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case err := <-done:
 		t.Fatalf("ServeListeners returned before sibling handler drained: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the sibling handler, so ServeListeners must not return
 	}
 	close(release)
 	require.True(t, errors.Is(<-done, net.ErrClosed))

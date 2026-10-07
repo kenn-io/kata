@@ -80,7 +80,7 @@ loop:
 				break loop
 			}
 			got++
-		case <-time.After(20 * time.Millisecond):
+		default:
 			break loop
 		}
 	}

@@ -314,7 +314,7 @@ func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) { //n
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
 
-	deadlineCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+	deadlineCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	started := time.Now()
 	got, err := d.ResolveAPIToken(deadlineCtx, "secret-token")

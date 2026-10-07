@@ -72,7 +72,7 @@ func TestStateLockHonorsContextWhileOwnerIsLive(t *testing.T) {
 	}
 	defer release()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the held lock keeps the second owner blocked until it fires
 	defer cancel()
 	secondRelease, err := lockContext(ctx, lockPath)
 	if secondRelease != nil {
@@ -127,7 +127,7 @@ func TestStateUpdateDoesNotStealLiveLockAndRecoversAfterKill(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second update failed while testing live ownership: %v", err)
 		}
-	case <-time.After(350 * time.Millisecond):
+	case <-time.After(350 * time.Millisecond): //nolint:kennlint // absence window; the live child process owns the state lock, so the second update must not enter
 	}
 	if err := command.Process.Kill(); err != nil {
 		t.Fatal(err)

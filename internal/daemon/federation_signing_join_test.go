@@ -91,7 +91,7 @@ func TestConfigureSigningIsNotLostToConcurrentRejoin(t *testing.T) {
 	configureStatus := 0
 	select {
 	case configureStatus = <-configure:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond): //nolint:kennlint // absence window; the paused rejoin holds the credential store, so a serialized configure cannot finish
 	}
 	close(credentials.resume)
 	require.Equal(t, http.StatusOK, <-rejoin)

@@ -84,7 +84,7 @@ func TestExternalRootCompletionClaimsWaitForIssueLock(t *testing.T) {
 			select {
 			case got := <-result:
 				require.Failf(t, "claim bypassed issue lock", "result=%+v", got)
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the blocker transaction holds the issue lock, so the claim must not finish
 			}
 			require.NoError(t, blocker.Rollback())
 			select {

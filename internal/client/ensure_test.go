@@ -391,7 +391,7 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	select {
 	case err := <-waitCh:
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond): //nolint:kennlint // absence window; the unverified PID must never be signaled, so nothing ends the process
 	}
 }
 
@@ -755,10 +755,7 @@ func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T)
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
-
-	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	err = stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "PID could not be verified")
 

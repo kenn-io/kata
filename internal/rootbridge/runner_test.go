@@ -140,7 +140,7 @@ func TestRunnerDeliversRetainedEventsExactlyOnceWhenReconcileReturnsError(t *tes
 	select {
 	case duplicate := <-delivered:
 		t.Fatalf("runner delivered event twice: %#v", duplicate)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; the event was already delivered once, so any second delivery is a duplicate
 	}
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -229,7 +229,7 @@ func TestRunnerDeliversCommittedProjectionBeforeLaterConnectorCallReturns(t *tes
 	var eventBeforeRelease db.Event
 	select {
 	case eventBeforeRelease = <-delivered:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 	}
 	close(release)
 	cancel()

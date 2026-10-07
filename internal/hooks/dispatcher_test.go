@@ -282,7 +282,7 @@ func TestDispatcher_Shutdown_Timeout_ReportsInflight(t *testing.T) {
 	d, logBuf, _ := mustNewDispatcher(t, []ResolvedHook{stuck}, cfg)
 	enqueueEvents(d, "issue.created", 300, 1)
 	waitForInflight(t, d, 1, 5*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the term-ignore hook keeps Shutdown waiting until it fires
 	defer cancel()
 	if err := d.Shutdown(ctx); err == nil {
 		t.Fatal("Shutdown with 5ms ctx vs term-ignore should return error")

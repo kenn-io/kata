@@ -134,9 +134,11 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 			case createHit <- struct{}{}:
 			default:
 			}
+			// The server notices a client disconnect only after the body is read.
+			_, _ = io.Copy(io.Discard, r.Body)
 			select {
 			case <-r.Context().Done():
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(5 * time.Second):
 			}
 		default:
 			http.NotFound(w, r)

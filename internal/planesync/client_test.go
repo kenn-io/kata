@@ -423,7 +423,7 @@ func TestClientAdmissionCancellationWhileAnotherCallerWaits(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- c.admit(context.Background()) }()
 	<-entered
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the first caller's wait until it fires
 	defer cancel()
 	canceled := make(chan error, 1)
 	go func() { canceled <- c.admit(ctx) }()

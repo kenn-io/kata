@@ -81,7 +81,7 @@ func TestFederationEnrollmentFenceDoesNotDeadlockAgainstBindingFirstWriter(t *te
 		require.NoError(t, fenceErr)
 		require.NoError(t, bindingFirst.Commit())
 		return
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond): //nolint:kennlint // absence window; bindingFirst holds the binding lock, so a binding-first fence stays blocked
 	}
 
 	_, updateErr := bindingFirst.ExecContext(ctx,

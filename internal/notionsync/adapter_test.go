@@ -272,7 +272,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			defer cancel()
 			var callerDeadline time.Time
 			if mode == "deadline" {
-				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond) //nolint:kennlint // the deadline is the expected result; onContent waits on ctx.Done until it fires
 				callerDeadline, _ = ctx.Deadline()
 				defer cancel()
 			}

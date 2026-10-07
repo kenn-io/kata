@@ -48,7 +48,7 @@ func TestBackendProjectLockCoordinatesDistinctProcessGates(t *testing.T) {
 	select {
 	case <-rebindAcquired:
 		t.Fatal("backend rebind lock acquired while another process gate held transport")
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the process-a sync gate holds transport, so the rebind lock must not be granted
 	}
 	releaseSync()
 

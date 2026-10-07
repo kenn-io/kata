@@ -165,7 +165,7 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 	case rebindErr := <-rebindDone:
 		close(releaseResponse)
 		t.Fatalf("cross-replica rebind completed before the old-origin claim committed: %v", rebindErr)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; releaseResponse holds the old-origin claim, so the rebind must not complete
 	}
 
 	close(releaseResponse)

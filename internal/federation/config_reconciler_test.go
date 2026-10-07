@@ -1645,7 +1645,7 @@ func TestPrepareLeaveDrainsPendingEnrollmentRecovery(t *testing.T) {
 	select {
 	case prepareErr := <-prepared:
 		require.FailNow(t, "prepare returned before recovery drained", "error: %v", prepareErr)
-	case <-time.After(20 * time.Millisecond):
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; releaseEnsureEnrollment holds recovery, so prepare must not return
 	}
 
 	close(hub.releaseEnsureEnrollment)

@@ -239,7 +239,7 @@ func TestBindDeliversCommittedBindingBeforeImmediateReconcileReturns(t *testing.
 	var eventBeforeRelease db.Event
 	select {
 	case eventBeforeRelease = <-delivered:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 	}
 	close(release)
 	got := <-done
