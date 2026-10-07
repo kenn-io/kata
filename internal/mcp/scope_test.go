@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,7 +90,7 @@ func TestScopeProjectsFailWhenNoMembersRemain(t *testing.T) {
 
 func projectCatalogClient(t *testing.T, response string) *kataclient.Client {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/api/v1/projects", request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(response))

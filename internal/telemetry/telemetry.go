@@ -76,6 +76,12 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
 			posthog.AllowProperty("duration_bucket", posthog.AllowStringValues("under_1m", "1_to_5m", "5_to_30m", "over_30m")),
 		),
+		posthog.WithAllowedEvent("agent_active",
+			posthog.AllowProperty("call_count_bucket", posthog.AllowStringValues("1-10", "11-100", "over-100")),
+		),
+		posthog.WithAllowedEvent("agent_call_count",
+			posthog.AllowProperty("call_count_bucket", posthog.AllowStringValues("1-10", "11-100", "over-100")),
+		),
 	)
 }
 

@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,7 +16,7 @@ func TestMCPSearchStatusCompatibilityAndForwarding(t *testing.T) {
 	for _, version := range []string{"", "invalid", "0.18.0", "0.19.0", "0.20.0"} {
 		t.Run(version, func(t *testing.T) {
 			var searches atomic.Int32
-			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			daemon := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/api/v1/health" {
 					writeJSON(w, map[string]any{"ok": true, "api_schema_version": version})
@@ -51,7 +50,7 @@ func TestMCPSearchStatusCompatibilityAndForwarding(t *testing.T) {
 
 func TestMCPSearchStatusRejectsInvalidExplicitValues(t *testing.T) {
 	var searches atomic.Int32
-	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/search") {
 			searches.Add(1)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -198,7 +197,7 @@ func TestCreateRejectsNumericScheduleOffsetAndDedicatedCollision(t *testing.T) {
 
 func TestCreateSendsSchedulingSomedayAndForceNew(t *testing.T) {
 	requestSeen := make(chan capturedRequest, 1)
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		requestSeen <- capturedRequest{Path: request.URL.Path, Body: body}
 		writer.Header().Set("Content-Type", "application/json")
@@ -226,7 +225,7 @@ func TestCreateSendsSchedulingSomedayAndForceNew(t *testing.T) {
 
 func TestEditSchedulingClearUsesOneMetadataPatch(t *testing.T) {
 	requestSeen := make(chan capturedRequest, 1)
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		requestSeen <- capturedRequest{Path: request.URL.Path, Body: body}
 		writer.Header().Set("Content-Type", "application/json")
@@ -252,7 +251,7 @@ func TestEditSchedulingClearUsesOneMetadataPatch(t *testing.T) {
 }
 
 func TestForceClaimReportsPreviousOwner(t *testing.T) {
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		response := map[string]any{}
 		require.NoError(t, json.Unmarshal(daemonResponse(request), &response))
@@ -272,7 +271,7 @@ func TestForceClaimReportsPreviousOwner(t *testing.T) {
 
 func TestClaimReportsAssignmentExpiry(t *testing.T) {
 	const expiresOn = "2026-08-08T01:00:00Z"
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		var response map[string]any
 		require.NoError(t, json.Unmarshal(daemonResponse(request), &response))
@@ -300,7 +299,7 @@ func TestClaimForwardsTTLAndIfUnowned(t *testing.T) {
 		TTLSeconds *int64 `json:"ttl_seconds"`
 	}
 	requestSeen := make(chan claimBody, 1)
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.HasSuffix(request.URL.Path, "/actions/claim") {
 			raw, err := io.ReadAll(request.Body)
 			if err != nil {
@@ -352,7 +351,7 @@ func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, 
 	t.Helper()
 	var mu sync.Mutex
 	requests := []string{}
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/api/v1/projects" {
 			mu.Lock()
 			requests = append(requests, request.URL.Path)

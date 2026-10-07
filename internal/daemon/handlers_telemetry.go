@@ -2,14 +2,19 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.kenn.io/kit/atomicfile"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/telemetry"
 )
 
@@ -51,10 +56,71 @@ func (g *appOpenedGate) capture(surface string, forward func() (captured bool)) 
 	}
 }
 
+type agentUseGate struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	path  string
+	state struct {
+		Day   string `json:"day"`
+		Count int    `json:"count"`
+		Sent  int    `json:"sent"`
+	}
+}
+
+func newAgentUseGate(path string, now func() time.Time) *agentUseGate {
+	g := &agentUseGate{path: path, now: now}
+	data, err := os.ReadFile(path) //nolint:gosec // Private telemetry marker derived from Kata home.
+	if err == nil {
+		_ = json.Unmarshal(data, &g.state)
+	}
+	return g
+}
+
+func (g *agentUseGate) capture(reporter TelemetryReporter) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if day := g.now().UTC().Format(time.DateOnly); day != g.state.Day {
+		g.state.Day, g.state.Count, g.state.Sent = day, 0, 0
+	}
+	if g.state.Count < 101 {
+		g.state.Count++
+	}
+	threshold, bucket := 1, "1-10"
+	if g.state.Count > 100 {
+		threshold, bucket = 101, "over-100"
+	} else if g.state.Count > 10 {
+		threshold, bucket = 11, "11-100"
+	}
+	var err error
+	if g.state.Sent < threshold {
+		event := "agent_call_count"
+		if g.state.Sent == 0 {
+			event = "agent_active"
+		}
+		err = reporter.Capture(event, map[string]any{"call_count_bucket": bucket})
+		if err == nil {
+			g.state.Sent = threshold
+		}
+	}
+	if g.path != "" {
+		if data, marshalErr := json.Marshal(g.state); marshalErr == nil {
+			if os.MkdirAll(filepath.Dir(g.path), 0o700) == nil {
+				_ = atomicfile.WriteFile(g.path, data, atomicfile.WithPerm(0o600))
+			}
+		}
+	}
+	return err
+}
+
 // registerTelemetryHandlers lets UI clients report allowlisted events through
 // the daemon's reporter, which filters properties and owns delivery.
 func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 	gate := newAppOpenedGate(time.Now)
+	path := ""
+	if home, err := config.KataHome(); err == nil {
+		path = filepath.Join(home, "telemetry", "agent-use-"+cfg.DB.InstanceUID()+".json")
+	}
+	agentGate := newAgentUseGate(path, time.Now)
 	huma.Register(humaAPI, huma.Operation{
 		OperationID:   "captureTelemetryEvent",
 		Method:        http.MethodPost,
@@ -68,7 +134,8 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusServiceUnavailable, "telemetry_unavailable",
 				"telemetry capture is unavailable", "", nil)
 		}
-		if !reporter.EventAllowed(in.Body.Event) {
+		event := strings.TrimSpace(in.Body.Event)
+		if event == "agent_call_count" || !reporter.EventAllowed(event) {
 			return nil, api.NewError(http.StatusBadRequest, "unsupported_telemetry_event",
 				"unsupported telemetry event", "", nil)
 		}
@@ -82,9 +149,12 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			err = reporter.Capture(in.Body.Event, in.Body.Properties)
 			return err == nil
 		}
-		if strings.TrimSpace(in.Body.Event) == "app_opened" {
+		switch event {
+		case "agent_active":
+			err = agentGate.capture(reporter)
+		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
-		} else {
+		default:
 			capture()
 		}
 		if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -1075,7 +1074,7 @@ func TestEditRelationshipTargetSurvivesScopedProjectNameReuse(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
 	var namesReused atomic.Bool
 	daemonHandler := daemonServer.Handler()
-	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	httpServer := newToolTestDaemon(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodPatch && namesReused.CompareAndSwap(false, true) {
 			if _, renameErr := store.RenameProject(request.Context(), targetProject.ID, "renamed-target"); renameErr != nil {
 				http.Error(writer, renameErr.Error(), http.StatusInternalServerError)
@@ -1935,7 +1934,7 @@ func reviewDigestBodyJSON(projectID int64, projectName string) map[string]any {
 
 func reviewClient(t *testing.T, handler http.HandlerFunc) *kataclient.Client {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := newToolTestDaemon(handler)
 	t.Cleanup(server.Close)
 	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)

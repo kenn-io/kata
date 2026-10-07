@@ -29,8 +29,10 @@ type cliUseTelemetry struct {
 	captured []map[string]any
 }
 
-func (*cliUseTelemetry) EventAllowed(event string) bool { return event == "app_opened" }
-func (*cliUseTelemetry) Enabled() bool                  { return true }
+func (*cliUseTelemetry) EventAllowed(event string) bool {
+	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
+}
+func (*cliUseTelemetry) Enabled() bool { return true }
 func (c *cliUseTelemetry) Capture(_ string, properties map[string]any) error {
 	if c.block != nil {
 		<-c.block
@@ -125,7 +127,11 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 
 				require.NoError(t, err)
 				require.NotNil(t, cliUseTarget.Load(), "the command resolved a daemon")
-				assert.Empty(t, capture.recorded())
+				if test.hook != "" {
+					assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
+				} else {
+					assert.Empty(t, capture.recorded())
+				}
 			})
 		}
 	})
@@ -141,7 +147,7 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 			require.NoError(t, runAttnHook(t, env, dir, args...))
 
 			require.NotNil(t, cliUseTarget.Load(), "the hook resolved a daemon")
-			assert.Empty(t, capture.recorded())
+			assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 		})
 	}
 
@@ -335,4 +341,59 @@ func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
 
 	assert.False(t, reportsCLIUse(findCommand(t, "projects", "list")),
 		"agents and scripts read output through a pipe")
+}
+
+func TestAgentUseHookClassification(t *testing.T) {
+	t.Setenv(hooks.HookVersionEnv, "")
+	for _, test := range []struct {
+		path []string
+		want bool
+	}{
+		{[]string{"agent-hook", "contract"}, true},
+		{[]string{"agent-hook", "attention-native"}, true},
+		{[]string{"agent-hook", "attention", "end"}, true},
+		{[]string{"agent-hook", "status"}, false},
+		{[]string{"agent-hook", "install"}, false},
+		{[]string{"mcp", "serve"}, false},
+		{[]string{"projects", "list"}, false},
+	} {
+		require.Equal(t, test.want, reportsAgentUse(findCommand(t, test.path...)), test.path)
+	}
+}
+
+func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
+	baseline, err := runCmdOutput(t, newCLIUseEnv(t, nil), "agent-contract-hook")
+	require.NoError(t, err)
+	capture := &cliUseTelemetry{}
+	env := newCLIUseEnv(t, capture)
+	for range 11 {
+		output, stderr, err := runCmdCapture(t, env, "agent-contract-hook")
+		require.NoError(t, err)
+		require.Equal(t, baseline, output)
+		require.Empty(t, stderr)
+	}
+	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}, {"call_count_bucket": "11-100"}}, capture.recorded())
+	shortenCLIUseReportTimeout(t, 50*time.Millisecond)
+	hung := &cliUseTelemetry{block: make(chan struct{})}
+	env = newCLIUseEnv(t, hung)
+	t.Cleanup(func() { close(hung.block) })
+	start := time.Now()
+	output, stderr, err := runCmdCapture(t, env, "agent-contract-hook")
+	require.NoError(t, err)
+	require.Equal(t, baseline, output)
+	require.Empty(t, stderr)
+	require.Less(t, time.Since(start), time.Second)
+}
+
+func TestAgentContractUseWithoutDaemon(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", "http://"+closedLoopbackAddr(t))
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	output, stderr, err := runCmdCapture(t, nil, "agent-contract-hook")
+	require.NoError(t, err)
+	require.Contains(t, output, "SessionStart")
+	require.Empty(t, stderr)
+	t.Setenv("KATA_SERVER", "")
+	_, err = discoverDaemon(context.Background())
+	require.ErrorContains(t, err, "no daemon running")
 }

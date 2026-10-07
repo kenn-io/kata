@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-04
+last_edited: 2026-10-06
 ---
 
 # Configuration
@@ -897,9 +897,8 @@ waits at most one second and prints nothing.
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
 `kata health` or `kata version` send nothing. Agent output mode (`--agent`,
-`--format agent`), `kata mcp serve`, agent hooks and daemon hook children send
-nothing either. An agent that runs commands in a terminal without `--agent`
-counts like a person.
+`--format agent`) and `kata mcp serve` startup send nothing either. An agent that
+runs commands in a terminal without `--agent` counts like a person.
 
 Each client's event goes through the daemon it used, so that daemon's install
 ID and its `KATA_TELEMETRY_ENABLED` setting apply, and a TUI or CLI pointed at
@@ -907,6 +906,26 @@ a shared daemon counts that daemon's install. The daemon forwards one
 `app_opened` per surface per UTC day and forgets what it sent when it restarts,
 so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
+
+Each admitted MCP tool call, including section loaders and tool errors, reports
+`agent_active` to its daemon. Successful contract and attention hooks, and commands
+run as daemon hook children, report the same event. Hook installation and status
+commands send nothing. Reports wait at most one second, preserve command output
+and exit status, and never start a daemon. Ordinary piped commands send nothing.
+
+The daemon counts these observations together for each install and UTC day. It
+sends `agent_active` on the first observation with `call_count_bucket: 1-10`, then
+`agent_call_count` at calls 11 and 101 with `11-100` and `over-100`. Later calls in
+the same bucket send nothing. Use distinct `agent_active` installs for daily agent
+activity, separately from human `app_opened` counts. The highest bucket across
+both agent event names gives the total observed daily volume.
+
+The daemon keeps the day, count capped at 101, and last queued threshold in a
+private instance-specific file under `<KATA_HOME>/telemetry/`, so ordinary restarts
+retain the count. A new UTC day resets it on the next observation. Failed captures
+retry the current bucket on the next observation, with `agent_active` if the first
+capture is still pending. Reports share the daemon's install ID and opt-out and
+send buckets rather than exact counts, paths, tool names, or actor names.
 
 Disable telemetry with:
 

@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +16,7 @@ import (
 func TestMCPTeammateSharedCalls(t *testing.T) {
 	var mu sync.Mutex
 	requests := map[string]map[string]any{}
-	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
 			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.18.0"})
@@ -99,7 +98,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 
 func TestMCPTeammateRejectsOldDaemonBeforePost(t *testing.T) {
 	var posts atomic.Int32
-	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
 			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.17.0"})
@@ -130,7 +129,7 @@ func TestMCPTeammateRejectsOldDaemonBeforePost(t *testing.T) {
 func TestMCPTeammateStartupFallbackAndMetadata(t *testing.T) {
 	var mu sync.Mutex
 	var requests []map[string]any
-	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	daemon := newToolTestDaemon(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
 			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.18.0"})
