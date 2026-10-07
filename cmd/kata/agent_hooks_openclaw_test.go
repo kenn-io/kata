@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -36,13 +35,17 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	var posts, mutations atomic.Int32
+	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/telemetry" {
 			var body struct{ Event string }
 			if json.NewDecoder(r.Body).Decode(&body) == nil && body.Event == "agent_active" {
 				posts.Add(1)
 			}
-			time.Sleep(800 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
@@ -52,6 +55,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 		proxy.ServeHTTP(w, r)
 	}))
 	defer server.Close()
+	defer close(release)
 	opts := openClawTestOptions(t)
 	opts.Dir = workspace
 	opts.Executable = filepath.Join(opts.Home, "kata")
