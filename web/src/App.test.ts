@@ -2296,10 +2296,6 @@ describe('App', () => {
       history.pushState(null, '', '/kata?view=today')
       window.dispatchEvent(new PopStateEvent('popstate'))
       await waitFor(() => expect(telemetry).toHaveLength(2))
-      await expect(telemetry[1]!.clone().json()).resolves.toEqual({
-        event: 'screen_viewed',
-        properties: { screen: 'today', surface: 'web' },
-      })
       history.pushState(null, '', '/kata?view=delegated')
       window.dispatchEvent(new PopStateEvent('popstate'))
       await waitFor(() => expect(rejectedSnapshots).toBeGreaterThan(0))

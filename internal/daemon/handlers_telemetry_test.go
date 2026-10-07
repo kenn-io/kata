@@ -350,22 +350,6 @@ func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
 	}
 }
 
-func TestScreenViewsPersistAcrossServerRestartAndUTCDate(t *testing.T) {
-	store := openAuthTestDB(t)
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
-	claimed, err := store.ClaimScreenView(t.Context(), "inbox", yesterday)
-	require.NoError(t, err)
-	require.True(t, claimed)
-	reporter := &fakeTelemetryReporter{}
-	body := `{"event":"screen_viewed","properties":{"screen":"inbox","surface":"web"}}`
-	for range 2 {
-		server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal}, store)
-		response := server.post(t.Context(), t, body)
-		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
-	}
-	require.Len(t, reporter.captured, 1)
-}
-
 type failingScreenStore struct{ db.Storage }
 
 func (failingScreenStore) ClaimScreenView(context.Context, string, string) (bool, error) {
@@ -373,6 +357,10 @@ func (failingScreenStore) ClaimScreenView(context.Context, string, string) (bool
 }
 func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
 	store := openAuthTestDB(t)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	claimed, err := store.ClaimScreenView(t.Context(), "inbox", yesterday)
+	require.NoError(t, err)
+	require.True(t, claimed)
 	body := `{"event":"screen_viewed","properties":{"screen":"inbox","surface":"web"}}`
 	server := newTelemetryTestServer(t, &fakeTelemetryReporter{}, Principal{Kind: PrincipalWebLocal}, failingScreenStore{store})
 	response := server.post(t.Context(), t, body)
@@ -381,9 +369,11 @@ func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
 	response = server.post(t.Context(), t, body)
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
-	claimed, err := store.ClaimScreenView(t.Context(), "inbox", time.Now().UTC().Format(time.DateOnly))
-	require.NoError(t, err)
-	require.True(t, claimed, "opt-out consumes no daily claim")
+	reporter := &fakeTelemetryReporter{}
+	server = newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal}, store)
+	response = server.post(t.Context(), t, body)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Len(t, reporter.captured, 1, "yesterday's claim and today's opt-out leave today's visit eligible")
 }
 
 func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {

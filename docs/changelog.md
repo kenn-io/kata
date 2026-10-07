@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Count browser and terminal screen visits with anonymous `screen_viewed` events.
+  Fixed `screen` names count once per installation per UTC day across interfaces
+  and daemon restarts; `surface` identifies the first interface. Daily claims
+  live in exported `meta` rows. `KATA_TELEMETRY_ENABLED=0` opts out.
+
 - Anonymous usage reporting includes browser and terminal session duration
   buckets. Browser time excludes hidden tabs and authentication recovery.
 

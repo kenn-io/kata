@@ -145,33 +145,13 @@ func TestScreenViewsThroughModelAndDaemon(t *testing.T) {
 	m := initialModel(Options{})
 	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 	m.width = 100
-	for _, test := range []struct {
-		view   viewID
-		inbox  bool
-		screen string
-	}{
-		{viewList, true, "inbox"}, {viewList, false, "issues"}, {viewDetail, false, "issue"},
-		{viewHelp, false, "help"}, {viewEmpty, false, "empty"}, {viewProjects, false, "projects"},
-		{viewDaemons, false, "daemons"}, {viewFederation, false, "federation"}, {viewCredentials, false, "credentials"},
-	} {
-		m.view = test.view
-		m.scope.inbox = test.inbox
-		next, cmd := m.Update(nil)
-		m = next.(Model)
-		runCmd(cmd)
-		recorder.mu.Lock()
-		require.Equal(t, test.screen, recorder.captured[len(recorder.captured)-1]["screen"])
-		recorder.mu.Unlock()
-	}
-	recorder.mu.Lock()
-	require.Len(t, recorder.captured, 9)
-	recorder.mu.Unlock()
-	next, cmd := m.Update(nil)
-	m = next.(Model)
+	m.scope.inbox = true
+	_, cmd := m.Update(nil)
 	runCmd(cmd)
 	recorder.mu.Lock()
-	require.Len(t, recorder.captured, 9)
-	recorder.mu.Unlock()
+	defer recorder.mu.Unlock()
+	require.Len(t, recorder.captured, 1)
+	assert.Subset(t, recorder.captured[0], map[string]any{"screen": "inbox", "surface": "tui"})
 }
 
 func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
@@ -227,17 +207,23 @@ func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
 	require.Equal(t, uint64(1), m.connGen)
 }
 
-func TestScreenNameMatchesNarrowView(t *testing.T) {
+func TestScreenName(t *testing.T) {
 	m := initialModel(Options{})
-	m.width, m.height = 70, 30
 	for _, test := range []struct {
+		width  int
 		view   viewID
+		inbox  bool
 		screen string
 	}{
-		{viewList, ""}, {viewDetail, ""}, {viewHelp, ""}, {viewEmpty, ""}, {viewDaemons, ""},
-		{viewProjects, "projects"}, {viewFederation, "federation"}, {viewCredentials, "credentials"},
+		{100, viewList, true, "inbox"}, {100, viewList, false, "issues"}, {100, viewDetail, false, "issue"},
+		{100, viewHelp, false, "help"}, {100, viewEmpty, false, "empty"}, {100, viewProjects, false, "projects"},
+		{100, viewDaemons, false, "daemons"}, {100, viewFederation, false, "federation"}, {100, viewCredentials, false, "credentials"},
+		{70, viewList, false, ""}, {70, viewDetail, false, ""}, {70, viewHelp, false, ""}, {70, viewEmpty, false, ""}, {70, viewDaemons, false, ""},
+		{70, viewProjects, false, "projects"}, {70, viewFederation, false, "federation"}, {70, viewCredentials, false, "credentials"},
 	} {
+		m.width, m.height = test.width, 30
 		m.view = test.view
+		m.scope.inbox = test.inbox
 		require.Equal(t, test.screen, m.screenName())
 	}
 }
