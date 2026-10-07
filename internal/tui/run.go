@@ -119,10 +119,15 @@ func Run(ctx context.Context, opts Options) error {
 	if !bi.scope.empty && sseHC != nil {
 		startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
-	if _, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run(); err != nil {
-		return err
+	started := time.Now()
+	final, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run()
+	elapsed := time.Since(started)
+	if fm, ok := final.(Model); ok {
+		fm.reportSessionEnded(elapsed)
+	} else {
+		m.reportSessionEnded(elapsed)
 	}
-	return nil
+	return err
 }
 
 // buildRunModel seeds the initial model with the resolved client,

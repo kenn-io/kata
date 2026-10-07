@@ -7,10 +7,37 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSessionEndedPropertiesAndBuckets(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		elapsed time.Duration
+		bucket  string
+	}{
+		{time.Minute - time.Nanosecond, "under_1m"}, {time.Minute, "1_to_5m"},
+		{2 * time.Minute, "1_to_5m"}, {5 * time.Minute, "5_to_30m"},
+		{30 * time.Minute, "5_to_30m"}, {30*time.Minute + time.Nanosecond, "over_30m"},
+	} {
+		assert.Equal(t, tc.bucket, DurationBucket(tc.elapsed))
+		props, err := reporter.SanitizeProperties("session_ended", map[string]any{"surface": "tui", "duration_bucket": tc.bucket, "seconds": 120})
+		require.NoError(t, err)
+		assert.Equal(t, tc.bucket, props["duration_bucket"])
+		assert.Equal(t, "tui", props["surface"])
+		assert.NotContains(t, props, "seconds")
+	}
+	for _, value := range []any{"invalid", 120} {
+		props, err := reporter.SanitizeProperties("session_ended", map[string]any{"surface": "cli", "duration_bucket": value})
+		require.NoError(t, err)
+		assert.NotContains(t, props, "surface")
+		assert.NotContains(t, props, "duration_bucket")
+	}
+}
 
 func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 	goEnv := exec.Command("go", "env", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned module cache.

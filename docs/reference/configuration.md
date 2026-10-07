@@ -874,6 +874,11 @@ PostHog with the same fields, distinct ID, and opt-out as its own events; the
 browser never contacts PostHog. Only signed-in sessions with write access on the
 serving daemon are counted.
 
+Hiding or closing a tab, or exiting `kata tui`, reports `session_ended` with
+`surface` and `duration_bucket`: `under_1m`, `1_to_5m`, `5_to_30m`, or
+`over_30m`. Browser durations count each visible interval and exclude hidden
+time. Terminal exit reporting uses the selected daemon and never starts one.
+
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
 daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
 connects to, after connecting. Switching daemons inside the TUI sends nothing
