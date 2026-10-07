@@ -920,7 +920,8 @@ Ordinary piped commands send nothing.
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
 has a separate one-second deadline. Shutdown cancels and joins the worker. CLI
-hook reports wait at most 100 ms after successful execution. Delivery is best
+hook reports wait at most 100 ms after successful execution; slow remote transports
+may drop observations. Delivery is best
 effort and preserves command output, results, and exit status.
 
 The daemon counts these observations for each install and UTC day. It sends one

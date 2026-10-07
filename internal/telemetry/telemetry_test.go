@@ -125,11 +125,6 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 		assert.NotContains(t, props, "surface")
 		assert.NotContains(t, props, "duration_bucket")
 	}
-}
-
-func TestAgentEventAllowlist(t *testing.T) {
-	reporter, err := NewReporter(Options{DistinctID: "anonymous-instance-id"})
-	require.NoError(t, err)
 	for _, event := range []string{"agent_active", "agent_call_count"} {
 		for _, bucket := range []any{"1-10", "11-100", "over-100", "101", 11} {
 			props, err := reporter.SanitizeProperties(event, map[string]any{"call_count_bucket": bucket, "actor": "example-agent", "path": "/example", "call_count": 11})

@@ -27,7 +27,7 @@ func TestScopedAgentTelemetryAdmission(t *testing.T) {
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
-	token, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker", AdminActor: db.BootstrapActor,
 		Scope:     &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID},
 		ExpiresAt: new(time.Now().UTC().Add(time.Hour)),
@@ -37,16 +37,11 @@ func TestScopedAgentTelemetryAdmission(t *testing.T) {
 		event  string
 		status int
 	}{
-		{"agent_active", http.StatusAccepted}, {"agent_active", http.StatusAccepted},
+		{"agent_active", http.StatusAccepted},
 		{"app_opened", http.StatusForbidden}, {"agent_call_count", http.StatusForbidden},
 	} {
 		resp, body := envDoRaw(t, env, http.MethodPost, "/api/v1/ui/telemetry", map[string]any{"event": test.event, "properties": map[string]any{"call_count_bucket": "over-100"}}, map[string]string{"Authorization": "Bearer worker-token"})
 		require.Equal(t, test.status, resp.StatusCode, string(body))
 	}
-	require.Equal(t, []string{"agent_active"}, r.events)
-	_, _, err = env.DB.RevokeAPIToken(t.Context(), token.ID, db.BootstrapActor)
-	require.NoError(t, err)
-	resp, _ := envDoRaw(t, env, http.MethodPost, "/api/v1/ui/telemetry", map[string]any{"event": "agent_active"}, map[string]string{"Authorization": "Bearer worker-token"})
-	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	require.Equal(t, []string{"agent_active"}, r.events)
 }

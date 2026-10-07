@@ -230,9 +230,6 @@ func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (f
 		}
 	}()
 	observe := func() {
-		if reportCtx.Err() != nil {
-			return
-		}
 		select {
 		case queue <- struct{}{}:
 		default:
