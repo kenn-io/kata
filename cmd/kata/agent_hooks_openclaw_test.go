@@ -27,7 +27,9 @@ func openClawTestOptions(t *testing.T) nativeAgentHookOptions {
 
 func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	node, err := exec.LookPath("node")
-	require.NoError(t, err)
+	if err != nil {
+		t.Skip("node unavailable")
+	}
 	env, workspace, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "tracked work")
 	target, err := url.Parse(env.URL)
