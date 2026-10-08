@@ -159,9 +159,13 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 		}
 		var payload struct {
 			CommentUID string `json:"comment_uid"`
+			ReplyToUID string `json:"reply_to_uid"`
 		}
 		if json.Unmarshal(p.Payload, &payload) == nil {
 			out.commentUID = payload.CommentUID
+			if p.Type == "issue.commented" && payload.ReplyToUID != "" {
+				out.replyToUIDs = append(out.replyToUIDs, payload.ReplyToUID)
+			}
 		}
 	case "issue.created", "issue.snapshot":
 		if len(p.Payload) == 0 {

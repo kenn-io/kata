@@ -999,6 +999,29 @@ func TestFederatedCommentIdentityRefreshesPendingReplyTarget(t *testing.T) {
 	}
 }
 
+func TestFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
+	m := sseDetailFixture(7, "source", "source-issue")
+	m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
+	msg := federatedCommentIdentityEvent(t, "issue.commented", "incoming-comment", "displayed-comment")
+
+	assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+}
+
+func FuzzFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(f *testing.F) {
+	f.Add("incoming-comment", "displayed-comment")
+	f.Add("reply-a", "target-b")
+	f.Fuzz(func(t *testing.T, commentUID, replyToUID string) {
+		if commentUID == "" || replyToUID == "" || commentUID == replyToUID ||
+			!utf8.ValidString(commentUID) || !utf8.ValidString(replyToUID) {
+			return
+		}
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: replyToUID}}
+		msg := federatedCommentIdentityEvent(t, "issue.commented", commentUID, replyToUID)
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
 func FuzzFederatedCommentIdentityRefreshesPendingReplyTarget(f *testing.F) {
 	f.Add(uint8(0), "target-comment")
 	f.Add(uint8(1), "target-comment")
