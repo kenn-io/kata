@@ -175,7 +175,7 @@ func purgeProjectCascade(ctx context.Context, c projectPurgeQueryer, project db.
 	if err := deleteProjectScoped(ctx, c, project.ID); err != nil {
 		return 0, err
 	}
-	reservedCursor, err := reserveEventSequence(ctx, c, counts.minEventID.Valid)
+	reservedCursor, err := reserveEventSequence(ctx, c, true)
 	if err != nil {
 		return 0, err
 	}

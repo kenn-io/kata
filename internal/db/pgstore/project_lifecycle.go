@@ -275,16 +275,14 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 			return err
 		}
 		var resetCursor sql.NullInt64
-		if counts.minEventID.Valid {
-			if err := lockEventSequenceTx(ctx, tx); err != nil {
-				return err
-			}
-			value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
-			if err != nil {
-				return err
-			}
-			resetCursor = sql.NullInt64{Int64: value, Valid: true}
+		if err := lockEventSequenceTx(ctx, tx); err != nil {
+			return err
 		}
+		value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
+		if err != nil {
+			return err
+		}
+		resetCursor = sql.NullInt64{Int64: value, Valid: true}
 		purgeID, err := s.insertProjectPurgeLogTx(ctx, tx, project, counts, resetCursor,
 			params.Actor, params.Reason)
 		if err != nil {
