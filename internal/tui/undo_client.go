@@ -308,5 +308,7 @@ func (c *undoClient) AddCommentReply(ctx context.Context, pid int64, ref, body, 
 	if !ok {
 		return nil, errors.New("client does not support typed comment replies")
 	}
-	return client.AddCommentReply(ctx, pid, ref, body, actor, target, kind, force, key)
+	return c.boundaryWrite(ctx, "comment addition cannot be undone", func() (*MutationResp, error) {
+		return client.AddCommentReply(ctx, pid, ref, body, actor, target, kind, force, key)
+	})
 }
