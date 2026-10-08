@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/db"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -968,11 +969,15 @@ func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEn
 }
 
 func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectID int64) commentref.Record {
-	record := commentref.Record{IssueUID: issueUID, ProjectID: projectID}
-	record.Comment.UID = uid
-	record.Comment.ReplyToUID = replyToUID
-	record.Comment.ReplyKind = replyKind
-	return record
+	return commentref.Record{
+		Comment: db.Comment{
+			UID:        uid,
+			ReplyToUID: replyToUID,
+			ReplyKind:  replyKind,
+		},
+		IssueUID:  issueUID,
+		ProjectID: projectID,
+	}
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-
