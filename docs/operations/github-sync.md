@@ -183,10 +183,19 @@ links are restored. An idle incremental run makes no parent GraphQL requests. Gi
 that limit, such as after a long pause, the run falls back to a full repository
 parent scan.
 
-Initial sync and the one-time parent-link backfill still scan the full repository
-for parent coverage. Issue imports and comments continue to respect `--since`
-during those scans. Hosts without parent support retain incremental issue
-fetching and preserve existing parent links.
+With `--since`, initial sync fetches eligible issues first and checks only their
+parents in GraphQL batches of at most 100 children, without reading historical
+relationship events. On a new binding, an empty selection makes no parent
+requests. Retries use the same scope when all previously imported issues remain
+eligible.
+
+Unfiltered initial sync and the one-time parent-link backfill for an existing
+binding still scan the full repository for parent coverage. A filtered run with
+a reset cursor also keeps full parent coverage if previously imported issues
+fall outside the eligible selection, such as after a narrower cutoff. Issue
+imports and comments continue to respect `--since` during those scans. Hosts
+without parent support retain incremental issue fetching and preserve existing
+parent links.
 
 Enablement validates the repository through the daemon before storing the
 binding. The binding, sync cursor, interval, status, and import mappings live
@@ -223,11 +232,13 @@ GitHub sync running
 Progress: comments — 25/120 completed; updated 2026-01-02T12:34:56Z
 ```
 
-Incremental runs use the phases `repository`, `issues`, `parents`, `comments`,
-`importing`, and `finalizing`. Initial sync and parent-link backfill check
-`parents` before `issues`. Counts reset when the phase changes. Incremental
-parent progress counts selected children checked against GitHub, with the
-selected total known once recent events have been read. Full parent scans and
+Incremental runs and filtered initial sync use the phases `repository`,
+`issues`, `parents`, `comments`, `importing`, and `finalizing`. Unfiltered initial
+sync and an existing binding's parent-link backfill check `parents` before
+`issues`. Counts reset when the phase changes. Filtered initial parent progress
+counts eligible children with a known total. Incremental parent progress counts
+selected children checked against GitHub, with the selected total known once
+recent events have been read. Full parent scans and
 issue fetches count rows as pages arrive; their total is unknown. The issue count
 includes pull-request rows and rows the cutoff may subsequently exclude. Comments count
 eligible issues checked, including issues with no comments, rather than comment
