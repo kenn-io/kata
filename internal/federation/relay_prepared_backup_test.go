@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/json/v2"
 	"iter"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
 			require.NoError(t, root.store.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
-			issue, _, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Retained artifact source"})
+			issue, _, err := root.store.CreateIssue(db.WithRootAttribution(t.Context(), root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Retained artifact source"})
 			require.NoError(t, err)
 			identity := embedding.ArtifactIdentity{ProjectUID: project.UID, IssueUID: issue.UID, ProducerInstanceUID: root.store.InstanceUID(), Provider: "openai-compatible", Model: "example-model", Dimensions: 2, InputType: "none", Normalization: "none", Preprocessing: "kata.issue/v2", RecipeVersion: 2, SplitMaxRunes: 2000, SplitOverlap: 200, RecipeFingerprint: strings.Repeat("a", 64)}
 			artifact, err := embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{1, 0}})
@@ -57,6 +58,21 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			_, err = executor.ExecContext(t.Context(), query, project.ID)
 			require.NoError(t, err)
 			syncRelayMatrixNode(t, personal)
+
+			postCheckpoint, _, err := root.store.CreateIssue(db.WithRootAttribution(t.Context(), root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Post-checkpoint artifact source"})
+			require.NoError(t, err)
+			postCheckpointArtifact := relayBackupArtifact(t, root, postCheckpoint)
+			_, err = root.store.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(t.Context(), postCheckpointArtifact)
+			require.NoError(t, err)
+			_, _, changed, err := root.store.SoftDeleteIssue(t.Context(), issue.ID, root.account)
+			require.NoError(t, err)
+			require.True(t, changed)
+			_, restoredEvent, changed, err := root.store.RestoreIssue(t.Context(), issue.ID, root.account)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.NotNil(t, restoredEvent)
+			syncRelayMatrixNode(t, personal)
+
 			enrollRelayMatrixReplica(t, personal, leaf, "leaf-alias", false)
 			syncRelayMatrixNode(t, leaf)
 			leafBinding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
@@ -67,6 +83,14 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			forwarded, err := forwarder.CreateRelayReset(t.Context(), leafBinding.RelayConfig.BindingUID, db.RootAttributionSigner{})
 			require.NoError(t, err)
 			preparedEpoch := forwarded.Translation.Authority.Epoch
+			var checkpointArtifacts []embedding.ArtifactManifest
+			require.NoError(t, json.Unmarshal(forwarded.Snapshot.Artifacts, &checkpointArtifacts))
+			var checkpointArtifactDigests []string
+			for _, manifest := range checkpointArtifacts {
+				checkpointArtifactDigests = append(checkpointArtifactDigests, manifest.Digest)
+			}
+			require.Contains(t, checkpointArtifactDigests, artifact.Digest)
+			require.NotContains(t, checkpointArtifactDigests, postCheckpointArtifact.Digest, "the live artifact was retained after the older checkpoint was signed")
 			personalEnrollments, err := personal.store.ListProjectFederationEnrollments(t.Context(), personal.project.ID)
 			require.NoError(t, err)
 			var preparedGrant *db.FederationEnrollment
@@ -80,14 +104,25 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			require.Equal(t, preparedGrant.RelayResetEpoch+1, preparedEpoch)
 
 			records := collectPreparedRelayBackupRecords(t, personal.store)
-			var preparedArtifacts []db.RelayOutboxExport
+			preparedOutbox := map[string][]db.RelayOutboxExport{}
 			for _, record := range records {
 				outbox, ok := record.(*db.RelayOutboxExport)
-				if ok && outbox.BindingUID == leafBinding.RelayConfig.BindingUID && outbox.Stream == db.RelayStreamArtifact && outbox.ResetEpoch == preparedEpoch && !outbox.Acknowledged {
-					preparedArtifacts = append(preparedArtifacts, *outbox)
+				if ok && outbox.BindingUID == leafBinding.RelayConfig.BindingUID && outbox.ResetEpoch == preparedEpoch && !outbox.Acknowledged {
+					preparedOutbox[outbox.Stream] = append(preparedOutbox[outbox.Stream], *outbox)
 				}
 			}
-			require.Len(t, preparedArtifacts, 1, "the backup carries the prepared artifact delivery at N+1")
+			require.NotEmpty(t, preparedOutbox[db.RelayStreamEvent], "the backup carries prepared post-checkpoint events at N+1")
+			require.NotEmpty(t, preparedOutbox[db.RelayStreamReceipt], "the backup carries prepared post-checkpoint receipts at N+1")
+			require.NotEmpty(t, preparedOutbox[db.RelayStreamArtifact], "the backup carries prepared current artifact manifests at N+1")
+			require.Contains(t, relayBackupOutboxSourceUIDs(preparedOutbox[db.RelayStreamArtifact]), artifact.Digest+":"+restoredEvent.UID, "the backup retains the restored offer generation")
+			require.Contains(t, relayBackupOutboxSourceUIDs(preparedOutbox[db.RelayStreamArtifact]), postCheckpointArtifact.Digest, "the backup retains a live offer absent from the older checkpoint")
+			var preparedArtifacts []db.RelayOutboxExport
+			for _, outbox := range preparedOutbox[db.RelayStreamArtifact] {
+				if outbox.SourceUID == artifact.Digest+":"+restoredEvent.UID || outbox.SourceUID == postCheckpointArtifact.Digest {
+					preparedArtifacts = append(preparedArtifacts, outbox)
+				}
+			}
+			require.Len(t, preparedArtifacts, 2)
 
 			restored := newRelayBackupRestoreStore(t, backend)
 			require.NoError(t, restored.ImportReplay(t.Context(), records, db.ImportOptions{}), "a full backup must restore while reset activation is still deferred")
@@ -104,9 +139,32 @@ func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
 			require.Equal(t, preparedGrant.RelayResetEpoch, restoredGrant.RelayResetEpoch,
 				"restore must retain the child at epoch N until an authenticated N+1 request activates the checkpoint")
 			restoredOutbox := collectRelayOutbox(t, restored)
-			require.Contains(t, restoredOutbox, preparedArtifacts[0])
+			for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt} {
+				for _, preparedDelivery := range preparedOutbox[stream] {
+					require.Contains(t, restoredOutbox, preparedDelivery)
+				}
+			}
+			for _, preparedArtifact := range preparedArtifacts {
+				require.Contains(t, restoredOutbox, preparedArtifact)
+			}
 		})
 	}
+}
+
+func relayBackupArtifact(t *testing.T, node *relayMatrixNode, issue db.Issue) embedding.EmbeddingArtifact {
+	t.Helper()
+	identity := embedding.ArtifactIdentity{ProjectUID: node.project.UID, IssueUID: issue.UID, ProducerInstanceUID: node.store.InstanceUID(), Provider: "openai-compatible", Model: "example-model", Dimensions: 2, InputType: "none", Normalization: "none", Preprocessing: "kata.issue/v2", RecipeVersion: 2, SplitMaxRunes: 2000, SplitOverlap: 200, RecipeFingerprint: strings.Repeat("b", 64)}
+	artifact, err := embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{{0, 1}})
+	require.NoError(t, err)
+	return artifact
+}
+
+func relayBackupOutboxSourceUIDs(records []db.RelayOutboxExport) []string {
+	var sourceUIDs []string
+	for _, record := range records {
+		sourceUIDs = append(sourceUIDs, record.SourceUID)
+	}
+	return sourceUIDs
 }
 
 func collectPreparedRelayBackupRecords(t *testing.T, store db.Storage) []db.ImportRecord {

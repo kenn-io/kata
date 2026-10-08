@@ -13,7 +13,7 @@ import (
 func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord, error] {
 	return func(yield func(db.ImportRecord, error) bool) {
 		{
-			rows, err := d.QueryContext(ctx, `SELECT id,project_uid,binding_uid,stream,reset_epoch,source_uid,source_hash,envelope,emitted,acknowledged FROM federation_relay_outbox ORDER BY binding_uid,stream,reset_epoch,id`)
+			rows, err := d.exportQueryContext(ctx, `SELECT id,project_uid,binding_uid,stream,reset_epoch,source_uid,source_hash,envelope,emitted,acknowledged FROM federation_relay_outbox ORDER BY binding_uid,stream,reset_epoch,id`)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -49,7 +49,7 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 			}
 		}
 		{
-			rows, err := d.QueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,sequence,source_uid,source_hash,envelope_digest,envelope,accepted FROM federation_relay_inbox ORDER BY binding_uid,stream,reset_epoch,sequence`)
+			rows, err := d.exportQueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,sequence,source_uid,source_hash,envelope_digest,envelope,accepted FROM federation_relay_inbox ORDER BY binding_uid,stream,reset_epoch,sequence`)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -84,7 +84,7 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 			}
 		}
 		{
-			rows, err := d.QueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,offered_through,accepted_through,emitted_through,acknowledged_through FROM federation_relay_cursors ORDER BY binding_uid,stream,reset_epoch`)
+			rows, err := d.exportQueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,offered_through,accepted_through,emitted_through,acknowledged_through FROM federation_relay_cursors ORDER BY binding_uid,stream,reset_epoch`)
 			if err != nil {
 				yield(nil, err)
 				return

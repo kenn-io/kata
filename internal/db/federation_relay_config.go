@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json/v2"
 	"errors"
+	"reflect"
 	"strings"
 
 	"go.kenn.io/kata/internal/embedding"
@@ -104,6 +105,7 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 	projects := make(map[int64]string)
 	pins := make(map[string]string)
 	rootKeys := make(map[string]map[string]RootKeyPin)
+	currentArtifactManifests := make(map[string]map[string]embedding.ArtifactManifest)
 	preparedCheckpoints := make(map[string]RelayResetCheckpoint)
 	type retainedHop struct {
 		project, peer string
@@ -144,6 +146,16 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 			if !r.Retired {
 				pins[r.ProjectUID] = r.AuthorityUID
 			}
+		case *EmbeddingArtifactExport:
+			artifact := r.EmbeddingArtifact
+			manifest := artifact.Manifest()
+			if currentArtifactManifests[artifact.ProjectUID] == nil {
+				currentArtifactManifests[artifact.ProjectUID] = make(map[string]embedding.ArtifactManifest)
+			}
+			if prior, exists := currentArtifactManifests[artifact.ProjectUID][artifact.Digest]; exists && !reflect.DeepEqual(prior, manifest) {
+				return errors.New("backup artifact digest changes its retained manifest")
+			}
+			currentArtifactManifests[artifact.ProjectUID][artifact.Digest] = manifest
 		}
 	}
 	for _, record := range records {
@@ -178,8 +190,8 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		}
 	}
 	type preparedReset struct {
-		epoch           int64
-		artifactDigests map[string]struct{}
+		epoch             int64
+		artifactManifests map[string]embedding.ArtifactManifest
 	}
 	prepared := make(map[string]preparedReset)
 	for binding, checkpoint := range preparedCheckpoints {
@@ -218,9 +230,15 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		if err := json.Unmarshal(checkpoint.Snapshot.Artifacts, &manifests, json.RejectUnknownMembers(true)); err != nil || manifests == nil {
 			return errors.New("backup prepared relay checkpoint artifact manifest is invalid")
 		}
-		state := preparedReset{epoch: epoch, artifactDigests: make(map[string]struct{}, len(manifests))}
+		state := preparedReset{epoch: epoch, artifactManifests: make(map[string]embedding.ArtifactManifest, len(manifests))}
 		for _, manifest := range manifests {
-			state.artifactDigests[manifest.Digest] = struct{}{}
+			if embedding.ValidateArtifactManifest(manifest) != nil || manifest.ProjectUID != hop.project {
+				return errors.New("backup prepared relay checkpoint artifact manifest is invalid")
+			}
+			if prior, exists := state.artifactManifests[manifest.Digest]; exists && !reflect.DeepEqual(prior, manifest) {
+				return errors.New("backup prepared relay checkpoint changes an artifact manifest")
+			}
+			state.artifactManifests[manifest.Digest] = manifest
 		}
 		prepared[binding] = state
 	}
@@ -248,9 +266,9 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		if hop.project != project {
 			return errors.New("backup relay delivery has no matching retained hop")
 		}
+		preparedReset, hasPreparedReset := prepared[binding]
 		if epoch > hop.epoch {
-			preparedReset, ok := prepared[binding]
-			if !ok || epoch != preparedReset.epoch || stream != RelayStreamArtifact || (!outgoing && !cursor) {
+			if !hasPreparedReset || epoch != preparedReset.epoch || (!outgoing && !cursor) {
 				return errors.New("backup relay delivery has no matching retained hop")
 			}
 		}
@@ -268,8 +286,14 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		if envelope.AuthorityUID != pins[project] || envelope.SenderInstanceUID != sender || envelope.ReceiverInstanceUID != receiver {
 			return errors.New("backup relay delivery differs from retained transport authority")
 		}
-		if epoch > hop.epoch {
-			if _, exists := prepared[binding].artifactDigests[envelope.SourceUID]; !exists {
+		if epoch > hop.epoch && stream == RelayStreamArtifact {
+			var manifest embedding.ArtifactManifest
+			if json.Unmarshal([]byte(envelope.Body), &manifest, json.RejectUnknownMembers(true)) != nil || embedding.ValidateArtifactManifest(manifest) != nil || manifest.ProjectUID != project || manifest.Digest != envelope.SourceHash || !ValidRelayArtifactSourceUID(envelope.SourceUID, manifest.Digest) {
+				return errors.New("backup prepared relay artifact offer is invalid")
+			}
+			checkpointManifest, inCheckpoint := preparedReset.artifactManifests[manifest.Digest]
+			currentManifest, currentlyRetained := currentArtifactManifests[project][manifest.Digest]
+			if (!inCheckpoint || !reflect.DeepEqual(checkpointManifest, manifest)) && (!currentlyRetained || !reflect.DeepEqual(currentManifest, manifest)) {
 				return errors.New("backup prepared relay artifact is absent from its retained checkpoint")
 			}
 		}
