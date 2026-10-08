@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +26,93 @@ func TestWaitReplyInitialSlotIsBaseline(t *testing.T) {
 	require.NoError(t, e)
 	_, _, e = runCLIWithErr(t, env, dir, "wait", issue.ShortID, "--until", "reply", "--poll-interval", waitFastPoll, "--timeout", "200ms")
 	_ = requireCLIError(t, e, ExitWaitTimeout)
+}
+
+func TestWaitReplyDiscoveryTimeoutUsesWaitDeadline(t *testing.T) {
+	stdout, err := runWaitReplyDiscoveryUntilContextDone(t, time.Second, 0)
+	_ = requireCLIError(t, err, ExitWaitTimeout)
+
+	result := parseWaitJSON(t, stdout)
+	require.True(t, result.TimedOut)
+	require.Equal(t, []string{"example-project#abcd"}, result.Pending)
+}
+
+func TestWaitReplyDiscoveryParentDeadlineIsNotWaitTimeout(t *testing.T) {
+	_, err := runWaitReplyDiscoveryUntilContextDone(t, 4*time.Second, 2*time.Second)
+	require.Error(t, err)
+	if cliErr, ok := errors.AsType[*cliError](err); ok {
+		require.NotEqual(t, ExitWaitTimeout, cliErr.ExitCode)
+	}
+}
+
+func FuzzWaitReplyDiscoveryTimeoutClassification(f *testing.F) {
+	f.Add(int64(1000), int64(0))
+	f.Add(int64(3000), int64(1000))
+	f.Add(int64(1000), int64(3000))
+	f.Fuzz(func(t *testing.T, waitTimeoutMS, parentTimeoutMS int64) {
+		if waitTimeoutMS < 40 || waitTimeoutMS > 5000 || parentTimeoutMS < 0 || parentTimeoutMS > 5000 {
+			return
+		}
+		if parentTimeoutMS > 0 && absDurationMS(waitTimeoutMS-parentTimeoutMS) < 100 {
+			return
+		}
+
+		stdout, err := runWaitReplyDiscoveryUntilContextDone(
+			t, time.Duration(waitTimeoutMS)*time.Millisecond, time.Duration(parentTimeoutMS)*time.Millisecond)
+		waitDeadlineFirst := parentTimeoutMS == 0 || waitTimeoutMS < parentTimeoutMS
+		if waitDeadlineFirst {
+			_ = requireCLIError(t, err, ExitWaitTimeout)
+			result := parseWaitJSON(t, stdout)
+			require.True(t, result.TimedOut)
+			require.Equal(t, []string{"example-project#abcd"}, result.Pending)
+			return
+		}
+
+		require.Error(t, err)
+		if cliErr, ok := errors.AsType[*cliError](err); ok {
+			require.NotEqual(t, ExitWaitTimeout, cliErr.ExitCode)
+		}
+	})
+}
+
+func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTimeout time.Duration) (string, error) {
+	t.Helper()
+	var instanceRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case "/api/v1/instance":
+			instanceRequests.Add(1)
+			<-r.Context().Done()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("KATA_AUTHOR", "")
+	t.Setenv("KATA_TEAMMATE", "")
+	t.Setenv("KATA_INBOX_USER", "")
+
+	ctx := contextWithBaseURL(context.Background(), server.URL)
+	if parentTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, parentTimeout)
+		t.Cleanup(cancel)
+	}
+	resetFlags(t)
+	stdout, _, err := executeRootCapture(t, ctx,
+		"--json", "wait", "example-project#abcd", "--until", "reply",
+		"--timeout", waitTimeout.String(), "--poll-interval", "10ms")
+	require.Equal(t, int32(1), instanceRequests.Load(), "the test must reach instance discovery")
+	return stdout, err
+}
+
+func absDurationMS(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func TestWaitReplySlotTransition(t *testing.T) {

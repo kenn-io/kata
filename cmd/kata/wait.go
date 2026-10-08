@@ -327,21 +327,8 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	for _, arg := range args {
 		c, resolvedURL, pid, ref, rerr := resolveIssueRefForCommand(cmd, arg)
 		if rerr != nil {
-			// Attribute the failure to --timeout only when the wait's own
-			// deadline has actually elapsed (wall clock, matching the poll
-			// loop). ctx.Err() alone is not enough: a parent context deadline
-			// (e.g. a caller's ExecuteContext budget) also surfaces as
-			// DeadlineExceeded on the derived context, and that failure must
-			// return the resolution error, not timed_out=true.
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) && run.expired() {
-				if err := emitWaitJSON(cmd, waitJSONOutput{
-					Results:  []waitResult{},
-					TimedOut: true,
-					Pending:  append([]string(nil), args...),
-				}); err != nil {
-					return err
-				}
-				return waitTimeoutError(opts.timeout, args)
+			if timeoutErr, timedOut := handleWaitTimeout(cmd, ctx, run, opts.timeout, args); timedOut {
+				return timeoutErr
 			}
 			return rerr
 		}
@@ -360,6 +347,9 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			var instance instanceStatusForCLI
 			if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
+				if timeoutErr, timedOut := handleWaitTimeout(cmd, ctx, run, opts.timeout, pendingRefs(targets)); timedOut {
+					return timeoutErr
+				}
 				return err
 			}
 			if instance.Auth.Actor != "" {
@@ -486,6 +476,31 @@ func waitTimeoutError(timeout time.Duration, pending []string) *cliError {
 		Kind:     kindTimeout,
 		ExitCode: ExitWaitTimeout,
 	}
+}
+
+// handleWaitTimeout attributes a cancelled request to the command's own wait
+// budget only when that wall-clock deadline has elapsed. Parent-context
+// cancellation remains the original request error. It is shared by ref
+// resolution and reply-recipient discovery so every setup request honors the
+// same --timeout contract as the poll loop.
+func handleWaitTimeout(
+	cmd *cobra.Command,
+	ctx context.Context,
+	run waitRun,
+	timeout time.Duration,
+	pending []string,
+) (error, bool) {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || !run.expired() {
+		return nil, false
+	}
+	if err := emitWaitJSON(cmd, waitJSONOutput{
+		Results:  []waitResult{},
+		TimedOut: true,
+		Pending:  append([]string(nil), pending...),
+	}); err != nil {
+		return err, true
+	}
+	return waitTimeoutError(timeout, pending), true
 }
 
 // waitPollLoop polls the still-pending targets on run.poll cadence until the
