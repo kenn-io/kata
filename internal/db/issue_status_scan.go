@@ -108,7 +108,7 @@ func IssueSyncConfigMatches(left, right jsontext.Value) (bool, error) {
 
 // issueStatusSettingKeys select status sync mode and write targets. Content
 // imports never read them.
-var issueStatusSettingKeys = []string{"status_sync", "todo_group_id", "closed_status_id", "open_status_id", "closed_state_id", "open_state_id"}
+var issueStatusSettingKeys = []string{"status_sync", "todo_group_id", "closed_status_id", "open_status_id", "closed_state_id", "open_state_id", "open_status"}
 
 // IssueSyncContentConfigMatches reports whether two configs produce the same
 // content imports, so a change between them keeps the content cursor.

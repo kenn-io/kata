@@ -48,3 +48,22 @@ func TestIssueSyncConfigComparisonIgnoresPrivateProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, match)
 }
+
+func TestTwentyStatusConfigSeparatesClassificationFromWriteTarget(t *testing.T) {
+	left := jsontext.Value(`{"status_sync":"two-way","closed_status":"DONE","open_status":"TODO","open_statuses":["TODO","IN_PROGRESS"]}`)
+	for _, tc := range []struct {
+		name, config string
+		match        bool
+	}{
+		{"write-target", `{"status_sync":"two-way","closed_status":"DONE","open_status":"IN_PROGRESS","open_statuses":["TODO","IN_PROGRESS"]}`, true},
+		{"mode", `{"status_sync":"one-way","closed_status":"DONE","open_status":"TODO","open_statuses":["TODO","IN_PROGRESS"]}`, true},
+		{"closed-classification", `{"status_sync":"two-way","closed_status":"COMPLETE","open_status":"TODO","open_statuses":["TODO","IN_PROGRESS"]}`, false},
+		{"open-classification", `{"status_sync":"two-way","closed_status":"DONE","open_status":"TODO","open_statuses":["TODO"]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			match, err := db.IssueSyncContentConfigMatches(left, jsontext.Value(tc.config))
+			require.NoError(t, err)
+			require.Equal(t, tc.match, match)
+		})
+	}
+}

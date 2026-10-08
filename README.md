@@ -208,6 +208,7 @@ The [docs site](docs/) is the definitive reference:
   [Notion sync](docs/operations/notion-sync.md) ·
   [Plane sync](docs/operations/plane-sync.md) ·
   [Linear sync](docs/operations/linear-sync.md) ·
+  [Twenty sync](docs/operations/twenty-sync.md) ·
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·

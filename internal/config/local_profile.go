@@ -171,6 +171,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 			profile.Config.NotionSync.TokenEnv,
 			profile.Config.PlaneSync.TokenEnv,
 			profile.Config.LinearSync.TokenEnv,
+			profile.Config.TwentySync.TokenEnv,
 		)
 		for _, entry := range profile.Config.Daemons {
 			references = append(references, entry.TokenEnv)

@@ -44,6 +44,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
+| `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
 | `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
 | `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
@@ -263,6 +264,11 @@ trust_private_network = true
 listen = "127.0.0.1:27777"
 public_origin = "https://daemon.example"
 
+[twenty_sync]
+api_origin = "https://api.twenty.com"
+web_origin = "https://app.twenty.com"
+token_env = "KATA_TWENTY_TOKEN"
+
 [plane_sync]
 api_origin = "https://api.plane.so"
 web_origin = "https://app.plane.so"
@@ -326,7 +332,7 @@ configured interval. Ordinary health probes do not renew the timeout. A running
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
 checks in both stdio and streamable-HTTP modes so the bridge remains usable for
 its full lifetime. Use an explicit daemon service when
-GitHub/Notion/Plane/Linear sync, federation, or timed-claim maintenance must remain continuously
+GitHub/Notion/Plane/Linear/Twenty sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
@@ -1000,3 +1006,13 @@ token). All requests use `https://api.linear.app/graphql`; redirects are rejecte
 Kata does not refresh OAuth tokens. Workspace/team UUIDs and an optional project
 restriction belong to `kata sync linear enable`. See
 [Linear sync](../operations/linear-sync.md).
+
+## Twenty credentials
+
+`[twenty_sync]` selects daemon-owned `api_origin`, `web_origin`, and `token_env`.
+Defaults are `https://api.twenty.com`, `https://app.twenty.com`, and
+`KATA_TWENTY_TOKEN`. Self-hosted HTTPS root origins and literal-loopback HTTP are
+supported; an omitted web origin follows a custom API origin. Keys are captured
+once per run and used as bearer credentials only at the configured API origin;
+redirects are rejected. Enable discovers the key's workspace UUID. Bindings
+cannot choose origins, keys, or another workspace. See [Twenty sync](../operations/twenty-sync.md).

@@ -82,7 +82,7 @@ func newSyncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "sync external systems",
 	}
-	cmd.AddCommand(newGitHubSyncCmd(), newNotionSyncCmd(), newPlaneSyncCmd(), newLinearSyncCmd())
+	cmd.AddCommand(newGitHubSyncCmd(), newNotionSyncCmd(), newPlaneSyncCmd(), newLinearSyncCmd(), newTwentySyncCmd())
 	return cmd
 }
 

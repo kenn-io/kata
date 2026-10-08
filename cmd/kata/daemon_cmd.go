@@ -39,6 +39,7 @@ import (
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
+	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kataweb "go.kenn.io/kata/internal/web"
@@ -92,6 +93,11 @@ var newPlaneSyncDaemonRunner = func(cfg planesync.RunnerConfig) issueSyncDaemonR
 }
 
 var newPlaneSyncClient = planesync.NewClient
+var newTwentySyncDaemonRunner = func(cfg twentysync.RunnerConfig) issueSyncDaemonRunner {
+	return twentysync.NewRunner(cfg)
+}
+
+var newTwentySyncClient = twentysync.NewClient
 
 var newLinearSyncDaemonRunner = func(cfg linearsync.RunnerConfig) issueSyncDaemonRunner {
 	return linearsync.NewRunner(cfg)
@@ -126,6 +132,9 @@ func newConfiguredPlaneSyncFetcher(cfg config.PlaneSyncConfig) planesync.Fetcher
 }
 func newConfiguredLinearSyncFetcher(cfg config.LinearSyncConfig) linearsync.Fetcher {
 	return newLinearSyncClient(linearsync.ClientConfig{Daemon: cfg})
+}
+func newConfiguredTwentySyncFetcher(cfg config.TwentySyncConfig) twentysync.Fetcher {
+	return newTwentySyncClient(twentysync.ClientConfig{Daemon: cfg})
 }
 
 type daemonStartOutput struct {
@@ -1279,6 +1288,11 @@ func runDaemonProcess(
 	linearSyncWake := startLinearSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, linearSyncFetcher, publisher, daemonLog, linearSyncProgress,
 	)
+	twentySyncFetcher := newConfiguredTwentySyncFetcher(dcfg.TwentySync)
+	twentySyncProgress := issuesync.NewProgressTracker()
+	twentySyncWake := startTwentySyncRunner(
+		ctx, workers, waitableDrainAdmission, store, twentySyncFetcher, publisher, daemonLog, twentySyncProgress,
+	)
 
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
 	if err != nil {
@@ -1370,6 +1384,10 @@ func runDaemonProcess(
 		LinearSyncConfig:          dcfg.LinearSync,
 		LinearSyncWake:            linearSyncWake,
 		LinearSyncProgress:        linearSyncProgress,
+		TwentySyncFetcher:         twentySyncFetcher,
+		TwentySyncConfig:          dcfg.TwentySync,
+		TwentySyncWake:            twentySyncWake,
+		TwentySyncProgress:        twentySyncProgress,
 		ExternalRootRegistry:      externalRootRegistry,
 		ExternalRootService:       externalRootService,
 		ExternalRootReconciler:    externalRootReconciler,
@@ -1989,6 +2007,35 @@ func startPlaneSyncRunner(
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "plane", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newPlaneSyncDaemonRunner(planesync.RunnerConfig{
+			Store:          store,
+			Fetcher:        fetcher,
+			Progress:       progress,
+			Logger:         logger,
+			Interval:       30 * time.Second,
+			Wake:           wake,
+			DrainAdmission: drainAdmission,
+			EventSinkFrom: func(_ context.Context, projectID int64, events []db.Event, fork activity.Admission) error {
+				publisher.EventsFrom(projectID, events, fork)
+				return nil
+			},
+		})
+	})
+}
+func startTwentySyncRunner(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	store db.Storage,
+	fetcher twentysync.Fetcher,
+	publisher daemon.EventPublisher,
+	daemonLog *log.Logger,
+	progress *issuesync.ProgressTracker,
+) func() {
+	if fetcher == nil {
+		fetcher = newConfiguredTwentySyncFetcher(config.TwentySyncConfig{})
+	}
+	return startIssueSyncRunner(ctx, workers, daemonLog, "twenty", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
+		return newTwentySyncDaemonRunner(twentysync.RunnerConfig{
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,

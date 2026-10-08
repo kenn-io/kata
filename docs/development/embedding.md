@@ -681,3 +681,10 @@ Defaults match `[plane_sync]`; service construction validates origins without
 reading secrets. `Run` starts the Plane worker alongside Notion/GitHub workers.
 Manual routes and polling share the client, live progress, and committed-event
 publication. See [Plane sync](../operations/plane-sync.md).
+
+
+Twenty polling uses `Config.TwentySync` with `APIOrigin`, `WebOrigin`, and
+`TokenEnv`. Defaults match `[twenty_sync]`; construction validates origins
+without reading secrets. `Run` starts the Twenty worker, and manual routes and
+polling share its client, live progress, and committed-event publication.
+See [Twenty sync](../operations/twenty-sync.md).
