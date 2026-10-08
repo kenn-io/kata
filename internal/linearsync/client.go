@@ -156,7 +156,7 @@ func (c *Client) headersCooldown(h http.Header, limited bool, attempt int) {
 		until = now.Add(delay)
 	}
 	for _, prefix := range []string{"X-RateLimit-Requests", "X-RateLimit-Endpoint-Requests", "X-RateLimit-Complexity"} {
-		if limited || h.Get(prefix+"-Remaining") == "0" {
+		if h.Get(prefix+"-Remaining") == "0" {
 			if ms, err := strconv.ParseInt(h.Get(prefix+"-Reset"), 10, 64); err == nil {
 				at := time.UnixMilli(ms)
 				if at.After(until) {

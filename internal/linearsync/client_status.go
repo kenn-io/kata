@@ -83,15 +83,22 @@ func (s *clientSession) readStatusCached(ctx context.Context, c Config, id strin
 	if !ok {
 		return zero, schema, blockedStatus("Linear issue state is absent from selected team workflow")
 	}
-	status, reason, at, err := issueStatus(i, typ)
+	obs, err := statusObservation(i, typ)
 	if err != nil {
 		return zero, schema, statusReadError(err)
+	}
+	return obs, schema, nil
+}
+func statusObservation(i Issue, typ string) (issuesync.StatusObservation, error) {
+	status, reason, at, err := issueStatus(i, typ)
+	if err != nil {
+		return issuesync.StatusObservation{}, err
 	}
 	obs := issuesync.StatusObservation{RawStatus: &i.StateID, Status: status, ClosedAt: at, Version: i.UpdatedAt.UTC().Truncate(time.Millisecond)}
 	if reason != nil {
 		obs.ClosedReason = *reason
 	}
-	return obs, schema, nil
+	return obs, nil
 }
 func (s *clientSession) ReadStatus(ctx context.Context, c Config, id string) (issuesync.StatusObservation, error) {
 	obs, _, err := s.readStatusCached(ctx, c, id, nil)
@@ -171,7 +178,7 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	if json.Unmarshal(envelope.Data, &data) != nil || data.Update == nil || data.Update.Success == nil || !*data.Update.Success || data.Update.Issue == nil || data.Update.Issue.ID != id {
 		return zero, &issuesync.StatusError{Message: "Linear status write payload is unproven", Ambiguous: true}
 	}
-	obs, err = s.ReadStatus(ctx, c, id)
+	obs, _, err = s.readStatusCached(ctx, c, id, &schema)
 	if err != nil || obs.Status != desired || obs.RawStatus == nil || *obs.RawStatus != target {
 		return zero, &issuesync.StatusError{Message: "Linear status write could not be verified", Ambiguous: true}
 	}

@@ -115,8 +115,8 @@ Collections are limited to 10,000 issues/states, 1,000 pages, 8 MiB per response
 128 MiB of collection responses, 1 MiB per description, and 64 MiB of mapped
 import data.
 
-The shared client spaces requests by at least 1.5 seconds and honors rate-limit
-reset headers and `Retry-After`. Reads retry rate limits and temporary server
+The shared client spaces requests by at least 1.5 seconds and honors
+`Retry-After` and the reset header of each exhausted rate-limit bucket. Reads retry rate limits and temporary server
 errors up to three times. Linear can report `RATELIMITED` on HTTP 400 as well as
 HTTP 429. Other applications using the same account share its quota. See
 [Linear rate limits](https://linear.app/developers/rate-limiting).
@@ -127,6 +127,11 @@ mutation response retains pending intent and the run claim. After the
 before deciding whether to send again. Request timeouts are 30 seconds and a
 whole run has a 20-minute budget. Two-way sweeps handle at most 100 pending and
 100 other mappings per pass, so larger collections need multiple passes.
+
+To save quota, a two-way sweep uses the status from the previous run's content
+read when it is current. It reads the issue from Linear only when that run did
+not return the issue or the stored status is newer. A Linear-side close or reopen
+can therefore take one extra polling interval to reach Kata.
 
 Two-way status work is independent of the content cutoff and can proceed when
 content reads fail. In one-way mode, status arrives through content imports and

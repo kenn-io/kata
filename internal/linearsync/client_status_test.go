@@ -2,6 +2,7 @@ package linearsync
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -220,4 +221,30 @@ func TestStatusTargetsRequireLiveSelectedTypes(t *testing.T) {
 	require.Equal(t, "closed", status)
 	require.Equal(t, "done", *reason)
 	require.Equal(t, at, *closed)
+}
+
+// The verification read after a write reuses the workflow just loaded instead
+// of spending more quota on scope and state reads.
+func TestStatusWriteLoadsWorkflowOnce(t *testing.T) {
+	current := stateID
+	workflowReads := 0
+	transport := statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) {
+		current = closedStateID
+		return dataResponse(map[string]any{"issueUpdate": map[string]any{"success": true, "issue": map[string]any{"id": issueID}}}), nil
+	}, func() map[string]any { i := wireIssue(); i["state"] = map[string]any{"id": current}; return i })
+	c := mockClient(t, func(r *http.Request) (*http.Response, error) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		if strings.Contains(string(raw), "KataLinearScope") || strings.Contains(string(raw), "KataLinearStates") {
+			workflowReads++
+		}
+		r.Body = io.NopCloser(strings.NewReader(string(raw)))
+		return transport(r)
+	})
+	s, err := c.ForRun(t.Context(), statusConfig())
+	require.NoError(t, err)
+	got, err := s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return nil })
+	require.NoError(t, err)
+	require.Equal(t, "closed", got.Status)
+	require.Equal(t, 2, workflowReads, "one scope read and one workflow read per write")
 }

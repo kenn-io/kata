@@ -13,7 +13,7 @@ const scopeQuery = `query KataLinearScope($team: String!) { viewer { organizatio
 const projectQuery = `query KataLinearProject($project: String!, $team: ID!) { project(id: $project) { id name archivedAt trashed teams(first: 100, filter: { id: { eq: $team } }) { nodes { id } pageInfo { hasNextPage endCursor } } } }`
 const statesQuery = `query KataLinearStates($after: String, $filter: WorkflowStateFilter!) { workflowStates(first: 100, after: $after, filter: $filter) { nodes { id type position archivedAt team { id } } pageInfo { hasNextPage endCursor } } }`
 const issueFields = `id identifier title description url priority createdAt updatedAt archivedAt trashed completedAt canceledAt team { id } project { id } state { id } creator { id } assignee { id }`
-const issuesQuery = `query KataLinearIssues($after: String, $filter: IssueFilter!) { issues(first: 100, after: $after, orderBy: updatedAt, filter: $filter) { nodes { ` + issueFields + ` } pageInfo { hasNextPage endCursor } } }`
+const issuesQuery = `query KataLinearIssues($after: String, $filter: IssueFilter!) { issues(first: 100, after: $after, filter: $filter) { nodes { ` + issueFields + ` } pageInfo { hasNextPage endCursor } } }`
 
 type identity struct {
 	ID string `json:"id"`

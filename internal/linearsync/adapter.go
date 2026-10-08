@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
@@ -16,10 +17,61 @@ import (
 type Adapter struct {
 	store   db.Storage
 	fetcher Fetcher
+	mu      sync.Mutex
+	// observed holds each two-way binding's latest content read. The next
+	// status sweep uses it instead of one Linear request per mapped issue.
+	observed map[int64]contentObservations
+}
+
+type contentObservations struct {
+	sourceKey string
+	byID      map[string]issuesync.StatusObservation
 }
 
 // NewAdapter connects durable storage to a Linear source.
-func NewAdapter(store db.Storage, fetcher Fetcher) *Adapter { return &Adapter{store, fetcher} }
+func NewAdapter(store db.Storage, fetcher Fetcher) *Adapter {
+	return &Adapter{store: store, fetcher: fetcher, observed: map[int64]contentObservations{}}
+}
+
+func (a *Adapter) recordObservations(bindingID int64, sourceKey string, states []State, items []Issue) error {
+	types, err := stateTypes(states)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]issuesync.StatusObservation, len(items))
+	for _, i := range items {
+		id, err := CanonicalID(i.ID)
+		if err != nil {
+			return err
+		}
+		obs, err := statusObservation(i, types[i.StateID])
+		if err != nil {
+			return err
+		}
+		byID[id] = obs
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.observed[bindingID] = contentObservations{sourceKey: sourceKey, byID: byID}
+	return nil
+}
+
+// takeObservation serves each content observation to at most one sweep, and
+// only when it is not older than the status already stored for the mapping.
+func (a *Adapter) takeObservation(bindingID int64, sourceKey, id string, stored *db.IssueStatusObservation) (issuesync.StatusObservation, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	observed, ok := a.observed[bindingID]
+	if !ok || observed.sourceKey != sourceKey {
+		return issuesync.StatusObservation{}, false
+	}
+	obs, ok := observed.byID[id]
+	delete(observed.byID, id)
+	if !ok || stored != nil && obs.Version.Before(stored.Version) {
+		return issuesync.StatusObservation{}, false
+	}
+	return obs, true
+}
 
 // Provider identifies the bindings this adapter handles.
 func (*Adapter) Provider() string { return "linear" }
@@ -91,6 +143,11 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 		return prepared, err
 	}
 	batch.ProjectID = b.ProjectID
+	if c.StatusSync == "two-way" {
+		if err := a.recordObservations(b.ID, b.SourceKey, states, eligible); err != nil {
+			return prepared, err
+		}
+	}
 	name := strings.TrimSpace(scope.Name)
 	if name == "" {
 		name = "Linear team " + c.TeamID

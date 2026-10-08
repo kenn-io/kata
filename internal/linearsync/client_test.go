@@ -235,3 +235,30 @@ func TestClientProjectScopeAndSharedResetCooldown(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []time.Duration{10 * time.Second, 1500 * time.Millisecond, 1500 * time.Millisecond}, waits)
 }
+
+// A rate-limited response waits for the exhausted bucket, not for an unrelated
+// bucket that still has quota and resets much later.
+func TestClientRateLimitWaitsForExhaustedBucket(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var waits []time.Duration
+	calls := 0
+	c := NewClient(ClientConfig{LookupEnv: func(string) (string, bool) { return "example-key", true }, Now: func() time.Time { return now }, Wait: func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		now = now.Add(d)
+		return ctx.Err()
+	}, Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			res := response(400, `{"errors":[{"extensions":{"code":"RATELIMITED"}}]}`)
+			res.Header.Set("X-RateLimit-Requests-Remaining", "0")
+			res.Header.Set("X-RateLimit-Requests-Reset", fmt.Sprint(now.Add(10*time.Second).UnixMilli()))
+			res.Header.Set("X-RateLimit-Complexity-Remaining", "250000")
+			res.Header.Set("X-RateLimit-Complexity-Reset", fmt.Sprint(now.Add(time.Hour).UnixMilli()))
+			return res, nil
+		}
+		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+	})})
+	_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+	require.NoError(t, err)
+	require.Equal(t, []time.Duration{10 * time.Second}, waits)
+}

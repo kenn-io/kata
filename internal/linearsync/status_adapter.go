@@ -29,14 +29,16 @@ func (a *Adapter) OpenStatus(ctx context.Context, b db.IssueSyncBinding, _ time.
 	if !ok {
 		return nil, blockedStatus("Linear session does not support two-way status")
 	}
-	return &linearStatusRun{session: s, status: status, config: c}, nil
+	return &linearStatusRun{session: s, status: status, config: c, adapter: a, bindingID: b.ID}, nil
 }
 
 type linearStatusRun struct {
-	session Session
-	status  StatusSession
-	config  Config
-	cache   statusSchema
+	session   Session
+	status    StatusSession
+	config    Config
+	cache     statusSchema
+	adapter   *Adapter
+	bindingID int64
 }
 
 func mappingID(m db.IssueStatusMapping) (string, error) {
@@ -50,6 +52,11 @@ func (r *linearStatusRun) ReadStatus(ctx context.Context, m db.IssueStatusMappin
 	id, err := mappingID(m)
 	if err != nil {
 		return issuesync.StatusObservation{}, err
+	}
+	if r.adapter != nil {
+		if obs, ok := r.adapter.takeObservation(r.bindingID, r.config.SourceKey(), id, m.State.Observed); ok {
+			return obs, nil
+		}
 	}
 	if s, ok := r.session.(*clientSession); ok {
 		obs, _, err := s.readStatusCached(ctx, r.config, id, &r.cache)

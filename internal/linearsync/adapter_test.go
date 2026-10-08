@@ -22,6 +22,7 @@ type adapterSource struct {
 	scope       Scope
 	states      []State
 	writes      int
+	statusReads int
 	contentErr  error
 	statusErr   error
 	duringWrite func()
@@ -41,6 +42,7 @@ func (s *adapterSource) Issues(ctx context.Context, _ Config) ([]Issue, error) {
 	return s.items, ctx.Err()
 }
 func (s *adapterSource) ReadStatus(_ context.Context, _ Config, id string) (issuesync.StatusObservation, error) {
+	s.statusReads++
 	if s.statusErr != nil {
 		return issuesync.StatusObservation{}, s.statusErr
 	}
@@ -284,4 +286,33 @@ func TestRunnerClosureMetadataFollowsMode(t *testing.T) {
 			require.Zero(t, pendingCount(t, store, b))
 		})
 	}
+}
+
+// Two-way sweeps reuse the previous content read, so each mapped issue does not
+// cost its own request against the shared Linear quota.
+func TestStatusSweepReusesPreviousContentRead(t *testing.T) {
+	ctx := context.Background()
+	store := adapterStore(t)
+	b := adapterBinding(t, store, statusConfig())
+	source := newSource()
+	runner := NewRunner(RunnerConfig{Store: store, Fetcher: source})
+	_, err := runner.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	source.items[0].StateID = closedStateID
+	source.items[0].UpdatedAt = source.items[0].UpdatedAt.Add(time.Minute)
+	for range 2 {
+		_, err = runner.RunOnce(ctx, b.ID)
+		require.NoError(t, err)
+	}
+	require.Equal(t, "closed", mappedIssue(t, store, b, issueID).Status)
+	require.Zero(t, source.statusReads)
+	// Each content observation serves one sweep; without a newer content read
+	// the sweep reads Linear directly.
+	source.contentErr = fmt.Errorf("content unavailable")
+	_, err = runner.RunOnce(ctx, b.ID)
+	require.Error(t, err)
+	require.Zero(t, source.statusReads)
+	_, err = runner.RunOnce(ctx, b.ID)
+	require.Error(t, err)
+	require.Equal(t, 1, source.statusReads)
 }
