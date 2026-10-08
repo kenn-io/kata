@@ -83,11 +83,18 @@ func (f *HTTPFetcher) incrementalParentData(ctx context.Context, client *http.Cl
 	if !covered {
 		return f.fullParentData(ctx, client, binding)
 	}
-	numbers = append(numbers, request.IssueNumbers...)
+	request.IssueNumbers = append(numbers, request.IssueNumbers...)
+	return f.selectedParentData(ctx, client, binding, request, ParentScanIncremental, budget)
+}
+
+// selectedParentData checks explicit children without reading historical events.
+// The caller supplies whether this covers a bootstrap or an incremental pass.
+func (f *HTTPFetcher) selectedParentData(ctx context.Context, client *http.Client, binding Binding, request ParentRequest, scan ParentScan, budget *gitHubRetryBudget) (ParentData, error) {
+	numbers := slices.Clone(request.IssueNumbers)
 	slices.Sort(numbers)
 	numbers = slices.Compact(numbers)
 	numbers = slices.DeleteFunc(numbers, func(n int) bool { return n <= 0 })
-	data := ParentData{Scan: ParentScanIncremental, ScannedChildIDs: map[int]int64{}, ParentByChild: map[int]int64{}}
+	data := ParentData{Scan: scan, ScannedChildIDs: map[int]int64{}, ParentByChild: map[int]int64{}}
 	reportProgress(ctx, "parents", 0, len(numbers))
 	if len(numbers) == 0 {
 		return data, nil

@@ -25,8 +25,8 @@ const (
 	// ParentScanUnsupported means the provider does not expose the parent
 	// field, so parent links from this source are not authoritative.
 	ParentScanUnsupported
-	// ParentScanComplete means a full repository parent scan succeeded and
-	// ScannedChildIDs is its coverage.
+	// ParentScanComplete means bootstrap coverage succeeded for the full
+	// repository or explicit selection. ScannedChildIDs is its coverage.
 	ParentScanComplete
 	// ParentScanIncremental covers only selected changed/event children.
 	ParentScanIncremental
@@ -65,10 +65,13 @@ func (d ParentData) ChildScanned(childNumber int) bool {
 	return ok
 }
 
-// ParentRequest selects a full scan (nil Since) or changed children plus recent
-// parent relationship events since the inclusive lower bound. ChildrenOf names
-// issues imported for the first time; their same-repository sub-issues are also
-// checked, because a link to a parent outside the cutoff was dropped earlier.
+// ParentRequest selects a full scan when both Since and IssueNumbers are nil.
+// Non-nil IssueNumbers with nil Since selects complete bootstrap coverage of
+// those children only; an empty slice makes no requests. Non-nil Since selects
+// changed children plus recent parent events since the inclusive lower bound.
+// ChildrenOf names issues imported for the first time; their same-repository
+// sub-issues are also checked, because a link to a parent outside the cutoff
+// was dropped earlier.
 type ParentRequest struct {
 	Since        *time.Time
 	IssueNumbers []int

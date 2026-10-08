@@ -118,7 +118,7 @@ jobs:
         run: make web-install
 
       - name: Check Huma API conventions
-        run: go run go.kenn.io/kit/cmd/huma-check@3b45dab969b23191d42426fce6482c99cd97fa47 ./...
+        run: go run go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68 ./...
 
       - name: Run tests
         env:
