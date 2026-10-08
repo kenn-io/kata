@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
@@ -47,6 +50,117 @@ func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
 	after, e := h.DB().MaxEventID(t.Context())
 	require.NoError(t, e)
 	require.Equal(t, before, after)
+}
+
+func TestNotifyPushSpokeUsesBoundMutationActor(t *testing.T) {
+	checkNotifyPushSpokeUsesBoundMutationActor(t, "request-agent")
+}
+
+func FuzzNotifyPushSpokeUsesBoundMutationActor(f *testing.F) {
+	f.Add(uint64(1))
+	f.Fuzz(func(t *testing.T, requestActorSuffix uint64) {
+		checkNotifyPushSpokeUsesBoundMutationActor(t, fmt.Sprintf("request-agent-%x", requestActorSuffix))
+	})
+}
+
+func TestNotifyPushSpokeRateLimitUsesBoundMutationActor(t *testing.T) {
+	env, project, issue := pushSpokeNotificationFixture(t)
+	prior, err := json.Marshal(notification.Value{
+		From: "bound-agent", Message: "repeat this request", Broadcast: true,
+	})
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: issue.ID,
+		Actor:   "bound-agent",
+		Patch: map[string]jsontext.Value{
+			notification.MetadataKey("reader"): jsontext.Value(prior),
+		},
+	})
+	require.NoError(t, err)
+
+	response, body := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", project.ID, issue.ShortID),
+		map[string]any{"actor": "request-agent", "broadcast": true, "message": "repeat this request"}, nil)
+	require.Equal(t, http.StatusTooManyRequests, response.StatusCode, string(body))
+	require.Contains(t, string(body), "broadcast_rate_limited")
+}
+
+func checkNotifyPushSpokeUsesBoundMutationActor(t *testing.T, requestActor string) {
+	t.Helper()
+	env, project, issue := pushSpokeNotificationFixture(t)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	response, body := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", project.ID, issue.ShortID),
+		map[string]any{"actor": requestActor, "broadcast": true, "message": "Inspect the finding"}, nil)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	var result struct {
+		Recipients []string `json:"recipients"`
+	}
+	require.NoError(t, json.Unmarshal(body, &result))
+	require.Equal(t, []string{"reader"}, result.Recipients,
+		"broadcast fan-out must exclude the push-enabled spoke's bound actor")
+
+	current, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	var slots map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
+	var value notification.Value
+	require.NoError(t, json.Unmarshal([]byte(slots[notification.MetadataKey("reader")]), &value))
+	require.Equal(t, "bound-agent", value.From,
+		"the notification sender must match the push-enabled spoke's bound mutation actor")
+
+	events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
+		AfterID: before, ProjectID: project.ID, IssueUID: issue.UID,
+		Types: []string{"issue.metadata_updated"}, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "bound-agent", events[0].Actor,
+		"the metadata event must use the same effective mutation actor")
+}
+
+func pushSpokeNotificationFixture(t *testing.T) (*testenv.Env, db.Project, db.Issue) {
+	t.Helper()
+	env := testenv.New(t)
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "notification-spoke")
+	require.NoError(t, err)
+	owner := "bound-agent"
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Notify", Author: "creator", Owner: &owner,
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "reader", Body: "Existing review comment",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "http://127.0.0.1:1", HubProjectID: 42, HubProjectUID: project.UID,
+		ReplayHorizonEventID: 1, PullCursorEventID: 1,
+		PushEnabled: true, Actor: "bound-agent", Enabled: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL: "http://127.0.0.1:1", HubProjectID: 42, Token: "spoke-token", Actor: "bound-agent",
+	}))
+	claimUID, err := uid.New()
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	require.NoError(t, env.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(), Holder: "bound-agent",
+		},
+		Claim: &db.IssueClaim{
+			ClaimUID: claimUID, ProjectID: project.ID, IssueID: issue.ID, IssueUID: issue.UID,
+			Holder: "bound-agent", HolderInstanceUID: env.DB.InstanceUID(), ClaimKind: "hard",
+			AcquiredAt: now.Add(-time.Minute), Revision: 1, UpdatedAt: now,
+		},
+		HubNow: now,
+	}))
+	return env, project, issue
 }
 
 func TestNotifyScopedCommentResolution(t *testing.T) {

@@ -63,6 +63,10 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		recipients := []string{}
 		ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
 			recipients = nil
+			mutationActor, err := notificationMutationActorTx(ctx, tx, current.ProjectID, actor)
+			if err != nil {
+				return nil, err
+			}
 			if current.Status != "open" {
 				return nil, api.NewError(400, "validation", "cannot notify on a closed issue", "", nil)
 			}
@@ -80,7 +84,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, err
 				}
-				recipients, err = notification.BroadcastRecipients(candidates, notification.Identity{Actor: actor, Teammate: tm}, in.Body.Teammates)
+				recipients, err = notification.BroadcastRecipients(candidates, notification.Identity{Actor: mutationActor, Teammate: tm}, in.Body.Teammates)
 				if err != nil {
 					return nil, api.NewError(400, "broadcast_recipient_limit", err.Error(), "use targeted --to … --re requests", nil)
 				}
@@ -101,13 +105,13 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 						}
 					}
 				}
-				if limited := notification.CheckBroadcastRate(records, notification.Address(actor, tm), in.Body.Message, time.Now().UTC()); limited != nil {
+				if limited := notification.CheckBroadcastRate(records, notification.Address(mutationActor, tm), in.Body.Message, time.Now().UTC()); limited != nil {
 					return nil, api.NewError(429, "broadcast_rate_limited", limited.Error(), "use targeted --to <actor> --re <comment> instead", map[string]any{"retry_after_seconds": limited.RetryAfterSeconds, "window": limited.Window, "last_broadcast_at": limited.LastBroadcastAt, "last_broadcast_by": limited.LastBroadcastBy, "last_message_prefix": limited.LastMessagePrefix})
 				}
 			} else {
 				recipients = []string{to}
 			}
-			value, err := json.Marshal(notification.Value{From: actor, Teammate: tm, Message: in.Body.Message, Re: re, Broadcast: in.Body.Broadcast})
+			value, err := json.Marshal(notification.Value{From: mutationActor, Teammate: tm, Message: in.Body.Message, Re: re, Broadcast: in.Body.Broadcast})
 			if err != nil {
 				return nil, err
 			}

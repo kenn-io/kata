@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -38,6 +39,31 @@ func notificationAllowedTx(ctx context.Context, tx *sql.Tx) (map[int64]bool, err
 
 func notificationIssueAllowed(allowed map[int64]bool, id int64) bool {
 	return allowed == nil || allowed[id]
+}
+
+// notificationMutationActorTx resolves the actor used by local mutations on
+// a push-enabled spoke while the notification patch transaction is open.
+// Event insertion applies the same binding in that transaction.
+func notificationMutationActorTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	requestedActor string,
+) (string, error) {
+	var actor string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(bound_actor, '') FROM federation_bindings
+WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
+		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return requestedActor, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if actor = strings.TrimSpace(actor); actor != "" {
+		return actor, nil
+	}
+	return requestedActor, nil
 }
 
 // Pin a selected comment to its currently authorized issue. B's comment
