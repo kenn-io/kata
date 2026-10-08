@@ -26,7 +26,7 @@ func (d *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 		if query.IncludeDeletedSourceIssueID > 0 &&
 			(requestedAllowed == nil || db.CommentGraphContainsID(requestedAllowed, query.IncludeDeletedSourceIssueID)) {
 			allowed, err := db.CommentGraphDeletedSourceInScope(ctx, tx, query.IncludeDeletedSourceIssueID,
-				query.ProjectID, *query.IssueScope, func(n int) string { return "?" })
+				query.ProjectID, *query.IssueScope, func(_ int) string { return "?" })
 			if err != nil {
 				return db.CommentGraphData{}, err
 			}

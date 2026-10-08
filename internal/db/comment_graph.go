@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -106,7 +107,19 @@ func ReadCommentGraphTx(
 			data.Comments[index].Comment.ReplyKind = ""
 			continue
 		}
-		if _, alreadyResolved := data.Targets[targetUID]; alreadyResolved {
+		if cached, alreadyResolved := data.Targets[targetUID]; alreadyResolved {
+			if cached.Status == "pending" {
+				// Imported snapshot comments may not have their own create event;
+				// a later reply to the same target can still prove it was purged.
+				removed, err := commentGraphPurgedTargetEvidence(ctx, tx, record.Comment.UID, bind, commentUIDExpr)
+				if err != nil {
+					return data, err
+				}
+				if removed {
+					cached.Status = "removed"
+					data.Targets[targetUID] = cached
+				}
+			}
 			continue
 		}
 
@@ -147,19 +160,34 @@ func ReadCommentGraphTx(
 			return data, err
 		}
 		if status == "" {
-			var removed bool
-			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+commentUIDExpr+"="+bind(1)+")", record.Comment.UID).Scan(&removed)
+			removed, err := commentGraphPurgedTargetEvidence(ctx, tx, record.Comment.UID, bind, commentUIDExpr)
 			if err != nil {
 				return data, err
 			}
-			status = "pending"
 			if removed {
 				status = "removed"
+			} else {
+				status = "pending"
 			}
 		}
 		data.Targets[targetUID] = CommentGraphTarget{Status: status}
 	}
 	return data, nil
+}
+
+func commentGraphPurgedTargetEvidence(
+	ctx context.Context,
+	tx *sql.Tx,
+	commentUID string,
+	bind func(int) string,
+	commentUIDExpr string,
+) (bool, error) {
+	var removed bool
+	err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+commentUIDExpr+"="+bind(1)+")",
+		commentUID,
+	).Scan(&removed)
+	return removed, err
 }
 
 type commentGraphScanner interface{ Scan(...any) error }
@@ -194,12 +222,7 @@ func scanCommentGraphRecord(row commentGraphScanner, parseTime func(string) (tim
 
 // CommentGraphContainsID reports whether ids contains target.
 func CommentGraphContainsID(ids []int64, target int64) bool {
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, target)
 }
 
 // CommentGraphIntersectIDs intersects scoped issue IDs with an optional

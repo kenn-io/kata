@@ -40,6 +40,7 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "comment graph deleted source", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphDeletedSource},
+	{name: "comment graph purge evidence order", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "ImportReplay", "IssueByID", "IssueByUID", "MoveIssueProject", "ProjectByUID", "PurgeIssue", "ReadCommentGraph"}, run: checkCommentGraphPurgeEvidenceOrder},
 	{name: "comment reply project purge lineage", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportPurgeLog", "MoveIssueProject", "PurgeProject", "ReadCommentGraph", "RemoveProject"}, run: checkCommentReplyProjectPurgeLineage},
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},

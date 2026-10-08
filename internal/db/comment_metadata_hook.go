@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
+	"maps"
 	"slices"
 )
 
@@ -57,9 +58,7 @@ func CoalesceCommentMetadataUpdates(updates []CommentMetadataUpdate) []CommentMe
 			patch = make(map[string]jsontext.Value, len(update.Patch))
 			patchesByIssue[update.IssueID] = patch
 		}
-		for key, value := range update.Patch {
-			patch[key] = value
-		}
+		maps.Copy(patch, update.Patch)
 	}
 	issueIDs := make([]int64, 0, len(patchesByIssue))
 	for issueID := range patchesByIssue {

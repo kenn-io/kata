@@ -43,10 +43,10 @@ func checkCommentMetadataMultiIssue(t *testing.T, store db.Storage) error {
 	hook := func(_ context.Context, _ *sql.Tx, issue db.Issue, comment db.Comment) ([]db.CommentMetadataUpdate, error) {
 		require.Equal(t, replyIssue.ID, issue.ID)
 		require.Equal(t, targetComment.UID, comment.ReplyToUID)
-		clear := map[string]jsontext.Value{"notify.worker": jsontext.Value("null")}
+		clearPatch := map[string]jsontext.Value{"notify.worker": jsontext.Value("null")}
 		return []db.CommentMetadataUpdate{
-			{IssueID: replyIssue.ID, Patch: clear},
-			{IssueID: targetIssue.ID, Patch: clear},
+			{IssueID: replyIssue.ID, Patch: clearPatch},
+			{IssueID: targetIssue.ID, Patch: clearPatch},
 			{IssueID: targetIssue.ID, Patch: map[string]jsontext.Value{"notify.other": jsontext.Value("null")}},
 		}, nil
 	}
