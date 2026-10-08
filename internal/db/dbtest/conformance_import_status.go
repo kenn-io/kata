@@ -108,6 +108,7 @@ func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
 		ReconcileStatusForUnchanged:     true,
 		ReconcileUnknownSourceTimestamp: map[string]bool{unknownID: true},
 		ReconcileLabelsForUnchanged:     map[string][]string{unknownID: {"todoist"}},
+		PresentationTitlePrefix:         "[Todoist] ",
 		Items:                           []db.ImportItem{{ExternalID: unknownID, Title: "[Todoist] Current task", Body: "Current body", Author: "todoist-unknown", Status: "closed", ClosedReason: new("done"), CreatedAt: at.Add(-time.Hour), UpdatedAt: at, ClosedAt: &at}},
 	}
 	_, _, err = store.ImportBatch(ctx, unknown)
@@ -140,6 +141,17 @@ func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
 	labels, err := store.LabelsForIssue(ctx, unknownIssue.ID)
 	require.NoError(t, err)
 	require.Contains(t, labels, "todoist")
+
+	// Without a source version, a title that differs by more than the
+	// presentation prefix may be a stale or partial observation; keep it.
+	unknown.Items[0].Title = "Renamed elsewhere"
+	_, events, err = store.ImportBatch(ctx, unknown)
+	require.NoError(t, err)
+	require.Empty(t, events)
+	unknownIssue, err = store.IssueByID(ctx, unknownIssue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Current task", unknownIssue.Title)
+	unknown.Items[0].Title = "Current task"
 
 	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: unknownIssue.ID, Body: new("Newer local work"), Actor: "editor"})
 	require.NoError(t, err)

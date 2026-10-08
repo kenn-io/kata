@@ -128,9 +128,10 @@ history fresh.
 Unknown (`null`) creation or update times take the task's other known
 timestamps; a task with none blocks the run. When `updated_at` is unknown, a
 fresh status change still advances its checkpoint past the prior observation.
-One-way imports may reconcile that status while the stored Todoist version
-still owns the issue. The status update preserves other issue fields, and newer
-local edits remain authoritative.
+While no one has edited the issue in Kata, imports still apply a one-way
+status change and add or remove the `[Todoist] ` title prefix. Other title,
+description and field changes import only when the task's known timestamps are
+newer than the stored version. Newer local edits remain authoritative.
 
 An active task wins over historical completions of the same ID, including old
 recurring occurrences. Conflicting observations at the same version fail the

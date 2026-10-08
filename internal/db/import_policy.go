@@ -128,14 +128,17 @@ func ImportOwnsUnknownSourceVersionStatus(params ImportBatchParams, mapping Impo
 
 // ImportOwnsUnknownSourceVersionTitle permits a presentation title refresh
 // when that item also opted into current presentation-label reconciliation.
+// Without a source version, only adding or removing the importer's declared
+// presentation prefix counts as presentation; other title changes may be stale.
 func ImportOwnsUnknownSourceVersionTitle(params ImportBatchParams, mapping ImportMapping, existing Issue, item ImportItem) bool {
-	if params.ReconcileLabelsForUnchanged == nil {
+	if params.ReconcileLabelsForUnchanged == nil || params.PresentationTitlePrefix == "" {
 		return false
 	}
 	if _, ok := params.ReconcileLabelsForUnchanged[item.ExternalID]; !ok || !ImportOwnsUnknownSourceVersion(params, mapping, existing, item) {
 		return false
 	}
-	return item.Title != existing.Title
+	prefix := params.PresentationTitlePrefix
+	return existing.Title == prefix+item.Title || prefix+existing.Title == item.Title
 }
 
 // ImportedStatusOnlyItem preserves unrelated scalars when the provider's

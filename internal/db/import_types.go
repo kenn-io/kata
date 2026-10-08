@@ -124,6 +124,10 @@ type ImportBatchParams struct {
 	// refresh only while the source still owns the issue's stored scalar version.
 	// The public import API omits it.
 	ReconcileUnknownSourceTimestamp map[string]bool
+	// PresentationTitlePrefix is the title prefix the importer adds for its
+	// presentation choice. Without a source timestamp, a title may refresh
+	// only by adding or removing this prefix. The public import API omits it.
+	PresentationTitlePrefix string
 	// PreserveLocalParentConflicts leaves an existing local parent in place when
 	// a source-managed parent insert would create a second parent. Generic
 	// imports report ErrParentAlreadySet by default.

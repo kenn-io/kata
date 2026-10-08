@@ -12,6 +12,9 @@ import (
 )
 
 const maxItems = 10000
+
+// todoistTitlePrefix marks imported titles when title_prefix is enabled.
+const todoistTitlePrefix = "[Todoist] "
 const maxImportBytes = 64 << 20
 
 func validateTask(c Config, r Task) error {
@@ -52,7 +55,7 @@ func BuildImportBatch(source string, c Config, project Project, tasks []Task) (d
 	if len(tasks) > maxItems {
 		return db.ImportBatchParams{}, fmt.Errorf("todoist source exceeds 10000 tasks")
 	}
-	b := db.ImportBatchParams{Source: source, Actor: "todoist-sync", ReconcileStatusForUnchanged: true, ReconcileLabelsForUnchanged: map[string][]string{}}
+	b := db.ImportBatchParams{Source: source, Actor: "todoist-sync", ReconcileStatusForUnchanged: true, ReconcileLabelsForUnchanged: map[string][]string{}, PresentationTitlePrefix: todoistTitlePrefix}
 	seen := map[string]bool{}
 	total := 0
 	for _, r := range tasks {
@@ -78,7 +81,7 @@ func BuildImportBatch(source string, c Config, project Project, tasks []Task) (d
 			b.ReconcileUnknownSourceTimestamp[item.ExternalID] = true
 		}
 		if c.UseTitlePrefix() {
-			item.Title = "[Todoist] " + title
+			item.Title = todoistTitlePrefix + title
 		} else {
 			item.Labels = importlabels.AppendNormalized(item.Labels, seenLabels, "todoist")
 		}
