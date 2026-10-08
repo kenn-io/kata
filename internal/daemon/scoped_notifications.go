@@ -111,38 +111,20 @@ func walkNotificationJSON(raw jsontext.Value, keep func(jsontext.Value) (bool, e
 		if err := json.Unmarshal(raw, &object); err != nil {
 			return nil, err
 		}
+		var eventType string
+		_ = json.Unmarshal(object["type"], &eventType)
 		for key, value := range object {
-			if strings.HasPrefix(key, notification.KeyPrefix) {
-				ok, err := keep(value)
-				if err != nil {
-					return nil, err
-				}
-				if !ok {
-					delete(object, key)
-				}
-				continue
-			}
-			if (key == "payload" || key == "metadata") && len(value) > 0 && value[0] == '"' {
-				var encoded string
-				if err := json.Unmarshal(value, &encoded); err != nil {
-					return nil, err
-				}
-				if jsontext.Value(encoded).IsValid() {
-					projected, err := walkNotificationJSON(jsontext.Value(encoded), keep)
-					if err != nil {
-						return nil, err
-					}
-					value, err = json.Marshal(string(projected))
-					if err != nil {
-						return nil, err
-					}
-				}
-			} else {
-				var err error
+			var err error
+			switch key {
+			case "metadata":
+				value, err = walkNotificationMetadata(value, keep)
+			case "payload":
+				value, err = walkNotificationEventPayload(value, eventType, keep)
+			default:
 				value, err = walkNotificationJSON(value, keep)
-				if err != nil {
-					return nil, err
-				}
+			}
+			if err != nil {
+				return nil, err
 			}
 			object[key] = value
 		}
@@ -165,6 +147,102 @@ func walkNotificationJSON(raw jsontext.Value, keep func(jsontext.Value) (bool, e
 	}
 }
 
+func walkNotificationMetadata(raw jsontext.Value, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return raw, nil
+	}
+	if raw[0] == '"' {
+		var encoded string
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			return nil, err
+		}
+		if !jsontext.Value(encoded).IsValid() {
+			return raw, nil
+		}
+		projected, err := walkNotificationMetadata(jsontext.Value(encoded), keep)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(string(projected))
+	}
+	if raw[0] != '{' {
+		return raw, nil
+	}
+	var slots map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &slots); err != nil {
+		return nil, err
+	}
+	return walkNotificationSlots(slots, keep)
+}
+
+// Notification slots are top-level keys in issue metadata and in an
+// issue.metadata_updated diff. Values below any other key are opaque metadata.
+func walkNotificationSlots(slots map[string]jsontext.Value, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
+	for key, value := range slots {
+		if !strings.HasPrefix(key, notification.KeyPrefix) {
+			continue
+		}
+		ok, err := keep(value)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			delete(slots, key)
+		}
+	}
+	return json.Marshal(slots)
+}
+
+func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
+	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" {
+		return raw, nil
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return raw, nil
+	}
+	if raw[0] == '"' {
+		var encoded string
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			return nil, err
+		}
+		if !jsontext.Value(encoded).IsValid() {
+			return raw, nil
+		}
+		projected, err := walkNotificationEventPayload(jsontext.Value(encoded), eventType, keep)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(string(projected))
+	}
+	if raw[0] != '{' {
+		return raw, nil
+	}
+	var payload map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	field := "metadata"
+	if eventType == "issue.metadata_updated" {
+		field = "diff"
+	}
+	value, ok := payload[field]
+	if !ok || len(value) == 0 || value[0] != '{' {
+		return raw, nil
+	}
+	var slots map[string]jsontext.Value
+	if err := json.Unmarshal(value, &slots); err != nil {
+		return nil, err
+	}
+	projected, err := walkNotificationSlots(slots, keep)
+	if err != nil {
+		return nil, err
+	}
+	payload[field] = projected
+	return json.Marshal(payload)
+}
+
 // Stream frames recheck notification targets after page projection, immediately
 // before release. Membership read during projection is only a snapshot.
 func notificationEventStillVisible(ctx context.Context, store db.Storage, event db.Event) (bool, error) {
@@ -173,7 +251,7 @@ func notificationEventStillVisible(ctx context.Context, store db.Storage, event 
 		return true, nil
 	}
 	var uids []string
-	_, err := walkNotificationJSON(jsontext.Value(event.Payload), func(slot jsontext.Value) (bool, error) {
+	_, err := walkNotificationEventPayload(jsontext.Value(event.Payload), event.Type, func(slot jsontext.Value) (bool, error) {
 		uids = append(uids, notificationReferences(slot)...)
 		return true, nil
 	})

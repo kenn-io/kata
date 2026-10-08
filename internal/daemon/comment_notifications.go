@@ -6,7 +6,10 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
@@ -66,25 +69,46 @@ func commentNotificationHook() db.CommentMetadataHook {
 			}
 		}
 		if reply.ReplyKind == "confirm" {
-			rows, err := tx.QueryContext(ctx, `SELECT c.issue_id,c.author,COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.reply_to_uid=$1 AND c.uid<>$2 AND i.project_id=$3 AND i.deleted_at IS NULL AND p.deleted_at IS NULL ORDER BY c.created_at DESC,c.uid DESC`, reply.ReplyToUID, reply.UID, issue.ProjectID)
+			rows, err := tx.QueryContext(ctx, `SELECT c.issue_id,c.uid,c.author,COALESCE(c.teammate,''),c.created_at FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.reply_to_uid=$1 AND c.uid<>$2 AND i.project_id=$3 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, reply.ReplyToUID, reply.UID, issue.ProjectID)
 			if err != nil {
 				return nil, err
 			}
+			type priorLinker struct {
+				issueID   int64
+				uid       string
+				identity  notification.Identity
+				createdAt time.Time
+			}
+			var priorLinkers []priorLinker
 			for rows.Next() {
-				var identity notification.Identity
-				var linkerIssueID int64
-				if err := rows.Scan(&linkerIssueID, &identity.Actor, &identity.Teammate); err != nil {
+				var linker priorLinker
+				var createdAt string
+				if err := rows.Scan(&linker.issueID, &linker.uid, &linker.identity.Actor, &linker.identity.Teammate, &createdAt); err != nil {
 					_ = rows.Close()
 					return nil, err
 				}
-				if notificationIssueAllowed(allowed, linkerIssueID) {
-					in.PriorLinkers = append(in.PriorLinkers, identity)
+				linker.createdAt, err = time.Parse(time.RFC3339Nano, createdAt)
+				if err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("parse prior reply timestamp %q: %w", createdAt, err)
+				}
+				if notificationIssueAllowed(allowed, linker.issueID) {
+					priorLinkers = append(priorLinkers, linker)
 				}
 			}
 			err = rows.Err()
 			_ = rows.Close()
 			if err != nil {
 				return nil, err
+			}
+			sort.Slice(priorLinkers, func(i, j int) bool {
+				if !priorLinkers[i].createdAt.Equal(priorLinkers[j].createdAt) {
+					return priorLinkers[i].createdAt.After(priorLinkers[j].createdAt)
+				}
+				return priorLinkers[i].uid > priorLinkers[j].uid
+			})
+			for _, linker := range priorLinkers {
+				in.PriorLinkers = append(in.PriorLinkers, linker.identity)
 			}
 			for key, raw := range in.Current {
 				if !strings.HasPrefix(key, notification.KeyPrefix) {

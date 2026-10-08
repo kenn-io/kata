@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -73,6 +74,92 @@ func TestCommentNotificationTransaction(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
 	require.NotContains(t, slots, notification.MetadataKey("reader/review"))
 	require.Contains(t, slots, notification.MetadataKey("worker/builder"))
+}
+
+func TestCommentNotificationConfirmUsesNewestTimestampInstant(t *testing.T) {
+	checkCommentNotificationConfirmTimestampInstantOrder(t, "12", "1")
+}
+
+func FuzzCommentNotificationConfirmTimestampInstantOrder(f *testing.F) {
+	f.Add("12", "1")
+	f.Fuzz(func(t *testing.T, newerFraction, olderFraction string) {
+		if !fractionalTimestampDigits(newerFraction) || !fractionalTimestampDigits(olderFraction) {
+			return
+		}
+		newerText := "2026-10-08T12:00:00." + newerFraction + "Z"
+		olderText := "2026-10-08T12:00:00." + olderFraction + "Z"
+		newer, err := time.Parse(time.RFC3339Nano, newerText)
+		if err != nil {
+			return
+		}
+		older, err := time.Parse(time.RFC3339Nano, olderText)
+		if err != nil || !newer.After(older) || newerText >= olderText {
+			return
+		}
+		checkCommentNotificationConfirmTimestampInstantOrder(t, newerFraction, olderFraction)
+	})
+}
+
+func fractionalTimestampDigits(value string) bool {
+	if value == "" || len(value) > 9 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func checkCommentNotificationConfirmTimestampInstantOrder(t *testing.T, newerFraction, olderFraction string) {
+	t.Helper()
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "example.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Finding", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "reader", Body: "Finding"})
+	require.NoError(t, err)
+
+	prior := make([]db.Comment, 0, 9)
+	for _, actor := range []string{"newer-fraction", "older-fraction", "later-a", "later-b", "later-c", "later-d", "later-e", "later-f", "later-g"} {
+		comment, _, createErr := store.CreateComment(t.Context(), db.CreateCommentParams{
+			IssueID: issue.ID, Author: actor, Body: "Earlier reply", ReplyToUID: target.UID, ReplyKind: "reply",
+		})
+		require.NoError(t, createErr)
+		prior = append(prior, comment)
+	}
+
+	timestamps := []string{
+		"2026-10-08T12:00:00." + newerFraction + "Z",
+		"2026-10-08T12:00:00." + olderFraction + "Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+		"2026-10-08T12:00:01.000Z",
+	}
+	for i, comment := range prior {
+		_, err := store.ExecContext(t.Context(), `UPDATE comments SET created_at=$1 WHERE uid=$2`, timestamps[i], comment.UID)
+		require.NoError(t, err)
+	}
+
+	_, _, err = store.CreateComment(
+		db.WithCommentMetadataHook(t.Context(), commentNotificationHook(), nil),
+		db.CreateCommentParams{IssueID: issue.ID, Author: "confirmer", Body: "Confirmed with reproduction evidence", ReplyToUID: target.UID, ReplyKind: "confirm"},
+	)
+	require.NoError(t, err)
+	updated, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	var metadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(updated.Metadata), &metadata))
+	require.Contains(t, metadata, notification.MetadataKey("newer-fraction"), "the newest instant must remain inside the eight-linker fan-out")
+	require.NotContains(t, metadata, notification.MetadataKey("older-fraction"), "the older instant must fall outside the eight-linker fan-out")
 }
 
 func TestCommentNotificationCrossIssueReplyClearsRequest(t *testing.T) {
@@ -229,6 +316,71 @@ func TestNotificationProjectionLeadingWhitespace(t *testing.T) {
 	got, err := walkNotificationJSON(raw, func(slot jsontext.Value) (bool, error) { return len(notificationReferences(slot)) == 0, nil })
 	require.NoError(t, err)
 	require.JSONEq(t, `{"metadata":{}}`, string(got))
+}
+
+func TestNotificationProjectionPreservesOpaqueNestedValues(t *testing.T) {
+	checkNotificationProjectionPreservesOpaqueNestedValues(t, "8")
+	checkNotificationProjectionPreservesOpaqueNestedValues(t, "opaque metadata")
+}
+
+func FuzzNotificationProjectionPreservesOpaqueNestedValues(f *testing.F) {
+	f.Add("8")
+	f.Add("opaque metadata")
+	f.Add(`JSON-looking text: {"re":"hidden-comment"}`)
+	f.Fuzz(func(t *testing.T, message string) {
+		if len(message) > 1024 || !utf8.ValidString(message) {
+			return
+		}
+		checkNotificationProjectionPreservesOpaqueNestedValues(t, message)
+	})
+}
+
+func checkNotificationProjectionPreservesOpaqueNestedValues(t *testing.T, message string) {
+	t.Helper()
+	slot := map[string]any{"re": "hidden-comment", "message": message}
+	opaque := map[string]any{"notify.reader": slot}
+	eventPayload, err := json.Marshal(map[string]any{"diff": map[string]any{
+		"custom":        opaque,
+		"notify.reader": map[string]any{"from": nil, "to": slot},
+	}})
+	require.NoError(t, err)
+	raw, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"custom":        opaque,
+			"notify.reader": slot,
+		},
+		"event": map[string]any{
+			"type":    "issue.metadata_updated",
+			"payload": string(eventPayload),
+		},
+	})
+	require.NoError(t, err)
+
+	got, err := walkNotificationJSON(jsontext.Value(raw), func(value jsontext.Value) (bool, error) {
+		for _, uid := range notificationReferences(value) {
+			if uid == "hidden-comment" {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	require.NoError(t, err)
+
+	var projected struct {
+		Metadata jsontext.Value `json:"metadata"`
+		Event    struct {
+			Type    string `json:"type"`
+			Payload string `json:"payload"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(got, &projected))
+	expectedMetadata, err := json.Marshal(map[string]any{"custom": opaque})
+	require.NoError(t, err)
+	require.JSONEq(t, string(expectedMetadata), string(projected.Metadata))
+	require.Equal(t, "issue.metadata_updated", projected.Event.Type)
+	expectedEventPayload, err := json.Marshal(map[string]any{"diff": map[string]any{"custom": opaque}})
+	require.NoError(t, err)
+	require.JSONEq(t, string(expectedEventPayload), projected.Event.Payload)
 }
 
 func TestBroadcastHistoryIncludesFractionalBoundary(t *testing.T) {
