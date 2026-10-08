@@ -171,13 +171,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{c})
+		comment, err := projectCommentMutationResponse(ctx, cfg.DB, c)
 		if err != nil {
 			return nil, err
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = comments[0]
+		out.Body.Comment = comment
 		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
@@ -252,13 +252,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{c})
+		comment, err := projectCommentMutationResponse(ctx, cfg.DB, c)
 		if err != nil {
 			return nil, err
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = comments[0]
+		out.Body.Comment = comment
 		out.Body.Event = evt
 		out.Body.Changed = changed
 		return out, nil
@@ -330,16 +330,73 @@ func replayComment(
 			"idempotency key matched a prior comment with a different fingerprint",
 			"use a fresh key or send the exact original comment", nil)
 	}
-	comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{match.Comment})
+	comment, err := projectCommentMutationResponse(ctx, cfg.DB, match.Comment)
 	if err != nil {
 		return nil, err
 	}
 	out := &api.CommentResponse{}
 	out.Body.Issue = current
-	out.Body.Comment = comments[0]
+	out.Body.Comment = comment
 	out.Body.Event = nil
 	out.Body.Changed = false
 	return out, nil
+}
+
+func projectCommentMutationResponse(ctx context.Context, store db.Storage, comment db.Comment) (db.Comment, error) {
+	projected, _, _, err := projectScopedCommentReplies(ctx, store, []db.Comment{comment})
+	if err != nil {
+		return db.Comment{}, err
+	}
+	comment = projected[0]
+	if comment.ReplyToUID == "" {
+		return comment, nil
+	}
+	if _, hostControlled := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); !hostControlled {
+		return comment, nil
+	}
+	issueIDs, err := store.CommentIssueIDsByUIDs(ctx, []string{comment.ReplyToUID})
+	if err != nil {
+		return db.Comment{}, internalAPIError(err)
+	}
+	issueID, exists := issueIDs[comment.ReplyToUID]
+	if !exists {
+		// Preserve pending and removed edges when their endpoint has no current
+		// issue record, matching the graph projection's unavailable-target path.
+		return comment, nil
+	}
+	targetIssue, err := store.IssueByID(ctx, issueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return comment, nil
+	}
+	if err != nil {
+		return db.Comment{}, internalAPIError(err)
+	}
+	project, err := store.ProjectByID(ctx, targetIssue.ProjectID)
+	if errors.Is(err, db.ErrNotFound) {
+		clearCommentReply(&comment)
+		return comment, nil
+	}
+	if err != nil {
+		return db.Comment{}, internalAPIError(err)
+	}
+	if project.DeletedAt != nil {
+		clearCommentReply(&comment)
+		return comment, nil
+	}
+	if targetIssue.DeletedAt != nil {
+		// Deleted endpoints remain visible as removed evidence without exposing
+		// a live project endpoint that still needs host authorization.
+		return comment, nil
+	}
+	if err := authorizeCommentEndpoint(ctx, targetIssue.ProjectID); err != nil {
+		var apiErr *api.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == 404 {
+			clearCommentReply(&comment)
+			return comment, nil
+		}
+		return db.Comment{}, err
+	}
+	return comment, nil
 }
 
 // receiptIssueUID recovers the issue a short-id retry addresses after that

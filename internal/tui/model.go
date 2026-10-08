@@ -2578,7 +2578,7 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	pid := m.detail.scopePID
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) {
+	if !msg.matchesIssue(ref, uid) && !msg.matchesCommentInDetail(m.detail.comments) {
 		return nil
 	}
 	gen := m.detail.gen
@@ -2607,7 +2607,8 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 	if msg.issueUID != "" && uid != "" && msg.issueUID == uid {
 		return true
 	}
-	if msg.eventType == "issue.commented" && msg.relatedIssueUID != "" && uid != "" && msg.relatedIssueUID == uid {
+	if (msg.eventType == "issue.commented" || msg.eventType == "issue.comment_edited") &&
+		msg.relatedIssueUID != "" && uid != "" && msg.relatedIssueUID == uid {
 		return true
 	}
 	if msg.issueShortID != "" && msg.issueShortID == ref && msg.issueUID == "" {
@@ -2620,6 +2621,26 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 	}
 	if msg.linksChanged != nil && msg.linksChangedMatches(ref, uid) {
 		return true
+	}
+	return false
+}
+
+func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
+	if msg.eventType != "issue.comment_edited" || msg.commentUID == "" {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.UID == msg.commentUID {
+			return true
+		}
+		if comment.Reply != nil && comment.Reply.UID == msg.commentUID {
+			return true
+		}
+		for _, backlink := range comment.Backlinks {
+			if backlink.UID == msg.commentUID {
+				return true
+			}
+		}
 	}
 	return false
 }

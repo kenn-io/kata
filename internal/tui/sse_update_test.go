@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -620,6 +621,84 @@ func FuzzCommentReplyEventRefreshesOpenTargetDetail(f *testing.F) {
 	f.Fuzz(func(t *testing.T, relatedIssueUID string) {
 		checkCommentReplyEventRefreshesRelatedIssue(t, relatedIssueUID)
 	})
+}
+
+func checkCommentEditEventRefreshesRelatedIssue(t *testing.T, relatedIssueUID string) {
+	t.Helper()
+	m := sseDetailFixture(7, "target", "target-issue")
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.comment_edited", projectID: 7, issueUID: "source-issue",
+		relatedIssueUID: relatedIssueUID,
+	})
+	if relatedIssueUID == "target-issue" {
+		assertDetailRefetchBatch(t, cmd)
+		return
+	}
+	if cmd != nil {
+		t.Fatalf("unrelated issue.comment_edited event must not refresh target detail, got %T", cmd)
+	}
+}
+
+func TestCommentEditEventRefreshesRelatedIssue(t *testing.T) {
+	checkCommentEditEventRefreshesRelatedIssue(t, "target-issue")
+}
+
+func FuzzCommentEditEventRefreshesRelatedIssue(f *testing.F) {
+	f.Add("target-issue")
+	f.Add("other-issue")
+	f.Fuzz(func(t *testing.T, relatedIssueUID string) {
+		checkCommentEditEventRefreshesRelatedIssue(t, relatedIssueUID)
+	})
+}
+
+func TestCommentEditRefreshesDisplayedReplyAndBacklink(t *testing.T) {
+	tests := []struct {
+		name           string
+		openIssueUID   string
+		editedIssueUID string
+		commentUID     string
+		comments       []CommentEntry
+	}{
+		{
+			name:         "backlink evidence edited",
+			openIssueUID: "target-issue", editedIssueUID: "source-issue", commentUID: "reply-comment",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:         "reply target edited",
+			openIssueUID: "source-issue", editedIssueUID: "target-issue", commentUID: "target-comment",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "target-issue", Kind: "confirm",
+			}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "open", test.openIssueUID)
+			m.detail.comments = test.comments
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: "issue.comment_edited", projectID: 7,
+				issueUID: test.editedIssueUID, commentUID: test.commentUID,
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestCommentEditIgnoresUnrepresentedComment(t *testing.T) {
+	m := sseDetailFixture(7, "target", "target-issue")
+	m.detail.comments = []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+		UID: "reply-comment", IssueUID: "source-issue", Kind: "confirm",
+	}}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.comment_edited", projectID: 7,
+		issueUID: "source-issue", commentUID: "unrelated-comment",
+	})
+	if cmd != nil {
+		t.Fatalf("unrepresented comment edit must not refresh target detail, got %T", cmd)
+	}
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-

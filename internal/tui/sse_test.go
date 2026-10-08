@@ -165,6 +165,19 @@ func TestSSEParser_LinkPayloadType(t *testing.T) {
 	}
 }
 
+func TestSSEParser_CommentEditedPayloadUID(t *testing.T) {
+	body := []byte(`{
+		"type":"issue.comment_edited",
+		"project_id":7,
+		"issue_uid":"source-issue",
+		"payload":{"comment_uid":"edited-comment"}
+	}`)
+	got := decodeEventReceived(frame{kind: frameEvent, data: body})
+	if got.commentUID != "edited-comment" {
+		t.Fatalf("commentUID = %q, want edited-comment", got.commentUID)
+	}
+}
+
 // TestSSEParser_LinkPayloadDecodesDaemonWireShape pins that the TUI
 // linkPayload decoder reads the daemon's emitted UID field names
 // (`from_uid` / `to_uid` — see queries_links.go::CreateLinkAndEvent and
