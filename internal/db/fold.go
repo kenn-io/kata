@@ -221,6 +221,9 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 		issue.Owner = owner
 		clearFoldAssignmentExpiry(&issue)
 	}
+	if expiresOn, ok := optionalString(payload["assignment_expires_on"]); ok {
+		setFoldAssignmentExpiry(&issue, expiresOn)
+	}
 	if priority, ok := optionalInt64(payload["priority"]); ok {
 		issue.Priority = priority
 	}

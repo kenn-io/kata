@@ -31,6 +31,7 @@ import (
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/tickticksync"
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
@@ -75,6 +76,10 @@ type ServerConfig struct {
 	NotionSyncFetcher        notionsync.Fetcher
 	NotionSyncProgress       *issuesync.ProgressTracker
 	NotionSyncWake           func()
+	TickTickSyncConfig       config.TickTickSyncConfig
+	TickTickSyncFetcher      tickticksync.Fetcher
+	TickTickSyncProgress     *issuesync.ProgressTracker
+	TickTickSyncWake         func()
 	PlaneSyncConfig          config.PlaneSyncConfig
 	PlaneSyncFetcher         planesync.Fetcher
 	PlaneSyncProgress        *issuesync.ProgressTracker
@@ -271,6 +276,12 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	if cfg.TodoistSyncFetcher == nil {
 		cfg.TodoistSyncFetcher = todoistSyncFetcher(cfg)
+	}
+	if cfg.TickTickSyncProgress == nil {
+		cfg.TickTickSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.TickTickSyncFetcher == nil {
+		cfg.TickTickSyncFetcher = tickTickSyncFetcher(cfg)
 	}
 	if cfg.PlaneSyncProgress == nil {
 		cfg.PlaneSyncProgress = issuesync.NewProgressTracker()

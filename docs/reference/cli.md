@@ -1261,6 +1261,24 @@ that the operation is safe. Recurring completion and cascade operations are
 blocked. Other fields remain incoming-only. See
 [Todoist sync](../operations/todoist-sync.md) for ownership, setup and recovery.
 
+### TickTick
+
+```sh
+kata sync ticktick enable --ticktick-project project-1
+kata sync ticktick enable [--interval 5m] [--title-prefix=false] [--status-sync=one-way|two-way]
+kata sync ticktick status
+kata sync ticktick once
+kata sync ticktick disable
+```
+
+Initial enable requires a task-project ID. Re-enable preserves omitted options.
+Global `--project` selects the native Kata project. The daemon owns the token
+selector in `[ticktick_sync]`; binding requests cannot supply credentials or
+API origins. Two-way mode sends ordinary task completion and receives source
+status. Outbound reopen and recurring completion require manual action in
+TickTick. See [TickTick sync](../operations/ticktick-sync.md) for field ownership,
+permissions, pending intent, and recovery.
+
 ### GitHub
 
 ```sh

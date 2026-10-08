@@ -378,7 +378,7 @@ func (s *Store) RefreshIssueSyncBinding(
 		if params.BindingUpdatedAt != nil && !previous.UpdatedAt.Equal(*params.BindingUpdatedAt) {
 			return db.ErrIssueSyncBindingChanged
 		}
-		config, err := db.PreserveIssueStatusScanConfig(previous.Config, params.Config)
+		config, err := db.RefreshIssueSyncConfig(previous, params)
 		if err != nil {
 			return err
 		}

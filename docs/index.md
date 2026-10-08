@@ -128,6 +128,7 @@ is a local ledger for the work itself. They coexist. See
 -   [__Local daemon profiles__](operations/local-daemon-profiles.md). Keep personal
     and work spokes separate and recover their existing data.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
+-   [__TickTick sync__](operations/ticktick-sync.md). Import a task project and send completion back.
 -   [__Plane sync__](operations/plane-sync.md). Mirror a Plane project into native issues.
 -   [__Linear sync__](operations/linear-sync.md). Import a selected team and synchronize completion and reopen.
 -   [__Todoist sync__](operations/todoist-sync.md). Mirror a Todoist project and sync task completion.

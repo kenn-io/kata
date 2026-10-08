@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
+	"go.kenn.io/kata/internal/tickticksync"
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 )
@@ -107,6 +108,10 @@ type TwentySyncConfig struct{ APIOrigin, WebOrigin, TokenEnv string }
 // TodoistSyncConfig selects the daemon-owned API token environment variable.
 type TodoistSyncConfig struct{ APIOrigin, TokenEnv string }
 
+// TickTickSyncConfig selects the daemon-owned TickTick token environment variable.
+// Credentials are never accepted from binding config.
+type TickTickSyncConfig struct{ TokenEnv string }
+
 // NotionSyncConfig selects the daemon-owned Notion token environment variable.
 // Empty TokenEnv uses KATA_NOTION_TOKEN; credentials are resolved only for runs.
 type NotionSyncConfig struct {
@@ -125,15 +130,16 @@ type GitHubAppConfig struct {
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
-	DSN         string
-	Postgres    PostgresConfig
-	Auth        AuthConfig
-	GitHubSync  GitHubSyncConfig
-	NotionSync  NotionSyncConfig
-	PlaneSync   PlaneSyncConfig
-	LinearSync  LinearSyncConfig
-	TwentySync  TwentySyncConfig
-	TodoistSync TodoistSyncConfig
+	DSN          string
+	Postgres     PostgresConfig
+	Auth         AuthConfig
+	GitHubSync   GitHubSyncConfig
+	NotionSync   NotionSyncConfig
+	PlaneSync    PlaneSyncConfig
+	LinearSync   LinearSyncConfig
+	TwentySync   TwentySyncConfig
+	TodoistSync  TodoistSyncConfig
+	TickTickSync TickTickSyncConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -163,18 +169,20 @@ type Config struct {
 }
 
 type serviceDeps struct {
-	notionSyncFetcher         notionsync.Fetcher
-	notionSyncFetcherFactory  func(config.NotionSyncConfig) notionsync.Fetcher
-	planeSyncFetcher          planesync.Fetcher
-	twentySyncFetcher         twentysync.Fetcher
-	planeSyncFetcherFactory   func(config.PlaneSyncConfig) planesync.Fetcher
-	linearSyncFetcher         linearsync.Fetcher
-	linearSyncFetcherFactory  func(config.LinearSyncConfig) linearsync.Fetcher
-	twentySyncFetcherFactory  func(config.TwentySyncConfig) twentysync.Fetcher
-	gitHubSyncFetcher         githubsync.Fetcher
-	gitHubSyncFetcherFactory  func(config.GitHubSyncConfig) githubsync.Fetcher
-	todoistSyncFetcher        todoistsync.Fetcher
-	todoistSyncFetcherFactory func(config.TodoistSyncConfig) todoistsync.Fetcher
+	notionSyncFetcher          notionsync.Fetcher
+	notionSyncFetcherFactory   func(config.NotionSyncConfig) notionsync.Fetcher
+	planeSyncFetcher           planesync.Fetcher
+	twentySyncFetcher          twentysync.Fetcher
+	planeSyncFetcherFactory    func(config.PlaneSyncConfig) planesync.Fetcher
+	linearSyncFetcher          linearsync.Fetcher
+	linearSyncFetcherFactory   func(config.LinearSyncConfig) linearsync.Fetcher
+	twentySyncFetcherFactory   func(config.TwentySyncConfig) twentysync.Fetcher
+	gitHubSyncFetcher          githubsync.Fetcher
+	gitHubSyncFetcherFactory   func(config.GitHubSyncConfig) githubsync.Fetcher
+	todoistSyncFetcher         todoistsync.Fetcher
+	todoistSyncFetcherFactory  func(config.TodoistSyncConfig) todoistsync.Fetcher
+	tickTickSyncFetcher        tickticksync.Fetcher
+	tickTickSyncFetcherFactory func(config.TickTickSyncConfig) tickticksync.Fetcher
 }
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
@@ -190,6 +198,9 @@ type Service struct {
 	notionSyncWake         chan struct{}
 	notionSyncFetcher      notionsync.Fetcher
 	notionSyncProgress     *issuesync.ProgressTracker
+	tickTickSyncWake       chan struct{}
+	tickTickSyncFetcher    tickticksync.Fetcher
+	tickTickSyncProgress   *issuesync.ProgressTracker
 	planeSyncWake          chan struct{}
 	twentySyncWake         chan struct{}
 	planeSyncFetcher       planesync.Fetcher
@@ -271,6 +282,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	todoistSyncConfig, err := config.NormalizeTodoistSyncConfig(config.TodoistSyncConfig{APIOrigin: cfg.TodoistSync.APIOrigin, TokenEnv: cfg.TodoistSync.TokenEnv})
 	if err != nil {
 		return nil, fmt.Errorf("kata: Todoist sync config: %w", err)
+	}
+	tickTickSyncConfig, err := config.NormalizeTickTickSyncConfig(config.TickTickSyncConfig{TokenEnv: cfg.TickTickSync.TokenEnv})
+	if err != nil {
+		return nil, fmt.Errorf("kata: TickTick sync config: %w", err)
 	}
 	publicFederationCredentials := cfg.FederationCredentials
 	if publicFederationCredentials == nil {
@@ -395,6 +410,19 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		todoistSyncFetcher = factory(todoistSyncConfig)
 	}
 	todoistSyncProgress := issuesync.NewProgressTracker()
+	tickTickSyncWake := make(chan struct{}, 1)
+	wakeTickTickSync := func() { signalWake(tickTickSyncWake) }
+	tickTickSyncFetcher := deps.tickTickSyncFetcher
+	if tickTickSyncFetcher == nil {
+		factory := deps.tickTickSyncFetcherFactory
+		if factory == nil {
+			factory = func(cfg config.TickTickSyncConfig) tickticksync.Fetcher {
+				return tickticksync.NewClient(tickticksync.ClientConfig{TokenEnv: cfg.TokenEnv})
+			}
+		}
+		tickTickSyncFetcher = factory(tickTickSyncConfig)
+	}
+	tickTickSyncProgress := issuesync.NewProgressTracker()
 	var hostAccess daemon.HostAccessController
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
@@ -422,6 +450,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		NotionSyncProgress:      notionSyncProgress,
 		NotionSyncConfig:        notionSyncConfig,
 		NotionSyncWake:          wakeNotionSync,
+		TickTickSyncFetcher:     tickTickSyncFetcher,
+		TickTickSyncProgress:    tickTickSyncProgress,
+		TickTickSyncConfig:      tickTickSyncConfig,
+		TickTickSyncWake:        wakeTickTickSync,
 		PlaneSyncFetcher:        planeSyncFetcher,
 		TwentySyncFetcher:       twentySyncFetcher,
 		PlaneSyncProgress:       planeSyncProgress,
@@ -458,6 +490,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		notionSyncWake:         notionSyncWake,
 		notionSyncFetcher:      notionSyncFetcher,
 		notionSyncProgress:     notionSyncProgress,
+		tickTickSyncWake:       tickTickSyncWake,
+		tickTickSyncFetcher:    tickTickSyncFetcher,
+		tickTickSyncProgress:   tickTickSyncProgress,
 		planeSyncWake:          planeSyncWake,
 		twentySyncWake:         twentySyncWake,
 		planeSyncFetcher:       planeSyncFetcher,
@@ -830,6 +865,18 @@ func (s *Service) Run(ctx context.Context) error {
 			return nil
 		},
 	})
+	tickTickSyncRunner := tickticksync.NewRunner(tickticksync.RunnerConfig{
+		Progress: s.tickTickSyncProgress,
+		Store:    s.store,
+		Fetcher:  s.tickTickSyncFetcher,
+		Logger:   s.logger,
+		Interval: 30 * time.Second,
+		Wake:     s.tickTickSyncWake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			s.publishWorkerEvents(projectID, events)
+			return nil
+		},
+	})
 	sweeper := daemon.NewTimedClaimSweeper(s.store, s.publish)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
@@ -850,6 +897,7 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "linear-sync", run: linearSyncRunner.Run},
 		{name: "twenty-sync", run: twentySyncRunner.Run},
 		{name: "todoist-sync", run: todoistSyncRunner.Run},
+		{name: "ticktick-sync", run: tickTickSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},

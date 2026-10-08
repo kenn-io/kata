@@ -70,6 +70,8 @@ var storageScenarios = []scenario{
 	{name: "native cron dormant storage", methods: []string{}, run: checkNativeCronDormancy},
 	{name: "cron project merge restore", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "MergeProjects", "ImportReplay"}, runWithBackend: checkCronProjectMergeRestore},
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
+	{name: "external import status expiry after mode switch", methods: []string{"ClaimOwner", "CreateProject", "EventsAfter", "ExpireAssignments", "ImportBatch", "ImportMappingBySource", "IssueByID"}, run: checkImportStatusCloseClearsAssignmentExpiry},
+	{name: "external import status observation acknowledgement", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "ReopenIssue"}, run: checkImportStatusObservationAcknowledgement},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},
 	{name: "issue status native intent", methods: []string{"CloseIssueWithEvents", "ReopenIssue", "CreateIssue", "UpsertIssueSyncBinding"}, runWithBackend: checkIssueStatusNativeIntent},
 	{name: "issue status mapping reads", methods: []string{"CreateProject", "CreateIssue", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding"}, run: checkIssueStatusMappingReads},

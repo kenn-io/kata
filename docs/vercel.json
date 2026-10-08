@@ -499,6 +499,16 @@
       "source": "/operations/todoist-sync.md",
       "destination": "/docs/operations/todoist-sync.md",
       "permanent": true
+    },
+    {
+      "source": "/operations/ticktick-sync/",
+      "destination": "/docs/operations/ticktick-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/ticktick-sync.md",
+      "destination": "/docs/operations/ticktick-sync.md",
+      "permanent": true
     }
   ]
 }

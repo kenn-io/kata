@@ -75,3 +75,4 @@ for machine readers.
 - [Linear sync](https://katatracker.com/docs/operations/linear-sync.md): Scope, credentials, field ownership, status synchronization, and recovery.
 - [Twenty sync](https://katatracker.com/docs/operations/twenty-sync.md): Mirror Twenty workspace tasks with self-hosted support and optional two-way status sync.
 - [Todoist sync](https://katatracker.com/docs/operations/todoist-sync.md): Scoped task import, status writeback, field ownership, and recovery.
+- [TickTick sync](https://katatracker.com/docs/operations/ticktick-sync.md): Import one task project and write ordinary completion back through the public API.
