@@ -53,6 +53,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			wake = cfg.PlaneSyncWake
 		case issueSyncProviderLinear:
 			wake = cfg.LinearSyncWake
+		case issueSyncProviderTwenty:
+			wake = cfg.TwentySyncWake
 		}
 		if wake != nil {
 			wake()
@@ -151,6 +153,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 				tracker = cfg.PlaneSyncProgress
 			case issueSyncProviderLinear:
 				tracker = cfg.LinearSyncProgress
+			case issueSyncProviderTwenty:
+				tracker = cfg.TwentySyncProgress
 			}
 			if progress := tracker.Snapshot(binding.ID, *status.SyncStartedAt); progress != nil {
 				body.Status.Progress = &api.IssueSyncProgressOut{Phase: progress.Phase, Completed: progress.Completed, Total: progress.Total, StartedAt: progress.StartedAt, UpdatedAt: progress.UpdatedAt}
@@ -195,6 +199,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			runner = planeSyncRunner(cfg)
 		case issueSyncProviderLinear:
 			runner = linearSyncRunner(cfg)
+		case issueSyncProviderTwenty:
+			runner = twentySyncRunner(cfg)
 		default:
 			runner = githubSyncRunner(cfg)
 		}
@@ -224,7 +230,7 @@ func validateIssueSyncProvider(provider string) (string, error) {
 	if provider == "" {
 		return "", api.NewError(http.StatusBadRequest, "validation", "issue sync provider is required", "", nil)
 	}
-	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion && provider != issueSyncProviderPlane && provider != issueSyncProviderLinear {
+	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion && provider != issueSyncProviderPlane && provider != issueSyncProviderLinear && provider != issueSyncProviderTwenty {
 		return "", api.NewError(http.StatusBadRequest, "validation", fmt.Sprintf("issue sync provider %q is not supported", provider), "", nil)
 	}
 	return provider, nil
@@ -240,6 +246,8 @@ func issueSyncEnableParams(ctx context.Context, cfg ServerConfig, provider strin
 		return planeSyncEnableParams(ctx, cfg, in)
 	case issueSyncProviderLinear:
 		return linearSyncEnableParams(ctx, cfg, in)
+	case issueSyncProviderTwenty:
+		return twentySyncEnableParams(ctx, cfg, in)
 	default:
 		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", fmt.Sprintf("issue sync provider %q is not supported", provider), "", nil)
 	}
@@ -465,6 +473,8 @@ func issueSyncStorageError(err error, provider string) error {
 			name = "Plane"
 		case issueSyncProviderLinear:
 			name = "Linear"
+		case issueSyncProviderTwenty:
+			name = "Twenty"
 		}
 		return api.NewError(http.StatusConflict, "issue_sync_federation_conflict",
 			fmt.Sprintf("project is a federation spoke; enable %s sync on the hub project so federation can replicate %s issues to spokes", name, name), "", nil)

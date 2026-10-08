@@ -139,7 +139,7 @@ func enqueueIssueStatusIntentTx(ctx context.Context, tx *sql.Tx, event db.Event)
 	_, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=$1
 WHERE issue_id=$2 AND project_id=$3 AND object_type='issue'
  AND EXISTS (SELECT 1 FROM issue_sync_bindings b WHERE b.project_id=import_mappings.project_id AND b.source_key=import_mappings.source
-  AND b.provider IN ('notion','github','plane','linear') AND b.config_json::jsonb->>'status_sync'='two-way')
+  AND b.provider IN ('notion','github','plane','linear','twenty') AND b.config_json::jsonb->>'status_sync'='two-way')
  AND NOT EXISTS (SELECT 1 FROM federation_bindings f WHERE f.project_id=import_mappings.project_id AND f.role='spoke' AND f.enabled=1)`, event.UID, event.IssueID, event.ProjectID)
 	return err
 }

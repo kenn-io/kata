@@ -479,6 +479,16 @@
       "source": "/operations/linear-sync.md",
       "destination": "/docs/operations/linear-sync.md",
       "permanent": true
+    },
+    {
+      "source": "/operations/twenty-sync/",
+      "destination": "/docs/operations/twenty-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/twenty-sync.md",
+      "destination": "/docs/operations/twenty-sync.md",
+      "permanent": true
     }
   ]
 }
