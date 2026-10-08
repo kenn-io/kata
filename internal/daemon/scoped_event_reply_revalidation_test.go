@@ -108,7 +108,7 @@ func (s *purgeBeforeReplyLookupStore) CommentIssueIDsByUIDs(
 ) (map[string]int64, error) {
 	if !s.purged {
 		s.purged = true
-		if _, err := s.Storage.PurgeIssue(ctx, s.issueID, "worker-a", nil); err != nil {
+		if _, err := s.PurgeIssue(ctx, s.issueID, "worker-a", nil); err != nil {
 			return nil, err
 		}
 	}

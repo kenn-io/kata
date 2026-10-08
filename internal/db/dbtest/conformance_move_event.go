@@ -55,11 +55,11 @@ func moveResultEvent(t *testing.T, result db.MoveIssueProjectOut) *db.Event {
 	t.Helper()
 	field := reflect.ValueOf(result).FieldByName("Event")
 	require.True(t, field.IsValid(), "MoveIssueProjectOut must return its committed event")
-	require.Equal(t, reflect.TypeOf((*db.Event)(nil)), field.Type(), "Event must be optional for dry-run previews")
+	require.Equal(t, reflect.TypeFor[*db.Event](), field.Type(), "Event must be optional for dry-run previews")
 	if field.IsNil() {
 		return nil
 	}
-	event, ok := field.Interface().(*db.Event)
+	event, ok := reflect.TypeAssert[*db.Event](field)
 	require.True(t, ok)
 	return event
 }
