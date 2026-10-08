@@ -124,6 +124,9 @@ func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID, acto
 	if err != nil {
 		return db.Project{}, db.Event{}, err
 	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, db.Event{}, fmt.Errorf("advance project access revision after project creation: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return db.Project{}, db.Event{}, err
 	}

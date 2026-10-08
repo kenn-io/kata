@@ -141,6 +141,33 @@ func (f projectAccessFixture) request(t *testing.T, method, path, actor string, 
 	return resp.StatusCode, resp.Header, raw
 }
 
+func openProjectAccessSSE(t *testing.T, f projectAccessFixture, cursor int64, actor string) (*http.Response, *sseFramer) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("%s/api/v1/events/stream?after_id=%d", f.server.URL, cursor), nil)
+	require.NoError(t, err)
+	token := actor + "-test-token"
+	if actor == "admin" {
+		token = "bootstrap-test-token"
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Accept", "text/event-stream")
+	response, err := f.server.Client().Do(request)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	return response, newSSEFramer(response.Body)
+}
+
+func createProjectAccessIssue(t *testing.T, f projectAccessFixture, projectID int64, actor, title string) {
+	t.Helper()
+	status, _, body := f.request(t, http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues", projectID), actor,
+		map[string]string{"title": title, "actor": actor}, nil)
+	require.True(t, status >= http.StatusOK && status < http.StatusMultipleChoices,
+		"create issue: status=%d body=%s", status, body)
+}
+
 type projectAccessBeforeEditStore struct {
 	db.Storage
 	before func(context.Context, db.EditIssueAtomicParams) error
@@ -701,6 +728,95 @@ func TestProjectAccessEventReferenceResetsPollAndSSE(t *testing.T) {
 		assert.Equal(t, "sync.reset_required", frame.event)
 		assert.Equal(t, fmt.Sprint(closeEvents[0].ID), frame.id)
 		assert.NotContains(t, frame.data, hiddenParent.UID)
+	})
+}
+
+func TestProjectAccessNewUnrestrictedProjectRefreshesExistingSSEAdmission(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		cursor, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		response, stream := openProjectAccessSSE(t, f, cursor, "member")
+
+		createProjectAccessIssue(t, f, f.public.ID, "member", "Before catalog change")
+		first, ok := stream.Next(t, 2*time.Second)
+		require.True(t, ok, "the authenticated stream should be subscribed before the catalog change")
+		assert.Equal(t, "issue.created", first.event)
+		cursor, err = store.MaxEventID(t.Context())
+		require.NoError(t, err)
+
+		status, _, body := f.request(t, http.MethodPost, "/api/v1/projects", "member",
+			map[string]string{"name": "new-shared-project", "actor": "member"}, nil)
+		require.True(t, status >= http.StatusOK && status < http.StatusMultipleChoices,
+			"create project: status=%d body=%s", status, body)
+		project, err := store.ProjectByName(t.Context(), "new-shared-project")
+		require.NoError(t, err)
+		createProjectAccessIssue(t, f, project.ID, "member", "New project task")
+		createProjectAccessIssue(t, f, f.public.ID, "member", "After catalog change")
+
+		leaked, ok := stream.Next(t, 2*time.Second)
+		require.False(t, ok,
+			"the old stream must close when an unrestricted project changes the admitted project set; got %s", leaked.event)
+
+		_, refreshed := openProjectAccessSSE(t, f, cursor, "member")
+		created, ok := refreshed.Next(t, 2*time.Second)
+		require.True(t, ok, "a newly admitted stream should receive the new project catalog event")
+		assert.Equal(t, "project.created", created.event)
+		assert.Contains(t, created.data, project.UID)
+		issue, ok := refreshed.Next(t, 2*time.Second)
+		require.True(t, ok, "a newly admitted stream should receive the new project's issue event")
+		assert.Equal(t, "issue.created", issue.event)
+		assert.Contains(t, issue.data, project.UID)
+		_ = response.Body.Close()
+	})
+}
+
+func TestProjectAccessRestoredUnrestrictedProjectRefreshesExistingSSEAdmission(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		project, err := store.CreateProject(t.Context(), "restored-shared-project")
+		require.NoError(t, err)
+		_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "admin",
+		})
+		require.NoError(t, err)
+
+		cursor, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		response, stream := openProjectAccessSSE(t, f, cursor, "member")
+		createProjectAccessIssue(t, f, f.public.ID, "member", "Before restore")
+		first, ok := stream.Next(t, 2*time.Second)
+		require.True(t, ok, "the authenticated stream should be subscribed before the restore")
+		assert.Equal(t, "issue.created", first.event)
+		cursor, err = store.MaxEventID(t.Context())
+		require.NoError(t, err)
+
+		restoredProject, event, changed, err := store.RestoreProject(t.Context(), project.ID, "admin")
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.NotNil(t, event)
+		f.broadcaster.Broadcast(daemon.NewEventMsg(restoredProject.ID, *event))
+		_, issueEvent, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: restoredProject.ID, Title: "Restored project task", Author: "member",
+		})
+		require.NoError(t, err)
+		f.broadcaster.Broadcast(daemon.NewEventMsg(restoredProject.ID, issueEvent))
+		createProjectAccessIssue(t, f, f.public.ID, "member", "After restore")
+
+		leaked, ok := stream.Next(t, 2*time.Second)
+		require.False(t, ok,
+			"the old stream must close when restoring an unrestricted project changes its admitted set; got %s", leaked.event)
+
+		_, refreshed := openProjectAccessSSE(t, f, cursor, "member")
+		restored, ok := refreshed.Next(t, 2*time.Second)
+		require.True(t, ok, "a newly admitted stream should receive the restore event")
+		assert.Equal(t, "project.restored", restored.event)
+		assert.Contains(t, restored.data, project.UID)
+		issue, ok := refreshed.Next(t, 2*time.Second)
+		require.True(t, ok, "a newly admitted stream should receive events from the restored project")
+		assert.Equal(t, "issue.created", issue.event)
+		assert.Contains(t, issue.data, project.UID)
+		_ = response.Body.Close()
 	})
 }
 
@@ -1360,7 +1476,11 @@ func TestProjectAccessRegisteredProjectOperations(t *testing.T) {
 				checked++
 				t.Run(op.OperationID, func(t *testing.T) {
 					route := strings.NewReplacer("{project_id}", fmt.Sprint(f.private.ID), "{ref}", f.issue.ShortID, "{uid}", f.issue.UID, "{id}", "1", "{comment_ref}", "1", "{label}", "example-label", "{link_id}", "1", "{alias_id}", "1", "{quarantine_id}", "1", "{recurrence_uid}", f.issue.UID, "{provider}", "example-provider").Replace(path)
-					status, _, body := f.request(t, op.Method, route, "nonmember", nil, nil)
+					var requestBody any
+					if op.OperationID == "disconnectRelayEnrollment" {
+						requestBody = map[string]string{"spoke_instance_uid": "01J00000000000000000000001"}
+					}
+					status, _, body := f.request(t, op.Method, route, "nonmember", requestBody, nil)
 					want := http.StatusNotFound
 					// Body-bearing federation routes authenticate enrollment before
 					// Huma dispatch or reading input. Other project routes retain 404.

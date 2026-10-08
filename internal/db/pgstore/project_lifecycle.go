@@ -141,6 +141,9 @@ func (s *Store) restoreProject(
 		if err != nil {
 			return err
 		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("advance project access revision after project restore: %w", err)
+		}
 		event = &created
 		changed = true
 		project, err = scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1`, project.ID))

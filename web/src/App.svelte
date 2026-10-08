@@ -217,7 +217,7 @@
 
   const invalidations = new InvalidationController((full) => refreshSnapshot(full))
   const stream = new EventStreamController({
-    connect: (cursor, signal) => openEventStream(browserFetch, cursor, signal),
+    connect: (cursor, signal, onOpen) => openEventStream(browserFetch, cursor, signal, onOpen),
     onFrame: (frame) => invalidations.frame(frame),
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {

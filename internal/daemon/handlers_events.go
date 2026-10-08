@@ -923,6 +923,11 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 				if msg.Event == nil {
 					continue
 				}
+				// A catalog or policy mutation can change the admitted project set
+				// even when its event is not visible through that existing set.
+				if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
+					return
+				}
 				// Defensive ordering: a concurrent purge can commit before
 				// this event's broadcast is processed (broadcaster lock race
 				// between two mutation goroutines). PurgeResetCheck makes the

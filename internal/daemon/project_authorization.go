@@ -85,6 +85,17 @@ func recordProjectAccessMutationRevision(ctx context.Context, revision int64) {
 	decision.PolicyRevision = revision
 }
 
+func recordProjectAccessCatalogMutation(ctx context.Context, projectUID string) {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil || decision.owner {
+		return
+	}
+	decision.PolicyRevision++
+	if projectUID != "" && !slices.Contains(decision.ProjectUIDs, projectUID) {
+		decision.ProjectUIDs = append(decision.ProjectUIDs, projectUID)
+	}
+}
+
 func revalidateProjectAccessHydratedIssues(ctx context.Context, decision *ProjectAccessDecision) error {
 	for issueUID, allowDeleted := range decision.hydratedIssues {
 		issue, err := decision.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)

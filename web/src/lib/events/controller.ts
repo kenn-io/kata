@@ -120,7 +120,7 @@ export class ReconnectBackoff {
 }
 
 interface EventStreamControllerOptions {
-  connect: (cursor: number, signal: AbortSignal) => AsyncIterable<EventFrame>
+  connect: (cursor: number, signal: AbortSignal, onOpen: () => void) => AsyncIterable<EventFrame>
   onFrame: (frame: EventFrame) => void
   onState?: ((state: 'connecting' | 'online' | 'reconnecting' | 'stopped') => void) | undefined
   onAuthenticationRequired?: (() => void) | undefined
@@ -166,10 +166,16 @@ export class EventStreamController {
     const backoff = new ReconnectBackoff()
     while (!signal.aborted) {
       let productive = false
+      let opened = false
+      const markOnline = (): void => {
+        if (signal.aborted || opened) return
+        opened = true
+        this.#onState('online')
+      }
       try {
-        for await (const frame of this.#connect(this.#cursor, signal)) {
+        for await (const frame of this.#connect(this.#cursor, signal, markOnline)) {
           if (signal.aborted) return
-          if (!productive) this.#onState('online')
+          markOnline()
           productive = true
           const eventID = Number.parseInt(frame.id, 10)
           if (Number.isSafeInteger(eventID) && eventID >= 0) this.#cursor = eventID

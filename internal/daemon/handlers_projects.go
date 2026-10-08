@@ -430,6 +430,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
+			recordProjectAccessCatalogMutation(ctx, project.UID)
 			cfg.Publish().Event(project.ID, *evt)
 		}
 		out := &api.RestoreProjectResponse{}
@@ -1050,9 +1051,7 @@ func upsertProject(ctx context.Context, store db.Storage, name, actor string) (d
 	if err != nil {
 		return db.Project{}, nil, false, internalAPIError(err)
 	}
-	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
-		decision.ProjectUIDs = append(decision.ProjectUIDs, created.UID)
-	}
+	recordProjectAccessCatalogMutation(ctx, created.UID)
 	return created, &event, true, nil
 }
 

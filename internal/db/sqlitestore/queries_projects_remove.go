@@ -178,6 +178,9 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 	if err != nil {
 		return db.Project{}, nil, false, err
 	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, nil, false, fmt.Errorf("advance project access revision after project restore: %w", err)
+	}
 	updated, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, project.ID))
 	if err != nil {
 		return db.Project{}, nil, false, err
