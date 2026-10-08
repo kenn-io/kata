@@ -2651,12 +2651,15 @@ func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool
 			}
 		}
 	case "issue.commented", "issue.created", "issue.snapshot":
-		if msg.commentUID == "" && len(msg.commentUIDs) == 0 {
+		if msg.commentUID == "" && len(msg.commentUIDs) == 0 && len(msg.replyToUIDs) == 0 {
 			return false
 		}
 		for _, comment := range comments {
 			if comment.Reply != nil && comment.Reply.Status == "pending" &&
 				msg.matchesCommentUID(comment.Reply.UID) {
+				return true
+			}
+			if slices.Contains(msg.replyToUIDs, comment.UID) {
 				return true
 			}
 		}

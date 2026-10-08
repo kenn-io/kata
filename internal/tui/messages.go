@@ -204,6 +204,7 @@ type eventReceivedMsg struct {
 	relatedIssueUID string
 	commentUID      string
 	commentUIDs     []string
+	replyToUIDs     []string
 	link            *linkPayload
 	linksChanged    *linksChangedParents
 }

@@ -170,12 +170,16 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 		var payload struct {
 			Comments []struct {
 				CommentUID string `json:"comment_uid"`
+				ReplyToUID string `json:"reply_to_uid"`
 			} `json:"comments"`
 		}
 		if json.Unmarshal(p.Payload, &payload) == nil {
 			for _, comment := range payload.Comments {
 				if comment.CommentUID != "" {
 					out.commentUIDs = append(out.commentUIDs, comment.CommentUID)
+				}
+				if comment.ReplyToUID != "" {
+					out.replyToUIDs = append(out.replyToUIDs, comment.ReplyToUID)
 				}
 			}
 		}

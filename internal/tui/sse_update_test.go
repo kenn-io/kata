@@ -1009,7 +1009,7 @@ func FuzzFederatedCommentIdentityRefreshesPendingReplyTarget(f *testing.F) {
 			return
 		}
 		eventTypes := []string{"issue.commented", "issue.snapshot", "issue.created"}
-		eventType := eventTypes[eventKind%uint8(len(eventTypes))]
+		eventType := eventTypes[int(eventKind)%len(eventTypes)]
 		m := sseDetailFixture(7, "source", "source-issue")
 		m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
 			UID: targetUID, IssueUID: "remote-target-issue", ProjectID: 8,
@@ -1021,10 +1021,54 @@ func FuzzFederatedCommentIdentityRefreshesPendingReplyTarget(f *testing.F) {
 	})
 }
 
-func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string) eventReceivedMsg {
+func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
+	tests := []struct {
+		name        string
+		replyToUID  string
+		wantRefresh bool
+	}{
+		{name: "reply to displayed comment", replyToUID: "displayed-comment", wantRefresh: true},
+		{name: "reply to other comment", replyToUID: "other-comment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "source", "source-issue")
+			m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
+			msg := federatedCommentIdentityEvent(t, "issue.snapshot", "incoming-comment", tt.replyToUID)
+			cmd := m.maybeRefetchOpenDetail(msg)
+			if tt.wantRefresh {
+				assertDetailRefetchBatch(t, cmd)
+			} else {
+				assert.Nil(t, cmd)
+			}
+		})
+	}
+}
+
+func FuzzFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(f *testing.F) {
+	f.Add("incoming-comment", "displayed-comment")
+	f.Add("reply-a", "target-b")
+	f.Fuzz(func(t *testing.T, commentUID, replyToUID string) {
+		if commentUID == "" || replyToUID == "" || commentUID == replyToUID ||
+			!utf8.ValidString(commentUID) || !utf8.ValidString(replyToUID) {
+			return
+		}
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: replyToUID}}
+		msg := federatedCommentIdentityEvent(t, "issue.snapshot", commentUID, replyToUID)
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
+func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, replyToUID ...string) eventReceivedMsg {
 	t.Helper()
+	replyTarget := ""
+	if len(replyToUID) > 0 {
+		replyTarget = replyToUID[0]
+	}
 	comment := struct {
 		CommentUID string `json:"comment_uid"`
+		ReplyToUID string `json:"reply_to_uid,omitempty"`
 	}{CommentUID: commentUID}
 	var payload any = comment
 	if eventType == "issue.snapshot" || eventType == "issue.created" {
@@ -1032,13 +1076,21 @@ func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string) e
 			UID      string `json:"uid"`
 			Comments []struct {
 				CommentUID string `json:"comment_uid"`
+				ReplyToUID string `json:"reply_to_uid,omitempty"`
 			} `json:"comments"`
 		}{
 			UID: "remote-target-issue",
 			Comments: []struct {
 				CommentUID string `json:"comment_uid"`
-			}{{CommentUID: commentUID}},
+				ReplyToUID string `json:"reply_to_uid,omitempty"`
+			}{{
+				CommentUID: commentUID,
+				ReplyToUID: replyTarget,
+			}},
 		}
+	} else {
+		comment.ReplyToUID = replyTarget
+		payload = comment
 	}
 	payloadJSON, err := json.Marshal(payload)
 	require.NoError(t, err)
