@@ -18,6 +18,7 @@ var errMovePreview = errors.New("move preview complete")
 // stable UID relationships and allocating a fresh target-local short ID.
 func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
 	var output db.MoveIssueProjectOut
+	var committedEvent *db.Event
 	if input.FromProjectID == input.ToProjectID {
 		return output, fmt.Errorf("source and target projects are the same")
 	}
@@ -127,15 +128,23 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return err
 		}
 		output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		if err != nil {
+			return err
+		}
+		committedEvent = &event
 		output.EventID = event.ID
 		output.NewShortID = newShortID
 		output.NewRevision = newRevision
-		return err
+		return nil
 	})
 	if errors.Is(err, errMovePreview) {
 		return output, nil
 	}
-	return output, err
+	if err != nil {
+		return db.MoveIssueProjectOut{}, err
+	}
+	output.Event = committedEvent
+	return output, nil
 }
 
 func rejectIssueMoveExternalRootIssueSyncTx(

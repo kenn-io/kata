@@ -207,7 +207,7 @@ func broadcastHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, origin s
 
 // Resolve notification pointers through the same authorized graph as replies.
 func resolveNotificationComment(ctx context.Context, store db.Storage, issue db.Issue, ref string) (string, error) {
-	records, err := readCommentRecords(ctx, store, issue.ProjectID)
+	records, err := readCommentRecords(ctx, store, issue.ProjectID, 0)
 	if err != nil {
 		return "", err
 	}

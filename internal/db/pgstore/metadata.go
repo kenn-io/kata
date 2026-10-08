@@ -24,7 +24,11 @@ func (s *Store) PatchIssueMetadata(ctx context.Context, input db.PatchIssueMetad
 	return s.patchIssueMetadata(ctx, input, s.withSerializableTx)
 }
 
-func (s *Store) patchIssueMetadata(ctx context.Context, input db.PatchIssueMetadataIn, run metadataTxRunner) (db.PatchIssueMetadataOut, error) {
+func (s *Store) patchIssueMetadata(
+	ctx context.Context,
+	input db.PatchIssueMetadataIn,
+	run metadataTxRunner,
+) (db.PatchIssueMetadataOut, error) {
 	var output db.PatchIssueMetadataOut
 	for key, raw := range input.Patch {
 		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
@@ -32,15 +36,76 @@ func (s *Store) patchIssueMetadata(ctx context.Context, input db.PatchIssueMetad
 		}
 	}
 	err := run(ctx, func(tx *sql.Tx) error {
-		var err error
-		output, err = s.patchIssueMetadataTx(ctx, tx, input)
+		output = db.PatchIssueMetadataOut{}
+		current, project, err := lockedIssueTx(ctx, tx, input.IssueID, false)
+		if err != nil {
+			return err
+		}
+		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
+		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
+		}
+		input.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, input.Patch)
+		if err != nil {
+			return err
+		}
+		for key, raw := range input.Patch {
+			if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+				return fmt.Errorf("validate %q: %w", key, err)
+			}
+		}
+		if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), input.Patch, input.Guard); err != nil {
+			return err
+		}
+		updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
+		if err != nil {
+			return err
+		}
+		if len(diff) == 0 {
+			output.Issue = current
+			output.NewRevision = current.Revision
+			return nil
+		}
+		updatedAt := mutationTimestamp()
+		newRevision := current.Revision + 1
+		if _, err := tx.ExecContext(ctx, `UPDATE issues
+SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
+			string(updated), newRevision, updatedAt, current.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		payload, err := json.Marshal(struct {
+			Diff        map[string]metadataKeyDiffPayload `json:"diff"`
+			RevisionNew int64                             `json:"revision_new"`
+			UpdatedAt   string                            `json:"updated_at"`
+		}{Diff: diff, RevisionNew: newRevision, UpdatedAt: updatedAt})
+		if err != nil {
+			return fmt.Errorf("marshal issue metadata event: %w", err)
+		}
+		output.Event, err = s.insertEventTx(ctx, tx,
+			issueEventInput(current, project, "issue.metadata_updated", input.Actor, string(payload)))
+		if err != nil {
+			return err
+		}
+		output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		output.Changed = true
+		output.NewRevision = newRevision
 		return err
 	})
 	return output, err
 }
 
+// patchIssueMetadataTx applies one comment-triggered patch inside the
+// transaction that created the comment. The caller retains the event only if
+// that outer transaction commits.
 func (s *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, input db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
-	output := db.PatchIssueMetadataOut{}
+	var output db.PatchIssueMetadataOut
+	for key, raw := range input.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return output, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
 	current, project, err := lockedIssueTx(ctx, tx, input.IssueID, false)
 	if err != nil {
 		return output, err
@@ -48,16 +113,6 @@ func (s *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, input db.P
 	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 		return output, err
 	}
-	input.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, input.Patch)
-	if err != nil {
-		return output, err
-	}
-	for key, raw := range input.Patch {
-		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-			return output, fmt.Errorf("validate %q: %w", key, err)
-		}
-	}
-
 	if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 		return output, &db.RevisionConflictError{CurrentRevision: current.Revision}
 	}
@@ -73,11 +128,12 @@ func (s *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, input db.P
 		output.NewRevision = current.Revision
 		return output, nil
 	}
+
 	updatedAt := mutationTimestamp()
 	newRevision := current.Revision + 1
 	if _, err := tx.ExecContext(ctx, `UPDATE issues
 SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
-		string(updated), newRevision, updatedAt, current.ID); err != nil {
+		string(updated), newRevision, updatedAt, input.IssueID); err != nil {
 		return output, mapSQLError(err, nil)
 	}
 	payload, err := json.Marshal(struct {
@@ -88,15 +144,17 @@ SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
 	if err != nil {
 		return output, fmt.Errorf("marshal issue metadata event: %w", err)
 	}
-	output.Event, err = s.insertEventTx(ctx, tx,
+	event, err := s.insertEventTx(ctx, tx,
 		issueEventInput(current, project, "issue.metadata_updated", input.Actor, string(payload)))
 	if err != nil {
 		return output, err
 	}
 	output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
-	output.Changed = true
-	output.NewRevision = newRevision
-	return output, err
+	if err != nil {
+		return output, err
+	}
+	output.Event, output.Changed, output.NewRevision = event, true, newRevision
+	return output, nil
 }
 
 // PatchProjectMetadata applies a validated per-key patch under the project's

@@ -14,7 +14,7 @@ import (
 )
 
 func commentNotificationHook() db.CommentMetadataHook {
-	return func(ctx context.Context, tx *sql.Tx, issue db.Issue, reply db.Comment) (map[string]jsontext.Value, error) {
+	return func(ctx context.Context, tx *sql.Tx, issue db.Issue, reply db.Comment) ([]db.CommentMetadataUpdate, error) {
 		if reply.ReplyToUID == "" {
 			return nil, nil
 		}
@@ -108,7 +108,67 @@ func commentNotificationHook() db.CommentMetadataHook {
 				}
 			}
 		}
-		return notification.LinkPatch(in)
+		patch, err := notification.LinkPatch(in)
+		if err != nil {
+			return nil, err
+		}
+		patchesByIssue := map[int64]map[string]jsontext.Value{}
+		if len(patch) > 0 {
+			patchesByIssue[issue.ID] = patch
+		}
+		if reply.ReplyKind == "reply" {
+			key := notification.MetadataKey(notification.Address(reply.Author, reply.Teammate))
+			rows, err := tx.QueryContext(ctx,
+				`SELECT id,metadata FROM issues WHERE project_id=$1 AND deleted_at IS NULL ORDER BY id`,
+				issue.ProjectID,
+			)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var issueID int64
+				var rawMetadata string
+				if err := rows.Scan(&issueID, &rawMetadata); err != nil {
+					_ = rows.Close()
+					return nil, err
+				}
+				if !notificationIssueAllowed(allowed, issueID) || rawMetadata == "" {
+					continue
+				}
+				var slots map[string]jsontext.Value
+				if err := json.Unmarshal([]byte(rawMetadata), &slots); err != nil {
+					_ = rows.Close()
+					return nil, err
+				}
+				raw, exists := slots[key]
+				if !exists {
+					continue
+				}
+				var pending notification.Value
+				if json.Unmarshal(raw, &pending) != nil || pending.Re != reply.ReplyToUID {
+					continue
+				}
+				issuePatch := patchesByIssue[issueID]
+				if issuePatch == nil {
+					issuePatch = map[string]jsontext.Value{}
+					patchesByIssue[issueID] = issuePatch
+				}
+				issuePatch[key] = jsontext.Value("null")
+			}
+			err = rows.Err()
+			closeErr := rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			if closeErr != nil {
+				return nil, closeErr
+			}
+		}
+		updates := make([]db.CommentMetadataUpdate, 0, len(patchesByIssue))
+		for issueID, issuePatch := range patchesByIssue {
+			updates = append(updates, db.CommentMetadataUpdate{IssueID: issueID, Patch: issuePatch})
+		}
+		return db.CoalesceCommentMetadataUpdates(updates), nil
 	}
 }
 

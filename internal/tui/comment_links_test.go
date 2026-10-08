@@ -253,3 +253,50 @@ func TestCommentEvidenceJumpAndReturnRestoresSelection(t *testing.T) {
 	require.Equal(t, 1, m.detail.commentLinkCursor)
 	require.Equal(t, focusActivity, m.detail.detailFocus)
 }
+
+func TestCommentNavigationWaitsForBothFetchesAndRevealsTarget(t *testing.T) {
+	for _, order := range []string{"comments first", "issue first"} {
+		t.Run(order, func(t *testing.T) {
+			const generation = 3
+			const targetIndex = 24
+			comments := make([]CommentEntry, targetIndex+1)
+			for i := range comments {
+				comments[i] = CommentEntry{UID: fmt.Sprintf("comment-%02d", i), Author: "worker", Body: "Earlier evidence"}
+			}
+			comments[targetIndex].UID = "destination-comment"
+			issue := &Issue{
+				UID: "destination-issue", ShortID: "bbbb", Title: "Destination",
+				Body: strings.Repeat("Long description line.\n", 20),
+			}
+			dm := detailModel{
+				selectedCommentUID: "destination-comment", loading: true, commentsLoading: true,
+				activeTab: tabComments, tabExplicit: true, gen: generation,
+				lastTermWidth: 48, lastTermHeight: 12,
+			}
+			issueResult := detailFetchedMsg{gen: generation, issue: issue}
+			commentsResult := commentsFetchedMsg{gen: generation, comments: comments}
+			if order == "comments first" {
+				dm = dm.applyFetched(commentsResult)
+				require.Equal(t, "destination-comment", dm.selectedCommentUID,
+					"keep the requested destination until issue data is available")
+				dm = dm.applyFetched(issueResult)
+			} else {
+				dm = dm.applyFetched(issueResult)
+				require.Equal(t, "destination-comment", dm.selectedCommentUID,
+					"keep the requested destination until comments are available")
+				dm = dm.applyFetched(commentsResult)
+			}
+
+			require.Empty(t, dm.selectedCommentUID)
+			require.Equal(t, targetIndex, dm.tabCursor)
+			require.Equal(t, tabComments, dm.activeTab)
+			require.Equal(t, focusActivity, dm.detailFocus)
+			_, anchors := dm.detailDocumentLines(48, dm.scrollChrome())
+			_, visible, ok := dm.viewportDims()
+			require.True(t, ok)
+			require.GreaterOrEqual(t, anchors.tabCursor, dm.scroll)
+			require.Less(t, anchors.tabCursor, dm.scroll+visible,
+				"the selected comment must be in the visible viewport")
+		})
+	}
+}

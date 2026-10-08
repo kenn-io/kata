@@ -21,12 +21,12 @@ func checkCommentNotifications(t *testing.T, store db.Storage) error {
 	_, e = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value("42")}})
 	require.ErrorContains(t, e, "scheduled_on", "validation errors identify the rejected key")
 	var events []db.Event
-	hook := func(_ context.Context, tx *sql.Tx, _ db.Issue, comment db.Comment) (map[string]jsontext.Value, error) {
+	hook := func(_ context.Context, tx *sql.Tx, issue db.Issue, comment db.Comment) ([]db.CommentMetadataUpdate, error) {
 		var count int
 		require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM comments WHERE uid=$1", comment.UID).Scan(&count))
 		require.Equal(t, 1, count)
 		value, e := json.Marshal(map[string]any{"from": "worker", "message": "reply", "re": comment.UID, "kind": "reply"})
-		return map[string]jsontext.Value{"notify.cmVhZGVy": value}, e
+		return []db.CommentMetadataUpdate{{IssueID: issue.ID, Patch: map[string]jsontext.Value{"notify.cmVhZGVy": value}}}, e
 	}
 	c, event, e := store.CreateComment(db.WithCommentMetadataHook(ctx, hook, &events), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Evidence"})
 	require.NoError(t, e)
@@ -54,7 +54,7 @@ func checkCommentNotifications(t *testing.T, store db.Storage) error {
 	require.JSONEq(t, string(current.Metadata), string(replay))
 	require.NotContains(t, event.Payload, "notify.")
 	events = nil
-	_, _, e = store.CreateComment(db.WithCommentMetadataHook(ctx, func(context.Context, *sql.Tx, db.Issue, db.Comment) (map[string]jsontext.Value, error) {
+	_, _, e = store.CreateComment(db.WithCommentMetadataHook(ctx, func(context.Context, *sql.Tx, db.Issue, db.Comment) ([]db.CommentMetadataUpdate, error) {
 		return nil, errors.New("policy refused")
 	}, &events), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Rejected"})
 	require.EqualError(t, e, "policy refused")

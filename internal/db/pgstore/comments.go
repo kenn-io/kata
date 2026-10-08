@@ -24,10 +24,10 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	}
 	var comment db.Comment
 	var event db.Event
-	var events []db.Event
+	var committedEvents []db.Event
 	db.RetainCommentEvents(ctx)
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		events = nil
+		comment, event, committedEvents = db.Comment{}, db.Event{}, nil
 		issue, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -101,26 +101,28 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return err
 		}
-		events = []db.Event{event}
+		committedEvents = []db.Event{event}
 		if hook := db.CommentMetadataPolicy(ctx); hook != nil {
-			patch, err := hook(ctx, tx, issue, comment)
+			updates, err := hook(ctx, tx, issue, comment)
 			if err != nil {
 				return err
 			}
-			if len(patch) > 0 {
-				out, err := s.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: effectiveActor, Patch: patch})
+			for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+				result, err := s.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{
+					IssueID: update.IssueID, Actor: effectiveActor, Patch: update.Patch,
+				})
 				if err != nil {
 					return err
 				}
-				if out.Changed {
-					events = append(events, out.Event)
+				if result.Changed {
+					committedEvents = append(committedEvents, result.Event)
 				}
 			}
 		}
 		return nil
 	})
 	if err == nil {
-		db.RetainCommentEvents(ctx, events...)
+		db.RetainCommentEvents(ctx, committedEvents...)
 	}
 	return comment, event, err
 }

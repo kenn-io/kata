@@ -85,6 +85,127 @@ func TestCommentReplyImportPreservesEditPrecision(t *testing.T) {
 	require.Equal(t, "01DDDDDDDDDDDDDDDDDDDDDDDD", comments[0].ReplyToUID)
 }
 
+func TestLegacyCommentReplyExportPreservesSourceEventAfterTargetSoftDelete(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	sourceIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Reply source", Author: "worker",
+	})
+	require.NoError(t, err)
+	targetIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Reply target", Author: "worker",
+	})
+	require.NoError(t, err)
+	targetComment, _, err := source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "reviewer", Body: "Finding",
+	})
+	require.NoError(t, err)
+	_, creation, err := source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: sourceIssue.ID, Author: "worker", Body: "Response",
+		ReplyToUID: targetComment.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	_, _, changed, err := source.SoftDeleteIssue(ctx, targetIssue.ID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	// Force the version-aware JSONL exporter used before schema 31.
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	var exported bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{}))
+	records := exportAndDecode(ctx, t, source, jsonl.ExportOptions{})
+	var commentEvent map[string]any
+	for _, envelope := range records {
+		if envelope["kind"] != "event" {
+			continue
+		}
+		data, ok := envelope["data"].(map[string]any)
+		if ok && data["uid"] == creation.UID {
+			commentEvent = data
+			break
+		}
+	}
+	require.NotNil(t, commentEvent, "legacy export must retain the live source's reply creation event")
+	require.Nil(t, commentEvent["related_issue_id"], "legacy export must detach a soft-deleted target's numeric FK")
+	require.Equal(t, targetIssue.UID, commentEvent["related_issue_uid"], "legacy export must keep portable target identity")
+	require.Equal(t, creation.ContentHash, commentEvent["content_hash"])
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), target))
+	targetProject, err := target.ProjectByUID(ctx, project.UID)
+	require.NoError(t, err)
+	imported, err := target.EventsByUIDs(ctx, targetProject.ID, []string{creation.UID})
+	require.NoError(t, err)
+	require.Len(t, imported, 1)
+	require.Nil(t, imported[0].RelatedIssueID)
+	require.NotNil(t, imported[0].RelatedIssueUID)
+	require.Equal(t, targetIssue.UID, *imported[0].RelatedIssueUID)
+	require.Equal(t, creation.ContentHash, imported[0].ContentHash)
+}
+
+func TestLegacyCommentReplyExportPreservesPurgedTargetIdentity(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	sourceIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Reply source", Author: "worker",
+	})
+	require.NoError(t, err)
+	targetIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Reply target", Author: "worker",
+	})
+	require.NoError(t, err)
+	targetComment, _, err := source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "reviewer", Body: "Finding",
+	})
+	require.NoError(t, err)
+	_, creation, err := source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: sourceIssue.ID, Author: "worker", Body: "Response",
+		ReplyToUID: targetComment.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	_, err = source.PurgeIssue(ctx, targetIssue.ID, "worker", nil)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+
+	var exported bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
+	records := exportAndDecode(ctx, t, source, jsonl.ExportOptions{IncludeDeleted: true})
+	var commentEvent map[string]any
+	for _, envelope := range records {
+		if envelope["kind"] != "event" {
+			continue
+		}
+		data, ok := envelope["data"].(map[string]any)
+		if ok && data["uid"] == creation.UID {
+			commentEvent = data
+			break
+		}
+	}
+	require.NotNil(t, commentEvent)
+	require.Nil(t, commentEvent["related_issue_id"])
+	require.Equal(t, targetIssue.UID, commentEvent["related_issue_uid"])
+	require.Equal(t, creation.ContentHash, commentEvent["content_hash"])
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), target))
+	targetProject, err := target.ProjectByUID(ctx, project.UID)
+	require.NoError(t, err)
+	imported, err := target.EventsByUIDs(ctx, targetProject.ID, []string{creation.UID})
+	require.NoError(t, err)
+	require.Len(t, imported, 1)
+	require.Equal(t, creation.ContentHash, imported[0].ContentHash)
+	require.NotNil(t, imported[0].RelatedIssueUID)
+	require.Equal(t, targetIssue.UID, *imported[0].RelatedIssueUID)
+}
+
 func TestCommentReplySchema30Cutover(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "legacy.db")

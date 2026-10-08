@@ -525,6 +525,7 @@ type MoveIssueProjectIn struct {
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
 	Issue       Issue
+	Event       *Event `json:"-"`
 	EventID     int64
 	NewShortID  string
 	NewRevision int64

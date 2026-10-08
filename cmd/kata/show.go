@@ -65,13 +65,21 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
-	if opts.Selectors.Inbound == "@self" {
-		opts.Selectors.Inbound, _ = resolveActor(ctx, flags.As, nil)
-	}
 	if opts.Selectors != (commentref.Options{}) {
 		if err := requireDaemonAPIVersion(ctx, client, baseURL, "0.26.0", "comment selectors"); err != nil {
 			return err
 		}
+	}
+	if opts.Selectors.Inbound == "@self" {
+		actor, _ := resolveActor(ctx, flags.As, nil)
+		var instance instanceStatusForCLI
+		if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
+			return err
+		}
+		if flags.As == "" && instance.Auth.Actor != "" {
+			actor = instance.Auth.Actor
+		}
+		opts.Selectors.Inbound = actor
 	}
 	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI, opts.Selectors)
 	if err != nil {

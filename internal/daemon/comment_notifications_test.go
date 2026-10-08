@@ -75,6 +75,103 @@ func TestCommentNotificationTransaction(t *testing.T) {
 	require.Contains(t, slots, notification.MetadataKey("worker/builder"))
 }
 
+func TestCommentNotificationCrossIssueReplyClearsRequest(t *testing.T) {
+	checkCrossIssueReplyAutoClear(t, 2, 0b01)
+}
+
+func FuzzCommentNotificationCrossIssueReplyAutoClear(f *testing.F) {
+	f.Add(uint8(2), uint8(0b01))
+	f.Add(uint8(4), uint8(0b1010))
+	f.Add(uint8(1), uint8(0))
+	f.Fuzz(func(t *testing.T, requestCount, matchingMask uint8) {
+		count := int(requestCount%5) + 1
+		mask := matchingMask & uint8((1<<count)-1)
+		checkCrossIssueReplyAutoClear(t, count, mask)
+	})
+}
+
+func checkCrossIssueReplyAutoClear(t *testing.T, requestCount int, matchingMask uint8) {
+	t.Helper()
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	notificationIssues := make([]db.Issue, requestCount)
+	for index := range notificationIssues {
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Notification context", Author: "lead"})
+		require.NoError(t, err)
+		notificationIssues[index] = issue
+	}
+	replyIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Comment thread", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: replyIssue.ID, Author: "reader", Body: "Finding"})
+	require.NoError(t, err)
+	otherTarget, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{IssueID: replyIssue.ID, Author: "reader", Body: "Another finding"})
+	require.NoError(t, err)
+	requestKey := notification.MetadataKey("worker")
+	matchingIssues := make([]db.Issue, 0, requestCount)
+	for index, issue := range notificationIssues {
+		re := otherTarget.UID
+		if matchingMask&(1<<index) != 0 {
+			re = target.UID
+			matchingIssues = append(matchingIssues, issue)
+		}
+		request, err := json.Marshal(notification.Value{From: "lead", Message: "Please respond", Re: re})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+			IssueID: issue.ID,
+			Actor:   "lead",
+			Patch:   map[string]jsontext.Value{requestKey: request},
+		})
+		require.NoError(t, err)
+	}
+
+	var events []db.Event
+	reply, _, err := store.CreateComment(
+		db.WithCommentMetadataHook(t.Context(), commentNotificationHook(), &events),
+		db.CreateCommentParams{IssueID: replyIssue.ID, Author: "worker", Body: "Answer", ReplyToUID: target.UID, ReplyKind: "reply"},
+	)
+	require.NoError(t, err)
+
+	for index, issue := range notificationIssues {
+		current, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		var slots map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
+		if matchingMask&(1<<index) != 0 {
+			require.NotContains(t, slots, requestKey, "a reply must clear the matching notify slot even when its metadata is on another issue")
+		} else {
+			require.Contains(t, slots, requestKey, "a reply must preserve the recipient slot when it references a different comment")
+		}
+	}
+
+	currentReplyIssue, err := store.IssueByID(t.Context(), replyIssue.ID)
+	require.NoError(t, err)
+	var replySlots map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(currentReplyIssue.Metadata), &replySlots))
+	var linked notification.Value
+	require.NoError(t, json.Unmarshal(replySlots[notification.MetadataKey("reader")], &linked))
+	require.Equal(t, "worker", linked.From)
+	require.Equal(t, reply.UID, linked.Re)
+	require.Equal(t, "reply", linked.Kind)
+
+	require.Len(t, events, 1+len(matchingIssues)+1, "retain the comment event and each coalesced issue metadata event")
+	require.Equal(t, "issue.commented", events[0].Type)
+	require.Equal(t, replyIssue.ID, *events[0].IssueID)
+	require.Equal(t, "worker", events[0].Actor)
+	for index, issue := range matchingIssues {
+		event := events[index+1]
+		require.Equal(t, "issue.metadata_updated", event.Type)
+		require.Equal(t, issue.ID, *event.IssueID)
+		require.Equal(t, "worker", event.Actor)
+	}
+	last := events[len(events)-1]
+	require.Equal(t, "issue.metadata_updated", last.Type)
+	require.Equal(t, replyIssue.ID, *last.IssueID)
+	require.Equal(t, "worker", last.Actor)
+}
+
 func FuzzNotificationProjectionWhitespace(f *testing.F) {
 	f.Add(" ", "secret")
 	f.Fuzz(func(t *testing.T, space, message string) {
@@ -243,8 +340,14 @@ func checkUniqueNotificationHandle(t *testing.T, depth int) {
 	tx, err := store.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	patch, err := commentNotificationHook()(t.Context(), tx, issue, reply)
+	updates, err := commentNotificationHook()(t.Context(), tx, issue, reply)
 	require.NoError(t, err)
+	var patch map[string]jsontext.Value
+	for _, update := range updates {
+		if update.IssueID == issue.ID {
+			patch = update.Patch
+		}
+	}
 	var value notification.Value
 	require.NoError(t, json.Unmarshal(patch[notification.MetadataKey("reader")], &value))
 	require.Equal(t, "latest: reply c:"+strings.ToLower(replyUID[len(replyUID)-depth-1:])+" by worker", value.Message)

@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"bytes"
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -137,4 +139,72 @@ func TestCommentGraphResponseRejectsReparentedBacklink(t *testing.T) {
 			require.NotContains(t, response.Body.String(), reply.UID)
 		})
 	}
+}
+
+func TestDuplicateReplyResponseRejectsReparentedExistingReply(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	finding, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "finder", Body: "Finding",
+	})
+	require.NoError(t, err)
+	existingIssue := createScopedAuthIssue(t, store, project.ID, "Existing response", &root)
+	requestIssue := createScopedAuthIssue(t, store, project.ID, "Retry response", &root)
+	existingReply, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: existingIssue.ID, Author: "worker-a", Body: "Existing evidence",
+		ReplyToUID: finding.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), existingIssue.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 2,
+	}
+	server := NewServer(ServerConfig{DB: storeWithReparent, StartedAt: time.Now()})
+	handler := withScopedPrincipalRevalidation(storeWithReparent, server.baseHandler)
+	body, err := json.Marshal(map[string]any{
+		"actor": "worker-a", "body": "Retry evidence",
+		"reply_to": finding.UID, "kind": "reply",
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues/%s/comments", project.ID, requestIssue.ShortID),
+		bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	require.Equal(t, 404, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), existingReply.UID,
+		"a duplicate reply outside the current subtree must not expose its identity")
+	require.Equal(t, 2, storeWithReparent.graphReads,
+		"the target-resolution and duplicate-response graph reads must both occur")
+}
+
+type reparentAfterCommentGraphReadStore struct {
+	db.Storage
+	parentLinkID  int64
+	reparentAfter int
+	graphReads    int
+}
+
+func (s *reparentAfterCommentGraphReadStore) ReadCommentGraph(
+	ctx context.Context, query db.CommentGraphQuery,
+) (db.CommentGraphData, error) {
+	data, err := s.Storage.ReadCommentGraph(ctx, query)
+	if err != nil {
+		return db.CommentGraphData{}, err
+	}
+	s.graphReads++
+	if s.graphReads == s.reparentAfter {
+		if err := s.DeleteLinkByID(ctx, s.parentLinkID); err != nil {
+			return db.CommentGraphData{}, err
+		}
+	}
+	return data, nil
 }

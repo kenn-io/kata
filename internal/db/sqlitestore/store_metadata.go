@@ -50,35 +50,20 @@ func (d *Store) PatchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 }
 
 func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
-	for key, raw := range in.Patch {
-		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-			return db.PatchIssueMetadataOut{}, fmt.Errorf("validate %q: %w", key, err)
-		}
-	}
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return db.PatchIssueMetadataOut{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	out, err := d.patchIssueMetadataTx(ctx, tx, in)
-	if err != nil {
-		return out, err
-	}
-	if err = tx.Commit(); err != nil {
-		return db.PatchIssueMetadataOut{}, err
-	}
-	return out, nil
-}
-
-func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 	var out db.PatchIssueMetadataOut
 
-	// Validate static patches used by the comment transaction hook.
+	// Validate all patch keys before opening a tx. A bad key/value never starts a tx.
 	for key, raw := range in.Patch {
 		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 			return out, fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
+
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	var (
 		curMetadata string
@@ -86,7 +71,7 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 		projectID   int64
 		projectName string
 	)
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT i.metadata, i.revision, i.project_id, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.deleted_at IS NULL`,
@@ -106,6 +91,12 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 	if err != nil {
 		return out, err
 	}
+
+	// nil IfMatchRev = unconditional last-write-wins; the gate only applies
+	// when the caller opted into optimistic concurrency.
+	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
+		return out, &db.RevisionConflictError{CurrentRevision: curRevision}
+	}
 	in.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, in.Patch)
 	if err != nil {
 		return out, err
@@ -114,12 +105,6 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 			return out, fmt.Errorf("validate %q: %w", key, err)
 		}
-	}
-
-	// nil IfMatchRev = unconditional last-write-wins; the gate only applies
-	// when the caller opted into optimistic concurrency.
-	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
-		return out, &db.RevisionConflictError{CurrentRevision: curRevision}
 	}
 	if err := db.CheckMetadataPatchGuard(jsontext.Value(curMetadata), in.Patch, in.Guard); err != nil {
 		return out, err
@@ -141,6 +126,9 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 		// No-op: commit (no writes) and return Changed=false. Revision unchanged.
 		issue, err := issueByIDTx(ctx, tx, in.IssueID)
 		if err != nil {
+			return out, err
+		}
+		if err := tx.Commit(); err != nil {
 			return out, err
 		}
 		out.Issue = issue
@@ -183,10 +171,90 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 	if err != nil {
 		return out, err
 	}
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
 	out.Issue = issue
 	out.Event = ev
 	out.Changed = true
 	out.NewRevision = newRev
+	return out, nil
+}
+
+// patchIssueMetadataTx applies one comment-triggered patch to an existing
+// transaction. The caller retains the returned event only after its transaction
+// commits.
+func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	var out db.PatchIssueMetadataOut
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return out, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
+
+	var (
+		currentMetadata string
+		currentRevision int64
+		projectID       int64
+		projectName     string
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT i.metadata, i.revision, i.project_id, p.name
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ? AND i.deleted_at IS NULL`, in.IssueID,
+	).Scan(&currentMetadata, &currentRevision, &projectID, &projectName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, fmt.Errorf("issue %d not found", in.IssueID)
+	}
+	if err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {
+		return out, err
+	}
+	if in.IfMatchRev != nil && *in.IfMatchRev != currentRevision {
+		return out, &db.RevisionConflictError{CurrentRevision: currentRevision}
+	}
+	if err := db.CheckMetadataPatchGuard(jsontext.Value(currentMetadata), in.Patch, in.Guard); err != nil {
+		return out, err
+	}
+	updated, err := db.ApplyMetadataPatch(jsontext.Value(currentMetadata), in.Patch)
+	if err != nil {
+		return out, fmt.Errorf("apply patch: %w", err)
+	}
+	diff, err := metadata.Diff(jsontext.Value(currentMetadata), updated)
+	if err != nil {
+		return out, fmt.Errorf("compute diff: %w", err)
+	}
+	if len(diff) == 0 {
+		out.Issue, err = issueByIDTx(ctx, tx, in.IssueID)
+		out.NewRevision = currentRevision
+		return out, err
+	}
+
+	newRevision := currentRevision + 1
+	updatedAt := nowTimestamp()
+	if _, err := tx.ExecContext(ctx, `UPDATE issues
+SET metadata = ?, revision = ?, updated_at = ? WHERE id = ?`,
+		string(updated), newRevision, updatedAt, in.IssueID); err != nil {
+		return out, fmt.Errorf("update issue metadata: %w", err)
+	}
+	payload, err := marshalIssueMetadataUpdatePayload(diff, newRevision, updatedAt)
+	if err != nil {
+		return out, fmt.Errorf("marshal event payload: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: projectID, ProjectName: projectName, IssueID: &in.IssueID,
+		Type: "issue.metadata_updated", Actor: in.Actor, Payload: string(payload),
+	})
+	if err != nil {
+		return out, err
+	}
+	out.Issue, err = issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
+		return out, err
+	}
+	out.Event, out.Changed, out.NewRevision = event, true, newRevision
 	return out, nil
 }
 

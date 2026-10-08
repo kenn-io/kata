@@ -264,6 +264,15 @@ it('keeps user focus during a refresh after linked-comment navigation', async ()
 it('shows conflicting direct relation counts and chronological evidence without hiding originals', async () => {
   const links = [
     {
+      uid: 'confirm-early',
+      issue_uid: 'other',
+      kind: 'confirm',
+      handle: 'bbbb:111111',
+      author: 'worker-a',
+      body: 'First reproduction',
+      created_at: '2026-08-08T20:02:00Z',
+    },
+    {
       uid: 'confirm-late',
       issue_uid: 'other',
       kind: 'confirm',
@@ -273,15 +282,6 @@ it('shows conflicting direct relation counts and chronological evidence without 
       body: 'Second reproduction',
       created_at: '2026-08-08T20:03:00Z',
       target_edited: true,
-    },
-    {
-      uid: 'confirm-early',
-      issue_uid: 'other',
-      kind: 'confirm',
-      handle: 'bbbb:111111',
-      author: 'worker-a',
-      body: 'First reproduction',
-      created_at: '2026-08-08T20:02:00Z',
     },
     {
       uid: 'refute',
@@ -347,6 +347,43 @@ it('shows conflicting direct relation counts and chronological evidence without 
     issueUID: '01TASK',
     commentUID: 'original',
   })
+})
+
+it('orders evidence chronologically when timestamps have different fractional precision', async () => {
+  const links = [
+    {
+      uid: 'earlier',
+      issue_uid: 'other',
+      kind: 'confirm',
+      handle: 'bbbb:earlier',
+      body: 'Earlier evidence',
+      created_at: '2026-08-08T20:03:00.1Z',
+    },
+    {
+      uid: 'later',
+      issue_uid: 'other',
+      kind: 'confirm',
+      handle: 'bbbb:later1',
+      body: 'Later evidence',
+      created_at: '2026-08-08T20:03:00.12Z',
+    },
+  ]
+  render(IssueDetail, {
+    props: {
+      detail: {
+        ...detail,
+        comments: [{ ...detail.comments[0]!, uid: 'original', backlinks: links }],
+      },
+    },
+  })
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Show 2 confirmation replies' }))
+  const evidence = screen.getByRole('region', { name: 'Confirmation replies' })
+  expect(
+    within(evidence)
+      .getAllByRole('listitem')
+      .map((element) => element.textContent),
+  ).toEqual([expect.stringContaining('Earlier evidence'), expect.stringContaining('Later evidence')])
 })
 
 it('refreshes incoming counts from accepted data and labels partial evidence honestly', async () => {

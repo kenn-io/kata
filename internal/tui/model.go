@@ -2553,11 +2553,15 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // touches the body header. Refetching all four is cheap (the daemon
 // has these in cache) and keeps every tab fresh without a kind switch.
 //
-// The match requires both projectID and the watched issue's UID to
+// The match normally requires projectID and the watched issue's UID to
 // align with the event's subject — UID is canonical and the
-// authoritative key across short_id cutovers. Each fetch is tagged
-// with the current detail-open gen so applyFetched drops the result
-// if the user navigates away before the response lands.
+// authoritative key across short_id cutovers. Comment-edit events also
+// refresh when commentUID matches a rendered comment, reply endpoint, or
+// backlink in the open pane. Moves and soft-deletes match displayed endpoint
+// UIDs; moves into the displayed project and restores refresh even after the
+// prior projection dropped that endpoint. Project lifecycle events match the
+// endpoint's displayed project ID when available. Each fetch is tagged with
+// the current detail-open gen so applyFetched drops it if the user navigates.
 func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.api == nil {
 		return nil
@@ -2572,13 +2576,15 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.detail.issue == nil {
 		return nil
 	}
-	if msg.projectID != m.detail.scopePID {
+	commentMatch := msg.matchesCommentInDetail(m.detail.comments)
+	relationLifecycleMatch := msg.matchesRelationLifecycleInDetail(m.detail.comments, m.detail.scopePID)
+	if msg.projectID != m.detail.scopePID && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
 	pid := m.detail.scopePID
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) {
+	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
 	gen := m.detail.gen
@@ -2607,6 +2613,10 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 	if msg.issueUID != "" && uid != "" && msg.issueUID == uid {
 		return true
 	}
+	if msg.eventType == "issue.commented" &&
+		msg.relatedIssueUID != "" && uid != "" && msg.relatedIssueUID == uid {
+		return true
+	}
 	if msg.issueShortID != "" && msg.issueShortID == ref && msg.issueUID == "" {
 		return true
 	}
@@ -2617,6 +2627,75 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 	}
 	if msg.linksChanged != nil && msg.linksChangedMatches(ref, uid) {
 		return true
+	}
+	return false
+}
+
+func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
+	if msg.eventType != "issue.comment_edited" || msg.commentUID == "" {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.UID == msg.commentUID {
+			return true
+		}
+		if comment.Reply != nil && comment.Reply.UID == msg.commentUID {
+			return true
+		}
+		for _, backlink := range comment.Backlinks {
+			if backlink.UID == msg.commentUID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {
+	switch msg.eventType {
+	case "issue.restored", "project.restored":
+		// The restore may make an endpoint visible again after a prior detail
+		// refresh removed its backlink or stripped IssueUID from a removed
+		// reply projection, so no current endpoint can identify what was restored.
+		return true
+	case "project.removed", "project.renamed":
+		if msg.projectID <= 0 {
+			return false
+		}
+		for _, comment := range comments {
+			if comment.Reply != nil && comment.Reply.ProjectID == msg.projectID {
+				return true
+			}
+			for _, backlink := range comment.Backlinks {
+				if backlink.ProjectID == msg.projectID {
+					return true
+				}
+			}
+		}
+		return false
+	case "issue.moved":
+		// The move event is recorded in its destination project. A backlink
+		// source moving into this detail's project can reappear even when the
+		// previous projection no longer carried the source UID.
+		if msg.projectID > 0 && msg.projectID == detailProjectID {
+			return true
+		}
+	case "issue.soft_deleted":
+	default:
+		return false
+	}
+	if msg.issueUID == "" {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.Reply != nil && comment.Reply.IssueUID == msg.issueUID {
+			return true
+		}
+		for _, backlink := range comment.Backlinks {
+			if backlink.IssueUID == msg.issueUID {
+				return true
+			}
+		}
 	}
 	return false
 }

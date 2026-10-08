@@ -1228,7 +1228,7 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 		return err
 	})
 	if err != nil {
-		return db.Comment{}, evt, err
+		return db.Comment{}, db.Event{}, err
 	}
 	return comment, evt, nil
 }
@@ -1326,32 +1326,37 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, err
 	}
-
-	events := []db.Event{evt}
+	committedEvents := []db.Event{evt}
 	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
-		comment, err := commentByIDTx(ctx, tx, commentID)
+		createdComment := db.Comment{
+			ID: commentID, UID: commentUID, IssueID: p.IssueID, Author: p.Author,
+			Body: p.Body, CreatedAt: commentAt, Teammate: p.Teammate,
+			ReplyToUID: p.ReplyToUID, ReplyKind: p.ReplyKind,
+		}
+		updates, err := hook(ctx, tx, issue, createdComment)
 		if err != nil {
 			return 0, db.Event{}, err
 		}
-		patch, err := hook(ctx, tx, issue, comment)
-		if err != nil {
-			return 0, db.Event{}, err
-		}
-		if len(patch) > 0 {
-			out, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: p.Author, Patch: patch})
+		for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+			result, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{
+				IssueID: update.IssueID, Actor: p.Author, Patch: update.Patch,
+			})
 			if err != nil {
 				return 0, db.Event{}, err
 			}
-			if out.Changed {
-				events = append(events, out.Event)
+			if result.Changed {
+				committedEvents = append(committedEvents, result.Event)
 			}
 		}
 	}
 
+	// Comment-create metadata seam: issue, p, commentUID and evt are all
+	// available here in the same transaction. Additional metadata events must
+	// be returned as a committed batch before callers publish any of them.
 	if err := tx.Commit(); err != nil {
 		return 0, db.Event{}, err
 	}
-	db.RetainCommentEvents(ctx, events...)
+	db.RetainCommentEvents(ctx, committedEvents...)
 	return commentID, evt, nil
 }
 

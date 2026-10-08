@@ -35,15 +35,9 @@
     refute: 'danger',
     supersede: 'workflow',
   } as const
-  const evidence = $derived(
-    links
-      .filter((link) => link.kind === selectedKind)
-      .toSorted(
-        (a, b) =>
-          (a.created_at ?? '').localeCompare(b.created_at ?? '') ||
-          (a.uid ?? '').localeCompare(b.uid ?? ''),
-      ),
-  )
+  // The API sorts backlinks by instant and UID; keep that order because
+  // timestamp strings with different fractional precision do not sort correctly.
+  const evidence = $derived(links.filter((link) => link.kind === selectedKind))
   function count(kind: KataReplyKind): number {
     return links.filter((link) => link.kind === kind).length
   }

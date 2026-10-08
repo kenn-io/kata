@@ -125,9 +125,10 @@ func countProjectPurge(ctx context.Context, c connExec, projectID int64) (projec
 }
 
 // deleteProjectScoped removes every project-scoped row in FK-safe order. Events
-// physically in the project are deleted; events in OTHER projects that reference
-// purged issues are DETACHED (both id and uid columns nulled) so per-project
-// resume stays valid. federation_bindings is absent (refused upfront).
+// physically in the project are deleted; external events detach the numeric
+// issue FK. Comment events retain their portable related issue UID so surviving
+// replies can resolve the issue tombstone. federation_bindings is absent
+// (refused upfront).
 // NOTE: purge_log (issue tombstones) is intentionally NOT deleted — it has no FK
 // to projects so it survives, preserving prior-purge audit history (spec Finding 3).
 // recurrences / issue_sync_bindings / issue_sync_status / import_mappings are not
@@ -140,7 +141,8 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 	}{
 		{`DELETE FROM events WHERE project_id = ?`, []any{projectID}},
 		{`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN ` + sub, []any{projectID}},
-		{`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN ` + sub, []any{projectID}},
+		{`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN ` + sub + ` AND type = 'issue.commented'`, []any{projectID}},
+		{`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN ` + sub + ` AND type <> 'issue.commented'`, []any{projectID}},
 		{`DELETE FROM comments WHERE issue_id IN ` + sub, []any{projectID}},
 		{`DELETE FROM links WHERE from_issue_id IN ` + sub + ` OR to_issue_id IN ` + sub, []any{projectID, projectID}},
 		{`DELETE FROM issue_labels WHERE issue_id IN ` + sub, []any{projectID}},
@@ -161,10 +163,13 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 	return nil
 }
 
-func purgeProjectCascade(ctx context.Context, c connExec, project db.Project,
+func purgeProjectCascade(ctx context.Context, c projectPurgeQueryer, project db.Project,
 	actor string, reason *string, originInstanceUID string) (int64, error) {
 	counts, err := countProjectPurge(ctx, c, project.ID)
 	if err != nil {
+		return 0, err
+	}
+	if err := insertProjectIssuePurgeLogs(ctx, c, project, actor, reason, originInstanceUID); err != nil {
 		return 0, err
 	}
 	if err := deleteProjectScoped(ctx, c, project.ID); err != nil {
@@ -175,6 +180,72 @@ func purgeProjectCascade(ctx context.Context, c connExec, project db.Project,
 		return 0, err
 	}
 	return insertProjectPurgeLog(ctx, c, project, counts, reservedCursor, actor, reason, originInstanceUID)
+}
+
+type projectPurgeQueryer interface {
+	connExec
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+type projectIssuePurgeSnapshot struct {
+	id                          int64
+	uid, shortID, title, author string
+	comments, links, labels     int64
+	events                      int64
+	minEventID, maxEventID      sql.NullInt64
+}
+
+// insertProjectIssuePurgeLogs retains per-issue identity for references that
+// survive the aggregate project purge. The existing purge_log record kind is
+// already portable through JSONL, so project purge needs no new schema.
+func insertProjectIssuePurgeLogs(ctx context.Context, c projectPurgeQueryer, project db.Project,
+	actor string, reason *string, originInstanceUID string,
+) error {
+	rows, err := c.QueryContext(ctx, `SELECT i.id, i.uid, i.short_id, i.title, i.author,
+       (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id),
+       (SELECT COUNT(*) FROM links l WHERE l.from_issue_id = i.id OR l.to_issue_id = i.id),
+       (SELECT COUNT(*) FROM issue_labels l WHERE l.issue_id = i.id),
+       (SELECT COUNT(*) FROM events e WHERE e.project_id = i.project_id AND (e.issue_id = i.id OR e.related_issue_id = i.id)),
+       (SELECT MIN(e.id) FROM events e WHERE e.project_id = i.project_id AND (e.issue_id = i.id OR e.related_issue_id = i.id)),
+       (SELECT MAX(e.id) FROM events e WHERE e.project_id = i.project_id AND (e.issue_id = i.id OR e.related_issue_id = i.id))
+  FROM issues i WHERE i.project_id = ? ORDER BY i.id`, project.ID)
+	if err != nil {
+		return fmt.Errorf("read project issue purge snapshots: %w", err)
+	}
+	snapshots := make([]projectIssuePurgeSnapshot, 0)
+	for rows.Next() {
+		var snapshot projectIssuePurgeSnapshot
+		if err := rows.Scan(&snapshot.id, &snapshot.uid, &snapshot.shortID, &snapshot.title, &snapshot.author,
+			&snapshot.comments, &snapshot.links, &snapshot.labels, &snapshot.events,
+			&snapshot.minEventID, &snapshot.maxEventID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan project issue purge snapshot: %w", err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return fmt.Errorf("iterate project issue purge snapshots: %w", err)
+	}
+	for _, snapshot := range snapshots {
+		purgeUID, err := katauid.New()
+		if err != nil {
+			return fmt.Errorf("generate project issue purge uid: %w", err)
+		}
+		if _, err := c.ExecContext(ctx, `INSERT INTO purge_log(
+     uid, origin_instance_uid, project_id, purged_issue_id, issue_uid, project_uid,
+     project_name, short_id, issue_title, issue_author, comment_count, link_count, label_count,
+     event_count, events_deleted_min_id, events_deleted_max_id, actor, reason)
+   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			purgeUID, originInstanceUID, project.ID, snapshot.id, snapshot.uid, project.UID,
+			project.Name, snapshot.shortID, snapshot.title, snapshot.author, snapshot.comments,
+			snapshot.links, snapshot.labels, snapshot.events, snapshot.minEventID, snapshot.maxEventID,
+			actor, reason); err != nil {
+			return fmt.Errorf("insert project issue purge log: %w", err)
+		}
+	}
+	return nil
 }
 
 func insertProjectPurgeLog(ctx context.Context, c connExec, project db.Project,

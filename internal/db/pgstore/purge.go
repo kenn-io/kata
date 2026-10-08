@@ -103,17 +103,17 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			}
 		}
 
-		var resetCursor sql.NullInt64
-		if minEventID.Valid {
-			if err := lockEventSequenceTx(ctx, tx); err != nil {
-				return err
-			}
-			value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
-			if err != nil {
-				return err
-			}
-			resetCursor = sql.NullInt64{Int64: value, Valid: true}
+		// Every successful issue purge changes snapshot-visible state, even when
+		// imported comments have no corresponding event or surviving reply.
+		// Always reserve a reset cursor so conditional snapshots rebuild.
+		if err := lockEventSequenceTx(ctx, tx); err != nil {
+			return err
 		}
+		value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
+		if err != nil {
+			return err
+		}
+		resetCursor := sql.NullInt64{Int64: value, Valid: true}
 		purgeUID, err := katauid.New()
 		if err != nil {
 			return fmt.Errorf("generate purge uid: %w", err)

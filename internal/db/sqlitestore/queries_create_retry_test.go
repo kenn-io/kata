@@ -117,12 +117,13 @@ func TestCreateCommentRetainsCommittedEventsOnFinalReadFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { readCreatedComment = original })
 	var events []db.Event
-	_, evt, e := store.CreateComment(db.WithCommentMetadataHook(ctx, func(context.Context, *sql.Tx, db.Issue, db.Comment) (map[string]jsontext.Value, error) {
-		return map[string]jsontext.Value{"notify.cmVhZGVy": jsontext.Value(`{"from":"worker","message":"inspect"}`)}, nil
+	_, _, e = store.CreateComment(db.WithCommentMetadataHook(ctx, func(_ context.Context, _ *sql.Tx, issue db.Issue, _ db.Comment) ([]db.CommentMetadataUpdate, error) {
+		return []db.CommentMetadataUpdate{{IssueID: issue.ID, Patch: map[string]jsontext.Value{"notify.cmVhZGVy": jsontext.Value(`{"from":"worker","message":"inspect"}`)}}}, nil
 	}, &events), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Finding"})
 	require.EqualError(t, e, "response read failed")
-	require.Equal(t, "issue.commented", evt.Type)
 	require.Len(t, events, 2)
+	require.Equal(t, "issue.commented", events[0].Type)
+	require.Equal(t, "issue.metadata_updated", events[1].Type)
 	var count int
 	require.NoError(t, store.QueryRowContext(ctx, "SELECT count(*) FROM comments WHERE issue_id=?", issue.ID).Scan(&count))
 	require.Equal(t, 1, count)

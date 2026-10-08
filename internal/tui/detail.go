@@ -378,7 +378,26 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 	default:
 		return dm, false
 	}
-	return dm, true
+	return dm.applyPendingCommentNavigation(), true
+}
+
+func (dm detailModel) applyPendingCommentNavigation() detailModel {
+	if dm.selectedCommentUID == "" || dm.issue == nil || dm.loading || dm.commentsLoading || dm.commentsErr != nil {
+		return dm
+	}
+	for i, comment := range dm.comments {
+		if comment.UID != dm.selectedCommentUID {
+			continue
+		}
+		dm.tabCursor = i
+		dm.activeTab = tabComments
+		dm.tabExplicit = true
+		dm.detailFocus = focusActivity
+		dm = dm.revealCursor()
+		break
+	}
+	dm.selectedCommentUID = ""
+	return dm
 }
 
 func detailFetchResultIsOlder(requestSeq, appliedSeq uint64) bool {

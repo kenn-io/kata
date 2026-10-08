@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
@@ -26,7 +27,9 @@ func (a commentProjectHostAccess) Authorize(
 	if slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
 	}
-	return daemon.HostAccessDecision{}, nil
+	return daemon.HostAccessDecision{
+		TransactionFence: func(context.Context, db.Transaction) error { return nil },
+	}, nil
 }
 
 func TestCommentEndpoint_AppendsAndEmitsEvent(t *testing.T) {
@@ -142,6 +145,165 @@ func TestCommentEndpoint_IdempotencyReauthorizesMovedIssue(t *testing.T) {
 
 	retry := postWithHeader(t, hostServer, path, headers, body)
 	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "not_found")
+}
+
+func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T) {
+	for _, operation := range []string{"edit", "idempotent replay"} {
+		t.Run(operation, func(t *testing.T) {
+			h, initialServer, projectID, sourceIssueID := bootstrapProjectWithIssue(t)
+			sourceIssue, err := h.DB().IssueByID(t.Context(), sourceIssueID)
+			require.NoError(t, err)
+			targetIssue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: projectID, Title: "Target issue", Author: "finder",
+			})
+			require.NoError(t, err)
+			targetComment, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+				IssueID: targetIssue.ID, Author: "finder", Body: "Finding",
+			})
+			require.NoError(t, err)
+
+			writeBody := map[string]any{
+				"actor": "agent", "body": "Response", "reply_to": targetComment.UID, "kind": "reply",
+			}
+			idempotencyKey := "host-reply-redaction"
+			replyUID := ""
+			if operation == "edit" {
+				reply, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+					IssueID: sourceIssue.ID, Author: "agent", Body: "Response",
+					ReplyToUID: targetComment.UID, ReplyKind: "reply",
+				})
+				require.NoError(t, err)
+				replyUID = reply.UID
+			} else {
+				created := postWithHeader(t, initialServer, issueURL(projectID, sourceIssueID, "comments"),
+					map[string]string{"Idempotency-Key": idempotencyKey}, writeBody)
+				requireOK(t, created)
+				var result struct {
+					Comment struct {
+						UID string `json:"uid"`
+					} `json:"comment"`
+				}
+				require.NoError(t, json.Unmarshal(created.body, &result))
+				replyUID = result.Comment.UID
+				require.NotEmpty(t, replyUID)
+			}
+
+			deniedProject, err := h.DB().CreateProject(t.Context(), "denied-project")
+			require.NoError(t, err)
+			_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: targetIssue.ID, FromProjectID: projectID, ToProjectID: deniedProject.ID,
+				IfMatchRev: targetIssue.Revision, Actor: "coordinator",
+			})
+			require.NoError(t, err)
+
+			server := daemon.NewServer(daemon.ServerConfig{
+				DB: h.DB(), StartedAt: time.Now(),
+				HostAccess: commentProjectHostAccess{deniedProjectID: deniedProject.ID},
+			})
+			hostServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+					Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+				})
+				server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+			}))
+			t.Cleanup(hostServer.Close)
+
+			show, showBody := doReq(t, hostServer, http.MethodGet,
+				issueURL(projectID, sourceIssueID, ""), nil, nil)
+			require.Equalf(t, http.StatusOK, show.StatusCode, "show response: %s", showBody)
+			var shown struct {
+				Comments []commentref.Record `json:"comments"`
+			}
+			require.NoError(t, json.Unmarshal(showBody, &shown))
+			var projected *commentref.Record
+			for i := range shown.Comments {
+				if shown.Comments[i].UID == replyUID {
+					projected = &shown.Comments[i]
+					break
+				}
+			}
+			require.NotNil(t, projected)
+			assert.Empty(t, projected.ReplyToUID)
+			assert.Empty(t, projected.ReplyKind)
+
+			var response *http.Response
+			var responseBody []byte
+			if operation == "edit" {
+				response, responseBody = doReq(t, hostServer, http.MethodPatch,
+					issueURL(projectID, sourceIssueID, "comments/"+replyUID),
+					map[string]any{"actor": "agent", "body": "Edited response"}, nil)
+			} else {
+				response, responseBody = doReq(t, hostServer, http.MethodPost,
+					issueURL(projectID, sourceIssueID, "comments"), writeBody,
+					map[string]string{"Idempotency-Key": idempotencyKey})
+			}
+			require.Equalf(t, http.StatusOK, response.StatusCode, "mutation response: %s", responseBody)
+			require.NotContains(t, string(responseBody), targetComment.UID)
+			require.NotContains(t, string(responseBody), `"reply_to_uid"`)
+			require.NotContains(t, string(responseBody), `"reply_kind"`)
+		})
+	}
+}
+
+func TestDeletedSourceShowRedactsHostDeniedMovedReplyTarget(t *testing.T) {
+	h, _, projectID, sourceIssueID := bootstrapProjectWithIssue(t)
+	sourceIssue, err := h.DB().IssueByID(t.Context(), sourceIssueID)
+	require.NoError(t, err)
+	targetIssue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "Target issue", Author: "finder",
+	})
+	require.NoError(t, err)
+	targetComment, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "finder", Body: "Finding",
+	})
+	require.NoError(t, err)
+	reply, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: sourceIssue.ID, Author: "agent", Body: "Verified finding",
+		ReplyToUID: targetComment.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+
+	deniedProject, err := h.DB().CreateProject(t.Context(), "denied-project")
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: targetIssue.ID, FromProjectID: projectID, ToProjectID: deniedProject.ID,
+		IfMatchRev: targetIssue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator")
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: h.DB(), StartedAt: time.Now(),
+		HostAccess: commentProjectHostAccess{deniedProjectID: deniedProject.ID},
+	})
+	hostServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+		})
+		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+	}))
+	t.Cleanup(hostServer.Close)
+
+	response, body := doReq(t, hostServer, http.MethodGet,
+		issueURL(projectID, sourceIssueID, "")+"?include_deleted=true", nil, nil)
+	require.Equalf(t, http.StatusOK, response.StatusCode, "show response: %s", body)
+	var shown struct {
+		Comments []commentref.Record `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal(body, &shown))
+	var projected *commentref.Record
+	for i := range shown.Comments {
+		if shown.Comments[i].UID == reply.UID {
+			projected = &shown.Comments[i]
+			break
+		}
+	}
+	require.NotNil(t, projected)
+	assert.Empty(t, projected.ReplyToUID)
+	assert.Empty(t, projected.ReplyKind)
+	assert.Nil(t, projected.Reply)
+	assert.NotContains(t, string(body), targetComment.UID)
 }
 
 func TestCommentEndpoint_IdempotencyRejectsDifferentBody(t *testing.T) {

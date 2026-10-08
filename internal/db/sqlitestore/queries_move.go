@@ -191,7 +191,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err := tx.Commit(); err != nil {
 		return out, err
 	}
+	committedEvent := ev
 	out.Issue = issue
+	out.Event = &committedEvent
 	out.EventID = ev.ID
 	out.NewShortID = newShortID
 	out.NewRevision = newRev
