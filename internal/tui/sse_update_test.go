@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/db"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -771,6 +772,120 @@ func TestIssueLifecycleIgnoresUnrepresentedCrossProjectEndpoint(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("unrepresented cross-project lifecycle event must not refresh detail, got %T", cmd)
 	}
+}
+
+func TestIssueRestoreRefreshesAfterRelationsDisappearFromProjection(t *testing.T) {
+	tests := []struct {
+		name             string
+		records          []commentref.Record
+		states           map[string]commentref.TargetState
+		wantRemovedReply bool
+	}{
+		{
+			name:             "removed reply target",
+			wantRemovedReply: true,
+			records: []commentref.Record{{
+				Comment:  db.Comment{UID: "reply-comment", ReplyToUID: "removed-target-comment", ReplyKind: "confirm"},
+				IssueUID: "open-issue", ProjectID: 7,
+			}},
+			states: map[string]commentref.TargetState{
+				"removed-target-comment": {Status: "removed"},
+			},
+		},
+		{
+			name: "deleted backlink source omitted",
+			records: []commentref.Record{{
+				Comment:  db.Comment{UID: "target-comment"},
+				IssueUID: "open-issue", ProjectID: 7,
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := commentref.Project(test.records, test.states)
+			require.Len(t, projected, 1)
+			if test.wantRemovedReply {
+				require.NotNil(t, projected[0].Reply)
+				require.Equal(t, "removed", projected[0].Reply.Status)
+				require.Empty(t, projected[0].Reply.IssueUID)
+			} else {
+				require.Empty(t, projected[0].Backlinks)
+			}
+
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(projected)
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: "issue.restored", projectID: 9, issueUID: "restored-endpoint-issue",
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestProjectRemovalRefreshesDisplayedRelationEndpoints(t *testing.T) {
+	tests := []struct {
+		name                  string
+		records               []commentref.Record
+		wantReplyProjectID    int64
+		wantBacklinkProjectID int64
+	}{
+		{
+			name:               "archived reply target",
+			wantReplyProjectID: 9,
+			records: []commentref.Record{
+				{Comment: db.Comment{UID: "target-comment"}, IssueUID: "archived-target-issue", ProjectID: 9},
+				{Comment: db.Comment{UID: "reply-comment", ReplyToUID: "target-comment", ReplyKind: "confirm"}, IssueUID: "open-issue", ProjectID: 7},
+			},
+		},
+		{
+			name:                  "archived backlink source",
+			wantBacklinkProjectID: 9,
+			records: []commentref.Record{
+				{Comment: db.Comment{UID: "target-comment"}, IssueUID: "open-issue", ProjectID: 7},
+				{Comment: db.Comment{UID: "reply-comment", ReplyToUID: "target-comment", ReplyKind: "confirm"}, IssueUID: "archived-source-issue", ProjectID: 9},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := commentref.Project(test.records, nil)
+			require.Len(t, projected, 2)
+			if test.wantReplyProjectID > 0 {
+				require.NotNil(t, projected[1].Reply)
+				require.Equal(t, test.wantReplyProjectID, projected[1].Reply.ProjectID)
+			}
+			if test.wantBacklinkProjectID > 0 {
+				require.Len(t, projected[0].Backlinks, 1)
+				require.Equal(t, test.wantBacklinkProjectID, projected[0].Backlinks[0].ProjectID)
+			}
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(projected)
+
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.removed", projectID: 9})
+			assertDetailRefetchBatch(t, cmd)
+
+			cmd = m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.removed", projectID: 10})
+			if cmd != nil {
+				t.Fatalf("unrelated project removal must not refresh detail, got %T", cmd)
+			}
+		})
+	}
+}
+
+func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEntry {
+	comments := make([]CommentEntry, len(records))
+	for i, record := range records {
+		comments[i] = CommentEntry{
+			UID: record.UID, Handle: record.Handle, EditedAt: record.EditedAt,
+			Reply: record.Reply, Backlinks: record.Backlinks,
+			BacklinksTruncated: record.BacklinksTruncated,
+			ID:                 record.ID, Author: record.Author, Teammate: record.Teammate,
+			Body: record.Body, CreatedAt: record.CreatedAt,
+		}
+	}
+	return comments
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-
