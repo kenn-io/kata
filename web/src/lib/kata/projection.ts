@@ -242,6 +242,16 @@ function normalizeSelectedDetail(
     issue: { ...selectedIssue, body: selectedIssue.body ?? '' },
     comments: (selected.comments ?? []).map((comment) => ({
       id: comment.id,
+      ...(comment.uid === undefined ? {} : { uid: comment.uid }),
+      ...(comment.handle === undefined ? {} : { handle: comment.handle }),
+      ...(comment.reply === undefined ? {} : { reply: { ...comment.reply } }),
+      ...(comment.backlinks === undefined
+        ? {}
+        : { backlinks: comment.backlinks.map((link) => ({ ...link })) }),
+      ...(comment.edited_at === undefined ? {} : { edited_at: comment.edited_at }),
+      ...(comment.backlinks_truncated === undefined
+        ? {}
+        : { backlinks_truncated: comment.backlinks_truncated }),
       issue_id: comment.issue_id,
       author: comment.author,
       ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),

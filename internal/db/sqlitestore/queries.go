@@ -1256,6 +1256,9 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("generate comment uid: %w", err)
 	}
+	if err := validateLocalCommentReplyTx(ctx, tx, commentUID, p, issue); err != nil {
+		return 0, db.Event{}, err
+	}
 	commentAt := time.Now().UTC()
 	createdAt := commentAt.Format(sqliteCommentTimeFormat)
 	mutationAt := commentAt.Format(sqliteTimeFormat)
@@ -1323,6 +1326,9 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 		return 0, db.Event{}, err
 	}
 
+	// Comment-create metadata seam: issue, p, commentUID and evt are all
+	// available here in the same transaction. Additional metadata events must
+	// be returned as a committed batch before callers publish any of them.
 	if err := tx.Commit(); err != nil {
 		return 0, db.Event{}, err
 	}

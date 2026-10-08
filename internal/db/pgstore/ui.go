@@ -101,6 +101,10 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			if err != nil {
 				return db.UISnapshotData{}, err
 			}
+			data.CommentGraph, err = readCommentGraphTx(ctx, tx, db.CommentGraphQuery{ProjectID: selected.ProjectID, AllowedIssueIDs: query.AllowedIssueIDs})
+			if err != nil {
+				return db.UISnapshotData{}, err
+			}
 			data.SelectedLabels, err = readUIIssueLabels(ctx, tx, selected.ID)
 			if err != nil {
 				return db.UISnapshotData{}, err

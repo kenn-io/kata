@@ -1888,7 +1888,11 @@ func (c *Client) ShowIssueByUID(ctx context.Context, options *ShowIssueByUIDRequ
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"inbound":         {Style: "form", Explode: &[]bool{false}[0]},
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
+		"kind":            {Style: "form", Explode: &[]bool{false}[0]},
+		"since":           {Style: "form", Explode: &[]bool{false}[0]},
+		"thread":          {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/issues/{uid}",
@@ -3688,7 +3692,11 @@ func (c *Client) ShowIssue(ctx context.Context, options *ShowIssueRequestOptions
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"inbound":         {Style: "form", Explode: &[]bool{false}[0]},
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
+		"kind":            {Style: "form", Explode: &[]bool{false}[0]},
+		"since":           {Style: "form", Explode: &[]bool{false}[0]},
+		"thread":          {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}",

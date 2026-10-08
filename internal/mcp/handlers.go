@@ -16,6 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
@@ -415,20 +416,68 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if commentLimit < 0 || commentLimit > maximumResultLimit {
 		return nil, ShowOutput{}, fmt.Errorf("comment_limit must be between 1 and %d when set", maximumResultLimit)
 	}
+	if input.Thread != "" || input.Inbound != "" || input.Kind != "" || input.Since != "" {
+		if err := h.requireCommentLinksAPI(ctx); err != nil {
+			return nil, ShowOutput{}, err
+		}
+	}
 	response, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+		Query:      &generated.ShowIssueQuery{Thread: optionalString(input.Thread), Inbound: optionalString(input.Inbound), Kind: optionalCommentEnum[generated.ShowIssueQueryKind](input.Kind), Since: optionalString(input.Since)},
 	})
 	if err != nil {
 		return nil, ShowOutput{}, err
 	}
-	comments := response.Comments
-	truncated := len(comments) > commentLimit
-	if truncated {
-		comments = comments[len(comments)-commentLimit:]
+	allowedProjects := map[string]bool{}
+	if h.options.Scope.Mode() != ScopeAll {
+		projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+		if err != nil {
+			return nil, ShowOutput{}, err
+		}
+		for _, p := range projects {
+			allowedProjects[p.UID] = true
+		}
 	}
-	commentSummaries := make([]CommentSummary, 0, len(comments))
-	for _, comment := range comments {
-		commentSummaries = append(commentSummaries, commentSummary(comment))
+	commentSummaries := make([]CommentSummary, 0, len(response.Comments))
+	for _, comment := range response.Comments {
+		summary := commentReadSummary(comment)
+		summary.Handle = commentref.HandleForIssue(summary.Handle, summary.IssueUID, summary.IssueShortID, response.Issue.UID)
+		if h.options.Scope.Mode() != ScopeAll {
+			if summary.Reply != nil && !allowedProjects[summary.Reply.ProjectUID] {
+				if summary.Reply.ProjectUID == "" {
+					// Preserve the source assertion's state, but an unknown target
+					// lineage cannot establish authority to expose its identity.
+					summary.Reply = &commentref.Link{Kind: summary.Reply.Kind, Status: summary.Reply.Status}
+				} else {
+					summary.Reply = nil
+				}
+			}
+			backlinks := make([]commentref.Link, 0, len(summary.Backlinks))
+			for _, link := range summary.Backlinks {
+				if allowedProjects[link.ProjectUID] {
+					backlinks = append(backlinks, link)
+				}
+			}
+			summary.Backlinks = backlinks
+		}
+		commentSummaries = append(commentSummaries, summary)
+	}
+	truncated := len(commentSummaries) > commentLimit || (response.CommentsTruncated != nil && *response.CommentsTruncated)
+	if len(commentSummaries) > commentLimit {
+		kept := commentSummaries[len(commentSummaries)-commentLimit:]
+		if input.Thread != "" {
+			root, err := commentref.Parse(input.Thread)
+			if err != nil {
+				return nil, ShowOutput{}, err
+			}
+			for _, c := range commentSummaries[:len(commentSummaries)-commentLimit] {
+				if (root.UID != "" && strings.EqualFold(root.UID, c.UID)) || (root.Suffix != "" && strings.HasSuffix(strings.ToLower(c.UID), root.Suffix) && ((root.IssueRef == "" && c.IssueUID == response.Issue.UID) || (root.IssueRef != "" && strings.EqualFold(root.IssueRef, c.IssueShortID)))) {
+					kept[0] = c
+					break
+				}
+			}
+		}
+		commentSummaries = kept
 	}
 	labels := make([]string, 0, len(response.Labels))
 	for _, label := range response.Labels {
@@ -638,6 +687,11 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, input CommentInput) (*sdkmcp.CallToolResult, CommentOutput, error) {
+	if input.ReplyTo != "" || input.Kind != "" || input.Force {
+		if err := h.requireCommentLinksAPI(ctx); err != nil {
+			return nil, CommentOutput{}, err
+		}
+	}
 	handle, err := teammate.Resolve(input.Teammate, h.options.Teammate)
 	if err != nil {
 		return nil, CommentOutput{}, err
@@ -666,9 +720,13 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	if key == "" {
 		return nil, CommentOutput{}, errors.New("idempotency_key must not be empty")
 	}
+	body := &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body, Teammate: optionalString(handle), ReplyTo: optionalString(input.ReplyTo), Kind: optionalCommentEnum[generated.CommentRequestBodyKind](input.Kind)}
+	if input.Force {
+		body.Force = &input.Force
+	}
 	response, err := h.options.Client.CreateComment(ctx, &generated.CreateCommentRequestOptions{
 		PathParams: &generated.CreateCommentPath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
-		Body:       &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body, Teammate: optionalString(handle)},
+		Body:       body,
 		Header:     &generated.CreateCommentHeaders{IdempotencyKey: &key},
 	})
 	if err != nil {
@@ -1646,4 +1704,52 @@ func formatOptionalTime(value *time.Time) *string {
 	}
 	formatted := formatTime(*value)
 	return &formatted
+}
+
+func (h toolHandlers) requireCommentLinksAPI(ctx context.Context) error {
+	health, err := h.options.Client.Health(ctx)
+	if err != nil {
+		return err
+	}
+	reported := ""
+	if health.APISchemaVersion != nil {
+		reported = *health.APISchemaVersion
+	}
+	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.26.0") < 0 {
+		return fmt.Errorf("typed comment links require daemon API 0.26.0 or newer; daemon reports %q; upgrade the daemon", reported)
+	}
+	return nil
+}
+
+func commentReadSummary(c generated.CommentOut) CommentSummary {
+	out := CommentSummary{BacklinksTruncated: commentValue(c.BacklinksTruncated), UID: c.UID, Handle: commentValue(c.Handle), Author: c.Author, Teammate: commentValue(c.Teammate), Body: c.Body, CreatedAt: formatTime(c.CreatedAt), IssueUID: commentValue(c.IssueUID), IssueShortID: commentValue(c.IssueShortID), Backlinks: []commentref.Link{}}
+	if c.EditedAt != nil {
+		out.EditedAt = formatTime(*c.EditedAt)
+	}
+	if c.Reply != nil {
+		link := commentLinkSummary(*c.Reply)
+		out.Reply = &link
+	}
+	for _, link := range c.Backlinks {
+		out.Backlinks = append(out.Backlinks, commentLinkSummary(link))
+	}
+	return out
+}
+func commentLinkSummary(r generated.CommentLink) commentref.Link {
+	return commentref.Link{Body: commentValue(r.Body), CreatedAt: commentValue(r.CreatedAt), EditedAt: r.EditedAt, UID: commentValue(r.UID), Handle: commentValue(r.Handle), Kind: r.Kind, Author: commentValue(r.Author), Teammate: commentValue(r.Teammate), IssueUID: commentValue(r.IssueUID), IssueShortID: commentValue(r.IssueShortID), ProjectUID: commentValue(r.ProjectUID), ProjectID: commentValue(r.ProjectID), Status: commentValue(r.Status), TargetEdited: commentValue(r.TargetEdited)}
+}
+func commentValue[T any](v *T) T {
+	if v != nil {
+		return *v
+	}
+	var zero T
+	return zero
+}
+
+func optionalCommentEnum[T ~string](value string) *T {
+	if value == "" {
+		return nil
+	}
+	converted := T(value)
+	return &converted
 }

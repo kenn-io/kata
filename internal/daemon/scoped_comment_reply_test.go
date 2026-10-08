@@ -112,3 +112,19 @@ func scopedReplyFixture(t *testing.T, targetOutsideSubtree bool) (
 	require.NoError(t, err)
 	return env, project, source, targetComment, replyComment
 }
+
+func TestTypedSelectorsDoNotDiscloseOutsideSubtree(t *testing.T) {
+	env, project, source, target, reply := scopedReplyFixture(t, true)
+	base := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+	for _, query := range []string{"", "?thread=" + reply.UID, "?inbound=coordinator"} {
+		response, body := envDoRaw(t, env, http.MethodGet, base+query, nil, headers)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+		require.NotContains(t, string(body), target.UID)
+		require.NotContains(t, string(body), "reply_kind")
+	}
+	response, body := envDoRaw(t, env, http.MethodGet, base+"?thread="+target.UID, nil, headers)
+	require.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+	response, body = envDoRaw(t, env, http.MethodPost, base+"/comments", map[string]string{"body": "Answer", "reply_to": target.UID, "kind": "reply"}, headers)
+	require.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+}

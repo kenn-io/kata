@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"go.kenn.io/kata/internal/commentref"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -97,32 +99,34 @@ type detailAPI interface {
 // "comments: <err>") so the user can tell whether an empty tab is the
 // daemon still working or a real failure they should react to.
 type detailModel struct {
-	issue           *Issue
-	parent          *IssueRef
-	children        []Issue
-	detailFocus     detailFocus
-	loading         bool
-	err             error
-	gen             int64
-	fetchSeq        detailFetchSequences
-	activeTab       detailTab
-	scroll          int // unified viewport offset in document lines
-	tabCursor       int // active-tab row cursor
-	childCursor     int
-	comments        []CommentEntry
-	events          []EventLogEntry
-	links           []LinkEntry
-	commentsLoading bool
-	eventsLoading   bool
-	linksLoading    bool
-	commentsErr     error
-	eventsErr       error
-	linksErr        error
-	navStack        []detailModel
-	scopePID        int64
-	allProjects     bool
-	actor           string
-	status          string
+	issue              *Issue
+	parent             *IssueRef
+	children           []Issue
+	detailFocus        detailFocus
+	loading            bool
+	err                error
+	gen                int64
+	fetchSeq           detailFetchSequences
+	activeTab          detailTab
+	scroll             int // unified viewport offset in document lines
+	tabCursor          int // active-tab row cursor
+	childCursor        int
+	comments           []CommentEntry
+	commentLinkCursor  int
+	selectedCommentUID string
+	events             []EventLogEntry
+	links              []LinkEntry
+	commentsLoading    bool
+	eventsLoading      bool
+	linksLoading       bool
+	commentsErr        error
+	eventsErr          error
+	linksErr           error
+	navStack           []detailModel
+	scopePID           int64
+	allProjects        bool
+	actor              string
+	status             string
 	// tabExplicit tracks whether the user has manually selected the
 	// active activity tab. False on a fresh detail open; flipped to
 	// true the first time the tab cycler runs. applyFetched uses this
@@ -339,6 +343,18 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
 		dm.comments = m.comments
+		if dm.selectedCommentUID != "" {
+			for i, c := range dm.comments {
+				if c.UID == dm.selectedCommentUID {
+					dm.tabCursor = i
+					dm.activeTab = tabComments
+					dm.tabExplicit = true
+					dm.detailFocus = focusActivity
+					break
+				}
+			}
+			dm.selectedCommentUID = ""
+		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
 	case eventsFetchedMsg:
@@ -446,6 +462,13 @@ func (dm detailModel) handleNavKey(
 	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	switch {
+	case (km.PrevCommentLink.matches(msg) || km.NextCommentLink.matches(msg)) && dm.activeTab == tabComments && dm.detailFocus == focusActivity:
+		if km.PrevCommentLink.matches(msg) {
+			dm.commentLinkCursor--
+		} else {
+			dm.commentLinkCursor++
+		}
+		return dm, nil, true
 	case km.NextTab.matches(msg):
 		return dm.cycleDetailFocus(1).revealCursor(), nil, true
 	case km.PrevTab.matches(msg):
@@ -782,6 +805,7 @@ func jumpDetailCmd(target jumpTargetRef) tea.Cmd {
 			ref:         target.ref,
 			projectID:   target.projectID,
 			projectName: target.projectName,
+			commentUID:  target.commentUID,
 		}
 	}
 }
@@ -794,6 +818,7 @@ type jumpTargetRef struct {
 	projectID   int64
 	projectName string
 	ref         string
+	commentUID  string
 }
 
 // jumpTarget returns the destination to jump to from the active tab +
@@ -811,6 +836,14 @@ func (dm detailModel) jumpTarget() (jumpTargetRef, bool) {
 		currentUID = dm.issue.UID
 	}
 	switch dm.activeTab {
+	case tabComments:
+		links := dm.commentLinks()
+		if len(links) == 0 {
+			return jumpTargetRef{}, false
+		}
+		index := ((dm.commentLinkCursor % len(links)) + len(links)) % len(links)
+		link := links[index]
+		return jumpTargetRef{ref: link.IssueUID, projectID: link.ProjectID, commentUID: link.UID}, true
 	case tabEvents:
 		target, ok := eventJumpTarget(dm.events, dm.tabCursor)
 		if !ok || target == "" || (current != "" && target == current) {
@@ -849,7 +882,7 @@ func (dm detailModel) activeChunks(width int) []entryChunk {
 	switch dm.activeTab {
 	case tabComments:
 		return commentChunks(dm.comments, width, dm.tabCursor,
-			tabState{loading: dm.commentsLoading, err: dm.commentsErr})
+			tabState{loading: dm.commentsLoading, err: dm.commentsErr, commentLinkCursor: dm.commentLinkCursor})
 	case tabEvents:
 		return eventChunks(dm.events, width, dm.tabCursor,
 			tabState{loading: dm.eventsLoading, err: dm.eventsErr})
@@ -876,4 +909,21 @@ func detailProjectID(iss Issue, sc scope) int64 {
 		return iss.ProjectID
 	}
 	return sc.projectID
+}
+
+func (dm detailModel) commentLinks() []commentref.Link {
+	if dm.tabCursor < 0 || dm.tabCursor >= len(dm.comments) {
+		return nil
+	}
+	c := dm.comments[dm.tabCursor]
+	links := []commentref.Link{}
+	if c.Reply != nil && c.Reply.IssueUID != "" && c.Reply.UID != "" {
+		links = append(links, *c.Reply)
+	}
+	for _, r := range c.Backlinks {
+		if r.IssueUID != "" && r.UID != "" {
+			links = append(links, r)
+		}
+	}
+	return links
 }

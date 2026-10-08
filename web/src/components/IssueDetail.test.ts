@@ -452,3 +452,70 @@ describe('IssueDetail', () => {
     expect(screen.getByText('Roadmap')).toBeTruthy()
   })
 })
+
+describe('typed replies in the default detail view', () => {
+  afterEach(cleanup)
+  it('captures a canonical target, enforces Unicode evidence, and navigates a backlink', async () => {
+    const issue = makeIssue()
+    issue.comments = [
+      {
+        id: 1,
+        uid: 'target-comment',
+        issue_id: 1,
+        author: 'finder',
+        body: 'Finding',
+        created_at: '2030-01-01T00:00:00Z',
+        handle: 'c:abc123',
+        backlinks: [
+          { uid: 'reply-comment', issue_uid: 'other-issue', handle: 'abcd:def456', kind: 'reply' },
+        ],
+      },
+    ]
+    const onAddComment = vi.fn(async () => false)
+    const onSelectIssue = vi.fn()
+    renderDetail({ issue, onAddComment, onSelectIssue })
+    await fireEvent.click(screen.getByRole('button', { name: 'Show 1 reply' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Open abcd:def456' }))
+    expect(onSelectIssue).toHaveBeenCalledWith({
+      uid: 'other-issue',
+      commentUID: 'reply-comment',
+      returnComment: { issueUID: 'issue-1', commentUID: 'target-comment' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Refute' }))
+    const composer = screen.getByRole('textbox', { name: 'Reply evidence' })
+    await fireEvent.input(composer, { target: { value: 'é'.repeat(39) } })
+    const submit = screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    await fireEvent.input(composer, { target: { value: 'é'.repeat(39) + '\u0085' } })
+    expect(submit.disabled).toBe(true)
+    await fireEvent.input(composer, { target: { value: 'é'.repeat(40) } })
+    await fireEvent.click(submit)
+    expect(onAddComment).toHaveBeenCalledWith('issue-1', 'é'.repeat(40), {
+      replyTo: 'target-comment',
+      kind: 'refute',
+      force: false,
+    })
+    await fireEvent.input(composer, { target: { value: 'é'.repeat(39) + '\uFEFF' } })
+    await fireEvent.click(submit)
+    expect(onAddComment).toHaveBeenLastCalledWith('issue-1', 'é'.repeat(39) + '\uFEFF', {
+      replyTo: 'target-comment',
+      kind: 'refute',
+      force: false,
+    })
+  })
+})
+
+describe('editor evidence navigation', () => {
+  afterEach(cleanup)
+  it('keeps the return route available in the issue editor', async () => {
+    const onSelectIssue = vi.fn()
+    renderDetail({
+      onSelectIssue,
+      returnComment: { issueUID: 'source-issue', commentUID: 'original' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
+    const back = screen.getByRole('button', { name: 'Return to original comment' })
+    await fireEvent.click(back)
+    expect(onSelectIssue).toHaveBeenCalledWith({ uid: 'source-issue', commentUID: 'original' })
+  })
+})

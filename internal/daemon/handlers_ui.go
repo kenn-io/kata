@@ -14,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -223,7 +224,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					if err != nil {
 						return nil, internalAPIError(err)
 					}
-					return snapshotResponse(cachedResponse, intent, policy, validator), nil
+					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
 				}
 			}
 			query := intent.storeQuery()
@@ -244,10 +245,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err := filterScopedUISnapshot(ctx, cfg.DB, &data, scopedIssueIDs, intent.ScopeProjectUID); err != nil {
 					return nil, internalAPIError(err)
 				}
-				data.Comments, _, _, err = projectScopedCommentReplies(ctx, cfg.DB, data.Comments)
-				if err != nil {
-					return nil, err
-				}
 			}
 			if scopedIssueIDs == nil && !data.AuthorityReused {
 				authorityCache.put(authorityKey, data)
@@ -259,7 +256,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			return snapshotResponse(data, intent, policy, validator), nil
+			return snapshotResponse(ctx, data, intent, policy, validator)
 		})
 
 	referencesOperation := huma.Operation{
@@ -748,9 +745,9 @@ func matchesStrongETag(header, current string) bool {
 	return false
 }
 
-func snapshotResponse(data db.UISnapshotData, intent normalizedUISnapshotIntent,
+func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,
 	policy uiPolicy, validator string,
-) *api.UISnapshotResponse {
+) (*api.UISnapshotResponse, error) {
 	out := &api.UISnapshotResponse{Status: http.StatusOK, ETag: validator}
 	out.Body.ContractVersion = api.UISnapshotContractVersion
 	out.Body.Cursor = data.Cursor
@@ -778,10 +775,22 @@ func snapshotResponse(data db.UISnapshotData, intent normalizedUISnapshotIntent,
 		}
 		out.Body.Selected = &api.UISelectedAuthority{
 			State: state, Issue: data.SelectedIssue,
-			Comments: nonNil(data.Comments), Labels: nonNil(data.SelectedLabels),
+			Comments: []api.CommentOut{}, Labels: nonNil(data.SelectedLabels),
 			Links: nonNil(data.SelectedLinks), Recurrences: nonNil(data.Recurrences),
 			History: nonNil(data.History),
 		}
+	}
+	if out.Body.Selected != nil && data.SelectedIssue != nil {
+		records, err := projectCommentGraph(ctx, data.CommentGraph)
+		if err != nil {
+			return nil, err
+		}
+		selected, err := commentref.Select(records, data.SelectedIssue.UID, commentref.Options{})
+		if err != nil {
+			return nil, commentReferenceError(err)
+		}
+		recordCommentResponseScope(ctx, records, selected.Comments)
+		out.Body.Selected.Comments = selected.Comments
 	}
 	if intent.IncludeGraph {
 		out.Body.Graph = &api.UIGraph{
@@ -789,7 +798,7 @@ func snapshotResponse(data db.UISnapshotData, intent normalizedUISnapshotIntent,
 			Edges: nonNil(data.GraphEdges), UnresolvedRefs: nonNil(data.GraphUnresolvedRefs),
 		}
 	}
-	return out
+	return out, nil
 }
 
 func referencesResponse(data db.UIReferencesData, policy uiPolicy, validator string) *api.UIReferencesResponse {
