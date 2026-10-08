@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 
 	"go.kenn.io/kata/internal/db"
@@ -54,6 +55,10 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		if err != nil || crossing {
 			return crossing, err
 		}
+		crossing, err = relayCloseEvidenceCrossesProjectTx(ctx, tx, projectID, payload)
+		if err != nil || crossing {
+			return crossing, err
+		}
 	}
 	refs, err := payloadReferencedIssueUIDs(event, payload)
 	if err != nil {
@@ -71,6 +76,48 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 			return false, err
 		}
 		if !own {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func relayCloseEvidenceCrossesProjectTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	payload map[string]jsontext.Value,
+) (bool, error) {
+	raw, ok := payload["evidence"]
+	if !ok {
+		return false, nil
+	}
+	var evidence []db.Evidence
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		return true, nil
+	}
+	if evidence == nil {
+		return true, nil
+	}
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+		return false, mapSQLError(err, nil)
+	}
+	for _, item := range evidence {
+		if item.Type != "duplicate-of" && item.Type != "superseded-by" {
+			continue
+		}
+		if item.IssueRef == "" {
+			return true, nil
+		}
+		target, err := eventIssueByRef(ctx, tx, projectUID, item.IssueRef)
+		if errors.Is(err, db.ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if target.ProjectID != projectID {
 			return true, nil
 		}
 	}

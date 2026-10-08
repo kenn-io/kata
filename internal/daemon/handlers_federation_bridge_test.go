@@ -1,19 +1,30 @@
 package daemon_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
+
+var errRelayPostCommitLookup = errors.New("post-commit event lookup failed")
+
+type relayEventLookupFailureStore struct{ db.Storage }
+
+func (s relayEventLookupFailureStore) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
+	return nil, errRelayPostCommitLookup
+}
 
 // R1/R3/R4: self-enrollment narrows a live ordinary user credential to one
 // chosen project and returns the root pin through the existing enrollment API.
@@ -192,5 +203,66 @@ func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
 			status, _, raw = f.request(t, route.method, route.path, "", route.body, headers)
 			require.Equal(t, http.StatusForbidden, status, string(raw))
 		}
+	})
+}
+
+// Accepted relay events must be published from the acceptance transaction's
+// returned rows. A read failure after commit must not turn success into an
+// HTTP error or lose the event notification.
+func TestRelayHTTPPublishesAcceptedEventsAfterCommitWithoutLookup(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		ctx := t.Context()
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: f.private.ID, Role: db.FederationRoleHub, HubProjectID: f.private.ID, HubProjectUID: f.private.UID, Enabled: true})
+		require.NoError(t, err)
+		pub, private, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		pin := db.RootKeyPin{ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(pub), PublicKey: pub}
+		require.NoError(t, store.PinRootAuthority(ctx, pin))
+		parent, err := store.ResolveAPIToken(ctx, "member-test-token")
+		require.NoError(t, err)
+		//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
+		grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: f.private.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion, Token: "relay-post-commit-test-token", ServeDownstream: true})
+		require.NoError(t, err)
+
+		sink := &publisherSink{}
+		server := daemon.NewServer(daemon.ServerConfig{
+			DB:                    relayEventLookupFailureStore{Storage: store},
+			RootAttributionSigner: &db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private},
+			Broadcaster:           f.broadcaster,
+			Hooks:                 sink,
+			Auth:                  config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true},
+		})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		httpServer := httptest.NewServer(server.Handler())
+		t.Cleanup(httpServer.Close)
+		f.server = httpServer
+		subscription := f.broadcaster.Subscribe(daemon.SubFilter{ProjectID: f.private.ID})
+		t.Cleanup(subscription.Unsub)
+
+		const peer = "00000000000000000000000007"
+		event := federationRemoteIssueCreatedEvent(t, f.private, peer)
+		body, err := db.EncodeRelaySourceEvent(event)
+		require.NoError(t, err)
+		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+			Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID,
+			ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(),
+			SenderInstanceUID: grant.Enrollment.SpokeInstanceUID, ReceiverInstanceUID: store.InstanceUID(),
+			Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent,
+			Path:      []string{peer, grant.Enrollment.SpokeInstanceUID},
+			SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body,
+		})
+		require.NoError(t, err)
+		status, _, raw := f.request(t, http.MethodPost, projectPath(f.private.ID)+"/federation/relay:accept", "", db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}}, bearer(grant.Token))
+
+		committed, err := store.EventsByUIDs(ctx, f.private.ID, []string{event.EventUID})
+		require.NoError(t, err)
+		require.Len(t, committed, 1, "acceptance must already be committed when response-only work runs")
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, []int64{committed[0].ID}, sink.ids())
+		msg := receiveMsg(t, subscription.Ch, time.Second, "accepted relay event broadcast")
+		require.Equal(t, daemon.StreamKindEvent, msg.Kind)
+		require.NotNil(t, msg.Event)
+		require.Equal(t, committed[0].ID, msg.Event.ID)
 	})
 }

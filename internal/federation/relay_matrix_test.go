@@ -2,8 +2,10 @@ package federation_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -107,6 +110,57 @@ func syncRelayMatrixNode(t *testing.T, node *relayMatrixNode) {
 	binding, err := node.store.FederationBindingByProject(t.Context(), node.project.ID)
 	require.NoError(t, err)
 	require.NoError(t, federation.SyncFederationOnce(t.Context(), node.store, binding, node.credential))
+}
+
+var errRelayPullPostCommitLookup = errors.New("post-commit event lookup failed")
+
+type relayPullEventLookupFailureStorage struct {
+	db.Storage
+	db.RelayArtifactStorage
+	db.RelayResetStore
+}
+
+func (s relayPullEventLookupFailureStorage) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
+	return nil, errRelayPullPostCommitLookup
+}
+
+func TestRelayPullPublishesAcceptedEventsWithoutPostCommitLookup(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "company-member")
+			personal := newRelayMatrixNode(t, backend, "personal-member")
+			project, err := root.store.CreateProject(t.Context(), "shared-project")
+			require.NoError(t, err)
+			root.project = project
+			_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+			require.NoError(t, err)
+			enrollRelayMatrixReplica(t, root, personal, "personal-alias", true)
+			syncRelayMatrixNode(t, personal)
+
+			issue, source, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "source-assistant", Title: "upstream event"})
+			require.NoError(t, err)
+			binding, err := personal.store.FederationBindingByProject(t.Context(), personal.project.ID)
+			require.NoError(t, err)
+			var callbackProjectID int64
+			var published []db.Event
+			artifactStore, ok := personal.store.(db.RelayArtifactStorage)
+			require.True(t, ok)
+			resetStore, ok := personal.store.(db.RelayResetStore)
+			require.True(t, ok)
+			syncErr := federation.SyncFederationOnceWithPulledEvents(t.Context(), relayPullEventLookupFailureStorage{Storage: personal.store, RelayArtifactStorage: artifactStore, RelayResetStore: resetStore}, binding, personal.credential, clientpkg.Opts{}, func(projectID int64, events []db.Event) {
+				callbackProjectID = projectID
+				published = append(published, events...)
+			})
+
+			mirrored, err := personal.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err, "the received event must already be committed")
+			require.Equal(t, issue.UID, mirrored.UID)
+			require.NoError(t, syncErr)
+			require.Equal(t, personal.project.ID, callbackProjectID)
+			require.Len(t, published, 1)
+			require.Equal(t, source.UID, published[0].UID)
+		})
+	}
 }
 
 // R1/R4/R5/A2: real HTTP through two hubs, two leaf devices, and a second

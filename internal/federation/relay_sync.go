@@ -186,12 +186,8 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 			if err != nil {
 				return recordRelayEventQuarantine(ctx, store, binding, db.FederationQuarantineDirectionPull, batch, err, validateLease)
 			}
-			if len(accepted.InsertedEventUIDs) > 0 && onPulledEvents != nil {
-				events, err := store.EventsByUIDs(ctx, binding.ProjectID, accepted.InsertedEventUIDs)
-				if err != nil {
-					return err
-				}
-				onPulledEvents(binding.ProjectID, events)
+			if len(accepted.InsertedEvents) > 0 && onPulledEvents != nil {
+				onPulledEvents(binding.ProjectID, accepted.InsertedEvents)
 			}
 			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 				return err

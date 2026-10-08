@@ -223,4 +223,68 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	})
 	require.NoError(t, err)
 	require.Empty(t, eventsAfterReplace, "rejected replacement emits no unlink or link event")
+
+	// Closing evidence can outlive the issue's original project. A later relay
+	// reset must omit the entire historical close when its target has moved out
+	// of the selected project, for both UID and qualified short-ID references.
+	evidenceProject, err := store.CreateProject(ctx, "evidence-shared-project")
+	require.NoError(t, err)
+	restrictedProject, err := store.CreateProject(ctx, "restricted-project")
+	require.NoError(t, err)
+	uidTarget, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "UID evidence target"})
+	require.NoError(t, err)
+	shortTarget, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "Short ID evidence target"})
+	require.NoError(t, err)
+	uidSource, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "UID evidence source"})
+	require.NoError(t, err)
+	shortSource, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "Short ID evidence source"})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: uidTarget.ID, FromProjectID: evidenceProject.ID, ToProjectID: restrictedProject.ID,
+		IfMatchRev: uidTarget.Revision, Actor: "member",
+	})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: shortTarget.ID, FromProjectID: evidenceProject.ID, ToProjectID: restrictedProject.ID,
+		IfMatchRev: shortTarget.Revision, Actor: "member",
+	})
+	require.NoError(t, err)
+	_, uidCloseEvents, changed, err := store.CloseIssueWithEvents(ctx, uidSource.ID, "done", "member", "closed with duplicate evidence", []db.Evidence{{Type: "duplicate-of", IssueRef: uidTarget.UID}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, uidCloseEvents, 1)
+	require.Contains(t, uidCloseEvents[0].Payload, uidTarget.UID)
+	_, shortCloseEvents, changed, err := store.CloseIssueWithEvents(ctx, shortSource.ID, "done", "member", "closed with superseded evidence", []db.Evidence{{Type: "superseded-by", IssueRef: restrictedProject.Name + "#" + shortTarget.ShortID}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, shortCloseEvents, 1)
+	require.Contains(t, shortCloseEvents[0].Payload, restrictedProject.Name+"#"+shortTarget.ShortID)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: evidenceProject.ID, Role: db.FederationRoleHub, HubProjectID: evidenceProject.ID, HubProjectUID: evidenceProject.UID, Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: evidenceProject.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	evidenceGrant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: evidenceProject.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000011",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "boundary-evidence-test-token",
+	})
+	require.NoError(t, err)
+	evidenceReset, ok := store.(db.RelayResetBootstrapStore)
+	require.True(t, ok)
+	resetRequired, err := evidenceReset.RelayEnrollmentNeedsReset(ctx, evidenceGrant.Enrollment.RelayBindingUID)
+	require.NoError(t, err)
+	require.True(t, resetRequired, "foreign close evidence requires a safe current-state reset")
+	evidenceResets, ok := store.(db.RelayResetStore)
+	require.True(t, ok)
+	evidenceCheckpoint, err := evidenceResets.CreateRelayReset(ctx, evidenceGrant.Enrollment.RelayBindingUID, db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: signingKey})
+	require.NoError(t, err)
+	for _, section := range [][]byte{evidenceCheckpoint.Snapshot.Events, evidenceCheckpoint.Snapshot.Entities} {
+		var bodies [][]byte
+		require.NoError(t, json.Unmarshal(section, &bodies))
+		for _, body := range bodies {
+			source, err := db.DecodeRelaySourceEvent(body)
+			require.NoError(t, err)
+			require.NotContains(t, string(source.Payload), uidTarget.UID, "reset cannot disclose a UID evidence target from another project")
+			require.NotContains(t, string(source.Payload), shortTarget.UID, "reset cannot disclose a short-ID evidence target from another project")
+			require.NotContains(t, string(source.Payload), shortTarget.ShortID, "reset cannot disclose a short-ID evidence reference from another project")
+		}
+	}
 }

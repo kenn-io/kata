@@ -149,11 +149,12 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				}
 				if errors.Is(err, db.ErrNotFound) {
 					clock := db.EventHLCTimestamp{PhysicalMS: source.HLCPhysicalMS, Counter: source.HLCCounter}
-					_, err = d.insertEventTx(ingressCtx, tx, eventInsert{ProjectID: projectID, ProjectUID: projectUID, ProjectName: source.ProjectName, IssueUID: source.IssueUID, RelatedIssueUID: source.RelatedIssueUID, Type: source.Type, Actor: source.Actor, Payload: string(source.Payload), UID: source.EventUID, OriginInstanceUID: source.OriginInstanceUID, HLC: &clock, CreatedAt: formatStoredTime(source.CreatedAt), ContentHash: source.ContentHash})
+					insertedEvent, err := d.insertEventTx(ingressCtx, tx, eventInsert{ProjectID: projectID, ProjectUID: projectUID, ProjectName: source.ProjectName, IssueUID: source.IssueUID, RelatedIssueUID: source.RelatedIssueUID, Type: source.Type, Actor: source.Actor, Payload: string(source.Payload), UID: source.EventUID, OriginInstanceUID: source.OriginInstanceUID, HLC: &clock, CreatedAt: formatStoredTime(source.CreatedAt), ContentHash: source.ContentHash})
 					if err != nil {
 						return err
 					}
 					result.InsertedEventUIDs = append(result.InsertedEventUIDs, source.EventUID)
+					result.InsertedEvents = append(result.InsertedEvents, insertedEvent)
 					linksAffected = linksAffected || db.FederationEventAffectsLinks(source.Type)
 				}
 				rememberIngestIssueUIDs(source, known)

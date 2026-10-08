@@ -94,14 +94,12 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
+		if len(result.InsertedEvents) > 0 {
+			cfg.Publish().Events(in.ProjectID, result.InsertedEvents)
+		}
 		if in.Body.Stream == db.RelayStreamArtifact && cfg.EmbeddingWake != nil && (len(in.Body.Artifacts) > 0 || result.Through > 0) {
 			cfg.EmbeddingWake()
 		}
-		events, err := cfg.DB.EventsByUIDs(ctx, in.ProjectID, result.InsertedEventUIDs)
-		if err != nil {
-			return nil, relayTransportError(err)
-		}
-		cfg.Publish().Events(in.ProjectID, events)
 		return &api.RelayAcceptResponse{Body: result}, nil
 	})
 	huma.Register(humaAPI, huma.Operation{OperationID: "ackRelayDeliveries", Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/federation/relay:ack"}, func(ctx context.Context, in *api.RelayAckRequest) (*api.RelayAckResponse, error) {

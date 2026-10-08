@@ -26,10 +26,12 @@ type RelayBatch struct {
 	Artifacts []embedding.EmbeddingArtifact `json:"artifacts,omitempty"`
 }
 
-// RelayAcceptance reports the accepted prefix and exact artifact digests still missing.
+// RelayAcceptance reports the accepted prefix, missing artifact digests, and
+// the exact event rows newly inserted by this transaction.
 type RelayAcceptance struct {
 	Through           int64    `json:"through"`
 	Digest            string   `json:"digest"`
 	MissingDigests    []string `json:"missing_digests,omitempty"`
 	InsertedEventUIDs []string `json:"-"`
+	InsertedEvents    []Event  `json:"-"`
 }

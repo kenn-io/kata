@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -102,6 +103,8 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 	var instanceUID string
 	projects := make(map[int64]string)
 	pins := make(map[string]string)
+	rootKeys := make(map[string]map[string]RootKeyPin)
+	preparedCheckpoints := make(map[string]RelayResetCheckpoint)
 	type retainedHop struct {
 		project, peer string
 		epoch         int64
@@ -113,9 +116,31 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 			if r.Key == "instance_uid" {
 				instanceUID = r.Value
 			}
+			if strings.HasPrefix(r.Key, RelayResetMetadataPrefix) {
+				suffix := strings.TrimPrefix(r.Key, RelayResetMetadataPrefix)
+				if strings.Contains(suffix, ".") {
+					var checkpoint RelayResetCheckpoint
+					if err := json.Unmarshal([]byte(r.Value), &checkpoint, json.RejectUnknownMembers(true)); err != nil {
+						return errors.New("backup relay checkpoint is invalid")
+					}
+					binding := checkpoint.Translation.Authority.BindingUID
+					key := RelayResetMetadataPrefix + checkpoint.Manifest.ProjectUID + "." + binding
+					if binding == "" || r.Key != key {
+						return errors.New("backup relay checkpoint metadata changes its project or binding")
+					}
+					if _, exists := preparedCheckpoints[binding]; exists {
+						return errors.New("duplicate prepared relay checkpoint in backup")
+					}
+					preparedCheckpoints[binding] = checkpoint
+				}
+			}
 		case *ProjectExport:
 			projects[r.ID] = r.UID
 		case *RootKeyPin:
+			if rootKeys[r.ProjectUID] == nil {
+				rootKeys[r.ProjectUID] = make(map[string]RootKeyPin)
+			}
+			rootKeys[r.ProjectUID][r.KeyID] = *r
 			if !r.Retired {
 				pins[r.ProjectUID] = r.AuthorityUID
 			}
@@ -152,17 +177,64 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 			}
 		}
 	}
+	type preparedReset struct {
+		epoch           int64
+		artifactDigests map[string]struct{}
+	}
+	prepared := make(map[string]preparedReset)
+	for binding, checkpoint := range preparedCheckpoints {
+		hop, ok := hops[binding]
+		if !ok {
+			continue // Detached historical namespaces do not retain active authority.
+		}
+		if checkpoint.Manifest.ProjectUID != hop.project {
+			return errors.New("backup prepared relay checkpoint differs from its retained hop")
+		}
+		epoch := checkpoint.Translation.Authority.Epoch
+		if epoch <= hop.epoch {
+			continue // A checkpoint already activated by the peer is retained for retry.
+		}
+		if epoch != hop.epoch+1 {
+			return errors.New("backup prepared relay checkpoint skips the retained hop epoch")
+		}
+		pin, ok := rootKeys[hop.project][checkpoint.Manifest.KeyID]
+		if !ok || pin.AuthorityUID != pins[hop.project] {
+			return errors.New("backup prepared relay checkpoint has no matching root pin")
+		}
+		authority := RelayHopAuthority{
+			BindingUID: binding, ProjectUID: hop.project, AuthorityUID: pins[hop.project],
+			SenderInstanceUID: instanceUID, ReceiverInstanceUID: hop.peer, Epoch: epoch,
+		}
+		if err := ValidateRelayResetTranslation(authority, checkpoint.Manifest, checkpoint.Translation); err != nil {
+			return errors.New("backup prepared relay checkpoint differs from its retained hop")
+		}
+		if err := VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot); err != nil {
+			return errors.New("backup prepared relay checkpoint signature is invalid")
+		}
+		if _, _, err := DecodeRootResetPayload(pin, checkpoint.Snapshot); err != nil {
+			return errors.New("backup prepared relay checkpoint payload is invalid")
+		}
+		var manifests []embedding.ArtifactManifest
+		if err := json.Unmarshal(checkpoint.Snapshot.Artifacts, &manifests, json.RejectUnknownMembers(true)); err != nil || manifests == nil {
+			return errors.New("backup prepared relay checkpoint artifact manifest is invalid")
+		}
+		state := preparedReset{epoch: epoch, artifactDigests: make(map[string]struct{}, len(manifests))}
+		for _, manifest := range manifests {
+			state.artifactDigests[manifest.Digest] = struct{}{}
+		}
+		prepared[binding] = state
+	}
 	for _, record := range records {
-		var project, binding, raw string
+		var project, binding, stream, raw string
 		var epoch int64
-		var outgoing bool
+		var outgoing, cursor bool
 		switch r := record.(type) {
 		case *RelayOutboxExport:
-			project, binding, raw, epoch, outgoing = r.ProjectUID, r.BindingUID, r.Envelope, r.ResetEpoch, true
+			project, binding, stream, raw, epoch, outgoing = r.ProjectUID, r.BindingUID, r.Stream, r.Envelope, r.ResetEpoch, true
 		case *RelayInboxExport:
-			project, binding, raw, epoch = r.ProjectUID, r.BindingUID, r.Envelope, r.ResetEpoch
+			project, binding, stream, raw, epoch = r.ProjectUID, r.BindingUID, r.Stream, r.Envelope, r.ResetEpoch
 		case *RelayCursorExport:
-			project, binding, epoch = r.ProjectUID, r.BindingUID, r.ResetEpoch
+			project, binding, stream, epoch, cursor = r.ProjectUID, r.BindingUID, r.Stream, r.ResetEpoch, true
 		default:
 			continue
 		}
@@ -173,8 +245,14 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		if !ok {
 			continue
 		}
-		if hop.project != project || epoch > hop.epoch {
+		if hop.project != project {
 			return errors.New("backup relay delivery has no matching retained hop")
+		}
+		if epoch > hop.epoch {
+			preparedReset, ok := prepared[binding]
+			if !ok || epoch != preparedReset.epoch || stream != RelayStreamArtifact || (!outgoing && !cursor) {
+				return errors.New("backup relay delivery has no matching retained hop")
+			}
 		}
 		if raw == "" {
 			continue
@@ -189,6 +267,11 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		}
 		if envelope.AuthorityUID != pins[project] || envelope.SenderInstanceUID != sender || envelope.ReceiverInstanceUID != receiver {
 			return errors.New("backup relay delivery differs from retained transport authority")
+		}
+		if epoch > hop.epoch {
+			if _, exists := prepared[binding].artifactDigests[envelope.SourceUID]; !exists {
+				return errors.New("backup prepared relay artifact is absent from its retained checkpoint")
+			}
 		}
 	}
 	return nil

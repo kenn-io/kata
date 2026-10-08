@@ -53,6 +53,10 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.Equal(t, int64(40), accepted.Through)
 	require.Equal(t, batch.Envelopes[1].Digest, accepted.Digest)
 	require.Len(t, accepted.InsertedEventUIDs, 2)
+	require.Len(t, accepted.InsertedEvents, 2)
+	require.Equal(t, []string{created.EventUID, commented.EventUID}, []string{accepted.InsertedEvents[0].UID, accepted.InsertedEvents[1].UID})
+	require.Equal(t, project.ID, accepted.InsertedEvents[0].ProjectID)
+	require.Equal(t, "issue.created", accepted.InsertedEvents[0].Type)
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "source-assistant", issue.Author)
@@ -89,6 +93,7 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.Equal(t, accepted.Through, retry.Through)
 	require.Equal(t, accepted.Digest, retry.Digest)
 	require.Empty(t, retry.InsertedEventUIDs)
+	require.Empty(t, retry.InsertedEvents, "replayed acceptance must not republish previously committed events")
 	duplicateSource := seal(created, 45)
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{
 		Stream: db.RelayStreamEvent, After: 40, Envelopes: []db.RelayEnvelope{duplicateSource},
@@ -116,6 +121,8 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	successful, err := store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, failedBatch)
 	require.NoError(t, err)
 	require.Equal(t, int64(51), successful.Through)
+	require.Len(t, successful.InsertedEvents, 1)
+	require.Equal(t, failed.EventUID, successful.InsertedEvents[0].UID)
 	_, _, err = store.RevokeAPIToken(ctx, parent.ID, "admin")
 	require.NoError(t, err)
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, batch)
