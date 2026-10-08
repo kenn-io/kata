@@ -1069,7 +1069,7 @@ func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, r
 	comment := struct {
 		CommentUID string `json:"comment_uid"`
 		ReplyToUID string `json:"reply_to_uid,omitempty"`
-	}{CommentUID: commentUID}
+	}{CommentUID: commentUID, ReplyToUID: replyTarget}
 	var payload any = comment
 	if eventType == "issue.snapshot" || eventType == "issue.created" {
 		payload = struct {
@@ -1088,9 +1088,6 @@ func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, r
 				ReplyToUID: replyTarget,
 			}},
 		}
-	} else {
-		comment.ReplyToUID = replyTarget
-		payload = comment
 	}
 	payloadJSON, err := json.Marshal(payload)
 	require.NoError(t, err)
