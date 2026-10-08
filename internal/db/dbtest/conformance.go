@@ -50,6 +50,7 @@ var storageScenarios = []scenario{
 	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
 	{name: "reply-only purge advances snapshot cursor", methods: []string{"CreateComment", "CreateIssue", "ImportReplay", "IssueByUID", "ProjectByUID", "PurgeIssue"}, run: checkReplyOnlyPurgeAdvancesSnapshotCursor},
 	{name: "imported comment purge advances snapshot cursor", methods: []string{"ImportReplay", "IssueByUID", "ProjectByUID", "PurgeIssue"}, run: checkImportedCommentPurgeAdvancesSnapshotCursor},
+	{name: "eventless archived project purge advances snapshot cursor", methods: []string{"ImportReplay", "ProjectByUID", "PurgeProject"}, run: checkEventlessArchivedProjectPurgeAdvancesSnapshotCursor},
 	{name: "comment snapshot marks purged reply target removed", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "PurgeIssue", "ReadCommentGraph"}, run: checkCommentSnapshotPurgedReplyTarget},
 	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
 	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},
