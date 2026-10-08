@@ -14,6 +14,7 @@ import (
 
 func dropIssueStatusSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropCommentReplySchema(ctx, t, admin, schema)
 	// Reconstruct the released schema-29 table shape from the current DDL.
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.import_mappings
 		DROP COLUMN IF EXISTS observed_status,
@@ -55,7 +56,7 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 30, version)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 	var status, observedAt, pending, locator sql.NullString
 	require.NoError(t, upgraded.QueryRowContext(ctx, `SELECT observed_status, observed_status_at, pending_event_uid, remote_locator FROM import_mappings WHERE id=$1`, mappingID).Scan(&status, &observedAt, &pending, &locator))
 	require.False(t, status.Valid)

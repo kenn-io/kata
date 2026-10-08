@@ -419,13 +419,16 @@ type IssueContent struct {
 
 // Comment mirrors a row in comments.
 type Comment struct {
-	ID        int64     `json:"id"`
-	UID       string    `json:"uid"`
-	IssueID   int64     `json:"issue_id"`
-	Author    string    `json:"author"`
-	Teammate  string    `json:"teammate,omitempty"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
+	ReplyToUID string     `json:"reply_to_uid,omitempty"`
+	ReplyKind  string     `json:"reply_kind,omitempty"`
+	EditedAt   *time.Time `json:"edited_at,omitempty"`
+	ID         int64      `json:"id"`
+	UID        string     `json:"uid"`
+	IssueID    int64      `json:"issue_id"`
+	Author     string     `json:"author"`
+	Teammate   string     `json:"teammate,omitempty"`
+	Body       string     `json:"body"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // Event mirrors a row in events. IssueShortID and RelatedIssueShortID are

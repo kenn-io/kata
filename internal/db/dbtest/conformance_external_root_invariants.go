@@ -1324,6 +1324,12 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		assert.Empty(t, edited.Teammate)
 		require.NotNil(t, editEvent)
 		assert.Equal(t, "issue.comment_edited", editEvent.Type)
+		require.NotNil(t, edited.EditedAt)
+		var editPayload struct {
+			EditedAt time.Time `json:"edited_at"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(editEvent.Payload), &editPayload))
+		require.True(t, edited.EditedAt.Equal(editPayload.EditedAt))
 
 		_, _, _, err = store.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
 			BindingID: fixture.binding.ID, ClaimToken: "wrong-claim",

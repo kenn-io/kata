@@ -306,18 +306,19 @@ func (d *Store) ExportIssueSyncStatus(ctx context.Context, f db.ExportFilter) it
 // ExportComments streams comments ordered by id, scoped via the parent issue
 // (project + soft-delete rides on issues).
 func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.CommentExport, error] {
-	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), comments.teammate
+	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), comments.teammate, comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)
 	          FROM comments
 	          JOIN issues ON issues.id = comments.issue_id` +
 		exportWhere("issues", f) + ` ORDER BY comments.id ASC`
 	return streamRows(ctx, d.readQ, "comments", query, exportArgs(f),
 		func(rows *sql.Rows) (db.CommentExport, error) {
 			var rec db.CommentExport
-			var teammate sql.NullString
-			if err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &teammate); err != nil {
+			var teammate, replyTo, replyKind, editedAt sql.NullString
+			if err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 				return db.CommentExport{}, scanError("comment", err)
 			}
 			rec.Teammate = teammate.String
+			rec.ReplyToUID, rec.ReplyKind, rec.EditedAt = replyTo.String, replyKind.String, editedAt.String
 			return rec, nil
 		})
 }

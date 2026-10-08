@@ -383,12 +383,19 @@ components:
         created_at:
           format: date-time
           type: string
+        edited_at:
+          format: date-time
+          type: string
         id:
           format: int64
           type: integer
         issue_id:
           format: int64
           type: integer
+        reply_kind:
+          type: string
+        reply_to_uid:
+          type: string
         teammate:
           type: string
         uid:

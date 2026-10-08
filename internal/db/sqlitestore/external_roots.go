@@ -911,13 +911,18 @@ func (d *Store) UpsertExternalCommentProjection(
 				return comment, nil, false, nil
 			}
 			mutationAt := nowTimestamp()
-			if _, err := tx.ExecContext(ctx, `UPDATE comments SET body=? WHERE id=?`, desiredBody, comment.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE comments SET body=?, edited_at=? WHERE id=?`, desiredBody, mutationAt, comment.ID); err != nil {
 				return db.Comment{}, nil, false, fmt.Errorf("edit external comment projection: %w", err)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at=? WHERE id=?`, mutationAt, issue.ID); err != nil {
 				return db.Comment{}, nil, false, fmt.Errorf("touch issue: %w", err)
 			}
 			comment.Body = desiredBody
+			editedAt, err := parseSQLiteTimestamp(mutationAt)
+			if err != nil {
+				return db.Comment{}, nil, false, err
+			}
+			comment.EditedAt = &editedAt
 			payload, err := db.MarshalExternalCommentProjectionPayload(binding, comment, params, mutationAt, false)
 			if err != nil {
 				return db.Comment{}, nil, false, err

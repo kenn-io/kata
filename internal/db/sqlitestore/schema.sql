@@ -84,11 +84,19 @@ CREATE TABLE comments (
   body       TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   teammate TEXT,
+  reply_to_uid TEXT,
+  reply_kind TEXT,
+  edited_at DATETIME,
+  CONSTRAINT comments_reply_pair CHECK ((reply_to_uid IS NULL) = (reply_kind IS NULL)),
+  CONSTRAINT comments_reply_kind CHECK (reply_kind IS NULL OR reply_kind IN ('reply','confirm','refute','supersede')),
+  CONSTRAINT comments_reply_target CHECK (reply_to_uid IS NULL OR (length(reply_to_uid) = 26 AND reply_to_uid <> uid)),
   CHECK (length(uid) = 26),
   CHECK (length(trim(author)) > 0),
   CHECK (length(trim(body))   > 0)
 );
 CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
+
+CREATE INDEX idx_comments_reply_to ON comments(reply_to_uid) WHERE reply_to_uid IS NOT NULL;
 
 CREATE TABLE links (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,

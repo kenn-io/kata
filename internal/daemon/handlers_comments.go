@@ -111,9 +111,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{c})
+		if err != nil {
+			return nil, err
+		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = c
+		out.Body.Comment = comments[0]
 		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
@@ -169,9 +173,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{c})
+		if err != nil {
+			return nil, err
+		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = c
+		out.Body.Comment = comments[0]
 		out.Body.Event = evt
 		out.Body.Changed = changed
 		return out, nil
@@ -211,9 +219,13 @@ func replayComment(
 			"idempotency key matched a prior comment with a different fingerprint",
 			"use a fresh key or send the exact original comment", nil)
 	}
+	comments, _, _, err := projectScopedCommentReplies(ctx, cfg.DB, []db.Comment{match.Comment})
+	if err != nil {
+		return nil, err
+	}
 	out := &api.CommentResponse{}
 	out.Body.Issue = current
-	out.Body.Comment = match.Comment
+	out.Body.Comment = comments[0]
 	out.Body.Event = nil
 	out.Body.Changed = false
 	return out, nil

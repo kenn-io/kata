@@ -918,19 +918,26 @@ func exportComments(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		return exportCommentsV10(ctx, d, enc, opts)
 	}
 	type record struct {
-		ID        int64   `json:"id"`
-		UID       string  `json:"uid"`
-		IssueID   int64   `json:"issue_id"`
-		Author    string  `json:"author"`
-		Body      string  `json:"body"`
-		CreatedAt string  `json:"created_at"`
-		Teammate  *string `json:"teammate,omitempty"`
+		ID         int64   `json:"id"`
+		UID        string  `json:"uid"`
+		IssueID    int64   `json:"issue_id"`
+		Author     string  `json:"author"`
+		Body       string  `json:"body"`
+		CreatedAt  string  `json:"created_at"`
+		Teammate   *string `json:"teammate,omitempty"`
+		ReplyToUID *string `json:"reply_to_uid,omitempty"`
+		ReplyKind  *string `json:"reply_kind,omitempty"`
+		EditedAt   *string `json:"edited_at,omitempty"`
 	}
 	teammateColumn := "NULL"
 	if sourceSchemaVersion >= 27 {
 		teammateColumn = "comments.teammate"
 	}
-	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), ` + teammateColumn + `
+	replyColumns := "NULL, NULL, NULL"
+	if sourceSchemaVersion >= 31 {
+		replyColumns = "comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)"
+	}
+	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), ` + teammateColumn + ", " + replyColumns + `
 	          FROM comments
 	          JOIN issues ON issues.id = comments.issue_id`
 	where, args := issueExportWhere("issues", opts)
@@ -941,7 +948,7 @@ func exportComments(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 	}
 	return scanRecords(rows, KindComment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &rec.Teammate)
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &rec.Teammate, &rec.ReplyToUID, &rec.ReplyKind, &rec.EditedAt)
 		return rec, err
 	})
 }

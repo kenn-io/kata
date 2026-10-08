@@ -39,6 +39,13 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
+	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
+	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},
+	{name: "comment reply federation", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject"}, run: checkCommentReplyFederation},
+	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
+	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
+	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "screen view claims", methods: []string{"ClaimScreenView", "ReleaseScreenView"}, run: checkScreenViewClaims},
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},

@@ -364,6 +364,12 @@ func purgeCascade(
 		issue.ID); err != nil {
 		return 0, fmt.Errorf("detach aggregated event peer refs: %w", err)
 	}
+	// A source reply keeps its original event, payload and portable target UID.
+	// Only the local FK is detached; scoped readers fail closed on the orphan UID.
+	if _, err := c.ExecContext(ctx,
+		`UPDATE events SET related_issue_id = NULL WHERE related_issue_id = ? AND type = 'issue.commented'`, issue.ID); err != nil {
+		return 0, fmt.Errorf("detach reply target issue: %w", err)
+	}
 	if _, err := c.ExecContext(ctx,
 		`DELETE FROM comments WHERE issue_id = ?`, issue.ID); err != nil {
 		return 0, fmt.Errorf("delete comments: %w", err)
@@ -543,7 +549,8 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 // this issue, plus per-link events (issue.linked / issue.unlinked) whose
 // related_issue_id pointed at this issue.
 //
-// Aggregated issue.links_changed events are excluded from the
+// Reply issue.commented events retain their source history and portable target.
+// Aggregated issue.links_changed events are also excluded from the
 // related_issue_id delete path even though iteration-16 sets
 // related_issue_id for single-peer edits. Without that exclusion a
 // `kata edit subject --blocks target` would lose subject's link history
@@ -558,7 +565,7 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 // (issue.created with an initial-link to this issue, issue.links_changed
 // with this issue in a *_uids slice) are likewise PRESERVED.
 func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
-	clause := `(issue_id = ? OR (related_issue_id = ? AND type != 'issue.links_changed'))`
+	clause := `(issue_id = ? OR (related_issue_id = ? AND type NOT IN ('issue.links_changed', 'issue.commented')))`
 	args := []any{issue.ID, issue.ID}
 	return clause, args
 }

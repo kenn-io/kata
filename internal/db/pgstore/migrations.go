@@ -26,6 +26,9 @@ var expiringAssignmentsMigrationSQL string
 //go:embed migrations/000030_issue_status_sync.up.sql
 var issueStatusSyncMigrationSQL string
 
+//go:embed migrations/000031_comment_reply.up.sql
+var commentReplyMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -70,6 +73,7 @@ var migrationAssets = []Migration{
 		Name:        "000030_issue_status_sync.up.sql",
 		SQL:         issueStatusSyncMigrationSQL,
 	},
+	{FromVersion: 30, ToVersion: 31, Name: "000031_comment_reply.up.sql", SQL: commentReplyMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

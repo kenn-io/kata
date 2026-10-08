@@ -227,7 +227,7 @@ func (d *Store) LookupCommentIdempotency(
 		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
 	}
 	comment, err := scanComment(d.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ? AND uid = ?`,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments WHERE issue_id = ? AND uid = ?`,
 		*evt.IssueID, payload.CommentUID,
 	))
 	if errors.Is(err, sql.ErrNoRows) {

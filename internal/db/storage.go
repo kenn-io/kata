@@ -111,6 +111,7 @@ type Storage interface {
 	EditComment(ctx context.Context, p EditCommentParams) (Comment, *Event, bool, error)
 	RewriteAuthorIdentity(ctx context.Context, p RewriteAuthorIdentityParams) (RewriteAuthorIdentityResult, error)
 	CommentBodyByID(ctx context.Context, id int64) (string, error)
+	CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[string]int64, error)
 	CommentsByIssue(ctx context.Context, issueID int64) ([]Comment, error)
 
 	// labels

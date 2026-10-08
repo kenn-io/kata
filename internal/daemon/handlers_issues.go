@@ -947,7 +947,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	allowed, scoped, err := issueScopedAllowedIDSet(ctx, cfg.DB)
+	comments, allowed, scoped, err := projectScopedCommentReplies(ctx, cfg.DB, comments)
 	if err != nil {
 		return nil, err
 	}

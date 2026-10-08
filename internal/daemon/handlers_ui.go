@@ -241,7 +241,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				mergeUISnapshotAuthority(&data, cachedAuthority)
 			}
 			if scopedIssueIDs != nil {
-				filterScopedUISnapshot(&data, scopedIssueIDs, intent.ScopeProjectUID)
+				if err := filterScopedUISnapshot(ctx, cfg.DB, &data, scopedIssueIDs, intent.ScopeProjectUID); err != nil {
+					return nil, internalAPIError(err)
+				}
+				data.Comments, _, _, err = projectScopedCommentReplies(ctx, cfg.DB, data.Comments)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if scopedIssueIDs == nil && !data.AuthorityReused {
 				authorityCache.put(authorityKey, data)
@@ -422,7 +428,13 @@ func applyIssueScopeToUIReferences(
 	return project, issueIDs, nil
 }
 
-func filterScopedUISnapshot(data *db.UISnapshotData, allowedIDs []int64, projectUID string) {
+func filterScopedUISnapshot(
+	ctx context.Context,
+	store db.Storage,
+	data *db.UISnapshotData,
+	allowedIDs []int64,
+	projectUID string,
+) error {
 	allowed := make(map[int64]struct{}, len(allowedIDs))
 	for _, issueID := range allowedIDs {
 		allowed[issueID] = struct{}{}
@@ -468,10 +480,14 @@ func filterScopedUISnapshot(data *db.UISnapshotData, allowedIDs []int64, project
 	data.GraphEdges = edges
 	data.GraphUnresolvedRefs = []db.UIGraphUnresolvedRef{}
 	data.Recurrences = []db.Recurrence{}
+	projectedEvents, visibleEvents, err := projectIssueScopedEvents(ctx, store, data.History, allowed, projectUID)
+	if err != nil {
+		return err
+	}
 	history := make([]db.Event, 0, len(data.History))
-	for _, event := range data.History {
-		if projected, ok := projectIssueScopedEvent(event, allowed, projectUID); ok {
-			history = append(history, projected)
+	for index := range data.History {
+		if visibleEvents[index] {
+			history = append(history, projectedEvents[index])
 		}
 	}
 	data.History = history
@@ -487,6 +503,7 @@ func filterScopedUISnapshot(data *db.UISnapshotData, allowedIDs []int64, project
 		}
 	}
 	data.Projects = projects
+	return nil
 }
 
 func filterScopedUIReferences(data *db.UIReferencesData, projectUID string) {
