@@ -78,3 +78,63 @@ func checkReplyOnlyPurgeAdvancesSnapshotCursor(t *testing.T, store db.Storage) e
 	require.NotContains(t, uiIssueUIDs(after.Issues), targetIssueUID)
 	return nil
 }
+
+func checkImportedCommentPurgeAdvancesSnapshotCursor(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+
+	projectUID, err := uid.New()
+	require.NoError(t, err)
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+	commentUID, err := uid.New()
+	require.NoError(t, err)
+	const importedAt = "2026-01-01T00:00:00.000Z"
+	records := []db.ImportRecord{
+		&db.ProjectExport{
+			ID: 1, UID: projectUID, Name: "spoke-project", CreatedAt: importedAt,
+			Metadata: []byte(`{}`), Revision: 1,
+		},
+		&db.IssueExport{
+			ID: 1, UID: issueUID, ProjectID: 1, ShortID: strings.ToLower(issueUID[len(issueUID)-4:]),
+			Title: "Imported issue", Status: "open", Author: "worker", CreatedAt: importedAt,
+			UpdatedAt: importedAt, Metadata: []byte(`{}`), Revision: 1, ContentRevision: 1,
+		},
+		&db.CommentExport{
+			ID: 1, UID: commentUID, IssueID: 1, Author: "reviewer", Body: "Imported comment",
+			CreatedAt: importedAt,
+		},
+	}
+	require.NoError(t, store.ImportReplay(ctx, records, db.ImportOptions{MergeProject: true}))
+
+	project, err := store.ProjectByUID(ctx, projectUID)
+	require.NoError(t, err)
+	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok, "storage backend must implement db.UIStore")
+	before, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open"})
+	require.NoError(t, err)
+	require.Contains(t, uiIssueUIDs(before.Issues), issueUID)
+
+	log, err := store.PurgeIssue(ctx, issue.ID, "worker", nil)
+	require.NoError(t, err)
+	require.Equal(t, project.ID, log.ProjectID)
+	require.Equal(t, int64(1), log.CommentCount)
+	require.Zero(t, log.EventCount, "the imported issue has no events")
+	require.Nil(t, log.EventsDeletedMinID)
+	require.Nil(t, log.EventsDeletedMaxID)
+
+	afterCursor, err := uiStore.UIEventCursor(ctx)
+	require.NoError(t, err)
+	require.Greater(t, afterCursor, before.Cursor,
+		"purging imported comments must invalidate snapshots even when no events or replies exist")
+	after, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", ReuseAuthorityCursor: &before.Cursor,
+	})
+	require.NoError(t, err)
+	require.False(t, after.AuthorityReused)
+	require.Greater(t, after.Cursor, before.Cursor)
+	require.NotContains(t, uiIssueUIDs(after.Issues), issueUID)
+	return nil
+}

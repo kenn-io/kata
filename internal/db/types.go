@@ -599,10 +599,11 @@ type Evidence struct {
 	IssueRef  string   `json:"issue_ref,omitempty"` // duplicate-of, superseded-by
 }
 
-// PurgeLog mirrors a row in purge_log. Snapshots the issue identity at purge
-// time so audits survive any future project rename. EventsDeletedMinID/MaxID
-// and PurgeResetAfterEventID are nullable: NULL when no events were attached
-// to the purged issue.
+// PurgeLog mirrors a row in purge_log. It snapshots the issue identity at purge
+// time so audits survive any future project rename. Deleted event ranges remain
+// NULL when no events were attached. PurgeResetAfterEventID is populated for
+// every successful issue purge so snapshot readers invalidate cached state;
+// replayed historical purge rows may omit it.
 type PurgeLog struct {
 	ID                     int64     `json:"id"`
 	UID                    string    `json:"uid"`

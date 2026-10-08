@@ -112,7 +112,8 @@ func (s *purgeBeforeReplyLookupStore) CommentIssueIDsByUIDs(
 			return nil, err
 		}
 	}
-	return s.CommentIssueIDsByUIDs(ctx, uids)
+	//lint:ignore QF1008 The embedded storage call avoids recursively dispatching to this test override.
+	return s.Storage.CommentIssueIDsByUIDs(ctx, uids)
 }
 
 type lateReplyTargetFixture struct {
