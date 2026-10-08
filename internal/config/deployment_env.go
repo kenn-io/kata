@@ -34,6 +34,31 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		cfg.Search.Embeddings.Dims = dims
 		cfg.Sources["search_embeddings_dims"] = "KATA_SEARCH_EMBEDDINGS_DIMS"
 	}
+	return applyEmbeddingTextEnv(cfg)
+}
+
+// applyEmbeddingTextEnv overlays the embedding role controls. Affixes are
+// literal provider text, so a set value keeps its whitespace.
+func applyEmbeddingTextEnv(cfg *DaemonConfig) error {
+	for name, field := range map[string]*string{
+		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX": &cfg.Search.Embeddings.DocumentPrefix,
+		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX": &cfg.Search.Embeddings.DocumentSuffix,
+		"KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX":    &cfg.Search.Embeddings.QueryPrefix,
+		"KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX":    &cfg.Search.Embeddings.QuerySuffix,
+	} {
+		if value := os.Getenv(name); strings.TrimSpace(value) != "" {
+			*field = value
+			cfg.Sources[deploymentSourceKey(name)] = name
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS")); value != "" {
+		request, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS must be true or false")
+		}
+		cfg.Search.Embeddings.RequestDimensions = request
+		cfg.Sources["search_embeddings_request_dimensions"] = "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"
+	}
 	return nil
 }
 
