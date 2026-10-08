@@ -77,11 +77,11 @@ func (s *notificationMoveBeforeWriteStore) moveIssue(ctx context.Context, issueI
 	if s.moved || s.toProjectID == 0 {
 		return nil
 	}
-	issue, err := s.Storage.IssueByID(ctx, issueID)
+	issue, err := s.IssueByID(ctx, issueID)
 	if err != nil {
 		return err
 	}
-	_, err = s.Storage.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+	_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: s.toProjectID,
 		IfMatchRev: issue.Revision, Actor: "coordinator",
 	})
