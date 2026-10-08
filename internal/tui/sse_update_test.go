@@ -623,34 +623,6 @@ func FuzzCommentReplyEventRefreshesOpenTargetDetail(f *testing.F) {
 	})
 }
 
-func checkCommentEditEventRefreshesRelatedIssue(t *testing.T, relatedIssueUID string) {
-	t.Helper()
-	m := sseDetailFixture(7, "target", "target-issue")
-	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
-		eventType: "issue.comment_edited", projectID: 7, issueUID: "source-issue",
-		relatedIssueUID: relatedIssueUID,
-	})
-	if relatedIssueUID == "target-issue" {
-		assertDetailRefetchBatch(t, cmd)
-		return
-	}
-	if cmd != nil {
-		t.Fatalf("unrelated issue.comment_edited event must not refresh target detail, got %T", cmd)
-	}
-}
-
-func TestCommentEditEventRefreshesRelatedIssue(t *testing.T) {
-	checkCommentEditEventRefreshesRelatedIssue(t, "target-issue")
-}
-
-func FuzzCommentEditEventRefreshesRelatedIssue(f *testing.F) {
-	f.Add("target-issue")
-	f.Add("other-issue")
-	f.Fuzz(func(t *testing.T, relatedIssueUID string) {
-		checkCommentEditEventRefreshesRelatedIssue(t, relatedIssueUID)
-	})
-}
-
 func TestCommentEditRefreshesDisplayedReplyAndBacklink(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -685,6 +657,37 @@ func TestCommentEditRefreshesDisplayedReplyAndBacklink(t *testing.T) {
 			assertDetailRefetchBatch(t, cmd)
 		})
 	}
+}
+
+func TestCommentEditRefreshesMovedReplyEndpoint(t *testing.T) {
+	checkCommentEditRefreshesMovedReplyEndpoint(t, "moved-target-comment")
+}
+
+func FuzzCommentEditRefreshesMovedReplyEndpoint(f *testing.F) {
+	f.Add("moved-target-comment")
+	f.Fuzz(func(t *testing.T, commentUID string) {
+		checkCommentEditRefreshesMovedReplyEndpoint(t, commentUID)
+	})
+}
+
+func checkCommentEditRefreshesMovedReplyEndpoint(t *testing.T, commentUID string) {
+	t.Helper()
+	m := sseDetailFixture(7, "open", "source-issue")
+	m.scope = scope{allProjects: true}
+	m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+		UID: commentUID, IssueUID: "moved-target-issue", Kind: "confirm",
+	}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.comment_edited", projectID: 8,
+		issueUID: "moved-target-issue", commentUID: commentUID,
+	})
+	if commentUID == "" {
+		if cmd != nil {
+			t.Fatalf("empty comment UID must not refresh detail, got %T", cmd)
+		}
+		return
+	}
+	assertDetailRefetchBatch(t, cmd)
 }
 
 func TestCommentEditIgnoresUnrepresentedComment(t *testing.T) {

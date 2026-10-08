@@ -2572,13 +2572,14 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.detail.issue == nil {
 		return nil
 	}
-	if msg.projectID != m.detail.scopePID {
+	commentMatch := msg.matchesCommentInDetail(m.detail.comments)
+	if msg.projectID != m.detail.scopePID && !(m.scope.allProjects && commentMatch) {
 		return nil
 	}
 	pid := m.detail.scopePID
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) && !msg.matchesCommentInDetail(m.detail.comments) {
+	if !msg.matchesIssue(ref, uid) && !commentMatch {
 		return nil
 	}
 	gen := m.detail.gen
@@ -2607,7 +2608,7 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 	if msg.issueUID != "" && uid != "" && msg.issueUID == uid {
 		return true
 	}
-	if (msg.eventType == "issue.commented" || msg.eventType == "issue.comment_edited") &&
+	if msg.eventType == "issue.commented" &&
 		msg.relatedIssueUID != "" && uid != "" && msg.relatedIssueUID == uid {
 		return true
 	}

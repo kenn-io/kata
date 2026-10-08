@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func checkCommentIdempotencyHeader(t *testing.T, data []byte) {
@@ -83,6 +85,71 @@ func TestCommentTypedReplyCLI(t *testing.T) {
 	agent := runCLI(t, env, dir, "--agent", "show", ref, "--inbound", "--kind", "reply")
 	require.Contains(t, agent, "reply")
 	require.Contains(t, agent, target)
+}
+
+func TestShowInboundDefaultsToAuthenticatedActor(t *testing.T) {
+	checkShowInboundActor(t, "daemon-operator", "workspace-agent")
+}
+
+func FuzzShowInboundDefaultsToAuthenticatedActor(f *testing.F) {
+	f.Add("operator")
+	f.Fuzz(func(t *testing.T, seed string) {
+		if len(seed) > 16 {
+			seed = seed[:16]
+		}
+		authActor := "daemon-" + hex.EncodeToString([]byte(seed))
+		checkShowInboundActor(t, authActor, "workspace-agent")
+	})
+}
+
+func checkShowInboundActor(t *testing.T, authActor, workspaceActor string) {
+	t.Helper()
+	env, dir, pid := setupCLIWorkspaceOptions(t,
+		testenv.WithAuthToken("bootstrap-token"),
+		testenv.WithRequireTokenIdentity(),
+	)
+	const operatorToken = "operator-bearer"
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+		PlaintextToken: operatorToken,
+		Actor:          authActor,
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", operatorToken)
+	t.Setenv("KATA_AUTHOR", workspaceActor)
+	t.Setenv("KATA_TEAMMATE", "")
+	t.Setenv("KATA_INBOX_USER", "")
+
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "Inbound actor", Author: "issue-author",
+	})
+	require.NoError(t, err)
+	operatorRoot, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: authActor, Body: "operator target",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "responder", Body: "operator reply",
+		ReplyToUID: operatorRoot.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	workspaceRoot, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: workspaceActor, Body: "workspace target",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "responder", Body: "workspace reply",
+		ReplyToUID: workspaceRoot.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+
+	out := runCLI(t, env, dir, "--json", "show", issue.ShortID, "--inbound")
+	require.Contains(t, out, "operator reply")
+	require.NotContains(t, out, "workspace reply")
+
+	explicit := runCLI(t, env, dir, "--json", "show", issue.ShortID, "--inbound=workspace-agent")
+	require.Contains(t, explicit, "workspace reply")
+	require.NotContains(t, explicit, "operator reply")
 }
 
 func TestCommentTypedFlagsMutuallyExclusive(t *testing.T) {
