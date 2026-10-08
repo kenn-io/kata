@@ -20,7 +20,13 @@ func eventIssueByUID(ctx context.Context, query eventQueryRower, uid string) (db
 
 func eventIssueByRef(ctx context.Context, query eventQueryRower, projectUID, ref string) (db.Issue, error) {
 	parsed, err := shortid.Parse(ref)
-	if err != nil || parsed.Project == "" && parsed.ShortID == "" {
+	if err != nil {
+		return db.Issue{}, db.ErrNotFound
+	}
+	if parsed.ULID != "" {
+		return eventIssueByUID(ctx, query, parsed.ULID)
+	}
+	if parsed.Project == "" && parsed.ShortID == "" {
 		return db.Issue{}, db.ErrNotFound
 	}
 	projectColumn, projectValue := "p.uid", projectUID
@@ -84,11 +90,37 @@ func authorizedEventPredicate(ctx context.Context, args *[]any) string {
  OR COALESCE(jsonb_typeof(link->'to_issue_uid'),'')<>'string'
  OR NOT EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=link->>'to_issue_uid' AND ` + createdPeers + `))))`
 	closedPeers := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
+	closedEvidencePeers := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
 	predicate += ` AND (e.type<>'issue.closed' OR (
- (COALESCE(e.payload::jsonb->>'parent_uid','')='' AND
-  COALESCE(e.payload::jsonb->>'parent_short_id','')='')
- OR (jsonb_typeof(e.payload::jsonb->'parent_uid')='string' AND
-  EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.payload::jsonb->>'parent_uid' AND ` + closedPeers + `))))`
+	((COALESCE(e.payload::jsonb->>'parent_uid','')='' AND
+	  COALESCE(e.payload::jsonb->>'parent_short_id','')='')
+	 OR (jsonb_typeof(e.payload::jsonb->'parent_uid')='string' AND
+	  EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.payload::jsonb->>'parent_uid' AND ` + closedPeers + `))
+	)
+ AND COALESCE(jsonb_typeof(e.payload::jsonb->'evidence'),'array')='array'
+ AND NOT EXISTS(
+   SELECT 1 FROM jsonb_array_elements(CASE
+     WHEN jsonb_typeof(e.payload::jsonb->'evidence')='array' THEN e.payload::jsonb->'evidence'
+     ELSE '[]'::jsonb END) evidence(value)
+   WHERE jsonb_typeof(evidence.value)<>'object'
+      OR COALESCE(jsonb_typeof(evidence.value->'type'),'')<>'string'
+      OR ((evidence.value->>'type') IN ('duplicate-of','superseded-by') AND (
+          COALESCE(jsonb_typeof(evidence.value->'issue_ref'),'')<>'string'
+          OR COALESCE(evidence.value->>'issue_ref','')=''
+          OR NOT EXISTS(SELECT 1 FROM issues endpoint
+                        JOIN projects endpoint_project ON endpoint_project.id=endpoint.project_id
+                        WHERE (endpoint.uid=upper(evidence.value->>'issue_ref')
+                           OR (endpoint.short_id=CASE
+                                 WHEN position('#' in evidence.value->>'issue_ref')=0
+                                 THEN evidence.value->>'issue_ref'
+                                 ELSE substring(evidence.value->>'issue_ref' from position('#' in evidence.value->>'issue_ref')+1)
+                               END
+                               AND endpoint_project.uid=CASE
+                                 WHEN position('#' in evidence.value->>'issue_ref')=0 THEN p.uid
+                                 ELSE (SELECT ref_project.uid FROM projects ref_project
+                                       WHERE ref_project.name=substring(evidence.value->>'issue_ref' from 1 for position('#' in evidence.value->>'issue_ref')-1))
+                               END))
+                          AND ` + closedEvidencePeers + `))))))`
 	return predicate
 }
 
@@ -103,7 +135,7 @@ func authorizedEventStreamPredicate(ctx context.Context, args *[]any) string {
 	subject := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
 	visibleSubject := source + " AND (e.issue_uid IS NULL OR EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.issue_uid AND " + subject + "))"
 	departure := authorizedProjectPredicate(ctx, "(e.payload::jsonb->>'from_project_uid')", args)
-	return "(" + visibleSubject + ") OR (e.type='issue.moved' AND e.issue_uid IS NOT NULL AND " + departure + ")"
+	return "((" + visibleSubject + ") OR (e.type='issue.moved' AND e.issue_uid IS NOT NULL AND " + departure + "))"
 }
 
 // authorizeRelationshipQuery intersects every referenced link endpoint before

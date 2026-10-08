@@ -137,6 +137,38 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	)
 	require.NoError(t, err)
 	require.Len(t, visibleCloseEvents, 1)
+	closedWithHiddenUIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visibleProject.ID, Title: "Close evidence with restricted UID", Author: "member",
+	})
+	require.NoError(t, err)
+	_, hiddenUIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithHiddenUIDEvidence.ID,
+		"done", "member", "Completed task.", []db.Evidence{{Type: "duplicate-of", IssueRef: hiddenPeer.UID}})
+	require.NoError(t, err)
+	require.Len(t, hiddenUIDEvidenceEvents, 1)
+	closedWithHiddenShortIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visibleProject.ID, Title: "Close evidence with restricted short ID", Author: "member",
+	})
+	require.NoError(t, err)
+	_, hiddenShortIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithHiddenShortIDEvidence.ID,
+		"done", "member", "Completed task.", []db.Evidence{{Type: "superseded-by", IssueRef: hiddenProject.Name + "#" + hiddenPeer.ShortID}})
+	require.NoError(t, err)
+	require.Len(t, hiddenShortIDEvidenceEvents, 1)
+	closedWithVisibleEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visibleProject.ID, Title: "Close evidence with visible short ID", Author: "member",
+	})
+	require.NoError(t, err)
+	_, visibleEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithVisibleEvidence.ID,
+		"done", "member", "Completed task.", []db.Evidence{{Type: "duplicate-of", IssueRef: visiblePeer.ShortID}})
+	require.NoError(t, err)
+	require.Len(t, visibleEvidenceEvents, 1)
+	closedWithVisibleUIDEvidence, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visibleProject.ID, Title: "Close evidence with visible UID", Author: "member",
+	})
+	require.NoError(t, err)
+	_, visibleUIDEvidenceEvents, _, err := store.CloseIssueWithEvents(ctx, closedWithVisibleUIDEvidence.ID,
+		"done", "member", "Completed task.", []db.Evidence{{Type: "superseded-by", IssueRef: visiblePeer.UID}})
+	require.NoError(t, err)
+	require.Len(t, visibleUIDEvidenceEvents, 1)
 	hiddenReference := hiddenProject.Name + "#" + hiddenPeer.ShortID
 	throttledEvent, err := store.InsertCloseThrottledEvent(ctx, closedWithVisibleParent.ID, "member", db.CloseThrottledPayload{
 		Reason: db.CloseThrottleReasonSiblingBurst,
@@ -151,22 +183,28 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		hiddenCreateEvent.UID,
 		hiddenSnapshot.EventUID,
 		hiddenCloseEvents[0].UID,
+		hiddenUIDEvidenceEvents[0].UID,
+		hiddenShortIDEvidenceEvents[0].UID,
 		throttledEvent.UID,
 	}
 	visibleUIDs := []string{
 		visibleCreateEvent.UID,
 		visibleSnapshot.EventUID,
 		visibleCloseEvents[0].UID,
+		visibleEvidenceEvents[0].UID,
+		visibleUIDEvidenceEvents[0].UID,
 	}
 
 	after, err := store.EventsAfter(scoped, db.EventsAfterParams{AfterID: 0, Limit: 1000})
 	require.NoError(t, err)
 	assertVisibleEventUIDs(t, after, hiddenUIDs, visibleUIDs)
 	resetEventIDs := map[int64]struct{}{
-		hiddenCreateEvent.ID:     {},
-		hiddenSnapshotRows[0].ID: {},
-		hiddenCloseEvents[0].ID:  {},
-		throttledEvent.ID:        {},
+		hiddenCreateEvent.ID:              {},
+		hiddenSnapshotRows[0].ID:          {},
+		hiddenCloseEvents[0].ID:           {},
+		hiddenUIDEvidenceEvents[0].ID:     {},
+		hiddenShortIDEvidenceEvents[0].ID: {},
+		throttledEvent.ID:                 {},
 	}
 	for _, event := range after {
 		if _, expected := resetEventIDs[event.ID]; !expected {
@@ -180,6 +218,31 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		delete(resetEventIDs, event.ID)
 	}
 	assert.Empty(t, resetEventIDs, "each visible mutation with a hidden reference needs a reset cursor")
+	departureIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visibleProject.ID, Title: "Moved away from scoped project", Author: "member",
+	})
+	require.NoError(t, err)
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: departureIssue.ID, FromProjectID: visibleProject.ID, ToProjectID: hiddenProject.ID,
+		IfMatchRev: departureIssue.Revision, Actor: "member",
+	})
+	require.NoError(t, err)
+	pageAfterDeparture, err := store.EventsAfter(scoped, db.EventsAfterParams{
+		AfterID: moved.EventID, ProjectID: visibleProject.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	for _, event := range pageAfterDeparture {
+		assert.NotEqual(t, moved.EventID, event.ID,
+			"a departure reset must not bypass the cursor that already includes it")
+	}
+	pageBeforeDeparture, err := store.EventsAfter(scoped, db.EventsAfterParams{
+		AfterID: 0, ThroughID: moved.EventID - 1, ProjectID: visibleProject.ID, Limit: 1000,
+	})
+	require.NoError(t, err)
+	for _, event := range pageBeforeDeparture {
+		assert.NotEqual(t, moved.EventID, event.ID,
+			"a departure reset must not bypass the upper event cursor")
+	}
 	for _, event := range after {
 		assert.Equal(t, visibleProject.UID, event.ProjectUID,
 			"cross-project feeds must retain their project boundary")
@@ -201,6 +264,10 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		{issue: createdWithHiddenLink, hiddenUID: []string{hiddenCreateEvent.UID, hiddenSnapshot.EventUID}},
 		{issue: createdWithVisibleLink, visible: []string{visibleCreateEvent.UID, visibleSnapshot.EventUID}},
 		{issue: closedWithHiddenParent, hiddenUID: []string{hiddenCloseEvents[0].UID}},
+		{issue: closedWithHiddenUIDEvidence, hiddenUID: []string{hiddenUIDEvidenceEvents[0].UID}},
+		{issue: closedWithHiddenShortIDEvidence, hiddenUID: []string{hiddenShortIDEvidenceEvents[0].UID}},
+		{issue: closedWithVisibleEvidence, visible: []string{visibleEvidenceEvents[0].UID}},
+		{issue: closedWithVisibleUIDEvidence, visible: []string{visibleUIDEvidenceEvents[0].UID}},
 		{issue: closedWithVisibleParent, hiddenUID: []string{throttledEvent.UID}, visible: []string{visibleCloseEvents[0].UID}},
 	} {
 		snapshot, err := ui.ReadUISnapshot(scoped, db.UISnapshotQuery{

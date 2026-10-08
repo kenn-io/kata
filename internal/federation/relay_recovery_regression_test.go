@@ -61,6 +61,18 @@ func TestRelayMembershipRegrantCatchup(t *testing.T) {
 			require.NoError(t, err)
 			_, err = root.store.AuthorizeFederationToken(t.Context(), personal.credential.Token, root.project.ID, "pull")
 			require.NoError(t, err, "the original credential is live again on the root")
+			oldPin, err := root.store.RootAuthority(t.Context(), root.project.UID)
+			require.NoError(t, err)
+			nextPublic, nextPrivate, err := ed25519.GenerateKey(nil)
+			require.NoError(t, err)
+			nextPin := db.RootKeyPin{
+				ProjectUID: root.project.UID, AuthorityUID: oldPin.AuthorityUID,
+				KeyID: db.RootPublicKeyID(nextPublic), PublicKey: nextPublic,
+			}
+			transition, err := db.SignRootKeyTransition(oldPin, nextPin, root.signer.PrivateKey)
+			require.NoError(t, err)
+			require.NoError(t, root.store.RotateRootAuthority(t.Context(), transition))
+			root.signer.PrivateKey = nextPrivate
 			personalIssue, _, err := personal.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: personal.project.ID, Title: "Offline task", Author: personal.account})
 			require.NoError(t, err)
 			err = federation.SyncFederationOnce(t.Context(), personal.store, binding, personal.credential)

@@ -119,16 +119,30 @@ func EventRequiresProjectScopeReset(
 		return checkUIDs(uids)
 	case "issue.closed":
 		var payload struct {
-			ParentUID     *string `json:"parent_uid"`
-			ParentShortID *string `json:"parent_short_id"`
+			ParentUID     *string    `json:"parent_uid"`
+			ParentShortID *string    `json:"parent_short_id"`
+			Evidence      []Evidence `json:"evidence"`
 		}
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil
 		}
 		if payload.ParentUID == nil || *payload.ParentUID == "" {
-			return payload.ParentShortID != nil && *payload.ParentShortID != "", nil
+			if payload.ParentShortID != nil && *payload.ParentShortID != "" {
+				return true, nil
+			}
+		} else {
+			private, err := issueIsPrivate(*payload.ParentUID)
+			if err != nil || private {
+				return private, err
+			}
 		}
-		return issueIsPrivate(*payload.ParentUID)
+		refs := make([]string, 0, len(payload.Evidence))
+		for _, evidence := range payload.Evidence {
+			if evidence.Type == "duplicate-of" || evidence.Type == "superseded-by" {
+				refs = append(refs, evidence.IssueRef)
+			}
+		}
+		return checkRefs(refs)
 	case "issue.links_changed":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {

@@ -205,7 +205,7 @@ var storageScenarios = []scenario{
 	{
 		name: "event reference project scope",
 		methods: []string{
-			"CloseIssueWithEvents", "CreateIssue", "CreateLink", "CreateProject", "EventsAfter",
+			"CloseIssueWithEvents", "CreateIssue", "CreateLink", "CreateProject", "EventsAfter", "MoveIssueProject",
 			"EventsInWindow", "InsertCloseThrottledEvent", "InsertRemoteEvent",
 		},
 		run: func(t *testing.T, store db.Storage) error {

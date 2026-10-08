@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -94,6 +95,80 @@ func TestEmbeddingProducerStatusScope(t *testing.T) {
 		require.NotContains(t, string(body), f.issue.UID)
 		require.NotContains(t, string(body), store.InstanceUID())
 		require.Zero(t, calls.Load())
+	})
+}
+
+// Retained artifacts can outlive an issue's move. They must not fill the
+// bounded status page or turn a healthy federation status response into 500.
+func TestEmbeddingProducerStatusSkipsMovedArtifactsBeforeLimit(t *testing.T) {
+	embeddingStatusBackends(t, func(t *testing.T, store db.Storage) {
+		ctx := t.Context()
+		f := newProjectAccessFixture(t, store)
+		destination, err := store.CreateProject(ctx, "artifact-destination")
+		require.NoError(t, err)
+		validIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: f.private.ID, Title: "Current artifact issue", Author: "member",
+		})
+		require.NoError(t, err)
+		client, err := embedding.New(embedding.Config{BaseURL: "https://embedder.example", Model: "example-model", Dims: 2})
+		require.NoError(t, err)
+		issues := []db.Issue{f.issue, validIssue}
+		artifacts := make([]embedding.EmbeddingArtifact, len(issues))
+		for i, issue := range issues {
+			identity, err := client.ArtifactIdentity(f.private.UID, issue.UID, store.InstanceUID())
+			require.NoError(t, err)
+			vector := []float32{1, float32(i + 1)}
+			artifacts[i], err = embedding.NewArtifact(identity, embedding.EmbedText(issue.Title, issue.Body), [][]float32{vector})
+			require.NoError(t, err)
+		}
+		require.NotEqual(t, artifacts[0].Digest, artifacts[1].Digest)
+		staleIndex, validIndex := 0, 1
+		if artifacts[1].Digest < artifacts[0].Digest {
+			staleIndex, validIndex = 1, 0
+		}
+		artifactStore := store.(db.EmbeddingArtifactStorage)
+		for _, artifact := range artifacts {
+			durable, err := artifactStore.RetainEmbeddingArtifact(ctx, artifact)
+			require.NoError(t, err)
+			require.True(t, durable)
+		}
+		staleIssue := issues[staleIndex]
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: staleIssue.ID, FromProjectID: f.private.ID, ToProjectID: destination.ID,
+			IfMatchRev: staleIssue.Revision, Actor: "owner",
+		})
+		require.NoError(t, err)
+		manifests, err := artifactStore.EmbeddingArtifactManifests(ctx, f.private.UID, 1)
+		require.NoError(t, err)
+		if assert.Len(t, manifests, 1) {
+			assert.Equal(t, artifacts[validIndex].Digest, manifests[0].Digest,
+				"a stale manifest must not consume the bounded status page")
+		}
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: f.private.ID, Role: db.FederationRoleHub,
+			HubProjectID: f.private.ID, HubProjectUID: f.private.UID, Enabled: true,
+		})
+		require.NoError(t, err)
+		code, _, body := f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/federation/status", f.private.ID), "member", nil, nil)
+		assert.Equal(t, http.StatusOK, code, string(body))
+		if code == http.StatusOK {
+			var response struct {
+				Statuses []struct {
+					Embedding *struct {
+						Artifacts []struct {
+							Digest string `json:"digest"`
+						} `json:"artifacts"`
+					} `json:"embedding"`
+				} `json:"statuses"`
+			}
+			require.NoError(t, json.Unmarshal(body, &response))
+			require.Len(t, response.Statuses, 1)
+			require.NotNil(t, response.Statuses[0].Embedding)
+			assert.Len(t, response.Statuses[0].Embedding.Artifacts, 1)
+			assert.Equal(t, artifacts[validIndex].Digest, response.Statuses[0].Embedding.Artifacts[0].Digest)
+			assert.NotContains(t, string(body), artifacts[staleIndex].Digest)
+		}
 	})
 }
 

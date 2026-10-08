@@ -41,18 +41,11 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	if err != nil {
 		return err
 	}
-	for _, transition := range transitions {
-		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-			return err
-		}
-		if err := store.RotateRootAuthority(ctx, transition); err != nil {
-			return err
-		}
-	}
+	recoveredRevocation := false
 	if c.UpstreamRevoked {
-		// Only the existing authenticated, origin-pinned metadata exchange
-		// can resume a regranted hop; downstream admission remains closed
-		// until its exact project, peer, path and root pin have been verified.
+		// Validate the complete signed transition chain before reopening the
+		// recovered hop. The expected config keeps a concurrent operator change
+		// or policy update from being overwritten during this recovery.
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
@@ -63,6 +56,25 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 			return err
 		}
 		c = binding.RelayConfig
+		recoveredRevocation = true
+	}
+	for _, transition := range transitions {
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
+		if err := store.RotateRootAuthority(ctx, transition); err != nil {
+			if recoveredRevocation {
+				revoked := *c
+				revoked.UpstreamRevoked = true
+				if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+					return errors.Join(err, leaseErr)
+				}
+				if _, restoreErr := store.SetRelayBindingConfig(ctx, binding.ProjectID, revoked, *c); restoreErr != nil {
+					return errors.Join(err, restoreErr)
+				}
+			}
+			return err
+		}
 	}
 	// Projection installation may commit before the first new-epoch request
 	// reaches the upstream. Resume that namespace instead of fetching another

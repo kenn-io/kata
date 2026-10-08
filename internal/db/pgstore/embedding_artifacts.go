@@ -167,7 +167,11 @@ func (d *Store) EmbeddingArtifactManifests(ctx context.Context, projectUID strin
 	manifests := []embedding.ArtifactManifest{}
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		manifests = []embedding.ArtifactManifest{}
-		rows, err := tx.QueryContext(ctx, `SELECT a.manifest FROM federation_embedding_artifacts a JOIN projects p ON p.uid=a.project_uid WHERE a.project_uid=$1 AND a.staging_expires_at IS NULL AND p.deleted_at IS NULL ORDER BY a.digest LIMIT $2`, projectUID, limit)
+		rows, err := tx.QueryContext(ctx, `SELECT a.manifest FROM federation_embedding_artifacts a
+			JOIN projects p ON p.uid=a.project_uid
+			JOIN issues i ON i.uid=a.issue_uid AND i.project_id=p.id
+			WHERE a.project_uid=$1 AND a.staging_expires_at IS NULL AND p.deleted_at IS NULL AND i.deleted_at IS NULL
+			ORDER BY a.digest LIMIT $2`, projectUID, limit)
 		if err != nil {
 			return err
 		}

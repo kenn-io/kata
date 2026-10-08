@@ -70,7 +70,7 @@ func federationEmbeddingStatus(ctx context.Context, cfg ServerConfig, project db
 			return nil, err
 		}
 		if issue.ProjectID != project.ID {
-			return nil, db.ErrFederationIngestValidation
+			continue
 		}
 		artifact := api.FederationEmbeddingArtifactStatus{IssueUID: manifest.IssueUID, Digest: manifest.Digest, State: "reused"}
 		if manifest.ProducerInstanceUID == cfg.DB.InstanceUID() {

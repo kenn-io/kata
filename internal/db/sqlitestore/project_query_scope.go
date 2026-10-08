@@ -21,7 +21,13 @@ func eventIssueByUID(ctx context.Context, query eventQueryRower, uid string) (db
 
 func eventIssueByRef(ctx context.Context, query eventQueryRower, projectUID, ref string) (db.Issue, error) {
 	parsed, err := shortid.Parse(ref)
-	if err != nil || parsed.Project == "" && parsed.ShortID == "" {
+	if err != nil {
+		return db.Issue{}, db.ErrNotFound
+	}
+	if parsed.ULID != "" {
+		return eventIssueByUID(ctx, query, parsed.ULID)
+	}
+	if parsed.Project == "" && parsed.ShortID == "" {
 		return db.Issue{}, db.ErrNotFound
 	}
 	projectColumn, projectValue := "p.uid", projectUID
@@ -87,11 +93,44 @@ func authorizedEventPredicate(ctx context.Context, args *[]any) string {
  OR NOT EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=json_extract(
    CASE WHEN link.type='object' THEN link.value ELSE '{}' END,'$.to_issue_uid') AND ` + createdPeers + `))))`
 	closedPeers := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
+	closedEvidencePeers := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
 	predicate += ` AND (e.type<>'issue.closed' OR (
- (COALESCE(json_extract(e.payload,'$.parent_uid'),'')='' AND
-  COALESCE(json_extract(e.payload,'$.parent_short_id'),'')='')
- OR (COALESCE(json_type(e.payload,'$.parent_uid'),'')='text' AND
-  EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=json_extract(e.payload,'$.parent_uid') AND ` + closedPeers + `))))`
+	((COALESCE(json_extract(e.payload,'$.parent_uid'),'')='' AND
+	  COALESCE(json_extract(e.payload,'$.parent_short_id'),'')='')
+	 OR (COALESCE(json_type(e.payload,'$.parent_uid'),'')='text' AND
+	  EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=json_extract(e.payload,'$.parent_uid') AND ` + closedPeers + `))
+	)
+ AND COALESCE(json_type(e.payload,'$.evidence'),'array')='array'
+ AND NOT EXISTS(
+   SELECT 1 FROM (
+     SELECT item.type AS item_type,
+            CASE WHEN item.type='object' THEN json_type(item.value,'$.type') END AS type_type,
+            CASE WHEN item.type='object' THEN json_extract(item.value,'$.type') END AS evidence_type,
+            CASE WHEN item.type='object' THEN json_type(item.value,'$.issue_ref') END AS ref_type,
+            CASE WHEN item.type='object' THEN json_extract(item.value,'$.issue_ref') END AS issue_ref
+     FROM json_each(
+       CASE WHEN json_type(e.payload,'$.evidence')='array' THEN e.payload ELSE '{"evidence":[]}' END,
+       '$.evidence'
+     ) item
+   ) evidence
+   WHERE evidence.item_type<>'object'
+      OR COALESCE(evidence.type_type,'')<>'text'
+      OR (evidence.evidence_type IN ('duplicate-of','superseded-by') AND (
+          COALESCE(evidence.ref_type,'')<>'text'
+          OR COALESCE(evidence.issue_ref,'')=''
+          OR NOT EXISTS(SELECT 1 FROM issues endpoint
+                        JOIN projects endpoint_project ON endpoint_project.id=endpoint.project_id
+                        WHERE (endpoint.uid=upper(evidence.issue_ref)
+                           OR (endpoint.short_id=CASE
+                                 WHEN instr(evidence.issue_ref,'#')=0 THEN evidence.issue_ref
+                                 ELSE substr(evidence.issue_ref,instr(evidence.issue_ref,'#')+1)
+                               END
+                               AND endpoint_project.uid=CASE
+                                 WHEN instr(evidence.issue_ref,'#')=0 THEN p.uid
+                                 ELSE (SELECT ref_project.uid FROM projects ref_project
+                                       WHERE ref_project.name=substr(evidence.issue_ref,1,instr(evidence.issue_ref,'#')-1))
+                               END))
+                          AND ` + closedEvidencePeers + `))))))`
 	return predicate
 }
 
@@ -106,7 +145,7 @@ func authorizedEventStreamPredicate(ctx context.Context, args *[]any) string {
 	subject := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
 	visibleSubject := source + " AND (e.issue_uid IS NULL OR EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.issue_uid AND " + subject + "))"
 	departure := authorizedProjectPredicate(ctx, "json_extract(e.payload,'$.from_project_uid')", args)
-	return "(" + visibleSubject + ") OR (e.type='issue.moved' AND e.issue_uid IS NOT NULL AND " + departure + ")"
+	return "((" + visibleSubject + ") OR (e.type='issue.moved' AND e.issue_uid IS NOT NULL AND " + departure + "))"
 }
 
 var sqliteNumberedParameter = regexp.MustCompile(`\?[0-9]+`)
