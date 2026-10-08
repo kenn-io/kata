@@ -46,6 +46,12 @@ func projectIssueScopedEvents(
 			continue
 		}
 		replyByIndex[index] = replyProjection{targetUID: targetUID, originalPayload: event.Payload}
+		if event.RelatedIssueID != nil {
+			// Event selection captured this endpoint while it was in scope. Keep
+			// it in the response fence even if the comment lookup below loses a
+			// race with purge and cannot restore the reply payload fields.
+			db.RecordIssueScopeTarget(ctx, *event.RelatedIssueID)
+		}
 		if _, exists := seenReplyUIDs[targetUID]; exists {
 			continue
 		}

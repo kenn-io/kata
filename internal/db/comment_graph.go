@@ -50,7 +50,7 @@ func ReadCommentGraphTx(
 	query CommentGraphQuery,
 	bind func(int) string,
 	parseTime func(string) (time.Time, error),
-	commentUIDExpr string,
+	replyTargetUIDExpr string,
 ) (CommentGraphData, error) {
 	data := CommentGraphData{
 		Comments:             []CommentGraphRecord{},
@@ -111,7 +111,7 @@ func ReadCommentGraphTx(
 			if cached.Status == "pending" {
 				// Imported snapshot comments may not have their own create event;
 				// a later reply to the same target can still prove it was purged.
-				removed, err := commentGraphPurgedTargetEvidence(ctx, tx, record.Comment.UID, bind, commentUIDExpr)
+				removed, err := commentGraphPurgedTargetEvidence(ctx, tx, targetUID, bind, replyTargetUIDExpr)
 				if err != nil {
 					return data, err
 				}
@@ -160,7 +160,7 @@ func ReadCommentGraphTx(
 			return data, err
 		}
 		if status == "" {
-			removed, err := commentGraphPurgedTargetEvidence(ctx, tx, record.Comment.UID, bind, commentUIDExpr)
+			removed, err := commentGraphPurgedTargetEvidence(ctx, tx, targetUID, bind, replyTargetUIDExpr)
 			if err != nil {
 				return data, err
 			}
@@ -178,14 +178,14 @@ func ReadCommentGraphTx(
 func commentGraphPurgedTargetEvidence(
 	ctx context.Context,
 	tx *sql.Tx,
-	commentUID string,
+	targetCommentUID string,
 	bind func(int) string,
-	commentUIDExpr string,
+	replyTargetUIDExpr string,
 ) (bool, error) {
 	var removed bool
 	err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+commentUIDExpr+"="+bind(1)+")",
-		commentUID,
+		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+replyTargetUIDExpr+"="+bind(1)+")",
+		targetCommentUID,
 	).Scan(&removed)
 	return removed, err
 }

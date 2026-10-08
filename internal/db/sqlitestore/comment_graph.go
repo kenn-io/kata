@@ -44,7 +44,7 @@ func (d *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 	data, err := db.ReadCommentGraphTx(ctx, tx, query,
 		func(int) string { return "?" },
 		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-		`json_extract(e.payload,'$.comment_uid')`,
+		`json_extract(e.payload,'$.reply_to_uid')`,
 	)
 	if err != nil {
 		return data, err

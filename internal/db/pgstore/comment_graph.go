@@ -42,7 +42,7 @@ func (s *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 	}
 
 	data, err := db.ReadCommentGraphTx(ctx, tx, query, func(n int) string { return "$" + strconv.Itoa(n) },
-		parseStoredTime, `(e.payload::jsonb->>'comment_uid')`)
+		parseStoredTime, `(e.payload::jsonb->>'reply_to_uid')`)
 	if err != nil {
 		return data, err
 	}

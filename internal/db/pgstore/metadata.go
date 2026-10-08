@@ -47,6 +47,15 @@ func (s *Store) patchIssueMetadata(
 		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
+		input.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, input.Patch)
+		if err != nil {
+			return err
+		}
+		for key, raw := range input.Patch {
+			if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+				return fmt.Errorf("validate %q: %w", key, err)
+			}
+		}
 		if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), input.Patch, input.Guard); err != nil {
 			return err
 		}
