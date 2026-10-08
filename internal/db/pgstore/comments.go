@@ -40,6 +40,11 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return fmt.Errorf("generate comment uid: %w", err)
 		}
+		localParams := params
+		localParams.Author = effectiveActor
+		if err := validateLocalCommentReplyTx(ctx, tx, commentUID, localParams, issue); err != nil {
+			return err
+		}
 		createdAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
 			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind)
@@ -90,6 +95,9 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			}
 		}
 		event, err = s.insertEventTx(ctx, tx, input)
+		// Comment-create metadata seam: issue, project, localParams, comment
+		// and event are available before this transaction commits. Additional
+		// metadata events must be returned and published as a committed batch.
 		return err
 	})
 	return comment, event, err

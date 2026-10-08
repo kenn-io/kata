@@ -2042,6 +2042,102 @@ describe('App', () => {
     expect(keys[1]).toBe(keys[0])
   })
 
+  it('retries a typed reply with the same key and changes the key for force', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    const targetUID = '01J00000000000000000000009'
+    const accepted = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [
+          {
+            id: 9,
+            uid: targetUID,
+            handle: 'c:000009',
+            issue_uid: base.collection[0]!.uid,
+            author: 'finder',
+            body: 'Finding',
+            created_at: '2026-08-01T12:00:00Z',
+          },
+        ],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    const requests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        if (request.method === 'POST' && new URL(request.url).pathname.endsWith('/comments')) {
+          requests.push(request)
+          if (requests.length === 1) return new Response('', { status: 502 })
+          if (requests.length === 2)
+            return Response.json(
+              {
+                error: {
+                  code: 'duplicate_reply',
+                  message: 'a reply of this kind already exists (c:000010)',
+                },
+              },
+              { status: 409 },
+            )
+          return Response.json({
+            issue: base.collection[0],
+            comment: {
+              uid: '01J00000000000000000000010',
+              author: 'worker',
+              body: 'Answer',
+              created_at: '2026-08-01T12:00:01Z',
+            },
+            changed: false,
+            event: null,
+          })
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-typed"' } })
+      }),
+    )
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Reply' }))
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Reply evidence' }), {
+      target: { value: 'Answer' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    const send = screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement
+    await waitFor(() => expect(send.disabled).toBe(false))
+    await fireEvent.click(send)
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Send another reply' }))
+    await waitFor(() => expect(requests).toHaveLength(3))
+    const keys = requests.map((r) => r.headers.get('Idempotency-Key'))
+    expect(keys[0]).toBeTruthy()
+    expect(keys[1]).toBe(keys[0])
+    expect(keys[2]).not.toBe(keys[0])
+    expect(await requests[0]!.json()).toMatchObject({
+      body: 'Answer',
+      reply_to: targetUID,
+      kind: 'reply',
+      force: false,
+    })
+    expect(await requests[2]!.json()).toMatchObject({
+      reply_to: targetUID,
+      kind: 'reply',
+      force: true,
+    })
+  })
+
   it('preserves a comment draft during transparent session renewal', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
     sessionStorage.setItem(

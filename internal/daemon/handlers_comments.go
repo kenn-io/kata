@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
@@ -76,7 +77,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			if match != nil {
-				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body, handle)
+				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body, handle, in.Body.ReplyTo, in.Body.Kind)
 			}
 		}
 		if !resolved {
@@ -85,18 +86,77 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
+		replyUID := ""
+		if (in.Body.ReplyTo == "") != (in.Body.Kind == "") || (in.Body.Kind != "" && !commentref.ValidKind(in.Body.Kind)) {
+			return nil, api.NewError(400, "validation", "reply_to and a valid kind must be supplied together", "", nil)
+		}
+		if in.Body.ReplyTo != "" {
+			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			target, err := commentref.Resolve(records, issue.UID, in.Body.ReplyTo, project.Name)
+			if err != nil {
+				return nil, commentReferenceError(err)
+			}
+			targetIssue, err := cfg.DB.IssueByID(ctx, target.IssueID)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			if err := authorizeIssueScopedIssue(ctx, cfg.DB, targetIssue); err != nil {
+				return nil, err
+			}
+			replyUID = target.UID
+		}
 		if in.IdempotencyKey != "" {
-			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body, handle)
+			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body, handle, replyUID, in.Body.Kind)
 		}
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
-			IssueID:                issue.ID,
-			Author:                 actor,
-			Teammate:               handle,
-			Body:                   in.Body.Body,
+			IssueID:    issue.ID,
+			Author:     actor,
+			Teammate:   handle,
+			Body:       in.Body.Body,
+			ReplyToUID: replyUID, ReplyKind: in.Body.Kind, ValidateReply: true, Force: in.Body.Force,
 			IdempotencyKey:         in.IdempotencyKey,
 			IdempotencyFingerprint: fingerprint,
 		})
 		if err != nil {
+			if duplicate, ok := errors.AsType[*db.DuplicateCommentReplyError](err); ok {
+				data := map[string]any{}
+				const duplicateMessage = "a reply of this kind already exists for this author and teammate"
+				message := duplicateMessage
+				records, readErr := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+				if readErr != nil {
+					return nil, readErr
+				}
+				for _, r := range records {
+					if r.UID == duplicate.Comment.UID {
+						db.RecordIssueScopeTarget(ctx, r.IssueID)
+						h := r.Handle
+						if r.IssueUID != issue.UID {
+							h = r.IssueShortID + ":" + strings.TrimPrefix(h, "c:")
+						}
+						data["existing_handle"] = h
+						data["existing_uid"] = r.UID
+						message = duplicateMessage + " (" + h + ")"
+						break
+					}
+				}
+				return nil, api.NewError(409, "duplicate_reply", message, "use --force to create another reply", data)
+			}
+			if errors.Is(err, db.ErrCommentReplyInvalid) {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			}
+			if errors.Is(err, db.ErrCommentReplyTarget) {
+				return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
+			}
+			if errors.Is(err, db.ErrCommentReplyClosed) {
+				return nil, api.NewError(409, "issue_closed", "reopen the reply issue before adding a typed reply", "", nil)
+			}
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
@@ -139,12 +199,31 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		commentUID := in.CommentRef
+		if !uid.Valid(commentUID) {
+			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			resolved, err := commentref.Resolve(records, issue.UID, commentUID, project.Name)
+			if err != nil {
+				return nil, commentReferenceError(err)
+			}
+			if resolved.IssueID != issue.ID {
+				return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
+			}
+			commentUID = resolved.UID
+		}
 		// Comment creation has always sat outside the federation claim gate;
 		// comment edits follow that model so redaction remains a comment-level
 		// maintenance action rather than leased issue work.
 		c, evt, changed, err := cfg.DB.EditComment(ctx, db.EditCommentParams{
 			IssueID:    issue.ID,
-			CommentUID: in.CommentRef,
+			CommentUID: strings.ToUpper(commentUID),
 			Actor:      actor,
 			Body:       in.Body.Body,
 		})
@@ -196,6 +275,7 @@ func replayComment(
 	routeProjectID int64,
 	match *db.CommentIdempotencyMatch,
 	actor, body, teammate string,
+	links ...string,
 ) (*api.CommentResponse, error) {
 	current, err := cfg.DB.IssueByID(ctx, match.Comment.IssueID)
 	if err != nil {
@@ -205,7 +285,8 @@ func replayComment(
 		(routeProjectID != match.Event.ProjectID && routeProjectID != current.ProjectID) {
 		return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 	}
-	if _, err := activeProjectByID(ctx, cfg.DB, current.ProjectID); err != nil {
+	currentProject, err := activeProjectByID(ctx, cfg.DB, current.ProjectID)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
@@ -214,7 +295,37 @@ func replayComment(
 	if err := authorizeIssueScopedIssue(ctx, cfg.DB, current); err != nil {
 		return nil, err
 	}
-	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate) {
+	replyUID, kind := "", ""
+	if len(links) > 0 {
+		input := links[0]
+		kind = links[1]
+		if input != "" {
+			parsed, parseErr := commentref.Parse(input)
+			same := parseErr == nil && match.Comment.ReplyToUID != ""
+			if same && parsed.UID != "" {
+				same = strings.EqualFold(parsed.UID, match.Comment.ReplyToUID)
+			} else if same {
+				same = strings.HasSuffix(strings.ToLower(match.Comment.ReplyToUID), parsed.Suffix)
+				targetIssueUID := match.IssueUID
+				if match.Event.RelatedIssueUID != nil {
+					targetIssueUID = *match.Event.RelatedIssueUID
+				}
+				if parsed.IssueRef != "" {
+					same = same && strings.HasSuffix(strings.ToLower(targetIssueUID), parsed.IssueRef)
+				} else {
+					same = same && targetIssueUID == match.IssueUID
+				}
+				if parsed.Project != "" {
+					same = same && (parsed.Project == match.Event.ProjectName || parsed.Project == currentProject.Name)
+				}
+			}
+			if !same {
+				return nil, api.NewError(409, "idempotency_mismatch", "idempotency key matched a different reply target", "use a fresh key", nil)
+			}
+			replyUID = match.Comment.ReplyToUID
+		}
+	}
+	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate, replyUID, kind) {
 		return nil, api.NewError(409, "idempotency_mismatch",
 			"idempotency key matched a prior comment with a different fingerprint",
 			"use a fresh key or send the exact original comment", nil)
@@ -263,13 +374,19 @@ func receiptIssueUID(
 	return match.IssueUID, nil
 }
 
-func commentIdempotencyFingerprint(issueUID, actor, body, teammate string) string {
+func commentIdempotencyFingerprint(issueUID, actor, body, teammate string, links ...string) string {
+	replyUID, kind := "", ""
+	if len(links) > 0 {
+		replyUID, kind = links[0], links[1]
+	}
 	encoded, _ := json.Marshal(struct {
 		IssueUID string `json:"issue_uid"`
 		Actor    string `json:"actor"`
 		Body     string `json:"body"`
 		Teammate string `json:"teammate,omitempty"`
-	}{IssueUID: issueUID, Actor: actor, Body: body, Teammate: teammate})
+		ReplyTo  string `json:"reply_to_uid,omitempty"`
+		Kind     string `json:"reply_kind,omitempty"`
+	}{ReplyTo: replyUID, Kind: kind, IssueUID: issueUID, Actor: actor, Body: body, Teammate: teammate})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])
 }

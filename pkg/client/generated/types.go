@@ -586,14 +586,110 @@ func (c Comment) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CommentLink struct {
+	Author       *string    `json:"author,omitempty"`
+	Body         *string    `json:"body,omitempty"`
+	CreatedAt    *time.Time `json:"created_at,omitempty"`
+	EditedAt     *time.Time `json:"edited_at,omitempty"`
+	Handle       *string    `json:"handle,omitempty"`
+	IssueShortID *string    `json:"issue_short_id,omitempty"`
+	IssueUID     *string    `json:"issue_uid,omitempty"`
+	Kind         string     `json:"kind" validate:"required"`
+	ProjectID    *int64     `json:"project_id,omitempty"`
+	ProjectUID   *string    `json:"project_uid,omitempty"`
+	Status       *string    `json:"status,omitempty"`
+	TargetEdited *bool      `json:"target_edited,omitempty"`
+	Teammate     *string    `json:"teammate,omitempty"`
+	UID          *string    `json:"uid,omitempty"`
+}
+
+func (c CommentLink) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CommentOut struct {
+	Author             string        `json:"author" validate:"required"`
+	Backlinks          []CommentLink `json:"backlinks,omitempty"`
+	BacklinksTruncated *bool         `json:"backlinks_truncated,omitempty"`
+	Body               string        `json:"body" validate:"required"`
+	CreatedAt          time.Time     `json:"created_at" validate:"required"`
+	EditedAt           *time.Time    `json:"edited_at,omitempty"`
+	Handle             *string       `json:"handle,omitempty"`
+	ID                 int64         `json:"id"`
+	IssueID            int64         `json:"issue_id"`
+	IssueShortID       *string       `json:"issue_short_id,omitempty"`
+	IssueUID           *string       `json:"issue_uid,omitempty"`
+	ProjectID          *int64        `json:"project_id,omitempty"`
+	ProjectName        *string       `json:"project_name,omitempty"`
+	ProjectUID         *string       `json:"project_uid,omitempty"`
+	Reply              *CommentLink  `json:"reply,omitempty"`
+	ReplyKind          *string       `json:"reply_kind,omitempty"`
+	ReplyToUID         *string       `json:"reply_to_uid,omitempty"`
+	Teammate           *string       `json:"teammate,omitempty"`
+	UID                string        `json:"uid" validate:"required"`
+}
+
+func (c CommentOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Author, "required"); err != nil {
+		errors = errors.Append("Author", err)
+	}
+	for i, item := range c.Backlinks {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Backlinks[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.Body, "required"); err != nil {
+		errors = errors.Append("Body", err)
+	}
+	if err := typesValidator.Var(c.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if c.Reply != nil {
+		if v, ok := any(c.Reply).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Reply", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CommentRequestBody struct {
-	Actor    *string `json:"actor,omitempty"`
-	Body     string  `json:"body" validate:"required"`
-	Teammate *string `json:"teammate,omitempty"`
+	Actor *string `json:"actor,omitempty"`
+	Body  string  `json:"body" validate:"required"`
+	Force *bool   `json:"force,omitempty"`
+
+	// Kind reply is a general response; confirm asserts verification or reproduction
+	Kind     *CommentRequestBodyKind `json:"kind,omitempty"`
+	ReplyTo  *string                 `json:"reply_to,omitempty"`
+	Teammate *string                 `json:"teammate,omitempty"`
 }
 
 func (c CommentRequestBody) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Body, "required"); err != nil {
+		errors = errors.Append("Body", err)
+	}
+	if c.Kind != nil {
+		if v, ok := any(c.Kind).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Kind", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CommentResponseBody struct {
@@ -4120,7 +4216,8 @@ type ShowIssueResponseBody struct {
 	ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
 	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
 	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
-	Comments            []Comment           `json:"comments" validate:"required"`
+	Comments            []CommentOut        `json:"comments" validate:"required"`
+	CommentsTruncated   *bool               `json:"comments_truncated,omitempty"`
 	Issue               ShowIssueOut        `json:"issue"`
 	Labels              []IssueLabel        `json:"labels" validate:"required"`
 	Lease               *IssueClaimOut      `json:"lease,omitempty"`
@@ -4660,7 +4757,7 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []Comment    `json:"comments" validate:"required"`
+	Comments    []CommentOut `json:"comments" validate:"required"`
 	History     []Event      `json:"history" validate:"required"`
 	Issue       *UIIssue     `json:"issue,omitempty"`
 	Labels      []IssueLabel `json:"labels" validate:"required"`

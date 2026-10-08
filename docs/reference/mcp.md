@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-02
+last_edited: 2026-10-08
 ---
 
 # Model Context Protocol server
@@ -172,6 +172,18 @@ The MCP server still starts against its documented baseline daemon. A
 `kata.comment` call with a nonempty teammate checks for API 0.18.0 before
 mutating and returns a tool error explaining the API requirement against an older daemon.
 Teammate-free calls retain their existing compatibility floor.
+
+With daemon API `0.26.0` or newer, `kata.comment` accepts `reply_to` (a comment
+handle or full UID), `kind` (`reply`, `confirm`, `refute`, or `supersede` (reply is a general response; confirm asserts verification or reproduction)),
+and optional `force` to bypass duplicate-reply rejection. The required
+`idempotency_key` includes the resolved target and kind in its request identity.
+`kata.show` accepts `thread`, `inbound`, `kind`, and `since` selectors and
+returns handles, reply lines, backlinks, and edit state. Thread results retain
+their root within the requested comment limit and report truncation.
+Endpoint identities and backlinks remain within the server's fixed startup
+project UID scope, including after project moves or renames. See the
+[CLI reference](cli.md#issue-lifecycle) for selector behavior, reply validation,
+and handle syntax.
 
 `kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
 it to search both statuses. It combines with labels and the selected search

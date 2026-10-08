@@ -15,12 +15,21 @@ import (
 
 func newCommentCmd() *cobra.Command {
 	var src BodySources
+	var reply, confirm, refute, supersede, key string
+	var force bool
 	var unsupportedRelationships commentRelationshipFlags
 	cmd := &cobra.Command{
 		Use:   "comment <issue-ref>",
 		Short: "append a comment to an issue",
 		Args:  cobra.ExactArgs(1),
 	}
+	cmd.Flags().StringVar(&reply, "reply", "", "reply to a comment reference")
+	cmd.Flags().StringVar(&confirm, "confirm", "", "verify or reproduce a comment with at least 40 characters of evidence")
+	cmd.Flags().StringVar(&refute, "refute", "", "refute a comment with at least 40 characters of evidence")
+	cmd.Flags().StringVar(&supersede, "supersede", "", "supersede a comment reference")
+	cmd.MarkFlagsMutuallyExclusive("reply", "confirm", "refute", "supersede")
+	cmd.Flags().StringVar(&key, "idempotency-key", "", "stable key for safe comment retries")
+	cmd.Flags().BoolVar(&force, "force", false, "allow another reply of the same kind by this author and teammate")
 	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
 	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
 	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
@@ -38,6 +47,24 @@ func newCommentCmd() *cobra.Command {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := unsupportedRelationships.err(cmd, args[0]); err != nil {
 			return err
+		}
+		replyTo, kind := "", ""
+		for _, link := range []struct{ ref, kind string }{{reply, "reply"}, {confirm, "confirm"}, {refute, "refute"}, {supersede, "supersede"}} {
+			if cmd.Flags().Changed(link.kind) {
+				if strings.TrimSpace(link.ref) == "" {
+					return fmt.Errorf("--%s requires a comment reference", link.kind)
+				}
+				replyTo, kind = link.ref, link.kind
+			}
+		}
+		if replyTo != "" || force {
+			a, err := dialDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, "0.26.0", "typed comment replies"); err != nil {
+				return err
+			}
 		}
 		src.BodySet = cmd.Flags().Changed("body")
 		src.FileSet = cmd.Flags().Changed("body-file")
@@ -59,6 +86,14 @@ func newCommentCmd() *cobra.Command {
 		}
 		actor, _ := resolveActor(project.api.ctx, flags.As, nil)
 		payload := &generated.CreateCommentBody{Actor: &actor, Body: body}
+		if replyTo != "" {
+			payload.ReplyTo = &replyTo
+			replyKind := generated.CommentRequestBodyKind(kind)
+			payload.Kind = &replyKind
+		}
+		if force {
+			payload.Force = &force
+		}
 		if handle != "" {
 			payload.Teammate = &handle
 		}
@@ -66,9 +101,13 @@ func newCommentCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, &generated.CreateCommentRequestOptions{
+		options := &generated.CreateCommentRequestOptions{
 			PathParams: &generated.CreateCommentPath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: payload,
-		})
+		}
+		if key != "" {
+			options.Header = &generated.CreateCommentHeaders{IdempotencyKey: &key}
+		}
+		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, options)
 		if err := externalCLITransportError(response, callErr); err != nil {
 			return err
 		}

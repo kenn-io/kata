@@ -594,6 +594,34 @@ func TestHandleEventReceived_DetailViewMismatch_NoRefetch(t *testing.T) {
 	}
 }
 
+func checkCommentReplyEventRefreshesRelatedIssue(t *testing.T, relatedIssueUID string) {
+	t.Helper()
+	m := sseDetailFixture(7, "target", "target-issue")
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.commented", projectID: 7, issueUID: "source-issue",
+		relatedIssueUID: relatedIssueUID,
+	})
+	if relatedIssueUID == "target-issue" {
+		assertDetailRefetchBatch(t, cmd)
+		return
+	}
+	if cmd != nil {
+		t.Fatalf("unrelated issue.commented event must not refresh target detail, got %T", cmd)
+	}
+}
+
+func TestCommentReplyEventRefreshesOpenTargetDetail(t *testing.T) {
+	checkCommentReplyEventRefreshesRelatedIssue(t, "target-issue")
+}
+
+func FuzzCommentReplyEventRefreshesOpenTargetDetail(f *testing.F) {
+	f.Add("target-issue")
+	f.Add("other-issue")
+	f.Fuzz(func(t *testing.T, relatedIssueUID string) {
+		checkCommentReplyEventRefreshesRelatedIssue(t, relatedIssueUID)
+	})
+}
+
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-
 // projects scope, short_ids are project-scoped — project A's abc4 is
 // not project B's abc4. An event for project B abc4 must NOT trigger a

@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
+
+	"go.kenn.io/kata/internal/commentref"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -11,8 +15,9 @@ import (
 // to the renderer. A non-nil err takes priority over loading; both
 // short-circuit the entry-list path so the user gets a clear hint.
 type tabState struct {
-	loading bool
-	err     error
+	commentLinkCursor int
+	loading           bool
+	err               error
 }
 
 // commentChunks builds the chunk slice for the comments tab. Each
@@ -31,9 +36,43 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 	for i, c := range cs {
 		author := padToWidth(commentAuthorStyle(commentAttribution(c)), authorW)
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
+		if c.Handle != "" {
+			header = sanitizeForDisplay(c.Handle) + "  " + header
+		}
+		if c.EditedAt != nil {
+			header += "  (edited)"
+		}
 		lines := []string{applyActivityCursor(header, i == cursor)}
+		if c.Reply != nil {
+			r := c.Reply
+			label := r.Handle
+			if label == "" {
+				label = "(" + r.Status + ")"
+			}
+			line := "  ↳ " + commentOutgoingLabel(r.Kind) + " " + label
+			if r.Author != "" {
+				line += " by " + r.Author
+				if r.Teammate != "" {
+					line += " / " + r.Teammate
+				}
+			}
+			if r.Status != "" && r.Handle != "" {
+				line += " (" + r.Status + ")"
+			}
+			if r.TargetEdited {
+				line += " — Target edited after this reply"
+			}
+			lines = append(lines, sanitizeForDisplay(line))
+		}
+
 		for _, ln := range renderMarkdownLines(c.Body, max(1, width-2)) {
 			lines = append(lines, "  "+ln)
+		}
+
+		lines = append(lines, commentRelationSummaryLines(c, width)...)
+		if c.UID != "" && i == cursor {
+			lines = append(lines, wrapDetailRow("  ", "R typed reply · [/] select evidence · Enter open · Esc back", width)...)
+			lines = append(lines, commentEvidenceLines(c, width, ts.commentLinkCursor)...)
 		}
 		lines = append(lines, "")
 		chunks = append(chunks, entryChunk{lines: lines})
@@ -295,4 +334,105 @@ func clipTab(lines []string, width, height int) string {
 		out = append(out, truncate(ln, width))
 	}
 	return strings.Join(out, "\n")
+}
+
+func commentOutgoingLabel(kind string) string {
+	switch kind {
+	case "reply":
+		return "Replies to"
+	case "confirm":
+		return "Confirms"
+	case "refute":
+		return "Refutes"
+	case "supersede":
+		return "Supersedes"
+	default:
+		return kind
+	}
+}
+
+func commentRelationSummaryLines(c CommentEntry, width int) []string {
+	kinds := []string{"reply", "confirm", "refute", "supersede"}
+	labels := []string{"Replies", "Confirmations", "Refutations", "Superseding replies"}
+	counts := make(map[string]int)
+	for _, link := range c.Backlinks {
+		counts[link.Kind]++
+	}
+	suffix := ""
+	if c.BacklinksTruncated {
+		suffix = "+"
+	}
+	rows := []string{}
+	row := ""
+	for i, kind := range kinds {
+		if counts[kind] == 0 {
+			continue
+		}
+		label := fmt.Sprintf("%s %d%s", labels[i], counts[kind], suffix)
+		if row != "" && width > 0 && runewidth.StringWidth(row+" | "+label) > max(width-2, 1) {
+			rows = append(rows, wrapDetailRow("  ", row, width)...)
+			row = ""
+		}
+		if row != "" {
+			row += " | "
+		}
+		row += label
+	}
+	if row != "" {
+		rows = append(rows, wrapDetailRow("  ", row, width)...)
+	}
+	if c.BacklinksTruncated {
+		rows = append(rows, wrapDetailRow("  ", "More replies may be available", width)...)
+	}
+	return rows
+}
+
+func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
+	links := (detailModel{comments: []CommentEntry{c}}).commentLinks()
+	if len(links) == 0 {
+		return nil
+	}
+	index := ((cursor % len(links)) + len(links)) % len(links)
+	selected := links[index]
+	evidence := []commentref.Link{}
+	for _, link := range c.Backlinks {
+		if link.Kind == selected.Kind {
+			evidence = append(evidence, link)
+		}
+	}
+	if c.Reply != nil && selected.UID == c.Reply.UID {
+		evidence = []commentref.Link{selected}
+	}
+	slices.SortFunc(evidence, func(a, b commentref.Link) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.UID, b.UID))
+	})
+	lines := wrapDetailRow("  ", fmt.Sprintf("evidence %d/%d: %s %s", index+1, len(links), selected.Kind, selected.Handle), width)
+	for _, link := range evidence {
+		actor := link.Author
+		if link.Teammate != "" {
+			actor += " / " + link.Teammate
+		}
+		header := link.Handle + "  " + actor + "  " + formatDocumentTime(link.CreatedAt)
+		if link.UID == selected.UID {
+			header = "> " + header
+		}
+		if link.EditedAt != nil {
+			header += "  (edited)"
+		}
+		if link.Status != "" {
+			header += "  (" + link.Status + ")"
+		}
+		lines = append(lines, wrapDetailRow("  ", sanitizeForDisplay(header), width)...)
+		if link.TargetEdited {
+			lines = append(lines, wrapDetailRow("  ", "Target edited after this reply", width)...)
+		}
+		body := link.Body
+		if body == "" {
+			body = "Open reply to read its evidence"
+		}
+		for _, line := range renderMarkdownLines(body, max(width-4, 1)) {
+			lines = append(lines, "    "+line)
+		}
+	}
+	return lines
 }

@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
+	"golang.org/x/mod/semver"
 )
 
 // Client is the typed adapter the TUI uses to talk to the daemon. Errors
@@ -1247,4 +1248,33 @@ func decodeError(body []byte, status int, method, path string) error {
 		Message: env.Error.Message,
 		Hint:    env.Error.Hint,
 	}
+}
+
+// AddCommentReply sends an attributed typed reply with a retry-stable key.
+func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body, actor, target, kind string, force bool, key string) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	health, err := apiClient.Health(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reported := ""
+	if health.APISchemaVersion != nil {
+		reported = *health.APISchemaVersion
+	}
+	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.26.0") < 0 {
+		return nil, fmt.Errorf("typed replies require daemon API 0.26.0 or newer; upgrade the daemon")
+	}
+	replyKind := generated.CommentRequestBodyKind(kind)
+	wire, callErr := apiClient.CreateCommentWithResponse(ctx, &generated.CreateCommentRequestOptions{PathParams: &generated.CreateCommentPath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.CreateCommentBody{Actor: &actor, Body: body, ReplyTo: &target, Kind: &replyKind, Force: &force}, Header: &generated.CreateCommentHeaders{IdempotencyKey: &key}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }

@@ -8,12 +8,16 @@
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { ComponentProps } from 'svelte'
 
+  import Comments from './Comments.svelte'
+  import type { KataCommentReplyIntent } from '../lib/kata/types'
   import IssueEditor from './IssueEditor.svelte'
   import IssueHistory from './IssueHistory.svelte'
   import RecurrencePanel from './RecurrencePanel.svelte'
 
   let props: ComponentProps<typeof IssueEditor> = $props()
   let editing = $state(false)
+  let replyIntent = $state<KataCommentReplyIntent | undefined>()
+  let replySourceUID = $state('')
 
   const detail = $derived(projectIssueDetail(props.issue))
   const visibleRecurrences = $derived.by(() => {
@@ -58,11 +62,22 @@
   })
 </script>
 
+{#if props.returnComment && props.onSelectIssue}
+  <Button
+    size="sm"
+    label="Return to original comment"
+    onclick={() =>
+      props.onSelectIssue?.({
+        uid: props.returnComment!.issueUID,
+        commentUID: props.returnComment!.commentUID,
+      })}
+  />
+{/if}
 <section class="editor-mode" aria-label="Kata issue editor" hidden={!editing}>
   <div class="editor-toolbar">
     <Button size="sm" label="Done editing" onclick={() => (editing = false)} />
   </div>
-  <IssueEditor {...props} />
+  <IssueEditor {...props} navigationActive={editing} />
 </section>
 {#if !editing}
   <div class="shared-detail">
@@ -70,7 +85,31 @@
       {detail}
       {actions}
       onOpenIssue={(uid) => void props.onSelectIssue?.({ uid })}
+      onOpenComment={(uid, commentUID, returnComment) =>
+        void props.onSelectIssue?.({ uid, commentUID, returnComment })}
+      onReplyComment={(replyTo, kind) => {
+        replySourceUID = props.issue.issue.uid
+        replyIntent = { replyTo, kind, force: false }
+      }}
+      commentActionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
+      selectedCommentUID={props.selectedCommentUID}
     />
+    {#if replyIntent && replySourceUID === props.issue.issue.uid}
+      <Comments
+        issue={props.issue}
+        searchReferences={props.searchReferences ?? (async () => [])}
+        actionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
+        draftResetGeneration={props.draftResetGeneration}
+        draftFenceGeneration={props.draftFenceGeneration}
+        onAddComment={props.onAddComment ?? (async () => false)}
+        initialReply={replyIntent}
+        showList={false}
+        commentError={props.commentError}
+        onCancelReply={() => {
+          replyIntent = undefined
+        }}
+      />
+    {/if}
     {#if props.issue.issue.assignment_expires_on}
       <dl class="assignment-timing" aria-label="Assignment timing">
         <div>

@@ -320,3 +320,33 @@ function link(
     created_at: '2026-08-01T12:00:00.000Z',
   } as NonNullable<UISnapshot['collection_links']>[number]
 }
+
+test('snapshot normalization preserves comment identities, links, and edit state', () => {
+  const captured = snapshot()
+  captured.selected!.comments = [
+    {
+      id: 1,
+      issue_id: 2,
+      uid: 'source-comment',
+      author: 'worker',
+      body: 'Answer',
+      created_at: '2030-01-01T00:00:00Z',
+      handle: 'c:abc123',
+      reply: {
+        kind: 'reply',
+        uid: 'target-comment',
+        issue_uid: 'other-issue',
+        handle: 'abcd:def456',
+      },
+      backlinks: [],
+      edited_at: '2030-01-02T00:00:00Z',
+    },
+  ]
+  const normalized = normalizeKataUISnapshot(captured)
+  expect(normalized.selected_detail?.comments[0]).toMatchObject({
+    uid: 'source-comment',
+    handle: 'c:abc123',
+    reply: { uid: 'target-comment' },
+    edited_at: '2030-01-02T00:00:00Z',
+  })
+})

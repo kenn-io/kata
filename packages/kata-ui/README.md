@@ -8,6 +8,18 @@ Pass `onOpenIssue` to let readers open parent, child, and linked issues: the
 package calls it with the peer issue UID and the host decides how to navigate.
 Without it, those references render as plain text.
 
+API `0.26.x` adds comment handles, typed reply lines, backlinks, and edit markers.
+Pass `onOpenComment` to open an endpoint; it receives the owning issue UID and
+comment UID, plus an optional source `{ issueUID, commentUID }` for a return
+route. Keep that source in the host and pass it as `returnComment` to show the
+return control. Pass `onReplyComment` to start a composer with the selected comment
+UID and reply kind. The host owns the write. Set `commentActionsDisabled` while
+write authority is stale, read-only, or busy. Set `selectedCommentUID` after
+navigation to focus and highlight the destination comment. Incoming kind
+buttons count direct authorized replies and open chronological author/time/body
+evidence. A `backlinks_truncated` result shows partial counts. Keep conflicting
+assertions visible; a superseding reply does not hide the original body.
+
 `IssueDetail` lays itself out from its own width, so give it a definite width
 from its container. Inside a shrink-to-fit parent, such as an inline-block,
 a float, or `width: max-content`, it collapses to zero width.
@@ -25,10 +37,8 @@ only Kata wire data and host-supplied actions.
     type KataIssueDetailWire,
   } from '@kenn-io/kata-ui'
 
-  let {
-    apiSchemaVersion,
-    wire,
-  }: { apiSchemaVersion?: string; wire: KataIssueDetailWire } = $props()
+  let { apiSchemaVersion, wire }: { apiSchemaVersion?: string; wire: KataIssueDetailWire } =
+    $props()
 
   const compatible = $derived(supportsKataAPISchema(apiSchemaVersion ?? ''))
   const detail: KataIssueDetailModel | undefined = $derived(
@@ -43,7 +53,7 @@ only Kata wire data and host-supplied actions.
 {/if}
 ```
 
-`supportsKataAPISchema` accepts Kata API schemas `>=0.9.0 <0.12.0`. A missing
+`supportsKataAPISchema` accepts Kata API schemas `>=0.9.0 <0.12.0` and `0.26.x`. A missing
 or empty `api_schema_version` is incompatible for an embedding host. Read the
 version from `GET /api/v1/health`; issue-detail responses do not carry it.
 The embedding host must fetch health and issue data through its authenticated

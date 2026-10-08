@@ -1,3 +1,4 @@
+import type { KataCommentLink, KataReplyKind } from '@kenn-io/kata-ui'
 export type KataTaskViewName = 'inbox' | 'today' | 'delegated' | 'scheduled' | 'all' | 'logbook'
 
 export interface KataTaskChecklistItem {
@@ -131,7 +132,19 @@ export interface KataReachableGraphResponse {
   fetched_at: string
 }
 
+export interface KataCommentReplyIntent {
+  replyTo: string
+  kind: KataReplyKind
+  force: boolean
+}
+
 export interface KataComment {
+  uid?: string
+  handle?: string
+  reply?: KataCommentLink
+  backlinks_truncated?: boolean
+  backlinks?: KataCommentLink[]
+  edited_at?: string
   id: number
   issue_id: number
   author: string

@@ -14,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/similarity"
@@ -374,7 +375,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted)
+		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -403,7 +404,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
 			return nil, err
 		}
-		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted)
+		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -911,8 +912,8 @@ func issueUIDPrefixMatchesForCaller(
 // canonical Lease* fields onto their deprecated Claim* aliases. Hydration has
 // several early returns; funneling every success through here is what keeps
 // the two spellings from ever disagreeing.
-func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
-	out, err := hydrateShowIssueResponse(ctx, cfg, issue, includeDeleted)
+func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
+	out, err := hydrateShowIssueResponse(ctx, cfg, issue, includeDeleted, selectors...)
 	if err != nil {
 		return nil, err
 	}
@@ -920,16 +921,12 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
-func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
+func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
 	if issue.DeletedAt != nil && !includeDeleted {
 		return nil, api.NewError(404, "issue_not_found",
 			"issue not found",
 			"pass include_deleted=true to view soft-deleted issues",
 			nil)
-	}
-	comments, err := listComments(ctx, cfg.DB, issue.ID)
-	if err != nil {
-		return nil, internalAPIError(err)
 	}
 	links, err := loadLinkOuts(ctx, cfg.DB, issue.ID)
 	if err != nil {
@@ -947,7 +944,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	comments, allowed, scoped, err := projectScopedCommentReplies(ctx, cfg.DB, comments)
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, cfg.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -966,7 +963,39 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	out := &api.ShowIssueResponse{}
 	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
-	out.Body.Comments = comments
+	var extra []db.CommentGraphRecord
+	if issue.DeletedAt != nil {
+		comments, err := listComments(ctx, cfg.DB, issue.ID)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		comments, _, _, err = projectScopedCommentReplies(ctx, cfg.DB, comments)
+		if err != nil {
+			return nil, err
+		}
+		project, err := cfg.DB.ProjectByID(ctx, issue.ProjectID)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		for _, c := range comments {
+			extra = append(extra, db.CommentGraphRecord{Comment: c, IssueUID: issue.UID, IssueShortID: issue.ShortID, ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name})
+		}
+	}
+	records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID, extra...)
+	if err != nil {
+		return nil, err
+	}
+	opts := commentref.Options{}
+	if len(selectors) > 0 {
+		opts = selectors[0]
+	}
+	selected, err := commentref.Select(records, issue.UID, opts)
+	if err != nil {
+		return nil, commentReferenceError(err)
+	}
+	recordCommentResponseScope(ctx, records, selected.Comments)
+	out.Body.Comments = selected.Comments
+	out.Body.CommentsTruncated = selected.Truncated
 	out.Body.Links = links
 	out.Body.Labels = labels
 	out.Body.Parent = parent
