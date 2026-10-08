@@ -473,3 +473,64 @@ func FuzzIncrementalParentCredentialGuardRejectsExtraSelection(f *testing.F) {
 		require.False(t, graphQLQueryMatchesParentQuery(query))
 	})
 }
+
+func TestSelectedParentBootstrapBatchesWithoutEvents(t *testing.T) {
+	var graphCalls int
+	var queried []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method, "bootstrap must not read historical events")
+		graphCalls++
+		var request parentGraphQLRequest
+		require.NoError(t, json.UnmarshalRead(r.Body, &request))
+		assert.NotContains(t, request.Query, "issues(first:")
+		nodes := map[string]any{}
+		for _, match := range testParentAlias.FindAllStringSubmatch(request.Query, -1) {
+			n, err := strconv.Atoi(match[2])
+			require.NoError(t, err)
+			queried = append(queried, n)
+			nodes["i"+match[1]] = map[string]any{"number": n, "fullDatabaseId": 1000 + n, "parent": nil}
+		}
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"data": map[string]any{"repository": nodes}}))
+	}))
+	defer server.Close()
+	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	f.restBaseURLOverride = server.URL + "/"
+	numbers := []int{0, -1, 1, 1}
+	want := make([]int, 101)
+	for i := range want {
+		want[i] = i + 1
+		numbers = append(numbers, i+1)
+	}
+	var progress [][2]int
+	ctx := withProgressReporter(t.Context(), func(phase string, done, total int) {
+		assert.Equal(t, "parents", phase)
+		progress = append(progress, [2]int{done, total})
+	})
+	data, err := f.ParentData(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{IssueNumbers: numbers})
+	require.NoError(t, err)
+	assert.Equal(t, 2, graphCalls)
+	assert.Equal(t, want, queried)
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Len(t, data.ScannedChildIDs, 101)
+	assert.Equal(t, int64(1101), data.ScannedChildIDs[101])
+	assert.Equal(t, [][2]int{{0, 101}, {100, 101}, {101, 101}}, progress)
+}
+
+func TestSelectedParentBootstrapEmptyMakesNoRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("empty bootstrap made an HTTP request")
+		_, _ = fmt.Fprint(w, `{"data":{"repository":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}`)
+	}))
+	defer server.Close()
+	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	var progress [][2]int
+	ctx := withProgressReporter(t.Context(), func(phase string, done, total int) {
+		assert.Equal(t, "parents", phase)
+		progress = append(progress, [2]int{done, total})
+	})
+	data, err := f.ParentData(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{IssueNumbers: []int{}})
+	require.NoError(t, err)
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Empty(t, data.ScannedChildIDs)
+	assert.Equal(t, [][2]int{{0, 0}}, progress)
+}

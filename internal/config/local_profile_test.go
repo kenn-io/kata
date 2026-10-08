@@ -455,3 +455,31 @@ key_env = "EXAMPLE_SHARED_SIGNING_KEY"
 	}}, true)
 	require.Error(t, err, "an OS allowlist variable remains reserved")
 }
+
+func TestLocalProfileEnvironmentIncludesLinearToken(t *testing.T) {
+	t.Setenv("KATA_LINEAR_TOKEN", "default-linear-credential")
+	t.Setenv("EXAMPLE_LINEAR_TOKEN", "custom-linear-credential")
+	for _, tc := range []struct {
+		name, config, want, excluded string
+	}{
+		{"default", "", "KATA_LINEAR_TOKEN=default-linear-credential", "EXAMPLE_LINEAR_TOKEN=custom-linear-credential"},
+		{"custom", "[linear_sync]\ntoken_env = \"EXAMPLE_LINEAR_TOKEN\"\n", "EXAMPLE_LINEAR_TOKEN=custom-linear-credential", "KATA_LINEAR_TOKEN=default-linear-credential"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600))
+			}
+			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{
+				Name: "example-profile", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01",
+			})
+			require.NoError(t, err)
+
+			env, err := config.LocalProfileEnvironment(profile, true)
+
+			require.NoError(t, err)
+			assert.True(t, slices.Contains(env, tc.want), "child environment must include the selected Linear token")
+			assert.False(t, slices.Contains(env, tc.excluded), "unselected Linear credentials must remain outside the child environment")
+		})
+	}
+}

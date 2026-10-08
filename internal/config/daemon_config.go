@@ -68,6 +68,7 @@ type DaemonConfig struct {
 	GitHubSync GitHubSyncConfig `toml:"github_sync"`
 	NotionSync NotionSyncConfig `toml:"notion_sync"`
 	PlaneSync  PlaneSyncConfig  `toml:"plane_sync"`
+	LinearSync LinearSyncConfig `toml:"linear_sync"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
 }
@@ -501,6 +502,11 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	cfg.PlaneSync = planeSync
+	linearSync, err := NormalizeLinearSyncConfig(cfg.LinearSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LinearSync = linearSync
 	connectors, err := NormalizeConnectorConfigs(cfg.Connectors)
 	if err != nil {
 		return nil, err
