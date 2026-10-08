@@ -105,7 +105,7 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				db.CommentGraphQuery{ProjectID: selected.ProjectID, AllowedIssueIDs: query.AllowedIssueIDs},
 				func(n int) string { return fmt.Sprintf("$%d", n) },
 				parseStoredTime,
-				`(e.payload::jsonb->>'comment_uid')`,
+				`(e.payload::jsonb->>'reply_to_uid')`,
 			)
 			if err != nil {
 				return db.UISnapshotData{}, err

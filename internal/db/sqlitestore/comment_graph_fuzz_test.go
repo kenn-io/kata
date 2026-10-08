@@ -133,5 +133,11 @@ func FuzzCommentGraphPurgeEvidenceOrder(f *testing.F) {
 		graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID})
 		require.NoError(t, err)
 		require.Equal(t, "removed", graph.Targets[targetCommentUID].Status)
+		snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, SelectedIssueUID: source.UID,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "removed", snapshot.CommentGraph.Targets[targetCommentUID].Status,
+			"the UI snapshot must resolve the same purged target evidence as the graph reader")
 	})
 }
