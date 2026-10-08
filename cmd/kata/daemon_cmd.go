@@ -34,6 +34,7 @@ import (
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
@@ -92,6 +93,12 @@ var newPlaneSyncDaemonRunner = func(cfg planesync.RunnerConfig) issueSyncDaemonR
 
 var newPlaneSyncClient = planesync.NewClient
 
+var newLinearSyncDaemonRunner = func(cfg linearsync.RunnerConfig) issueSyncDaemonRunner {
+	return linearsync.NewRunner(cfg)
+}
+
+var newLinearSyncClient = linearsync.NewClient
+
 var newGitHubSyncHTTPFetcher = githubsync.NewHTTPFetcher
 
 var openEmbeddingVectorIndex = func(
@@ -116,6 +123,9 @@ func newConfiguredNotionSyncFetcher(cfg config.NotionSyncConfig) notionsync.Fetc
 }
 func newConfiguredPlaneSyncFetcher(cfg config.PlaneSyncConfig) planesync.Fetcher {
 	return newPlaneSyncClient(planesync.ClientConfig{Daemon: cfg})
+}
+func newConfiguredLinearSyncFetcher(cfg config.LinearSyncConfig) linearsync.Fetcher {
+	return newLinearSyncClient(linearsync.ClientConfig{Daemon: cfg})
 }
 
 type daemonStartOutput struct {
@@ -1264,6 +1274,11 @@ func runDaemonProcess(
 	planeSyncWake := startPlaneSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, planeSyncFetcher, publisher, daemonLog, planeSyncProgress,
 	)
+	linearSyncFetcher := newConfiguredLinearSyncFetcher(dcfg.LinearSync)
+	linearSyncProgress := issuesync.NewProgressTracker()
+	linearSyncWake := startLinearSyncRunner(
+		ctx, workers, waitableDrainAdmission, store, linearSyncFetcher, publisher, daemonLog, linearSyncProgress,
+	)
 
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
 	if err != nil {
@@ -1351,6 +1366,10 @@ func runDaemonProcess(
 		PlaneSyncConfig:           dcfg.PlaneSync,
 		PlaneSyncWake:             planeSyncWake,
 		PlaneSyncProgress:         planeSyncProgress,
+		LinearSyncFetcher:         linearSyncFetcher,
+		LinearSyncConfig:          dcfg.LinearSync,
+		LinearSyncWake:            linearSyncWake,
+		LinearSyncProgress:        linearSyncProgress,
 		ExternalRootRegistry:      externalRootRegistry,
 		ExternalRootService:       externalRootService,
 		ExternalRootReconciler:    externalRootReconciler,
@@ -1970,6 +1989,36 @@ func startPlaneSyncRunner(
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "plane", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newPlaneSyncDaemonRunner(planesync.RunnerConfig{
+			Store:          store,
+			Fetcher:        fetcher,
+			Progress:       progress,
+			Logger:         logger,
+			Interval:       30 * time.Second,
+			Wake:           wake,
+			DrainAdmission: drainAdmission,
+			EventSinkFrom: func(_ context.Context, projectID int64, events []db.Event, fork activity.Admission) error {
+				publisher.EventsFrom(projectID, events, fork)
+				return nil
+			},
+		})
+	})
+}
+
+func startLinearSyncRunner(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	store db.Storage,
+	fetcher linearsync.Fetcher,
+	publisher daemon.EventPublisher,
+	daemonLog *log.Logger,
+	progress *issuesync.ProgressTracker,
+) func() {
+	if fetcher == nil {
+		fetcher = newConfiguredLinearSyncFetcher(config.LinearSyncConfig{})
+	}
+	return startIssueSyncRunner(ctx, workers, daemonLog, "linear", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
+		return newLinearSyncDaemonRunner(linearsync.RunnerConfig{
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,

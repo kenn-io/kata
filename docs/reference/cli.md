@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-04
+last_edited: 2026-10-07
 ---
 
 # CLI reference
@@ -1194,6 +1194,24 @@ adds the `plane` label. Completed state groups close with reason `done`, cancell
 groups close with `wontfix`, and other groups map to open. Explicit close/reopen writes back when `--status-sync=two-way` is configured;
 other local fields stay in Kata. See [Plane sync](../operations/plane-sync.md) for permissions,
 self-hosting, timestamp ownership, polling limits, and recovery.
+
+### Linear
+
+```sh
+kata sync linear enable --linear-workspace UUID --linear-team UUID [--linear-project UUID]
+kata sync linear enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync linear enable --status-sync two-way [--closed-state UUID] [--open-state UUID]
+kata sync linear status
+kata sync linear once
+kata sync linear disable
+```
+
+Initial enable requires workspace and team UUIDs. The optional project restriction
+must be set initially; the source identity cannot change on re-enable. Omitted
+options preserve their saved values, and empty `--since` clears the cutoff.
+Credentials and authorization type belong to daemon `[linear_sync]` configuration.
+Two-way mode writes only completion/reopen state. See
+[Linear sync](../operations/linear-sync.md) for field ownership, permissions, and recovery.
 
 ### GitHub
 
