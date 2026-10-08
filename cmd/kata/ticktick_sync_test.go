@@ -33,7 +33,10 @@ func TestTickTickSyncCommands(t *testing.T) {
 	})
 	require.Contains(t, runCLI(t, env, dir, "sync", "ticktick", "enable", "--ticktick-project", "project-1", "--interval", "10m", "--title-prefix=false"), "TickTick sync enabled")
 	require.Contains(t, runCLI(t, env, dir, "--agent", "sync", "ticktick", "once"), "OK ticktick-sync action=once")
-	require.Contains(t, runCLI(t, env, dir, "sync", "ticktick", "status"), "TickTick")
+	status := runCLI(t, env, dir, "sync", "ticktick", "status")
+	for _, want := range []string{"TickTick", "TickTick project: project-1", "Title prefix: false"} {
+		require.Contains(t, status, want)
+	}
 	require.Contains(t, runCLI(t, env, dir, "sync", "ticktick", "disable"), "TickTick sync disabled")
 	require.Len(t, paths, 4)
 }

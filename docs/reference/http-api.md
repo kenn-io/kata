@@ -798,3 +798,12 @@ preserve omission on re-enable. The daemon resolves `account_id`. Account,
 origin, project and history floor are immutable. Requests cannot supply tokens
 or origins. Two-way delivery uses completion/reopen endpoints after fresh
 safety checks. See [Todoist sync](../operations/todoist-sync.md).
+
+TickTick uses the same issue-sync routes with provider `ticktick`. Initial
+enable config requires string `project_id`; optional boolean `title_prefix`
+preserves omission on re-enable. The project ID is immutable. Top-level
+`status_sync` selects `one-way` or `two-way`; interval accepts `interval` or
+`interval_seconds`. Tokens and the API origin are daemon-owned and rejected as
+request config. Enable reads the project to validate its kind, archive state,
+and permission before a guarded upsert. See
+[TickTick sync](../operations/ticktick-sync.md).

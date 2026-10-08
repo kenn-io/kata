@@ -210,6 +210,7 @@ The [docs site](docs/) is the definitive reference:
   [Linear sync](docs/operations/linear-sync.md) ·
   [Twenty sync](docs/operations/twenty-sync.md) ·
   [Todoist sync](docs/operations/todoist-sync.md) ·
+  [TickTick sync](docs/operations/ticktick-sync.md) ·
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·

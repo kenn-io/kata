@@ -688,3 +688,9 @@ Twenty polling uses `Config.TwentySync` with `APIOrigin`, `WebOrigin`, and
 without reading secrets. `Run` starts the Twenty worker, and manual routes and
 polling share its client, live progress, and committed-event publication.
 See [Twenty sync](../operations/twenty-sync.md).
+
+TickTick polling uses `Config.TickTickSync` with `TokenEnv`, which defaults to
+`KATA_TICKTICK_TOKEN` like `[ticktick_sync]`. The API origin is fixed. `Run`
+starts the TickTick worker, and manual routes and polling share its client,
+live progress, and committed-event publication. See
+[TickTick sync](../operations/ticktick-sync.md).
