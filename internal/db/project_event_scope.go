@@ -18,6 +18,7 @@ func EventRequiresProjectScopeReset(
 	ctx context.Context,
 	event Event,
 	issueByUID func(string) (Issue, error),
+	issueByRef func(string, string) (Issue, error),
 ) (bool, error) {
 	allowedUIDs, restricted := AuthorizedProjects(ctx)
 	if !restricted {
@@ -55,6 +56,24 @@ func EventRequiresProjectScopeReset(
 			private, err := issueIsPrivate(uid)
 			if err != nil || private {
 				return private, err
+			}
+		}
+		return false, nil
+	}
+	checkRefs := func(refs []string) (bool, error) {
+		for _, ref := range refs {
+			if ref == "" || issueByRef == nil {
+				return true, nil
+			}
+			issue, err := issueByRef(event.ProjectUID, ref)
+			if errors.Is(err, ErrNotFound) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if _, visible := allowed[issue.ProjectUID]; !visible {
+				return true, nil
 			}
 		}
 		return false, nil
@@ -135,6 +154,17 @@ func EventRequiresProjectScopeReset(
 			uids = append(uids, values...)
 		}
 		return checkUIDs(uids)
+	case "close.throttled":
+		var payload CloseThrottledPayload
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		refs := []string{payload.Parent}
+		refs = append(refs, payload.Cohort...)
+		if payload.Prior != nil {
+			refs = append(refs, *payload.Prior)
+		}
+		return checkRefs(refs)
 	default:
 		return false, nil
 	}
@@ -148,4 +178,43 @@ func ProjectScopeResetEvent(event Event) Event {
 		ProjectID: event.ProjectID, ProjectUID: event.ProjectUID,
 		ProjectName: event.ProjectName, CreatedAt: event.CreatedAt,
 	}
+}
+
+// EventDepartureProjectUID returns the authorized source of an issue move.
+// Scoped streams use it to deliver a reset to readers of the project the issue left.
+func EventDepartureProjectUID(ctx context.Context, event Event) string {
+	if event.Type != "issue.moved" {
+		return ""
+	}
+	var payload struct {
+		FromProjectUID string `json:"from_project_uid"`
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil || payload.FromProjectUID == "" {
+		return ""
+	}
+	allowed, restricted := AuthorizedProjects(ctx)
+	if !restricted {
+		return ""
+	}
+	for _, uid := range allowed {
+		if uid == payload.FromProjectUID {
+			return uid
+		}
+	}
+	return ""
+}
+
+// ProjectScopeResetEventInProject places a reset cursor in the project whose
+// readers need it, while retaining none of the moved issue's identity.
+func ProjectScopeResetEventInProject(event Event, project Project) Event {
+	event.ProjectID = project.ID
+	event.ProjectUID = project.UID
+	event.ProjectName = project.Name
+	return ProjectScopeResetEvent(event)
+}
+
+// ProjectScopeResetCursor is an identity-free fallback when the visible source
+// project was removed before the move invalidation could be projected.
+func ProjectScopeResetCursor(event Event) Event {
+	return Event{ID: event.ID, Type: ProjectScopeResetEventType, CreatedAt: event.CreatedAt}
 }

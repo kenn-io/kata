@@ -88,7 +88,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// used by metadata, event polls, and lease requests.
 		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
-		if route.operation == "ingestFederationProjectEvents" {
+		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" {
 			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
 		}

@@ -625,7 +625,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// below.
 		if disposition == "archive" {
 			project, evt, err := cfg.DB.RemoveProject(ctx, db.RemoveProjectParams{
-				ProjectID: in.ProjectID, Actor: actor, Force: in.Body.Force,
+				ProjectID: in.ProjectID, Actor: actor, Force: in.Body.Force, SkipFederationRelay: true,
 			})
 			var openErr *db.ProjectHasOpenIssuesError
 			switch {

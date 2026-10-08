@@ -933,7 +933,6 @@ func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event
 	if err != nil {
 		return nil, fmt.Errorf("read UI history: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 	history := []db.Event{}
 	for rows.Next() {
 		event, err := scanEvent(rows)
@@ -942,7 +941,30 @@ func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event
 		}
 		history = append(history, event)
 	}
-	return history, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	filtered := make([]db.Event, 0, len(history))
+	for _, event := range history {
+		if event.Type == "close.throttled" {
+			reset, err := db.EventRequiresProjectScopeReset(ctx, event, nil,
+				func(projectUID, ref string) (db.Issue, error) {
+					return eventIssueByRef(ctx, tx, projectUID, ref)
+				})
+			if err != nil {
+				return nil, fmt.Errorf("check UI history project scope: %w", err)
+			}
+			if reset {
+				continue
+			}
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered, nil
 }
 
 func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]db.UILink, error) {

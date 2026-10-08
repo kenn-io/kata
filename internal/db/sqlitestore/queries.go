@@ -1938,6 +1938,9 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	if err != nil {
 		return db.Issue{}, "", fmt.Errorf("lookup issue: %w", err)
 	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, i.ProjectUID); err != nil {
+		return db.Issue{}, "", err
+	}
 	if err := ensureProjectWritableTx(ctx, tx, i.ProjectID); err != nil {
 		return db.Issue{}, "", err
 	}
@@ -2001,6 +2004,7 @@ type eventInsert struct {
 	HLC               *db.EventHLCTimestamp
 	CreatedAt         string
 	ContentHash       string
+	SkipRelay         bool
 }
 
 // UpdateOwner sets issues.owner to the new value and emits the matching
@@ -2539,8 +2543,10 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
 		return db.Event{}, err
 	}
-	if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {
-		return db.Event{}, err
+	if !in.SkipRelay {
+		if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {
+			return db.Event{}, err
+		}
 	}
 	return e, nil
 }

@@ -24,7 +24,7 @@ type ProjectAccessDecision struct {
 	PolicyRevision int64
 	Actor          string
 	targets        []string
-	hydratedIssues map[string]struct{}
+	hydratedIssues map[string]bool
 	store          db.Storage
 	owner          bool
 }
@@ -62,19 +62,23 @@ func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	return nil
 }
 
-func recordProjectAccessHydratedIssue(ctx context.Context, issueUID string) {
+func recordProjectAccessHydratedIssue(ctx context.Context, issueUID string, allowDeleted bool) {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	if decision == nil || decision.owner || issueUID == "" {
 		return
 	}
 	if decision.hydratedIssues == nil {
-		decision.hydratedIssues = make(map[string]struct{})
+		decision.hydratedIssues = make(map[string]bool)
 	}
-	decision.hydratedIssues[issueUID] = struct{}{}
+	if previous, ok := decision.hydratedIssues[issueUID]; ok {
+		decision.hydratedIssues[issueUID] = previous && allowDeleted
+		return
+	}
+	decision.hydratedIssues[issueUID] = allowDeleted
 }
 
 func revalidateProjectAccessHydratedIssues(ctx context.Context, decision *ProjectAccessDecision) error {
-	for issueUID := range decision.hydratedIssues {
+	for issueUID, allowDeleted := range decision.hydratedIssues {
 		issue, err := decision.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		if errors.Is(err, db.ErrNotFound) {
 			return projectAccessDenied()
@@ -89,7 +93,7 @@ func revalidateProjectAccessHydratedIssues(ctx context.Context, decision *Projec
 		if err != nil {
 			return err
 		}
-		if issue.DeletedAt != nil || project.DeletedAt != nil || !slices.Contains(decision.ProjectUIDs, project.UID) {
+		if (issue.DeletedAt != nil && !allowDeleted) || project.DeletedAt != nil || !slices.Contains(decision.ProjectUIDs, project.UID) {
 			return projectAccessDenied()
 		}
 	}

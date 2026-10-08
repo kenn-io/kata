@@ -215,6 +215,55 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 	})
 }
 
+func TestSignedRelayAcceptAllowsSupportedBulkBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("TEST_RELAY_SIGNING_KEY", strings.Repeat("k", 64))
+		home := t.TempDir()
+		t.Setenv("KATA_HOME", home)
+		t.Setenv("KATA_WORKSPACE", filepath.Join(home, "workspace"))
+		source := federationsigning.Source{KeyID: "relay-key", KeyEnv: "TEST_RELAY_SIGNING_KEY"}
+		state := filepath.Join(home, "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		project, err := store.CreateProject(t.Context(), "spoke-project")
+		require.NoError(t, err)
+		enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+			Token: "relay-token", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID,
+			Capabilities: "push", Actor: "example-actor",
+		})
+		require.NoError(t, err)
+		verifier, err := federationsigning.NewVerifier("https://daemon.example", []federationsigning.Key{{
+			Source: source, EnrollmentID: enrollment.Enrollment.ID,
+		}}, state)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, verifier.Close()) })
+		time.Sleep(federationsigning.Quarantine)
+		server := daemon.NewServer(daemon.ServerConfig{
+			DB: store, FederationSigning: verifier, FederationSigningRequired: true,
+		})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+
+		body, err := json.Marshal(db.RelayBatch{
+			Stream:    db.RelayStreamEvent,
+			Envelopes: []db.RelayEnvelope{{Body: bytes.Repeat([]byte("x"), 70*1024)}},
+		})
+		require.NoError(t, err)
+		require.Greater(t, len(body), 64*1024)
+		request := httptest.NewRequest(http.MethodPost,
+			fmt.Sprintf("https://daemon.example/api/v1/projects/%d/federation/relay:accept", project.ID), bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer relay-token")
+		request.Header.Set("Content-Type", "application/json")
+		require.NoError(t, federationsigning.Sign(request, source))
+		require.Greater(t, request.ContentLength, int64(64*1024))
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		require.NotEqual(t, http.StatusRequestEntityTooLarge, recorder.Code, recorder.Body.String(),
+			"acceptRelayDeliveries supports the route's 128 MiB batch budget")
+	})
+}
+
 // Contract: the native ingress HTTP server enforces its header budget before
 // routing, including requests to endpoints outside its allowlist.
 func TestFederationIngressBoundsHeaders(t *testing.T) {

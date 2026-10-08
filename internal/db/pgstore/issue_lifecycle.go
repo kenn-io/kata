@@ -587,6 +587,9 @@ func lockedIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, includeDelete
 	if project.DeletedAt != nil {
 		return db.Issue{}, db.Project{}, db.ErrNotFound
 	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, project.UID); err != nil {
+		return db.Issue{}, db.Project{}, err
+	}
 	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 		return db.Issue{}, db.Project{}, err
 	}

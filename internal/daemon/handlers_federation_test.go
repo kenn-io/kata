@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -3721,6 +3722,45 @@ func TestLeaveFederationReplicaRouteArchiveRefusesOpenIssues(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("want 200 with force, got %d body=%s", resp.StatusCode, raw)
 	}
+}
+
+func TestLeaveFederationReplicaRouteArchiveDoesNotCreateRelayDebt(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project, binding := newSpokeProject(t, env)
+	binding.PushEnabled = true
+	binding, err := env.DB.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	rootUID := "00000000000000000000000002"
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, env.DB.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID,
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}))
+	_, err = env.DB.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000007",
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath: []string{rootUID, env.DB.InstanceUID()}, LocalActor: binding.Actor, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "actor": binding.Actor}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var body struct {
+		Archived bool `json:"archived"`
+		Detached bool `json:"detached"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.True(t, body.Archived)
+	require.True(t, body.Detached)
+	archived, err := env.DB.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, archived.DeletedAt)
+	_, err = env.DB.FederationBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
 // TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach is the Fix 6

@@ -102,11 +102,9 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 	var instanceUID string
 	projects := make(map[int64]string)
 	pins := make(map[string]string)
-	configs := make(map[string]*RelayBindingConfig)
 	type retainedHop struct {
 		project, peer string
 		epoch         int64
-		upstream      bool
 	}
 	hops := make(map[string]retainedHop)
 	for _, record := range records {
@@ -137,8 +135,7 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 				if _, ok := hops[c.BindingUID]; ok {
 					return errors.New("duplicate relay binding in backup")
 				}
-				hops[c.BindingUID] = retainedHop{project: project, peer: c.UpstreamInstanceUID, epoch: c.ResetEpoch, upstream: true}
-				configs[project] = c
+				hops[c.BindingUID] = retainedHop{project: project, peer: c.UpstreamInstanceUID, epoch: c.ResetEpoch}
 			}
 		case *FederationEnrollmentExport:
 			if r.RelayProtocolVersion == RelayProtocolVersion {
@@ -169,13 +166,14 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 		default:
 			continue
 		}
-		// Detached historical state is retained; active negotiated projects must
-		// resolve every mapping to their exact current hop rather than source labels.
-		if configs[project] == nil {
+		// Detached historical namespaces remain in full backups after leave or
+		// reconnect. Validate delivery identity only when the binding is still
+		// retained as an active hop.
+		hop, ok := hops[binding]
+		if !ok {
 			continue
 		}
-		hop, ok := hops[binding]
-		if !ok || hop.project != project || epoch > hop.epoch {
+		if hop.project != project || epoch > hop.epoch {
 			return errors.New("backup relay delivery has no matching retained hop")
 		}
 		if raw == "" {

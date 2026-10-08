@@ -107,7 +107,7 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 			return &api.ConnectFederationBridgeResponse{Body: body}, nil
 		}
 		credentials := cfg.federationCredentialStore()
-		credential, err := reserveFederationBridgeCredential(ctx, credentials, body, catalog.AllowInsecure)
+		credential, err := reserveFederationBridgeCredential(ctx, cfg.DB, credentials, body, catalog.AllowInsecure)
 		if err != nil {
 			return nil, err
 		}
@@ -164,8 +164,9 @@ func beginFederationBridgeEnrollment(
 	key := federationReplicaOperationKey(store, projectName, expected)
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
-	if err := federationReplicaTransitions.leaveBlockedError(key); err != nil {
-		return nil, federationReplicaAPIError(err)
+	state := federationReplicaTransitions.state(key)
+	if state == federationReplicaLeavePending {
+		return nil, federationReplicaAPIError(federationReplicaTransitions.leaveBlockedError(key))
 	}
 	current, found, err := credentials.FederationCredential(ctx, projectUID)
 	if err != nil {
@@ -173,6 +174,12 @@ func beginFederationBridgeEnrollment(
 	}
 	if !found || !current.Equal(expected) {
 		return nil, api.NewError(http.StatusConflict, "federation_credential_conflict", "bridge credential changed before enrollment", "retry after resolving the current bridge state", nil)
+	}
+	if state == federationReplicaLeft {
+		// An explicit connect is the operator action that rejoins a completed
+		// leave. Clear that terminal state only after the fresh reservation was
+		// verified, then register the hub request under the same mutex.
+		federationReplicaTransitions.clearLeave(key)
 	}
 	finish := federationReplicaTransitions.registerHubOperationLocked(key)
 	return func() {
@@ -200,12 +207,16 @@ func federationBridgeProjectCollision(ctx context.Context, store db.Storage, pro
 	return nil
 }
 
-func reserveFederationBridgeCredential(ctx context.Context, credentials config.FederationCredentialStore, body api.FederationBridgeBody, allowInsecure bool) (config.FederationCredential, error) {
+func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, body api.FederationBridgeBody, allowInsecure bool) (config.FederationCredential, error) {
 	if credentials == nil {
 		return config.FederationCredential{}, api.NewError(503, "federation_credentials_unavailable", "federation credential storage is unavailable", "", nil)
 	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
+	key := federationReplicaTransitionKey(store, body.ProjectName)
+	if federationReplicaTransitions.state(key) == federationReplicaLeavePending {
+		return config.FederationCredential{}, federationReplicaAPIError(federationReplicaTransitions.leaveBlockedError(key))
+	}
 	current, found, err := credentials.FederationCredential(ctx, body.HubProjectUID)
 	if err != nil {
 		return config.FederationCredential{}, internalAPIError(err)

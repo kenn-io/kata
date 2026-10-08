@@ -101,6 +101,7 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		Type:        "project.removed",
 		Actor:       p.Actor,
 		Payload:     string(payload),
+		SkipRelay:   p.SkipFederationRelay,
 	})
 	if err != nil {
 		return db.Project{}, nil, err

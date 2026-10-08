@@ -44,8 +44,10 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	args = append(args, db.SystemProjectName)
 	conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
 	if p.ProjectID != 0 {
-		conds = append(conds, "e.project_id = ?")
-		args = append(args, p.ProjectID)
+		conds = append(conds, `(e.project_id = ? OR (e.type='issue.moved' AND
+            json_extract(CASE WHEN e.type='issue.moved' THEN e.payload ELSE '{}' END,'$.from_project_uid') =
+            (SELECT uid FROM projects WHERE id = ?)))`)
+		args = append(args, p.ProjectID, p.ProjectID)
 	}
 	if p.ThroughID != 0 {
 		conds = append(conds, "e.id <= ?")
@@ -76,10 +78,27 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	if err != nil {
 		return nil, fmt.Errorf("events after: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	var events []db.Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		events = append(events, e)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	var out []db.Event
 	issueCache := make(map[string]db.Issue)
 	missingIssueUIDs := make(map[string]struct{})
+	refCache := make(map[string]db.Issue)
+	missingRefs := make(map[string]struct{})
 	issueByUID := func(uid string) (db.Issue, error) {
 		if issue, ok := issueCache[uid]; ok {
 			return issue, nil
@@ -96,21 +115,45 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 		}
 		return issue, err
 	}
-	for rows.Next() {
-		e, err := scanEvent(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
+	issueByRef := func(projectUID, ref string) (db.Issue, error) {
+		key := projectUID + "\x00" + ref
+		if issue, ok := refCache[key]; ok {
+			return issue, nil
 		}
-		reset, err := db.EventRequiresProjectScopeReset(ctx, e, issueByUID)
+		if _, ok := missingRefs[key]; ok {
+			return db.Issue{}, db.ErrNotFound
+		}
+		issue, err := eventIssueByRef(ctx, d, projectUID, ref)
+		if errors.Is(err, db.ErrNotFound) {
+			missingRefs[key] = struct{}{}
+		}
+		if err == nil {
+			refCache[key] = issue
+		}
+		return issue, err
+	}
+	for _, e := range events {
+		reset, err := db.EventRequiresProjectScopeReset(ctx, e, issueByUID, issueByRef)
 		if err != nil {
 			return nil, fmt.Errorf("check event project scope: %w", err)
 		}
 		if reset {
-			e = db.ProjectScopeResetEvent(e)
+			if sourceUID := db.EventDepartureProjectUID(ctx, e); sourceUID != "" {
+				project, projectErr := d.ProjectByUID(ctx, sourceUID)
+				if errors.Is(projectErr, db.ErrNotFound) {
+					e = db.ProjectScopeResetCursor(e)
+				} else if projectErr != nil {
+					return nil, fmt.Errorf("resolve moved issue source project: %w", projectErr)
+				} else {
+					e = db.ProjectScopeResetEventInProject(e, project)
+				}
+			} else {
+				e = db.ProjectScopeResetEvent(e)
+			}
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, error) {
@@ -204,8 +247,7 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 	if err != nil {
 		return nil, fmt.Errorf("events in window: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	var out []db.Event
+	var events []db.Event
 	for rows.Next() {
 		var e db.Event
 		if err := rows.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID, &e.IssueUID, &e.IssueShortID,
@@ -213,9 +255,32 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 			&e.Type, &e.Actor, &e.Payload, &e.HLCPhysicalMS, &e.HLCCounter, &e.ContentHash, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-		out = append(out, e)
+		events = append(events, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	var out []db.Event
+	for _, event := range events {
+		if event.Type == "close.throttled" {
+			reset, err := db.EventRequiresProjectScopeReset(ctx, event, nil,
+				func(projectUID, ref string) (db.Issue, error) {
+					return eventIssueByRef(ctx, d, projectUID, ref)
+				})
+			if err != nil {
+				return nil, fmt.Errorf("check event project scope: %w", err)
+			}
+			if reset {
+				continue
+			}
+		}
+		out = append(out, event)
+	}
+	return out, nil
 }
 
 // RecentSiblingCloses returns issue.closed events emitted by actor on direct

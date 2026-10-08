@@ -206,10 +206,29 @@ var storageScenarios = []scenario{
 		name: "event reference project scope",
 		methods: []string{
 			"CloseIssueWithEvents", "CreateIssue", "CreateLink", "CreateProject", "EventsAfter",
-			"EventsInWindow", "InsertRemoteEvent",
+			"EventsInWindow", "InsertCloseThrottledEvent", "InsertRemoteEvent",
 		},
 		run: func(t *testing.T, store db.Storage) error {
 			RunEventReferenceProjectScope(t, store)
+			return nil
+		},
+	},
+	{
+		name:    "archived federation root pin export",
+		methods: []string{"CreateProject", "ExportAttribution", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding"},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchivedFederationPinExport(t, store)
+			return nil
+		},
+	},
+	{
+		name: "archive and leave avoids relay debt",
+		methods: []string{
+			"CreateProject", "FederationBindingByProject", "LeaveFederationReplica", "PinRootAuthority", "RemoveProject",
+			"SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchiveAndLeaveDoesNotCreateRelayDebt(t, store)
 			return nil
 		},
 	},

@@ -453,6 +453,9 @@ type RemoveProjectParams struct {
 	ProjectID int64
 	Actor     string
 	Force     bool
+	// SkipFederationRelay preserves the archive audit event but omits its
+	// relay delivery when the caller will immediately detach the replica.
+	SkipFederationRelay bool
 }
 
 // PurgeProjectParams are the inputs to Storage.PurgeProject.

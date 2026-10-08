@@ -237,6 +237,48 @@ func TestProjectAccessRechecksMovedIssueInsideCommentTransaction(t *testing.T) {
 	})
 }
 
+func TestProjectAccessRechecksMovedIssueInsideReopenTransaction(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden, err := store.CreateProject(t.Context(), "reopen-hidden-project")
+		require.NoError(t, err)
+		otherTeam, _, err := store.CreateTeam(t.Context(), "reopen-owner-team", "admin")
+		require.NoError(t, err)
+		_, err = store.SetTeamMembership(t.Context(), otherTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{otherTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+		_, _, _, err = store.CloseIssue(t.Context(), f.visible.ID, "done", "member", "Closed issue", nil)
+		require.NoError(t, err)
+
+		wrapped := &projectAccessBeforeReopenStore{Storage: store, before: func(issueID int64) {
+			require.Equal(t, f.visible.ID, issueID)
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: issueID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+				IfMatchRev: f.visible.Revision + 1, Actor: "admin",
+			})
+			require.NoError(t, err)
+		}}
+		f = projectAccessFixtureWithStorage(t, f, wrapped)
+
+		status, _, body := f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/reopen", f.public.ID, f.visible.ShortID),
+			"member", map[string]string{"actor": "member"}, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.NotContains(t, string(body), hidden.UID)
+		assert.NotContains(t, string(body), hidden.Name)
+
+		current, err := store.IssueByID(t.Context(), f.visible.ID)
+		require.NoError(t, err)
+		project, err := store.ProjectByID(t.Context(), current.ProjectID)
+		require.NoError(t, err)
+		assert.Equal(t, hidden.UID, project.UID, "the owner-side move should remain committed")
+		assert.Equal(t, "closed", current.Status, "the member must not reopen the moved issue")
+	})
+}
+
 func TestProjectAccessDoesNotHydrateCommentsAfterIssueMoves(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)
@@ -270,6 +312,43 @@ func TestProjectAccessDoesNotHydrateCommentsAfterIssueMoves(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, status, string(body))
 		assert.NotContains(t, string(body), projectAccessCanary,
 			"the response must be discarded when the hydrated issue has moved outside the caller's projects")
+	})
+}
+
+func TestProjectAccessPreservesSoftDeletedShowReads(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		deleted, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Readable deleted issue", Author: "member",
+		})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(t.Context(), deleted.ID, "member")
+		require.NoError(t, err)
+		status, _, body := f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s?include_deleted=true", f.public.ID, deleted.ShortID),
+			"member", nil, nil)
+		assert.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), "Readable deleted issue")
+
+		live, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Live issue with deleted peer", Author: "member",
+		})
+		require.NoError(t, err)
+		deletedPeer, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Deleted linked peer", Author: "member",
+		})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{
+			FromIssueID: live.ID, ToIssueID: deletedPeer.ID, Type: "related", Author: "member",
+		})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(t.Context(), deletedPeer.ID, "member")
+		require.NoError(t, err)
+		status, _, body = f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.public.ID, live.ShortID),
+			"member", nil, nil)
+		assert.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), "Live issue with deleted peer")
 	})
 }
 
@@ -333,6 +412,59 @@ func TestProjectAccessEventReferenceResetsPollAndSSE(t *testing.T) {
 		assert.Equal(t, "sync.reset_required", frame.event)
 		assert.Equal(t, fmt.Sprint(closeEvents[0].ID), frame.id)
 		assert.NotContains(t, frame.data, hiddenParent.UID)
+	})
+}
+
+func TestProjectAccessMoveResetsFormerProjectPollAndSSE(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden, err := store.CreateProject(t.Context(), "move-hidden-project")
+		require.NoError(t, err)
+		otherTeam, _, err := store.CreateTeam(t.Context(), "move-owner-team", "admin")
+		require.NoError(t, err)
+		_, err = store.SetTeamMembership(t.Context(), otherTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{otherTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+		afterID, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: f.visible.ID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+			IfMatchRev: f.visible.Revision, Actor: "admin",
+		})
+		require.NoError(t, err)
+
+		status, _, body := f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/events?after_id=%d", f.public.ID, afterID),
+			"member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var polled api.PollEventsResponse
+		require.NoError(t, json.Unmarshal(body, &polled.Body))
+		assert.True(t, polled.Body.ResetRequired)
+		assert.Equal(t, moved.EventID, polled.Body.ResetAfterID)
+		assert.Empty(t, polled.Body.Events)
+		assert.NotContains(t, string(body), hidden.UID)
+		assert.NotContains(t, string(body), hidden.Name)
+
+		streamCtx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
+			fmt.Sprintf("%s/api/v1/events/stream?project_id=%d&after_id=%d", f.server.URL, f.public.ID, afterID), nil)
+		require.NoError(t, err)
+		request.Header.Set("Authorization", "Bearer member-test-token")
+		request.Header.Set("Accept", "text/event-stream")
+		response, err := f.server.Client().Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		frame, ok := newSSEFramer(response.Body).Next(t, 2*time.Second)
+		require.True(t, ok)
+		assert.Equal(t, db.ProjectScopeResetEventType, frame.event)
+		assert.Equal(t, fmt.Sprint(moved.EventID), frame.id)
+		assert.NotContains(t, frame.data, hidden.UID)
+		assert.NotContains(t, frame.data, hidden.Name)
 	})
 }
 
@@ -608,6 +740,22 @@ func (s projectAccessBeforeComment) CreateComment(ctx context.Context, p db.Crea
 type projectAccessBeforeCommentsReadStore struct {
 	db.Storage
 	before func(int64)
+}
+
+type projectAccessBeforeReopenStore struct {
+	db.Storage
+	before func(int64)
+}
+
+func (s *projectAccessBeforeReopenStore) ReopenIssue(
+	ctx context.Context, issueID int64, actor string,
+) (db.Issue, *db.Event, bool, error) {
+	if s.before != nil {
+		before := s.before
+		s.before = nil
+		before(issueID)
+	}
+	return s.Storage.ReopenIssue(ctx, issueID, actor)
 }
 
 func (s *projectAccessBeforeCommentsReadStore) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {

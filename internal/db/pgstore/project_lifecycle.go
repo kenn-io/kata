@@ -90,7 +90,7 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		}
 		event, err = s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
-			Type: "project.removed", Actor: params.Actor, Payload: string(payload),
+			Type: "project.removed", Actor: params.Actor, Payload: string(payload), SkipRelay: params.SkipFederationRelay,
 		})
 		if err != nil {
 			return err

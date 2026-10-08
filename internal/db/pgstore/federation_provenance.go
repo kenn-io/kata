@@ -365,7 +365,11 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 				args = append(args, *filter.ProjectID)
 			}
 			if !filter.IncludeDeleted {
-				where = append(where, `p.deleted_at IS NULL`)
+				if kind == "federation_root_key" {
+					where = append(where, `(p.deleted_at IS NULL OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=p.id))`)
+				} else {
+					where = append(where, `p.deleted_at IS NULL`)
+				}
 			}
 			allowed, restricted := db.AuthorizedProjects(ctx)
 			if restricted {

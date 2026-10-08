@@ -38,6 +38,7 @@ type eventInsert struct {
 	HLC               *db.EventHLCTimestamp
 	CreatedAt         string
 	ContentHash       string
+	SkipRelay         bool
 }
 
 // MaxEventID returns the current event high-water mark.
@@ -56,7 +57,10 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 	conditions = append(conditions, authorizedEventStreamPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
-		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
+		projectPosition := len(args)
+		args = append(args, params.ProjectID)
+		conditions = append(conditions, fmt.Sprintf(`(e.project_id = $%d OR (e.type='issue.moved' AND
+            e.payload::jsonb->>'from_project_uid' = (SELECT uid FROM projects WHERE id = $%d)))`, projectPosition, len(args)))
 	}
 	if params.ThroughID != 0 {
 		args = append(args, params.ThroughID)
@@ -81,10 +85,27 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
-	defer func() { _ = rows.Close() }()
 	events := make([]db.Event, 0)
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	projected := make([]db.Event, 0, len(events))
 	issueCache := make(map[string]db.Issue)
 	missingIssueUIDs := make(map[string]struct{})
+	refCache := make(map[string]db.Issue)
+	missingRefs := make(map[string]struct{})
 	issueByUID := func(uid string) (db.Issue, error) {
 		if issue, ok := issueCache[uid]; ok {
 			return issue, nil
@@ -101,24 +122,45 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 		}
 		return issue, err
 	}
-	for rows.Next() {
-		event, err := scanEvent(rows)
-		if err != nil {
-			return nil, err
+	issueByRef := func(projectUID, ref string) (db.Issue, error) {
+		key := projectUID + "\x00" + ref
+		if issue, ok := refCache[key]; ok {
+			return issue, nil
 		}
-		reset, err := db.EventRequiresProjectScopeReset(ctx, event, issueByUID)
+		if _, ok := missingRefs[key]; ok {
+			return db.Issue{}, db.ErrNotFound
+		}
+		issue, err := eventIssueByRef(ctx, s, projectUID, ref)
+		if errors.Is(err, db.ErrNotFound) {
+			missingRefs[key] = struct{}{}
+		}
+		if err == nil {
+			refCache[key] = issue
+		}
+		return issue, err
+	}
+	for _, event := range events {
+		reset, err := db.EventRequiresProjectScopeReset(ctx, event, issueByUID, issueByRef)
 		if err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		if reset {
-			event = db.ProjectScopeResetEvent(event)
+			if sourceUID := db.EventDepartureProjectUID(ctx, event); sourceUID != "" {
+				project, projectErr := s.ProjectByUID(ctx, sourceUID)
+				if errors.Is(projectErr, db.ErrNotFound) {
+					event = db.ProjectScopeResetCursor(event)
+				} else if projectErr != nil {
+					return nil, mapSQLError(projectErr, nil)
+				} else {
+					event = db.ProjectScopeResetEventInProject(event, project)
+				}
+			} else {
+				event = db.ProjectScopeResetEvent(event)
+			}
 		}
-		events = append(events, event)
+		projected = append(projected, event)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, mapSQLError(err, nil)
-	}
-	return events, nil
+	return projected, nil
 }
 
 func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, error) {
@@ -174,7 +216,6 @@ func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowPara
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
-	defer func() { _ = rows.Close() }()
 	var events []db.Event
 	for rows.Next() {
 		event, err := scanEvent(rows)
@@ -183,7 +224,30 @@ func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowPara
 		}
 		events = append(events, event)
 	}
-	return events, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	filtered := make([]db.Event, 0, len(events))
+	for _, event := range events {
+		if event.Type == "close.throttled" {
+			reset, err := db.EventRequiresProjectScopeReset(ctx, event, nil,
+				func(projectUID, ref string) (db.Issue, error) {
+					return eventIssueByRef(ctx, s, projectUID, ref)
+				})
+			if err != nil {
+				return nil, mapSQLError(err, nil)
+			}
+			if reset {
+				continue
+			}
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered, nil
 }
 
 // MaxLocalOriginEventID returns the newest locally-originated project event.
@@ -380,8 +444,10 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
 		return db.Event{}, err
 	}
-	if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
-		return db.Event{}, err
+	if !input.SkipRelay {
+		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.Event{}, err
+		}
 	}
 	return event, nil
 }

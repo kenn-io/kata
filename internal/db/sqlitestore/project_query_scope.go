@@ -2,12 +2,35 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 )
+
+type eventQueryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func eventIssueByUID(ctx context.Context, query eventQueryRower, uid string) (db.Issue, error) {
+	return scanIssue(query.QueryRowContext(ctx, issueSelect+` WHERE i.uid = ?`, uid))
+}
+
+func eventIssueByRef(ctx context.Context, query eventQueryRower, projectUID, ref string) (db.Issue, error) {
+	parsed, err := shortid.Parse(ref)
+	if err != nil || parsed.Project == "" && parsed.ShortID == "" {
+		return db.Issue{}, db.ErrNotFound
+	}
+	projectColumn, projectValue := "p.uid", projectUID
+	if parsed.Project != "" {
+		projectColumn, projectValue = "p.name", parsed.Project
+	}
+	return scanIssue(query.QueryRowContext(ctx,
+		issueSelect+` WHERE `+projectColumn+` = ? AND i.short_id = ?`, projectValue, parsed.ShortID))
+}
 
 func authorizedProjectPredicate(ctx context.Context, column string, args *[]any) string {
 	return db.AuthorizedProjectPredicate(ctx, column, func(value any) string {
@@ -81,7 +104,9 @@ func authorizedEventStreamPredicate(ctx context.Context, args *[]any) string {
 	}
 	source := authorizedProjectPredicate(ctx, "p.uid", args)
 	subject := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
-	return source + " AND (e.issue_uid IS NULL OR EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.issue_uid AND " + subject + "))"
+	visibleSubject := source + " AND (e.issue_uid IS NULL OR EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.issue_uid AND " + subject + "))"
+	departure := authorizedProjectPredicate(ctx, "json_extract(e.payload,'$.from_project_uid')", args)
+	return "(" + visibleSubject + ") OR (e.type='issue.moved' AND e.issue_uid IS NOT NULL AND " + departure + ")"
 }
 
 var sqliteNumberedParameter = regexp.MustCompile(`\?[0-9]+`)

@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -9,6 +10,41 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+// RunArchivedFederationPinExport ensures the live-only export filter still
+// includes public authority pins needed to restore retained federation bindings.
+func RunArchivedFederationPinExport(t *testing.T, store db.Storage) {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: project.UID, Actor: "example-actor", Enabled: true, PushEnabled: true,
+	})
+	require.NoError(t, err)
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	pin := db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: "00000000000000000000000002",
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}
+	require.NoError(t, store.PinRootAuthority(ctx, pin))
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "operator"})
+	require.NoError(t, err)
+
+	attribution, ok := store.(db.AttributionStorage)
+	require.True(t, ok)
+	found := false
+	for record, err := range attribution.ExportAttribution(ctx, db.ExportFilter{IncludeDeleted: false}) {
+		require.NoError(t, err)
+		if exportedPin, ok := record.(*db.RootKeyPin); ok && exportedPin.ProjectUID == project.UID {
+			found = true
+			require.Equal(t, pin.AuthorityUID, exportedPin.AuthorityUID)
+		}
+	}
+	assert.True(t, found, "a retained federation binding must keep its public root pin in filtered exports")
+}
 
 // RunEventReferenceProjectScope verifies that event feeds replace references
 // to inaccessible issues with identity-free reset markers. Digest windows and
@@ -101,12 +137,21 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	)
 	require.NoError(t, err)
 	require.Len(t, visibleCloseEvents, 1)
+	hiddenReference := hiddenProject.Name + "#" + hiddenPeer.ShortID
+	throttledEvent, err := store.InsertCloseThrottledEvent(ctx, closedWithVisibleParent.ID, "member", db.CloseThrottledPayload{
+		Reason: db.CloseThrottleReasonSiblingBurst,
+		Parent: hiddenReference,
+		Cohort: []string{hiddenReference},
+		Prior:  &hiddenReference,
+	})
+	require.NoError(t, err)
 
 	scoped := db.WithAuthorizedProjects(ctx, []string{visibleProject.UID})
 	hiddenUIDs := []string{
 		hiddenCreateEvent.UID,
 		hiddenSnapshot.EventUID,
 		hiddenCloseEvents[0].UID,
+		throttledEvent.UID,
 	}
 	visibleUIDs := []string{
 		visibleCreateEvent.UID,
@@ -121,6 +166,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		hiddenCreateEvent.ID:     {},
 		hiddenSnapshotRows[0].ID: {},
 		hiddenCloseEvents[0].ID:  {},
+		throttledEvent.ID:        {},
 	}
 	for _, event := range after {
 		if _, expected := resetEventIDs[event.ID]; !expected {
@@ -155,7 +201,7 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 		{issue: createdWithHiddenLink, hiddenUID: []string{hiddenCreateEvent.UID, hiddenSnapshot.EventUID}},
 		{issue: createdWithVisibleLink, visible: []string{visibleCreateEvent.UID, visibleSnapshot.EventUID}},
 		{issue: closedWithHiddenParent, hiddenUID: []string{hiddenCloseEvents[0].UID}},
-		{issue: closedWithVisibleParent, visible: []string{visibleCloseEvents[0].UID}},
+		{issue: closedWithVisibleParent, hiddenUID: []string{throttledEvent.UID}, visible: []string{visibleCloseEvents[0].UID}},
 	} {
 		snapshot, err := ui.ReadUISnapshot(scoped, db.UISnapshotQuery{
 			View: "all-open", SelectedIssueUID: tc.issue.UID, IncludeHistory: true,
