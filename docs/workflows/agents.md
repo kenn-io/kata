@@ -691,7 +691,7 @@ A refusal returns `429 broadcast_rate_limited` with `retry_after_seconds`,
 `window`, `last_broadcast_at`, `last_broadcast_by`, and `last_message_prefix`.
 It emits no events and does not extend the window. Prefer a targeted
 `--to ... --re` request when rate-limited. Broadcast stays out of the
-per-session contract; coordinators learn it here and in `kata quickstart`.
+per-session contract and remains a planned coordinator workflow in this guide.
 
 For federation rollout, upgrade hubs to the comment-link schema before their
 spokes. A schema-30 hub rejects pushes from a schema-31 spoke. Older CLIs ignore
