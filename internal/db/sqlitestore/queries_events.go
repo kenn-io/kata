@@ -42,7 +42,7 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	args = append(args, p.AfterID)
 	conds = append(conds, "p.name <> ?")
 	args = append(args, db.SystemProjectName)
-	conds = append(conds, authorizedEventPredicate(ctx, &args))
+	conds = append(conds, authorizedEventStreamPredicate(ctx, &args))
 	if p.ProjectID != 0 {
 		conds = append(conds, "e.project_id = ?")
 		args = append(args, p.ProjectID)
@@ -78,10 +78,35 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	}
 	defer func() { _ = rows.Close() }()
 	var out []db.Event
+	issueCache := make(map[string]db.Issue)
+	missingIssueUIDs := make(map[string]struct{})
+	issueByUID := func(uid string) (db.Issue, error) {
+		if issue, ok := issueCache[uid]; ok {
+			return issue, nil
+		}
+		if _, ok := missingIssueUIDs[uid]; ok {
+			return db.Issue{}, db.ErrNotFound
+		}
+		issue, err := d.IssueByUID(ctx, uid, db.IncludeDeletedYes)
+		if errors.Is(err, db.ErrNotFound) {
+			missingIssueUIDs[uid] = struct{}{}
+		}
+		if err == nil {
+			issueCache[uid] = issue
+		}
+		return issue, err
+	}
 	for rows.Next() {
 		e, err := scanEvent(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		reset, err := db.EventRequiresProjectScopeReset(ctx, e, issueByUID)
+		if err != nil {
+			return nil, fmt.Errorf("check event project scope: %w", err)
+		}
+		if reset {
+			e = db.ProjectScopeResetEvent(e)
 		}
 		out = append(out, e)
 	}

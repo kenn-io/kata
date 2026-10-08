@@ -616,6 +616,9 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT),relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream
 	          FROM federation_enrollments`
 	query, args := withProjectIDFilter(query, f, "project_id")
+	if f.ProjectID != nil {
+		query += ` AND relay_protocol_version=0 AND parent_token_id IS NULL AND relay_binding_uid IS NULL`
+	}
 	query += ` ORDER BY id ASC`
 	return streamRows(ctx, d.readQ, "federation_enrollments", query, args,
 		func(rows *sql.Rows) (db.FederationEnrollmentExport, error) {

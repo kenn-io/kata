@@ -798,6 +798,74 @@ func RunEmbeddingProducerIngressOwnership(t *testing.T, store db.Storage) {
 	}
 }
 
+// RunDownstreamCannotForgeRootEmbeddingProducer verifies that an enrolled
+// relay cannot submit a root-origin claim to replace the shared producer
+// configuration. Relay envelope paths and hashes are hop commitments, not
+// proof that the root authored the source event.
+func RunDownstreamCannotForgeRootEmbeddingProducer(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "producer-downstream-forgery")
+	require.NoError(t, err)
+	rootUID := "00000000000000000000000002"
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID,
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: 42,
+		HubProjectUID: project.UID, Actor: "local-member",
+		PushEnabled: true, Enabled: true,
+	})
+	require.NoError(t, err)
+	bindingUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath:    []string{rootUID, store.InstanceUID()},
+		LocalActor: "local-member", ServeDownstream: true, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
+	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		Actor: "local-member", AdminActor: "admin", PlaintextToken: "producer-forgery-parent-token",
+	})
+	require.NoError(t, err)
+	peer := "00000000000000000000000006"
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peer,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "producer-forgery-child-token",
+		ServeDownstream: true,
+	})
+	require.NoError(t, err)
+
+	producer, err := json.Marshal(projectProducerTestConfig(peer))
+	require.NoError(t, err)
+	source := newRemoteEvent(t, project, nil, "project.metadata_updated", "root-admin", rootUID, 500,
+		jsontext.Value(`{"project_uid":"`+project.UID+`","diff":{"federation_embedding":{"from":null,"to":`+string(producer)+`}}}`))
+	body, err := db.EncodeRelaySourceEvent(source)
+	require.NoError(t, err)
+	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+		Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID,
+		ProjectUID: project.UID, AuthorityUID: rootUID,
+		SenderInstanceUID: peer, ReceiverInstanceUID: store.InstanceUID(),
+		Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent,
+		Path: []string{rootUID, peer}, SourceUID: source.EventUID,
+		SourceHash: source.ContentHash, Body: body,
+	})
+	require.NoError(t, err)
+	_, err = store.AcceptRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID,
+		db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	current, err := store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	configured, err := db.ProjectEmbeddingProducerFromMetadata(current.Metadata)
+	require.NoError(t, err)
+	require.Nil(t, configured, "a downstream grant cannot choose the root-owned producer")
+}
+
 func projectProducerTestConfig(producerUID string) db.ProjectEmbeddingProducer {
 	return db.ProjectEmbeddingProducer{ProducerInstanceUID: producerUID, Recipe: embedding.ArtifactIdentity{Provider: "openai-compatible", Model: "example-model", Dimensions: 2, InputType: "none", Normalization: "none", Preprocessing: "kata.issue/v2", RecipeVersion: 2, SplitMaxRunes: 2000, SplitOverlap: 200, RecipeFingerprint: strings.Repeat("a", 64), Encoding: embedding.ArtifactFloat32Encoding}}
 }

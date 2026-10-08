@@ -10,10 +10,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// RunEventReferenceProjectScope verifies that event reads hide references to
-// issues in projects the caller cannot access, including references embedded
-// in immutable create/snapshot/close payloads. The same predicate feeds event
-// polling, digest windows, and selected-issue history in browser snapshots.
+// RunEventReferenceProjectScope verifies that event feeds replace references
+// to inaccessible issues with identity-free reset markers. Digest windows and
+// selected-issue history continue to omit events that cannot be projected.
 func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	t.Helper()
 	ctx := context.Background()
@@ -58,6 +57,9 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 			hiddenPeer.UID+`","to_short_id":"`+hiddenPeer.ShortID+`"}]}`))
 	_, err = store.InsertRemoteEvent(ctx, visibleProject.ID, hiddenSnapshot)
 	require.NoError(t, err)
+	hiddenSnapshotRows, err := store.EventsByUIDs(ctx, visibleProject.ID, []string{hiddenSnapshot.EventUID})
+	require.NoError(t, err)
+	require.Len(t, hiddenSnapshotRows, 1)
 	visibleSnapshot := newRemoteEvent(t, visibleProject, &createdWithVisibleLink.UID,
 		"issue.snapshot", "member", store.InstanceUID(), 701,
 		jsontext.Value(`{"uid":"`+createdWithVisibleLink.UID+`","short_id":"`+
@@ -115,6 +117,23 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	after, err := store.EventsAfter(scoped, db.EventsAfterParams{AfterID: 0, Limit: 1000})
 	require.NoError(t, err)
 	assertVisibleEventUIDs(t, after, hiddenUIDs, visibleUIDs)
+	resetEventIDs := map[int64]struct{}{
+		hiddenCreateEvent.ID:     {},
+		hiddenSnapshotRows[0].ID: {},
+		hiddenCloseEvents[0].ID:  {},
+	}
+	for _, event := range after {
+		if _, expected := resetEventIDs[event.ID]; !expected {
+			continue
+		}
+		assert.Equal(t, db.ProjectScopeResetEventType, event.Type)
+		assert.Empty(t, event.UID)
+		assert.Nil(t, event.IssueUID)
+		assert.Nil(t, event.RelatedIssueUID)
+		assert.Empty(t, event.Payload)
+		delete(resetEventIDs, event.ID)
+	}
+	assert.Empty(t, resetEventIDs, "each visible mutation with a hidden reference needs a reset cursor")
 	for _, event := range after {
 		assert.Equal(t, visibleProject.UID, event.ProjectUID,
 			"cross-project feeds must retain their project boundary")

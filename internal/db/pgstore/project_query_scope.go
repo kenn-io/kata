@@ -69,6 +69,18 @@ func authorizedEventPredicate(ctx context.Context, args *[]any) string {
 	return predicate
 }
 
+// authorizedEventStreamPredicate keeps visible source events whose structured
+// peers may be private. EventsAfter replaces those rows with identity-free
+// reset markers so polling and SSE invalidate without exposing the peer.
+func authorizedEventStreamPredicate(ctx context.Context, args *[]any) string {
+	if _, restricted := db.AuthorizedProjects(ctx); !restricted {
+		return "1=1"
+	}
+	source := authorizedProjectPredicate(ctx, "p.uid", args)
+	subject := authorizedIssuePredicate(ctx, "endpoint.project_id", args)
+	return source + " AND (e.issue_uid IS NULL OR EXISTS(SELECT 1 FROM issues endpoint WHERE endpoint.uid=e.issue_uid AND " + subject + "))"
+}
+
 // authorizeRelationshipQuery intersects every referenced link endpoint before
 // deriving counts, blockers, or relationship facets. The aliases and SQL are
 // native query constants; project identities remain bound parameters. A shared

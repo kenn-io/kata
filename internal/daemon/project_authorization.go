@@ -24,6 +24,7 @@ type ProjectAccessDecision struct {
 	PolicyRevision int64
 	Actor          string
 	targets        []string
+	hydratedIssues map[string]struct{}
 	store          db.Storage
 	owner          bool
 }
@@ -57,6 +58,40 @@ func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	}
 	if !slices.Contains(decision.targets, projectUID) {
 		decision.targets = append(decision.targets, projectUID)
+	}
+	return nil
+}
+
+func recordProjectAccessHydratedIssue(ctx context.Context, issueUID string) {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil || decision.owner || issueUID == "" {
+		return
+	}
+	if decision.hydratedIssues == nil {
+		decision.hydratedIssues = make(map[string]struct{})
+	}
+	decision.hydratedIssues[issueUID] = struct{}{}
+}
+
+func revalidateProjectAccessHydratedIssues(ctx context.Context, decision *ProjectAccessDecision) error {
+	for issueUID := range decision.hydratedIssues {
+		issue, err := decision.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		if errors.Is(err, db.ErrNotFound) {
+			return projectAccessDenied()
+		}
+		if err != nil {
+			return err
+		}
+		project, err := decision.store.ProjectByID(ctx, issue.ProjectID)
+		if errors.Is(err, db.ErrNotFound) {
+			return projectAccessDenied()
+		}
+		if err != nil {
+			return err
+		}
+		if issue.DeletedAt != nil || project.DeletedAt != nil || !slices.Contains(decision.ProjectUIDs, project.UID) {
+			return projectAccessDenied()
+		}
 	}
 	return nil
 }
@@ -167,6 +202,15 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 		}
 		if current != decision.PolicyRevision {
 			api.WriteEnvelope(w, http.StatusNotFound, "not_found", "resource not found")
+			return
+		}
+		if err := revalidateProjectAccessHydratedIssues(ctx, decision); err != nil {
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+				api.WriteEnvelope(w, http.StatusNotFound, "not_found", "resource not found")
+				return
+			}
+			api.WriteEnvelope(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
 		response.writeTo(w)

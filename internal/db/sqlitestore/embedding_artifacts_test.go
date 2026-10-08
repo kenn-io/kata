@@ -134,6 +134,12 @@ func TestEmbeddingProducerIngressOwnership(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	dbtest.RunEmbeddingProducerIngressOwnership(t, store)
 }
+func TestDownstreamCannotForgeRootEmbeddingProducer(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "producer-forgery.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunDownstreamCannotForgeRootEmbeddingProducer(t, store)
+}
 func TestEmbeddingProducerRootPropagation(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "producer-authority.db"))
 	require.NoError(t, err)

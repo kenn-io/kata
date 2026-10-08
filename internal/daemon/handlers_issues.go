@@ -973,6 +973,17 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	out.Body.WebURL = issueWebURL(cfg, issue.UID)
 	addIssueWebURLs(cfg, childOuts)
 	out.Body.Children = childOuts
+	recordProjectAccessHydratedIssue(ctx, issue.UID)
+	if parent != nil {
+		recordProjectAccessHydratedIssue(ctx, parent.UID)
+	}
+	for _, link := range links {
+		recordProjectAccessHydratedIssue(ctx, link.From.UID)
+		recordProjectAccessHydratedIssue(ctx, link.To.UID)
+	}
+	for _, child := range childOuts {
+		recordProjectAccessHydratedIssue(ctx, child.UID)
+	}
 	claimRelevant, err := showIssueClaimRelevant(ctx, cfg.DB, issue.ProjectID)
 	if err != nil {
 		return nil, internalAPIError(err)

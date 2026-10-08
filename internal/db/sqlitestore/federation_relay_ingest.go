@@ -128,7 +128,13 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err := validateFederationProjectEvent(projectUID, source.OriginInstanceUID, source, known, true); err != nil {
 					return err
 				}
-				if err := db.ValidateEmbeddingProducerEvent(source, pin.AuthorityUID); err != nil {
+				producerAuthorityUID := pin.AuthorityUID
+				if grant.ID > 0 {
+					// Enrollment authenticates the direct downstream peer, not the
+					// source identity it asserts in a forwarded path.
+					producerAuthorityUID = ""
+				}
+				if err := db.ValidateEmbeddingProducerEvent(source, producerAuthorityUID); err != nil {
 					return err
 				}
 				if err := db.ValidateFederationEntries(source.Type, source.EventUID, source.Payload); err != nil {

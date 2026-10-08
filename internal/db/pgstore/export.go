@@ -708,7 +708,7 @@ func (s *Store) ExportFederationEnrollments(ctx context.Context, filter db.Expor
        created_at, updated_at, revoked_at,relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream FROM federation_enrollments`
 	var args []any
 	if filter.ProjectID != nil {
-		query += ` WHERE project_id=$1`
+		query += ` WHERE project_id=$1 AND relay_protocol_version=0 AND parent_token_id IS NULL AND relay_binding_uid IS NULL`
 		args = append(args, *filter.ProjectID)
 	}
 	query += ` ORDER BY id ASC`

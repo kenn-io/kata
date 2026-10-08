@@ -2602,6 +2602,9 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("begin federation adoption: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("lock project access for federation adoption: %w", err)
+	}
 
 	project, err := scanProject(tx.QueryRowContext(ctx,
 		projectSelect+` WHERE id = ?`, p.ProjectID))
@@ -2678,6 +2681,9 @@ func (d *Store) adoptProjectIntoFederation(
 	if project.UID != p.HubProjectUID {
 		if err := replaceProjectUIDTx(ctx, tx, project.ID, p.HubProjectUID); err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("advance project access revision after federation adoption: %w", err)
 		}
 		project.UID = p.HubProjectUID
 	}
@@ -2815,8 +2821,86 @@ func federationAdoptionPushFloor(ctx context.Context, tx *sql.Tx, projectID int6
 	return 0, nil
 }
 
+type projectAccessPolicyForAdoption struct {
+	projectUID string
+	visibility string
+	revision   int64
+	teamUIDs   []string
+}
+
+func takeProjectAccessPolicyForUIDRewriteTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+) (*projectAccessPolicyForAdoption, error) {
+	var policy projectAccessPolicyForAdoption
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid,a.visibility,a.revision
+		  FROM projects p
+		  JOIN project_access_policies a ON a.project_uid=p.uid
+		 WHERE p.id=?`, projectID).Scan(&policy.projectUID, &policy.visibility, &policy.revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read adoption project access policy: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT team_uid FROM project_access_teams WHERE project_uid=? ORDER BY team_uid`, policy.projectUID)
+	if err != nil {
+		return nil, fmt.Errorf("read adoption project access teams: %w", err)
+	}
+	for rows.Next() {
+		var teamUID string
+		if err := rows.Scan(&teamUID); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan adoption project access team: %w", err)
+		}
+		policy.teamUIDs = append(policy.teamUIDs, teamUID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate adoption project access teams: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close adoption project access teams: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM project_access_policies WHERE project_uid=?`, policy.projectUID); err != nil {
+		return nil, fmt.Errorf("detach adoption project access policy: %w", err)
+	}
+	return &policy, nil
+}
+
+func restoreProjectAccessPolicyAfterUIDRewriteTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	policy *projectAccessPolicyForAdoption,
+	projectUID string,
+) error {
+	if policy == nil {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES(?,?,?)`,
+		projectUID, policy.visibility, policy.revision); err != nil {
+		return fmt.Errorf("restore adopted project access policy: %w", err)
+	}
+	for _, teamUID := range policy.teamUIDs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO project_access_teams(project_uid,team_uid) VALUES(?,?)`, projectUID, teamUID); err != nil {
+			return fmt.Errorf("restore adopted project access team: %w", err)
+		}
+	}
+	return nil
+}
+
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid string) error {
 	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
+		return err
+	}
+	accessPolicy, err := takeProjectAccessPolicyForUIDRewriteTx(ctx, tx, projectID)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS trg_projects_uid_immutable`); err != nil {
@@ -2833,6 +2917,9 @@ func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid s
 		  WHERE NEW.uid <> OLD.uid;
 		END`); err != nil {
 		return fmt.Errorf("restore project uid immutability trigger after adoption: %w", err)
+	}
+	if err := restoreProjectAccessPolicyAfterUIDRewriteTx(ctx, tx, accessPolicy, uid); err != nil {
+		return err
 	}
 	return restoreArtifactAdoptionTx(ctx, tx, uid)
 }

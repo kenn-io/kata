@@ -237,6 +237,105 @@ func TestProjectAccessRechecksMovedIssueInsideCommentTransaction(t *testing.T) {
 	})
 }
 
+func TestProjectAccessDoesNotHydrateCommentsAfterIssueMoves(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden, err := store.CreateProject(t.Context(), "comment-read-hidden-project")
+		require.NoError(t, err)
+		otherTeam, _, err := store.CreateTeam(t.Context(), "comment-read-owner-team", "admin")
+		require.NoError(t, err)
+		_, err = store.SetTeamMembership(t.Context(), otherTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{otherTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+
+		wrapped := &projectAccessBeforeCommentsReadStore{Storage: store, before: func(issueID int64) {
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: issueID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+				IfMatchRev: f.visible.Revision, Actor: "admin",
+			})
+			require.NoError(t, err)
+			_, _, err = store.CreateComment(t.Context(), db.CreateCommentParams{
+				IssueID: issueID, Author: "other-member", Body: projectAccessCanary,
+			})
+			require.NoError(t, err)
+		}}
+		f = projectAccessFixtureWithStorage(t, f, wrapped)
+
+		status, _, body := f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.public.ID, f.visible.ShortID),
+			"member", nil, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.NotContains(t, string(body), projectAccessCanary,
+			"the response must be discarded when the hydrated issue has moved outside the caller's projects")
+	})
+}
+
+func TestProjectAccessEventReferenceResetsPollAndSSE(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hidden, err := store.CreateProject(t.Context(), "event-reference-hidden-project")
+		require.NoError(t, err)
+		otherTeam, _, err := store.CreateTeam(t.Context(), "event-reference-owner-team", "admin")
+		require.NoError(t, err)
+		_, err = store.SetTeamMembership(t.Context(), otherTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{otherTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+		hiddenParent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: hidden.ID, Title: "Hidden parent", Author: "other-member",
+		})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{
+			FromIssueID: f.visible.ID, ToIssueID: hiddenParent.ID, Type: "parent", Author: "admin",
+		})
+		require.NoError(t, err)
+		afterID, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		_, closeEvents, _, err := store.CloseIssueWithEvents(
+			t.Context(), f.visible.ID, "done", "member", "Visible closure", nil,
+		)
+		require.NoError(t, err)
+		require.Len(t, closeEvents, 1)
+		require.Contains(t, closeEvents[0].Payload, hiddenParent.UID,
+			"the close event must exercise a hidden parent reference")
+
+		status, _, body := f.request(t, http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d/events?after_id=%d", f.public.ID, afterID),
+			"member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var polled api.PollEventsResponse
+		require.NoError(t, json.Unmarshal(body, &polled.Body))
+		assert.True(t, polled.Body.ResetRequired,
+			"polling must invalidate visible state when a visible close is filtered for a private parent")
+		assert.Equal(t, closeEvents[0].ID, polled.Body.ResetAfterID)
+		assert.Empty(t, polled.Body.Events)
+		assert.NotContains(t, string(body), hiddenParent.UID)
+		assert.NotContains(t, string(body), hiddenParent.ShortID)
+
+		streamCtx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
+			fmt.Sprintf("%s/api/v1/events/stream?project_id=%d&after_id=%d", f.server.URL, f.public.ID, afterID), nil)
+		require.NoError(t, err)
+		request.Header.Set("Authorization", "Bearer member-test-token")
+		request.Header.Set("Accept", "text/event-stream")
+		response, err := f.server.Client().Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		frame, ok := newSSEFramer(response.Body).Next(t, 2*time.Second)
+		require.True(t, ok, "the open stream must receive an invalidation frame")
+		assert.Equal(t, "sync.reset_required", frame.event)
+		assert.Equal(t, fmt.Sprint(closeEvents[0].ID), frame.id)
+		assert.NotContains(t, frame.data, hiddenParent.UID)
+	})
+}
+
 func TestProjectAccessRechecksExistingParentInsideReplacementTransaction(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)
@@ -504,6 +603,20 @@ type projectAccessBeforeComment struct {
 func (s projectAccessBeforeComment) CreateComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
 	s.before()
 	return s.Storage.CreateComment(ctx, p)
+}
+
+type projectAccessBeforeCommentsReadStore struct {
+	db.Storage
+	before func(int64)
+}
+
+func (s *projectAccessBeforeCommentsReadStore) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
+	if s.before != nil {
+		before := s.before
+		s.before = nil
+		before(issueID)
+	}
+	return s.Storage.CommentsByIssue(ctx, issueID)
 }
 
 type projectAccessDenyHost struct{}

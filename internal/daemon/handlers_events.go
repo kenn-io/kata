@@ -145,6 +145,11 @@ func readVisibleEvents(
 		if err != nil {
 			return nil, afterID, 0, internalAPIError(err)
 		}
+		for _, event := range rows {
+			if event.Type == db.ProjectScopeResetEventType {
+				return nil, event.ID, event.ID, nil
+			}
+		}
 		next := nextAfterID(rows, afterID)
 		if len(rows) == 0 && throughID > next {
 			next = throughID
@@ -195,6 +200,9 @@ func readVisibleEvents(
 		for _, event := range rows {
 			cursor = event.ID
 			scanned++
+			if event.Type == db.ProjectScopeResetEventType {
+				return nil, event.ID, event.ID, nil
+			}
 			projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
 			if ok && event.Type != "issue.links_changed" {
 				visible = append(visible, projected)

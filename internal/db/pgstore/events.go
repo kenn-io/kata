@@ -53,7 +53,7 @@ func (s *Store) MaxEventID(ctx context.Context) (int64, error) {
 func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
 	conditions := []string{"e.id > $1", "p.name <> $2"}
 	args := []any{params.AfterID, db.SystemProjectName}
-	conditions = append(conditions, authorizedEventPredicate(ctx, &args))
+	conditions = append(conditions, authorizedEventStreamPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
 		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
@@ -83,10 +83,35 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 	}
 	defer func() { _ = rows.Close() }()
 	events := make([]db.Event, 0)
+	issueCache := make(map[string]db.Issue)
+	missingIssueUIDs := make(map[string]struct{})
+	issueByUID := func(uid string) (db.Issue, error) {
+		if issue, ok := issueCache[uid]; ok {
+			return issue, nil
+		}
+		if _, ok := missingIssueUIDs[uid]; ok {
+			return db.Issue{}, db.ErrNotFound
+		}
+		issue, err := s.IssueByUID(ctx, uid, db.IncludeDeletedYes)
+		if errors.Is(err, db.ErrNotFound) {
+			missingIssueUIDs[uid] = struct{}{}
+		}
+		if err == nil {
+			issueCache[uid] = issue
+		}
+		return issue, err
+	}
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {
 			return nil, err
+		}
+		reset, err := db.EventRequiresProjectScopeReset(ctx, event, issueByUID)
+		if err != nil {
+			return nil, mapSQLError(err, nil)
+		}
+		if reset {
+			event = db.ProjectScopeResetEvent(event)
 		}
 		events = append(events, event)
 	}

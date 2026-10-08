@@ -618,6 +618,26 @@ var storageScenarios = []scenario{
 		run: checkFederationProjectAdoption,
 	},
 	{
+		name: "federation adoption project access",
+		methods: []string{
+			"AdoptProjectIntoFederation", "CreateProject", "CreateTeam", "ProjectAccessPolicy",
+			"ProjectAccessRevision", "SetProjectAccessPolicy",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			return checkAdoptionPreservesProjectAccessPolicy(t, store)
+		},
+	},
+	{
+		name: "federation enrollment project export",
+		methods: []string{
+			"CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "ExportFederationEnrollments",
+			"ImportReplay", "PinRootAuthority", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			return checkProjectScopedRelayEnrollmentExportRoundTrip(t, store, backend)
+		},
+	},
+	{
 		name:    "empty federation attachment",
 		methods: []string{"AdoptProjectIntoFederation", "CreateProjectAndEvent", "CreateIssue", "CreateRecurrence", "PatchProjectMetadata", "PendingFederationPushEvents", "EventsAfter", "ImportReplay"},
 		run:     checkEmptyFederationAttachment,
