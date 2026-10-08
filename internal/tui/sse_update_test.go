@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
-	"go.kenn.io/kata/internal/db"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -784,20 +783,18 @@ func TestIssueRestoreRefreshesAfterRelationsDisappearFromProjection(t *testing.T
 		{
 			name:             "removed reply target",
 			wantRemovedReply: true,
-			records: []commentref.Record{{
-				Comment:  db.Comment{UID: "reply-comment", ReplyToUID: "removed-target-comment", ReplyKind: "confirm"},
-				IssueUID: "open-issue", ProjectID: 7,
-			}},
+			records: []commentref.Record{
+				tuiCommentGraphRecord("reply-comment", "removed-target-comment", "confirm", "open-issue", 7),
+			},
 			states: map[string]commentref.TargetState{
 				"removed-target-comment": {Status: "removed"},
 			},
 		},
 		{
 			name: "deleted backlink source omitted",
-			records: []commentref.Record{{
-				Comment:  db.Comment{UID: "target-comment"},
-				IssueUID: "open-issue", ProjectID: 7,
-			}},
+			records: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+			},
 		},
 	}
 
@@ -823,7 +820,7 @@ func TestIssueRestoreRefreshesAfterRelationsDisappearFromProjection(t *testing.T
 	}
 }
 
-func TestProjectRemovalRefreshesDisplayedRelationEndpoints(t *testing.T) {
+func TestProjectLifecycleRefreshesDisplayedRelationEndpoints(t *testing.T) {
 	tests := []struct {
 		name                  string
 		records               []commentref.Record
@@ -834,16 +831,16 @@ func TestProjectRemovalRefreshesDisplayedRelationEndpoints(t *testing.T) {
 			name:               "archived reply target",
 			wantReplyProjectID: 9,
 			records: []commentref.Record{
-				{Comment: db.Comment{UID: "target-comment"}, IssueUID: "archived-target-issue", ProjectID: 9},
-				{Comment: db.Comment{UID: "reply-comment", ReplyToUID: "target-comment", ReplyKind: "confirm"}, IssueUID: "open-issue", ProjectID: 7},
+				tuiCommentGraphRecord("target-comment", "", "", "archived-target-issue", 9),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
 			},
 		},
 		{
 			name:                  "archived backlink source",
 			wantBacklinkProjectID: 9,
 			records: []commentref.Record{
-				{Comment: db.Comment{UID: "target-comment"}, IssueUID: "open-issue", ProjectID: 7},
-				{Comment: db.Comment{UID: "reply-comment", ReplyToUID: "target-comment", ReplyKind: "confirm"}, IssueUID: "archived-source-issue", ProjectID: 9},
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "archived-source-issue", 9),
 			},
 		},
 	}
@@ -863,15 +860,97 @@ func TestProjectRemovalRefreshesDisplayedRelationEndpoints(t *testing.T) {
 			m := sseDetailFixture(7, "open", "open-issue")
 			m.detail.comments = commentEntriesFromProjectedRecords(projected)
 
-			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.removed", projectID: 9})
-			assertDetailRefetchBatch(t, cmd)
+			for _, eventType := range []string{"project.removed", "project.renamed"} {
+				cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 9})
+				assertDetailRefetchBatch(t, cmd)
+			}
 
-			cmd = m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.removed", projectID: 10})
-			if cmd != nil {
-				t.Fatalf("unrelated project removal must not refresh detail, got %T", cmd)
+			for _, eventType := range []string{"project.removed", "project.renamed"} {
+				cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
+				if cmd != nil {
+					t.Fatalf("unrelated %s event must not refresh detail, got %T", eventType, cmd)
+				}
 			}
 		})
 	}
+}
+
+func TestProjectRestoreRefreshesRelationsAfterArchiveProjection(t *testing.T) {
+	tests := []struct {
+		name              string
+		beforeArchive     []commentref.Record
+		afterArchive      []commentref.Record
+		afterArchiveState map[string]commentref.TargetState
+		wantRemovedReply  bool
+	}{
+		{
+			name: "archived reply target",
+			beforeArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "archived-target-issue", 9),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
+			},
+			afterArchive: []commentref.Record{
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
+			},
+			afterArchiveState: map[string]commentref.TargetState{
+				"target-comment": {Status: "removed"},
+			},
+			wantRemovedReply: true,
+		},
+		{
+			name: "archived backlink source",
+			beforeArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "archived-source-issue", 9),
+			},
+			afterArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := commentref.Project(test.beforeArchive, nil)
+			if test.wantRemovedReply {
+				require.NotNil(t, before[1].Reply)
+				require.Equal(t, int64(9), before[1].Reply.ProjectID)
+			} else {
+				require.Len(t, before[0].Backlinks, 1)
+				require.Equal(t, int64(9), before[0].Backlinks[0].ProjectID)
+			}
+
+			after := commentref.Project(test.afterArchive, test.afterArchiveState)
+			require.Len(t, after, 1)
+			if test.wantRemovedReply {
+				require.NotNil(t, after[0].Reply)
+				require.Equal(t, "removed", after[0].Reply.Status)
+				require.Zero(t, after[0].Reply.ProjectID)
+			} else {
+				require.Empty(t, after[0].Backlinks)
+			}
+
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(after)
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.restored", projectID: 9})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestIssueMoveIntoDisplayedProjectRefreshesMissingBacklink(t *testing.T) {
+	projected := commentref.Project([]commentref.Record{
+		tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+	}, nil)
+	require.Len(t, projected, 1)
+	require.Empty(t, projected[0].Backlinks)
+
+	m := sseDetailFixture(7, "open", "open-issue")
+	m.detail.comments = commentEntriesFromProjectedRecords(projected)
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.moved", projectID: 7, issueUID: "moved-backlink-source",
+	})
+	assertDetailRefetchBatch(t, cmd)
 }
 
 func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEntry {
@@ -886,6 +965,14 @@ func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEn
 		}
 	}
 	return comments
+}
+
+func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectID int64) commentref.Record {
+	record := commentref.Record{IssueUID: issueUID, ProjectID: projectID}
+	record.Comment.UID = uid
+	record.Comment.ReplyToUID = replyToUID
+	record.Comment.ReplyKind = replyKind
+	return record
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-

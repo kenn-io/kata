@@ -2558,10 +2558,10 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // authoritative key across short_id cutovers. Comment-edit events also
 // refresh when commentUID matches a rendered comment, reply endpoint, or
 // backlink in the open pane. Moves and soft-deletes match displayed endpoint
-// UIDs; restores refresh even after the prior projection dropped that endpoint,
-// and project removals match the endpoint's displayed project ID. Each fetch
-// is tagged with the current detail-open gen so applyFetched drops the result
-// if the user navigates away before the response lands.
+// UIDs; moves into the displayed project and restores refresh even after the
+// prior projection dropped that endpoint. Project lifecycle events match the
+// endpoint's displayed project ID when available. Each fetch is tagged with
+// the current detail-open gen so applyFetched drops it if the user navigates.
 func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.api == nil {
 		return nil
@@ -2577,7 +2577,7 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	commentMatch := msg.matchesCommentInDetail(m.detail.comments)
-	relationLifecycleMatch := msg.matchesRelationLifecycleInDetail(m.detail.comments)
+	relationLifecycleMatch := msg.matchesRelationLifecycleInDetail(m.detail.comments, m.detail.scopePID)
 	if msg.projectID != m.detail.scopePID && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
@@ -2651,14 +2651,14 @@ func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool
 	return false
 }
 
-func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry) bool {
+func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {
 	switch msg.eventType {
-	case "issue.restored":
+	case "issue.restored", "project.restored":
 		// The restore may make an endpoint visible again after a prior detail
 		// refresh removed its backlink or stripped IssueUID from a removed
-		// reply projection, so no current endpoint can identify the restored UID.
+		// reply projection, so no current endpoint can identify what was restored.
 		return true
-	case "project.removed":
+	case "project.removed", "project.renamed":
 		if msg.projectID <= 0 {
 			return false
 		}
@@ -2673,7 +2673,14 @@ func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentE
 			}
 		}
 		return false
-	case "issue.moved", "issue.soft_deleted":
+	case "issue.moved":
+		// The move event is recorded in its destination project. A backlink
+		// source moving into this detail's project can reappear even when the
+		// previous projection no longer carried the source UID.
+		if msg.projectID > 0 && msg.projectID == detailProjectID {
+			return true
+		}
+	case "issue.soft_deleted":
 	default:
 		return false
 	}
