@@ -127,7 +127,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			IdempotencyFingerprint: fingerprint,
 		})
 		for _, event := range committedEvents {
-			cfg.Publish().Event(in.ProjectID, event)
+			cfg.Publish().Event(event.ProjectID, event)
 		}
 		if err != nil {
 			if duplicate, ok := errors.AsType[*db.DuplicateCommentReplyError](err); ok {
@@ -168,7 +168,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if len(committedEvents) == 0 {
-			cfg.Publish().Event(in.ProjectID, evt)
+			cfg.Publish().Event(evt.ProjectID, evt)
 		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {

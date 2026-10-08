@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -357,12 +358,7 @@ func checkNotificationProjectionPreservesOpaqueNestedValues(t *testing.T, messag
 	require.NoError(t, err)
 
 	got, err := walkNotificationJSON(jsontext.Value(raw), func(value jsontext.Value) (bool, error) {
-		for _, uid := range notificationReferences(value) {
-			if uid == "hidden-comment" {
-				return false, nil
-			}
-		}
-		return true, nil
+		return !slices.Contains(notificationReferences(value), "hidden-comment"), nil
 	})
 	require.NoError(t, err)
 

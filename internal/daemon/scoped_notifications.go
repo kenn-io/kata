@@ -34,11 +34,32 @@ func scopedNotificationTransformer(store db.Storage) func(huma.Context, string, 
 }
 
 func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext.Value) (jsontext.Value, error) {
+	return projectNotificationJSONWithWalker(ctx, store, raw, walkNotificationJSON)
+}
+
+func projectNotificationEventPayload(ctx context.Context, store db.Storage, event db.Event) (jsontext.Value, error) {
+	return projectNotificationJSONWithWalker(ctx, store, jsontext.Value(event.Payload), func(
+		raw jsontext.Value, keep func(jsontext.Value) (bool, error),
+	) (jsontext.Value, error) {
+		return walkNotificationEventPayload(raw, event.Type, keep)
+	})
+}
+
+type notificationJSONWalker func(
+	jsontext.Value, func(jsontext.Value) (bool, error),
+) (jsontext.Value, error)
+
+func projectNotificationJSONWithWalker(
+	ctx context.Context,
+	store db.Storage,
+	raw jsontext.Value,
+	walk notificationJSONWalker,
+) (jsontext.Value, error) {
 	if issueScopeFromContext(ctx) == nil {
 		return raw, nil
 	}
 	uids := map[string]bool{}
-	_, err := walkNotificationJSON(raw, func(slot jsontext.Value) (bool, error) {
+	_, err := walk(raw, func(slot jsontext.Value) (bool, error) {
 		for _, uid := range notificationReferences(slot) {
 			uids[uid] = true
 		}
@@ -62,7 +83,7 @@ func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext
 	if err != nil {
 		return nil, err
 	}
-	return walkNotificationJSON(raw, func(slot jsontext.Value) (bool, error) {
+	return walk(raw, func(slot jsontext.Value) (bool, error) {
 		for _, uid := range notificationReferences(slot) {
 			id, ok := ids[uid]
 			if !ok {

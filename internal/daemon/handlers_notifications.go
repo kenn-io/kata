@@ -131,7 +131,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if result.Changed {
-			cfg.Publish().Event(in.ProjectID, result.Event)
+			cfg.Publish().Event(result.Event.ProjectID, result.Event)
 		}
 		out := &api.NotifyIssueResponse{}
 		out.Body.Issue = result.Issue

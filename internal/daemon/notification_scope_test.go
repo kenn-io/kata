@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
@@ -133,10 +135,27 @@ func (s *notificationDetachStreamProjectionStore) IssueScopedMembers(ctx context
 	return rows, err
 }
 func TestNotifySSERejectsLatePointerDetach(t *testing.T) {
+	checkNotifySSERejectsLatePointerDetach(t, "hidden target context")
+}
+
+func FuzzNotifySSERejectsLatePointerDetach(f *testing.F) {
+	f.Add("hidden target context")
+	f.Fuzz(func(t *testing.T, message string) {
+		if len(message) > 256 || !utf8.ValidString(message) {
+			return
+		}
+		checkNotifySSERejectsLatePointerDetach(t, message)
+	})
+}
+
+func checkNotifySSERejectsLatePointerDetach(t *testing.T, message string) {
+	t.Helper()
 	env, p, source, target, _ := scopedReplyFixture(t, false)
 	link, err := env.DB.ParentOf(t.Context(), target.IssueID)
 	require.NoError(t, err)
-	out, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "lead", Patch: map[string]jsontext.Value{"notify.cmVhZGVy": jsontext.Value(fmt.Sprintf(`{"from":"lead","message":"hidden target context","re":%q}`, target.UID))}})
+	slot, err := json.Marshal(map[string]any{"from": "lead", "message": message, "re": target.UID})
+	require.NoError(t, err)
+	out, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "lead", Patch: map[string]jsontext.Value{"notify.cmVhZGVy": jsontext.Value(slot)}})
 	require.NoError(t, err)
 	wrapped := &notificationDetachStreamProjectionStore{Storage: env.DB, detach: func() error { return env.DB.DeleteLinkByID(t.Context(), link.ID) }}
 	cfg := daemon.ServerConfig{DB: wrapped, StartedAt: time.Now()}
