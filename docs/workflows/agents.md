@@ -486,6 +486,211 @@ context.
 Harness adapters live outside Kata. `quickstart`, `--with-agents`, and the hook
 installers do not install a runtime scheduler or wakeup adapter.
 
+## Reply to a finding
+
+Point workers at the comment they need to answer. A typed link records whether
+an agent builds on, reproduces, contradicts, or replaces that finding. The log
+stays chronological; Kata stores a reference without copying the target's body.
+Comment replies and the notification commands below are unreleased.
+
+### Find and use comment handles
+
+Read `kata show abc4` to find a comment's handle. Handles use a lowercase suffix
+of the comment UID, starting at 6 characters and extending until unique in the
+project. Resolution is case-insensitive. Copy the displayed handle; a full
+26-character comment UID is always accepted, and JSON keeps full UIDs.
+
+| Target | Handle form | Example |
+| --- | --- | --- |
+| Comment on the current issue | `c:<suffix>` | `c:xbzxrq` |
+| Comment on another issue in the same project | `<issue>:<suffix>` | `d4ex:xbzxrq` |
+| Project-qualified issue in the same project | `<project>#<issue>:<suffix>` | `spoke-project#d4ex:xbzxrq` |
+
+Project qualification does not permit cross-project replies. Use issue-level
+`--related` for context from another project. Each comment links to one target;
+to answer two findings, post two replies. The target must exist and be visible
+to the actor. The reply's issue must be open, but the target's issue may be
+closed. A comment cannot target itself. Editing a reply never changes its link.
+
+Choose the kind explicitly:
+
+| Flag | Meaning | Body requirement |
+| --- | --- | --- |
+| `--reply <cref>` | Responds to or builds on the target | Explain the response |
+| `--confirm <cref>` | Reproduced or verified the target | At least 40 characters of evidence |
+| `--refute <cref>` | Contradicts the target | At least 40 characters of evidence |
+| `--supersede <cref>` | Replaces the target; the target is outdated | Explain the replacement |
+
+```sh
+kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
+kata comment abc4 --confirm c:xbzxrq -m "Reproduced the result with the documented retry steps."
+kata comment abc4 --refute d4ex:xbzxrq -m "The retry still fails when the connection drops twice."
+kata comment abc4 --supersede c:xbzxrq -m "The updated finding replaces this one."
+```
+
+Kinds are assertions by the attributed actor, not facts Kata verifies. Teammate
+attribution is trusted within that actor; it is not a signed identity or an
+access boundary.
+
+If the same actor and teammate already linked the same target with the same
+kind, Kata refuses the duplicate with `409` and the existing comment's handle.
+Use `--force` only for a deliberate second assertion. For retries, pass
+`kata comment --idempotency-key <key>` and reuse that key with the same body,
+target, and kind. The receipt protects retries on one daemon; it does not
+promise exactly-once delivery across daemons.
+
+### Read replies and changed findings
+
+`kata show` displays each handle, its reply kind and target, and backlinks from
+comments that refer to it. Backlinks from other issues include their issue ref.
+Readers only see authorized comments and links.
+
+```sh
+kata show abc4 --thread c:xbzxrq
+kata show abc4 --inbound coordinator
+kata show abc4 --inbound coordinator --kind refute
+kata show abc4 --since c:xbzxrq
+```
+
+`--thread <cref>` reads the target and its replies transitively across the
+project, in chronological order. It is cycle-safe and capped at 50 comments;
+truncation is stated. `--inbound [<actor>[/<teammate>]]` finds comments anywhere
+in the project that link to that author's comments on this issue. Use
+`--kind <reply|confirm|refute|supersede>` with either view to select a kind.
+
+`--since <cref>` reads comments after that handle in `(created_at, uid)` order.
+A late federated comment can sort before the handle. Use the inbox to learn
+about replies; `--since` is a reading aid.
+
+The TUI and Web UI show counts for nonzero incoming kinds on original
+comments, for example:
+
+```text
+Replies 1 | Confirmations 2 | Refutations 1 | Superseding replies 1
+```
+
+Open a kind's count to inspect each linked comment's author, time, handle, and
+body, then jump to it and return focus to the original. The TUI uses a keyboard
+picker; the Web UI uses keyboard-accessible, labelled controls. Symbols and
+theme colors may supplement the text.
+
+Kata filters links by authorization before counting or rendering. Counts
+include only directly linked comments the reader may access. If the authorized
+list is incomplete or paginated, use the server's authorized total when
+available; otherwise mark the count as partial, such as `2+`. Never infer a
+complete count from a partial list or an unfiltered client cache. Counts are
+comments, not votes or a truth score; Kata does not resolve conflicting
+assertions automatically. Conflicting assertions stay visible together, and a
+superseding reply does not hide or strike through its target. Replies also show
+their outgoing relation, such as `Confirms c:ab12cd by worker-a`. Pending,
+removed, moved, and edited target states remain visible. Retrying a failed
+refresh does not duplicate rows or inflate counts.
+
+A target not yet received through federation displays as `(pending)`; a purged
+target as `(removed)`; a target whose issue moved to another project as
+`(moved)`. If the target was edited after the reply was created, Kata labels it
+`(target edited after reply)`. Read the current finding before relying on an
+older confirmation. Kata records the edit without claiming to verify content.
+
+### How replies reach the inbox
+
+Every linked comment notifies the target's author and teammate. Replies to your
+own comments do not notify you. Each issue has one `notify.<recipient>` slot
+per exact recipient; later link notifications replace earlier ones. The inbox
+shows the latest kind and comment handle. Its count, if present, is only a hint.
+A link never replaces a human request without a `re` comment pointer. The reply
+still appears in `show` when that request takes precedence.
+
+A `confirm` also reaches the issue owner, the parent owner's address for a
+child issue, and up to 8 earlier linkers of the same target, newest first. A
+recipient already awaiting a link notification about that target is skipped.
+The parent owner's slot is written on the child issue; coordinators can find it
+with `kata inbox --for coordinator --all` without `--project` or `--workspace`.
+
+An inbox slot's `re` is the comment UID the recipient should open. Posting
+`--reply` to that comment clears the matching slot in the same transaction.
+Only slots with `re` auto-clear; ordinary human requests still require explicit
+`notify --clear` after handling. To point one worker at a specific comment:
+
+```sh
+kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq \
+  --message "Please check this finding"
+```
+
+Linked comments also update notification metadata and advance the issue
+revision. Writers using `meta set --if-match` can see more `412` conflicts.
+Read the current revision before retrying a guarded write.
+
+### Coordinate a group
+
+Post a finding, copy its handle from `show`, and request the relevant worker's
+attention with `--to ... --re`. The worker responds with one of the four kinds.
+The coordinator reads its exact inbox and inbound links:
+
+```sh
+kata inbox --for coordinator
+kata wait abc4 --until reply --timeout 5m
+kata inbox --for coordinator
+kata show abc4 --inbound coordinator
+```
+
+`wait --until reply` observes changes to the waiter's notification slot after
+its first poll. Use the same actor/teammate identity as the intended recipient;
+`KATA_INBOX_USER` selects an inbox read, not comment attribution. A notification
+already present at the first poll does not satisfy the wait. A later slot
+replacement or clear can satisfy it, so inspect the inbox and linked comments
+to learn what changed. Fast replies can arrive before that first poll; inspect
+the inbox before waiting and after a timeout. Latest-wins slots can replace a
+reply between polls. There is no comment-target filter for this wait.
+
+Waiting does not claim work, launch an agent, or install wakeup integration.
+The [external harness](#teammate-heads-up) still maps exact addresses to workers
+and handles idle runtimes.
+
+When a response needs ownership, a separate branch, or tracked completion,
+a comment-sized task becomes a child issue. Create it with `--parent <ref>`
+and an idempotency key, then have its worker `kata claim` the child. Comments
+record findings and replies; child issues record accountable work. Parent links
+group that work without gating readiness.
+
+### Broadcast only when the group needs it
+
+A coordinator can request attention from everyone working on an issue:
+
+```sh
+kata notify abc4 --broadcast --re c:xbzxrq \
+  --message "Please check this finding"
+kata wait abc4 --until reply --timeout 5m
+kata inbox --for coordinator
+```
+
+`--re <cref>` is optional. Broadcast reaches the issue owner and each distinct
+commenter, plus owners and commenters on open child issues one level deep,
+using local links. By default commenters are addressed as actors; add
+`--teammates` to include their teammate addresses. The sender, `system`, and
+integration authors are excluded. All recipient slots are written on the
+broadcast issue in one metadata event. The inbox labels it as a broadcast.
+
+Broadcast refuses closed issues. More than 50 recipients is an error; Kata
+never truncates the list. `--json` returns the resolved recipients.
+
+Limits apply per writing daemon, not globally across federated daemons:
+
+- One broadcast per sender (`actor[/teammate]`) per issue per 10 minutes.
+- At most 3 broadcasts per issue per hour across all senders.
+- No identical message from the same sender within that hour.
+
+A refusal returns `429 broadcast_rate_limited` with `retry_after_seconds`,
+`window`, `last_broadcast_at`, `last_broadcast_by`, and `last_message_prefix`.
+It emits no events and does not extend the window. Prefer a targeted
+`--to ... --re` request when rate-limited. Broadcast stays out of the
+per-session contract; coordinators learn it here and in `kata quickstart`.
+
+For federation rollout, upgrade hubs to the comment-link schema before their
+spokes. A schema-30 hub rejects pushes from a schema-31 spoke. Older CLIs ignore
+the new comment fields. Follow the [federation upgrade guide](../operations/federation.md)
+for the participating daemons.
+
 ## Use Kata through MCP
 
 Agents with an MCP client can start Kata as a stdio server bound to the current

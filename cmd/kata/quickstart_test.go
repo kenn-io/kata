@@ -347,3 +347,38 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 		assert.Contains(t, out, "Never remove a workspace override to repair a stopped daemon")
 	}
 }
+
+// The settled comment-link contract must reach agents without teaching broadcasts
+// in every session. Removing either instruction breaks reply coordination.
+func TestQuickstart_ContractExplainsCommentReplies(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
+	assert.Contains(t, out, `kata comment <ref> -m \"<what changed>\"\nReply by handle: kata comment <ref> --reply c:<id> -m \"<evidence>\"\n(or --confirm, --refute, --supersede); it lands in that author's inbox.`)
+	assert.Contains(t, out, `wrapper can tell timeout from satisfaction.\nkata wait <ref> --until reply returns when a reply reaches you.`)
+	assert.NotContains(t, out, "--broadcast")
+	assert.NotContains(t, out, "--answer")
+}
+
+func TestQuickstart_ExplainsCommentReplyCoordination(t *testing.T) {
+	for _, format := range []string{"human", "agent", "json"} {
+		t.Run(format, func(t *testing.T) {
+			resetFlags(t)
+			out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
+			instructions := string(out)
+			if format == "json" {
+				var payload struct {
+					Quickstart string `json:"quickstart"`
+				}
+				require.NoError(t, json.Unmarshal(out, &payload))
+				instructions = payload.Quickstart
+			}
+			for _, text := range []string{"--reply", "--confirm", "--refute", "--supersede", "--re", "--until reply", "--broadcast", "50 recipients", "10 minutes", "3 broadcasts", "per writing daemon", "a comment-sized task becomes a child issue"} {
+				assert.Contains(t, instructions, text)
+			}
+			normalized := strings.Join(strings.Fields(instructions), " ")
+			assert.Contains(t, normalized, "Only --reply to the comment named by a slot's re clears it in the same transaction.")
+			assert.NotContains(t, normalized, "Answering the comment named by a slot's re clears that slot")
+			assert.NotContains(t, instructions, "--answer")
+		})
+	}
+}

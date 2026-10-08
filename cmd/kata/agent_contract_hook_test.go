@@ -229,3 +229,20 @@ func TestAgentContractHookPromptRoundTrip(t *testing.T) {
 		}
 	})
 }
+
+// Native context must preserve the reply instructions' DOT escaping alongside
+// arbitrary valid UTF-8 prompt text through each distinct JSON envelope.
+func FuzzNativeContractCommentRepliesRoundTrip(f *testing.F) {
+	for i := range byte(4) {
+		f.Add(i, "")
+		f.Add(i, "\n\"quotes\" \\ Unicode 世界 <tag> &\n")
+	}
+	f.Fuzz(func(t *testing.T, envelope byte, suffix string) {
+		agents := []agenthook.Agent{agenthook.AgentCodex, agenthook.AgentCopilot, agenthook.AgentCursor, agenthook.AgentHermes}
+		agent := agents[int(envelope)%len(agents)]
+		text := agentContractText + strings.ToValidUTF8(suffix, "�")
+		var out bytes.Buffer
+		require.NoError(t, writeNativeAgentContract(t.Context(), agent, strings.NewReader(contractHookPayload(agent)), &out, text))
+		assertNativePrompt(t, agent, out.String(), text)
+	})
+}

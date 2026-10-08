@@ -196,13 +196,70 @@ Use kata as the shared issue ledger for this workspace.
    coordinator/*. Shared MCP processes use the per-call teammate on
    kata.comment and kata.create when siblings cannot have separate environments.
 
-10. To leave context alongside a mutation, pass --comment TEXT on
+10. Reply to findings by comment handle (unreleased):
+
+   Read kata show abc4 to find a handle. Inside that issue, use c:xbzxrq;
+   for another issue in the same project, use d4ex:xbzxrq or
+   spoke-project#d4ex:xbzxrq. Handles are case-insensitive UID suffixes of
+   at least 6 characters, extended when needed for uniqueness. Full comment
+   UIDs also work; JSON keeps full UIDs. Replies cannot cross projects.
+
+   kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
+   kata comment abc4 --confirm c:xbzxrq -m "Reproduced the result with the documented retry steps."
+   kata comment abc4 --refute c:xbzxrq -m "The retry still fails when the connection drops twice."
+   kata comment abc4 --supersede c:xbzxrq -m "The updated finding replaces this one."
+
+   reply responds or builds on a finding; confirm records reproduction or
+   verification; refute contradicts it; supersede replaces an outdated finding.
+   These are attributed assertions, not facts verified by Kata. confirm and
+   refute need at least 40 characters of evidence. Each comment has one fixed
+   target. To answer two findings, write two replies. When ownership or
+   completion needs tracking,
+   a comment-sized task becomes a child issue. Use kata create --parent <ref>,
+   then kata claim the child.
+
+   A link notifies the target author and teammate, except yourself. The inbox
+   has one slot per exact recipient per issue: latest wins. Link notifications
+   do not replace human requests without a comment pointer. Only --reply to
+   the comment named by a slot's re clears it in the same transaction.
+   confirm also notifies the issue owner, a child issue's parent owner, and up
+   to 8 earlier linkers, newest first; an existing ping for that target is skipped.
+
+   Coordinators can point one worker at a finding, then inspect the replies:
+
+   kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq --message "Please check this finding"
+   kata wait abc4 --until reply --timeout 5m
+   kata inbox --for coordinator
+   kata show abc4 --inbound coordinator
+
+   wait compares your notify slot with its first poll. A request already there
+   does not satisfy a new wait; any later slot change can. Inspect the inbox
+   before waiting and after a timeout, since a fast reply can precede the first
+   poll. Latest-wins slots can replace replies between polls. The external
+   harness still handles wakeup; wait does not launch or claim a worker.
+
+   Use kata notify abc4 --broadcast --re c:xbzxrq --message "Please check this finding"
+   only when the whole group needs it. It reaches the owner and commenters,
+   plus owners/commenters on open children one level deep. --teammates adds
+   teammate addresses; the sender, system and integration authors are excluded.
+   Closed issues are refused; more than 50 recipients is an error, never truncation.
+   --json returns the resolved recipients. Limits apply per writing daemon:
+   1 broadcast per sender per issue per 10 minutes, 3 broadcasts per issue per
+   hour, and no identical message from the same sender within that hour.
+   A refusal returns 429 broadcast_rate_limited with retry details and emits
+   nothing. Prefer a targeted --to ... --re request when rate-limited.
+   Broadcast is deliberately absent from the per-session contract.
+
+   Read the full reply, retry and coordinator rules:
+   https://katatracker.com/docs/workflows/agents/#reply-to-a-finding
+
+11. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
    retry with kata comment <ref> --body ...
 
-11. Do not run delete or purge unless the user explicitly asks for that exact
+12. Do not run delete or purge unless the user explicitly asks for that exact
    destructive action and issue ref.
 
 For long-running agents, poll events:
@@ -266,6 +323,14 @@ Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
 Record progress: kata comment <ref> -m "<what changed>".
+Comment replies are unreleased: find handles with kata show; use c:<id> or <issue>:<id> within the same project (6+ character case-insensitive UID suffixes; full UIDs work).
+Reply with kata comment <ref> --reply c:<id> -m "<evidence>"; --confirm verifies, --refute contradicts (both need 40+ characters), --supersede replaces; kinds are attributed assertions.
+Links notify the target author/teammate; latest wins without replacing human requests. Only --reply to the comment named by a slot's re clears it in the same transaction. confirm also reaches owners and up to 8 earlier linkers.
+Coordinate with kata notify <ref> --to <actor>[/<teammate>] --re c:<id> --message "<request>"; kata wait <ref> --until reply --timeout 5m observes changes after its first poll; inspect the inbox for earlier replies.
+For ownership or tracked completion, a comment-sized task becomes a child issue: create --parent <ref>, then claim the child.
+Coordinators may use notify --broadcast [--re c:<id>] [--teammates]: owner/commenters and open children one level deep, excluding sender/system/integrations; closed issues refused, cap 50 recipients (error, never truncation).
+Broadcast limits per writing daemon: 1 per sender/issue per 10 minutes, 3 broadcasts per issue/hour, no same-sender identical message within the hour; 429 broadcast_rate_limited gives retry details. Prefer --to ... --re.
+Reply and coordinator rules: https://katatracker.com/docs/workflows/agents/#reply-to-a-finding
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.
