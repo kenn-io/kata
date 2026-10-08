@@ -167,6 +167,83 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 	return out, nil
 }
 
+// patchIssueMetadataTx applies one comment-triggered patch to an existing
+// transaction. The caller retains the returned event only after its transaction
+// commits.
+func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	var out db.PatchIssueMetadataOut
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return out, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
+
+	var (
+		currentMetadata string
+		currentRevision int64
+		projectID       int64
+		projectName     string
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT i.metadata, i.revision, i.project_id, p.name
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ? AND i.deleted_at IS NULL`, in.IssueID,
+	).Scan(&currentMetadata, &currentRevision, &projectID, &projectName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, fmt.Errorf("issue %d not found", in.IssueID)
+	}
+	if err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {
+		return out, err
+	}
+	if in.IfMatchRev != nil && *in.IfMatchRev != currentRevision {
+		return out, &db.RevisionConflictError{CurrentRevision: currentRevision}
+	}
+	if err := db.CheckMetadataPatchGuard(jsontext.Value(currentMetadata), in.Patch, in.Guard); err != nil {
+		return out, err
+	}
+	updated, err := db.ApplyMetadataPatch(jsontext.Value(currentMetadata), in.Patch)
+	if err != nil {
+		return out, fmt.Errorf("apply patch: %w", err)
+	}
+	diff, err := metadata.Diff(jsontext.Value(currentMetadata), updated)
+	if err != nil {
+		return out, fmt.Errorf("compute diff: %w", err)
+	}
+	if len(diff) == 0 {
+		out.Issue, err = issueByIDTx(ctx, tx, in.IssueID)
+		out.NewRevision = currentRevision
+		return out, err
+	}
+
+	newRevision := currentRevision + 1
+	updatedAt := nowTimestamp()
+	if _, err := tx.ExecContext(ctx, `UPDATE issues
+SET metadata = ?, revision = ?, updated_at = ? WHERE id = ?`,
+		string(updated), newRevision, updatedAt, in.IssueID); err != nil {
+		return out, fmt.Errorf("update issue metadata: %w", err)
+	}
+	payload, err := marshalIssueMetadataUpdatePayload(diff, newRevision, updatedAt)
+	if err != nil {
+		return out, fmt.Errorf("marshal event payload: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: projectID, ProjectName: projectName, IssueID: &in.IssueID,
+		Type: "issue.metadata_updated", Actor: in.Actor, Payload: string(payload),
+	})
+	if err != nil {
+		return out, err
+	}
+	out.Issue, err = issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
+		return out, err
+	}
+	out.Event, out.Changed, out.NewRevision = event, true, newRevision
+	return out, nil
+}
+
 // PatchProjectMetadata applies a per-key patch to projects.metadata inside a
 // single transaction. It validates all patch keys against metadata.ProjectRegistry
 // before opening a transaction, enforces If-Match (revision gate), and emits a

@@ -39,6 +39,9 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "comment graph deleted source", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphDeletedSource},
+	{name: "comment reply project purge lineage", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportPurgeLog", "MoveIssueProject", "PurgeProject", "ReadCommentGraph", "RemoveProject"}, run: checkCommentReplyProjectPurgeLineage},
+	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
 	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
 	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},

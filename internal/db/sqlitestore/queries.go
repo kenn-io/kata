@@ -1234,6 +1234,7 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 }
 
 func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (int64, db.Event, error) {
+	db.RetainCommentEvents(ctx)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, db.Event{}, err
@@ -1325,6 +1326,29 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, err
 	}
+	committedEvents := []db.Event{evt}
+	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+		createdComment := db.Comment{
+			ID: commentID, UID: commentUID, IssueID: p.IssueID, Author: p.Author,
+			Body: p.Body, CreatedAt: commentAt, Teammate: p.Teammate,
+			ReplyToUID: p.ReplyToUID, ReplyKind: p.ReplyKind,
+		}
+		updates, err := hook(ctx, tx, issue, createdComment)
+		if err != nil {
+			return 0, db.Event{}, err
+		}
+		for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+			result, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{
+				IssueID: update.IssueID, Actor: p.Author, Patch: update.Patch,
+			})
+			if err != nil {
+				return 0, db.Event{}, err
+			}
+			if result.Changed {
+				committedEvents = append(committedEvents, result.Event)
+			}
+		}
+	}
 
 	// Comment-create metadata seam: issue, p, commentUID and evt are all
 	// available here in the same transaction. Additional metadata events must
@@ -1332,6 +1356,7 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err := tx.Commit(); err != nil {
 		return 0, db.Event{}, err
 	}
+	db.RetainCommentEvents(ctx, committedEvents...)
 	return commentID, evt, nil
 }
 

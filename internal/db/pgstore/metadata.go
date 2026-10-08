@@ -87,6 +87,67 @@ SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
 	return output, err
 }
 
+// patchIssueMetadataTx applies one comment-triggered patch inside the
+// transaction that created the comment. The caller retains the event only if
+// that outer transaction commits.
+func (s *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, input db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	var output db.PatchIssueMetadataOut
+	for key, raw := range input.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return output, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
+	current, project, err := lockedIssueTx(ctx, tx, input.IssueID, false)
+	if err != nil {
+		return output, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+		return output, err
+	}
+	if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
+		return output, &db.RevisionConflictError{CurrentRevision: current.Revision}
+	}
+	if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), input.Patch, input.Guard); err != nil {
+		return output, err
+	}
+	updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
+	if err != nil {
+		return output, err
+	}
+	if len(diff) == 0 {
+		output.Issue = current
+		output.NewRevision = current.Revision
+		return output, nil
+	}
+
+	updatedAt := mutationTimestamp()
+	newRevision := current.Revision + 1
+	if _, err := tx.ExecContext(ctx, `UPDATE issues
+SET metadata = $1, revision = $2, updated_at = $3 WHERE id = $4`,
+		string(updated), newRevision, updatedAt, input.IssueID); err != nil {
+		return output, mapSQLError(err, nil)
+	}
+	payload, err := json.Marshal(struct {
+		Diff        map[string]metadataKeyDiffPayload `json:"diff"`
+		RevisionNew int64                             `json:"revision_new"`
+		UpdatedAt   string                            `json:"updated_at"`
+	}{Diff: diff, RevisionNew: newRevision, UpdatedAt: updatedAt})
+	if err != nil {
+		return output, fmt.Errorf("marshal issue metadata event: %w", err)
+	}
+	event, err := s.insertEventTx(ctx, tx,
+		issueEventInput(current, project, "issue.metadata_updated", input.Actor, string(payload)))
+	if err != nil {
+		return output, err
+	}
+	output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+	if err != nil {
+		return output, err
+	}
+	output.Event, output.Changed, output.NewRevision = event, true, newRevision
+	return output, nil
+}
+
 // PatchProjectMetadata applies a validated per-key patch under the project's
 // revision gate and emits the replayable diff in the same transaction.
 func (s *Store) PatchProjectMetadata(ctx context.Context, input db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
