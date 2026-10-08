@@ -811,7 +811,14 @@ AND events.type <> 'issue.links_changed')`
 		relatedScrub += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
 	relatedIDExpression := `CASE WHEN ` + relatedScrub + ` THEN NULL ELSE events.related_issue_id END`
-	relatedUIDExpression := `CASE WHEN ` + relatedScrub + ` THEN NULL ELSE events.related_issue_uid END`
+	// Root receipts sign related_issue_uid as part of the event hash. Keep that
+	// value when a signed event's peer is omitted, while clearing its local FK.
+	relatedUIDScrub := `(` + relatedScrub + `) AND NOT EXISTS (
+		SELECT 1 FROM federation_event_provenance signed_receipt
+		 WHERE signed_receipt.project_uid=export_project.uid
+		   AND signed_receipt.event_uid=events.uid
+		   AND signed_receipt.content_hash=events.content_hash)`
+	relatedUIDExpression := `CASE WHEN ` + relatedUIDScrub + ` THEN NULL ELSE events.related_issue_uid END`
 	subjectLive := `(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`
 	if !filter.IncludeDeleted {
 		subjectLive = `((events.issue_id IS NULL AND subject_issue.id IS NULL)

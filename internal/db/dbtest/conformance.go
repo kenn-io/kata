@@ -201,6 +201,18 @@ var storageScenarios = []scenario{
 		},
 	},
 	{
+		name: "live-only backup preserves signed soft-deleted peer",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "PinRootAuthority",
+			"SoftDeleteIssue", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunLiveOnlyBackupPreservesSignedSoftDeletedPeer(t, store, backend)
+			return nil
+		},
+	},
+	{
 		name: "project purge removes relay metadata",
 		methods: []string{
 			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",

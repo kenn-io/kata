@@ -766,16 +766,14 @@ func (d *Store) ExportProjectPurgeLog(ctx context.Context, f db.ExportFilter) it
 // events stay in the source project, so requiring the subject's project to
 // equal the event's would silently drop every event of a moved issue.
 func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[db.EventExport, error] {
-	// Scrub related_issue_id/_uid when the peer is missing entirely (any
-	// event type, either id-keyed or uid-keyed) OR, on a project-filtered
-	// export, when the peer issue lives in an omitted project (cross-project
-	// links export from both sides at storage v16, so the filtered envelope
-	// would otherwise carry a peer the importer never receives) OR, on live-
-	// only export, when an issue.links_changed peer is soft-deleted (kata#1
-	// history-preservation rule). Peer-missing must be checked first so
-	// `peer.deleted_at` doesn't dereference a NULL row. The peer JOIN matches
-	// by id when present, and falls back to uid for federation-inserted events
-	// that carry only related_issue_uid.
+	// Scrub related_issue_id when the peer is missing, omitted by a project-
+	// filtered export, or soft-deleted in a live-only export. The UID follows
+	// the same scrub rules except for issue.links_changed history without a
+	// local peer. Signed envelopes keep the UID when a local peer is omitted
+	// because a root receipt covers it in the content hash.
+	// Peer-missing is checked first so `peer.deleted_at` doesn't dereference a
+	// NULL row. The peer JOIN matches by id when present, and falls back to UID
+	// for federation-inserted events that carry only related_issue_uid.
 	scrubCondition := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL)
 	                   AND events.type <> 'issue.links_changed')`
 	// scrubArgs collects the args bound inside the SELECT-list CASE
@@ -792,7 +790,14 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 		scrubCondition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
 	relatedIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_id END`
-	relatedUIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_uid END`
+	// Root receipts sign related_issue_uid as part of the event hash. Keep that
+	// value when a signed event's peer is omitted, while clearing its local FK.
+	relatedUIDScrub := `(` + scrubCondition + `) AND NOT EXISTS (
+		SELECT 1 FROM federation_event_provenance signed_receipt
+		 WHERE signed_receipt.project_uid=export_project.uid
+		   AND signed_receipt.event_uid=events.uid
+		   AND signed_receipt.content_hash=events.content_hash)`
+	relatedUIDExpr := `CASE WHEN ` + relatedUIDScrub + ` THEN NULL ELSE events.related_issue_uid END`
 	issueIDExpr := `events.issue_id`
 	var subjectArgs []any
 	if f.ProjectID != nil {
