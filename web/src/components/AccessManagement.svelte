@@ -176,13 +176,16 @@
 
   async function removeTeam(): Promise<void> {
     const uid = teamUID
+    const selectedProjectID = projectID
     if (!uid || !confirm('Delete this team and revoke its project access?')) return
     if (
       await mutate({ teamUID: uid }, (context) =>
         deleteTeam({ teamUid: uid }, { headers: context.headers, signal: lifetime.signal }),
       )
-    )
+    ) {
       await refresh()
+      if (selectedProjectID && projectID === selectedProjectID) await loadPolicy(selectedProjectID)
+    }
   }
 
   async function savePolicy(): Promise<void> {

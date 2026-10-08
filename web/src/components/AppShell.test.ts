@@ -485,6 +485,66 @@ describe('AppShell', () => {
     ])
   })
 
+  test('reloads the selected project policy after deleting one of its teams', async () => {
+    const writes: unknown[] = []
+    let deleted = false
+    let policyReads = 0
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (init?.method === 'DELETE' && path === '/api/v1/teams/team-one') {
+        deleted = true
+        return Response.json({ changed: true })
+      }
+      if (init?.method === 'PUT') {
+        writes.push(JSON.parse(String(init.body)))
+        return Response.json({ changed: true })
+      }
+      if (path === '/api/v1/teams')
+        return Response.json({
+          teams: deleted ? [] : [{ uid: 'team-one', name: 'Example team', revision: 1 }],
+        })
+      if (path === '/api/v1/teams/team-one')
+        return Response.json({
+          team: { uid: 'team-one', name: 'Example team', revision: 1 },
+          members: [],
+        })
+      if (path === '/api/v1/projects/7/access') {
+        policyReads++
+        return Response.json({
+          policy: deleted
+            ? { project_uid: 'example-project', visibility: 'all', team_uids: [], revision: 5 }
+            : {
+                project_uid: 'example-project',
+                visibility: 'teams',
+                team_uids: ['team-one'],
+                revision: 4,
+              },
+        })
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${path}`)
+    })
+    vi.stubGlobal('confirm', () => true)
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await screen.findByRole('option', { name: 'Example team' })
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await fireEvent.change(screen.getByLabelText('Project visibility'), { target: { value: '7' } })
+    await waitFor(() =>
+      expect((screen.getByLabelText('Visibility') as HTMLSelectElement).disabled).toBe(false),
+    )
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete team' }))
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'Example team' })).toBeNull())
+    await waitFor(() =>
+      expect((screen.getByLabelText('Visibility') as HTMLSelectElement).value).toBe('all'),
+    )
+    expect(policyReads).toBe(2)
+
+    await fireEvent.change(screen.getByLabelText('Visibility'), { target: { value: 'teams' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Save visibility' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]).toEqual({ visibility: 'teams', team_uids: [], revision: 5 })
+  })
+
   test('updates visibility with the loaded policy revision and selected teams', async () => {
     let write: unknown
     setGeneratedFetch(async (input, init) => {

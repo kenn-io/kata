@@ -21,6 +21,16 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
+func requireLegacyFederationEnrollmentAuthority(ctx context.Context) error {
+	principal, ok := PrincipalFromContext(ctx)
+	if ok && principal.Kind == PrincipalDBToken && principal.TokenID > 0 {
+		return api.NewError(http.StatusForbidden, "federation_enrollment_requires_relay",
+			"database account tokens must use relay enrollments",
+			"include relay configuration so the enrollment remains bound to this account token", nil)
+	}
+	return nil
+}
+
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	registerFederationSigningHandlers(humaAPI, cfg)
 	registerRelayHandlers(humaAPI, cfg)
@@ -198,7 +208,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments",
 		Summary:     "Create a federation enrollment",
-		Description: "Creates a hub-side transport grant. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.",
+		Description: "Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.",
 	}, func(ctx context.Context, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
 		if in.Body.Relay != nil {
 			return createRelayEnrollment(ctx, cfg, in)
@@ -235,6 +245,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if err := db.ValidateTokenActor(actor); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
+		if err := requireLegacyFederationEnrollmentAuthority(ctx); err != nil {
+			return nil, err
 		}
 		hubURL := in.Body.HubURL
 		allowInsecure := in.Body.AllowInsecure
@@ -301,7 +314,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments/actions/rotate",
 		Summary:     "Rotate a federation enrollment",
-		Description: "Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.",
+		Description: "Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. Database account tokens cannot rotate legacy grants; use relay enrollment credentials so issuer expiry and revocation remain enforced. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.",
 	}, func(ctx context.Context, in *api.RotateFederationEnrollmentRequest) (*api.RotateFederationEnrollmentResponse, error) {
 		if !katauid.Valid(in.Body.SpokeInstanceUID) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_instance_uid must be a valid instance UID", "", nil)
@@ -328,6 +341,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if err := db.ValidateTokenActor(actor); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
+		if err := requireLegacyFederationEnrollmentAuthority(ctx); err != nil {
+			return nil, err
 		}
 		projectID := in.Body.ProjectID
 		created, err := cfg.DB.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{

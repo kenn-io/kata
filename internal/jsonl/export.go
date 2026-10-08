@@ -1541,6 +1541,9 @@ func exportFederationEnrollments(
 	args := []any{}
 	if opts.ProjectID > 0 {
 		query += ` WHERE project_id = ?`
+		if sourceSchemaVersion >= 33 {
+			query += ` AND relay_protocol_version = 0 AND parent_token_id IS NULL AND relay_binding_uid IS NULL`
+		}
 		args = append(args, opts.ProjectID)
 	}
 	query += ` ORDER BY id ASC`

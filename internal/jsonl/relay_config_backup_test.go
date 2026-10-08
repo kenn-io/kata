@@ -68,7 +68,7 @@ func TestRelayConfigurationOwnerBackup(t *testing.T) {
 			t.Cleanup(func() { _ = restored.Close() })
 			require.NoError(t, Import(ctx, bytes.NewReader(forwarded.Bytes()), restored))
 			check(restored)
-			for _, change := range []func(*db.RelayBindingConfig){
+			for changeIndex, change := range []func(*db.RelayBindingConfig){
 				func(c *db.RelayBindingConfig) { c.HubPath = []string{rootUID, rootUID, source.InstanceUID()} },
 				func(c *db.RelayBindingConfig) {
 					c.AuthorityUID = "00000000000000000000000008"
@@ -90,7 +90,23 @@ func TestRelayConfigurationOwnerBackup(t *testing.T) {
 					}
 					require.NoError(t, encoder.Write(record))
 				}
-				require.Error(t, Import(ctx, bytes.NewReader(corrupt.Bytes()), restored), "invalid relay restore must fail before clearing retained state")
+				if changeIndex == 2 {
+					// A reconnect can retain the old relay namespace as detached
+					// history while installing a new active binding identity.
+					var detachedEnvelopeBefore string
+					require.NoError(t, restored.QueryRowContext(ctx, `SELECT envelope FROM federation_relay_outbox WHERE binding_uid=? AND stream=? AND reset_epoch=?`, config.BindingUID, db.RelayStreamEvent, config.ResetEpoch).Scan(&detachedEnvelopeBefore))
+					require.NoError(t, Import(ctx, bytes.NewReader(corrupt.Bytes()), restored))
+					binding, err := restored.FederationBindingByProject(ctx, project.ID)
+					require.NoError(t, err)
+					detached := config
+					detached.BindingUID = "00000000000000000000000009"
+					require.Equal(t, &detached, binding.RelayConfig)
+					var detachedEnvelopeAfter string
+					require.NoError(t, restored.QueryRowContext(ctx, `SELECT envelope FROM federation_relay_outbox WHERE binding_uid=? AND stream=? AND reset_epoch=?`, config.BindingUID, db.RelayStreamEvent, config.ResetEpoch).Scan(&detachedEnvelopeAfter))
+					require.Equal(t, detachedEnvelopeBefore, detachedEnvelopeAfter, "detached retry bytes remain under their original identity")
+					continue
+				}
+				require.Error(t, Import(ctx, bytes.NewReader(corrupt.Bytes()), restored), "invalid relay restore %d must fail before clearing retained state", changeIndex)
 				check(restored)
 			}
 			var scoped bytes.Buffer

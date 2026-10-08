@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -482,6 +483,48 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 
 	assertRecordsDoNotContain(t, records, "drop me")
 	assertProjectIDs(t, records, map[int64]bool{p1.ID: true})
+}
+
+func TestExportProjectIDOmitsRelayEnrollmentsWithSystemParents(t *testing.T) {
+	ctx := context.Background()
+	d := openExportTestDB(t)
+	project, err := d.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, d.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: d.InstanceUID(),
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}))
+	parent, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "project-export-parent-token", Actor: "member", AdminActor: "admin",
+	})
+	require.NoError(t, err)
+	_, err = d.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID,
+		SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion,
+		Token: "project-export-relay-token",
+	})
+	require.NoError(t, err)
+
+	version, err := d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, version, 33)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value = '33' WHERE key = 'schema_version'`)
+	require.NoError(t, err)
+	version, err = d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 33, version)
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true})
+	for _, rec := range records {
+		assert.NotEqual(t, "federation_enrollment", rec["kind"],
+			"project-scoped exports cannot include a relay grant whose parent token is omitted")
+	}
 }
 
 func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {

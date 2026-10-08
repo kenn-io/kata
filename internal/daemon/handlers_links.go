@@ -300,11 +300,11 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return nil, internalAPIError(err)
 		}
 
+		cfg.Publish().Event(in.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
 		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if err != nil {
 			return nil, err
@@ -451,11 +451,11 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		cfg.Publish().Event(in.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
 		projected, perr := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if perr != nil {
 			return nil, perr

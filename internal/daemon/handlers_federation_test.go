@@ -2018,7 +2018,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 		assert.False(t, survivorRevokedAt.Valid)
 	})
 
-	t.Run("token identity overrides the request actor", func(t *testing.T) {
+	t.Run("account token cannot rotate a legacy grant", func(t *testing.T) {
 		env := testenv.New(
 			t,
 			testenv.WithAuthToken("rotation-bootstrap-token"),
@@ -2033,7 +2033,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 			AdminActor:     db.BootstrapActor,
 		})
 		require.NoError(t, err)
-		_, err = env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		old, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token: "rotation-identity-old-token", SpokeInstanceUID: federationTestSpokeUID,
 			ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
 		})
@@ -2050,20 +2050,18 @@ func TestRotateFederationEnrollment(t *testing.T) {
 			},
 			bearer("rotation-alice-token"),
 		)
-		require.Equal(t, http.StatusOK, resp.StatusCode, "identity rotation response: %s", raw)
-		assert.NotContains(t, string(raw), "token_hash")
-		var rotated struct {
-			ID    int64  `json:"id"`
-			Actor string `json:"actor"`
-		}
-		require.NoError(t, json.Unmarshal(raw, &rotated))
-		assert.Equal(t, "alice", rotated.Actor)
-
-		var storedActor string
+		assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_enrollment_requires_relay")
+		var revokedAt sql.NullString
 		require.NoError(t, env.DB.QueryRow(
-			`SELECT bound_actor FROM federation_enrollments WHERE id = ?`, rotated.ID,
-		).Scan(&storedActor))
-		assert.Equal(t, "alice", storedActor)
+			`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, old.Enrollment.ID,
+		).Scan(&revokedAt))
+		assert.False(t, revokedAt.Valid, "a rejected rotation must preserve the existing legacy grant")
+		var replacementCount int
+		require.NoError(t, env.DB.QueryRow(
+			`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash = ?`,
+			db.FederationTokenHash("rotation-identity-replacement-token"),
+		).Scan(&replacementCount))
+		assert.Zero(t, replacementCount, "a rejected account-token rotation must not create a legacy grant")
 	})
 
 	t.Run("bootstrap identity cannot rotate with a body actor", func(t *testing.T) {
@@ -2281,7 +2279,7 @@ func TestFederationEnrollmentRejectsWildcardAdoptionSnapshotAuthorMarker(t *test
 	assert.Contains(t, string(raw), "project_id")
 }
 
-func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
+func TestFederationEnrollmentIdentityModeRequiresRelayForAccountToken(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
@@ -2289,14 +2287,7 @@ func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
-		PlaintextToken: "bob-token",
-		Actor:          "bob",
-		AdminActor:     db.BootstrapActor,
-	})
-	require.NoError(t, err)
 
-	// Ordinary user credentials enroll a chosen project; wildcard grants require owner authority.
 	project, err := env.DB.CreateProject(t.Context(), "shared-project")
 	require.NoError(t, err)
 	request := map[string]any{
@@ -2307,36 +2298,13 @@ func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
 		"actor":              "mallory",
 	}
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("alice-token"))
-	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
-
-	var out struct {
-		ID    int64  `json:"id"`
-		Actor string `json:"actor"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &out))
-	assert.Equal(t, "alice", out.Actor)
-
-	var actor string
+	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_enrollment_requires_relay")
+	var count int
 	require.NoError(t, env.DB.QueryRow(`
-		SELECT bound_actor
+		SELECT COUNT(*)
 		  FROM federation_enrollments
-		 WHERE token_hash = ?`, db.FederationTokenHash("identity-enrollment-token")).Scan(&actor))
-	assert.Equal(t, "alice", actor)
-
-	request["actor"] = "different-request-actor"
-	replayResp, replayRaw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("alice-token"))
-	require.Equal(t, http.StatusOK, replayResp.StatusCode, "identity replay response: %s", replayRaw)
-	var replayed struct {
-		ID    int64  `json:"id"`
-		Actor string `json:"actor"`
-	}
-	require.NoError(t, json.Unmarshal(replayRaw, &replayed))
-	assert.Equal(t, out.ID, replayed.ID)
-	assert.Equal(t, "alice", replayed.Actor)
-
-	conflictResp, conflictRaw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("bob-token"))
-	assertAPIError(t, conflictResp.StatusCode, conflictRaw, http.StatusConflict, "federation_enrollment_token_conflict")
-	assert.NotContains(t, string(conflictRaw), "identity-enrollment-token")
+		 WHERE token_hash = ?`, db.FederationTokenHash("identity-enrollment-token")).Scan(&count))
+	assert.Zero(t, count, "account tokens cannot leave a legacy grant without issuer lifetime enforcement")
 }
 
 func TestFederationEnrollmentIdentityModeRejectsBootstrapToken(t *testing.T) {
