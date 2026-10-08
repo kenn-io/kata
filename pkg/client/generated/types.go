@@ -3123,6 +3123,50 @@ func (m MutationResponseBody) Validate() error {
 	return errors
 }
 
+type NotifyIssueRequestBody struct {
+	Actor     *string `json:"actor,omitempty"`
+	Broadcast *bool   `json:"broadcast,omitempty"`
+	Message   string  `json:"message" validate:"required"`
+	Re        *string `json:"re,omitempty"`
+	Teammate  *string `json:"teammate,omitempty"`
+	Teammates *bool   `json:"teammates,omitempty"`
+	To        *string `json:"to,omitempty"`
+}
+
+func (n NotifyIssueRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(n))
+}
+
+type NotifyIssueResponseBody struct {
+	Changed    bool     `json:"changed"`
+	Event      *Event   `json:"event,omitempty"`
+	Issue      Issue    `json:"issue"`
+	Recipients []string `json:"recipients" validate:"required"`
+}
+
+func (n NotifyIssueResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if n.Event != nil {
+		if v, ok := any(n.Event).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Event", err)
+			}
+		}
+	}
+	if v, ok := any(n.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if err := typesValidator.Var(n.Recipients, "required"); err != nil {
+		errors = errors.Append("Recipients", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type PatchIssueMetadataRequestBody struct {
 	Actor *string             `json:"actor,omitempty"`
 	Guard *MetadataPatchGuard `json:"guard,omitempty"`

@@ -39,6 +39,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},
 	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
 	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
 	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},

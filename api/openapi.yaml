@@ -3206,6 +3206,44 @@ components:
         - event
         - changed
       type: object
+    NotifyIssueRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        broadcast:
+          type: boolean
+        message:
+          type: string
+        re:
+          type: string
+        teammate:
+          type: string
+        teammates:
+          type: boolean
+        to:
+          type: string
+      required:
+        - message
+      type: object
+    NotifyIssueResponseBody:
+      additionalProperties: true
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        recipients:
+          items:
+            type: string
+          type: array
+      required:
+        - issue
+        - changed
+        - recipients
+      type: object
     PatchIssueMetadataRequestBody:
       additionalProperties: false
       properties:
@@ -7983,6 +8021,58 @@ paths:
           headers:
             ETag:
               schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/notifications:
+    post:
+      operationId: notifyIssue
+      parameters:
+        - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+          in: path
+          name: project_id
+          required: true
+          schema:
+            description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+            type: string
+        - description: "Workspace alias identity; requires a name: selector"
+          in: header
+          name: X-Kata-Project-Alias
+          schema:
+            description: "Workspace alias identity; requires a name: selector"
+            type: string
+        - description: Workspace alias kind; required with X-Kata-Project-Alias
+          in: header
+          name: X-Kata-Project-Alias-Kind
+          schema:
+            description: Workspace alias kind; required with X-Kata-Project-Alias
+            type: string
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotifyIssueRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotifyIssueResponseBody"
+          description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
                 type: string
         default:
           content:

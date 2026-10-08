@@ -508,6 +508,16 @@ func (p PatchIssueMetadataPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 
+type NotifyIssuePath struct {
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (n NotifyIssuePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(n))
+}
+
 type ListLabelsPath struct {
 	ProjectID int64 `json:"project_id"`
 }

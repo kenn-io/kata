@@ -375,6 +375,9 @@ type ClientInterface interface {
 	PatchIssueMetadata(ctx context.Context, options *PatchIssueMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PatchIssueMetadataResponse, error)
 	PatchIssueMetadataWithResponse(ctx context.Context, options *PatchIssueMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PatchIssueMetadataResp, error)
 
+	NotifyIssue(ctx context.Context, options *NotifyIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*NotifyIssueResponse, error)
+	NotifyIssueWithResponse(ctx context.Context, options *NotifyIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*NotifyIssueResp, error)
+
 	ListLabels(ctx context.Context, options *ListLabelsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListLabelsResponse, error)
 	ListLabelsWithResponse(ctx context.Context, options *ListLabelsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListLabelsResp, error)
 
@@ -5851,6 +5854,69 @@ func (c *Client) PatchIssueMetadata(ctx context.Context, options *PatchIssueMeta
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/metadata")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) NotifyIssue(ctx context.Context, options *NotifyIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*NotifyIssueResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/notifications",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*NotifyIssueResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(NotifyIssueErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "NotifyIssueErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(NotifyIssueResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "NotifyIssueResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/notifications")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

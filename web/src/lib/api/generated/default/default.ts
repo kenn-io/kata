@@ -126,6 +126,9 @@ import type {
   MoveIssueRequestBody,
   MoveIssueResponseBody,
   MutationResponseBody,
+  NotifyIssuePathParameters,
+  NotifyIssueRequestBody,
+  NotifyIssueResponseBody,
   PatchIssueMetadataPathParameters,
   PatchIssueMetadataRequestBody,
   PatchIssueMetadataResponseBody,
@@ -4078,6 +4081,50 @@ export const patchIssueMetadata = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(patchIssueMetadataRequestBody),
+  })
+}
+
+export type notifyIssueResponse200 = {
+  data: NotifyIssueResponseBody
+  status: 200
+}
+
+export type notifyIssueResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type notifyIssueResponseSuccess = notifyIssueResponse200 & {
+  headers: Headers
+}
+export type notifyIssueResponseError = notifyIssueResponseDefault & {
+  headers: Headers
+}
+
+export type notifyIssueResponse = notifyIssueResponseSuccess | notifyIssueResponseError
+
+export const getNotifyIssueUrl = ({ projectId, ref }: NotifyIssuePathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/notifications`
+}
+
+export const notifyIssue = async (
+  { projectId, ref }: NotifyIssuePathParameters,
+  notifyIssueRequestBody: NotifyIssueRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<notifyIssueResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<notifyIssueResponse>(getNotifyIssueUrl({ projectId, ref }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(notifyIssueRequestBody),
   })
 }
 

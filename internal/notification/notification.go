@@ -35,9 +35,12 @@ const (
 
 // Value is the JSON payload stored in a notify.* metadata entry.
 type Value struct {
-	From     string `json:"from"`
-	Teammate string `json:"teammate,omitempty"`
-	Message  string `json:"message"`
+	From      string `json:"from"`
+	Teammate  string `json:"teammate,omitempty"`
+	Message   string `json:"message"`
+	Re        string `json:"re,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Broadcast bool   `json:"broadcast,omitzero"`
 }
 
 // Automatic describes a system-generated notification recognized from metadata.

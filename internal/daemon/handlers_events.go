@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
@@ -201,6 +200,11 @@ func readVisibleEvents(
 			scanned++
 			projected, ok := projectedRows[index], visibleRows[index]
 			if ok && event.Type != "issue.links_changed" {
+				raw, err := projectNotificationJSON(ctx, store, jsontext.Value(projected.Payload))
+				if err != nil {
+					return nil, cursor, 0, internalAPIError(err)
+				}
+				projected.Payload = string(raw)
 				visible = append(visible, projected)
 				if len(visible) == limit {
 					break
@@ -1032,7 +1036,7 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 			}
 		}
 	}
-	return true, nil
+	return notificationEventStillVisible(ctx, store, event)
 }
 
 func revalidateEventStreamAuthority(ctx context.Context, store db.Storage) error {

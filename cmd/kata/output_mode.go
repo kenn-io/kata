@@ -369,6 +369,9 @@ func emitAgentError(w io.Writer, command string, err error) {
 		command = "kata"
 	}
 	message := firstLine(cli.Message)
+	if cli.Hint != "" {
+		message += "; hint: " + firstLine(cli.Hint)
+	}
 	switch cli.Code {
 	case "idempotency_mismatch", "idempotency_deleted", "duplicate_candidates":
 		var data struct {

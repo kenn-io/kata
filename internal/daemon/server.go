@@ -17,8 +17,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/klauspost/compress/gzhttp"
-	kitdaemon "go.kenn.io/kit/daemon"
-
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -31,6 +29,7 @@ import (
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
+	kitdaemon "go.kenn.io/kit/daemon"
 	"golang.org/x/net/netutil"
 )
 
@@ -292,7 +291,7 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
 	humaConfig.DocsPath = ""
-	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError)
+	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError, scopedNotificationTransformer(cfg.DB))
 	// Drop DefaultConfig's SchemaLinkTransformer: it rebuilds response structs
 	// via reflection (adding a $schema field), which silently bypasses any
 	// MarshalJSON. Our APIError relies on MarshalJSON to emit the wire-spec
@@ -739,6 +738,7 @@ func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 // registerMetadata registers metadata patch routes.
 func registerMetadata(humaAPI huma.API, cfg ServerConfig) {
 	registerMetadataHandlers(humaAPI, cfg)
+	registerNotificationHandlers(humaAPI, cfg)
 }
 
 // registerMove registers the cross-project issue move action route.

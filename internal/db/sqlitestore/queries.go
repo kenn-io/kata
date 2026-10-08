@@ -1228,12 +1228,13 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 		return err
 	})
 	if err != nil {
-		return db.Comment{}, db.Event{}, err
+		return db.Comment{}, evt, err
 	}
 	return comment, evt, nil
 }
 
 func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (int64, db.Event, error) {
+	db.RetainCommentEvents(ctx)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, db.Event{}, err
@@ -1326,12 +1327,31 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 		return 0, db.Event{}, err
 	}
 
-	// Comment-create metadata seam: issue, p, commentUID and evt are all
-	// available here in the same transaction. Additional metadata events must
-	// be returned as a committed batch before callers publish any of them.
+	events := []db.Event{evt}
+	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+		comment, err := commentByIDTx(ctx, tx, commentID)
+		if err != nil {
+			return 0, db.Event{}, err
+		}
+		patch, err := hook(ctx, tx, issue, comment)
+		if err != nil {
+			return 0, db.Event{}, err
+		}
+		if len(patch) > 0 {
+			out, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: p.Author, Patch: patch})
+			if err != nil {
+				return 0, db.Event{}, err
+			}
+			if out.Changed {
+				events = append(events, out.Event)
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, db.Event{}, err
 	}
+	db.RetainCommentEvents(ctx, events...)
 	return commentID, evt, nil
 }
 

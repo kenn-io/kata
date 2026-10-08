@@ -267,6 +267,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 		Error struct {
 			Kind     errKind        `json:"kind"`
 			Code     string         `json:"code,omitempty"`
+			Hint     string         `json:"hint,omitempty"`
 			Message  string         `json:"message"`
 			ExitCode int            `json:"exit_code"`
 			Data     jsontext.Value `json:"data,omitempty"`
@@ -275,6 +276,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 	env.Error.Kind = cli.Kind
 	env.Error.Code = cli.Code
 	env.Error.Message = cli.Message
+	env.Error.Hint = cli.Hint
 	env.Error.ExitCode = cli.ExitCode
 	env.Error.Data = cli.Data
 	bs, mErr := json.Marshal(env)
@@ -288,6 +290,9 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
 	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	if cli.Hint != "" {
+		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
+	}
 }
 
 func cliErrorForErr(err error, runEReached bool) *cliError {

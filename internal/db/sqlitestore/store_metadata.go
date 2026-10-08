@@ -50,20 +50,35 @@ func (d *Store) PatchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 }
 
 func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return db.PatchIssueMetadataOut{}, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.PatchIssueMetadataOut{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	out, err := d.patchIssueMetadataTx(ctx, tx, in)
+	if err != nil {
+		return out, err
+	}
+	if err = tx.Commit(); err != nil {
+		return db.PatchIssueMetadataOut{}, err
+	}
+	return out, nil
+}
+
+func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 	var out db.PatchIssueMetadataOut
 
-	// Validate all patch keys before opening a tx. A bad key/value never starts a tx.
+	// Validate static patches used by the comment transaction hook.
 	for key, raw := range in.Patch {
 		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 			return out, fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
-
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return out, err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var (
 		curMetadata string
@@ -71,7 +86,7 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		projectID   int64
 		projectName string
 	)
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT i.metadata, i.revision, i.project_id, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.deleted_at IS NULL`,
@@ -85,6 +100,20 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 	}
 	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {
 		return out, err
+	}
+
+	current, err := issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
+		return out, err
+	}
+	in.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, in.Patch)
+	if err != nil {
+		return out, err
+	}
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return out, fmt.Errorf("validate %q: %w", key, err)
+		}
 	}
 
 	// nil IfMatchRev = unconditional last-write-wins; the gate only applies
@@ -112,9 +141,6 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		// No-op: commit (no writes) and return Changed=false. Revision unchanged.
 		issue, err := issueByIDTx(ctx, tx, in.IssueID)
 		if err != nil {
-			return out, err
-		}
-		if err := tx.Commit(); err != nil {
 			return out, err
 		}
 		out.Issue = issue
@@ -155,9 +181,6 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 
 	issue, err := issueByIDTx(ctx, tx, in.IssueID)
 	if err != nil {
-		return out, err
-	}
-	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Issue = issue

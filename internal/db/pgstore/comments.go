@@ -24,7 +24,10 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	}
 	var comment db.Comment
 	var event db.Event
+	var events []db.Event
+	db.RetainCommentEvents(ctx)
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		events = nil
 		issue, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -95,11 +98,30 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			}
 		}
 		event, err = s.insertEventTx(ctx, tx, input)
-		// Comment-create metadata seam: issue, project, localParams, comment
-		// and event are available before this transaction commits. Additional
-		// metadata events must be returned and published as a committed batch.
-		return err
+		if err != nil {
+			return err
+		}
+		events = []db.Event{event}
+		if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+			patch, err := hook(ctx, tx, issue, comment)
+			if err != nil {
+				return err
+			}
+			if len(patch) > 0 {
+				out, err := s.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: effectiveActor, Patch: patch})
+				if err != nil {
+					return err
+				}
+				if out.Changed {
+					events = append(events, out.Event)
+				}
+			}
+		}
+		return nil
 	})
+	if err == nil {
+		db.RetainCommentEvents(ctx, events...)
+	}
 	return comment, event, err
 }
 
