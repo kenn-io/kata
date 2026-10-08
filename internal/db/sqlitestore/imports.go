@@ -303,13 +303,6 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		}
 		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
 	}
-	if !hasStatusObservation && db.ImportOwnsStatusForUnchangedContent(p, mapping, item) {
-		updated, evt, err := d.updateImportedIssue(ctx, tx, p, db.ImportedStatusOnlyItem(existing, item), existing, projectName)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
-	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, evt, err := d.updateImportedIssue(ctx, tx, p, item, existing, projectName)
 		if err != nil {

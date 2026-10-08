@@ -314,13 +314,6 @@ func (s *Store) importIssue(
 		}
 		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
 	}
-	if !hasStatusObservation && db.ImportOwnsStatusForUnchangedContent(params, mapping, item) {
-		updated, event, err := s.updateImportedIssue(ctx, tx, params, db.ImportedStatusOnlyItem(existing, item), existing, project)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
-	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, event, err := s.updateImportedIssue(ctx, tx, params, item, existing, project)
 		if err != nil {

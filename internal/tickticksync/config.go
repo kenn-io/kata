@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -82,7 +83,8 @@ func DecodeCheckpoint(raw jsontext.Value) (Checkpoint, error) {
 		}
 	}
 	for id, v := range cp.Versions {
-		if ValidateID(id) != nil || len(v.Hash) != 64 || !validTime(v.FirstSeen) || !validTime(v.Version) || v.Version.Before(v.FirstSeen) {
+		if ValidateID(id) != nil || len(v.Hash) != 64 || !validTime(v.FirstSeen) || !validTime(v.Version) || v.Version.Before(v.FirstSeen) ||
+			(v.Status != 0 && v.Status != 2 && v.Status != -1) || !utf8.ValidString(v.CompletedTime) || strings.ContainsRune(v.CompletedTime, 0) {
 			return cp, fmt.Errorf("invalid TickTick task version")
 		}
 	}

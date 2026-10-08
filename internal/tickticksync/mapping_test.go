@@ -43,7 +43,6 @@ func TestTickTickConfigAndMappingContract(t *testing.T) {
 	reopened, _, err := BuildImportBatch(c, data, cp, at.Add(time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, one.Items[0].UpdatedAt, reopened.Items[0].UpdatedAt, "a status-only change must not advance the source-content timestamp")
-	require.True(t, reopened.ReconcileStatusForUnchangedContent["task:task-1"])
 	require.Contains(t, reopened.ImportStatusObservations, "task:task-1")
 	for _, p := range []struct {
 		in              int

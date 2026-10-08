@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -70,124 +71,21 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	for _, t := range data.Tasks {
 		visible[t.ID] = true
 	}
-	openMissing, err := a.openMissingTasks(ctx, b, visible)
+	missing, closedCandidates, err := a.missingTaskWindow(ctx, b, visible, &cp)
 	if err != nil {
 		return p, err
 	}
-	closedCandidates, err := a.closedMissingTaskCandidates(ctx, b, visible, cp)
+	recovered, err := recoverMissingTasks(ctx, session, missing, closedCandidates, &cp, &data)
 	if err != nil {
 		return p, err
-	}
-	openSet := make(map[string]bool, len(openMissing))
-	allMissing := make([]string, 0, len(openMissing)+len(closedCandidates))
-	for _, id := range openMissing {
-		openSet[id] = true
-		allMissing = append(allMissing, id)
-	}
-	for id := range closedCandidates {
-		if !openSet[id] {
-			allMissing = append(allMissing, id)
-		}
-	}
-	sort.Strings(allMissing)
-	retained := map[string]bool{}
-	for _, id := range allMissing {
-		retained[id] = true
-	}
-	maps.DeleteFunc(cp.Versions, func(id string, _ TaskVersion) bool { return !visible[id] && !retained[id] })
-	index := sort.SearchStrings(allMissing, cp.MissingAfter)
-	if index < len(allMissing) && allMissing[index] == cp.MissingAfter {
-		index++
-	}
-	if index >= len(allMissing) {
-		index = 0
-	}
-	end := min(index+missingTaskLookupLimit, len(allMissing))
-	issuesync.ReportProgress(ctx, "missing-tasks", 0, end-index)
-	missing := append([]string(nil), allMissing[index:end]...)
-	cp.MissingAfter = ""
-	if end < len(allMissing) && end > 0 {
-		cp.MissingAfter = allMissing[end-1]
-	}
-	recovered := map[string]bool{}
-	for n, id := range missing {
-		t, err := session.Task(ctx, id)
-		if err != nil {
-			if se, ok := errors.AsType[*issuesync.StatusError](err); ok && se.HTTPStatus == 404 {
-				delete(cp.Versions, id)
-				continue
-			}
-			if errors.Is(err, errTaskOutsideProject) {
-				delete(cp.Versions, id)
-				continue
-			}
-			return p, err
-		}
-		if t.Status == nil {
-			return p, blocked("TickTick task status is missing")
-		}
-		if *t.Status == -1 || t.Kind == "NOTE" {
-			delete(cp.Versions, id)
-			issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
-			continue
-		}
-		if _, candidate := closedCandidates[id]; candidate && *t.Status != 2 {
-			previous, _, ok := decodeTaskFingerprint(cp.Versions[id].Hash)
-			if !ok || !previous.pendingRecovery {
-				issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
-				continue
-			}
-		}
-		data.Tasks = append(data.Tasks, t)
-		recovered[id] = true
-		issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
 	}
 	batch, next, err := BuildImportBatch(c, data, cp, started)
 	if err != nil {
 		return p, err
 	}
-	deferredCheckpoint := maps.Clone(recovered)
-	statusPending := map[string]bool{}
-	for externalID := range batch.ImportStatusObservations {
-		id, err := mappingTaskID(externalID)
-		if err != nil {
-			return p, err
-		}
-		deferredCheckpoint[id] = true
-		statusPending[id] = true
-	}
-	for externalID, pending := range batch.ReconcileStatusForUnchangedContent {
-		if !pending {
-			continue
-		}
-		id, err := mappingTaskID(externalID)
-		if err != nil {
-			return p, err
-		}
-		if _, ok := cp.Versions[id]; ok {
-			deferredCheckpoint[id] = true
-		}
-	}
-	staged := Checkpoint{Versions: maps.Clone(next.Versions), MissingAfter: next.MissingAfter}
-	for id := range deferredCheckpoint {
-		previous, hadPrevious := cp.Versions[id]
-		if observed, ok := staged.Versions[id]; ok && (recovered[id] || statusPending[id]) {
-			if recovered[id] {
-				observed.Hash, err = markTaskFingerprintRecoveryPending(observed.Hash)
-				if err != nil {
-					return p, err
-				}
-			}
-			if statusPending[id] {
-				observed.Hash, err = markTaskFingerprintStatusPending(observed.Hash)
-				if err != nil {
-					return p, err
-				}
-			}
-			staged.Versions[id] = observed
-		} else if hadPrevious {
-			staged.Versions[id] = previous
-		}
+	staged, deferred, err := stagedCheckpoint(cp, next, batch, recovered)
+	if err != nil {
+		return p, err
 	}
 	stagedRaw, err := WithCheckpoint(b.Config, staged)
 	if err != nil {
@@ -214,7 +112,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		p.Binding = b
 	}
 	p.Batch = batch
-	if len(deferredCheckpoint) > 0 {
+	if deferred {
 		finalizeBinding := b
 		p.Finalize = func(finalizeCtx context.Context) (db.IssueSyncBinding, error) {
 			return a.store.RefreshIssueSyncBinding(finalizeCtx, db.IssueSyncBindingUpdateParams{
@@ -225,6 +123,106 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	}
 	issuesync.ReportProgress(ctx, "content", len(batch.Items), len(batch.Items))
 	return p, nil
+}
+
+// missingTaskWindow selects this run's bounded rotation of missing tasks to
+// read, prunes checkpoint entries no longer tracked, and advances the rotation.
+func (a *Adapter) missingTaskWindow(ctx context.Context, b db.IssueSyncBinding, visible map[string]bool, cp *Checkpoint) ([]string, map[string]bool, error) {
+	openMissing, err := a.openMissingTasks(ctx, b, visible)
+	if err != nil {
+		return nil, nil, err
+	}
+	closedCandidates, err := a.closedMissingTaskCandidates(ctx, b, visible, *cp)
+	if err != nil {
+		return nil, nil, err
+	}
+	tracked := map[string]bool{}
+	for _, id := range openMissing {
+		tracked[id] = true
+	}
+	for id := range closedCandidates {
+		tracked[id] = true
+	}
+	allMissing := slices.Sorted(maps.Keys(tracked))
+	maps.DeleteFunc(cp.Versions, func(id string, _ TaskVersion) bool { return !visible[id] && !tracked[id] })
+	index := sort.SearchStrings(allMissing, cp.MissingAfter)
+	if index < len(allMissing) && allMissing[index] == cp.MissingAfter {
+		index++
+	}
+	if index >= len(allMissing) {
+		index = 0
+	}
+	end := min(index+missingTaskLookupLimit, len(allMissing))
+	cp.MissingAfter = ""
+	if end < len(allMissing) && end > 0 {
+		cp.MissingAfter = allMissing[end-1]
+	}
+	return allMissing[index:end], closedCandidates, nil
+}
+
+// recoverMissingTasks reads the selected missing tasks and appends the ones
+// that still need an import to data. Tasks that left the project are forgotten.
+func recoverMissingTasks(ctx context.Context, session Session, missing []string, closedCandidates map[string]bool, cp *Checkpoint, data *ProjectData) (map[string]bool, error) {
+	issuesync.ReportProgress(ctx, "missing-tasks", 0, len(missing))
+	recovered := map[string]bool{}
+	for n, id := range missing {
+		issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
+		t, err := session.Task(ctx, id)
+		if se, ok := errors.AsType[*issuesync.StatusError](err); ok && se.HTTPStatus == 404 || errors.Is(err, errTaskOutsideProject) {
+			delete(cp.Versions, id)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if t.Status == nil {
+			return nil, blocked("TickTick task status is missing")
+		}
+		if *t.Status == -1 || t.Kind == "NOTE" {
+			delete(cp.Versions, id)
+			continue
+		}
+		if closedCandidates[id] && *t.Status != 2 && !cp.Versions[id].PendingRecovery {
+			continue
+		}
+		data.Tasks = append(data.Tasks, t)
+		recovered[id] = true
+	}
+	return recovered, nil
+}
+
+// stagedCheckpoint is the checkpoint saved before import. Recovered tasks and
+// one-way status observations stay marked pending until Finalize saves next
+// after the import commits, so a failed import retries them.
+func stagedCheckpoint(cp, next Checkpoint, batch db.ImportBatchParams, recovered map[string]bool) (Checkpoint, bool, error) {
+	statusPending := map[string]bool{}
+	for externalID := range batch.ImportStatusObservations {
+		id, err := mappingTaskID(externalID)
+		if err != nil {
+			return Checkpoint{}, false, err
+		}
+		statusPending[id] = true
+	}
+	staged := Checkpoint{Versions: maps.Clone(next.Versions), MissingAfter: next.MissingAfter}
+	for id := range recovered {
+		markPending(staged, cp, id, true, statusPending[id])
+	}
+	for id := range statusPending {
+		markPending(staged, cp, id, recovered[id], true)
+	}
+	return staged, len(recovered)+len(statusPending) > 0, nil
+}
+
+func markPending(staged, cp Checkpoint, id string, recovery, status bool) {
+	observed, ok := staged.Versions[id]
+	if !ok {
+		if previous, had := cp.Versions[id]; had {
+			staged.Versions[id] = previous
+		}
+		return
+	}
+	observed.PendingRecovery, observed.PendingStatus = recovery, status
+	staged.Versions[id] = observed
 }
 
 // openMissingTasks lists mapped tasks absent from the current collection whose
@@ -299,8 +297,7 @@ func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyn
 		if !ok {
 			continue
 		}
-		previous, _, ok := decodeTaskFingerprint(version.Hash)
-		if !ok || (!previous.pendingRecovery && (config.StatusSync != "two-way" || previous.status != 0)) {
+		if !version.PendingRecovery && (config.StatusSync != "two-way" || version.Status != 0) {
 			continue
 		}
 		taskByIssue[*mapping.IssueID] = id

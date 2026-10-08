@@ -70,10 +70,18 @@ const missingTaskLookupLimit = 100
 const maxCheckpointBytes = 2 << 20
 
 // TaskVersion checkpoints observations, not undocumented provider timestamps.
+// Hash covers task content only; Status and CompletedTime record the last
+// observed status separately so a status change never ages the content.
 type TaskVersion struct {
-	Hash      string    `json:"hash"`
-	FirstSeen time.Time `json:"first_seen"`
-	Version   time.Time `json:"version"`
+	Hash          string    `json:"hash"`
+	Status        int       `json:"status,omitzero"`
+	CompletedTime string    `json:"completed_time,omitempty"`
+	FirstSeen     time.Time `json:"first_seen"`
+	Version       time.Time `json:"version"`
+	// PendingRecovery marks a recovered task whose final import has not committed.
+	PendingRecovery bool `json:"pending_recovery,omitzero"`
+	// PendingStatus marks a one-way status observation whose import has not committed.
+	PendingStatus bool `json:"pending_status,omitzero"`
 }
 
 // Checkpoint survives partial import/restart and bounds absent-task recovery laps.

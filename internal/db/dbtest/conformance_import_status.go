@@ -39,9 +39,9 @@ func checkImportStatusCloseClearsAssignmentExpiry(t *testing.T, store db.Storage
 	require.NotNil(t, claim.Issue.AssignmentExpiresOn)
 	deadline := *claim.Issue.AssignmentExpiresOn
 
-	// The binding mode changed, but the source content version did not. The
-	// adapter marks this as an unchanged-content status reconciliation.
-	batch.ReconcileStatusForUnchangedContent = map[string]bool{externalID: true}
+	// The source reports completion without a new content version.
+	rawStatus := "2"
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{externalID: {Raw: &rawStatus, Version: base.Add(time.Minute)}}
 	batch.Items[0].Status, batch.Items[0].ClosedReason = "closed", new("done")
 	batch.Items[0].ClosedAt = new(base)
 	result, events, err := store.ImportBatch(ctx, batch)
@@ -104,7 +104,6 @@ func checkImportStatusObservationAcknowledgement(t *testing.T, store db.Storage)
 
 	observedAt := base.Add(10 * time.Minute)
 	rawStatus := "2"
-	batch.ReconcileStatusForUnchangedContent = map[string]bool{externalID: true}
 	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{
 		externalID: {Raw: &rawStatus, Version: observedAt},
 	}
@@ -227,7 +226,8 @@ func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
 	got, err = store.IssueByID(ctx, initial.ID)
 	require.NoError(t, err)
 	require.Equal(t, local, got)
-	batch.ReconcileStatusForUnchangedContent = map[string]bool{batch.Items[0].ExternalID: true}
+	rawStatus := "0"
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{batch.Items[0].ExternalID: {Raw: &rawStatus, Version: at.Add(time.Hour)}}
 	batch.Items[0].Status, batch.Items[0].ClosedReason, batch.Items[0].ClosedAt = "open", nil, nil
 	r, events, err = store.ImportBatch(ctx, batch)
 	require.NoError(t, err)

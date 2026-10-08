@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"go.kenn.io/kata/internal/issuesync"
@@ -20,7 +19,7 @@ func statusObservation(t Task, at time.Time) (issuesync.StatusObservation, error
 	if t.Status == nil || (*t.Status != 0 && *t.Status != 2) || t.Kind == "NOTE" {
 		return issuesync.StatusObservation{}, blocked("TickTick task is abandoned or unavailable")
 	}
-	raw := strconv.Itoa(*t.Status)
+	raw := taskStatusRaw(t)
 	obs := issuesync.StatusObservation{RawStatus: &raw, Status: "open", Version: at.UTC().Truncate(time.Millisecond)}
 	if *t.Status == 2 {
 		obs.Status = "closed"
@@ -30,33 +29,10 @@ func statusObservation(t Task, at time.Time) (issuesync.StatusObservation, error
 	return obs, nil
 }
 
-func (s *clientSession) statusTask(ctx context.Context, id string) (Task, error) {
-	var task Task
-	if ValidateID(id) != nil {
-		return task, blocked("invalid TickTick task identity")
-	}
-	if err := s.get(ctx, s.path()+"/task/"+id, &task); err != nil {
-		return task, err
-	}
-	if task.ID != id || ValidateID(task.ID) != nil {
-		return task, blocked("TickTick task read returned another identity")
-	}
-	if task.ProjectID != s.config.ProjectID {
-		return task, errTaskOutsideProject
-	}
-	if task.Status == nil || (*task.Status != 0 && *task.Status != 2 && *task.Status != -1) {
-		return task, blocked("TickTick task status is missing or unknown")
-	}
-	if task.Kind != "" && task.Kind != "TEXT" && task.Kind != "CHECKLIST" && task.Kind != "NOTE" {
-		return task, blocked("unknown TickTick task kind")
-	}
-	return task, nil
-}
-
 // ReadStatus reads one task. The adapter checks project policy once when the
 // status pass opens; WriteStatus rechecks it before every completion.
 func (s *clientSession) ReadStatus(ctx context.Context, id string) (issuesync.StatusObservation, error) {
-	t, err := s.statusTask(ctx, id)
+	t, err := s.readTask(ctx, id)
 	if err != nil {
 		return issuesync.StatusObservation{}, statusReadError(err)
 	}
@@ -79,7 +55,7 @@ func (s *clientSession) WriteStatus(ctx context.Context, id, desired string, adm
 	if _, err := s.Project(ctx); err != nil {
 		return zero, statusReadError(err)
 	}
-	task, err := s.statusTask(ctx, id)
+	task, err := s.readTask(ctx, id)
 	if err != nil {
 		return zero, statusReadError(err)
 	}

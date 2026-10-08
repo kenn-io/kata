@@ -139,13 +139,6 @@ func ImportOwnsSameSourceVersionStatus(params ImportBatchParams, mapping ImportM
 	return item.Status != existing.Status || !equalImportOptionalString(item.ClosedReason, existing.ClosedReason)
 }
 
-// ImportOwnsStatusForUnchangedContent permits a newly observed provider status
-// change to update workflow fields without replacing locally edited content.
-func ImportOwnsStatusForUnchangedContent(params ImportBatchParams, mapping ImportMapping, item ImportItem) bool {
-	return params.ReconcileStatusForUnchangedContent[item.ExternalID] && mapping.SourceUpdatedAt != nil &&
-		SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt)
-}
-
 // ImportedStatusOnlyItem preserves unrelated scalars when the provider's
 // workflow schema changes without advancing its item version.
 func ImportedStatusOnlyItem(existing Issue, item ImportItem) ImportItem {

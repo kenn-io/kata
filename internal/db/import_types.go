@@ -123,10 +123,6 @@ type ImportBatchParams struct {
 	// to refresh only when observation, mapping, and issue timestamps match.
 	// Newer local edits remain authoritative. The public import API omits it.
 	ReconcileStatusForUnchanged bool
-	// ReconcileStatusForUnchangedContent marks an observed status change whose
-	// provider content is unchanged. Stores apply only the workflow fields while
-	// preserving newer local content and its timestamp.
-	ReconcileStatusForUnchangedContent map[string]bool
 	// ImportStatusObservations atomically acknowledges source status observations
 	// with their issue import so retries cannot replay them over a later local
 	// status change.

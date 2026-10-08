@@ -313,9 +313,7 @@ func TestOneWayStatusBaselineSurvivesReappearanceAndImportFailure(t *testing.T) 
 	require.NoError(t, err)
 	checkpoint, err = DecodeCheckpoint(saved.Config)
 	require.NoError(t, err)
-	pending, _, ok := decodeTaskFingerprint(checkpoint.Versions["task-1"].Hash)
-	require.True(t, ok)
-	require.True(t, pending.pendingStatus, "the reappearing status baseline must stay pending until its import commits")
+	require.True(t, checkpoint.Versions["task-1"].PendingStatus, "the reappearing status baseline must stay pending until its import commits")
 
 	at = at.Add(time.Minute)
 	_, err = runner.RunOnce(ctx, b.ID)
@@ -475,9 +473,7 @@ func TestTwoWayCompletedMissingTaskRecoverySurvivesStatusPageAdvance(t *testing.
 	require.NoError(t, err)
 	checkpoint, err := DecodeCheckpoint(saved.Config)
 	require.NoError(t, err)
-	staged, _, ok := decodeTaskFingerprint(checkpoint.Versions["a-target"].Hash)
-	require.True(t, ok)
-	wasRecoveryPending := staged.pendingRecovery
+	wasRecoveryPending := checkpoint.Versions["a-target"].PendingRecovery
 
 	// The next status page reaches the target and closes its local issue. Content
 	// recovery then needs its pending marker to survive the status transition.
@@ -612,12 +608,10 @@ func TestTwoWayRecoveryKeepsContentCheckpointAcrossFinalizeFailure(t *testing.T)
 	require.NoError(t, err)
 	version, ok := checkpoint.Versions["task-1"]
 	require.True(t, ok)
-	observation, content, ok := decodeTaskFingerprint(version.Hash)
-	require.True(t, ok)
-	require.True(t, observation.pendingRecovery, "the durable checkpoint must retain an unfinished recovery marker")
-	wantContent, err := taskContentFingerprint(Task{ID: "task-1", ProjectID: "project-1", Title: remoteTitle, Content: remoteContent, Status: new(remoteStatus)})
+	require.True(t, version.PendingRecovery, "the durable checkpoint must retain an unfinished recovery marker")
+	wantContent, err := taskContentHash(Task{ID: "task-1", ProjectID: "project-1", Title: remoteTitle, Content: remoteContent, Status: new(remoteStatus)})
 	require.NoError(t, err)
-	require.Equal(t, wantContent, content, "the recovery fingerprint must be persisted before importing the item")
+	require.Equal(t, wantContent, version.Hash, "the recovery fingerprint must be persisted before importing the item")
 	require.Equal(t, at, version.Version)
 
 	localTitle, localBody := "Local edit after recovery", "Local body after recovery"
@@ -638,9 +632,7 @@ func TestTwoWayRecoveryKeepsContentCheckpointAcrossFinalizeFailure(t *testing.T)
 	require.NoError(t, err)
 	version, ok = checkpoint.Versions["task-1"]
 	require.True(t, ok, "successful recovery remains until the next collection confirms retirement")
-	observation, _, ok = decodeTaskFingerprint(version.Hash)
-	require.True(t, ok)
-	require.False(t, observation.pendingRecovery, "successful finalization clears the recovery marker")
+	require.False(t, version.PendingRecovery, "successful finalization clears the recovery marker")
 
 	at = at.Add(time.Minute)
 	*clientNow = at
@@ -1010,4 +1002,29 @@ func TestAdapterSkipsMissingTaskMovedToAnotherProject(t *testing.T) {
 	_, err = r.RunOnce(ctx, b.ID)
 	require.NoError(t, err)
 	require.Equal(t, "open", mappedIssue(t, s, b, "task-1").Status)
+}
+
+// One-way imports and two-way status reads record the same observed_status
+// value for one TickTick state, so switching modes compares like with like.
+func TestObservedStatusEncodingMatchesAcrossModes(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := sourceData()
+	completed := Task{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(2), CompletedTime: "2026-10-01T09:00:00.000+0000"}
+	f.data.Tasks = []Task{completed}
+	at := time.Now().UTC().Add(-time.Minute)
+	_, err := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }}).RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	var imported *string
+	require.NoError(t, s.QueryRowContext(ctx, `SELECT observed_status FROM import_mappings WHERE external_id='task:task-1'`).Scan(&imported))
+	require.NotNil(t, imported)
+
+	c, _ := testClient(t, func(*http.Request) (*http.Response, error) {
+		return reply(200, `{"id":"task-1","projectId":"project-1","status":2,"completedTime":"2026-10-01T09:00:00.000+0000"}`), nil
+	})
+	session, err := c.ForRun(ctx, clientConfig())
+	require.NoError(t, err)
+	obs, err := session.(StatusSession).ReadStatus(ctx, "task-1")
+	require.NoError(t, err)
+	require.Equal(t, *imported, *obs.RawStatus)
 }

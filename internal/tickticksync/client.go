@@ -225,6 +225,16 @@ func (s *clientSession) Data(ctx context.Context) (ProjectData, error) {
 	return data, nil
 }
 func (s *clientSession) Task(ctx context.Context, id string) (Task, error) {
+	t, err := s.readTask(ctx, id)
+	if err != nil {
+		return t, err
+	}
+	return t, validateTask(s.config, t)
+}
+
+// readTask reads one scoped task without bounding its content, which status
+// reads never import.
+func (s *clientSession) readTask(ctx context.Context, id string) (Task, error) {
 	var t Task
 	if ValidateID(id) != nil {
 		return t, blocked("invalid TickTick task identity")
@@ -238,5 +248,8 @@ func (s *clientSession) Task(ctx context.Context, id string) (Task, error) {
 	if t.ProjectID != s.config.ProjectID {
 		return t, errTaskOutsideProject
 	}
-	return t, validateTask(s.config, t)
+	if err := validateTaskIdentity(s.config, t); err != nil {
+		return t, blocked(err.Error())
+	}
+	return t, nil
 }

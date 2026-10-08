@@ -1,12 +1,12 @@
 package tickticksync
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,7 +29,9 @@ func ValidateProject(c Config, p Project) error {
 	}
 	return nil
 }
-func validateTask(c Config, t Task) error {
+
+// validateTaskIdentity checks what a status read needs: scope, status, and kind.
+func validateTaskIdentity(c Config, t Task) error {
 	if ValidateID(t.ID) != nil || t.ProjectID != c.ProjectID || t.Status == nil {
 		return fmt.Errorf("TickTick task identity or status is missing or outside the project")
 	}
@@ -38,6 +40,14 @@ func validateTask(c Config, t Task) error {
 	}
 	if t.Kind != "" && t.Kind != "TEXT" && t.Kind != "CHECKLIST" && t.Kind != "NOTE" {
 		return fmt.Errorf("unknown TickTick task kind")
+	}
+	return nil
+}
+
+// validateTask also bounds the content an import copies into Kata.
+func validateTask(c Config, t Task) error {
+	if err := validateTaskIdentity(c, t); err != nil {
+		return err
 	}
 	for _, v := range []string{t.Title, t.Content, t.Desc, t.Assignee, t.RepeatFlag, t.StartDate, t.DueDate, t.TimeZone, t.CompletedTime} {
 		if !utf8.ValidString(v) || strings.ContainsRune(v, 0) || len(v) > 1<<20 {
@@ -74,7 +84,7 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 	at = at.UTC().Truncate(time.Millisecond)
 	cp := Checkpoint{Versions: map[string]TaskVersion{}, MissingAfter: old.MissingAfter}
 	maps.Copy(cp.Versions, old.Versions)
-	batch := db.ImportBatchParams{Source: c.SourceKey(), Actor: "ticktick-sync", Items: []db.ImportItem{}, ReconcileLabelsForUnchanged: map[string][]string{}, ReconcileStatusForUnchanged: true, ReconcileStatusForUnchangedContent: map[string]bool{}, ImportStatusObservations: map[string]db.IssueStatusObservation{}}
+	batch := db.ImportBatchParams{Source: c.SourceKey(), Actor: "ticktick-sync", Items: []db.ImportItem{}, ReconcileLabelsForUnchanged: map[string][]string{}, ReconcileStatusForUnchanged: true, ImportStatusObservations: map[string]db.IssueStatusObservation{}}
 	seen := map[string]string{}
 	total := 0
 	for _, task := range data.Tasks {
@@ -92,7 +102,7 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 		if *task.Status == -1 || task.Kind == "NOTE" {
 			continue
 		}
-		fingerprint, err := taskFingerprint(c, task)
+		contentHash, err := taskContentHash(task)
 		if err != nil {
 			return db.ImportBatchParams{}, old, err
 		}
@@ -100,37 +110,16 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 		if !exists {
 			v.FirstSeen = at
 		}
-		advance := !exists
-		statusObservationChanged := false
-		pendingStatus := false
-		if exists && v.Hash != fingerprint {
-			if previous, content, ok := decodeTaskFingerprint(v.Hash); ok {
-				currentContent, err := taskContentFingerprint(task)
-				if err != nil {
-					return db.ImportBatchParams{}, old, err
-				}
-				currentCompletedTime := completedTimeFingerprint(task.CompletedTime)
-				statusObservationChanged = previous.status != *task.Status || previous.completedTime != currentCompletedTime
-				pendingStatus = previous.pendingStatus
-				advance = content != currentContent
-			} else {
-				previous, unchanged, err := matchingLegacyTaskFingerprint(v.Hash, task)
-				if err != nil {
-					return db.ImportBatchParams{}, old, err
-				}
-				statusObservationChanged = previous.status != *task.Status || previous.completedTime != completedTimeFingerprint(task.CompletedTime)
-				advance = !unchanged
-			}
+		advance := !exists || v.Hash != contentHash
+		statusChanged := exists && (v.Status != *task.Status || v.CompletedTime != task.CompletedTime)
+		statusOnly := false
+		if c.StatusSync == "one-way" && (!exists || statusChanged || v.PendingStatus) {
+			statusOnly = !advance
+			rawStatus := taskStatusRaw(task)
+			batch.ImportStatusObservations["task:"+task.ID] = db.IssueStatusObservation{Raw: &rawStatus, Version: at}
 		}
-		if c.StatusSync == "one-way" && (!exists || statusObservationChanged || pendingStatus) {
-			externalID := "task:" + task.ID
-			if !advance {
-				batch.ReconcileStatusForUnchangedContent[externalID] = true
-			}
-			rawStatus := taskStatusObservationRaw(task)
-			batch.ImportStatusObservations[externalID] = db.IssueStatusObservation{Raw: &rawStatus, Version: at}
-		}
-		v.Hash = fingerprint
+		v.Hash, v.Status, v.CompletedTime = contentHash, *task.Status, task.CompletedTime
+		v.PendingRecovery, v.PendingStatus = false, false
 		if advance {
 			v.Version = at
 			if exists && !v.Version.After(cp.Versions[task.ID].Version) {
@@ -183,7 +172,7 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 			item.Status = "closed"
 			item.ClosedReason = new("done")
 			closedAt := v.Version
-			if batch.ReconcileStatusForUnchangedContent[item.ExternalID] {
+			if statusOnly {
 				closedAt = at
 				if closedAt.Before(v.FirstSeen) {
 					closedAt = v.FirstSeen
@@ -215,198 +204,22 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 	return batch, cp, nil
 }
 
-func taskStatusObservationRaw(task Task) string {
-	// Completion time belongs in the acknowledgement identity so a retry with
-	// the same source observation stays idempotent while a changed completion
-	// detail remains a new observation. The status prefix is used by recovery.
-	return fmt.Sprintf("%d:%x", *task.Status, completedTimeFingerprint(task.CompletedTime))
+// taskStatusRaw is the observed_status value for one TickTick status. Both the
+// one-way import and the two-way status pass record it, so a retry of the same
+// observation is idempotent while a new completion time is a new observation.
+func taskStatusRaw(task Task) string {
+	if task.CompletedTime == "" {
+		return strconv.Itoa(*task.Status)
+	}
+	return strconv.Itoa(*task.Status) + "@" + task.CompletedTime
 }
 
-type taskFingerprintObservation struct {
-	mode          string
-	status        int
-	completedTime [8]byte
-	// pendingRecovery distinguishes a staged recovery from a finalized observation.
-	pendingRecovery bool
-	// pendingStatus distinguishes a staged one-way status update from an acknowledged one.
-	pendingStatus bool
-}
-
-var taskFingerprintMarker = [3]byte{0xb2, 0x02, 0xf1}
-
-// taskFingerprint stores a status-independent content digest and the latest
-// mode-specific status observation in the existing 64-character hash field.
-// Its layout keeps DecodeCheckpoint's persisted representation unchanged.
-func taskFingerprint(c Config, task Task) (string, error) {
-	content, err := taskContentFingerprint(task)
-	if err != nil {
-		return "", err
-	}
-	status, err := taskStatusCode(*task.Status)
-	if err != nil {
-		return "", err
-	}
-	var packed [sha256.Size]byte
-	copy(packed[:20], content[:])
-	completedTime := completedTimeFingerprint(task.CompletedTime)
-	copy(packed[20:28], completedTime[:])
-	metadata := byte(1 << 3)
-	if c.StatusSync == "two-way" {
-		metadata |= 1 << 2
-	}
-	metadata |= status
-	packed[28] = metadata
-	copy(packed[29:], taskFingerprintMarker[:])
-	return hex.EncodeToString(packed[:]), nil
-}
-
-func taskContentFingerprint(task Task) ([20]byte, error) {
-	content := task
-	content.Status = nil
-	content.CompletedTime = ""
-	encoded, err := json.Marshal(content, json.Deterministic(true))
-	if err != nil {
-		return [20]byte{}, err
-	}
-	hash := sha256.Sum256(encoded)
-	var fingerprint [20]byte
-	copy(fingerprint[:], hash[:20])
-	return fingerprint, nil
-}
-
-func completedTimeFingerprint(value string) [8]byte {
-	hash := sha256.Sum256([]byte(value))
-	var fingerprint [8]byte
-	copy(fingerprint[:], hash[:8])
-	return fingerprint
-}
-
-func taskStatusCode(status int) (byte, error) {
-	switch status {
-	case 0:
-		return 0, nil
-	case 2:
-		return 1, nil
-	case -1:
-		return 2, nil
-	default:
-		return 0, fmt.Errorf("unknown TickTick task status")
-	}
-}
-
-func decodeTaskFingerprint(value string) (taskFingerprintObservation, [20]byte, bool) {
-	var observation taskFingerprintObservation
-	var content [20]byte
-	raw, err := hex.DecodeString(value)
-	if err != nil || len(raw) != sha256.Size || !bytes.Equal(raw[29:], taskFingerprintMarker[:]) {
-		return observation, content, false
-	}
-	metadata := raw[28]
-	version := metadata >> 3
-	if version < 1 || version > 4 || metadata&0x3 == 3 {
-		return observation, content, false
-	}
-	observation.pendingRecovery = version == 2 || version == 4
-	observation.pendingStatus = version == 3 || version == 4
-	if metadata&(1<<2) != 0 {
-		observation.mode = "two-way"
-	} else {
-		observation.mode = "one-way"
-	}
-	switch metadata & 0x3 {
-	case 0:
-		observation.status = 0
-	case 1:
-		observation.status = 2
-	case 2:
-		observation.status = -1
-	}
-	copy(content[:], raw[:20])
-	copy(observation.completedTime[:], raw[20:28])
-	return observation, content, true
-}
-
-// markTaskFingerprintRecoveryPending keeps a recovered task's observed content
-// version while recording that its final import transaction has not completed.
-func markTaskFingerprintRecoveryPending(value string) (string, error) {
-	raw, err := hex.DecodeString(value)
-	if err != nil || len(raw) != sha256.Size || !bytes.Equal(raw[29:], taskFingerprintMarker[:]) {
-		return "", fmt.Errorf("invalid TickTick recovery fingerprint")
-	}
-	observation, _, ok := decodeTaskFingerprint(value)
-	if !ok {
-		return "", fmt.Errorf("invalid TickTick recovery fingerprint")
-	}
-	version := byte(2)
-	if observation.pendingStatus {
-		version = 4
-	}
-	raw[28] = raw[28]&0x07 | version<<3
-	return hex.EncodeToString(raw), nil
-}
-
-func markTaskFingerprintStatusPending(value string) (string, error) {
-	raw, err := hex.DecodeString(value)
-	if err != nil || len(raw) != sha256.Size || !bytes.Equal(raw[29:], taskFingerprintMarker[:]) {
-		return "", fmt.Errorf("invalid TickTick status fingerprint")
-	}
-	observation, _, ok := decodeTaskFingerprint(value)
-	if !ok {
-		return "", fmt.Errorf("invalid TickTick status fingerprint")
-	}
-	version := byte(3)
-	if observation.pendingRecovery {
-		version = 4
-	}
-	raw[28] = raw[28]&0x07 | version<<3
-	return hex.EncodeToString(raw), nil
-}
-
-// matchingLegacyTaskFingerprint recognizes older checkpoints whose hash mixed
-// content, status mode, and title-prefix configuration together.
-func matchingLegacyTaskFingerprint(hash string, task Task) (taskFingerprintObservation, bool, error) {
-	for _, mode := range []string{"one-way", "two-way"} {
-		for _, prefix := range []bool{true, false} {
-			config := Config{StatusSync: mode, TitlePrefix: new(prefix)}
-			if mode == "two-way" {
-				legacyHash, hashErr := legacyTaskFingerprint(config, task)
-				if hashErr != nil {
-					return taskFingerprintObservation{}, false, hashErr
-				}
-				if hash == legacyHash {
-					return taskFingerprintObservation{mode: mode}, true, nil
-				}
-				continue
-			}
-			for _, status := range []int{0, 2, -1} {
-				for _, completedTime := range []string{task.CompletedTime, ""} {
-					candidate := task
-					candidate.Status = new(status)
-					candidate.CompletedTime = completedTime
-					legacyHash, hashErr := legacyTaskFingerprint(config, candidate)
-					if hashErr != nil {
-						return taskFingerprintObservation{}, false, hashErr
-					}
-					if hash == legacyHash {
-						return taskFingerprintObservation{mode: mode, status: status, completedTime: completedTimeFingerprint(completedTime)}, true, nil
-					}
-				}
-			}
-		}
-	}
-	return taskFingerprintObservation{}, false, nil
-}
-
-func legacyTaskFingerprint(c Config, task Task) (string, error) {
-	if c.StatusSync == "two-way" {
-		task.Status = nil
-		task.CompletedTime = ""
-	}
-	encoded, err := json.Marshal(struct {
-		Task   Task
-		Prefix bool
-		Mode   string
-	}{task, c.UseTitlePrefix(), c.StatusSync}, json.Deterministic(true))
+// taskContentHash covers imported content only. Status, completion time, and
+// binding presentation settings never change it.
+func taskContentHash(task Task) (string, error) {
+	task.Status = nil
+	task.CompletedTime = ""
+	encoded, err := json.Marshal(task, json.Deterministic(true))
 	if err != nil {
 		return "", err
 	}
