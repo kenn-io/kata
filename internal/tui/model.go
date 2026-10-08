@@ -2632,23 +2632,43 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 }
 
 func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
-	if msg.eventType != "issue.comment_edited" || msg.commentUID == "" {
-		return false
-	}
-	for _, comment := range comments {
-		if comment.UID == msg.commentUID {
-			return true
+	switch msg.eventType {
+	case "issue.comment_edited":
+		if msg.commentUID == "" {
+			return false
 		}
-		if comment.Reply != nil && comment.Reply.UID == msg.commentUID {
-			return true
+		for _, comment := range comments {
+			if msg.matchesCommentUID(comment.UID) {
+				return true
+			}
+			if comment.Reply != nil && msg.matchesCommentUID(comment.Reply.UID) {
+				return true
+			}
+			for _, backlink := range comment.Backlinks {
+				if msg.matchesCommentUID(backlink.UID) {
+					return true
+				}
+			}
 		}
-		for _, backlink := range comment.Backlinks {
-			if backlink.UID == msg.commentUID {
+	case "issue.commented", "issue.created", "issue.snapshot":
+		if msg.commentUID == "" && len(msg.commentUIDs) == 0 {
+			return false
+		}
+		for _, comment := range comments {
+			if comment.Reply != nil && comment.Reply.Status == "pending" &&
+				msg.matchesCommentUID(comment.Reply.UID) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func (msg eventReceivedMsg) matchesCommentUID(uid string) bool {
+	if uid == "" || uid == msg.commentUID {
+		return uid != ""
+	}
+	return slices.Contains(msg.commentUIDs, uid)
 }
 
 func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {

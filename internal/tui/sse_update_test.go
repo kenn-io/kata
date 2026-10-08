@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -979,6 +982,77 @@ func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectI
 		IssueUID:  issueUID,
 		ProjectID: projectID,
 	}
+}
+
+func TestFederatedCommentIdentityRefreshesPendingReplyTarget(t *testing.T) {
+	for _, eventType := range []string{"issue.commented", "issue.snapshot", "issue.created"} {
+		t.Run(eventType, func(t *testing.T) {
+			m := sseDetailFixture(7, "source", "source-issue")
+			m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "remote-target-issue", ProjectID: 8,
+				Kind: "reply", Status: "pending",
+			}}}
+			msg := federatedCommentIdentityEvent(t, eventType, "target-comment")
+
+			assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+		})
+	}
+}
+
+func FuzzFederatedCommentIdentityRefreshesPendingReplyTarget(f *testing.F) {
+	f.Add(uint8(0), "target-comment")
+	f.Add(uint8(1), "target-comment")
+	f.Add(uint8(2), "target-comment")
+	f.Add(uint8(0), "a")
+	f.Fuzz(func(t *testing.T, eventKind uint8, targetUID string) {
+		if targetUID == "" || !utf8.ValidString(targetUID) {
+			return
+		}
+		eventTypes := []string{"issue.commented", "issue.snapshot", "issue.created"}
+		eventType := eventTypes[eventKind%uint8(len(eventTypes))]
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+			UID: targetUID, IssueUID: "remote-target-issue", ProjectID: 8,
+			Kind: "reply", Status: "pending",
+		}}}
+		msg := federatedCommentIdentityEvent(t, eventType, targetUID)
+
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
+func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string) eventReceivedMsg {
+	t.Helper()
+	comment := struct {
+		CommentUID string `json:"comment_uid"`
+	}{CommentUID: commentUID}
+	var payload any = comment
+	if eventType == "issue.snapshot" || eventType == "issue.created" {
+		payload = struct {
+			UID      string `json:"uid"`
+			Comments []struct {
+				CommentUID string `json:"comment_uid"`
+			} `json:"comments"`
+		}{
+			UID: "remote-target-issue",
+			Comments: []struct {
+				CommentUID string `json:"comment_uid"`
+			}{{CommentUID: commentUID}},
+		}
+	}
+	payloadJSON, err := json.Marshal(payload)
+	require.NoError(t, err)
+	eventJSON, err := json.Marshal(struct {
+		Type      string         `json:"type"`
+		ProjectID int64          `json:"project_id"`
+		IssueUID  string         `json:"issue_uid"`
+		Payload   jsontext.Value `json:"payload"`
+	}{
+		Type: eventType, ProjectID: 8, IssueUID: "remote-target-issue",
+		Payload: jsontext.Value(payloadJSON),
+	})
+	require.NoError(t, err)
+	return decodeEventReceived(frame{data: eventJSON})
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-
