@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -103,6 +104,35 @@ func TestTokenInitialTeamAdministrationAPI(t *testing.T) {
 		members, err = store.TeamMembers(t.Context(), f.team.UID)
 		require.NoError(t, err)
 		require.NotContains(t, members, "never-enrolled")
+	})
+}
+
+func TestTokenInitialTeamGrantNotifiesExistingSSEClients(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		cursor, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		response, stream := openProjectAccessSSE(t, f, cursor, "nonmember")
+
+		createProjectAccessIssue(t, f, f.public.ID, "nonmember", "Before team grant")
+		first, ok := stream.Next(t, 2*time.Second)
+		require.True(t, ok, "the existing stream should be subscribed before membership changes")
+		require.Equal(t, "issue.created", first.event)
+
+		status, _, body := f.request(t, http.MethodPost, "/api/v1/tokens", "admin", map[string]any{
+			"actor": "nonmember", "team_uids": []string{f.team.UID},
+		}, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		select {
+		case <-stream.doneCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the existing stream stayed open after initial team enrollment changed its project access")
+		}
+		accessible, err := store.AccessibleProjectUIDs(t.Context(), "nonmember")
+		require.NoError(t, err)
+		require.Contains(t, accessible, f.private.UID)
+		_ = response.Body.Close()
 	})
 }
 

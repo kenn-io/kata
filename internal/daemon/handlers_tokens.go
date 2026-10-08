@@ -52,7 +52,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		tok, _, err := cfg.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		tok, event, err := cfg.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
 			PlaintextToken: plaintext,
 			Actor:          in.Body.Actor,
 			Name:           name,
@@ -64,6 +64,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		cfg.Publish().Event(event.ProjectID, event)
 		out := &api.CreateTokenResponse{}
 		out.Body.Token = tokenOut(tok, tokenObservationTime(cfg))
 		out.Body.Plaintext = plaintext

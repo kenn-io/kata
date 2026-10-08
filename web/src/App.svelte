@@ -221,8 +221,11 @@
     onFrame: (frame) => invalidations.frame(frame),
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
+      const wasReconnecting = liveUpdatesReconnecting
       liveUpdatesReconnecting = state === 'reconnecting'
-      if (state === 'reconnecting') invalidations.reconnect()
+      if (state === 'reconnecting' || (state === 'online' && wasReconnecting)) {
+        invalidations.reconnect()
+      }
     },
   })
   const scheduler = new RefreshScheduler({

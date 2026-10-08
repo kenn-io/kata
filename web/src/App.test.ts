@@ -2202,7 +2202,7 @@ describe('App', () => {
         false,
       ),
     )
-    await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2), { timeout: 5000 })
     await waitFor(() =>
       expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
         'Credential: Connected',
@@ -2264,6 +2264,128 @@ describe('App', () => {
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2))
     expect(await screen.findByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
   })
+
+  it('refreshes membership after an SSE reconnect opens', async () => {
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    const refreshed = snapshot()
+    refreshed.capabilities.updates = 'sse'
+    refreshed.cursor = initial.cursor
+    refreshed.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'shared-project',
+        metadata: {},
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T11:00:00.000Z' },
+    })
+    refreshed.collection.push({
+      ...refreshed.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'shared-project',
+      short_id: 'b2',
+      qualified_id: 'shared-project#b2',
+      title: 'Previously existing shared issue',
+    })
+
+    const snapshotRequests: Request[] = []
+    let completeDisconnectRefresh: ((response: Response) => void) | undefined
+    const disconnectRefresh = new Promise<Response>((resolve) => {
+      completeDisconnectRefresh = resolve
+    })
+    let completeReconnectRefresh: ((response: Response) => void) | undefined
+    const reconnectRefresh = new Promise<Response>((resolve) => {
+      completeReconnectRefresh = resolve
+    })
+    let completeReconnectedStream: ((response: Response) => void) | undefined
+    const reconnectedStream = new Promise<Response>((resolve) => {
+      completeReconnectedStream = resolve
+    })
+    let streamRequests = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          streamRequests += 1
+          if (streamRequests === 1) {
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.close()
+                },
+              }),
+              { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+            )
+          }
+          if (streamRequests === 2) return reconnectedStream
+          return new Response(new ReadableStream(), {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (snapshotRequests.length === 2) return disconnectRefresh
+          if (snapshotRequests.length === 3) return reconnectRefresh
+          return Response.json(refreshed, {
+            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    completeDisconnectRefresh?.(Response.json(initial, { headers: { ETag: '"snapshot-2"' } }))
+    await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2), { timeout: 5000 })
+
+    completeReconnectedStream?.(
+      new Response(new ReadableStream(), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    await waitFor(() => expect(snapshotRequests).toHaveLength(3))
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
+
+    completeReconnectRefresh?.(Response.json(refreshed, { headers: { ETag: '"snapshot-3"' } }))
+    expect(
+      await screen.findByRole('button', { name: /Previously existing shared issue/ }),
+    ).not.toBeNull()
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
+  }, 15_000)
 
   it('keeps a reset refresh unconditional across 401 and transparent reauthentication', async () => {
     history.replaceState(null, '', '/kata#direct=1')
