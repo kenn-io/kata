@@ -21,6 +21,15 @@ export class InvalidationController {
     this.refresh()
   }
 
+  reconnect(): void {
+    this.#full = true
+    this.#stopped = false
+    this.#dirty = true
+    if (this.#pending !== undefined) clearTimeout(this.#pending)
+    this.#pending = undefined
+    if (!this.#running) void this.#drain()
+  }
+
   refresh(): void {
     this.#stopped = false
     this.#dirty = true

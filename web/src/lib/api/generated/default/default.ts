@@ -926,7 +926,7 @@ export const getCreateFederationEnrollmentUrl = () => {
 }
 
 /**
- * Creates a hub-side transport grant. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.
+ * Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.
  * @summary Create a federation enrollment
  */
 export const createFederationEnrollment = async (
@@ -975,7 +975,7 @@ export const getRotateFederationEnrollmentUrl = () => {
 }
 
 /**
- * Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.
+ * Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. Database account tokens cannot rotate legacy grants; use relay enrollment credentials so issuer expiry and revocation remain enforced. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.
  * @summary Rotate a federation enrollment
  */
 export const rotateFederationEnrollment = async (

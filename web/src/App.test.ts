@@ -2110,37 +2110,96 @@ describe('App', () => {
     )
   })
 
-  it('keeps accepted authority visible while live updates reconnect', async () => {
+  it('refreshes and fences authority when live updates disconnect', async () => {
     history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
-    const accepted = snapshot()
-    accepted.capabilities.updates = 'sse'
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    const refreshed = snapshot()
+    refreshed.cursor = initial.cursor
+    refreshed.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'shared-project',
+        metadata: {},
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T11:00:00.000Z' },
+    })
+    refreshed.collection.push({
+      ...refreshed.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'shared-project',
+      short_id: 'b2',
+      qualified_id: 'shared-project#b2',
+      title: 'Previously existing shared issue',
+    })
+    const snapshotRequests: Request[] = []
+    let completeRefresh: ((response: Response) => void) | undefined
+    const refreshResponse = new Promise<Response>((resolve) => {
+      completeRefresh = resolve
+    })
+    let streamRequests = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/api/v1/events/stream')) {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          streamRequests += 1
           return new Response(
             new ReadableStream({
               start(controller) {
-                controller.close()
+                if (streamRequests === 1) controller.close()
               },
             }),
             { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
           )
         }
-        return new Response(JSON.stringify(accepted), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-        })
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (snapshotRequests.length === 2) return refreshResponse
+          return Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } })
+        }
+        throw new Error(`Unexpected request ${target.pathname}`)
       }),
     )
 
     render(App)
 
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
+
+    completeRefresh?.(Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } }))
+    expect(
+      await screen.findByRole('button', { name: /Previously existing shared issue/ }),
+    ).not.toBeNull()
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
     expect(await screen.findByRole('status', { name: 'Kata daemon status' })).not.toBeNull()
   })
 

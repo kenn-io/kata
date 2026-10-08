@@ -222,6 +222,7 @@
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
       liveUpdatesReconnecting = state === 'reconnecting'
+      if (state === 'reconnecting') invalidations.reconnect()
     },
   })
   const scheduler = new RefreshScheduler({
