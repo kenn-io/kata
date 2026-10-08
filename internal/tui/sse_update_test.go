@@ -704,6 +704,75 @@ func TestCommentEditIgnoresUnrepresentedComment(t *testing.T) {
 	}
 }
 
+func TestIssueLifecycleRefreshesDisplayedCommentEndpoints(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		issueUID  string
+		comments  []CommentEntry
+	}{
+		{
+			name:      "moved reply target",
+			eventType: "issue.moved", issueUID: "moved-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "moved-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
+			name:      "soft-deleted reply target",
+			eventType: "issue.soft_deleted", issueUID: "deleted-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "deleted-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
+			name:      "moved backlink source",
+			eventType: "issue.moved", issueUID: "moved-source-issue",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "moved-source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:      "soft-deleted backlink source",
+			eventType: "issue.soft_deleted", issueUID: "deleted-source-issue",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "deleted-source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:      "restored reply target",
+			eventType: "issue.restored", issueUID: "restored-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "restored-target-issue", Kind: "confirm",
+			}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = test.comments
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: test.eventType, projectID: 8, issueUID: test.issueUID,
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestIssueLifecycleIgnoresUnrepresentedCrossProjectEndpoint(t *testing.T) {
+	m := sseDetailFixture(7, "open", "open-issue")
+	m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+		UID: "target-comment", IssueUID: "displayed-target-issue", Kind: "confirm",
+	}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.moved", projectID: 8,
+		issueShortID: "open", issueUID: "unrelated-issue",
+	})
+	if cmd != nil {
+		t.Fatalf("unrepresented cross-project lifecycle event must not refresh detail, got %T", cmd)
+	}
+}
+
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-
 // projects scope, short_ids are project-scoped — project A's abc4 is
 // not project B's abc4. An event for project B abc4 must NOT trigger a

@@ -2557,9 +2557,10 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // align with the event's subject — UID is canonical and the
 // authoritative key across short_id cutovers. Comment-edit events also
 // refresh when commentUID matches a rendered comment, reply endpoint, or
-// backlink in the open pane, regardless of project. Each fetch is tagged
-// with the current detail-open gen so applyFetched drops the result if the
-// user navigates away before the response lands.
+// backlink in the open pane. Issue lifecycle events refresh when issueUID
+// matches a displayed reply endpoint or backlink, including across projects.
+// Each fetch is tagged with the current detail-open gen so applyFetched drops
+// the result if the user navigates away before the response lands.
 func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.api == nil {
 		return nil
@@ -2575,13 +2576,14 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	commentMatch := msg.matchesCommentInDetail(m.detail.comments)
-	if msg.projectID != m.detail.scopePID && !commentMatch {
+	endpointLifecycleMatch := msg.matchesIssueLifecycleEndpointInDetail(m.detail.comments)
+	if msg.projectID != m.detail.scopePID && !commentMatch && !endpointLifecycleMatch {
 		return nil
 	}
 	pid := m.detail.scopePID
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) && !commentMatch {
+	if !msg.matchesIssue(ref, uid) && !commentMatch && !endpointLifecycleMatch {
 		return nil
 	}
 	gen := m.detail.gen
@@ -2641,6 +2643,28 @@ func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool
 		}
 		for _, backlink := range comment.Backlinks {
 			if backlink.UID == msg.commentUID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (msg eventReceivedMsg) matchesIssueLifecycleEndpointInDetail(comments []CommentEntry) bool {
+	switch msg.eventType {
+	case "issue.moved", "issue.soft_deleted", "issue.restored":
+	default:
+		return false
+	}
+	if msg.issueUID == "" {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.Reply != nil && comment.Reply.IssueUID == msg.issueUID {
+			return true
+		}
+		for _, backlink := range comment.Backlinks {
+			if backlink.IssueUID == msg.issueUID {
 				return true
 			}
 		}
