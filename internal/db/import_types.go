@@ -115,9 +115,15 @@ type ImportBatchParams struct {
 	// This internal provider allowance is absent from the public import API.
 	ReconcileLabelsForUnchanged map[string][]string
 	// ReconcileStatusForUnchanged permits a provider's derived workflow status
-	// to refresh only when observation, mapping, and issue timestamps match.
+	// to refresh when the source still owns the issue version. Known source
+	// timestamps must match; unknown timestamps require an explicit marker below.
 	// Newer local edits remain authoritative. The public import API omits it.
 	ReconcileStatusForUnchanged bool
+	// ReconcileUnknownSourceTimestamp identifies current provider observations
+	// whose update timestamp is unknown. Derived status and presentation may
+	// refresh only while the source still owns the issue's stored scalar version.
+	// The public import API omits it.
+	ReconcileUnknownSourceTimestamp map[string]bool
 	// PreserveLocalParentConflicts leaves an existing local parent in place when
 	// a source-managed parent insert would create a second parent. Generic
 	// imports report ErrParentAlreadySet by default.

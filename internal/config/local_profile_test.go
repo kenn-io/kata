@@ -483,3 +483,18 @@ func TestLocalProfileEnvironmentIncludesLinearToken(t *testing.T) {
 		})
 	}
 }
+
+// Contract: selected profiles forward only their configured Todoist credential reference.
+func TestLocalProfileEnvironmentIncludesTodoistTokenEnv(t *testing.T) {
+	for _, key := range []string{"", "EXAMPLE_TODOIST_TOKEN"} {
+		home := t.TempDir()
+		cfg, err := config.ReadDaemonConfigForHome(home)
+		require.NoError(t, err)
+		cfg.TodoistSync, err = config.NormalizeTodoistSyncConfig(config.TodoistSyncConfig{TokenEnv: key})
+		require.NoError(t, err)
+		t.Setenv(cfg.TodoistSync.TokenEnv, "example-todoist-token")
+		env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: home, Config: cfg}, true)
+		require.NoError(t, err)
+		assert.Contains(t, env, cfg.TodoistSync.TokenEnv+"=example-todoist-token")
+	}
+}

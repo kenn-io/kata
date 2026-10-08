@@ -101,5 +101,57 @@ func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
 	got, err = store.IssueByID(ctx, initial.ID)
 	require.NoError(t, err)
 	require.Equal(t, local, got)
+
+	unknownID := "task:unknown-time"
+	unknown := db.ImportBatchParams{
+		ProjectID: p.ID, Source: "todoist:example", Actor: "todoist-sync",
+		ReconcileStatusForUnchanged:     true,
+		ReconcileUnknownSourceTimestamp: map[string]bool{unknownID: true},
+		ReconcileLabelsForUnchanged:     map[string][]string{unknownID: {"todoist"}},
+		Items:                           []db.ImportItem{{ExternalID: unknownID, Title: "[Todoist] Current task", Body: "Current body", Author: "todoist-unknown", Status: "closed", ClosedReason: new("done"), CreatedAt: at.Add(-time.Hour), UpdatedAt: at, ClosedAt: &at}},
+	}
+	_, _, err = store.ImportBatch(ctx, unknown)
+	require.NoError(t, err)
+	unknownMapping, err := store.ImportMappingBySource(ctx, p.ID, unknown.Source, "issue", unknownID)
+	require.NoError(t, err)
+	unknownIssue, err := store.IssueByID(ctx, *unknownMapping.IssueID)
+	require.NoError(t, err)
+	unknown.Items[0].Title = "Current task"
+	unknown.Items[0].Body = "Stale task body"
+	unknown.Items[0].Status, unknown.Items[0].ClosedReason, unknown.Items[0].ClosedAt = "open", nil, nil
+	unknown.Items[0].UpdatedAt = at.Add(-time.Minute)
+	unknown.Items[0].Labels = []string{"todoist"}
+	r, events, err = store.ImportBatch(ctx, unknown)
+	require.NoError(t, err)
+	require.Equal(t, 1, r.Updated)
+	hasIssueUpdate := false
+	for _, event := range events {
+		if event.Type == "issue.updated" {
+			hasIssueUpdate = true
+		}
+	}
+	require.True(t, hasIssueUpdate)
+	unknownIssue, err = store.IssueByID(ctx, unknownIssue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "open", unknownIssue.Status)
+	require.Equal(t, "Current task", unknownIssue.Title)
+	require.Equal(t, "Current body", unknownIssue.Body)
+	require.True(t, unknownIssue.UpdatedAt.Equal(at))
+	labels, err := store.LabelsForIssue(ctx, unknownIssue.ID)
+	require.NoError(t, err)
+	require.Contains(t, labels, "todoist")
+
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: unknownIssue.ID, Body: new("Newer local work"), Actor: "editor"})
+	require.NoError(t, err)
+	localUnknown, err := store.IssueByID(ctx, unknownIssue.ID)
+	require.NoError(t, err)
+	unknown.Items[0].Status, unknown.Items[0].ClosedReason, unknown.Items[0].ClosedAt = "closed", new("done"), &at
+	unknown.Items[0].Title = "[Todoist] Current task"
+	_, events, err = store.ImportBatch(ctx, unknown)
+	require.NoError(t, err)
+	require.Empty(t, events)
+	got, err = store.IssueByID(ctx, unknownIssue.ID)
+	require.NoError(t, err)
+	require.Equal(t, localUnknown, got)
 	return nil
 }

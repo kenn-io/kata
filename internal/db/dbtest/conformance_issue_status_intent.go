@@ -17,7 +17,7 @@ func checkIssueStatusNativeIntent(t *testing.T, store db.Storage, backend Backen
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, provider := range []string{"notion", "github", "plane", "linear", "twenty"} {
+	for _, provider := range []string{"notion", "github", "plane", "linear", "twenty", "todoist"} {
 		for _, mode := range []string{"", "one-way", "two-way", "paused"} {
 			fixture, err := createIssueFixture(ctx, store, fmt.Sprintf("example-%s-%s", provider, mode), "Mapped task", "worker", nil)
 			require.NoError(t, err)

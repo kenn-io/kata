@@ -489,6 +489,16 @@
       "source": "/operations/twenty-sync.md",
       "destination": "/docs/operations/twenty-sync.md",
       "permanent": true
+    },
+    {
+      "source": "/operations/todoist-sync/",
+      "destination": "/docs/operations/todoist-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/todoist-sync.md",
+      "destination": "/docs/operations/todoist-sync.md",
+      "permanent": true
     }
   ]
 }

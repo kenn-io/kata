@@ -82,7 +82,8 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 	if !ok {
 		return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
 	}
-	statusCtx, cancel := context.WithTimeout(ctx, statusRunTimeout)
+	statusTimeout := r.statusTimeout()
+	statusCtx, cancel := context.WithTimeout(ctx, statusTimeout)
 	defer cancel()
 	run, err := adapter.OpenStatus(statusCtx, binding, startedAt)
 	if err != nil {
@@ -102,7 +103,7 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 		return binding, true, err
 	}
 	pass := &statusPass{
-		r: r, ctx: ctx, statusCtx: statusCtx, run: run, reader: reader, writer: writer, scans: scans,
+		r: r, ctx: ctx, statusCtx: statusCtx, statusTimeout: statusTimeout, run: run, reader: reader, writer: writer, scans: scans,
 		guard:   db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: startedAt, BindingUpdatedAt: new(binding.UpdatedAt)},
 		binding: binding, state: state, startedAt: startedAt, eventFork: eventFork, updated: statusUpdated,
 	}
@@ -110,21 +111,29 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 	return pass.binding, true, err
 }
 
+func (r *Runner) statusTimeout() time.Duration {
+	if r.config.StatusTimeout > 0 {
+		return r.config.StatusTimeout
+	}
+	return statusRunTimeout
+}
+
 // statusPass carries one run's status session and claim-fenced storage.
 type statusPass struct {
-	r         *Runner
-	ctx       context.Context
-	statusCtx context.Context
-	run       StatusRun
-	reader    db.IssueStatusReader
-	writer    db.IssueStatusWriter
-	scans     db.IssueStatusScanStore
-	guard     db.IssueSyncImportGuard
-	binding   db.IssueSyncBinding
-	state     db.IssueStatusScanState
-	startedAt time.Time
-	eventFork activity.Admission
-	updated   *int
+	r             *Runner
+	ctx           context.Context
+	statusCtx     context.Context
+	statusTimeout time.Duration
+	run           StatusRun
+	reader        db.IssueStatusReader
+	writer        db.IssueStatusWriter
+	scans         db.IssueStatusScanStore
+	guard         db.IssueSyncImportGuard
+	binding       db.IssueSyncBinding
+	state         db.IssueStatusScanState
+	startedAt     time.Time
+	eventFork     activity.Admission
+	updated       *int
 }
 
 func (p *statusPass) execute() error {
@@ -304,7 +313,7 @@ func (p *statusPass) admission(m db.IssueStatusMapping) func() error {
 		}
 		// Request timeouts are at most30s. Leave five minutes before abandoned
 		// claims can be recovered, including queued pacing and delayed cleanup.
-		horizon := min(statusRunTimeout, p.r.staleLockTTL()-5*time.Minute)
+		horizon := min(p.statusTimeout, p.r.staleLockTTL()-5*time.Minute)
 		if horizon <= 0 || !p.r.now().Before(p.startedAt.Add(horizon)) {
 			return fmt.Errorf("issue status dispatch recovery horizon expired")
 		}
