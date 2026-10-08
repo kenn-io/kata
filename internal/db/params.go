@@ -531,10 +531,11 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
-	Issue       Issue
-	EventID     int64
-	NewShortID  string
-	NewRevision int64
+	Issue                 Issue
+	EventID               int64
+	NewShortID            string
+	NewRevision           int64
+	ProjectAccessRevision int64
 }
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the

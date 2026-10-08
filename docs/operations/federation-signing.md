@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-04
+last_edited: 2026-10-08
 ---
 
 # Federation request signing
@@ -175,7 +175,7 @@ implementation does not provide a shared replay service.
 | Maximum lifetime / future clock skew | 90 seconds / 5 seconds |
 | Nonce | 24 random bytes, unpadded base64url |
 | Replay capacity | 8,192 live nonces; full cache rejects new admissions |
-| Ingest body / other request body / header budget | 64 MiB / 64 KiB / 16 KiB |
+| Ingest body / signed relay envelope / other request body / header budget | 64 MiB / 128 MiB / 64 KiB / 16 KiB |
 | Concurrent admissions across daemon listeners | 2 ingests plus 16 metadata, poll and lease requests |
 | Ingress connections / request duration | 16 / 60 seconds |
 
@@ -186,12 +186,15 @@ provide RFC canonicalization; Kata restricts their general features to this
 profile. MAC and digest comparisons use constant time comparisons. Native
 retries generate fresh signatures rather than replaying a saved signature.
 
-Verification checks the MAC before reading the body, hashes at most 64 MiB,
+Verification checks the MAC before reading the body, hashes at most 128 MiB,
 and rechecks freshness, key validity and cancellation after hashing before
-atomic nonce admission. The 90-second signature lifetime leaves 30 seconds
-for signing and transit around the 60-second request budget. A full 64 MiB
-snapshot still needs enough bandwidth to upload and finish processing within
-that request budget; retries cannot make a consistently slower upload finish.
+atomic nonce admission. The project-event ingest route remains capped at 64
+MiB; the larger signed relay envelope budget covers JSON and base64 encoding
+around the existing 64 MiB raw relay batch limit. The 90-second signature
+lifetime leaves 30 seconds for signing and transit around the 60-second request
+budget. A full 64 MiB snapshot still needs enough bandwidth to upload and
+finish processing within that request budget; retries cannot make a
+consistently slower upload finish.
 
 Two ingests may run at once, retaining the native adoption snapshot limit.
 Metadata, event polls and leases use a separate pool so slow uploads do not

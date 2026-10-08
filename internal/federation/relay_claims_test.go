@@ -164,11 +164,12 @@ func TestRelayRootClaimAuthority(t *testing.T) {
 			require.Equal(t, http.StatusOK, status)
 			require.True(t, granted.Granted)
 			require.NotNil(t, granted.Lease)
-			require.Equal(t, root.account, granted.Lease.Holder)
+			require.Equal(t, personal.account, granted.Lease.Holder)
 			rootState, err := root.store.ClaimStatusReadOnly(t.Context(), project.ID, issue.UID, time.Now().UTC())
 			require.NoError(t, err)
 			require.True(t, rootState.Held)
 			require.Equal(t, granted.Lease.ClaimUID, rootState.Claim.ClaimUID)
+			require.Equal(t, root.account, rootState.Claim.Holder)
 			for _, action := range []string{"renew", "release"} {
 				status, _ := relayClaimAction(t, second, issue.UID, action, "cli")
 				require.Equal(t, http.StatusConflict, status, "second leaf cannot %s first leaf's root lease", action)

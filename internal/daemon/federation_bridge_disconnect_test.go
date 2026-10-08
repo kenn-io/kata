@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning"
 )
 
 type bridgeDisconnectPartialSetupStore struct {
@@ -75,10 +77,13 @@ type bridgeDisconnectResponse struct {
 // R9: disconnect previews without mutation, revokes exactly the retained narrow
 // grant, and safely resumes after a lost upstream response without losing data.
 func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
-	for _, mode := range []string{"normal", "lost_response", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending"} {
+	for _, mode := range []string{"normal", "lost_response", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				t.Setenv("KATA_HOME", t.TempDir())
+				if mode == "signed_disconnect" {
+					t.Setenv("KATA_BRIDGE_SIGNING_KEY", strings.Repeat("k", 64))
+				}
 				rootStore := openReplicaServiceStore(t)
 				root := newProjectAccessFixture(t, rootStore)
 				_, err := rootStore.EnableProjectFederation(t.Context(), root.private.ID, "admin")
@@ -87,6 +92,7 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, rootStore.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: root.private.UID, AuthorityUID: rootStore.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 				var disconnectCalls atomic.Int32
+				var sawSignedDisconnect atomic.Bool
 				enrollmentStarted := make(chan struct{}, 1)
 				releaseEnrollment := make(chan struct{})
 				var releaseEnrollmentOnce sync.Once
@@ -97,7 +103,7 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				disconnectRequestStarted := make(chan struct{}, 1)
 				upstreamURL, err := url.Parse(root.server.URL)
 				require.NoError(t, err)
-				remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				remoteHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/api/v1/federation/enrollments" {
 						require.Equal(t, "Bearer member-test-token", r.Header.Get("Authorization"))
 						if mode == "inflight_enrollment" {
@@ -118,6 +124,9 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 						require.True(t, found)
 						require.Equal(t, "Bearer "+credential.Token, r.Header.Get("Authorization"))
 						disconnectCalls.Add(1)
+						if mode == "signed_disconnect" && r.Header.Get("Signature") != "" {
+							sawSignedDisconnect.Store(true)
+						}
 						select {
 						case disconnectRequestStarted <- struct{}{}:
 						default:
@@ -125,6 +134,11 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					}
 					req := r.Clone(r.Context())
 					req.RequestURI = ""
+					if mode == "signed_disconnect" {
+						req.Header.Del("Signature")
+						req.Header.Del("Signature-Input")
+						req.Header.Del("Content-Digest")
+					}
 					req.URL.Scheme = upstreamURL.Scheme
 					req.URL.Host = upstreamURL.Host
 					req.Host = upstreamURL.Host
@@ -152,7 +166,16 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					}
 					w.WriteHeader(response.StatusCode)
 					_, _ = w.Write(raw)
-				}))
+				})
+				var remote *httptest.Server
+				if mode == "signed_disconnect" {
+					remote = httptest.NewTLSServer(remoteHandler)
+					previousTransport := http.DefaultTransport
+					http.DefaultTransport = remote.Client().Transport
+					t.Cleanup(func() { http.DefaultTransport = previousTransport })
+				} else {
+					remote = httptest.NewServer(remoteHandler)
+				}
 				t.Cleanup(remote.Close)
 				localStore := store
 				switch mode {
@@ -245,6 +268,12 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				credential, found, err := config.DefaultFederationCredentialStore().FederationCredential(t.Context(), root.private.UID)
 				require.NoError(t, err)
 				require.True(t, found)
+				if mode == "signed_disconnect" {
+					credential.Signing = &federationsigning.Source{
+						KeyID: "bridge-signing-key", KeyEnv: "KATA_BRIDGE_SIGNING_KEY", HubURL: remote.URL,
+					}
+					require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(t.Context(), root.private.UID, credential))
+				}
 				if mode == "archived" || mode == "archived_pending" || mode == "partial_project_archived" {
 					project, err := store.ProjectByUID(t.Context(), root.private.UID)
 					require.NoError(t, err)
@@ -348,6 +377,9 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				code, _, raw = request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
 				require.Equal(t, http.StatusOK, code, string(raw))
 				require.Equal(t, beforeRetry, disconnectCalls.Load(), "local response retry must not need another upstream call")
+				if mode == "signed_disconnect" {
+					require.True(t, sawSignedDisconnect.Load(), "disconnect must sign with the saved federation credential")
+				}
 
 			})
 		})

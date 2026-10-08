@@ -77,6 +77,14 @@ func recordProjectAccessHydratedIssue(ctx context.Context, issueUID string, allo
 	decision.hydratedIssues[issueUID] = allowDeleted
 }
 
+func recordProjectAccessMutationRevision(ctx context.Context, revision int64) {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil || revision <= 0 {
+		return
+	}
+	decision.PolicyRevision = revision
+}
+
 func revalidateProjectAccessHydratedIssues(ctx context.Context, decision *ProjectAccessDecision) error {
 	for issueUID, allowDeleted := range decision.hydratedIssues {
 		issue, err := decision.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)

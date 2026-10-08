@@ -132,6 +132,11 @@ SET project_id = $1 WHERE issue_id = $2`,
 		if err := bumpProjectAccess(ctx, tx); err != nil {
 			return fmt.Errorf("bump project access revision after issue move: %w", err)
 		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT CAST(value AS BIGINT) FROM meta WHERE key='project_access_revision'`,
+		).Scan(&output.ProjectAccessRevision); err != nil {
+			return mapSQLError(err, nil)
+		}
 		output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		output.EventID = event.ID
 		output.NewShortID = newShortID

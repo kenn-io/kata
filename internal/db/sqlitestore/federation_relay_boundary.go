@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"errors"
 
 	"go.kenn.io/kata/internal/db"
@@ -47,7 +48,14 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 // sync uses a signed current-state checkpoint rather than rewriting or sharing
 // those historical private endpoints.
 func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
-	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	payload := db.PayloadMap(event.Payload)
+	if event.Type == "issue.closed" {
+		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload)
+		if err != nil || crossing {
+			return crossing, err
+		}
+	}
+	refs, err := payloadReferencedIssueUIDs(event, payload)
 	if err != nil {
 		return false, err
 	}
@@ -67,6 +75,47 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 	}
 	return false, nil
+}
+
+func relayCloseParentCrossesProjectTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	payload map[string]jsontext.Value,
+) (bool, error) {
+	parentUID, uidPresent := db.StringValue(payload["parent_uid"])
+	parentShortID, shortIDPresent := db.StringValue(payload["parent_short_id"])
+	if _, exists := payload["parent_uid"]; exists && !uidPresent {
+		return true, nil
+	}
+	if _, exists := payload["parent_short_id"]; exists && !shortIDPresent {
+		return true, nil
+	}
+	if parentUID == "" && parentShortID == "" {
+		return false, nil
+	}
+	var own bool
+	if parentUID != "" {
+		query := `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?`
+		args := []any{parentUID, projectID}
+		if parentShortID != "" {
+			query += ` AND short_id=?`
+			args = append(args, parentShortID)
+		}
+		query += `)`
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&own); err != nil {
+			return false, err
+		}
+		return !own, nil
+	}
+	var matches int
+	var resolvedProjectID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(MIN(project_id),0) FROM issues WHERE short_id=?`, parentShortID,
+	).Scan(&matches, &resolvedProjectID); err != nil {
+		return false, err
+	}
+	return matches != 1 || resolvedProjectID != projectID, nil
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {

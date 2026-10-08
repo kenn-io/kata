@@ -169,6 +169,9 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 			if link.ExpectedProjectUID != "" && targetProjectUID != link.ExpectedProjectUID {
 				return db.ErrInitialLinkTargetNotFound
 			}
+			if err := db.CheckProjectAccessTransaction(ctx, tx, targetProjectUID); err != nil {
+				return err
+			}
 			if targetProjectArchived {
 				return &db.LinkTargetArchivedError{Number: targetID, ShortID: targetShortID, Project: targetProjectName}
 			}

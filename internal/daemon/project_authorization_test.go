@@ -151,6 +151,24 @@ type projectAccessBeforeIssueMutationStore struct {
 	before func(context.Context, int64) error
 }
 
+type projectAccessBeforeCreateIssueStore struct {
+	db.Storage
+	before func(context.Context, db.CreateIssueParams) error
+}
+
+func (s *projectAccessBeforeCreateIssueStore) CreateIssue(
+	ctx context.Context, params db.CreateIssueParams,
+) (db.Issue, db.Event, error) {
+	if s.before != nil {
+		before := s.before
+		s.before = nil
+		if err := before(ctx, params); err != nil {
+			return db.Issue{}, db.Event{}, err
+		}
+	}
+	return s.Storage.CreateIssue(ctx, params)
+}
+
 func (s *projectAccessBeforeIssueMutationStore) runBefore(ctx context.Context, issueID int64) error {
 	if s.before == nil {
 		return nil
@@ -329,6 +347,61 @@ func TestMoveIssueProjectAdvancesProjectAccessRevision(t *testing.T) {
 		after, err := store.ProjectAccessRevision(t.Context())
 		require.NoError(t, err)
 		assert.Greater(t, after, before)
+	})
+}
+
+func TestProjectAccessAuthorizedMemberMoveReturnsCommittedResponse(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store, "authorized-move")
+		target, err := store.CreateProject(t.Context(), "authorized-move-target")
+		require.NoError(t, err)
+		status, headers, body := f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/move", f.public.ID, f.visible.ShortID),
+			"member", map[string]any{
+				"actor": "member", "to_project_uid": target.UID,
+			}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, f.visible.Revision)})
+		require.Equal(t, http.StatusOK, status, string(body))
+		assert.Equal(t, `"rev-2"`, headers.Get("ETag"))
+		assert.Contains(t, string(body), target.UID)
+		current, err := store.IssueByID(t.Context(), f.visible.ID)
+		require.NoError(t, err)
+		assert.Equal(t, target.UID, current.ProjectUID)
+	})
+}
+
+func TestProjectAccessRechecksInitialLinkPeerAfterMove(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store, "initial-link")
+		peer, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Initial link peer", Author: "member",
+		})
+		require.NoError(t, err)
+		hidden := projectAccessHiddenProject(t, store, "initial-link-hidden")
+		wrapped := &projectAccessBeforeCreateIssueStore{Storage: store}
+		wrapped.before = func(_ context.Context, params db.CreateIssueParams) error {
+			if params.Title != "Create with moved peer" {
+				return nil
+			}
+			_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: peer.ID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+				IfMatchRev: peer.Revision, Actor: "admin",
+			})
+			return err
+		}
+		f = projectAccessFixtureWithStorage(t, f, wrapped)
+		status, _, body := f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%d/issues", f.public.ID), "member", map[string]any{
+				"actor": "member", "title": "Create with moved peer",
+				"links": []map[string]any{{"type": "related", "to_ref": peer.ShortID}},
+			}, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		issues, err := store.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: f.public.ID})
+		require.NoError(t, err)
+		require.Len(t, issues, 1, "the moved peer leaves the public project and failed creation leaves no new issue")
+		assert.Equal(t, f.visible.UID, issues[0].UID)
+		links, err := store.LinksByIssue(t.Context(), peer.ID)
+		require.NoError(t, err)
+		assert.Empty(t, links, "a hidden peer cannot be linked by initial creation")
 	})
 }
 

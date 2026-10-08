@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -72,6 +73,12 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 		client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		if err := (config.BearerPolicy{AllowInsecurePlaintext: credential.AllowInsecure}).ConfigureClient(client, hubURL, credential.Token); err != nil {
 			return nil, api.NewError(400, "validation", "bridge credential target violates transport policy", "", nil)
+		}
+		if credential.Signing != nil {
+			if err := federationsigning.ConfigureClient(client, hubURL, credential.Token, *credential.Signing); err != nil {
+				return nil, api.NewError(http.StatusServiceUnavailable, "federation_signing_unavailable",
+					"saved bridge signing credential is unavailable", "restore its configured key source before retrying disconnect", nil)
+			}
 		}
 		validate := func() error {
 			current, found, err := credentials.FederationCredential(ctx, projectUID)

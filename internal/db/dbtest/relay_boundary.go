@@ -45,6 +45,15 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	require.Equal(t, adoptionLink, preservedAdoptionLink)
 	link, err := store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: old.ID, ToIssueID: private.ID, Type: "blocks", Author: "member"})
 	require.NoError(t, err, "existing direct-hub link contract remains available")
+	parentLink, err := store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: old.ID, ToIssueID: private.ID, Type: "parent", Author: "member"})
+	require.NoError(t, err)
+	_, closeEvents, changed, err := store.CloseIssueWithEvents(ctx, old.ID, "done", "member", "closed with a parent", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, closeEvents, 1)
+	require.Contains(t, closeEvents[0].Payload, private.UID,
+		"the close event must capture the parent UID before its link is removed")
+	require.Contains(t, closeEvents[0].Payload, private.ShortID)
 	public, signingKey, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	for _, p := range []db.Project{first, shared} {
@@ -62,6 +71,11 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	require.Equal(t, link, preserved)
 	_, err = store.AuthorizeFederationToken(ctx, params.Token, first.ID, "pull")
 	require.ErrorIs(t, err, db.ErrNotFound)
+	_, err = store.DeleteLinkAndEvent(ctx, parentLink, db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: old.ID, Actor: "member",
+		FromUID: old.UID, ToUID: private.UID, FromShortID: old.ShortID, ToShortID: private.ShortID,
+	})
+	require.NoError(t, err)
 	unlinkEvent, err := store.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: old.ID, Actor: "member", FromUID: old.UID, ToUID: private.UID, FromShortID: old.ShortID, ToShortID: private.ShortID})
 	require.NoError(t, err)
 	admitted, err := store.CreateRelayEnrollment(ctx, params)
@@ -108,6 +122,7 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 			source, err := db.DecodeRelaySourceEvent(body)
 			require.NoError(t, err)
 			require.NotContains(t, string(source.Payload), private.UID, "signed reset cannot disclose an excluded historical endpoint")
+			require.NotContains(t, string(source.Payload), private.ShortID, "signed reset cannot disclose an excluded historical short ID")
 			if source.RelatedIssueUID != nil {
 				require.NotEqual(t, private.UID, *source.RelatedIssueUID)
 			}

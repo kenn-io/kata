@@ -36,8 +36,10 @@ cancellation are checked again before atomic replay admission and after durable
 publication. Separate admission pools span handler execution: two ingests and
 sixteen metadata, poll or lease requests. Control requests have a 64 KiB body
 limit, while the native 64 MiB adoption limit remains available for ingests.
-Bounded memory buffering avoids a second temporary-file lifecycle for incoming
-event bodies. Saturated pools return `429` with `Retry-After`.
+Signed relay envelopes have a 128 MiB request budget so JSON and base64
+encoding fit around the 64 MiB raw relay batch limit. Bounded memory buffering
+avoids a second temporary-file lifecycle for incoming event bodies. Saturated
+pools return `429` with `Retry-After`.
 
 A durable maximum-admitted-expiry watermark complements the bounded nonce
 cache. Atomic publication fsyncs the file and directory before dispatch. One

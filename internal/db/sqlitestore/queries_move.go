@@ -189,6 +189,11 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err := bumpProjectAccess(ctx, tx); err != nil {
 		return out, fmt.Errorf("bump project access revision after issue move: %w", err)
 	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT CAST(value AS BIGINT) FROM meta WHERE key='project_access_revision'`,
+	).Scan(&out.ProjectAccessRevision); err != nil {
+		return out, fmt.Errorf("read project access revision after issue move: %w", err)
+	}
 
 	issue, err := issueByIDTx(ctx, tx, in.IssueID)
 	if err != nil {

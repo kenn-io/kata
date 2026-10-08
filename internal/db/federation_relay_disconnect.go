@@ -8,3 +8,11 @@ import "context"
 type RelaySelfRevoker interface {
 	RevokeOwnRelayEnrollment(context.Context, string, int64, string) error
 }
+
+// RelaySelfRevocationAuthenticator resolves only the retained relay grant ID
+// for a token and project. It intentionally ignores grant activity, parent
+// token activity, project visibility and membership so a signed cleanup retry
+// can verify against the same enrollment after revocation.
+type RelaySelfRevocationAuthenticator interface {
+	RelaySelfRevocationEnrollmentID(context.Context, string, int64) (int64, error)
+}

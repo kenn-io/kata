@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -60,12 +61,29 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 			Token: "enrollment-secret", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "pull,push,claim", Actor: "enrolled-actor",
 		})
 		require.NoError(t, err)
+		relayPublic, _, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		require.NoError(t, env.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
+			ProjectUID: project.UID, AuthorityUID: env.DB.InstanceUID(),
+			KeyID: db.RootPublicKeyID(relayPublic), PublicKey: relayPublic,
+		}))
+		relayParent, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "relay-cleanup-parent-token", Actor: "enrolled-actor", AdminActor: "admin",
+		})
+		require.NoError(t, err)
+		relayGrant, err := env.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{
+			ProjectID: project.ID, ParentTokenID: relayParent.ID, SpokeInstanceUID: spoke.DB.InstanceUID(),
+			ProtocolVersion: db.RelayProtocolVersion, ServeDownstream: true,
+		})
+		require.NoError(t, err)
 		t.Setenv("TEST_GLOBAL_KEY", strings.Repeat("g", 64))
 		t.Setenv("TEST_PULL_KEY", strings.Repeat("p", 64))
 		t.Setenv("TEST_REMOVED_KEY", strings.Repeat("r", 64))
+		t.Setenv("TEST_RELAY_CLEANUP_KEY", strings.Repeat("c", 64))
 		globalSource := federationsigning.Source{KeyID: "global-key", KeyEnv: "TEST_GLOBAL_KEY"}
 		pullSource := federationsigning.Source{KeyID: "pull-key", KeyEnv: "TEST_PULL_KEY"}
 		removedSource := federationsigning.Source{KeyID: "removed-key", KeyEnv: "TEST_REMOVED_KEY"}
+		relayCleanupSource := federationsigning.Source{KeyID: "relay-cleanup-key", KeyEnv: "TEST_RELAY_CLEANUP_KEY"}
 		globalEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "global-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Capabilities: "pull", Actor: "global-actor"})
 		require.NoError(t, err)
 		pullEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "pull-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ProjectID: &project.ID, Capabilities: "pull", Actor: "pull-actor"})
@@ -87,7 +105,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		base := "https://hub.example/mount"
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}}, state)
+		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}, {Source: relayCleanupSource, EnrollmentID: relayGrant.Enrollment.ID}}, state)
 		t.Cleanup(func() { _ = v.Close() })
 		previous := http.DefaultTransport
 		http.DefaultTransport = public.Client().Transport
@@ -107,8 +125,22 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		metadata, err := client.ProjectFederation(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.Equal(t, project.UID, metadata.ProjectUID)
-		_, err = client.RelayReset(t.Context(), project.ID)
-		require.ErrorContains(t, err, "403", "signed relay operations are admitted, then checked for relay enrollment scope")
+		disconnectPath := fmt.Sprintf("/api/v1/projects/%d/federation/relay:disconnect", project.ID)
+		disconnectBody, err := json.Marshal(map[string]string{"spoke_instance_uid": spoke.DB.InstanceUID()})
+		require.NoError(t, err)
+		disconnectSigned := func() *httptest.ResponseRecorder {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+disconnectPath, bytes.NewReader(disconnectBody))
+			require.NoError(t, err)
+			request.Header.Set("Authorization", "Bearer "+relayGrant.Token)
+			request.Header.Set("Content-Type", "application/json")
+			require.NoError(t, federationsigning.Sign(request, relayCleanupSource))
+			request.URL.Path = disconnectPath
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			return recorder
+		}
+		firstDisconnect := disconnectSigned()
+		require.Equal(t, http.StatusOK, firstDisconnect.Code, firstDisconnect.Body.String())
 		mainHandler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://daemon.example"})
 		require.NoError(t, err)
 		headRequest := httptest.NewRequest(http.MethodHead, "https://daemon.example"+projectPath(project.ID)+"/federation/metadata", nil)
@@ -131,6 +163,27 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		server.Handler().ServeHTTP(recorder, mainRequest)
 		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		require.Len(t, access.snapshot(), before+1, "verified ingest must reuse native host admission")
+		parentRecord, err := env.DB.ResolveAPIToken(t.Context(), "relay-cleanup-parent-token")
+		require.NoError(t, err)
+		_, _, err = env.DB.RevokeAPIToken(t.Context(), parentRecord.ID, "admin")
+		require.NoError(t, err)
+		cleanupTeam, _, err := env.DB.CreateTeam(t.Context(), "relay-cleanup-other-team", "admin")
+		require.NoError(t, err)
+		_, err = env.DB.SetTeamMembership(t.Context(), cleanupTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{cleanupTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+		retryDisconnect := disconnectSigned()
+		require.Equal(t, http.StatusOK, retryDisconnect.Code,
+			"signed self-revocation retry must survive revoked grant and parent authority; response=%s", retryDisconnect.Body.String())
+		_, err = client.RelayReset(t.Context(), project.ID)
+		require.ErrorContains(t, err, "404", "ordinary relay data access still obeys project visibility")
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: project.UID, Visibility: "all",
+		}, "admin")
+		require.NoError(t, err)
 
 		credential := config.FederationCredential{HubURL: base, HubProjectID: project.ID, Token: enrollment.Token, Capabilities: "pull,push,claim", Actor: "enrolled-actor", Signing: &source}
 		replica, err := daemon.EnsureFederationReplica(t.Context(), spoke.DB, credentials, nil, daemon.EnsureFederationReplicaParams{HubURL: base, HubProjectID: project.ID, HubProjectUID: project.UID, ProjectName: "spoke-project", ReplayHorizonEventID: metadata.ReplayHorizonEventID, Credential: credential, PushEnabled: true})
