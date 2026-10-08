@@ -146,6 +146,78 @@ func TestDeletedIssueCommentSelectors(t *testing.T) {
 	require.Equal(t, reply.UID, out.Comments[0].UID)
 }
 
+func TestDeletedSourceCommentRetainsReplyEndpointState(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		targetState string
+		wantStatus  string
+		wantProject string
+	}{
+		{name: "moved target", targetState: "moved", wantStatus: "moved", wantProject: "moved-project"},
+		{name: "removed target", targetState: "removed", wantStatus: "removed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ts, projectID, sourceID := bootstrapProjectWithIssue(t)
+			sourceIssue, err := h.DB().IssueByID(t.Context(), sourceID)
+			require.NoError(t, err)
+			targetIssue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: projectID, Title: "Target issue", Author: "finder",
+			})
+			require.NoError(t, err)
+			target, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+				IssueID: targetIssue.ID, Author: "finder", Body: "Finding",
+			})
+			require.NoError(t, err)
+			reply, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+				IssueID: sourceIssue.ID, Author: "worker", Body: "Response",
+				ReplyToUID: target.UID, ReplyKind: "confirm",
+			})
+			require.NoError(t, err)
+
+			if test.targetState == "moved" {
+				movedProject, err := h.DB().CreateProject(t.Context(), test.wantProject)
+				require.NoError(t, err)
+				_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+					IssueID: targetIssue.ID, FromProjectID: projectID, ToProjectID: movedProject.ID,
+					IfMatchRev: targetIssue.Revision, Actor: "coordinator",
+				})
+				require.NoError(t, err)
+			} else {
+				_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator")
+				require.NoError(t, err)
+			}
+			_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), sourceIssue.ID, "coordinator")
+			require.NoError(t, err)
+
+			path := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s?include_deleted=true",
+				ts.URL, projectID, sourceIssue.ShortID)
+			response, err := ts.Client().Get(path)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, response.Body.Close()) }()
+			require.Equal(t, 200, response.StatusCode)
+			var out struct {
+				Comments []commentref.Record `json:"comments"`
+			}
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&out))
+			var got *commentref.Record
+			for i := range out.Comments {
+				if out.Comments[i].UID == reply.UID {
+					got = &out.Comments[i]
+					break
+				}
+			}
+			require.NotNil(t, got)
+			require.NotNil(t, got.Reply)
+			require.Equal(t, target.UID, got.Reply.UID)
+			require.Equal(t, test.wantStatus, got.Reply.Status)
+			if test.wantProject != "" {
+				require.Contains(t, got.Reply.Handle, test.wantProject+"#")
+				require.NotContains(t, got.Reply.Handle, "pending")
+			}
+		})
+	}
+}
+
 func TestCanonicalReplyReceiptAfterProjectRename(t *testing.T) {
 	h, ts, pid, id := bootstrapProjectWithIssue(t)
 	issue, err := h.DB().IssueByID(t.Context(), id)

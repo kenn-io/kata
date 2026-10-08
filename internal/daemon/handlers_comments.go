@@ -91,7 +91,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(400, "validation", "reply_to and a valid kind must be supplied together", "", nil)
 		}
 		if in.Body.ReplyTo != "" {
-			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +129,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				data := map[string]any{}
 				const duplicateMessage = "a reply of this kind already exists for this author and teammate"
 				message := duplicateMessage
-				records, readErr := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+				records, readErr := readCommentRecords(ctx, cfg.DB, issue.ProjectID, 0)
 				if readErr != nil {
 					return nil, readErr
 				}
@@ -201,7 +201,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		commentUID := in.CommentRef
 		if !uid.Valid(commentUID) {
-			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID)
+			records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID, 0)
 			if err != nil {
 				return nil, err
 			}

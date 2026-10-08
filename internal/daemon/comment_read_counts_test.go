@@ -13,12 +13,18 @@ import (
 
 type commentReadCountingStore struct {
 	db.Storage
-	legacyReads int
+	legacyReads  int
+	graphQueries []db.CommentGraphQuery
 }
 
 func (s *commentReadCountingStore) CommentsByIssue(ctx context.Context, id int64) ([]db.Comment, error) {
 	s.legacyReads++
 	return s.Storage.CommentsByIssue(ctx, id)
+}
+
+func (s *commentReadCountingStore) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery) (db.CommentGraphData, error) {
+	s.graphQueries = append(s.graphQueries, query)
+	return s.Storage.ReadCommentGraph(ctx, query)
 }
 
 func checkShowCommentReadCount(t *testing.T, deleted, scoped bool, count uint8) {
@@ -52,10 +58,14 @@ func checkShowCommentReadCount(t *testing.T, deleted, scoped bool, count uint8) 
 		require.Equal(t, "Evidence", comment.Body)
 	}
 	want := 0
+	require.Equal(t, want, counted.legacyReads, "live and selected deleted-source comments come from the consistent graph")
+	require.Len(t, counted.graphQueries, 1)
+	var deletedSourceID int64
 	if deleted {
-		want = 1
+		deletedSourceID = issue.ID
 	}
-	require.Equal(t, want, counted.legacyReads, "live comments come from the consistent graph; only deleted-issue extras need the legacy read")
+	require.Equal(t, deletedSourceID, counted.graphQueries[0].IncludeDeletedSourceIssueID)
+	require.Equal(t, issueScopeFromContext(ctx), counted.graphQueries[0].IssueScope)
 }
 
 func TestLiveShowAvoidsLegacyCommentRead(t *testing.T) {
@@ -66,13 +76,13 @@ func TestScopedLiveShowAvoidsLegacyCommentRead(t *testing.T) {
 	checkShowCommentReadCount(t, false, true, 0)
 }
 
-func TestDeletedShowRetainsLegacyCommentExtras(t *testing.T) {
+func TestDeletedShowUsesSelectedSourceGraphRead(t *testing.T) {
 	checkShowCommentReadCount(t, true, false, 0)
 }
 
 func FuzzShowCommentReadCount(f *testing.F) {
+	f.Add(true, false, uint8(1))
 	f.Add(false, false, uint8(0))
 	f.Add(false, true, uint8(2))
-	f.Add(true, false, uint8(1))
 	f.Fuzz(checkShowCommentReadCount)
 }

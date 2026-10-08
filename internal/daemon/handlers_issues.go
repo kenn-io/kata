@@ -963,25 +963,11 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	out := &api.ShowIssueResponse{}
 	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
-	var extra []db.CommentGraphRecord
-	if issue.DeletedAt != nil {
-		comments, err := listComments(ctx, cfg.DB, issue.ID)
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		comments, _, _, err = projectScopedCommentReplies(ctx, cfg.DB, comments)
-		if err != nil {
-			return nil, err
-		}
-		project, err := cfg.DB.ProjectByID(ctx, issue.ProjectID)
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		for _, c := range comments {
-			extra = append(extra, db.CommentGraphRecord{Comment: c, IssueUID: issue.UID, IssueShortID: issue.ShortID, ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name})
-		}
+	var includeDeletedSourceIssueID int64
+	if includeDeleted && issue.DeletedAt != nil {
+		includeDeletedSourceIssueID = issue.ID
 	}
-	records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID, extra...)
+	records, err := readCommentRecords(ctx, cfg.DB, issue.ProjectID, includeDeletedSourceIssueID)
 	if err != nil {
 		return nil, err
 	}

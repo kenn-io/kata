@@ -2553,11 +2553,13 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // touches the body header. Refetching all four is cheap (the daemon
 // has these in cache) and keeps every tab fresh without a kind switch.
 //
-// The match requires both projectID and the watched issue's UID to
+// The match normally requires projectID and the watched issue's UID to
 // align with the event's subject — UID is canonical and the
-// authoritative key across short_id cutovers. Each fetch is tagged
-// with the current detail-open gen so applyFetched drops the result
-// if the user navigates away before the response lands.
+// authoritative key across short_id cutovers. Comment-edit events also
+// refresh when commentUID matches a rendered comment, reply endpoint, or
+// backlink in the open pane, regardless of project. Each fetch is tagged
+// with the current detail-open gen so applyFetched drops the result if the
+// user navigates away before the response lands.
 func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.api == nil {
 		return nil

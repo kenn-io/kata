@@ -63,12 +63,14 @@ func projectCommentGraph(ctx context.Context, data db.CommentGraphData) ([]comme
 	}
 	return commentref.Project(records, states), nil
 }
-func readCommentRecords(ctx context.Context, store db.Storage, projectID int64, extra ...db.CommentGraphRecord) ([]commentref.Record, error) {
-	data, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: projectID, IssueScope: issueScopeFromContext(ctx)})
+func readCommentRecords(ctx context.Context, store db.Storage, projectID, includeDeletedSourceIssueID int64) ([]commentref.Record, error) {
+	data, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{
+		ProjectID: projectID, IssueScope: issueScopeFromContext(ctx),
+		IncludeDeletedSourceIssueID: includeDeletedSourceIssueID,
+	})
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	data.Comments = append(data.Comments, extra...)
 	return projectCommentGraph(ctx, data)
 }
 
