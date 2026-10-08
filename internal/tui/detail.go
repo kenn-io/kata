@@ -343,18 +343,6 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
 		dm.comments = m.comments
-		if dm.selectedCommentUID != "" {
-			for i, c := range dm.comments {
-				if c.UID == dm.selectedCommentUID {
-					dm.tabCursor = i
-					dm.activeTab = tabComments
-					dm.tabExplicit = true
-					dm.detailFocus = focusActivity
-					break
-				}
-			}
-			dm.selectedCommentUID = ""
-		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
 	case eventsFetchedMsg:
