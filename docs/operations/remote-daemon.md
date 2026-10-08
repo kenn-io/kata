@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-10-02
+last_edited: 2026-10-08
 ---
 
 # Remote daemon
@@ -85,6 +85,20 @@ url = "http://100.64.0.5:7777"
 If none of those are set, clients next honor `active_daemon` in
 `<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
 auto-start.
+
+For project-scoped CLI commands such as `list`, `search`, and `create`, the
+client resolves `.kata.toml` and Git aliases on its own host. Without either
+binding, a remote client reports `project_not_initialized` (exit code 4) with
+guidance to run `kata init` or pass `--project`. A missing `--workspace` path
+gets the same guidance. The client does not send these paths to the daemon.
+Explicit `--hub-url` project lookups follow this rule too, including loopback
+hub URLs.
+Bind a client directory or select an existing project for one command:
+
+```sh
+kata init --project example-project
+kata list --project example-project
+```
 
 Ordinary remote CLI commands send their API requests without a preliminary
 ping. Refused connections still report `daemon_unavailable` (exit code 7).

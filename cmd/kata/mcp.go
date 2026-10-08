@@ -95,6 +95,7 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 			baseURL := resolved.BaseURL
 			// Ordinary daemon calls retain the CLI request timeout so a
 			// stalled daemon cannot consume every MCP tool-call slot.
