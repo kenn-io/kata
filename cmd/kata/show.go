@@ -76,7 +76,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 		if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
 			return err
 		}
-		if instance.Auth.Actor != "" {
+		if flags.As == "" && instance.Auth.Actor != "" {
 			actor = instance.Auth.Actor
 		}
 		opts.Selectors.Inbound = actor

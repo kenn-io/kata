@@ -2573,7 +2573,7 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	commentMatch := msg.matchesCommentInDetail(m.detail.comments)
-	if msg.projectID != m.detail.scopePID && !(m.scope.allProjects && commentMatch) {
+	if msg.projectID != m.detail.scopePID && !commentMatch {
 		return nil
 	}
 	pid := m.detail.scopePID

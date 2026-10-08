@@ -150,6 +150,10 @@ func checkShowInboundActor(t *testing.T, authActor, workspaceActor string) {
 	explicit := runCLI(t, env, dir, "--json", "show", issue.ShortID, "--inbound=workspace-agent")
 	require.Contains(t, explicit, "workspace reply")
 	require.NotContains(t, explicit, "operator reply")
+
+	explicitAs := runCLIAs(t, env, dir, workspaceActor, "--json", "show", issue.ShortID, "--inbound")
+	require.Contains(t, explicitAs, "workspace reply")
+	require.NotContains(t, explicitAs, "operator reply")
 }
 
 func TestCommentTypedFlagsMutuallyExclusive(t *testing.T) {

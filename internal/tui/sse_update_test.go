@@ -673,7 +673,7 @@ func FuzzCommentEditRefreshesMovedReplyEndpoint(f *testing.F) {
 func checkCommentEditRefreshesMovedReplyEndpoint(t *testing.T, commentUID string) {
 	t.Helper()
 	m := sseDetailFixture(7, "open", "source-issue")
-	m.scope = scope{allProjects: true}
+	m.scope = scope{projectID: 7}
 	m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
 		UID: commentUID, IssueUID: "moved-target-issue", Kind: "confirm",
 	}}}
