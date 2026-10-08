@@ -32,6 +32,22 @@ type ProjectAccessPolicy struct {
 	Revision   int64    `json:"revision"`
 }
 
+type archivedProjectAccessKey struct{}
+
+// WithArchivedProjectAccess marks archived project targets admitted by a
+// route-specific authorization check. Stores still recheck the actor's
+// current project policy inside the transaction fence.
+func WithArchivedProjectAccess(ctx context.Context, projectUIDs []string) context.Context {
+	return context.WithValue(ctx, archivedProjectAccessKey{}, slices.Clone(projectUIDs))
+}
+
+// ArchivedProjectAccessAllowed reports whether a route admitted this archived
+// project for transactional policy revalidation.
+func ArchivedProjectAccessAllowed(ctx context.Context, projectUID string) bool {
+	projectUIDs, _ := ctx.Value(archivedProjectAccessKey{}).([]string)
+	return slices.Contains(projectUIDs, projectUID)
+}
+
 // ProjectAccessStorage is the native project-policy contract. Administrative
 // mutations append daemon-local audit events and return the exact committed event.
 type ProjectAccessStorage interface {

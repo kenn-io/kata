@@ -776,7 +776,8 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	// `peer.deleted_at` doesn't dereference a NULL row. The peer JOIN matches
 	// by id when present, and falls back to uid for federation-inserted events
 	// that carry only related_issue_uid.
-	scrubCondition := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	scrubCondition := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL)
+	                   AND events.type <> 'issue.links_changed')`
 	// scrubArgs collects the args bound inside the SELECT-list CASE
 	// expressions; they precede every WHERE-clause arg because the CASE
 	// expressions appear first in the query. scrubCondition is embedded once

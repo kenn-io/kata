@@ -799,7 +799,8 @@ func (s *Store) ExportPendingClaimRequests(ctx context.Context, filter db.Export
 // ExportEvents streams replay-safe event envelopes under the export visibility rules.
 func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.EventExport, error] {
 	issueIDExpression := `events.issue_id`
-	relatedScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	relatedScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL)
+AND events.type <> 'issue.links_changed')`
 	var args []any
 	if filter.ProjectID != nil {
 		issueIDExpression = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> $1 THEN NULL ELSE events.issue_id END`

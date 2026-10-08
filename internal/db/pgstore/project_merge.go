@@ -124,6 +124,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := deleteProjectRelayMetadataTx(ctx, tx, source.UID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, source.ID); err != nil {
 			return mapSQLError(err, nil)
 		}

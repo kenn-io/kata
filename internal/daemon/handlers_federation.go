@@ -526,6 +526,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if disposition != "detach" && disposition != "archive" {
 			return nil, api.NewError(http.StatusBadRequest, "validation", `disposition must be "detach" or "archive"`, "", nil)
 		}
+		if disposition == "archive" && !projectOwnerAuthority(ctx) {
+			authorizedContext, authErr := authorizeAdditionalHostOperation(ctx, "removeProject")
+			if authErr != nil {
+				return nil, authErr
+			}
+			ctx = authorizedContext
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err

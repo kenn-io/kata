@@ -366,7 +366,17 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 			}
 			if !filter.IncludeDeleted {
 				if kind == "federation_root_key" {
-					where = append(where, `(p.deleted_at IS NULL OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=p.id))`)
+					first := len(args) + 1
+					where = append(where, fmt.Sprintf(`(p.deleted_at IS NULL
+						OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=p.id)
+						OR EXISTS(SELECT 1 FROM meta m WHERE m.key=$%d || p.uid
+						           OR left(m.key,length($%d || p.uid || '.'))=$%d || p.uid || '.'
+						           OR left(m.key,length($%d || p.uid || '.'))=$%d || p.uid || '.'))`,
+						first, first+1, first+2, first+3, first+4))
+					args = append(args,
+						db.RelayResetMetadataPrefix,
+						db.RelayResetMetadataPrefix, db.RelayResetMetadataPrefix,
+						db.RootKeyTransitionMetadataPrefix, db.RootKeyTransitionMetadataPrefix)
 				} else {
 					where = append(where, `p.deleted_at IS NULL`)
 				}

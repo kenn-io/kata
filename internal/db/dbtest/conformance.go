@@ -177,6 +177,67 @@ var storageScenarios = []scenario{
 		run: checkPurgeReset,
 	},
 	{
+		name: "purge preserves signed peer event",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "LeaveFederationReplica",
+			"PurgeIssue", "PinRootAuthority", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunPurgePreservesSignedPeerEvent(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project purge preserves signed peer event",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "LeaveFederationReplica",
+			"PurgeProject", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectPurgePreservesSignedPeerEvent(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project purge removes relay metadata",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
+			"ImportReplay", "InstallRelayReset", "LeaveFederationReplica", "PinRootAuthority",
+			"PurgeProject", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
+			"UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectPurgeRemovesRelayMetadata(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project merge removes relay metadata",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
+			"ImportReplay", "InstallRelayReset", "LeaveFederationReplica", "MergeProjects",
+			"PinRootAuthority", "RotateRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectMergeRemovesRelayMetadata(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "archived detached relay metadata retains root keys",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "InstallRelayReset", "LeaveFederationReplica",
+			"PinRootAuthority", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
+			"UpsertFederationBinding",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchivedDetachedRelayMetadataRetainsRootKeys(t, store)
+			return nil
+		},
+	},
+	{
 		name: "project lifecycle",
 		methods: []string{
 			"AttachAlias", "CountOpenIssues", "CreateIssue", "CreateProject", "DetachProjectAlias",

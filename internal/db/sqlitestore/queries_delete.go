@@ -365,17 +365,12 @@ func purgeCascade(
 		return 0, fmt.Errorf("delete events: %w", err)
 	}
 	// Detach surviving aggregated issue.links_changed events from the
-	// purged issue: NULL the envelope's related_issue_id (and its UID
-	// counterpart) so the FK constraint passes when the issues row is
-	// deleted in step 7. The payload retains the peer's UID as an
-	// orphan reference — that is the intentional preservation per
-	// kata#1's design call. Iteration-16 set related_issue_id for
-	// single-peer aggregated events; without this UPDATE the FK would
-	// block purge.
+	// purged issue by clearing only the local FK. The UID is part of the
+	// immutable event envelope and may also be covered by a retained root
+	// receipt, so preserve it as historical evidence.
 	if _, err := c.ExecContext(ctx,
 		`UPDATE events
-		    SET related_issue_id  = NULL,
-		        related_issue_uid = NULL
+		    SET related_issue_id = NULL
 		  WHERE related_issue_id = ? AND type = 'issue.links_changed'`,
 		issue.ID); err != nil {
 		return 0, fmt.Errorf("detach aggregated event peer refs: %w", err)

@@ -20,13 +20,14 @@ type projectTrustedCallerContextKey struct{}
 // request. Native transactions recheck every resolved target under the policy
 // lock; readers discard a response if its admission epoch changed.
 type ProjectAccessDecision struct {
-	ProjectUIDs    []string
-	PolicyRevision int64
-	Actor          string
-	targets        []string
-	hydratedIssues map[string]bool
-	store          db.Storage
-	owner          bool
+	ProjectUIDs     []string
+	PolicyRevision  int64
+	Actor           string
+	targets         []string
+	archivedTargets []string
+	hydratedIssues  map[string]bool
+	store           db.Storage
+	owner           bool
 }
 
 func projectOwnerAuthority(ctx context.Context) bool {
@@ -53,7 +54,7 @@ func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	if decision == nil || decision.owner {
 		return nil
 	}
-	if !slices.Contains(decision.ProjectUIDs, projectUID) {
+	if !slices.Contains(decision.ProjectUIDs, projectUID) && !slices.Contains(decision.archivedTargets, projectUID) {
 		return projectAccessDenied()
 	}
 	if !slices.Contains(decision.targets, projectUID) {
@@ -191,6 +192,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			if decision.owner || len(decision.targets) == 0 {
 				return nil
 			}
+			fenceCtx = db.WithArchivedProjectAccess(fenceCtx, decision.archivedTargets)
 			err := store.ProjectAccessTransactionFence(decision.Actor, decision.targets)(fenceCtx, tx)
 			if errors.Is(err, db.ErrNotFound) {
 				return projectAccessDenied()
@@ -203,6 +205,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			if decision.owner {
 				return nil
 			}
+			checkCtx = db.WithArchivedProjectAccess(checkCtx, decision.archivedTargets)
 			err := store.ProjectAccessTransactionFence(decision.Actor, []string{projectUID})(checkCtx, tx)
 			if errors.Is(err, db.ErrNotFound) {
 				return projectAccessDenied()
@@ -285,7 +288,21 @@ func withProjectOperationAuthorization(humaAPI huma.API, store db.Storage) {
 		}
 		if valid {
 			project, err := store.ProjectByID(ctx.Context(), id)
-			if err != nil || authorizeProjectTarget(ctx.Context(), project.UID) != nil {
+			if err != nil {
+				writeHostAccessError(ctx, 404, "not_found", "resource not found")
+				return
+			}
+			if mountedArchivedProjectOperation(ctx.Context(), op.OperationID, project) {
+				decision, _ := ctx.Context().Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+				if decision == nil {
+					writeHostAccessError(ctx, 404, "not_found", "resource not found")
+					return
+				}
+				if !slices.Contains(decision.archivedTargets, project.UID) {
+					decision.archivedTargets = append(decision.archivedTargets, project.UID)
+				}
+			}
+			if authorizeProjectTarget(ctx.Context(), project.UID) != nil {
 				writeHostAccessError(ctx, 404, "not_found", "resource not found")
 				return
 			}
@@ -298,4 +315,17 @@ func withProjectOperationAuthorization(humaAPI huma.API, store db.Storage) {
 		}
 		next(ctx)
 	})
+}
+
+func mountedArchivedProjectOperation(ctx context.Context, operationID string, project db.Project) bool {
+	if project.DeletedAt == nil || (operationID != "restoreProject" && operationID != "purgeProject") {
+		return false
+	}
+	hosted, _ := ctx.Value(projectHostedContextKey{}).(bool)
+	principal, authenticated := PrincipalFromContext(ctx)
+	if !hosted || !authenticated || !validHostPrincipal(principal) {
+		return false
+	}
+	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
+	return ok && state != nil && state.authorized && state.request.Operation.ID == operationID
 }

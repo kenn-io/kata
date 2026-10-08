@@ -424,7 +424,7 @@ func (d *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string
 		}
 		for _, projectUID := range projectUIDs {
 			var allowed int
-			err := tx.QueryRowContext(ctx, `SELECT 1 FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.uid=? AND p.uid<>? AND p.deleted_at IS NULL AND (COALESCE(a.visibility,'all')='all' OR EXISTS(SELECT 1 FROM project_access_teams pat JOIN team_memberships tm ON tm.team_uid=pat.team_uid WHERE pat.project_uid=p.uid AND tm.actor=? AND tm.actor<>''))`, projectUID, db.SystemProjectUID, strings.TrimSpace(actor)).Scan(&allowed)
+			err := tx.QueryRowContext(ctx, `SELECT 1 FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.uid=? AND p.uid<>? AND (p.deleted_at IS NULL OR ?) AND (COALESCE(a.visibility,'all')='all' OR EXISTS(SELECT 1 FROM project_access_teams pat JOIN team_memberships tm ON tm.team_uid=pat.team_uid WHERE pat.project_uid=p.uid AND tm.actor=? AND tm.actor<>''))`, projectUID, db.SystemProjectUID, db.ArchivedProjectAccessAllowed(ctx, projectUID), strings.TrimSpace(actor)).Scan(&allowed)
 			if errors.Is(err, sql.ErrNoRows) {
 				return db.ErrNotFound
 			}

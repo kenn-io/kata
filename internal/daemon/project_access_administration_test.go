@@ -136,6 +136,26 @@ func TestTokenInitialTeamGrantNotifiesExistingSSEClients(t *testing.T) {
 	})
 }
 
+func TestMemberCannotArchiveStandaloneProjectThroughFederationLeave(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		alias, err := store.AttachAlias(t.Context(), f.public.ID, "example-project-alias", "git")
+		require.NoError(t, err)
+
+		status, _, body := f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", f.public.ID), "member",
+			map[string]any{"disposition": "archive", "force": true, "actor": "member"}, nil)
+		require.Equal(t, http.StatusNotFound, status, string(body))
+
+		project, err := store.ProjectByID(t.Context(), f.public.ID)
+		require.NoError(t, err)
+		require.Nil(t, project.DeletedAt, "a denied archive must leave the project active")
+		aliases, err := store.ProjectAliases(t.Context(), f.public.ID)
+		require.NoError(t, err)
+		require.Equal(t, []db.ProjectAlias{alias}, aliases, "a denied archive must preserve aliases")
+	})
+}
+
 // R9: a stale policy editor receives a conflict and cannot overwrite a newer
 // visibility decision. The native revision check remains inside the mutation.
 func TestProjectAccessAdministrationRevisionConflict(t *testing.T) {

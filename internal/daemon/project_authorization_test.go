@@ -1117,6 +1117,22 @@ func (s *revokeBeforeCreateStore) CreateIssue(ctx context.Context, p db.CreateIs
 
 type projectAccessHostController struct{ fence *bool }
 
+type projectAccessHostOperations struct {
+	operations []string
+	fenceCalls int
+}
+
+func (h *projectAccessHostOperations) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	h.operations = append(h.operations, request.Operation.ID)
+	return daemon.HostAccessDecision{
+		Revalidate: func(context.Context) error { return nil },
+		TransactionFence: func(context.Context, db.Transaction) error {
+			h.fenceCalls++
+			return nil
+		},
+	}, nil
+}
+
 type projectAccessFinalHostFence struct {
 	called *bool
 	deny   bool
@@ -1181,6 +1197,72 @@ func (projectAccessDenyHost) Authorize(context.Context, daemon.HostAccessRequest
 func (h projectAccessHostController) Authorize(context.Context, daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
 	return daemon.HostAccessDecision{Revalidate: func(context.Context) error { return nil }, TransactionFence: func(context.Context, db.Transaction) error { *h.fence = true; return nil }}, nil
 }
+
+func TestMountedAdministratorsCanManageArchivedProjectsWithinProjectPolicy(t *testing.T) {
+	for _, operation := range []string{"restoreProject", "purgeProject"} {
+		for _, actor := range []string{"member", "nonmember"} {
+			t.Run(operation+"/"+actor, func(t *testing.T) {
+				projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+					project, err := store.CreateProject(t.Context(), "archived-managed-project")
+					require.NoError(t, err)
+					team, _, err := store.CreateTeam(t.Context(), "project-operators", "admin")
+					require.NoError(t, err)
+					_, err = store.SetTeamMembership(t.Context(), team.UID, "member", true, "admin")
+					require.NoError(t, err)
+					_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+						ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+					}, "admin")
+					require.NoError(t, err)
+					_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "admin"})
+					require.NoError(t, err)
+
+					hostAccess := &projectAccessHostOperations{}
+					server := daemon.NewServer(daemon.ServerConfig{DB: store, HostAccess: hostAccess})
+					t.Cleanup(func() { require.NoError(t, server.Close()) })
+					path := fmt.Sprintf("/api/v1/projects/%d/restore?actor=%s", project.ID, actor)
+					body := ""
+					if operation == "purgeProject" {
+						path = fmt.Sprintf("/api/v1/projects/%d/actions/purge", project.ID)
+						body = `{"actor":"` + actor + `"}`
+					}
+					request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+					if operation == "purgeProject" {
+						request.Header.Set("Content-Type", "application/json")
+						request.Header.Set("X-Kata-Confirm", "PURGE archived-managed-project")
+					}
+					request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{
+						Kind: daemon.PrincipalHost, Actor: actor, Subject: "mounted-user",
+					}))
+					response := httptest.NewRecorder()
+					server.Handler().ServeHTTP(response, request)
+
+					wantStatus := http.StatusNotFound
+					if actor == "member" {
+						wantStatus = http.StatusOK
+					}
+					assert.Equal(t, wantStatus, response.Code, response.Body.String())
+					assert.Equal(t, []string{operation}, hostAccess.operations)
+					if actor == "member" {
+						assert.Positive(t, hostAccess.fenceCalls, "the host transaction grant remains enforced")
+					}
+
+					stored, err := store.ProjectByID(t.Context(), project.ID)
+					if operation == "purgeProject" && actor == "member" {
+						assert.ErrorIs(t, err, db.ErrNotFound)
+						return
+					}
+					require.NoError(t, err)
+					if actor == "member" && operation == "restoreProject" {
+						assert.Nil(t, stored.DeletedAt)
+					} else {
+						assert.NotNil(t, stored.DeletedAt, "a denied actor cannot change archived state")
+					}
+				})
+			})
+		}
+	}
+}
+
 func TestProjectAccessRevocationFence(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)
