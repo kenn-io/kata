@@ -181,6 +181,9 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 		ctx = db.WithProjectAccessTransactionCheck(ctx, func(
 			checkCtx context.Context, tx db.Transaction, projectUID string,
 		) error {
+			if decision.owner {
+				return nil
+			}
 			err := store.ProjectAccessTransactionFence(decision.Actor, []string{projectUID})(checkCtx, tx)
 			if errors.Is(err, db.ErrNotFound) {
 				return projectAccessDenied()

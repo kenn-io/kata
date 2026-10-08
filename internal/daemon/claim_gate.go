@@ -65,7 +65,7 @@ func requireFederatedIssueClaimForPrincipal(
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	principal = boundSpokeClaimPrincipal(binding, principal)
+	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 
 	if binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
@@ -133,6 +133,10 @@ func refreshSpokeClaimStatusForGate(
 			return nil
 		}
 		return claimForwardError(err)
+	}
+	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
+	if err != nil {
+		return claimAPIError(err)
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
 		return claimAPIError(err)

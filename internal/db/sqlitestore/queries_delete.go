@@ -32,6 +32,9 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, issue.ProjectUID); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	if issue.DeletedAt != nil {
 		// Already soft-deleted; commit so the read-side state is consistent
 		// (no-op tx is harmless) and return the no-op envelope.
@@ -114,6 +117,9 @@ func (d *Store) restoreIssue(ctx context.Context, issueID int64, actor string) (
 
 	issue, projectName, err := lookupIssueIncludingDeleted(ctx, tx, issueID)
 	if err != nil {
+		return db.Issue{}, nil, false, err
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, issue.ProjectUID); err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	if issue.DeletedAt == nil {

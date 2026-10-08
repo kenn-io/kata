@@ -255,6 +255,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		if target.ID == issue.ID {
 			return changed, db.ErrSelfLink
 		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
+			return changed, err
+		}
 		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
 			return changed, err
 		}
@@ -314,6 +317,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if existing.ToIssueID != *params.RemoveParent {
 			return changed, db.ErrParentMismatch
+		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+			return changed, err
 		}
 		identity, err := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
 		if err != nil {
@@ -413,6 +419,9 @@ func atomicAddEdgeTx(
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
+		return false, db.PeerIdentity{}, err
+	}
 	if target.ID == issue.ID {
 		return false, db.PeerIdentity{}, db.ErrSelfLink
 	}
@@ -447,6 +456,12 @@ func atomicAddEdgeTx(
 }
 
 func insertAtomicEdgeTx(ctx context.Context, tx *sql.Tx, params db.CreateLinkParams) (bool, error) {
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return false, err
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return false, err
+	}
 	var id int64
 	err := tx.QueryRowContext(ctx, `INSERT INTO links(
   from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author
@@ -475,6 +490,9 @@ func atomicRemoveEdgeTx(
 		return false, db.PeerIdentity{}, nil
 	}
 	if err != nil {
+		return false, db.PeerIdentity{}, err
+	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	fromID, toID := issue.ID, target.ID

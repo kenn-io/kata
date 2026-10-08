@@ -21,6 +21,11 @@ func lockProjectAccess(ctx context.Context, tx db.Transaction) error {
 	return tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='project_access_revision' FOR SHARE`).Scan(&revision)
 }
 
+func lockProjectAccessExclusive(ctx context.Context, tx db.Transaction) error {
+	var revision string
+	return tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='project_access_revision' FOR UPDATE`).Scan(&revision)
+}
+
 func bumpProjectAccess(ctx context.Context, tx db.Transaction) error {
 	_, err := tx.ExecContext(ctx, `UPDATE meta SET value=CAST(CAST(value AS BIGINT)+1 AS TEXT) WHERE key='project_access_revision'`)
 	return err

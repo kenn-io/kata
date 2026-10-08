@@ -369,3 +369,9 @@ type Storage interface {
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)
 }
+
+// ParentLinkReplacementStorage is implemented by native stores that can swap
+// a parent link and emit its unlink/link events atomically.
+type ParentLinkReplacementStorage interface {
+	ReplaceParentAndEvents(context.Context, ReplaceParentAndEventsParams) (ReplaceParentAndEventsResult, error)
+}

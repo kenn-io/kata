@@ -139,6 +139,9 @@ func (s *Store) DeleteLinkAndEvent(
 		if err != nil {
 			return err
 		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+			return err
+		}
 		result, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, link.ID)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -226,6 +229,12 @@ func (s *Store) ParentOf(ctx context.Context, childIssueID int64) (db.Link, erro
 }
 
 func insertLinkTx(ctx context.Context, tx *sql.Tx, params db.CreateLinkParams) (db.Link, error) {
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return db.Link{}, err
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return db.Link{}, err
+	}
 	link, err := scanLink(tx.QueryRowContext(ctx, `INSERT INTO links(
 			from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author
 		)

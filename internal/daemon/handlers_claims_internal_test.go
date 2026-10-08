@@ -26,10 +26,10 @@ func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
 	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "spoke-actor"}
 	first := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
 		Holder: hostClaimHolder("user-one"), ClientKind: "cli", AuthenticatedHost: true,
-	})
+	}, "local-instance")
 	second := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
 		Holder: hostClaimHolder("user-two"), ClientKind: "cli", AuthenticatedHost: true,
-	})
+	}, "local-instance")
 
 	assert.Equal(t, "spoke-actor", first.Holder)
 	assert.Equal(t, "spoke-actor", second.Holder)
@@ -41,7 +41,7 @@ func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
 	for _, holder := range []string{"local-worker", "host:worker"} {
 		legacy := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
 			Holder: holder, ClientKind: "cli",
-		})
+		}, "local-instance")
 
 		assert.Equal(t, "spoke-actor", legacy.Holder)
 		assert.Equal(t, "cli", legacy.ClientKind)

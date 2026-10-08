@@ -397,6 +397,16 @@ type LinkEventParams struct {
 	Actor        string
 }
 
+// ReplaceParentAndEventsParams atomically swaps one existing parent link for
+// a new parent and records both link events in the same transaction.
+type ReplaceParentAndEventsParams struct {
+	ExpectedParentLinkID  int64
+	ExpectedParentIssueID int64
+	Link                  CreateLinkParams
+	UnlinkEvent           LinkEventParams
+	LinkEvent             LinkEventParams
+}
+
 // LabelEventParams describes the event-emission side of a label mutation. The
 // DB-layer methods AddLabelAndEvent and RemoveLabelAndEvent split the mutation
 // (label insert/delete) from the event metadata so the handler can emit the

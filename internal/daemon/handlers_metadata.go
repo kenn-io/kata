@@ -114,6 +114,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, res.Issue.UID, false)
 
 		out := &api.PatchIssueMetadataResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)

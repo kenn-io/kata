@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +12,51 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
+
+func TestOwnerClaimAuthorizationSkipsActorProjectFence(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(t.Context(), "owner-claim-project")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "before", Author: "member",
+	})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	srv := NewServer(ServerConfig{DB: store})
+	t.Cleanup(func() { _ = srv.Close() })
+	matcher := newSelfAuthenticatedRouteMatcher([]routeTemplate{{
+		Method: http.MethodPost, Path: "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/acquire",
+	}})
+	var editErr error
+	handler := withProjectAuthorization(store, false, false, matcher, srv.noProjectDataRoutes,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := claimRequestContext(r.Context(), claimPrincipal{OwnerAuthority: true})
+			title := "after"
+			_, editErr = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+				IssueID: issue.ID, Actor: "admin", Title: &title,
+			})
+			if editErr != nil {
+				http.Error(w, fmt.Sprint(editErr), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+	request := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/acquire", project.ID, issue.ShortID), nil)
+	request = request.WithContext(WithPrincipal(request.Context(), Principal{Kind: PrincipalStaticToken}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("owner claim mutation status = %d, error = %v, body = %q", response.Code, editErr, response.Body.String())
+	}
+}
 
 type projectAuthorizationProbeStore struct {
 	db.Storage

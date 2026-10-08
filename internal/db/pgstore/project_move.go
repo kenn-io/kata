@@ -22,6 +22,9 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		return output, fmt.Errorf("source and target projects are the same")
 	}
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
+			return err
+		}
 		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
 			return err
 		}
@@ -125,6 +128,9 @@ SET project_id = $1 WHERE issue_id = $2`,
 		})
 		if err != nil {
 			return err
+		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("bump project access revision after issue move: %w", err)
 		}
 		output.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		output.EventID = event.ID

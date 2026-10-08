@@ -25,6 +25,14 @@ const claimTestOtherSpokeUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 func TestClaimAuthLocalDaemonBearerCanClaimHubProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)
+	team, _, err := env.DB.CreateTeam(context.Background(), "claim-private-team", "admin")
+	require.NoError(t, err)
+	_, err = env.DB.SetTeamMembership(context.Background(), team.UID, "different-member", true, "admin")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(context.Background(), db.ProjectAccessPolicy{
+		ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+	}, "admin")
+	require.NoError(t, err)
 
 	var out claimResponseBody
 	resp := claimPost(t, env, project.ID, issue.ShortID, "claim", map[string]any{

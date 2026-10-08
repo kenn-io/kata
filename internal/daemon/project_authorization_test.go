@@ -60,29 +60,43 @@ type projectAccessFixture struct {
 	private, public db.Project
 	issue, visible  db.Issue
 	team            db.Team
+	tokenSuffix     string
 	broadcaster     *daemon.EventBroadcaster
 	api             huma.API
 }
 
-func newProjectAccessFixture(t *testing.T, store db.Storage) projectAccessFixture {
+func newProjectAccessFixture(t *testing.T, store db.Storage, suffix ...string) projectAccessFixture {
 	t.Helper()
 	ctx := t.Context()
-	private, err := store.CreateProject(ctx, "restricted-project")
+	privateName, publicName := "restricted-project", "shared-project"
+	teamName := "engineering"
+	tokenSuffix := ""
+	if len(suffix) > 0 && suffix[0] != "" {
+		privateName += "-" + suffix[0]
+		publicName += "-" + suffix[0]
+		teamName += "-" + suffix[0]
+		tokenSuffix = suffix[0]
+	}
+	private, err := store.CreateProject(ctx, privateName)
 	require.NoError(t, err)
-	public, err := store.CreateProject(ctx, "shared-project")
+	public, err := store.CreateProject(ctx, publicName)
 	require.NoError(t, err)
 	visible, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: public.ID, Title: "Visible task", Author: "member"})
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: private.ID, Title: projectAccessCanary, Body: projectAccessCanary, Author: "member"})
 	require.NoError(t, err)
-	team, _, err := store.CreateTeam(ctx, "engineering", "admin")
+	team, _, err := store.CreateTeam(ctx, teamName, "admin")
 	require.NoError(t, err)
 	_, err = store.SetTeamMembership(ctx, team.UID, "member", true, "admin")
 	require.NoError(t, err)
 	_, _, err = store.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: private.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin")
 	require.NoError(t, err)
 	for _, actor := range []string{"member", "nonmember"} {
-		_, _, err = store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: actor + "-test-token", Actor: actor, AdminActor: "admin"})
+		plaintext := actor + "-test-token"
+		if tokenSuffix != "" {
+			plaintext = actor + "-" + tokenSuffix + "-test-token"
+		}
+		_, _, err = store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: plaintext, Actor: actor, AdminActor: "admin"})
 		require.NoError(t, err)
 	}
 	broadcaster := daemon.NewEventBroadcaster()
@@ -90,7 +104,7 @@ func newProjectAccessFixture(t *testing.T, store db.Storage) projectAccessFixtur
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
-	return projectAccessFixture{store: store, server: httpServer, private: private, public: public, issue: issue, visible: visible, team: team, broadcaster: broadcaster, api: server.API()}
+	return projectAccessFixture{store: store, server: httpServer, private: private, public: public, issue: issue, visible: visible, team: team, tokenSuffix: tokenSuffix, broadcaster: broadcaster, api: server.API()}
 }
 
 func (f projectAccessFixture) request(t *testing.T, method, path, actor string, body any, headers map[string]string) (int, http.Header, []byte) {
@@ -108,6 +122,9 @@ func (f projectAccessFixture) request(t *testing.T, method, path, actor string, 
 	}
 	if actor != "" {
 		token := actor + "-test-token"
+		if f.tokenSuffix != "" && actor != "admin" {
+			token = actor + "-" + f.tokenSuffix + "-test-token"
+		}
 		if actor == "admin" {
 			token = "bootstrap-test-token"
 		}
@@ -127,6 +144,79 @@ func (f projectAccessFixture) request(t *testing.T, method, path, actor string, 
 type projectAccessBeforeEditStore struct {
 	db.Storage
 	before func(context.Context, db.EditIssueAtomicParams) error
+}
+
+type projectAccessBeforeIssueMutationStore struct {
+	db.Storage
+	before func(context.Context, int64) error
+}
+
+func (s *projectAccessBeforeIssueMutationStore) runBefore(ctx context.Context, issueID int64) error {
+	if s.before == nil {
+		return nil
+	}
+	before := s.before
+	s.before = nil
+	return before(ctx, issueID)
+}
+
+func (s *projectAccessBeforeIssueMutationStore) PatchIssueMetadata(
+	ctx context.Context, input db.PatchIssueMetadataIn,
+) (db.PatchIssueMetadataOut, error) {
+	if err := s.runBefore(ctx, input.IssueID); err != nil {
+		return db.PatchIssueMetadataOut{}, err
+	}
+	return s.Storage.PatchIssueMetadata(ctx, input)
+}
+
+func (s *projectAccessBeforeIssueMutationStore) SoftDeleteIssue(
+	ctx context.Context, issueID int64, actor string,
+) (db.Issue, *db.Event, bool, error) {
+	if err := s.runBefore(ctx, issueID); err != nil {
+		return db.Issue{}, nil, false, err
+	}
+	return s.Storage.SoftDeleteIssue(ctx, issueID, actor)
+}
+
+func (s *projectAccessBeforeIssueMutationStore) RestoreIssue(
+	ctx context.Context, issueID int64, actor string,
+) (db.Issue, *db.Event, bool, error) {
+	if err := s.runBefore(ctx, issueID); err != nil {
+		return db.Issue{}, nil, false, err
+	}
+	return s.Storage.RestoreIssue(ctx, issueID, actor)
+}
+
+type projectAccessBeforeLinkStore struct {
+	db.Storage
+	before func(context.Context) error
+}
+
+func (s *projectAccessBeforeLinkStore) runBefore(ctx context.Context) error {
+	if s.before == nil {
+		return nil
+	}
+	before := s.before
+	s.before = nil
+	return before(ctx)
+}
+
+func (s *projectAccessBeforeLinkStore) EditIssueAtomic(
+	ctx context.Context, params db.EditIssueAtomicParams,
+) (db.EditIssueAtomicResult, error) {
+	if err := s.runBefore(ctx); err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
+	return s.Storage.EditIssueAtomic(ctx, params)
+}
+
+func (s *projectAccessBeforeLinkStore) CreateLinkAndEvent(
+	ctx context.Context, params db.CreateLinkParams, event db.LinkEventParams,
+) (db.Link, db.Event, error) {
+	if err := s.runBefore(ctx); err != nil {
+		return db.Link{}, db.Event{}, err
+	}
+	return s.Storage.CreateLinkAndEvent(ctx, params, event)
 }
 
 func (s *projectAccessBeforeEditStore) EditIssueAtomic(
@@ -155,6 +245,132 @@ func projectAccessFixtureWithStorage(
 	t.Cleanup(httpServer.Close)
 	fixture.server = httpServer
 	return fixture
+}
+
+func projectAccessHiddenProject(t *testing.T, store db.Storage, name string) db.Project {
+	t.Helper()
+	project, err := store.CreateProject(t.Context(), name)
+	require.NoError(t, err)
+	team, _, err := store.CreateTeam(t.Context(), name+"-team", "admin")
+	require.NoError(t, err)
+	_, err = store.SetTeamMembership(t.Context(), team.UID, "other-member", true, "admin")
+	require.NoError(t, err)
+	_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+		ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+	}, "admin")
+	require.NoError(t, err)
+	return project
+}
+
+func TestProjectAccessRechecksMetadataDeleteAndRestoreAfterIssueMove(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		for _, mutation := range []string{"metadata", "delete", "restore"} {
+			t.Run(mutation, func(t *testing.T) {
+				f := newProjectAccessFixture(t, store, mutation)
+				hidden := projectAccessHiddenProject(t, store, "hidden-"+mutation)
+				wrapped := &projectAccessBeforeIssueMutationStore{Storage: store}
+				wrapped.before = func(_ context.Context, issueID int64) error {
+					if issueID != f.visible.ID {
+						return nil
+					}
+					_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+						IssueID: f.visible.ID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+						IfMatchRev: f.visible.Revision, Actor: "admin",
+					})
+					return err
+				}
+				f = projectAccessFixtureWithStorage(t, f, wrapped)
+
+				path := fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.public.ID, f.visible.ShortID)
+				var status int
+				var body []byte
+				switch mutation {
+				case "metadata":
+					status, _, body = f.request(t, http.MethodPost, path+"/metadata", "member",
+						map[string]any{"actor": "member", "patch": map[string]any{"race_secret": "should-not-commit"}}, nil)
+				case "delete":
+					status, _, body = f.request(t, http.MethodPost, path+"/actions/delete", "member",
+						map[string]any{"actor": "member"}, map[string]string{
+							"X-Kata-Confirm": "DELETE " + f.public.Name + "#" + f.visible.ShortID,
+						})
+				case "restore":
+					status, _, body = f.request(t, http.MethodPost, path+"/actions/restore", "member",
+						map[string]any{"actor": "member"}, nil)
+				}
+				assert.Equal(t, http.StatusNotFound, status, string(body))
+				assert.NotContains(t, string(body), projectAccessCanary)
+				assert.NotContains(t, string(body), hidden.UID)
+				current, err := store.IssueByID(t.Context(), f.visible.ID)
+				require.NoError(t, err)
+				assert.Equal(t, hidden.UID, current.ProjectUID, "the owner-side move should remain committed")
+				switch mutation {
+				case "metadata":
+					assert.NotContains(t, string(current.Metadata), "should-not-commit")
+				case "delete":
+					assert.Nil(t, current.DeletedAt, "the denied delete must not change issue visibility")
+				}
+			})
+		}
+	})
+}
+
+func TestMoveIssueProjectAdvancesProjectAccessRevision(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		target, err := store.CreateProject(t.Context(), "move-target-project")
+		require.NoError(t, err)
+		before, err := store.ProjectAccessRevision(t.Context())
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: f.visible.ID, FromProjectID: f.public.ID, ToProjectID: target.ID,
+			IfMatchRev: f.visible.Revision, Actor: "admin",
+		})
+		require.NoError(t, err)
+		after, err := store.ProjectAccessRevision(t.Context())
+		require.NoError(t, err)
+		assert.Greater(t, after, before)
+	})
+}
+
+func TestProjectAccessRechecksCurrentPeerProjectBeforeLinkWrites(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		for _, mutation := range []string{"atomic", "dedicated"} {
+			t.Run(mutation, func(t *testing.T) {
+				f := newProjectAccessFixture(t, store, "link-"+mutation)
+				peer, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+					ProjectID: f.public.ID, Title: "Peer task", Author: "member",
+				})
+				require.NoError(t, err)
+				hidden := projectAccessHiddenProject(t, store, "link-hidden-"+mutation)
+				wrapped := &projectAccessBeforeLinkStore{Storage: store}
+				wrapped.before = func(context.Context) error {
+					_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+						IssueID: peer.ID, FromProjectID: f.public.ID, ToProjectID: hidden.ID,
+						IfMatchRev: peer.Revision, Actor: "admin",
+					})
+					return err
+				}
+				f = projectAccessFixtureWithStorage(t, f, wrapped)
+				path := fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.public.ID, f.visible.ShortID)
+				var status int
+				var body []byte
+				if mutation == "atomic" {
+					status, _, body = f.request(t, http.MethodPatch, path, "member", map[string]any{
+						"actor": "member", "links_delta": map[string]any{"add_related": []string{peer.ShortID}},
+					}, nil)
+				} else {
+					status, _, body = f.request(t, http.MethodPost, path+"/links", "member", map[string]any{
+						"actor": "member", "type": "related", "to_ref": peer.ShortID,
+					}, nil)
+				}
+				assert.Equal(t, http.StatusNotFound, status, string(body))
+				assert.NotContains(t, string(body), hidden.UID)
+				links, err := store.LinksByIssue(t.Context(), f.visible.ID)
+				require.NoError(t, err)
+				assert.Empty(t, links, "a peer moved into a hidden project cannot be linked")
+			})
+		}
+	})
 }
 
 func TestProjectAccessRechecksMovedIssueInsideEditTransaction(t *testing.T) {

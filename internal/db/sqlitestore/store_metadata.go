@@ -70,18 +70,22 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		curMetadata string
 		curRevision int64
 		projectID   int64
+		projectUID  string
 		projectName string
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT i.metadata, i.revision, i.project_id, p.name
+		SELECT i.metadata, i.revision, i.project_id, p.uid, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.deleted_at IS NULL`,
 		in.IssueID,
-	).Scan(&curMetadata, &curRevision, &projectID, &projectName)
+	).Scan(&curMetadata, &curRevision, &projectID, &projectUID, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, fmt.Errorf("issue %d not found", in.IssueID)
 	}
 	if err != nil {
+		return out, err
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
 		return out, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {

@@ -121,6 +121,24 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	require.NoError(t, err)
 	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: private.ID, Type: "blocks", Author: "member"})
 	require.Error(t, err, "new link cannot cross relay boundary")
+	atomicTitle := "must roll back with rejected edge"
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "member", Title: &atomicTitle,
+		AddBlocks: []int64{private.ID},
+	})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary,
+		"atomic block insertion cannot bypass the negotiated relay boundary")
+	unchangedIssue, err := store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Shared issue", unchangedIssue.Title, "the scalar edit rolls back with the rejected edge")
+	sharedLinks, err := store.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, sharedLinks)
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "member", SetParent: &private.ID,
+	})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary,
+		"atomic parent insertion cannot bypass the negotiated relay boundary")
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: private.ID, ToIssueID: issue.ID, Type: "blocks", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: private.ID, Actor: "member"})
 	require.Error(t, err, "opposite endpoint and event route cannot bypass relay boundary")
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: shared.ID, Author: "member", Title: "Rejected initial private link", Links: []db.InitialLink{{Type: "blocks", ToNumber: private.ID}}})
@@ -130,4 +148,64 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	links, err := store.LinksByIssue(ctx, local.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
+	oldParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: shared.ID, Author: "member", Title: "Existing shared parent"})
+	require.NoError(t, err)
+	oldParentLink, err := store.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: local.ID, ToIssueID: oldParent.ID, Type: "parent", Author: "member",
+	})
+	require.NoError(t, err)
+	replacementStore, ok := store.(db.ParentLinkReplacementStorage)
+	require.True(t, ok, "native stores support atomic parent replacement")
+	newParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: shared.ID, Author: "member", Title: "Replacement shared parent"})
+	require.NoError(t, err)
+	replacement, err := replacementStore.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+		ExpectedParentLinkID: oldParentLink.ID, ExpectedParentIssueID: oldParent.ID,
+		Link: db.CreateLinkParams{
+			FromIssueID: local.ID, ToIssueID: newParent.ID, Type: "parent", Author: "member",
+		},
+		UnlinkEvent: db.LinkEventParams{
+			EventType: "issue.unlinked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: oldParent.ShortID, ToUID: oldParent.UID, Actor: "member",
+		},
+		LinkEvent: db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: newParent.ShortID, ToUID: newParent.UID, Actor: "member",
+		},
+	})
+	require.NoError(t, err, "same-project parent replacement commits")
+	require.Equal(t, "issue.unlinked", replacement.UnlinkedEvent.Type)
+	require.Equal(t, "issue.linked", replacement.LinkedEvent.Type)
+	require.Equal(t, newParent.ID, replacement.Link.ToIssueID)
+	currentParentLink := replacement.Link
+	eventsBeforeReplace, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: shared.ID, Limit: 1000})
+	require.NoError(t, err)
+	require.NotEmpty(t, eventsBeforeReplace)
+	_, err = replacementStore.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+		ExpectedParentLinkID: currentParentLink.ID, ExpectedParentIssueID: newParent.ID,
+		Link: db.CreateLinkParams{
+			FromIssueID: local.ID, ToIssueID: private.ID, Type: "parent", Author: "member",
+		},
+		UnlinkEvent: db.LinkEventParams{
+			EventType: "issue.unlinked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: newParent.ShortID, ToUID: newParent.UID, Actor: "member",
+		},
+		LinkEvent: db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: local.ID,
+			FromShortID: local.ShortID, FromUID: local.UID,
+			ToShortID: private.ShortID, ToUID: private.UID, Actor: "member",
+		},
+	})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary,
+		"atomic parent replacement cannot bypass the negotiated relay boundary")
+	parentAfterReject, err := store.ParentOf(ctx, local.ID)
+	require.NoError(t, err)
+	require.Equal(t, currentParentLink, parentAfterReject, "rejected replacement preserves the current parent")
+	eventsAfterReplace, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		AfterID: eventsBeforeReplace[len(eventsBeforeReplace)-1].ID, ProjectID: shared.ID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, eventsAfterReplace, "rejected replacement emits no unlink or link event")
 }

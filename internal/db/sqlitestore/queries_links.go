@@ -26,6 +26,9 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, err
+	}
 	if err := ensureRelayLinkBoundaryTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
 		return db.Link{}, err
 	}
@@ -410,6 +413,9 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, db.Event{}, err
+	}
 	requestedActor := strings.TrimSpace(ev.Actor)
 	if requestedActor == "" {
 		requestedActor = p.Author
@@ -538,6 +544,9 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 
 	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
 	if err != nil {
+		return db.Event{}, err
+	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
 		return db.Event{}, err
 	}
 

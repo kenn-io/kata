@@ -493,6 +493,14 @@ type Link struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// ReplaceParentAndEventsResult contains the committed replacement link and
+// the unlink/link events emitted by the same transaction.
+type ReplaceParentAndEventsResult struct {
+	Link          Link  `json:"link"`
+	UnlinkedEvent Event `json:"unlinked_event"`
+	LinkedEvent   Event `json:"linked_event"`
+}
+
 // IssueLabel mirrors a row in issue_labels.
 type IssueLabel struct {
 	IssueID   int64     `json:"issue_id"`

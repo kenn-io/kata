@@ -2,6 +2,7 @@ package federation_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"fmt"
@@ -13,10 +14,112 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
 )
+
+func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T) {
+	t.Run("online acquire then edit", func(t *testing.T) {
+		_, _, leaf, issue := newRelayClaimChain(t)
+		status, acquired := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
+		require.Equal(t, http.StatusOK, status)
+		require.True(t, acquired.Granted)
+		require.NotNil(t, acquired.Lease)
+		leafBinding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
+		require.NoError(t, err)
+		require.Equal(t, leaf.store.InstanceUID(), acquired.Lease.HolderInstanceUID)
+		require.Equal(t, leafBinding.Actor, acquired.Lease.Holder)
+
+		body, err := json.Marshal(map[string]string{"actor": leaf.account, "title": "edited through relay claim"})
+		require.NoError(t, err)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch,
+			fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", leaf.http.URL, leaf.project.ID, issue.ShortID), bytes.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+leaf.userToken)
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(responseBody))
+		updated, err := leaf.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "edited through relay claim", updated.Title)
+	})
+
+	t.Run("offline acquire resolves through relay", func(t *testing.T) {
+		_, relay, leaf, issue := newRelayClaimChain(t)
+		binding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
+		require.NoError(t, err)
+		const offlineURL = "http://127.0.0.1:1"
+		binding, err = leaf.store.RebindFederationBinding(t.Context(), db.RebindFederationBindingParams{
+			ProjectID: leaf.project.ID, ExpectedHubURL: binding.HubURL,
+			HubProjectID: binding.HubProjectID, HubProjectUID: binding.HubProjectUID,
+			TargetHubURL: offlineURL,
+		})
+		require.NoError(t, err)
+		status, pendingResponse := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
+		require.Equal(t, http.StatusOK, status)
+		require.True(t, pendingResponse.Pending)
+		require.NotEmpty(t, pendingResponse.RequestUID)
+
+		binding, err = leaf.store.RebindFederationBinding(t.Context(), db.RebindFederationBindingParams{
+			ProjectID: leaf.project.ID, ExpectedHubURL: offlineURL,
+			HubProjectID: binding.HubProjectID, HubProjectUID: binding.HubProjectUID,
+			TargetHubURL: relay.http.URL,
+		})
+		require.NoError(t, err)
+		credential := leaf.credential
+		credential.HubURL = relay.http.URL
+		require.NoError(t, federation.RetryPendingClaimsOnce(
+			context.Background(), leaf.store, binding, credential, clientpkg.Opts{},
+		))
+		pending, err := leaf.store.ListPendingClaimRequests(t.Context(), leaf.project.ID, 10)
+		require.NoError(t, err)
+		require.Empty(t, pending, "the relay must return the leaf holder tuple so the pending request resolves")
+		claimStatus, err := leaf.store.ClaimStatus(t.Context(), leaf.project.ID, issue.UID, time.Now().UTC())
+		require.NoError(t, err)
+		require.True(t, claimStatus.Held)
+		require.Equal(t, leaf.store.InstanceUID(), claimStatus.Holder.HolderInstanceUID)
+		leafBinding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
+		require.NoError(t, err)
+		require.Equal(t, leafBinding.Actor, claimStatus.Holder.Holder)
+	})
+}
+
+func newRelayClaimChain(t *testing.T) (*relayMatrixNode, *relayMatrixNode, *relayMatrixNode, db.Issue) {
+	t.Helper()
+	root := newRelayMatrixNode(t, "sqlite", "company-member")
+	project, err := root.store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root.project = project
+	_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, root.store.PinRootAuthority(t.Context(), db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(),
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	issue, _, err := root.store.CreateIssue(db.WithRootAttribution(t.Context(), root.signer, root.account), db.CreateIssueParams{
+		ProjectID: project.ID, Author: root.account, Title: "claim target",
+	})
+	require.NoError(t, err)
+
+	relay := newRelayMatrixNode(t, "sqlite", "personal-member")
+	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
+	enrollRelayMatrixReplica(t, root, relay, "relay-project", true)
+	syncRelayMatrixNode(t, relay)
+	enrollRelayMatrixReplica(t, relay, leaf, "leaf-project", false)
+	syncRelayMatrixNode(t, leaf)
+	return root, relay, leaf, issue
+}
 
 // R4/A7: the root arbitrates; two leaves sharing an account and client label
 // cannot renew or release each other's root lease through the personal relay.

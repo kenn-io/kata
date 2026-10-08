@@ -201,7 +201,8 @@ func handleClaimAcquire(
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
-	principal = boundSpokeClaimPrincipal(binding, principal)
+	incomingPrincipal := principal
+	principal = boundSpokeClaimPrincipal(binding, incomingPrincipal, cfg.DB.InstanceUID())
 	if binding.Role == db.FederationRoleHub {
 		result, err := cfg.DB.AcquireClaim(ctx, db.AcquireClaimParams{
 			ProjectID: projectID,
@@ -254,6 +255,7 @@ func handleClaimAcquire(
 		}
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
+	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, true); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -278,7 +280,8 @@ func handleClaimRenew(
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
-	principal = boundSpokeClaimPrincipal(binding, principal)
+	incomingPrincipal := principal
+	principal = boundSpokeClaimPrincipal(binding, incomingPrincipal, cfg.DB.InstanceUID())
 	if binding.Role == db.FederationRoleHub {
 		result, err := cfg.DB.RenewClaim(ctx, db.RenewClaimParams{
 			ProjectID: projectID,
@@ -304,6 +307,7 @@ func handleClaimRenew(
 	if err != nil {
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
+	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, true); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -328,7 +332,8 @@ func handleClaimRelease(
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
-	principal = boundSpokeClaimPrincipal(binding, principal)
+	incomingPrincipal := principal
+	principal = boundSpokeClaimPrincipal(binding, incomingPrincipal, cfg.DB.InstanceUID())
 	if binding.Role == db.FederationRoleHub {
 		result, err := cfg.DB.ReleaseClaim(ctx, db.ReleaseClaimParams{
 			ProjectID: projectID,
@@ -357,6 +362,7 @@ func handleClaimRelease(
 	if err != nil {
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
+	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, false); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -389,6 +395,10 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 	resp, err := remote.ClaimStatus(ctx, cred.HubProjectID, ref)
 	if err != nil {
 		return api.ClaimStatusBody{}, claimForwardError(err)
+	}
+	resp, err = remapCachedClaimStatus(ctx, cfg.DB, projectID, ref, resp)
+	if err != nil {
+		return api.ClaimStatusBody{}, claimAPIError(err)
 	}
 	issueRef := ref
 	lease := resp.Lease
@@ -441,7 +451,11 @@ func beginClaimFederationTransport(
 	return finish, nil
 }
 
-func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPrincipal) db.ClaimPrincipal {
+func boundSpokeClaimPrincipal(
+	binding db.FederationBinding,
+	principal db.ClaimPrincipal,
+	localInstanceUID string,
+) db.ClaimPrincipal {
 	if binding.Role != db.FederationRoleSpoke {
 		return principal
 	}
@@ -455,6 +469,7 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 		// A caller-supplied client label cannot impersonate another leaf instance.
 		identity, _ := json.Marshal([3]string{principal.HolderInstanceUID, principal.Holder, principal.ClientKind})
 		digest := sha256.Sum256(append([]byte("kata:relay-claim-holder:v1\x00"), identity...))
+		principal.HolderInstanceUID = localInstanceUID
 		principal.ClientKind = "relay:v1:" + base64.RawURLEncoding.EncodeToString(digest[:])
 		principal.Holder = actor
 		return principal
@@ -468,6 +483,75 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 	}
 	principal.Holder = actor
 	return principal
+}
+
+func remapRelayClaimActionResponse(
+	response api.ClaimActionResponseBody,
+	binding db.FederationBinding,
+	localInstanceUID string,
+	forwarded, incoming db.ClaimPrincipal,
+) api.ClaimActionResponseBody {
+	if binding.RelayConfig == nil || incoming.HolderInstanceUID == "" ||
+		incoming.HolderInstanceUID == localInstanceUID || !claimPrincipalOutMatches(response.Holder, forwarded) {
+		return response
+	}
+	response.Holder = claimPrincipalOut(incoming)
+	response.Lease = remapIssueClaimOut(response.Lease, forwarded, incoming)
+	response.Claim = remapIssueClaimOut(response.Claim, forwarded, incoming)
+	return response
+}
+
+func claimPrincipalOutMatches(out api.ClaimPrincipalOut, principal db.ClaimPrincipal) bool {
+	return out.HolderInstanceUID == principal.HolderInstanceUID &&
+		out.Holder == principal.Holder && out.ClientKind == principal.ClientKind
+}
+
+func remapIssueClaimOut(
+	claim *api.IssueClaimOut,
+	from, to db.ClaimPrincipal,
+) *api.IssueClaimOut {
+	if claim == nil || claim.HolderInstanceUID != from.HolderInstanceUID ||
+		claim.Holder != from.Holder || claim.ClientKind != from.ClientKind {
+		return claim
+	}
+	claim.HolderInstanceUID = to.HolderInstanceUID
+	claim.Holder = to.Holder
+	claim.ClientKind = to.ClientKind
+	return claim
+}
+
+func remapCachedClaimStatus(
+	ctx context.Context,
+	store db.Storage,
+	projectID int64,
+	issueRef string,
+	remote api.ClaimStatusBody,
+) (api.ClaimStatusBody, error) {
+	if !remote.Held {
+		return remote, nil
+	}
+	remoteLease := remote.Lease
+	if remoteLease == nil {
+		remoteLease = remote.Claim
+	}
+	if remoteLease == nil {
+		return remote, nil
+	}
+	cached, err := store.ClaimStatus(ctx, projectID, issueRef, time.Now().UTC())
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return remote, nil
+		}
+		return remote, err
+	}
+	if !cached.Held || cached.Claim == nil || cached.Claim.ClaimUID != remoteLease.ClaimUID {
+		return remote, nil
+	}
+	remoteHolder := claimPrincipalFromAPI(remote.Holder)
+	remote.Holder = claimPrincipalOut(cached.Holder)
+	remote.Lease = remapIssueClaimOut(remote.Lease, remoteHolder, cached.Holder)
+	remote.Claim = remapIssueClaimOut(remote.Claim, remoteHolder, cached.Holder)
+	return remote, nil
 }
 
 func claimForwardClient(

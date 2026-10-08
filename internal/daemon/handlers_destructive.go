@@ -53,6 +53,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, updated.UID, true)
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
@@ -90,6 +91,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, updated.UID, false)
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}

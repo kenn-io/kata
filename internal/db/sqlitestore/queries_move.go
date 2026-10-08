@@ -35,6 +35,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return out, err
+	}
 
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
@@ -182,6 +185,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	})
 	if err != nil {
 		return out, err
+	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return out, fmt.Errorf("bump project access revision after issue move: %w", err)
 	}
 
 	issue, err := issueByIDTx(ctx, tx, in.IssueID)
