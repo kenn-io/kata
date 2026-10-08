@@ -126,7 +126,7 @@ func (f *undoTestAPI) AddComment(_ context.Context, _ int64, _, _, _ string) (*M
 	return f.commentResp, nil
 }
 
-func (f *undoTestAPI) AddCommentReply(_ context.Context, _ int64, _ref, _body, _actor, _target, _kind string, _ bool, _key string) (*MutationResp, error) {
+func (f *undoTestAPI) AddCommentReply(_ context.Context, _ int64, _, _, _, _, _ string, _ bool, _ string) (*MutationResp, error) {
 	f.replyCalls++
 	return f.completeResponse(f.replyResp), f.replyErr
 }

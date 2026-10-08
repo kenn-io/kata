@@ -327,7 +327,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	for _, arg := range args {
 		c, resolvedURL, pid, ref, rerr := resolveIssueRefForCommand(cmd, arg)
 		if rerr != nil {
-			if timeoutErr, timedOut := handleWaitTimeout(cmd, ctx, run, opts.timeout, args); timedOut {
+			if timedOut, timeoutErr := handleWaitTimeout(ctx, cmd, run, opts.timeout, args); timedOut {
 				return timeoutErr
 			}
 			return rerr
@@ -347,12 +347,12 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			var instance instanceStatusForCLI
 			if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
-				if timeoutErr, timedOut := handleWaitTimeout(cmd, ctx, run, opts.timeout, pendingRefs(targets)); timedOut {
+				if timedOut, timeoutErr := handleWaitTimeout(ctx, cmd, run, opts.timeout, pendingRefs(targets)); timedOut {
 					return timeoutErr
 				}
 				return err
 			}
-			if instance.Auth.Actor != "" {
+			if flags.As == "" && instance.Auth.Actor != "" {
 				actor = instance.Auth.Actor
 			}
 			tm, err := resolveTeammate(cmd)
@@ -484,23 +484,23 @@ func waitTimeoutError(timeout time.Duration, pending []string) *cliError {
 // resolution and reply-recipient discovery so every setup request honors the
 // same --timeout contract as the poll loop.
 func handleWaitTimeout(
-	cmd *cobra.Command,
 	ctx context.Context,
+	cmd *cobra.Command,
 	run waitRun,
 	timeout time.Duration,
 	pending []string,
-) (error, bool) {
+) (bool, error) {
 	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || !run.expired() {
-		return nil, false
+		return false, nil
 	}
 	if err := emitWaitJSON(cmd, waitJSONOutput{
 		Results:  []waitResult{},
 		TimedOut: true,
 		Pending:  append([]string(nil), pending...),
 	}); err != nil {
-		return err, true
+		return true, err
 	}
-	return waitTimeoutError(timeout, pending), true
+	return true, waitTimeoutError(timeout, pending)
 }
 
 // waitPollLoop polls the still-pending targets on run.poll cadence until the

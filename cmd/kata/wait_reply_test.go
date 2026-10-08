@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 func TestWaitReplyInitialSlotIsBaseline(t *testing.T) {
@@ -186,6 +187,46 @@ func TestWaitReplyTransientBaselineAndRecipientIsolation(t *testing.T) {
 	out := parseWaitJSON(t, stdout)
 	require.Len(t, out.Results, 1)
 	require.Equal(t, "reply", out.Results[0].Reason)
+}
+
+func TestWaitReplyExplicitActorOverridesAuthenticatedActor(t *testing.T) {
+	var polls atomic.Int32
+	authenticatedKey := notification.MetadataKey("authenticated-user")
+	requestedKey := notification.MetadataKey("requested-user")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case r.URL.Path == "/api/v1/instance":
+			_, _ = w.Write([]byte(`{"auth":{"actor":"authenticated-user"}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/projects/1/issues/"):
+			poll := polls.Add(1)
+			requestedReply := `{"message":"before"}`
+			if poll >= 2 {
+				requestedReply = `{"message":"after"}`
+			}
+			_, _ = fmt.Fprintf(w,
+				`{"issue":{"short_id":"abcd","status":"open","metadata":{%q:{"message":"stable"},%q:%s}}}`,
+				authenticatedKey, requestedKey, requestedReply)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("KATA_INBOX_USER", "")
+	t.Setenv("KATA_TEAMMATE", "")
+	t.Setenv("KATA_AUTHOR", "")
+	t.Setenv("KATA_HTTP_TIMEOUT", "")
+	resetFlags(t)
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL),
+		"--as", "requested-user", "--json", "wait", "example-project#abcd", "--until", "reply",
+		"--timeout", "250ms", "--poll-interval", "10ms")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, polls.Load(), int32(2))
+	result := parseWaitJSON(t, stdout)
+	require.Len(t, result.Results, 1)
+	require.Equal(t, "reply", result.Results[0].Reason)
 }
 
 func TestWaitReplyJoinAndClosedCompletion(t *testing.T) {
