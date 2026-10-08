@@ -969,12 +969,13 @@ func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEn
 }
 
 func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectID int64) commentref.Record {
+	comment := db.Comment{
+		UID:        uid,
+		ReplyToUID: replyToUID,
+		ReplyKind:  replyKind,
+	}
 	return commentref.Record{
-		Comment: db.Comment{
-			UID:        uid,
-			ReplyToUID: replyToUID,
-			ReplyKind:  replyKind,
-		},
+		Comment:   comment,
 		IssueUID:  issueUID,
 		ProjectID: projectID,
 	}
