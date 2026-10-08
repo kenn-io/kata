@@ -3,9 +3,11 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -340,6 +342,101 @@ func TestCommentEndpoint_EditsCommentAndEmitsEvent(t *testing.T) {
 	assert.Contains(t, string(editBS), `"body":"[redacted]"`)
 	assert.Contains(t, string(editBS), `"type":"issue.comment_edited"`)
 	assert.NotContains(t, string(editBS), "token=leaked")
+}
+
+type moveIssueBeforeCommentEditStore struct {
+	db.Storage
+	toProjectID int64
+	moved       bool
+}
+
+func withMoveIssueBeforeCommentEditStore(target **moveIssueBeforeCommentEditStore) serverOption {
+	return func(cfg *daemon.ServerConfig) {
+		wrapped := &moveIssueBeforeCommentEditStore{Storage: cfg.DB}
+		*target = wrapped
+		cfg.DB = wrapped
+	}
+}
+
+func (s *moveIssueBeforeCommentEditStore) EditComment(
+	ctx context.Context, in db.EditCommentParams,
+) (db.Comment, *db.Event, bool, error) {
+	if !s.moved && s.toProjectID != 0 {
+		issue, err := s.IssueByID(ctx, in.IssueID)
+		if err != nil {
+			return db.Comment{}, nil, false, err
+		}
+		_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: s.toProjectID,
+			IfMatchRev: issue.Revision, Actor: "coordinator",
+		})
+		if err != nil {
+			return db.Comment{}, nil, false, err
+		}
+		s.moved = true
+	}
+	return s.Storage.EditComment(ctx, in)
+}
+
+func TestCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T) {
+	checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, "Redacted evidence", 0)
+}
+
+func FuzzCommentEditPublishesCommittedProjectAfterConcurrentMove(f *testing.F) {
+	f.Add("Redacted evidence", uint8(0))
+	f.Fuzz(func(t *testing.T, body string, projectOffset uint8) {
+		if len(body) > 256 {
+			return
+		}
+		if strings.TrimSpace(body) == "" {
+			body = "Redacted evidence"
+		}
+		checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, body, projectOffset)
+	})
+}
+
+func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, body string, projectOffset uint8) {
+	t.Helper()
+	broadcaster := daemon.NewEventBroadcaster()
+	var wrapped *moveIssueBeforeCommentEditStore
+	h, sourceProjectID := bootstrapProject(
+		t,
+		withBroadcaster(broadcaster),
+		withMoveIssueBeforeCommentEditStore(&wrapped),
+	)
+	issue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: sourceProjectID, Title: "Movable issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	comment, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "reviewer", Body: "Original evidence",
+	})
+	require.NoError(t, err)
+	for i := uint8(0); i < projectOffset%4; i++ {
+		_, err := h.DB().CreateProject(t.Context(), fmt.Sprintf("spoke-project-%d", i))
+		require.NoError(t, err)
+	}
+	target, err := h.DB().CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	wrapped.toProjectID = target.ID
+	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: target.ID})
+	defer sub.Unsub()
+
+	resp, responseBody := patchJSON(t, h.ts.(*httptest.Server),
+		issueURLRef(sourceProjectID, issue.ShortID, "comments/"+comment.UID),
+		map[string]any{"actor": "redactor", "body": body},
+	)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "edit comment: %s", responseBody)
+	require.True(t, wrapped.moved)
+	select {
+	case msg := <-sub.Ch:
+		require.NotNil(t, msg.Event)
+		require.Equal(t, target.ID, msg.ProjectID)
+		require.Equal(t, target.ID, msg.Event.ProjectID)
+		require.Equal(t, "issue.comment_edited", msg.Event.Type)
+	case <-time.After(time.Second):
+		t.Fatal("destination project did not receive the committed comment edit event")
+	}
 }
 
 func TestCommentEndpoint_RejectsEditingExternallyOwnedComment(t *testing.T) {
