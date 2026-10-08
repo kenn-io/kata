@@ -185,16 +185,17 @@ parent scan.
 
 With `--since`, initial sync fetches eligible issues first and checks only their
 parents in GraphQL batches of at most 100 children, without reading historical
-relationship events. An empty selection makes no parent requests. Retries use
-the same scope when all previously imported issues remain eligible.
+relationship events. On a new binding, an empty selection makes no parent
+requests. Retries use the same scope when all previously imported issues remain
+eligible.
 
 Unfiltered initial sync and the one-time parent-link backfill for an existing
 binding still scan the full repository for parent coverage. A filtered run with
 a reset cursor also keeps full parent coverage if previously imported issues
-fall outside the eligible selection, including after a narrower cutoff or a
-partially completed import. Issue imports and comments continue to respect
-`--since` during those scans. Hosts without parent support retain incremental
-issue fetching and preserve existing parent links.
+fall outside the eligible selection, such as after a narrower cutoff. Issue
+imports and comments continue to respect `--since` during those scans. Hosts
+without parent support retain incremental issue fetching and preserve existing
+parent links.
 
 Enablement validates the repository through the daemon before storing the
 binding. The binding, sync cursor, interval, status, and import mappings live

@@ -92,32 +92,11 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		issues = eligible
 	}
 	if !preflightParents {
-		numbers := make([]int, 0, len(issues))
-		for _, issue := range issues {
-			if !IsPullRequestIssue(issue) && issue.Number > 0 {
-				numbers = append(numbers, issue.Number)
-			}
-		}
-		request := ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers}
-		if filteredBootstrap {
-			covered, err := r.selectedIssuesCoverImports(ctx, binding, issues)
-			if err != nil {
-				return issuesync.Prepared{Binding: binding}, err
-			}
-			if !covered {
-				// Config changes can clear the cursor while keeping old imports.
-				// Their parent-only changes still need authoritative coverage.
-				request = ParentRequest{}
-			}
-		} else {
-			request.ChildrenOf, err = r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
-			if err != nil {
-				return issuesync.Prepared{Binding: binding}, err
-			}
+		request, err := r.parentRequest(ctx, binding, issues, cutoff)
+		if err != nil {
+			return issuesync.Prepared{Binding: binding}, err
 		}
 		reportProgress(ctx, "parents", 0, len(request.IssueNumbers))
-		// Relationship changes do not update updatedAt. Event discovery uses the
-		// cursor overlap even if the issue cutoff excludes an already imported child.
 		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), request)
 		if err != nil {
 			return issuesync.Prepared{Binding: binding}, err
@@ -171,6 +150,35 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		}
 	}
 	return prepared, nil
+}
+
+// parentRequest selects the parent coverage for a run that skipped the
+// repository-wide preflight scan. Without a cursor that is a filtered
+// bootstrap of the eligible issues; otherwise it is an incremental pass over
+// changed issues and recent relationship events.
+func (r *adapter) parentRequest(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, cutoff *time.Time) (ParentRequest, error) {
+	numbers := make([]int, 0, len(issues))
+	for _, issue := range issues {
+		if !IsPullRequestIssue(issue) && issue.Number > 0 {
+			numbers = append(numbers, issue.Number)
+		}
+	}
+	if binding.LastCursorAt == nil {
+		covered, err := r.selectedIssuesCoverImports(ctx, binding, issues)
+		if err != nil || !covered {
+			// Config changes can clear the cursor while keeping old imports.
+			// Their parent-only changes still need authoritative coverage.
+			return ParentRequest{}, err
+		}
+		return ParentRequest{IssueNumbers: numbers}, nil
+	}
+	// Relationship changes do not update updatedAt. Event discovery uses the
+	// cursor overlap even if the issue cutoff excludes an already imported child.
+	childrenOf, err := r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
+	if err != nil {
+		return ParentRequest{}, err
+	}
+	return ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers, ChildrenOf: childrenOf}, nil
 }
 
 // selectedIssuesCoverImports permits a scoped bootstrap only when every
