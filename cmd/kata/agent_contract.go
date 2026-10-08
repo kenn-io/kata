@@ -24,14 +24,14 @@ digraph kata {
     label="";
     claim  [label="Claim and mark it tracked:\nkata claim <ref>\nkata meta set <ref> work.attention ok"];
     branch [label="If the work happens on a dedicated branch, stamp it once:\nkata meta set <ref> work.branch <branch>\nor bind at creation:\nkata create ... --meta work.branch=<branch> --idempotency-key <key>"];
-    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nReply by handle: kata comment <ref> --reply c:<id> -m \"<evidence>\"\n(or --confirm, --refute, --supersede); it lands in that author's inbox.\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
+    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
     claim -> branch -> live;
   }
 
   subgraph cluster_delegate {
     label="";
     fanout [label="Tracked children: --parent <ref>, --meta work.branch=<branch>,\n--idempotency-key <key>, --json; capture .issue.short_id.\nSubagents: distinct KATA_TEAMMATE and\nKATA_INBOX_USER=<actor>/<teammate>; keep the actor.\nRead requests: kata inbox --for <actor>[/<teammate>].\nAfter handling: kata notify <ref> --to <actor>[/<teammate>] --clear."];
-    join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction.\nkata wait <ref> --until reply returns when a reply reaches you."];
+    join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction."];
     coord  [label="Read delegated work.*; never write it."];
     fanout -> join -> coord;
   }

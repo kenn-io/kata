@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-07
+last_edited: 2026-10-08
 ---
 
 # Agent workflows
@@ -491,7 +491,10 @@ installers do not install a runtime scheduler or wakeup adapter.
 Point workers at the comment they need to answer. A typed link records whether
 an agent builds on, reproduces, contradicts, or replaces that finding. The log
 stays chronological; Kata stores a reference without copying the target's body.
-Comment replies and the notification commands below are unreleased.
+Comment replies and the notification commands below are unreleased. These
+examples describe planned behavior; the current released CLI does not accept
+the new options yet. Until the feature ships, use ordinary comments and
+supported targeted `kata notify --to` requests.
 
 ### Find and use comment handles
 
@@ -562,17 +565,21 @@ in the project that link to that author's comments on this issue. Use
 A late federated comment can sort before the handle. Use the inbox to learn
 about replies; `--since` is a reading aid.
 
-The TUI and Web UI show counts for nonzero incoming kinds on original
-comments, for example:
+The TUI and Web UI show nonzero counts for authorized direct incoming kinds on
+original comments. Place the summary immediately below the comment body and
+before expanded backlinks. Omit zero kinds and keep the order reply, confirm,
+refute, supersede. For example:
 
 ```text
 Replies 1 | Confirmations 2 | Refutations 1 | Superseding replies 1
 ```
 
-Open a kind's count to inspect each linked comment's author, time, handle, and
-body, then jump to it and return focus to the original. The TUI uses a keyboard
-picker; the Web UI uses keyboard-accessible, labelled controls. Symbols and
-theme colors may supplement the text.
+Open a kind's count to inspect each directly linked comment in chronological
+order, with its author, teammate when present, time, handle, and body, then jump
+to it and return focus to the original. The TUI uses a keyboard picker through
+the existing comment navigation pattern; the Web UI uses keyboard-accessible,
+labelled controls with names such as “Show 2 confirmation replies”. Text carries
+the meaning. Symbols and theme colors may supplement the text.
 
 Kata filters links by authorization before counting or rendering. Counts
 include only directly linked comments the reader may access. If the authorized

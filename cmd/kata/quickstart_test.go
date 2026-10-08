@@ -9,6 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func assertNoUnimplementedCommentOptions(t *testing.T, guidance string) {
+	t.Helper()
+	tokens := strings.Fields(guidance)
+	for i, token := range tokens {
+		for _, option := range []string{"--answer", "--ask", "--reply", "--confirm", "--refute", "--supersede", "--re", "--broadcast"} {
+			assert.NotEqualf(t, option, token, "active guidance advertises unavailable option %q", option)
+		}
+		if token == "--until" && i+1 < len(tokens) {
+			assert.NotEqual(t, "reply", tokens[i+1], "active guidance advertises unavailable wait mode reply")
+		}
+	}
+}
+
 func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
 	for _, format := range []string{"human", "agent", "json"} {
 		t.Run(format, func(t *testing.T) {
@@ -348,18 +361,15 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 	}
 }
 
-// The settled comment-link contract must reach agents without teaching broadcasts
-// in every session. Removing either instruction breaks reply coordination.
-func TestQuickstart_ContractExplainsCommentReplies(t *testing.T) {
+func TestQuickstart_ActiveContractOmitsUnimplementedCommentOptions(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
-	assert.Contains(t, out, `kata comment <ref> -m \"<what changed>\"\nReply by handle: kata comment <ref> --reply c:<id> -m \"<evidence>\"\n(or --confirm, --refute, --supersede); it lands in that author's inbox.`)
-	assert.Contains(t, out, `wrapper can tell timeout from satisfaction.\nkata wait <ref> --until reply returns when a reply reaches you.`)
-	assert.NotContains(t, out, "--broadcast")
-	assert.NotContains(t, out, "--answer")
+	assertNoUnimplementedCommentOptions(t, out)
+	assert.Contains(t, out, "kata wait <refs> --until attention --any")
+	assert.Contains(t, out, "kata notify <ref> --to <actor>")
 }
 
-func TestQuickstart_ExplainsCommentReplyCoordination(t *testing.T) {
+func TestQuickstart_ActiveOutputOmitsUnimplementedCommentOptions(t *testing.T) {
 	for _, format := range []string{"human", "agent", "json"} {
 		t.Run(format, func(t *testing.T) {
 			resetFlags(t)
@@ -372,13 +382,8 @@ func TestQuickstart_ExplainsCommentReplyCoordination(t *testing.T) {
 				require.NoError(t, json.Unmarshal(out, &payload))
 				instructions = payload.Quickstart
 			}
-			for _, text := range []string{"--reply", "--confirm", "--refute", "--supersede", "--re", "--until reply", "--broadcast", "50 recipients", "10 minutes", "3 broadcasts", "per writing daemon", "a comment-sized task becomes a child issue"} {
-				assert.Contains(t, instructions, text)
-			}
-			normalized := strings.Join(strings.Fields(instructions), " ")
-			assert.Contains(t, normalized, "Only --reply to the comment named by a slot's re clears it in the same transaction.")
-			assert.NotContains(t, normalized, "Answering the comment named by a slot's re clears that slot")
-			assert.NotContains(t, instructions, "--answer")
+			assertNoUnimplementedCommentOptions(t, instructions)
+			assert.Contains(t, instructions, "kata notify")
 		})
 	}
 }

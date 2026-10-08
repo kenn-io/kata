@@ -41,6 +41,23 @@ func TestAgentContractHookBare(t *testing.T) {
 	assertCodexPrompt(t, stdout, agentContractText)
 }
 
+func TestAgentContractHookOmitsUnimplementedCommentOptions(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	var envelope struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	assertNoUnimplementedCommentOptions(t, envelope.HookSpecificOutput.AdditionalContext)
+	assert.Contains(t, envelope.HookSpecificOutput.AdditionalContext, "kata wait <refs> --until attention --any")
+	assert.Contains(t, envelope.HookSpecificOutput.AdditionalContext, "kata notify <ref> --to <actor>")
+}
+
 func TestAgentContractHookCustomSource(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, tc := range []struct {
@@ -230,9 +247,9 @@ func TestAgentContractHookPromptRoundTrip(t *testing.T) {
 	})
 }
 
-// Native context must preserve the reply instructions' DOT escaping alongside
+// Native context must preserve the managed contract's DOT escaping alongside
 // arbitrary valid UTF-8 prompt text through each distinct JSON envelope.
-func FuzzNativeContractCommentRepliesRoundTrip(f *testing.F) {
+func FuzzNativeContractRoundTrip(f *testing.F) {
 	for i := range byte(4) {
 		f.Add(i, "")
 		f.Add(i, "\n\"quotes\" \\ Unicode 世界 <tag> &\n")

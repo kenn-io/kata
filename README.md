@@ -89,14 +89,14 @@ flowchart TB
     direction TB
     claim["Claim and mark it tracked:<br/>kata claim #60;ref#62;<br/>kata meta set #60;ref#62; work.attention ok"]
     branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
-    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Reply by handle: kata comment #60;ref#62; --reply c:#60;id#62; -m #34;#60;evidence#62;#34;<br/>(or --confirm, --refute, --supersede); it lands in that author's inbox.<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
+    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
     claim --> branch --> live
   end
 
   subgraph delegateside[" "]
     direction TB
     fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;].<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
-    join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction.<br/>kata wait #60;ref#62; --until reply returns when a reply reaches you."]
+    join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction."]
     coord["Read delegated work.*; never write it."]
     fanout --> join --> coord
   end
@@ -138,20 +138,26 @@ kata close abc4 --done \
   --commit <sha>
 ```
 
-Comment replies are unreleased. Use the handle from `kata show` to answer a
-finding and reach its author's inbox:
+Comment relations and their notification commands are unreleased. These
+examples describe planned behavior; the current released CLI does not accept
+the options yet. Use ordinary comments and supported targeted notifications
+until the feature ships:
 
 ```sh
 kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
 kata wait abc4 --until reply --timeout 5m
 ```
 
-The TUI and Web UI show incoming relation counts on original comments. Open a
-count to inspect linked evidence and jump to the reply. Conflicting assertions
-stay visible together.
+The TUI and Web UI show nonzero counts for authorized direct relations on
+original comments. Open a count to inspect chronological evidence with its
+author, time, handle, and body, then jump to it and return focus. The TUI uses a
+keyboard picker; Web controls are accessible. Replies show their outgoing
+relation. Partial counts stay explicit. Conflicting assertions stay visible
+together without scores, automatic resolution, or hiding. Pending, removed,
+moved, and edited targets remain visible.
 
 Use `--confirm`, `--refute`, or `--supersede` when the response has that meaning.
-See [reply and coordinator workflows](docs/workflows/agents.md#reply-to-a-finding)
+See [planned reply and coordinator workflows](docs/workflows/agents.md#reply-to-a-finding)
 for handles, inbox behavior, and rate-limited broadcasts. For work that needs
 ownership or tracked completion, a comment-sized task becomes a child issue.
 
