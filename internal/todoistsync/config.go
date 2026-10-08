@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,12 +11,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-
-// ValidateID preserves opaque IDs and prevents path/query injection.
+// ValidateID requires a Todoist ID. IDs are opaque strings; requests escape them.
 func ValidateID(value string) error {
-	if !idPattern.MatchString(value) {
-		return fmt.Errorf("todoist ID must be a nonempty URL-safe opaque ID")
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("todoist ID is required")
 	}
 	return nil
 }
@@ -29,7 +26,7 @@ func ParseHistorySince(value string) (time.Time, error) {
 	if err != nil {
 		at, err = time.Parse(time.DateOnly, value)
 	}
-	if err != nil || strings.ContainsAny(value, ".,") || !validTime(at) {
+	if err != nil || strings.ContainsAny(value, ".,") {
 		return time.Time{}, fmt.Errorf("todoist history_since requires a UTC date or whole-second RFC3339 instant")
 	}
 	return at.UTC(), nil
@@ -100,6 +97,9 @@ func DecodeConfig(raw jsontext.Value) (Config, error) {
 	}
 	return c, nil
 }
-func validTime(at time.Time) bool {
-	return !at.IsZero() && at.UTC().Year() >= 1 && at.UTC().Year() <= 9999
+
+// historyFloor is the normalized history_since instant.
+func (c Config) historyFloor() time.Time {
+	at, _ := ParseHistorySince(c.HistorySince)
+	return at
 }

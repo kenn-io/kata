@@ -37,11 +37,8 @@ type RunnerConfig struct {
 	// RunTimeout bounds preparation, imports, and finalization after claim.
 	// Zero preserves detached GitHub finalization after caller cancellation.
 	RunTimeout time.Duration
-	// StatusTimeout bounds the independent two-way status pass. Zero keeps the
-	// historical provider-independent limit.
-	StatusTimeout time.Duration
-	Clock         func() time.Time
-	EventSink     func(context.Context, int64, []db.Event) error
+	Clock      func() time.Time
+	EventSink  func(context.Context, int64, []db.Event) error
 	// EventSinkFrom takes precedence over EventSink when set. Its fork source
 	// is nil when the pass has no parent activity lease.
 	EventSinkFrom    func(context.Context, int64, []db.Event, activity.Admission) error

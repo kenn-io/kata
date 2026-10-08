@@ -46,7 +46,7 @@ func (f *runtimeTodoistFetcher) Tasks(ctx context.Context, c todoistsync.Config,
 		return nil, ctx.Err()
 	}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	return []todoistsync.Task{{ID: "33333333-3333-4333-8333-333333333333", ProjectID: c.ProjectID, Content: "Scheduled task", Checked: new(false), Deleted: new(false), Priority: 1, AddedAt: at, UpdatedAt: at}}, nil
+	return []todoistsync.Task{{ID: "33333333-3333-4333-8333-333333333333", ProjectID: c.ProjectID, Content: "Scheduled task", Priority: 1, AddedAt: at, UpdatedAt: at}}, nil
 }
 func runtimeTodoistBinding(t *testing.T, store db.Storage, id int64) db.IssueSyncBinding {
 	t.Helper()

@@ -2,23 +2,21 @@ package todoistsync
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v7"
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/todoistsync/todoistapi"
 )
-
-const maxResponseBytes = 8 << 20
-const maxResponsePages = 1000
 
 // Fetcher resolves credential identity and opens an account-pinned read session.
 type Fetcher interface {
@@ -26,38 +24,34 @@ type Fetcher interface {
 	ForRun(context.Context, Config) (Session, error)
 }
 
-// Session reads one selected project, its active tasks and the completions
-// recorded from since (clamped to the history floor) until the cutoff.
+// Session reads one selected project and its tasks.
 type Session interface {
 	Project(context.Context, Config) (Project, error)
+	// Tasks returns every active task and the tasks completed in
+	// [since, until), with since clamped to the history floor.
 	Tasks(ctx context.Context, c Config, since, until time.Time) ([]Task, error)
 }
 
-// ClientConfig selects daemon-owned credentials and isolated transport/timing seams.
+// ClientConfig selects daemon-owned credentials and an optional transport.
 type ClientConfig struct {
 	Daemon    config.TodoistSyncConfig
 	LookupEnv func(string) (string, bool)
 	Transport http.RoundTripper
-	Now       func() time.Time
-	Wait      func(context.Context, time.Duration) error
+	// BackOff overrides the GET retry policy; tests use it to avoid waiting.
+	BackOff func() backoff.BackOff
 }
 
-// Client owns origin-pinned HTTP requests, pacing and shared retry cooldowns.
+// Client builds sessions against Todoist's API at the configured origin.
 type Client struct {
-	cfg            ClientConfig
-	configErr      error
-	http           *http.Client
-	mu             sync.Mutex
-	admission      chan struct{}
-	next, cooldown time.Time
+	cfg       ClientConfig
+	configErr error
+	http      *http.Client
 }
+
 type clientSession struct {
 	client *Client
 	config Config
-	token  string
-	// scoped and history serve status reads within one run.
-	scoped  bool
-	history *completionHistory
+	api    *todoistapi.Client
 }
 
 // NewClient constructs a client without reading credentials or contacting Todoist.
@@ -67,14 +61,14 @@ func NewClient(cfg ClientConfig) *Client {
 	if cfg.LookupEnv == nil {
 		cfg.LookupEnv = os.LookupEnv
 	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
+	if cfg.BackOff == nil {
+		cfg.BackOff = func() backoff.BackOff { return backoff.NewExponentialBackOff() }
 	}
-	if cfg.Wait == nil {
-		cfg.Wait = waitForTodoist
-	}
-	return &Client{cfg: cfg, configErr: err, admission: make(chan struct{}, 1), http: &http.Client{Transport: cfg.Transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	// Redirects are refused so the bearer token never leaves the configured origin.
+	httpClient := &http.Client{Transport: cfg.Transport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &Client{cfg: cfg, configErr: err, http: httpClient}
 }
+
 func (c *Client) session(ctx context.Context) (*clientSession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -84,10 +78,19 @@ func (c *Client) session(ctx context.Context) (*clientSession, error) {
 	}
 	token, ok := c.cfg.LookupEnv(c.cfg.Daemon.TokenEnv)
 	token = strings.TrimSpace(token)
-	if !ok || token == "" || strings.ContainsAny(token, "\r\n\x00") {
-		return nil, blocked("Todoist daemon token environment variable is unset or invalid")
+	if !ok || token == "" {
+		return nil, blocked("Todoist daemon token environment variable is unset")
 	}
-	return &clientSession{client: c, config: Config{APIOrigin: c.cfg.Daemon.APIOrigin}, token: token}, nil
+	api, err := todoistapi.NewDefaultClient(c.cfg.Daemon.APIOrigin,
+		runtime.WithHTTPClient(retryingDoer{http: c.http, backOff: c.cfg.BackOff}),
+		runtime.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer "+token)
+			return nil
+		}))
+	if err != nil {
+		return nil, err
+	}
+	return &clientSession{client: c, config: Config{APIOrigin: c.cfg.Daemon.APIOrigin}, api: api}, nil
 }
 
 // Account resolves only the credential's identity; no account data is imported.
@@ -98,24 +101,19 @@ func (c *Client) Account(ctx context.Context) (string, error) {
 	}
 	return s.account(ctx)
 }
+
 func (s *clientSession) account(ctx context.Context) (string, error) {
-	raw, err := s.get(ctx, "/api/v1/user")
-	if err != nil {
+	resp, err := s.api.UserInfoAPIV1UserGetWithResponse(ctx)
+	if err := responseError(err, "read Todoist account"); err != nil {
 		return "", err
 	}
-	var account struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal(raw, &account) != nil || ValidateID(account.ID) != nil {
-		return "", blocked("invalid Todoist account response")
-	}
-	if s.config.AccountID != "" && account.ID != s.config.AccountID {
+	if s.config.AccountID != "" && resp.JSON200.ID != s.config.AccountID {
 		return "", blocked("Todoist credential account differs from the saved binding")
 	}
-	return account.ID, nil
+	return resp.JSON200.ID, nil
 }
 
-// ForRun captures one credential and verifies its configured account identity.
+// ForRun opens a session for one binding after checking the credential's account.
 func (c *Client) ForRun(ctx context.Context, input Config) (Session, error) {
 	input, err := normalizeConfig(input)
 	if err != nil {
@@ -134,166 +132,90 @@ func (c *Client) ForRun(ctx context.Context, input Config) (Session, error) {
 	}
 	return s, nil
 }
-func (s *clientSession) validate(input Config) error {
-	c, err := normalizeConfig(input)
-	if err != nil {
-		return err
+
+// Project reads the selected project and refuses archived or deleted projects.
+func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) {
+	resp, err := s.api.GetProjectAPIV1ProjectsProjectIDGetWithResponse(ctx, &todoistapi.GetProjectAPIV1ProjectsProjectIDGetRequestOptions{
+		PathParams: &todoistapi.GetProjectAPIV1ProjectsProjectIDGetPath{ProjectID: url.PathEscape(c.ProjectID)},
+	})
+	if err := responseError(err, "read Todoist project"); err != nil {
+		return Project{}, err
 	}
-	if c.SourceKey() != s.config.SourceKey() {
-		return blocked("Todoist session scope differs from binding")
+	var p Project
+	if v := resp.JSON200.AnyProjectSyncViewResponse_AnyOf; v != nil && v.IsA() {
+		p = Project{ID: v.A.ID, Name: v.A.Name, Archived: v.A.IsArchived, Deleted: v.A.IsDeleted}
+	} else if v != nil && v.IsB() {
+		p = Project{ID: v.B.ID, Name: v.B.Name, Archived: v.B.IsArchived, Deleted: v.B.IsDeleted}
 	}
-	return nil
+	if p.ID != c.ProjectID || p.Archived || p.Deleted {
+		return Project{}, blocked("Todoist project is unavailable")
+	}
+	return p, nil
 }
+
 func blocked(message string) error { return &issuesync.StatusError{Message: message, Blocked: true} }
-func waitForTodoist(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
 
-func (c *Client) admit(ctx context.Context) error {
-	select {
-	case c.admission <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	defer func() { <-c.admission }()
-	if err := ctx.Err(); err != nil {
+// responseError classifies a generated client error. Context errors pass
+// through; 4xx responses other than 409 and 429 block the binding.
+func responseError(err error, action string) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	c.mu.Lock()
-	when := c.next
-	if c.cooldown.After(when) {
-		when = c.cooldown
+	if statusErr, ok := errors.AsType[*issuesync.StatusError](err); ok {
+		return statusErr
 	}
-	c.mu.Unlock()
-	if now := c.cfg.Now(); now.After(when) {
-		when = now
+	apiErr, ok := errors.AsType[*runtime.ClientAPIError](err)
+	if !ok || apiErr.StatusCode() == 0 {
+		return &issuesync.StatusError{Message: "cannot " + action}
 	}
-	for {
-		if delay := when.Sub(c.cfg.Now()); delay > 0 {
-			if err := c.cfg.Wait(ctx, delay); err != nil {
-				return err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		c.mu.Lock()
-		// An in-flight request may extend the shared cooldown while we wait.
-		if c.cooldown.After(when) {
-			when = c.cooldown
-			c.mu.Unlock()
-			continue
-		}
-		if now := c.cfg.Now(); now.After(when) {
-			when = now
-		}
-		c.next = when.Add(time.Second)
-		c.mu.Unlock()
-		return nil
+	code := apiErr.StatusCode()
+	return &issuesync.StatusError{
+		Message:    fmt.Sprintf("cannot %s (HTTP %d)", action, code),
+		HTTPStatus: code,
+		Blocked:    code >= 300 && code < 500 && code != http.StatusConflict && code != http.StatusTooManyRequests,
 	}
 }
 
-func (c *Client) deferRequests(header string, attempt int) {
-	now := c.cfg.Now()
-	delay := time.Duration(1<<attempt) * time.Second
-	if seconds, err := strconv.ParseInt(header, 10, 32); err == nil && seconds >= 0 {
-		delay = time.Duration(seconds) * time.Second
-	} else if at, err := http.ParseTime(header); err == nil && at.After(now) {
-		delay = at.Sub(now)
-	}
-	if delay > 20*time.Minute {
-		delay = 20 * time.Minute
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	until := now.Add(delay)
-	if until.After(c.cooldown) {
-		c.cooldown = until
-	}
+// retryingDoer retries idempotent reads on 429 and 5xx with exponential
+// backoff, honoring Retry-After. Writes go out once; the status runner owns
+// their recovery.
+type retryingDoer struct {
+	http    *http.Client
+	backOff func() backoff.BackOff
 }
 
-// cooldownRemaining reports how long requests stay deferred after a rate limit.
-func (c *Client) cooldownRemaining() time.Duration {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return max(c.cooldown.Sub(c.cfg.Now()), 0)
-}
-
-// get reads Todoist's API at the configured provider origin, not the Kata API.
+// Do sends Todoist API requests to the configured provider origin, not the Kata API.
 // huma-check:external
-func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
-	for attempt := 0; ; attempt++ {
-		if err := s.client.admit(ctx); err != nil {
+func (d retryingDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	// The generated client builds every URL from the origin that
+	// NormalizeTodoistSyncConfig allowlists.
+	if req.Method != http.MethodGet {
+		return d.http.Do(req) //nolint:gosec // G704: allowlisted Todoist origin.
+	}
+	return backoff.Retry(ctx, func() (*http.Response, error) {
+		resp, err := d.http.Do(req.Clone(ctx)) //nolint:gosec // G704: allowlisted Todoist origin.
+		if err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.config.APIOrigin+path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("cannot build Todoist read request")
+		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
+			return resp, nil
 		}
-		req.Header.Set("Authorization", "Bearer "+s.token)
-		req.Header.Set("Accept", "application/json")
-		response, err := s.client.http.Do(req)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, context.DeadlineExceeded
-			}
-			return nil, &issuesync.StatusError{Message: "Todoist read request failed"}
+		_ = resp.Body.Close()
+		delay := retryAfter(resp.Header.Get("Retry-After"))
+		statusErr := &issuesync.StatusError{Message: fmt.Sprintf("Todoist API temporarily unavailable (HTTP %d)", resp.StatusCode), HTTPStatus: resp.StatusCode, RetryAfter: delay}
+		if delay > 0 {
+			return nil, backoff.RetryAfter(delay, statusErr)
 		}
-		if response.StatusCode == 429 || response.StatusCode >= 500 {
-			s.client.deferRequests(response.Header.Get("Retry-After"), attempt)
-			_ = response.Body.Close()
-			if attempt < 3 {
-				continue
-			}
-			return nil, &issuesync.StatusError{Message: fmt.Sprintf("Todoist API temporarily unavailable (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, RetryAfter: s.client.cooldownRemaining()}
-		}
-		if response.StatusCode != http.StatusOK {
-			_ = response.Body.Close()
-			return nil, &issuesync.StatusError{Message: fmt.Sprintf("Todoist API read failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 409}
-		}
-		raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-		_ = response.Body.Close()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, context.DeadlineExceeded
-			}
-			return nil, &issuesync.StatusError{Message: "cannot read Todoist API response"}
-		}
-		if len(raw) > maxResponseBytes {
-			return nil, fmt.Errorf("todoist API response exceeds 8 MiB")
-		}
-		return raw, nil
-	}
+		return nil, statusErr
+	}, backoff.WithBackOff(d.backOff()), backoff.WithMaxTries(4))
 }
 
-func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) {
-	if err := s.validate(c); err != nil {
-		return Project{}, err
+func retryAfter(header string) time.Duration {
+	if seconds, err := strconv.Atoi(header); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
 	}
-	raw, err := s.get(ctx, projectAPIPath(c.ProjectID))
-	if err != nil {
-		return Project{}, err
+	if at, err := http.ParseTime(header); err == nil {
+		return max(time.Until(at), 0)
 	}
-	var project Project
-	if json.Unmarshal(raw, &project) != nil || project.ID != c.ProjectID || project.Archived == nil || project.Deleted == nil || *project.Archived || *project.Deleted {
-		return Project{}, blocked("Todoist project is unavailable or identity does not match")
-	}
-	return project, nil
-}
-
-func projectAPIPath(id string) string {
-	return strings.Join([]string{"/api/v1", "projects", id}, "/")
+	return 0
 }

@@ -34,7 +34,7 @@ func TestTodoistCLIEnablePreservesPresence(t *testing.T) {
 	}
 }
 func TestTodoistCLIRejectsUnsafeScope(t *testing.T) {
-	for _, args := range [][]string{{"--todoist-project", "bad/path"}, {"--history-since", ""}, {"--history-since", "bad"}, {"--interval", "0"}, {"--token", "secret"}, {"--api-origin", "https://foreign.example"}} {
+	for _, args := range [][]string{{"--todoist-project", " "}, {"--history-since", ""}, {"--history-since", "bad"}, {"--interval", "0"}, {"--token", "secret"}, {"--api-origin", "https://foreign.example"}} {
 		env, dir := notionCLIHTTP(t, func(http.ResponseWriter, *http.Request) { t.Error("invalid input reached daemon") })
 		_, _, err := runCLIWithErr(t, env, dir, append([]string{"sync", "todoist", "enable"}, args...)...)
 		require.Error(t, err)

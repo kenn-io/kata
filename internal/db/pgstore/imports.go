@@ -257,8 +257,6 @@ func (s *Store) importIssue(
 	}
 	sourceCurrent := mapping.SourceUpdatedAt != nil &&
 		(db.SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) || item.UpdatedAt.After(*mapping.SourceUpdatedAt))
-	unknownSourceCurrent := db.ImportOwnsUnknownSourceVersion(params, mapping, existing, item)
-	sourceCurrent = sourceCurrent || unknownSourceCurrent
 	// Keep older observations from gaining current-version label authority on
 	// their next replay. The source timestamp is independent of local edits.
 	sourceUpdatedAt := item.UpdatedAt
@@ -280,13 +278,8 @@ func (s *Store) importIssue(
 		}
 		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &event, nil
 	}
-	unknownTitleCurrent := db.ImportOwnsUnknownSourceVersionTitle(params, mapping, existing, item)
-	if db.ImportOwnsSameSourceVersionStatus(params, mapping, existing, item) || db.ImportOwnsUnknownSourceVersionStatus(params, mapping, existing, item) || unknownTitleCurrent {
-		presentation := db.ImportedStatusOnlyItem(existing, item)
-		if unknownTitleCurrent {
-			presentation.Title = item.Title
-		}
-		updated, event, err := s.updateImportedIssue(ctx, tx, params, presentation, existing, project)
+	if db.ImportOwnsSameSourceVersionStatus(params, mapping, existing, item) {
+		updated, event, err := s.updateImportedIssue(ctx, tx, params, db.ImportedStatusOnlyItem(existing, item), existing, project)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -27,7 +27,7 @@ func (f *lifecycleTodoist) Project(_ context.Context, c todoistsync.Config) (tod
 }
 func (f *lifecycleTodoist) Tasks(_ context.Context, c todoistsync.Config, _, _ time.Time) ([]todoistsync.Task, error) {
 	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	return []todoistsync.Task{{ID: "task123", ProjectID: c.ProjectID, Content: "Example task", AddedAt: at, UpdatedAt: at, Priority: 1, Checked: new(false), Deleted: new(false)}}, nil
+	return []todoistsync.Task{{ID: "task123", ProjectID: c.ProjectID, Content: "Example task", AddedAt: at, UpdatedAt: at, Priority: 1}}, nil
 }
 func (f *lifecycleTodoist) ReadStatus(context.Context, todoistsync.Config, todoistsync.StatusTarget) (issuesync.StatusObservation, error) {
 	return issuesync.StatusObservation{Status: "open", RawStatus: new("open"), Version: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)}, nil

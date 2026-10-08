@@ -102,35 +102,6 @@ func TestStatusRunnerTwoWayDoesNotCapContentRun(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestStatusTimeoutLeavesTimeForContentImport(t *testing.T) {
-	s, b, mappings, at := statusFixture(t, 1)
-	run := &statusTestRun{
-		read: func(ctx context.Context, _ db.IssueStatusMapping) (StatusObservation, error) {
-			<-ctx.Done()
-			return StatusObservation{}, ctx.Err()
-		},
-		write: func(context.Context, db.IssueStatusMapping, string, func() error) (StatusObservation, error) {
-			t.Fatal("there is no pending status write")
-			return StatusObservation{}, nil
-		},
-	}
-	a := statusAdapter(b, run)
-	a.prepare = func(ctx context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
-		require.NoError(t, ctx.Err(), "the provider status deadline must not cancel content preparation")
-		prepared := testPrepared(binding, at)
-		prepared.Batch.Items[0].ExternalID = mappings[0].Mapping.ExternalID
-		prepared.Batch.Items[0].Title = "Fresh content after status deadline"
-		prepared.Batch.Items[0].UpdatedAt = at.Add(time.Hour)
-		return prepared, nil
-	}
-	result, err := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }, StatusTimeout: 20 * time.Millisecond}).RunOnce(t.Context(), b.ID)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Equal(t, 1, result.Import.Updated)
-	issue, err := s.IssueByID(t.Context(), *mappings[0].Mapping.IssueID)
-	require.NoError(t, err)
-	require.Equal(t, "Fresh content after status deadline", issue.Title)
-}
-
 func TestStatusRunnerInvalidMappingDoesNotStopTheSweep(t *testing.T) {
 	for name, corrupt := range map[string]string{
 		"missing pending event": `UPDATE import_mappings SET pending_event_uid='01HZZZZZZZZZZZZZZZZZZZZZ99' WHERE id=$1`,

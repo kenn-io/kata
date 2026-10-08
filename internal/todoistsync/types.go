@@ -22,39 +22,30 @@ func (c Config) RemoteID() string { return c.AccountID + "/" + c.ProjectID }
 // UseTitlePrefix defaults omitted presentation choices to prefixed titles.
 func (c Config) UseTitlePrefix() bool { return c.TitlePrefix == nil || *c.TitlePrefix }
 
-// Project contains the selected source identity and archive/deletion evidence.
+// Project is the selected Todoist project.
 type Project struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Archived *bool  `json:"is_archived"`
-	Deleted  *bool  `json:"is_deleted"`
+	ID       string
+	Name     string
+	Archived bool
+	Deleted  bool
 }
 
-// Due contains the recurrence flag needed to prevent occurrence-advancing writes.
-type Due struct {
-	Recurring bool `json:"is_recurring"`
-}
-
-// Task follows the documented ItemSyncView, keeping absent status flags distinct.
+// Task is the subset of a Todoist task that Kata imports and writes back.
 type Task struct {
-	ID          string     `json:"id"`
-	ProjectID   string     `json:"project_id"`
-	ParentID    string     `json:"parent_id"`
-	SectionID   string     `json:"section_id"`
-	Content     string     `json:"content"`
-	Description string     `json:"description"`
-	AddedBy     string     `json:"added_by_uid"`
-	Assignee    string     `json:"responsible_uid"`
-	Labels      []string   `json:"labels"`
-	Priority    int64      `json:"priority"`
-	AddedAt     time.Time  `json:"added_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	CompletedAt *time.Time `json:"completed_at"`
-	Checked     *bool      `json:"checked"`
-	Deleted     *bool      `json:"is_deleted"`
-	Due         *Due       `json:"due"`
-	// recurrenceKnown is ephemeral read evidence; absent fields never authorize a write.
-	recurrenceKnown bool
-	hierarchyKnown  bool
-	updatedAtKnown  bool
+	ID          string
+	ProjectID   string
+	ParentID    string
+	SectionID   string
+	Content     string
+	Description string
+	AddedBy     string
+	Assignee    string
+	Labels      []string
+	Priority    int
+	AddedAt     time.Time
+	UpdatedAt   time.Time
+	CompletedAt *time.Time
+	Checked     bool
+	Deleted     bool
+	Recurring   bool
 }

@@ -1,114 +1,54 @@
 package todoistsync
 
 import (
-	"encoding/json/v2"
-	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/importlabels"
 )
 
-const maxItems = 10000
-
 // todoistTitlePrefix marks imported titles when title_prefix is enabled.
 const todoistTitlePrefix = "[Todoist] "
-const maxImportBytes = 64 << 20
 
-func validateTask(c Config, r Task) error {
-	for _, id := range []string{r.ID, r.ProjectID} {
-		if err := ValidateID(id); err != nil {
-			return err
-		}
-	}
-	if r.ProjectID != c.ProjectID || r.Deleted == nil || *r.Deleted || r.Checked == nil {
-		return fmt.Errorf("todoist task is missing, deleted or outside the selected project")
-	}
-	if !validTime(r.AddedAt) || !validTime(r.UpdatedAt) || r.UpdatedAt.Before(r.AddedAt) || r.Priority < 1 || r.Priority > 4 {
-		return fmt.Errorf("todoist task requires ordered timestamps and priority 1-4")
-	}
-	if *r.Checked && (r.CompletedAt == nil || !validTime(*r.CompletedAt) || r.CompletedAt.Before(r.AddedAt) || r.CompletedAt.After(r.UpdatedAt)) {
-		return fmt.Errorf("todoist completed task requires a valid completion timestamp")
-	}
-	for _, text := range append([]string{r.Content, r.Description}, r.Labels...) {
-		if !utf8.ValidString(text) || strings.ContainsRune(text, '\x00') {
-			return fmt.Errorf("todoist content requires valid UTF-8 without NUL")
-		}
-	}
-	if len(r.Description) > 1<<20 {
-		return fmt.Errorf("todoist description exceeds 1 MiB")
-	}
-	return nil
-}
-
-// BuildImportBatch validates the complete projection before guarded import.
-func BuildImportBatch(source string, c Config, project Project, tasks []Task) (db.ImportBatchParams, error) {
-	c, err := normalizeConfig(c)
-	if err != nil {
-		return db.ImportBatchParams{}, err
-	}
-	if source != c.SourceKey() || project.ID != c.ProjectID {
-		return db.ImportBatchParams{}, fmt.Errorf("todoist source identity does not match binding")
-	}
-	if len(tasks) > maxItems {
-		return db.ImportBatchParams{}, fmt.Errorf("todoist source exceeds 10000 tasks")
-	}
-	b := db.ImportBatchParams{Source: source, Actor: "todoist-sync", ReconcileStatusForUnchanged: true, ReconcileLabelsForUnchanged: map[string][]string{}, PresentationTitlePrefix: todoistTitlePrefix}
-	seen := map[string]bool{}
-	total := 0
-	for _, r := range tasks {
-		if err := validateTask(c, r); err != nil {
-			return db.ImportBatchParams{}, err
-		}
-		if seen[r.ID] {
-			return db.ImportBatchParams{}, fmt.Errorf("duplicate Todoist task identity")
-		}
-		seen[r.ID] = true
-		title := r.Content
+// BuildImportBatch converts tasks into one Kata import batch.
+func BuildImportBatch(c Config, tasks []Task) (db.ImportBatchParams, error) {
+	b := db.ImportBatchParams{Source: c.SourceKey(), Actor: "todoist-sync", ReconcileStatusForUnchanged: true, ReconcileLabelsForUnchanged: map[string][]string{}}
+	for _, t := range tasks {
+		title := t.Content
 		if strings.TrimSpace(title) == "" {
 			title = "(untitled)"
 		}
-		link := "https://app.todoist.com/app/task/" + r.ID
 		seenLabels := map[string]struct{}{}
-		labels := importlabels.AppendNormalized(nil, seenLabels, r.Labels...)
-		item := db.ImportItem{ExternalID: "task:" + r.ID, Title: title, Body: r.Description + "\n\n---\nImported from Todoist: " + link, Status: "open", Author: "todoist-unknown", Priority: new(5 - r.Priority), Labels: labels, CreatedAt: r.AddedAt.UTC().Truncate(time.Millisecond), UpdatedAt: r.UpdatedAt.UTC().Truncate(time.Millisecond)}
-		if !r.updatedAtKnown {
-			if b.ReconcileUnknownSourceTimestamp == nil {
-				b.ReconcileUnknownSourceTimestamp = map[string]bool{}
-			}
-			b.ReconcileUnknownSourceTimestamp[item.ExternalID] = true
+		item := db.ImportItem{
+			ExternalID: "task:" + t.ID,
+			Title:      title,
+			Body:       t.Description + "\n\n---\nImported from Todoist: https://app.todoist.com/app/task/" + t.ID,
+			Status:     "open",
+			Author:     "todoist-unknown",
+			// Todoist priority runs from 1 (normal) to 4 (urgent); Kata's 1 is highest.
+			Priority:  new(int64(5 - t.Priority)),
+			Labels:    importlabels.AppendNormalized(nil, seenLabels, t.Labels...),
+			CreatedAt: t.AddedAt.Truncate(time.Millisecond),
+			UpdatedAt: t.UpdatedAt.Truncate(time.Millisecond),
 		}
 		if c.UseTitlePrefix() {
 			item.Title = todoistTitlePrefix + title
 		} else {
 			item.Labels = importlabels.AppendNormalized(item.Labels, seenLabels, "todoist")
 		}
-		if r.AddedBy != "" {
-			if err := ValidateID(r.AddedBy); err != nil {
-				return db.ImportBatchParams{}, err
-			}
-			item.Author = "todoist:" + r.AddedBy
+		if t.AddedBy != "" {
+			item.Author = "todoist:" + t.AddedBy
 		}
-		if r.Assignee != "" {
-			if err := ValidateID(r.Assignee); err != nil {
-				return db.ImportBatchParams{}, err
-			}
-			item.Owner = new("todoist:" + r.Assignee)
+		if t.Assignee != "" {
+			item.Owner = new("todoist:" + t.Assignee)
 		}
-		if *r.Checked {
+		if t.Checked {
 			item.Status = "closed"
 			item.ClosedReason = new("done")
-			item.ClosedAt = new(r.CompletedAt.UTC().Truncate(time.Millisecond))
-		}
-		raw, err := json.Marshal(item)
-		if err != nil {
-			return db.ImportBatchParams{}, fmt.Errorf("cannot serialize Todoist task")
-		}
-		total += len(raw)
-		if total > maxImportBytes {
-			return db.ImportBatchParams{}, fmt.Errorf("todoist import exceeds 64 MiB")
+			if t.CompletedAt != nil {
+				item.ClosedAt = new(t.CompletedAt.Truncate(time.Millisecond))
+			}
 		}
 		b.ReconcileLabelsForUnchanged[item.ExternalID] = []string{"todoist"}
 		b.Items = append(b.Items, item)

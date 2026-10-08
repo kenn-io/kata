@@ -91,60 +91,48 @@ replaces older queued intent. The existing claim and admission checks fence
 disabled bindings, changed settings and superseded intent before dispatch.
 
 Recurring tasks remain importable. Their outbound completion is blocked because
-Todoist's close operation advances the next occurrence. Complete them in
-Todoist. An incomplete response that omits recurrence or hierarchy evidence also blocks
-writeback. Kata also blocks closing tasks with active subtasks and reopening
-child tasks because Todoist cascades those operations. Reopening a task in a
-section requires a fresh read proving that section is active in the selected
-project; an archived or unavailable section blocks delivery. Todoist offers no
-atomic conditional status operation, so provider edits between validation and
-dispatch remain an API concurrency limitation.
+Todoist's close operation moves them to their next date. Complete them in
+Todoist. Kata also blocks closing tasks with active subtasks, reopening
+subtasks, and reopening tasks in an archived section, because Todoist applies
+those operations to the subtasks, parent tasks or section too. Todoist offers
+no atomic conditional status operation, so provider edits between these checks
+and the write remain an API concurrency limitation.
 
 ## Recovery and limits
 
 Each run reads every active task with project-filtered cursor pagination. It
-reads completion history in contiguous thirty-day windows, because Todoist
-allows at most three months per completion-date request:
+reads completion history in windows of at most three months, the limit Todoist
+allows per completion-date request:
 
 - The first run, and the first run after a title-presentation change, read
   history from the floor.
 - Later runs read completions since the last successful run's start, with a
   two-minute overlap. A failed run does not advance that point.
 
-Each run's reads are bounded to 1,000 pages, 10,000 task observations, 8 MiB
-per response and 64 MiB total. Exceeding a limit or failing a page prevents
-partial content import. Status scans have their own durable checkpoints and can
-progress independently of content failures.
+A failed read prevents partial content import. Status scans have their own
+durable checkpoints and can progress independently of content failures.
 
 Two-way status scans read each mapped task's active state. A task whose
 completion Kata already verified is not looked up in history again while it
 stays inactive. A task last seen open is searched in history from that
-observation onward; other lookups start at the configured floor. Status scans
-search recent thirty-day windows first and stop when they find the exact task.
-They share successful history reads across mappings and stay within the
-10,000-observation limit per lookup. Reopen checks and write verification read
-history fresh.
+observation onward; other lookups start at the configured floor.
 
-Unknown (`null`) creation or update times take the task's other known
-timestamps; a task with none blocks the run. When `updated_at` is unknown, a
-fresh status change still advances its checkpoint past the prior observation.
-While no one has edited the issue in Kata, imports still apply a one-way
-status change and add or remove the `[Todoist] ` title prefix. Other title,
-description and field changes import only when the task's known timestamps are
-newer than the stored version. Newer local edits remain authoritative.
+Todoist reports unknown (`null`) creation or update times. Kata uses the task's
+other known timestamps instead, or the history floor when none are known. A
+task whose update time is unknown cannot be ordered against Kata's stored
+version, so a reopen in Todoist reaches Kata only after the task changes again.
 
 An active task wins over historical completions of the same ID, including old
-recurring occurrences. Conflicting observations at the same version fail the
-run. A missing task or `404` is never treated as completion or deletion. Kata
-accepts a completion only when the exact task is found in scoped history and
-an active reread does not find a reopened task. Deleted, moved, inaccessible or
-archived data blocks delivery and preserves native issues. Tasks completed
-before the configured history floor cannot be resolved through that history.
+recurring occurrences. A missing task is never treated as completion or
+deletion: Kata accepts a completion only when the exact task is found in scoped
+history. Deleted, moved or inaccessible tasks block delivery and preserve native
+issues. Tasks completed before the configured history floor cannot be resolved
+through that history.
 
-Reads retry transient failures with bounded backoff. Requests share pacing and
-`Retry-After` cooldowns. Authentication and permission failures stop credential
-fallback. A status POST is sent once and verified through fresh reads. A lost
-or unverified response retains pending intent; the next run reads the provider
+Reads retry `429` and `5xx` responses with exponential backoff, honoring
+`Retry-After`. Authentication and permission failures block the binding. A
+close or reopen is sent once and verified with a fresh read. A lost or
+unverified response retains pending intent; the next run reads the provider
 before deciding whether another write is needed. Check `status` for pending
 changes and blocked errors. Repair credentials or provider state, then run
 `kata sync todoist once` or wait for the next scheduled attempt.

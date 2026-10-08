@@ -18,8 +18,8 @@ type TodoistSyncConfig struct {
 
 var todoistTokenEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// NormalizeTodoistSyncConfig pins production traffic to Todoist's public API.
-// Literal HTTP loopback origins support isolated local API fixtures.
+// NormalizeTodoistSyncConfig pins the token to Todoist's public API. Literal
+// HTTP loopback origins support isolated local API fixtures.
 func NormalizeTodoistSyncConfig(c TodoistSyncConfig) (TodoistSyncConfig, error) {
 	c.TokenEnv = strings.TrimSpace(c.TokenEnv)
 	if c.TokenEnv == "" {
@@ -31,18 +31,11 @@ func NormalizeTodoistSyncConfig(c TodoistSyncConfig) (TodoistSyncConfig, error) 
 	if strings.TrimSpace(c.APIOrigin) == "" {
 		c.APIOrigin = "https://api.todoist.com"
 	}
-	u, err := url.Parse(strings.TrimSpace(c.APIOrigin))
-	if err != nil || u.User != nil || u.Opaque != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(c.APIOrigin, "#") || strings.HasSuffix(u.Host, ":") {
-		return TodoistSyncConfig{}, errors.New("invalid todoist_sync.api_origin")
-	}
 	origin, err := httpurl.CanonicalHTTPOrigin(c.APIOrigin)
 	if err != nil {
 		return TodoistSyncConfig{}, errors.New("invalid todoist_sync.api_origin")
 	}
-	u, err = url.Parse(origin)
-	if err != nil {
-		return TodoistSyncConfig{}, errors.New("invalid todoist_sync.api_origin")
-	}
+	u, _ := url.Parse(origin)
 	ip := net.ParseIP(u.Hostname())
 	if origin != "https://api.todoist.com" && (u.Scheme != "http" || ip == nil || !ip.IsLoopback()) {
 		return TodoistSyncConfig{}, errors.New("todoist_sync.api_origin requires https://api.todoist.com or literal loopback HTTP")

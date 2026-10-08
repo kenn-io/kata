@@ -56,7 +56,7 @@ func TestRunnerDurableCloseReopenAndReplay(t *testing.T) {
 	_, err = runner.RunOnce(ctx, binding.ID)
 	require.NoError(t, err)
 	require.Len(t, f.posts, 1)
-	require.False(t, f.active)
+	require.True(t, f.row.Checked)
 	_, err = runner.RunOnce(ctx, binding.ID)
 	require.NoError(t, err)
 	require.Len(t, f.posts, 1)
@@ -66,7 +66,7 @@ func TestRunnerDurableCloseReopenAndReplay(t *testing.T) {
 	_, err = newRunner().RunOnce(ctx, binding.ID)
 	require.NoError(t, err)
 	require.Len(t, f.posts, 2)
-	require.True(t, f.active)
+	require.False(t, f.row.Checked)
 	issue, err := store.IssueByID(ctx, *mapping.IssueID)
 	require.NoError(t, err)
 	require.Equal(t, "open", issue.Status)
@@ -104,29 +104,6 @@ func newRunnerFixture(t *testing.T, mode string) (*sqlitestore.Store, db.IssueSy
 
 func (f *apiFixture) runner(store db.Storage) *issuesync.Runner {
 	return NewRunner(RunnerConfig{Store: store, Fetcher: f.client(), Clock: func() time.Time { f.mu.Lock(); defer f.mu.Unlock(); return f.now }})
-}
-
-func (f *apiFixture) completeInTodoist() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.now = f.now.Add(time.Minute)
-	f.active = false
-	f.row.Checked = new(true)
-	f.row.CompletedAt = new(f.now)
-	f.row.UpdatedAt = f.now
-	f.now = f.now.Add(time.Minute)
-}
-
-func (f *apiFixture) requestsTo(path string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := 0
-	for _, p := range f.paths {
-		if p == path {
-			n++
-		}
-	}
-	return n
 }
 
 // Contract: after a successful run, completion history resumes from the saved
@@ -176,60 +153,4 @@ func TestRunnerSweepOfCompletedTaskSkipsHistoryReplay(t *testing.T) {
 	require.Equal(t, 1, f.requestsTo("/api/v1/tasks/completed/by_completion_date"), "content window only")
 	require.Equal(t, 2, f.requestsTo("/api/v1/user"), "one account check per session")
 	require.Empty(t, f.posts)
-}
-
-// Contract: a currently active Todoist task with unknown updated_at can still
-// reopen its imported issue after an earlier completion observation.
-func TestRunnerReopensTaskWithUnknownUpdatedAt(t *testing.T) {
-	ctx := context.Background()
-	store, binding, f := newRunnerFixture(t, "one-way")
-	_, err := f.runner(store).RunOnce(ctx, binding.ID)
-	require.NoError(t, err)
-	f.completeInTodoist()
-	_, err = f.runner(store).RunOnce(ctx, binding.ID)
-	require.NoError(t, err)
-
-	mapping, err := store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", "task:"+f.row.ID)
-	require.NoError(t, err)
-	issue, err := store.IssueByID(ctx, *mapping.IssueID)
-	require.NoError(t, err)
-	require.Equal(t, "closed", issue.Status)
-	previousTitle, previousBody := issue.Title, issue.Body
-
-	f.mu.Lock()
-	f.now = f.now.Add(time.Minute)
-	f.active = true
-	f.row.Checked = new(false)
-	f.row.CompletedAt = nil
-	f.row.UpdatedAt = f.now
-	f.nullFields = []string{"updated_at"}
-	f.mu.Unlock()
-	_, err = f.runner(store).RunOnce(ctx, binding.ID)
-	require.NoError(t, err)
-
-	issue, err = store.IssueByID(ctx, *mapping.IssueID)
-	require.NoError(t, err)
-	require.Equal(t, "open", issue.Status)
-	require.Equal(t, previousTitle, issue.Title)
-	require.Equal(t, previousBody, issue.Body)
-
-	c, err := DecodeConfig(binding.Config)
-	require.NoError(t, err)
-	c.TitlePrefix = new(false)
-	raw, err := EncodeConfig(c)
-	require.NoError(t, err)
-	binding, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
-		ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey,
-		RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw,
-		IntervalSeconds: binding.IntervalSeconds,
-	})
-	require.NoError(t, err)
-	_, err = f.runner(store).RunOnce(ctx, binding.ID)
-	require.NoError(t, err)
-	issue, err = store.IssueByID(ctx, *mapping.IssueID)
-	require.NoError(t, err)
-	require.Equal(t, "Example task", issue.Title)
-	labels, err := store.LabelsForIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Contains(t, labels, "todoist")
 }

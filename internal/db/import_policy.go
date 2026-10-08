@@ -101,46 +101,6 @@ func ImportOwnsSameSourceVersionStatus(params ImportBatchParams, mapping ImportM
 	return item.Status != existing.Status || !equalImportOptionalString(item.ClosedReason, existing.ClosedReason)
 }
 
-// ImportOwnsUnknownSourceVersion reports whether an explicitly current
-// provider observation with no source timestamp still belongs to the stored
-// source version. It cannot override a newer local edit.
-func ImportOwnsUnknownSourceVersion(params ImportBatchParams, mapping ImportMapping, existing Issue, item ImportItem) bool {
-	if !params.ReconcileUnknownSourceTimestamp[item.ExternalID] || mapping.SourceUpdatedAt == nil ||
-		!SameImportTimestamp(*mapping.SourceUpdatedAt, existing.UpdatedAt) {
-		return false
-	}
-	if params.ReconcileStatusForUnchanged {
-		return true
-	}
-	_, presentation := params.ReconcileLabelsForUnchanged[item.ExternalID]
-	return presentation
-}
-
-// ImportOwnsUnknownSourceVersionStatus permits a current provider status
-// observation with no source timestamp while the source still owns the issue
-// version. It cannot override a newer local edit.
-func ImportOwnsUnknownSourceVersionStatus(params ImportBatchParams, mapping ImportMapping, existing Issue, item ImportItem) bool {
-	if !params.ReconcileStatusForUnchanged || !ImportOwnsUnknownSourceVersion(params, mapping, existing, item) {
-		return false
-	}
-	return item.Status != existing.Status || !equalImportOptionalString(item.ClosedReason, existing.ClosedReason)
-}
-
-// ImportOwnsUnknownSourceVersionTitle permits a presentation title refresh
-// when that item also opted into current presentation-label reconciliation.
-// Without a source version, only adding or removing the importer's declared
-// presentation prefix counts as presentation; other title changes may be stale.
-func ImportOwnsUnknownSourceVersionTitle(params ImportBatchParams, mapping ImportMapping, existing Issue, item ImportItem) bool {
-	if params.ReconcileLabelsForUnchanged == nil || params.PresentationTitlePrefix == "" {
-		return false
-	}
-	if _, ok := params.ReconcileLabelsForUnchanged[item.ExternalID]; !ok || !ImportOwnsUnknownSourceVersion(params, mapping, existing, item) {
-		return false
-	}
-	prefix := params.PresentationTitlePrefix
-	return existing.Title == prefix+item.Title || prefix+existing.Title == item.Title
-}
-
 // ImportedStatusOnlyItem preserves unrelated scalars when the provider's
 // workflow schema changes without advancing its item version.
 func ImportedStatusOnlyItem(existing Issue, item ImportItem) ImportItem {

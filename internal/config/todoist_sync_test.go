@@ -14,7 +14,7 @@ func TestTodoistSyncConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://api.todoist.com", got.APIOrigin)
 	require.Equal(t, "KATA_TODOIST_TOKEN", got.TokenEnv)
-	for _, origin := range []string{"https://foreign.example", "http://192.168.1.1", "https://api.todoist.com/secret", "https://person:secret@api.todoist.com", "https://api.todoist.com/?secret"} {
+	for _, origin := range []string{"https://foreign.example", "http://192.168.1.1", "https://person:secret@api.todoist.com"} {
 		_, err := config.NormalizeTodoistSyncConfig(config.TodoistSyncConfig{APIOrigin: origin})
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "secret")

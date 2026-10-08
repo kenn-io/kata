@@ -192,9 +192,6 @@ func todoistSyncVerifySource(ctx context.Context, fetcher todoistsync.Fetcher, c
 	if err != nil {
 		return nil, "", todoistSyncRemoteError(err, "cannot access the selected active Todoist project")
 	}
-	if _, err := todoistsync.BuildImportBatch(c.SourceKey(), c, project, nil); err != nil {
-		return nil, "", todoistSyncValidation(err.Error())
-	}
 	name := project.Name
 	if strings.TrimSpace(name) == "" {
 		name = "Todoist project " + c.ProjectID
