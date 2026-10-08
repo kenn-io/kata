@@ -366,9 +366,14 @@ func purgeCascade(
 	}
 	// A source reply keeps its original event, payload and portable target UID.
 	// Only the local FK is detached; scoped readers fail closed on the orphan UID.
-	if _, err := c.ExecContext(ctx,
-		`UPDATE events SET related_issue_id = NULL WHERE related_issue_id = ? AND type = 'issue.commented'`, issue.ID); err != nil {
+	replyDetachResult, err := c.ExecContext(ctx,
+		`UPDATE events SET related_issue_id = NULL WHERE related_issue_id = ? AND type = 'issue.commented'`, issue.ID)
+	if err != nil {
 		return 0, fmt.Errorf("detach reply target issue: %w", err)
+	}
+	detachedReplyCount, err := replyDetachResult.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count detached reply targets: %w", err)
 	}
 	if _, err := c.ExecContext(ctx,
 		`DELETE FROM comments WHERE issue_id = ?`, issue.ID); err != nil {
@@ -406,10 +411,9 @@ func purgeCascade(
 		}
 	}
 
-	// Step 5: reserve an SSE cursor by bumping sqlite_sequence past the
-	// max events.id we just deleted. Skip when no events were attached —
-	// there's nothing for subscribers to skip past.
-	reservedCursor, err := reserveEventSequence(ctx, c, minEventID.Valid)
+	// Step 5: reserve an SSE cursor when purge deletes events or detaches a
+	// surviving reply target. Both changes invalidate cached browser snapshots.
+	reservedCursor, err := reserveEventSequence(ctx, c, minEventID.Valid || detachedReplyCount > 0)
 	if err != nil {
 		return 0, err
 	}
@@ -462,10 +466,10 @@ func scanCount(ctx context.Context, r sqlReader, query string, args ...any) (int
 
 // reserveEventSequence advances sqlite_sequence for events past the current
 // seq, returning the reserved value as a NullInt64 (Valid=true) for the
-// purge_log row's purge_reset_after_event_id column. If hadEvents is false,
+// purge_log row's purge_reset_after_event_id column. If needsReset is false,
 // returns NullInt64{} so the column stores NULL (no SSE reset needed).
-func reserveEventSequence(ctx context.Context, c connExec, hadEvents bool) (sql.NullInt64, error) {
-	if !hadEvents {
+func reserveEventSequence(ctx context.Context, c connExec, needsReset bool) (sql.NullInt64, error) {
+	if !needsReset {
 		return sql.NullInt64{}, nil
 	}
 	var seq int64

@@ -72,8 +72,13 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		}
 		// Retain the source reply's portable envelope/hash for replay and scoping.
 		// Its numeric target FK must be detached before deleting the target issue.
-		if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
-WHERE related_issue_id = $1 AND type = 'issue.commented'`, issue.ID); err != nil {
+		replyDetachResult, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
+WHERE related_issue_id = $1 AND type = 'issue.commented'`, issue.ID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		detachedReplyCount, err := replyDetachResult.RowsAffected()
+		if err != nil {
 			return mapSQLError(err, nil)
 		}
 		for _, statement := range []string{
@@ -104,7 +109,7 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 		}
 
 		var resetCursor sql.NullInt64
-		if minEventID.Valid {
+		if minEventID.Valid || detachedReplyCount > 0 {
 			if err := lockEventSequenceTx(ctx, tx); err != nil {
 				return err
 			}

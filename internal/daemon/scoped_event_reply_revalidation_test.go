@@ -112,7 +112,7 @@ func (s *purgeBeforeReplyLookupStore) CommentIssueIDsByUIDs(
 			return nil, err
 		}
 	}
-	return s.Storage.CommentIssueIDsByUIDs(ctx, uids)
+	return s.CommentIssueIDsByUIDs(ctx, uids)
 }
 
 type lateReplyTargetFixture struct {

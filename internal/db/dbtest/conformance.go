@@ -48,6 +48,7 @@ var storageScenarios = []scenario{
 	{name: "comment reply project purge lineage", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportPurgeLog", "MoveIssueProject", "PurgeProject", "ReadCommentGraph", "RemoveProject"}, run: checkCommentReplyProjectPurgeLineage},
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
+	{name: "reply-only purge advances snapshot cursor", methods: []string{"CreateComment", "CreateIssue", "ImportReplay", "IssueByUID", "ProjectByUID", "PurgeIssue"}, run: checkReplyOnlyPurgeAdvancesSnapshotCursor},
 	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
 	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},
 	{name: "comment reply federation", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject"}, run: checkCommentReplyFederation},
