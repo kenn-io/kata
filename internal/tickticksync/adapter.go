@@ -79,7 +79,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
-	recovered, err := recoverMissingTasks(ctx, session, missing, closedCandidates, &cp, &data)
+	recovered, err := recoverMissingTasks(ctx, session, a.now, missing, closedCandidates, &cp, &data)
 	if err != nil {
 		return p, err
 	}
@@ -90,10 +90,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
-	staged, deferred, err := stagedCheckpoint(cp, next, batch, recovered)
-	if err != nil {
-		return p, err
-	}
+	staged := stagedCheckpoint(cp, next, recovered)
 	stagedRaw, err := WithCheckpoint(b.Config, staged)
 	if err != nil {
 		return p, err
@@ -119,7 +116,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		p.Binding = b
 	}
 	p.Batch = batch
-	if deferred {
+	if len(recovered) > 0 {
 		finalizeBinding := b
 		p.Finalize = func(finalizeCtx context.Context) (db.IssueSyncBinding, error) {
 			return a.store.RefreshIssueSyncBinding(finalizeCtx, db.IssueSyncBindingUpdateParams{
@@ -169,7 +166,7 @@ func (a *Adapter) missingTaskWindow(ctx context.Context, b db.IssueSyncBinding, 
 
 // recoverMissingTasks reads the selected missing tasks and appends the ones
 // that still need an import to data. Tasks that left the project are forgotten.
-func recoverMissingTasks(ctx context.Context, session Session, missing []string, closedCandidates map[string]bool, cp *Checkpoint, data *ProjectData) (map[string]bool, error) {
+func recoverMissingTasks(ctx context.Context, session Session, now func() time.Time, missing []string, closedCandidates map[string]bool, cp *Checkpoint, data *ProjectData) (map[string]bool, error) {
 	issuesync.ReportProgress(ctx, "missing-tasks", 0, len(missing))
 	recovered := map[string]bool{}
 	for n, id := range missing {
@@ -192,50 +189,36 @@ func recoverMissingTasks(ctx context.Context, session Session, missing []string,
 		if closedCandidates[id] && *t.Status != 2 && !cp.Versions[id].PendingRecovery {
 			continue
 		}
+		// Date the task when it was read; the reads run after the list fetch.
+		t.observedAt = now()
 		data.Tasks = append(data.Tasks, t)
 		recovered[id] = true
 	}
 	return recovered, nil
 }
 
-// stagedCheckpoint is the checkpoint saved before import. Recovered tasks and
-// one-way status observations stay marked pending until Finalize saves next
-// after the import commits, so a failed import retries them.
-func stagedCheckpoint(cp, next Checkpoint, batch db.ImportBatchParams, recovered map[string]bool) (Checkpoint, bool, error) {
-	statusPending := map[string]bool{}
-	for externalID := range batch.ImportStatusObservations {
-		id, err := mappingTaskID(externalID)
-		if err != nil {
-			return Checkpoint{}, false, err
-		}
-		statusPending[id] = true
-	}
+// stagedCheckpoint is the checkpoint saved before import. Recovered tasks stay
+// marked pending until Finalize saves next after the import commits, so a
+// failed import reads them again.
+func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint {
 	staged := Checkpoint{Versions: maps.Clone(next.Versions), MissingAfter: next.MissingAfter}
 	for id := range recovered {
-		markPending(staged, cp, id, true, statusPending[id])
-	}
-	for id := range statusPending {
-		markPending(staged, cp, id, recovered[id], true)
-	}
-	return staged, len(recovered)+len(statusPending) > 0, nil
-}
-
-func markPending(staged, cp Checkpoint, id string, recovery, status bool) {
-	observed, ok := staged.Versions[id]
-	if !ok {
-		if previous, had := cp.Versions[id]; had {
-			staged.Versions[id] = previous
+		observed, ok := staged.Versions[id]
+		if !ok {
+			if previous, had := cp.Versions[id]; had {
+				staged.Versions[id] = previous
+			}
+			continue
 		}
-		return
+		observed.PendingRecovery = true
+		staged.Versions[id] = observed
 	}
-	observed.PendingRecovery, observed.PendingStatus = recovery, status
-	staged.Versions[id] = observed
+	return staged
 }
 
 // seedReturningTasks gives a mapped task with no checkpoint entry, such as one
 // that sync stopped tracking, its saved source version as a baseline. Unchanged
-// content then cannot replace newer local edits. Its status is marked pending so
-// the import compares it with the recorded observation once.
+// content then cannot replace newer local edits.
 func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) error {
 	returning := map[string]Task{}
 	for _, t := range data.Tasks {
@@ -268,7 +251,7 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 			return err
 		}
 		saved := m.SourceUpdatedAt.UTC().Truncate(time.Millisecond)
-		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved, PendingStatus: true}
+		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved}
 	}
 	return nil
 }

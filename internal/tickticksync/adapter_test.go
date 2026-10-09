@@ -309,11 +309,6 @@ func TestOneWayStatusBaselineSurvivesReappearanceAndImportFailure(t *testing.T) 
 	wrapped.failNext = true
 	_, err = runner.RunOnce(ctx, b.ID)
 	require.ErrorContains(t, err, "injected final content import failure")
-	saved, err = store.IssueSyncBindingByID(ctx, b.ID)
-	require.NoError(t, err)
-	checkpoint, err = DecodeCheckpoint(saved.Config)
-	require.NoError(t, err)
-	require.True(t, checkpoint.Versions["task-1"].PendingStatus, "the reappearing status baseline must stay pending until its import commits")
 
 	at = at.Add(time.Minute)
 	_, err = runner.RunOnce(ctx, b.ID)
@@ -495,7 +490,9 @@ func TestTwoWayCompletedMissingTaskRecoverySurvivesStatusPageAdvance(t *testing.
 	require.True(t, wasRecoveryPending, "the failed completed-task import must stage recovery regardless of local status")
 }
 
-func TestOneWayStatusRetryDoesNotUndoLocalReopenAfterFinalizeFailure(t *testing.T) {
+// One-way sync resends the current status every run; a repeat of the recorded
+// completion must not undo a later local reopen.
+func TestOneWayRepeatedStatusDoesNotUndoLocalReopen(t *testing.T) {
 	ctx := context.Background()
 	store, b := adapterDB(t)
 	wrapped := &failOnceFinalizeStore{Store: store}
@@ -536,11 +533,10 @@ func TestOneWayStatusRetryDoesNotUndoLocalReopenAfterFinalizeFailure(t *testing.
 	require.NoError(t, err)
 	at = at.Add(time.Minute)
 	*clientNow = at
-	wrapped.failOnRefresh = 2
 	_, err = runner.RunOnce(ctx, b.ID)
-	require.ErrorContains(t, err, "injected checkpoint finalization failure")
+	require.NoError(t, err)
 	issue := mappedIssue(t, store, b, "task-1")
-	require.Equal(t, "closed", issue.Status, "the status-only import committed before finalization failed")
+	require.Equal(t, "closed", issue.Status)
 	require.Equal(t, "closed", mappedIssue(t, store, b, "task-2").Status)
 	_, _, changed, err := store.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
@@ -550,7 +546,7 @@ func TestOneWayStatusRetryDoesNotUndoLocalReopenAfterFinalizeFailure(t *testing.
 	*clientNow = at
 	_, err = runner.RunOnce(ctx, b.ID)
 	require.NoError(t, err)
-	require.Equal(t, "open", mappedIssue(t, store, b, "task-1").Status, "retrying an acknowledged completion must preserve a later local reopen")
+	require.Equal(t, "open", mappedIssue(t, store, b, "task-1").Status, "a repeated completion must preserve a later local reopen")
 	require.Equal(t, "closed", mappedIssue(t, store, b, "task-2").Status)
 }
 
@@ -1121,6 +1117,81 @@ func TestContentIsDatedWhenFetched(t *testing.T) {
 	f.data.Tasks[0].Title = "Remote change"
 	f.onData = func() {
 		local := "Local edit during the run"
+		_, _, _, err := s.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &local, Actor: "worker"})
+		require.NoError(t, err)
+		at = time.Now().UTC().Add(time.Second)
+	}
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Remote change", mappedIssue(t, s, b, "task-1").Title)
+}
+
+// One-way sync sends the current status on every import, so a completion the
+// two-way status pass never reached still closes the issue after a mode switch.
+func TestOneWayAppliesCompletionCheckpointedByTwoWay(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	setMode := func(mode string) {
+		current, err := s.IssueSyncBindingByID(ctx, b.ID)
+		require.NoError(t, err)
+		raw, err := EncodeConfig(Config{ProjectID: "project-1", StatusSync: mode, TitlePrefix: new(false)})
+		require.NoError(t, err)
+		_, err = s.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: b.ProjectID, Provider: b.Provider, SourceKey: b.SourceKey, RemoteID: b.RemoteID, DisplayName: b.DisplayName, Config: raw, IntervalSeconds: 300, ExpectedBinding: &db.IssueSyncBindingPrecondition{ID: current.ID, Config: current.Config, IntervalSeconds: current.IntervalSeconds}})
+		require.NoError(t, err)
+	}
+	setMode("two-way")
+	// The fixture has no status session, so the two-way status pass never reaches the task.
+	f := sourceData()
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.True(t, issuesync.IsBlockedStatusWarning(err))
+	f.missing["task-1"] = Task{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(2)}
+	f.data.Tasks = nil
+	at = at.Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.True(t, issuesync.IsBlockedStatusWarning(err))
+	issue := mappedIssue(t, s, b, "task-1")
+	require.Equal(t, "open", issue.Status)
+	setMode("one-way")
+	local := "Local edit"
+	_, _, _, err = s.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &local, Actor: "worker"})
+	require.NoError(t, err)
+	at = time.Now().UTC().Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	got := mappedIssue(t, s, b, "task-1")
+	require.Equal(t, "closed", got.Status)
+	require.Equal(t, local, got.Title)
+}
+
+type taskHookFixture struct {
+	*sourceFixture
+	onTask func()
+}
+
+func (f *taskHookFixture) ForRun(context.Context, Config) (Session, error) { return f, nil }
+func (f *taskHookFixture) Task(ctx context.Context, id string) (Task, error) {
+	f.onTask()
+	return f.sourceFixture.Task(ctx, id)
+}
+
+// A task read individually is dated when that read happens, so a local edit
+// made earlier in the same run cannot hide its newer TickTick content.
+func TestRecoveredTaskIsDatedWhenRead(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := &taskHookFixture{sourceFixture: sourceData(), onTask: func() {}}
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	issue := mappedIssue(t, s, b, "task-1")
+	f.missing["task-1"] = Task{ID: "task-1", ProjectID: "project-1", Title: "Remote change", Status: new(0)}
+	f.data.Tasks = nil
+	at = time.Now().UTC().Add(-time.Minute)
+	f.onTask = func() {
+		local := "Local edit during recovery"
 		_, _, _, err := s.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &local, Actor: "worker"})
 		require.NoError(t, err)
 		at = time.Now().UTC().Add(time.Second)

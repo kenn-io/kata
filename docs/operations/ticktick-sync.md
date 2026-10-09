@@ -83,14 +83,18 @@ to local users. Note tasks and abandoned tasks (`-1`) are skipped; previously
 imported issues remain intact. Unknown statuses, invalid identities, or invalid
 content fail preparation before imports begin.
 
-The API does not supply a task content revision. Kata persists a fingerprint
-and observation time for each task. Identical content keeps its original
-version across retries, restarts, and reordered responses. A changed fingerprint
-gets a new observed version. The newest observed content can replace older local
-scalar edits; unchanged content preserves local edits. Observation timestamps
-are not original TickTick creation/edit timestamps. Two-way status changes do
-not advance the content version or replace local scalar edits. Changing only
-status direction also keeps unchanged content at its saved version.
+The API does not supply a task content revision. Kata persists a fingerprint and
+observation time for each task. Identical content keeps its original version
+across retries, restarts, and reordered responses. A changed fingerprint gets a
+new observed version. The newest observed content can replace older local scalar
+edits; unchanged content preserves local edits. The observation time is when
+Kata fetched the task list, or when it read a missing task on its own. It is not
+the original TickTick creation or edit time. Status changes do not advance the
+content version or replace local scalar edits. Changing only status direction
+also keeps unchanged content at its saved version. One-way mode records the
+current TickTick status on every run. A repeat of the last recorded status
+changes nothing, so a local close or reopen stays until TickTick's status
+changes.
 
 Only explicit local close/reopen events accepted in two-way mode queue writes.
 Opt-in does not send existing local states in bulk. Pending local intent wins

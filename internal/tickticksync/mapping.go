@@ -106,22 +106,28 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 		if err != nil {
 			return db.ImportBatchParams{}, old, err
 		}
+		taskAt := at
+		if !task.observedAt.IsZero() {
+			taskAt = task.observedAt.UTC().Truncate(time.Millisecond)
+		}
 		v, exists := cp.Versions[task.ID]
 		if !exists {
-			v.FirstSeen = at
+			v.FirstSeen = taskAt
 		}
 		advance := !exists || v.Hash != contentHash
-		statusChanged := exists && (v.Status != *task.Status || v.CompletedTime != task.CompletedTime)
 		statusOnly := false
-		if c.StatusSync == "one-way" && (!exists || statusChanged || v.PendingStatus) {
+		// One-way sends the current status every run. The store ignores a repeat of
+		// the recorded observation, so local changes stay until TickTick changes,
+		// even when another mode already saved this status in the checkpoint.
+		if c.StatusSync == "one-way" {
 			statusOnly = !advance
 			rawStatus := taskStatusRaw(task)
-			batch.ImportStatusObservations["task:"+task.ID] = db.IssueStatusObservation{Raw: &rawStatus, Version: at}
+			batch.ImportStatusObservations["task:"+task.ID] = db.IssueStatusObservation{Raw: &rawStatus, Version: taskAt}
 		}
 		v.Hash, v.Status, v.CompletedTime = contentHash, *task.Status, task.CompletedTime
-		v.PendingRecovery, v.PendingStatus = false, false
+		v.PendingRecovery = false
 		if advance {
-			v.Version = at
+			v.Version = taskAt
 			if exists && !v.Version.After(cp.Versions[task.ID].Version) {
 				v.Version = cp.Versions[task.ID].Version.Add(time.Millisecond)
 			}
@@ -173,7 +179,7 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 			item.ClosedReason = new("done")
 			closedAt := v.Version
 			if statusOnly {
-				closedAt = at
+				closedAt = taskAt
 				if closedAt.Before(v.FirstSeen) {
 					closedAt = v.FirstSeen
 				}

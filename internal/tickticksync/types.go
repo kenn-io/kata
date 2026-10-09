@@ -49,6 +49,8 @@ type Task struct {
 	TimeZone      string          `json:"timeZone"`
 	CompletedTime string          `json:"completedTime"`
 	Items         []ChecklistItem `json:"items"`
+	// observedAt dates a task read on its own after the list fetch.
+	observedAt time.Time
 }
 
 // ChecklistItem is rendered inside the provider-owned body, never as another issue.
@@ -80,8 +82,6 @@ type TaskVersion struct {
 	Version       time.Time `json:"version"`
 	// PendingRecovery marks a recovered task whose final import has not committed.
 	PendingRecovery bool `json:"pending_recovery,omitzero"`
-	// PendingStatus marks a one-way status observation whose import has not committed.
-	PendingStatus bool `json:"pending_status,omitzero"`
 }
 
 // Checkpoint survives partial import/restart and bounds absent-task recovery laps.
