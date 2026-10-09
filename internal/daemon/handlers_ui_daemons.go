@@ -198,8 +198,21 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "read_only")
 		return
 	}
-	d, err := g.selectDaemon(r.Context(), r.Header.Get(webDaemonHeaderName))
+	requestedDaemon := strings.TrimSpace(r.Header.Get(webDaemonHeaderName))
+	d, err := g.selectDaemon(r.Context(), requestedDaemon)
 	if err != nil {
+		if requestedDaemon != "" {
+			if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
+				// Keep configured targets hidden while giving a scoped principal the
+				// same denial as a target that resolved but has no delegated grant.
+				writeWebDaemonError(w, http.StatusForbidden, "project_authority_not_delegated")
+				return
+			}
+			if policy.insecureReadonly {
+				writeWebDaemonError(w, http.StatusForbidden, "web_daemon_readonly_target_forbidden")
+				return
+			}
+		}
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
 		return
 	}

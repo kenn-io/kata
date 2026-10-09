@@ -509,7 +509,9 @@ func RunArtifactResetInstallation(t *testing.T, store db.Storage) {
 	rootUID := "00000000000000000000000002"
 	pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
-	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true})
+	pushCursor, err := store.MaxLocalOriginEventID(ctx, project.ID)
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true, PushCursorEventID: pushCursor})
 	require.NoError(t, err)
 	bindingUID, err := uid.New()
 	require.NoError(t, err)

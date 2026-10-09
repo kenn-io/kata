@@ -216,7 +216,7 @@ var storageScenarios = []scenario{
 		name: "project purge removes relay metadata",
 		methods: []string{
 			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
-			"ImportReplay", "InstallRelayReset", "LeaveFederationReplica", "PinRootAuthority",
+			"ImportReplay", "LeaveFederationReplica", "PinRootAuthority",
 			"PurgeProject", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
 			"UpsertFederationBinding",
 		},
@@ -229,7 +229,7 @@ var storageScenarios = []scenario{
 		name: "project merge removes relay metadata",
 		methods: []string{
 			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
-			"ImportReplay", "InstallRelayReset", "LeaveFederationReplica", "MergeProjects",
+			"ImportReplay", "LeaveFederationReplica", "MergeProjects",
 			"PinRootAuthority", "RotateRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding",
 		},
 		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
@@ -240,7 +240,7 @@ var storageScenarios = []scenario{
 	{
 		name: "archived detached relay metadata retains root keys",
 		methods: []string{
-			"CreateProject", "ExportAttribution", "InstallRelayReset", "LeaveFederationReplica",
+			"CreateProject", "ExportAttribution", "LeaveFederationReplica",
 			"PinRootAuthority", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
 			"UpsertFederationBinding",
 		},

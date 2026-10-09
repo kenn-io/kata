@@ -452,6 +452,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				},
 			},
 		)
+		if result.CreatedEvent != nil {
+			recordProjectAccessCatalogMutation(ctx, result.Project.UID)
+		}
 		if err != nil {
 			return nil, federationReplicaAPIError(err)
 		}

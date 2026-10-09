@@ -139,7 +139,7 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	assert.NotContains(t, listOut, "bootstrap should not write")
 }
 
-func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
+func TestTokenIdentity_FederationPersonalTokenBridgeConnectAndPush(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e")
 	}
@@ -160,13 +160,17 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	hubEnv := identityCLIEnv(hubClientHome, hubAddr, userToken)
 	hubWS := initRepo(t, "https://example.invalid/team/identity-federation-hub.git")
 	runRemoteCmd(t, bin, hubWS, hubEnv, "--project", projectName, "init")
+	runRemoteCmd(t, bin, hubWS, hubEnv, "federation", "enable", "--project", projectName)
 
 	spokeDirs := newE2EDirs(t)
 	spokeEnv := append(spokeDirs.env(),
+		"EXAMPLE_HUB_TOKEN="+userToken,
 		"KATA_AUTH_TOKEN=",
 		"KATA_FEDERATION_PULL_INTERVAL_MS=25",
 		"KATA_HTTP_TIMEOUT=10s",
 	)
+	spokeConfig := fmt.Sprintf("[[daemon]]\nname = \"hub\"\nurl = %q\ntoken_env = \"EXAMPLE_HUB_TOKEN\"\nallow_insecure = true\n", "http://"+hubAddr)
+	require.NoError(t, os.WriteFile(filepath.Join(spokeDirs.home, "config.toml"), []byte(spokeConfig), 0o600))
 	spokeStderr := startDaemon(t, bin, spokeEnv)
 	_, _ = connectDaemon(t, spokeDirs, spokeStderr)
 	spokeIdentityOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
@@ -193,28 +197,11 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	require.Error(t, bootstrapErr, "bootstrap token must not create identity-mode federation enrollments")
 	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
 
-	enrollEnv := append(spokeDirs.env(),
-		"EXAMPLE_HUB_TOKEN="+userToken,
-		"KATA_AUTH_TOKEN="+userToken,
-		"KATA_AUTHOR=e2e-client",
-		"KATA_HTTP_TIMEOUT=10s",
-	)
-	enrollOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, enrollEnv,
-		"federation", "enroll", projectName,
-		"--spoke-instance", spokeIdentity.InstanceUID,
-		"--hub-url", "http://"+hubAddr,
-		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
-		"--capabilities", "pull,push,lease",
-		"--actor", "mallory")
-	joinCommand := extractFederationJoinCommand(t, enrollOut)
-	assert.Contains(t, joinCommand, "--actor wesm")
-	assert.NotContains(t, joinCommand, "mallory")
-
-	spokeShellEnv := append(spokeEnv, "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	joinOut, err := runShellOutput(spokeDirs.repoDir, spokeShellEnv, joinCommand)
-	require.NoErrorf(t, err, "join command %q failed:\n%s", joinCommand, joinOut)
-	assert.Contains(t, joinOut, "joined federation project "+projectName)
-	assert.Contains(t, joinOut, "push-enabled: true")
+	connectOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
+		"--project", projectName, "federation", "bridge", "connect",
+		"--hub-daemon", "hub", "--hub-project", projectName)
+	assert.Contains(t, connectOut, "bridge "+projectName+": connected (bidirectional)")
+	assert.Contains(t, connectOut, "account: wesm")
 
 	runRemoteCmd(t, bin, spokeDirs.repoDir, spokeEnv,
 		"--project", projectName,
@@ -331,26 +318,6 @@ func createIdentityTokenCLI(t *testing.T, bin string, env []string, actor string
 func runRemoteCmdOutputErr(t *testing.T, bin, workdir string, env []string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(bin, args...) //nolint:gosec
-	cmd.Dir = workdir
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-func extractFederationJoinCommand(t *testing.T, out string) string {
-	t.Helper()
-	for line := range strings.SplitSeq(out, "\n") {
-		if cmd, ok := strings.CutPrefix(line, "join: "); ok {
-			require.NotEmpty(t, strings.TrimSpace(cmd), "empty join command in output:\n%s", out)
-			return strings.TrimSpace(cmd)
-		}
-	}
-	t.Fatalf("missing join command in output:\n%s", out)
-	return ""
-}
-
-func runShellOutput(workdir string, env []string, command string) (string, error) {
-	cmd := exec.Command("sh", "-c", command) //nolint:gosec // test executes a kata-generated join command.
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

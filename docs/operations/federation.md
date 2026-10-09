@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-05
+last_edited: 2026-10-09
 ---
 
 # Federation
@@ -234,17 +234,16 @@ on the spoke and should print `--adopt-existing`. The generated token printed
 in the `kata federation join ...` command is a separate spoke transport
 credential.
 
-On hubs configured with `[auth].require_token_identity = true`, authenticate
-`kata federation enroll` with the hub's DB-backed personal token for the actor
-doing the setup. Export the token and pass the variable name with
-`--hub-token-env HUB_ADMIN_TOKEN`, or select it through a same-origin
-daemon-catalog `token` or `token_env` entry. The bootstrap token can mint
-personal tokens, but it cannot perform the attributed federation-enable step
-that `enroll` runs. In identity mode the daemon derives the enrollment actor
-from the token actor and ignores client-supplied actor strings such as
-`--actor`, `--as`, or `KATA_AUTHOR`. If you only have the bootstrap token,
-first mint a personal token as described in
-[Identity tokens](remote-daemon.md#identity-tokens).
+On hubs configured with `[auth].require_token_identity = true`, a DB-backed
+account token cannot create a legacy enrollment because that grant would outlive
+the account token. Use `kata federation bridge connect` to create a
+credential-bound relay from a hub account selected in the local daemon catalog.
+The bootstrap token can mint account tokens, but it cannot perform the
+attributed federation-enable step that `kata federation enroll` runs. In
+identity mode the daemon derives the enrollment actor from the token actor and
+ignores client-supplied actor strings such as `--actor`, `--as`, or
+`KATA_AUTHOR`. If you only have the bootstrap token, first mint an account
+token as described in [Identity tokens](remote-daemon.md#identity-tokens).
 
 `--hub-token-env` replaces `--hub-token` for enrollment and leave. Pass only
 an environment variable's name; Kata reads its value inside the process.
