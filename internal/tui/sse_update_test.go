@@ -1,14 +1,19 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/db"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -592,6 +597,534 @@ func TestHandleEventReceived_DetailViewMismatch_NoRefetch(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("maybeRefetchOpenDetail must return nil for non-matching ref, got %T", cmd)
 	}
+}
+
+func checkCommentReplyEventRefreshesRelatedIssue(t *testing.T, relatedIssueUID string) {
+	t.Helper()
+	m := sseDetailFixture(7, "target", "target-issue")
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.commented", projectID: 7, issueUID: "source-issue",
+		relatedIssueUID: relatedIssueUID,
+	})
+	if relatedIssueUID == "target-issue" {
+		assertDetailRefetchBatch(t, cmd)
+		return
+	}
+	if cmd != nil {
+		t.Fatalf("unrelated issue.commented event must not refresh target detail, got %T", cmd)
+	}
+}
+
+func TestCommentReplyEventRefreshesOpenTargetDetail(t *testing.T) {
+	checkCommentReplyEventRefreshesRelatedIssue(t, "target-issue")
+}
+
+func FuzzCommentReplyEventRefreshesOpenTargetDetail(f *testing.F) {
+	f.Add("target-issue")
+	f.Add("other-issue")
+	f.Fuzz(func(t *testing.T, relatedIssueUID string) {
+		checkCommentReplyEventRefreshesRelatedIssue(t, relatedIssueUID)
+	})
+}
+
+func TestCommentEditRefreshesDisplayedReplyAndBacklink(t *testing.T) {
+	tests := []struct {
+		name           string
+		openIssueUID   string
+		editedIssueUID string
+		commentUID     string
+		comments       []CommentEntry
+	}{
+		{
+			name:         "backlink evidence edited",
+			openIssueUID: "target-issue", editedIssueUID: "source-issue", commentUID: "reply-comment",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:         "reply target edited",
+			openIssueUID: "source-issue", editedIssueUID: "target-issue", commentUID: "target-comment",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "target-issue", Kind: "confirm",
+			}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "open", test.openIssueUID)
+			m.detail.comments = test.comments
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: "issue.comment_edited", projectID: 7,
+				issueUID: test.editedIssueUID, commentUID: test.commentUID,
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestCommentEditRefreshesMovedReplyEndpoint(t *testing.T) {
+	checkCommentEditRefreshesMovedReplyEndpoint(t, "moved-target-comment")
+}
+
+func FuzzCommentEditRefreshesMovedReplyEndpoint(f *testing.F) {
+	f.Add("moved-target-comment")
+	f.Fuzz(func(t *testing.T, commentUID string) {
+		checkCommentEditRefreshesMovedReplyEndpoint(t, commentUID)
+	})
+}
+
+func checkCommentEditRefreshesMovedReplyEndpoint(t *testing.T, commentUID string) {
+	t.Helper()
+	m := sseDetailFixture(7, "open", "source-issue")
+	m.scope = scope{projectID: 7}
+	m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+		UID: commentUID, IssueUID: "moved-target-issue", Kind: "confirm",
+	}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.comment_edited", projectID: 8,
+		issueUID: "moved-target-issue", commentUID: commentUID,
+	})
+	if commentUID == "" {
+		if cmd != nil {
+			t.Fatalf("empty comment UID must not refresh detail, got %T", cmd)
+		}
+		return
+	}
+	assertDetailRefetchBatch(t, cmd)
+}
+
+func TestCommentEditIgnoresUnrepresentedComment(t *testing.T) {
+	m := sseDetailFixture(7, "target", "target-issue")
+	m.detail.comments = []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+		UID: "reply-comment", IssueUID: "source-issue", Kind: "confirm",
+	}}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.comment_edited", projectID: 7,
+		issueUID: "source-issue", commentUID: "unrelated-comment",
+	})
+	if cmd != nil {
+		t.Fatalf("unrepresented comment edit must not refresh target detail, got %T", cmd)
+	}
+}
+
+func TestIssueLifecycleRefreshesDisplayedCommentEndpoints(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		issueUID  string
+		comments  []CommentEntry
+	}{
+		{
+			name:      "moved reply target",
+			eventType: "issue.moved", issueUID: "moved-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "moved-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
+			name:      "soft-deleted reply target",
+			eventType: "issue.soft_deleted", issueUID: "deleted-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "deleted-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
+			name:      "moved backlink source",
+			eventType: "issue.moved", issueUID: "moved-source-issue",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "moved-source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:      "soft-deleted backlink source",
+			eventType: "issue.soft_deleted", issueUID: "deleted-source-issue",
+			comments: []CommentEntry{{UID: "target-comment", Backlinks: []commentref.Link{{
+				UID: "reply-comment", IssueUID: "deleted-source-issue", Kind: "confirm",
+			}}}},
+		},
+		{
+			name:      "restored reply target",
+			eventType: "issue.restored", issueUID: "restored-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "restored-target-issue", Kind: "confirm",
+			}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = test.comments
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: test.eventType, projectID: 8, issueUID: test.issueUID,
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestIssueLifecycleIgnoresUnrepresentedCrossProjectEndpoint(t *testing.T) {
+	m := sseDetailFixture(7, "open", "open-issue")
+	m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+		UID: "target-comment", IssueUID: "displayed-target-issue", Kind: "confirm",
+	}}}
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.moved", projectID: 8,
+		issueShortID: "open", issueUID: "unrelated-issue",
+	})
+	if cmd != nil {
+		t.Fatalf("unrepresented cross-project lifecycle event must not refresh detail, got %T", cmd)
+	}
+}
+
+func TestIssueRestoreRefreshesAfterRelationsDisappearFromProjection(t *testing.T) {
+	tests := []struct {
+		name             string
+		records          []commentref.Record
+		states           map[string]commentref.TargetState
+		wantRemovedReply bool
+	}{
+		{
+			name:             "removed reply target",
+			wantRemovedReply: true,
+			records: []commentref.Record{
+				tuiCommentGraphRecord("reply-comment", "removed-target-comment", "confirm", "open-issue", 7),
+			},
+			states: map[string]commentref.TargetState{
+				"removed-target-comment": {Status: "removed"},
+			},
+		},
+		{
+			name: "deleted backlink source omitted",
+			records: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := commentref.Project(test.records, test.states)
+			require.Len(t, projected, 1)
+			if test.wantRemovedReply {
+				require.NotNil(t, projected[0].Reply)
+				require.Equal(t, "removed", projected[0].Reply.Status)
+				require.Empty(t, projected[0].Reply.IssueUID)
+			} else {
+				require.Empty(t, projected[0].Backlinks)
+			}
+
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(projected)
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+				eventType: "issue.restored", projectID: 9, issueUID: "restored-endpoint-issue",
+			})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestProjectLifecycleRefreshesDisplayedRelationEndpoints(t *testing.T) {
+	tests := []struct {
+		name                  string
+		records               []commentref.Record
+		wantReplyProjectID    int64
+		wantBacklinkProjectID int64
+	}{
+		{
+			name:               "archived reply target",
+			wantReplyProjectID: 9,
+			records: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "archived-target-issue", 9),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
+			},
+		},
+		{
+			name:                  "archived backlink source",
+			wantBacklinkProjectID: 9,
+			records: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "archived-source-issue", 9),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			projected := commentref.Project(test.records, nil)
+			require.Len(t, projected, 2)
+			if test.wantReplyProjectID > 0 {
+				require.NotNil(t, projected[1].Reply)
+				require.Equal(t, test.wantReplyProjectID, projected[1].Reply.ProjectID)
+			}
+			if test.wantBacklinkProjectID > 0 {
+				require.Len(t, projected[0].Backlinks, 1)
+				require.Equal(t, test.wantBacklinkProjectID, projected[0].Backlinks[0].ProjectID)
+			}
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(projected)
+
+			for _, eventType := range []string{"project.removed", "project.renamed"} {
+				cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 9})
+				assertDetailRefetchBatch(t, cmd)
+			}
+
+			for _, eventType := range []string{"project.removed", "project.renamed"} {
+				cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
+				if cmd != nil {
+					t.Fatalf("unrelated %s event must not refresh detail, got %T", eventType, cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestProjectRestoreRefreshesRelationsAfterArchiveProjection(t *testing.T) {
+	tests := []struct {
+		name              string
+		beforeArchive     []commentref.Record
+		afterArchive      []commentref.Record
+		afterArchiveState map[string]commentref.TargetState
+		wantRemovedReply  bool
+	}{
+		{
+			name: "archived reply target",
+			beforeArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "archived-target-issue", 9),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
+			},
+			afterArchive: []commentref.Record{
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "open-issue", 7),
+			},
+			afterArchiveState: map[string]commentref.TargetState{
+				"target-comment": {Status: "removed"},
+			},
+			wantRemovedReply: true,
+		},
+		{
+			name: "archived backlink source",
+			beforeArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+				tuiCommentGraphRecord("reply-comment", "target-comment", "confirm", "archived-source-issue", 9),
+			},
+			afterArchive: []commentref.Record{
+				tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := commentref.Project(test.beforeArchive, nil)
+			if test.wantRemovedReply {
+				require.NotNil(t, before[1].Reply)
+				require.Equal(t, int64(9), before[1].Reply.ProjectID)
+			} else {
+				require.Len(t, before[0].Backlinks, 1)
+				require.Equal(t, int64(9), before[0].Backlinks[0].ProjectID)
+			}
+
+			after := commentref.Project(test.afterArchive, test.afterArchiveState)
+			require.Len(t, after, 1)
+			if test.wantRemovedReply {
+				require.NotNil(t, after[0].Reply)
+				require.Equal(t, "removed", after[0].Reply.Status)
+				require.Zero(t, after[0].Reply.ProjectID)
+			} else {
+				require.Empty(t, after[0].Backlinks)
+			}
+
+			m := sseDetailFixture(7, "open", "open-issue")
+			m.detail.comments = commentEntriesFromProjectedRecords(after)
+			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.restored", projectID: 9})
+			assertDetailRefetchBatch(t, cmd)
+		})
+	}
+}
+
+func TestIssueMoveIntoDisplayedProjectRefreshesMissingBacklink(t *testing.T) {
+	projected := commentref.Project([]commentref.Record{
+		tuiCommentGraphRecord("target-comment", "", "", "open-issue", 7),
+	}, nil)
+	require.Len(t, projected, 1)
+	require.Empty(t, projected[0].Backlinks)
+
+	m := sseDetailFixture(7, "open", "open-issue")
+	m.detail.comments = commentEntriesFromProjectedRecords(projected)
+	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
+		eventType: "issue.moved", projectID: 7, issueUID: "moved-backlink-source",
+	})
+	assertDetailRefetchBatch(t, cmd)
+}
+
+func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEntry {
+	comments := make([]CommentEntry, len(records))
+	for i, record := range records {
+		comments[i] = CommentEntry{
+			UID: record.UID, Handle: record.Handle, EditedAt: record.EditedAt,
+			Reply: record.Reply, Backlinks: record.Backlinks,
+			BacklinksTruncated: record.BacklinksTruncated,
+			ID:                 record.ID, Author: record.Author, Teammate: record.Teammate,
+			Body: record.Body, CreatedAt: record.CreatedAt,
+		}
+	}
+	return comments
+}
+
+func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectID int64) commentref.Record {
+	comment := db.Comment{
+		UID:        uid,
+		ReplyToUID: replyToUID,
+		ReplyKind:  replyKind,
+	}
+	return commentref.Record{
+		Comment:   comment,
+		IssueUID:  issueUID,
+		ProjectID: projectID,
+	}
+}
+
+func TestFederatedCommentIdentityRefreshesPendingReplyTarget(t *testing.T) {
+	for _, eventType := range []string{"issue.commented", "issue.snapshot", "issue.created"} {
+		t.Run(eventType, func(t *testing.T) {
+			m := sseDetailFixture(7, "source", "source-issue")
+			m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "remote-target-issue", ProjectID: 8,
+				Kind: "reply", Status: "pending",
+			}}}
+			msg := federatedCommentIdentityEvent(t, eventType, "target-comment")
+
+			assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+		})
+	}
+}
+
+func TestFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
+	m := sseDetailFixture(7, "source", "source-issue")
+	m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
+	msg := federatedCommentIdentityEvent(t, "issue.commented", "incoming-comment", "displayed-comment")
+
+	assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+}
+
+func FuzzFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(f *testing.F) {
+	f.Add("incoming-comment", "displayed-comment")
+	f.Add("reply-a", "target-b")
+	f.Fuzz(func(t *testing.T, commentUID, replyToUID string) {
+		if commentUID == "" || replyToUID == "" || commentUID == replyToUID ||
+			!utf8.ValidString(commentUID) || !utf8.ValidString(replyToUID) {
+			return
+		}
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: replyToUID}}
+		msg := federatedCommentIdentityEvent(t, "issue.commented", commentUID, replyToUID)
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
+func FuzzFederatedCommentIdentityRefreshesPendingReplyTarget(f *testing.F) {
+	f.Add(uint8(0), "target-comment")
+	f.Add(uint8(1), "target-comment")
+	f.Add(uint8(2), "target-comment")
+	f.Add(uint8(0), "a")
+	f.Fuzz(func(t *testing.T, eventKind uint8, targetUID string) {
+		if targetUID == "" || !utf8.ValidString(targetUID) {
+			return
+		}
+		eventTypes := []string{"issue.commented", "issue.snapshot", "issue.created"}
+		eventType := eventTypes[int(eventKind)%len(eventTypes)]
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+			UID: targetUID, IssueUID: "remote-target-issue", ProjectID: 8,
+			Kind: "reply", Status: "pending",
+		}}}
+		msg := federatedCommentIdentityEvent(t, eventType, targetUID)
+
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
+func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
+	tests := []struct {
+		name        string
+		replyToUID  string
+		wantRefresh bool
+	}{
+		{name: "reply to displayed comment", replyToUID: "displayed-comment", wantRefresh: true},
+		{name: "reply to other comment", replyToUID: "other-comment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := sseDetailFixture(7, "source", "source-issue")
+			m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
+			msg := federatedCommentIdentityEvent(t, "issue.snapshot", "incoming-comment", tt.replyToUID)
+			cmd := m.maybeRefetchOpenDetail(msg)
+			if tt.wantRefresh {
+				assertDetailRefetchBatch(t, cmd)
+			} else {
+				assert.Nil(t, cmd)
+			}
+		})
+	}
+}
+
+func FuzzFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(f *testing.F) {
+	f.Add("incoming-comment", "displayed-comment")
+	f.Add("reply-a", "target-b")
+	f.Fuzz(func(t *testing.T, commentUID, replyToUID string) {
+		if commentUID == "" || replyToUID == "" || commentUID == replyToUID ||
+			!utf8.ValidString(commentUID) || !utf8.ValidString(replyToUID) {
+			return
+		}
+		m := sseDetailFixture(7, "source", "source-issue")
+		m.detail.comments = []CommentEntry{{UID: replyToUID}}
+		msg := federatedCommentIdentityEvent(t, "issue.snapshot", commentUID, replyToUID)
+		assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	})
+}
+
+func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, replyToUID ...string) eventReceivedMsg {
+	t.Helper()
+	replyTarget := ""
+	if len(replyToUID) > 0 {
+		replyTarget = replyToUID[0]
+	}
+	comment := struct {
+		CommentUID string `json:"comment_uid"`
+		ReplyToUID string `json:"reply_to_uid,omitempty"`
+	}{CommentUID: commentUID, ReplyToUID: replyTarget}
+	var payload any = comment
+	if eventType == "issue.snapshot" || eventType == "issue.created" {
+		payload = struct {
+			UID      string `json:"uid"`
+			Comments []struct {
+				CommentUID string `json:"comment_uid"`
+				ReplyToUID string `json:"reply_to_uid,omitempty"`
+			} `json:"comments"`
+		}{
+			UID: "remote-target-issue",
+			Comments: []struct {
+				CommentUID string `json:"comment_uid"`
+				ReplyToUID string `json:"reply_to_uid,omitempty"`
+			}{{
+				CommentUID: commentUID,
+				ReplyToUID: replyTarget,
+			}},
+		}
+	}
+	payloadJSON, err := json.Marshal(payload)
+	require.NoError(t, err)
+	eventJSON, err := json.Marshal(struct {
+		Type      string         `json:"type"`
+		ProjectID int64          `json:"project_id"`
+		IssueUID  string         `json:"issue_uid"`
+		Payload   jsontext.Value `json:"payload"`
+	}{
+		Type: eventType, ProjectID: 8, IssueUID: "remote-target-issue",
+		Payload: jsontext.Value(payloadJSON),
+	})
+	require.NoError(t, err)
+	return decodeEventReceived(frame{data: eventJSON})
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-

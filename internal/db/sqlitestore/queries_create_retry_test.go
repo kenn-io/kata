@@ -2,6 +2,9 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json/jsontext"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -97,4 +100,31 @@ func TestCreateCommentRetriesPostCommitReadWithoutDuplicatingComment(t *testing.
 	require.NoError(t, d.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM events WHERE issue_id = ? AND type = 'issue.commented'`, issue.ID).Scan(&eventCount))
 	assert.Equal(t, 1, eventCount)
+}
+
+func TestCreateCommentRetainsCommittedEventsOnFinalReadFailure(t *testing.T) {
+	ctx := t.Context()
+	store, e := Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, e)
+	t.Cleanup(func() { _ = store.Close() })
+	p, e := store.CreateProject(ctx, "example-project")
+	require.NoError(t, e)
+	issue, _, e := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Finding", Author: "worker"})
+	require.NoError(t, e)
+	original := readCreatedComment
+	readCreatedComment = func(context.Context, *Store, int64) (db.Comment, error) {
+		return db.Comment{}, fmt.Errorf("response read failed")
+	}
+	t.Cleanup(func() { readCreatedComment = original })
+	var events []db.Event
+	_, _, e = store.CreateComment(db.WithCommentMetadataHook(ctx, func(_ context.Context, _ *sql.Tx, issue db.Issue, _ db.Comment) ([]db.CommentMetadataUpdate, error) {
+		return []db.CommentMetadataUpdate{{IssueID: issue.ID, Patch: map[string]jsontext.Value{"notify.cmVhZGVy": jsontext.Value(`{"from":"worker","message":"inspect"}`)}}}, nil
+	}, &events), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Finding"})
+	require.EqualError(t, e, "response read failed")
+	require.Len(t, events, 2)
+	require.Equal(t, "issue.commented", events[0].Type)
+	require.Equal(t, "issue.metadata_updated", events[1].Type)
+	var count int
+	require.NoError(t, store.QueryRowContext(ctx, "SELECT count(*) FROM comments WHERE issue_id=?", issue.ID).Scan(&count))
+	require.Equal(t, 1, count)
 }

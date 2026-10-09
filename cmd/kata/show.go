@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kit/tui/markdownrender"
@@ -20,6 +21,7 @@ import (
 
 func newShowCmd() *cobra.Command {
 	var render bool
+	var selectors commentref.Options
 	cmd := &cobra.Command{
 		Use:   "show <issue-ref>",
 		Short: "show issue + comments",
@@ -29,15 +31,22 @@ func newShowCmd() *cobra.Command {
 Redirects and pipelines, including "| less -R", keep plain output.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShow(cmd, args[0], "show", showRunOptions{Render: render})
+			return runShow(cmd, args[0], "show", showRunOptions{Render: render, Selectors: selectors})
 		},
 	}
+	cmd.Flags().StringVar(&selectors.Thread, "thread", "", "show a comment and its replies across this project (maximum 50)")
+	cmd.Flags().StringVar(&selectors.Inbound, "inbound", "", "show replies to an author[/teammate] on this issue; omit actor for yourself")
+	cmd.Flags().Lookup("inbound").NoOptDefVal = "@self"
+	cmd.Flags().StringVar(&selectors.Kind, "kind", "", "filter thread or inbound by reply kind")
+	cmd.Flags().StringVar(&selectors.Since, "since", "", "show comments strictly after a comment reference")
+	cmd.MarkFlagsMutuallyExclusive("thread", "inbound")
 	cmd.Flags().BoolVar(&render, "render", false, "render description and comment Markdown on a terminal")
 	return cmd
 }
 
 type showRunOptions struct {
-	Render bool
+	Render    bool
+	Selectors commentref.Options
 }
 
 func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOptions) error {
@@ -56,7 +65,23 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
-	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+	if opts.Selectors != (commentref.Options{}) {
+		if err := requireDaemonAPIVersion(ctx, client, baseURL, "0.26.0", "comment selectors"); err != nil {
+			return err
+		}
+	}
+	if opts.Selectors.Inbound == "@self" {
+		actor, _ := resolveActor(ctx, flags.As, nil)
+		var instance instanceStatusForCLI
+		if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
+			return err
+		}
+		if flags.As == "" && instance.Auth.Actor != "" {
+			actor = instance.Auth.Actor
+		}
+		opts.Selectors.Inbound = actor
+	}
+	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI, opts.Selectors)
 	if err != nil {
 		return err
 	}
@@ -140,7 +165,10 @@ func printShowHuman(
 			return err
 		}
 		for i, c := range b.Comments {
-			prefix := showCommentPrefix(c.UID, c.Author, c.Teammate)
+			if err := printCommentAnnotations(out, c); err != nil {
+				return err
+			}
+			prefix := showCommentPrefix(showCommentIdentity(c, b.Issue.UID), c.Author, c.Teammate)
 			if rendered != nil {
 				if err := writeRenderedPrefixedLines(out, prefix, rendered.comments[i]); err != nil {
 					return err
@@ -150,6 +178,11 @@ func printShowHuman(
 			if _, err := fmt.Fprintf(out, "%s%s\n", prefix, textsafe.Block(c.Body)); err != nil {
 				return err
 			}
+		}
+	}
+	if b.CommentsTruncated {
+		if _, err := fmt.Fprintln(out, "Comments truncated at 50; narrow the thread with --kind or --since."); err != nil {
+			return err
 		}
 	}
 	if len(b.Labels) > 0 {
@@ -256,14 +289,9 @@ type showResponseForCLI struct {
 		Revision            int64                     `json:"revision"`
 		Metadata            map[string]jsontext.Value `json:"metadata"`
 	} `json:"issue"`
-	Comments []struct {
-		UID       string `json:"uid"`
-		Author    string `json:"author"`
-		Teammate  string `json:"teammate,omitempty"`
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
-	} `json:"comments"`
-	Labels []struct {
+	Comments          []cliShowComment `json:"comments"`
+	CommentsTruncated bool             `json:"comments_truncated"`
+	Labels            []struct {
 		Label string `json:"label"`
 	} `json:"labels"`
 	Links []struct {
@@ -275,6 +303,71 @@ type showResponseForCLI struct {
 	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
 	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
+}
+
+type cliShowComment struct {
+	UID                string            `json:"uid"`
+	Author             string            `json:"author"`
+	Teammate           string            `json:"teammate,omitempty"`
+	Body               string            `json:"body"`
+	CreatedAt          string            `json:"created_at"`
+	EditedAt           string            `json:"edited_at,omitempty"`
+	Handle             string            `json:"handle,omitempty"`
+	IssueUID           string            `json:"issue_uid,omitempty"`
+	IssueShortID       string            `json:"issue_short_id,omitempty"`
+	Reply              *commentref.Link  `json:"reply,omitempty"`
+	Backlinks          []commentref.Link `json:"backlinks,omitempty"`
+	BacklinksTruncated bool              `json:"backlinks_truncated,omitempty"`
+}
+
+func showCommentIdentity(c cliShowComment, issueUID string) string {
+	if c.Handle == "" {
+		return c.UID
+	}
+	h := commentref.HandleForIssue(c.Handle, c.IssueUID, c.IssueShortID, issueUID)
+	return h + " (" + c.UID + ")"
+}
+func printCommentAnnotations(w io.Writer, c cliShowComment) error {
+	if c.EditedAt != "" {
+		if _, err := fmt.Fprintln(w, "  (edited)"); err != nil {
+			return err
+		}
+	}
+	if c.Reply != nil {
+		r := c.Reply
+		label := r.Handle
+		if label == "" {
+			label = "(" + r.Status + ")"
+		}
+		author := ""
+		if r.Author != "" {
+			author = " (" + commentAttribution(r.Author, r.Teammate) + ")"
+		}
+		if r.Status != "" && r.Handle != "" {
+			author += " (" + r.Status + ")"
+		}
+		if r.TargetEdited {
+			author += " (target edited)"
+		}
+		if _, err := fmt.Fprintln(w, "  ↳ "+textsafe.Line(r.Kind+" "+label+author)); err != nil {
+			return err
+		}
+	}
+	if len(c.Backlinks) > 0 {
+		labels := make([]string, 0, len(c.Backlinks))
+		for _, r := range c.Backlinks {
+			labels = append(labels, r.Kind+" "+r.Handle)
+		}
+		if _, err := fmt.Fprintln(w, "  ← "+textsafe.Line(strings.Join(labels, ", "))); err != nil {
+			return err
+		}
+	}
+	if c.BacklinksTruncated {
+		if _, err := fmt.Fprintln(w, "  More replies may be available."); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type renderedShowFields struct {
@@ -302,7 +395,7 @@ func renderShowFields(
 		if comment.Body == "" {
 			continue
 		}
-		prefix := showCommentPrefix(comment.UID, comment.Author, comment.Teammate)
+		prefix := showCommentPrefix(showCommentIdentity(comment, response.Issue.UID), comment.Author, comment.Teammate)
 		fieldWidth := max(1, width-ansi.StringWidth(prefix))
 		rendered, err := renderer.Render(
 			ctx, markdownComment, textsafe.Block(comment.Body), fieldWidth,
@@ -412,16 +505,50 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				agentRowField("uid", c.UID),
 				agentRowField("author", c.Author),
 			}
+			if c.Handle != "" {
+				fields = append(fields, agentRowField("handle", commentref.HandleForIssue(c.Handle, c.IssueUID, c.IssueShortID, b.Issue.UID)))
+			}
+			if c.IssueUID != "" {
+				fields = append(fields, agentRowField("issue_uid", c.IssueUID), agentRowField("issue_short_id", c.IssueShortID))
+			}
+			if c.EditedAt != "" {
+				fields = append(fields, agentRowField("edited_at", c.EditedAt))
+			}
 			if c.Teammate != "" {
 				fields = append(fields, agentRowField("teammate", c.Teammate))
 			}
 			fields = append(fields, agentRowField("created_at", c.CreatedAt))
+			if c.BacklinksTruncated {
+				fields = append(fields, agentRowField("backlinks_truncated", "true"))
+			}
 			if err := writeAgentKVRow(w, fields...); err != nil {
 				return err
+			}
+			if c.Reply != nil {
+				r := c.Reply
+				if _, err := fmt.Fprint(w, "reply "); err != nil {
+					return err
+				}
+				if err := writeAgentKVRow(w, agentRowField("kind", r.Kind), agentRowField("uid", r.UID), agentRowField("handle", r.Handle), agentRowField("author", r.Author), agentRowField("status", r.Status), agentRowField("target_edited", fmt.Sprint(r.TargetEdited))); err != nil {
+					return err
+				}
+			}
+			for _, r := range c.Backlinks {
+				if _, err := fmt.Fprint(w, "backlink "); err != nil {
+					return err
+				}
+				if err := writeAgentKVRow(w, agentRowField("kind", r.Kind), agentRowField("uid", r.UID), agentRowField("handle", r.Handle)); err != nil {
+					return err
+				}
 			}
 			if _, err := fmt.Fprint(w, agentFencedText(c.Body)); err != nil {
 				return err
 			}
+		}
+	}
+	if b.CommentsTruncated {
+		if err := writeAgentField(w, "Comments truncated", "true"); err != nil {
+			return err
 		}
 	}
 	if len(b.Links) > 0 {

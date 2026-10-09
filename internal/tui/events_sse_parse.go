@@ -152,6 +152,42 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 	if p.IssueShortID != nil {
 		out.issueShortID = *p.IssueShortID
 	}
+	switch p.Type {
+	case "issue.commented", "issue.comment_edited":
+		if len(p.Payload) == 0 {
+			break
+		}
+		var payload struct {
+			CommentUID string `json:"comment_uid"`
+			ReplyToUID string `json:"reply_to_uid"`
+		}
+		if json.Unmarshal(p.Payload, &payload) == nil {
+			out.commentUID = payload.CommentUID
+			if p.Type == "issue.commented" && payload.ReplyToUID != "" {
+				out.replyToUIDs = append(out.replyToUIDs, payload.ReplyToUID)
+			}
+		}
+	case "issue.created", "issue.snapshot":
+		if len(p.Payload) == 0 {
+			break
+		}
+		var payload struct {
+			Comments []struct {
+				CommentUID string `json:"comment_uid"`
+				ReplyToUID string `json:"reply_to_uid"`
+			} `json:"comments"`
+		}
+		if json.Unmarshal(p.Payload, &payload) == nil {
+			for _, comment := range payload.Comments {
+				if comment.CommentUID != "" {
+					out.commentUIDs = append(out.commentUIDs, comment.CommentUID)
+				}
+				if comment.ReplyToUID != "" {
+					out.replyToUIDs = append(out.replyToUIDs, comment.ReplyToUID)
+				}
+			}
+		}
+	}
 	if p.Type == "issue.linked" || p.Type == "issue.unlinked" {
 		var link linkPayload
 		if len(p.Payload) > 0 && json.Unmarshal(p.Payload, &link) == nil {

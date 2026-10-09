@@ -487,7 +487,7 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "comments", "labels", "links", "metadata":
+		case "comments", "labels", "links", "metadata", "notifications":
 			return r.Method == http.MethodPost
 		case "actions":
 			return false

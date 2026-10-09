@@ -4,6 +4,8 @@
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
 
+  import { commentRetryIdentity } from './lib/kata/commentRetry'
+  import type { KataCommentReplyIntent } from './lib/kata/types'
   import AppShell from './components/AppShell.svelte'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
@@ -116,7 +118,7 @@
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
   let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
-  let pendingComment: { issueUID: string; body: string; key: string } | undefined
+  let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
   let preferences = $state(loadPreferences())
@@ -545,18 +547,29 @@
     )
   }
 
-  async function addComment(uid: string, body: string): Promise<boolean> {
+  async function addComment(
+    uid: string,
+    body: string,
+    reply?: KataCommentReplyIntent,
+  ): Promise<boolean> {
     const target = selectedMutationTarget(uid)
     if (!target) return false
+    const identity = commentRetryIdentity(uid, body, reply)
     const comment =
-      pendingComment?.issueUID === uid && pendingComment.body === body
+      pendingComment?.identity === identity
         ? pendingComment
-        : { issueUID: uid, body, key: crypto.randomUUID() }
+        : { identity, key: crypto.randomUUID() }
     pendingComment = comment
     const accepted = await runMutation({ draft: body }, (context) =>
       createComment(
         { projectId: String(target.project_id), ref: target.ref },
-        context.body({ body }, requestActor),
+        context.body(
+          {
+            body,
+            ...(reply ? { reply_to: reply.replyTo, kind: reply.kind, force: reply.force } : {}),
+          },
+          requestActor,
+        ),
         { headers: { 'Idempotency-Key': comment.key } },
       ),
     )

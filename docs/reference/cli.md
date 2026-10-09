@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-07
+last_edited: 2026-10-08
 ---
 
 # CLI reference
@@ -621,6 +621,8 @@ kata list --all [--status open|closed|all] [--sort oldest] [--limit N]
               [--owner NAME | --unowned]
               [--label LABEL] [--no-label LABEL] [--meta key[=value]]
 kata show <issue-ref> [--render]
+kata show <issue-ref> [--thread COMMENT | --inbound[=AUTHOR[/TEAMMATE]]]
+                     [--kind reply|confirm|refute|supersede] [--since COMMENT]
 kata status <issue-ref>
 kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical | --hybrid | --semantic]
@@ -647,6 +649,20 @@ present and is `[]` when the issue has no labels. The CLI prints the daemon's
 response as-is, so `.issue.labels` requires daemon API `0.24.0` or newer; an
 older daemon omits the key. The top-level `.labels` array keeps each label's
 `author` and `created_at` on every daemon version.
+
+With daemon API `0.26.0` or newer, comments include copyable handles, typed
+reply lines, backlinks, and edit markers in human, `--agent`, and `--json`
+output. `--thread COMMENT` follows the root and all its transitive replies
+across the project. It returns at most 50 comments and reports truncation;
+the root is retained when the limit or `--kind` filter applies. `--inbound`
+returns replies to your comments on this issue. Use `--inbound=AUTHOR` or
+`--inbound=AUTHOR/TEAMMATE` to select another participant. Thread and inbound
+selectors cannot be combined. `--kind` requires one of those selectors.
+`--since COMMENT` keeps comments strictly after that comment in creation-time,
+then UID order. All selectors and backlinks respect the caller's read scope.
+Backlink evidence retains the newest 50 replies per kind and marks incomplete
+results with `backlinks_truncated` in JSON and agent output. Human output states
+that more replies may be available.
 
 `kata status` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. Its `hold` value is `active`,
@@ -792,12 +808,38 @@ Comment:
 
 ```sh
 kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
-kata comment edit <ref> <comment-uid> \
+kata comment <ref> --reply COMMENT [--idempotency-key KEY] [--force] --body TEXT
+kata comment <ref> --confirm COMMENT --body TEXT
+kata comment <ref> --refute COMMENT --body TEXT
+kata comment <ref> --supersede COMMENT --body TEXT
+kata comment edit <ref> <comment-uid-or-handle> \
   [--body TEXT | --body-file PATH | --body-stdin]
 ```
 
 `-m` and `--message` are aliases of `--body` on both comment commands, so
 the text flag from `kata close` works here too.
+
+Typed replies require daemon API `0.26.0` or newer. Choose one of `--reply`,
+`--confirm`, `--refute`, or `--supersede`. Reply is a general response; confirm
+asserts verification or reproduction. Confirm and refute bodies need at
+least 40 Unicode characters after whitespace normalization. The target must
+be visible and in the same project. A comment cannot link to itself. You
+cannot post a reply from a closed issue; a target on a closed issue is allowed.
+
+Use the displayed `c:abcdef` handle for a comment on the current issue,
+`abcd:abcdef` for another issue in the project, or
+`example-project#abcd:abcdef` for an explicit project. Full comment ULIDs are
+also accepted. Suffixes contain at least six characters, grow until unique
+within the visible project, and match case-insensitively. Bare suffixes are
+not accepted. Handles are computed on read; the stored edge uses the full UID.
+Read views mark unavailable targets as pending, removed, or moved. A moved
+target's link uses its current project and issue handle.
+
+Kata rejects a second reply with the same author, teammate, target, and kind
+with HTTP 409 and the existing reply's visible handle. Use `--force` to post
+another. Supply `--idempotency-key` for a retryable write: identical requests
+return the original result, while changing the body, participant, target, or
+kind with that key is a conflict. Equivalent target spellings share a receipt.
 
 `KATA_TEAMMATE` supplies an optional default for comment creation;
 `--teammate` overrides it and `--teammate=''` suppresses it for one
@@ -807,7 +849,9 @@ create` writes the string to the new issue's initial `metadata.teammate`.
 Commenting on an existing issue never changes that issue metadata.
 
 `kata comment edit` replaces the current comment body while preserving the
-comment UID, author, teammate, creation time, and thread position. Use it for
+comment UID, author, teammate, creation time, reply edge, and thread position.
+Read views show when a comment was edited and when its target changed after
+the reply was posted. Use it for
 pre-federation content redaction; it does not rewrite historical events that
 have already been shared.
 
@@ -1588,6 +1632,17 @@ read-only experiments, and explicit tokenless private-network writes, see
 such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
+
+In the detail Comments tab, press `R` to reply to the selected comment.
+`Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
+refusal, `Ctrl+f` enables a forced retry. Use `[` and `]` to select a reply
+target or backlink evidence kind, then Enter to open its issue and focus that
+comment. Back returns to the original selection. Originals show nonzero direct
+counts for Replies, Confirmations, Refutations, and Superseding replies. The
+selected kind shows each visible reply’s author, time, and evidence. Conflicting
+assertions stay visible; superseding replies never hide the original body.
+Typed replies require daemon API `0.26.0` or newer and follow the comment
+rules above.
 
 Press `I` to open the TUI Inbox. It shows open tasks from the project designated
 with `role=inbox`, regardless of that project's name. The project is chosen when

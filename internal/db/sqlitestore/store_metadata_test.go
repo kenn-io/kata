@@ -309,3 +309,10 @@ func TestPatchIssueMetadata_ClearKeyWithNull(t *testing.T) {
 	assert.True(t, res2.Changed)
 	assert.NotContains(t, string(res2.Issue.Metadata), "scheduled_on")
 }
+
+func TestPatchIssueMetadataValidatesBeforeOpeningTransaction(t *testing.T) {
+	store, ctx, _, issue := setupTestIssue(t)
+	require.NoError(t, store.Close())
+	_, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value("42")}})
+	require.ErrorContains(t, err, `validate "scheduled_on"`)
+}

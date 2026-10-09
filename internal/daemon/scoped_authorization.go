@@ -239,11 +239,15 @@ func filterIssueScopedReportEvents(
 	}
 	out := make([]db.Event, 0, len(events))
 	projectUID := scope.ProjectUID
-	for _, event := range events {
-		projected, ok := projectIssueScopedEvent(event, allowed, projectUID)
-		if !ok {
+	projectedEvents, visibleEvents, err := projectIssueScopedEvents(ctx, store, events, allowed, projectUID)
+	if err != nil {
+		return nil, nil, internalAPIError(err)
+	}
+	for index, event := range events {
+		if !visibleEvents[index] {
 			continue
 		}
+		projected := projectedEvents[index]
 		// Reports keep the typed safe projection and re-add only the
 		// authorized link/parent context the digest and audit aggregators
 		// read, so counts stay truthful without naming hidden peers.

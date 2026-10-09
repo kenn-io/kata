@@ -160,13 +160,16 @@ func (*IssueSyncStatusExport) ImportKind() string { return ImportKindIssueSyncSt
 
 // CommentExport is one comment row in export shape.
 type CommentExport struct {
-	ID        int64  `json:"id"`
-	UID       string `json:"uid"`
-	IssueID   int64  `json:"issue_id"`
-	Author    string `json:"author"`
-	Teammate  string `json:"teammate,omitempty"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"`
+	ReplyToUID string `json:"reply_to_uid,omitempty"`
+	ReplyKind  string `json:"reply_kind,omitempty"`
+	EditedAt   string `json:"edited_at,omitempty"`
+	ID         int64  `json:"id"`
+	UID        string `json:"uid"`
+	IssueID    int64  `json:"issue_id"`
+	Author     string `json:"author"`
+	Teammate   string `json:"teammate,omitempty"`
+	Body       string `json:"body"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

@@ -34,11 +34,35 @@ export interface KataIssueReferenceWire {
   status?: string | undefined
 }
 
+export type KataReplyKind = 'reply' | 'confirm' | 'refute' | 'supersede'
+export interface KataCommentLink {
+  uid?: string | undefined
+  handle?: string | undefined
+  kind: string
+  author?: string | undefined
+  teammate?: string | undefined
+  issue_uid?: string | undefined
+  issue_short_id?: string | undefined
+  project_uid?: string | undefined
+  project_id?: number | undefined
+  status?: string | undefined
+  target_edited?: boolean | undefined
+  body?: string | undefined
+  created_at?: string | undefined
+  edited_at?: string | undefined
+}
+
 export interface KataIssueDetailWire {
   issue: KataIssueWire
   comments?:
     | Array<{
         id: number
+        uid?: string | undefined
+        handle?: string | undefined
+        reply?: KataCommentLink | undefined
+        backlinks?: KataCommentLink[] | undefined
+        backlinks_truncated?: boolean | undefined
+        edited_at?: string | undefined
         author: string
         teammate?: string | undefined
         body: string
@@ -102,6 +126,12 @@ export interface KataIssueDetailModel {
   }
   comments: Array<{
     id: string
+    uid?: string
+    handle?: string
+    reply?: KataCommentLink
+    backlinksPartial?: boolean
+    backlinks?: KataCommentLink[]
+    editedAt?: string
     author: string
     teammate?: string
     body: string
@@ -133,4 +163,13 @@ export interface KataIssueDetailProps {
   actions?: readonly KataIssueHostAction[]
   /** Host navigation for parent, child, and linked issue references. */
   onOpenIssue?: (uid: string) => void
+  onOpenComment?: (
+    issueUID: string,
+    commentUID: string,
+    source?: { issueUID: string; commentUID: string },
+  ) => void
+  returnComment?: { issueUID: string; commentUID: string } | undefined
+  onReplyComment?: (commentUID: string, kind: KataReplyKind) => void
+  commentActionsDisabled?: boolean
+  selectedCommentUID?: string | undefined
 }

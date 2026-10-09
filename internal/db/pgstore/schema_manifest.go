@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "296b297d7f2e06a90d7d93e89fc851903eba4a8d7d41316aca0a4db6dca8e103"
-	canonicalConstraintFingerprint = "184a76b16fd874ccbf2a59d0e100f9958ea3dc799ddddbcda86d800363a0e92f"
-	canonicalIndexFingerprint      = "a827a2c2fa61f2ac0782385bec439033625c9869c656d2190dc80e30a33ab543"
+	canonicalColumnFingerprint     = "ba3249a14af552187eb8d4b2d5ed622550ad646eb8f5c91024002af7422b55c9"
+	canonicalConstraintFingerprint = "4810e0841e82b8b0d99c9897976a983a94e020fa5b78b904d5f8088bc744a45d"
+	canonicalIndexFingerprint      = "b183dcf6bdb9e9c7be5f38dbcd3e35309c3c7ef0fa799a1504d917a1c7645e55"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -24,7 +24,7 @@ const (
 
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
 	"api_tokens":              "id,token_hash,actor,name,scope_kind,scope_project_uid,scope_root_issue_uid,expires_at,created_at,last_used_at,revoked_at",
-	"comments":                "id,uid,issue_id,author,body,created_at,teammate",
+	"comments":                "id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at",
 	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
 	"external_field_mappings": "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
 	"external_field_states":   "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",
@@ -60,7 +60,7 @@ var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog co
 var canonicalIndexes = strings.Fields(`
 idx_projects_active idx_project_aliases_project recurrences_project
 idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner idx_issues_assignment_expires_on
-uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue
+uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue idx_comments_reply_to
 uniq_one_parent_per_child idx_links_from idx_links_to idx_links_from_uid idx_links_to_uid
 idx_issue_labels_label idx_events_project idx_events_issue idx_events_related
 idx_events_issue_uid idx_events_related_issue_uid idx_events_origin_instance

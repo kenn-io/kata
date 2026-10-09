@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-26
+last_edited: 2026-10-08
 ---
 
 # Web UI
@@ -103,6 +103,14 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 - completing, reopening, moving, and deleting issues; and
 - creating, editing, or deleting the issue's recurrence.
 
+With daemon API `0.26.0` or newer, comments show handles, reply targets,
+backlinks, and edit markers. Select a reply target or backlink to open its issue
+and focus the linked comment. **Reply**, **Confirm**, **Refute**, and
+**Supersede** open a typed reply composer from the read view. An unchanged
+retry keeps its request identity; a duplicate refusal offers an explicit force
+action. See the [comment rules](../reference/cli.md#issue-lifecycle) for
+validation and handle syntax.
+
 When the editor pane is narrower than 640 pixels, the title appears above the
 actions so it remains readable.
 
@@ -153,6 +161,15 @@ when its browser session cannot mutate issues, while a normal local-web,
 identity-token, scoped-worker, or proxy session cannot inspect them. Switching
 through the local daemon gateway cannot borrow a target's configured credential
 to gain this view.
+
+Original comments show nonzero incoming counts for Replies, Confirmations,
+Refutations, and Superseding replies. Activate a kind to inspect each visible
+reply's author, time, and evidence, then open its handle. **Return to original
+comment** restores focus to the source. Conflicting assertions remain visible;
+superseding replies do not hide the original body. Each kind includes up to 50
+of its newest visible incoming replies, in chronological order. Partial evidence uses a `+`
+count and a “More replies may be available” notice. A target edited after a
+reply is marked on that reply and in its incoming evidence list.
 
 ## Browser authority and deployment
 

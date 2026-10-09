@@ -769,6 +769,9 @@ type createdLinkOut struct {
 }
 
 type issueSnapshotComment struct {
+	ReplyToUID string `json:"reply_to_uid,omitempty"`
+	ReplyKind  string `json:"reply_kind,omitempty"`
+	EditedAt   string `json:"edited_at,omitempty"`
 	CommentUID string `json:"comment_uid"`
 	Author     string `json:"author"`
 	Teammate   string `json:"teammate,omitempty"`
@@ -1171,7 +1174,7 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 // failures; production uses the direct comment query through this function.
 var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (db.Comment, error) {
 	c, err := scanComment(d.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments WHERE id = ?`,
 		commentID))
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
@@ -1181,7 +1184,7 @@ var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (d
 
 func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {
 	c, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ? AND uid = ?`,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments WHERE issue_id = ? AND uid = ?`,
 		issueID, commentUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
@@ -1194,7 +1197,7 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 
 func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
 	c, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments WHERE id = ?`,
 		commentID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
@@ -1231,6 +1234,7 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 }
 
 func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (int64, db.Event, error) {
+	db.RetainCommentEvents(ctx)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, db.Event{}, err
@@ -1253,12 +1257,15 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("generate comment uid: %w", err)
 	}
+	if err := validateLocalCommentReplyTx(ctx, tx, commentUID, p, issue); err != nil {
+		return 0, db.Event{}, err
+	}
 	commentAt := time.Now().UTC()
 	createdAt := commentAt.Format(sqliteCommentTimeFormat)
 	mutationAt := commentAt.Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''))`,
-		commentUID, p.IssueID, p.Author, p.Body, createdAt, p.Teammate)
+		`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+		commentUID, p.IssueID, p.Author, p.Body, createdAt, p.Teammate, p.ReplyToUID, p.ReplyKind)
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("insert comment: %w", err)
 	}
@@ -1274,6 +1281,8 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	}
 
 	payloadBytes, err := json.Marshal(struct {
+		ReplyToUID             string `json:"reply_to_uid,omitempty"`
+		ReplyKind              string `json:"reply_kind,omitempty"`
 		CommentUID             string `json:"comment_uid"`
 		Author                 string `json:"author"`
 		Teammate               string `json:"teammate,omitempty"`
@@ -1282,6 +1291,7 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 		IdempotencyKey         string `json:"idempotency_key,omitempty"`
 		IdempotencyFingerprint string `json:"idempotency_fingerprint,omitempty"`
 	}{
+		ReplyToUID: p.ReplyToUID, ReplyKind: p.ReplyKind,
 		CommentUID:             commentUID,
 		Author:                 p.Author,
 		Teammate:               p.Teammate,
@@ -1293,21 +1303,60 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("marshal comment payload: %w", err)
 	}
+	var relatedID *int64
+	if p.ReplyToUID != "" {
+		var targetIssueID int64
+		err := tx.QueryRowContext(ctx, `SELECT i.id FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=? AND i.project_id=?`, p.ReplyToUID, issue.ProjectID).Scan(&targetIssueID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, db.Event{}, fmt.Errorf("lookup reply target issue: %w", err)
+		}
+		if err == nil && targetIssueID != issue.ID {
+			relatedID = &targetIssueID
+		}
+	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:   issue.ProjectID,
-		ProjectName: projectName,
-		IssueID:     &issue.ID,
-		Type:        "issue.commented",
-		Actor:       p.Author,
-		Payload:     string(payloadBytes),
+		ProjectID:      issue.ProjectID,
+		ProjectName:    projectName,
+		IssueID:        &issue.ID,
+		RelatedIssueID: relatedID,
+		Type:           "issue.commented",
+		Actor:          p.Author,
+		Payload:        string(payloadBytes),
 	})
 	if err != nil {
 		return 0, db.Event{}, err
 	}
+	committedEvents := []db.Event{evt}
+	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+		createdComment := db.Comment{
+			ID: commentID, UID: commentUID, IssueID: p.IssueID, Author: p.Author,
+			Body: p.Body, CreatedAt: commentAt, Teammate: p.Teammate,
+			ReplyToUID: p.ReplyToUID, ReplyKind: p.ReplyKind,
+		}
+		updates, err := hook(ctx, tx, issue, createdComment)
+		if err != nil {
+			return 0, db.Event{}, err
+		}
+		for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+			result, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{
+				IssueID: update.IssueID, Actor: p.Author, Patch: update.Patch,
+			})
+			if err != nil {
+				return 0, db.Event{}, err
+			}
+			if result.Changed {
+				committedEvents = append(committedEvents, result.Event)
+			}
+		}
+	}
 
+	// Comment-create metadata seam: issue, p, commentUID and evt are all
+	// available here in the same transaction. Additional metadata events must
+	// be returned as a committed batch before callers publish any of them.
 	if err := tx.Commit(); err != nil {
 		return 0, db.Event{}, err
 	}
+	db.RetainCommentEvents(ctx, committedEvents...)
 	return commentID, evt, nil
 }
 
@@ -1371,7 +1420,7 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 
 	editedAt := nowTimestamp()
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE comments SET body = ? WHERE id = ?`, p.Body, comment.ID); err != nil {
+		`UPDATE comments SET body = ?, edited_at = ? WHERE id = ?`, p.Body, editedAt, comment.ID); err != nil {
 		return db.Comment{}, nil, false, fmt.Errorf("update comment: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -1416,7 +1465,7 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ?`, issueID)
+		`SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -1441,16 +1490,57 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 	return out, nil
 }
 
+// CommentIssueIDsByUIDs maps existing comment UIDs to their owning issue IDs.
+func (d *Store) CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[string]int64, error) {
+	out := make(map[string]int64, len(uids))
+	const chunk = 500
+	for i := 0; i < len(uids); i += chunk {
+		end := min(i+chunk, len(uids))
+		slice := uids[i:end]
+		placeholders := make([]string, len(slice))
+		args := make([]any, 0, len(slice))
+		for j, commentUID := range slice {
+			placeholders[j] = "?"
+			args = append(args, commentUID)
+		}
+		rows, err := d.QueryContext(ctx,
+			`SELECT uid, issue_id FROM comments WHERE uid IN (`+strings.Join(placeholders, ",")+")", args...)
+		if err != nil {
+			return nil, fmt.Errorf("comment issue ids by uids: %w", err)
+		}
+		for rows.Next() {
+			var commentUID string
+			var issueID int64
+			if err := rows.Scan(&commentUID, &issueID); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan comment issue id: %w", err)
+			}
+			out[commentUID] = issueID
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate comment issue ids: %w", err)
+		}
+		_ = rows.Close()
+	}
+	return out, nil
+}
+
 func scanComment(row rowScanner) (db.Comment, error) {
 	var comment db.Comment
-	var teammate sql.NullString
+	var teammate, replyTo, replyKind sql.NullString
+	var editedAt sql.NullTime
 	if err := row.Scan(
 		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body,
-		&comment.CreatedAt, &teammate,
+		&comment.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt,
 	); err != nil {
 		return db.Comment{}, err
 	}
 	comment.Teammate = teammate.String
+	comment.ReplyToUID, comment.ReplyKind = replyTo.String, replyKind.String
+	if editedAt.Valid {
+		comment.EditedAt = &editedAt.Time
+	}
 	return comment, nil
 }
 

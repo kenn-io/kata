@@ -9,14 +9,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
-
-	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/textsafe"
 )
 
 // ExitWaitTimeout is the dedicated exit code `kata wait` returns when the
@@ -52,6 +54,7 @@ const (
 type waitMode string
 
 const (
+	waitReply      waitMode = "reply"
 	waitClosed     waitMode = "closed"
 	waitAttention  waitMode = "attention"
 	waitNeedsHuman waitMode = "needs-human"
@@ -66,6 +69,7 @@ const (
 type issueState struct {
 	status    string
 	attention string
+	reply     jsontext.Value
 }
 
 // evalWait is the pure condition-evaluation core: given a wait mode and an
@@ -99,11 +103,11 @@ func evalWait(mode waitMode, st issueState) (satisfied bool, reason string) {
 // parseWaitMode validates the --until value.
 func parseWaitMode(s string) (waitMode, error) {
 	switch waitMode(s) {
-	case waitClosed, waitAttention, waitNeedsHuman, waitStuck:
+	case waitClosed, waitAttention, waitNeedsHuman, waitStuck, waitReply:
 		return waitMode(s), nil
 	default:
 		return "", &cliError{
-			Message:  fmt.Sprintf("--until must be one of closed|attention|needs-human|stuck, got %q", s),
+			Message:  fmt.Sprintf("--until must be one of closed|attention|needs-human|stuck|reply, got %q", s),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
@@ -159,13 +163,16 @@ const (
 
 // waitTarget is a ref's mutable per-run state.
 type waitTarget struct {
-	arg        string // user-supplied ref, used verbatim for display
-	pid        int64
-	refForAPI  string
-	fails      int
-	state      waitTargetState
-	abandonErr error // the permanent error that moved this ref to targetAbandoned
-	result     waitResult
+	arg              string // user-supplied ref, used verbatim for display
+	pid              int64
+	refForAPI        string
+	fails            int
+	state            waitTargetState
+	abandonErr       error // the permanent error that moved this ref to targetAbandoned
+	result           waitResult
+	replyKey         string
+	replyBaseline    jsontext.Value
+	replyBaselineSet bool
 }
 
 type waitOptions struct {
@@ -211,7 +218,9 @@ the issue to be closed; --until needs-human / --until stuck wait for the
 work.attention metadata key to reach that value; --until attention fires on any
 attention level other than "ok". A closed issue also completes the wait in the
 attention modes (you cannot wait forever on a finished issue); the reason then
-reads "closed" rather than "attention".
+reads "closed" rather than "attention". --until reply waits for your inbox slot
+to change after the first successful poll. Existing requests are the baseline.
+KATA_INBOX_USER selects an inbox; otherwise your actor and teammate select it.
 
 With multiple refs, --all (default) waits for every ref and --any returns as
 soon as the first fires. On --timeout expiry the still-pending refs are reported
@@ -232,18 +241,19 @@ The --json output is a single object:
     ]
   }
 
-reason is "closed" or "attention"; attention/attention_msg are present only for
+reason is "closed", "attention", or "reply"; attention/attention_msg are present only for
 attention completions; pending lists refs still unmet on timeout. abandoned
 (present only when non-empty) lists refs dropped from an --any join after a
 permanent daemon error such as a deleted issue; in --all a permanent error
 aborts the whole wait with the daemon's exit code instead.`,
+		Example: `  kata wait abc4 --until reply --timeout 30m --agent`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWait(cmd, args, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.until, "until", "closed",
-		"condition to wait for: closed|attention|needs-human|stuck")
+		"condition to wait for: closed|attention|needs-human|stuck|reply")
 	opts.pollInterval = defaultWaitPollInterval
 	cmd.Flags().Var(durationFlag{&opts.timeout}, "timeout",
 		"maximum time to wait (0 = wait forever)")
@@ -318,21 +328,8 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	for _, arg := range args {
 		c, resolvedURL, pid, ref, rerr := resolveIssueRefForCommand(cmd, arg)
 		if rerr != nil {
-			// Attribute the failure to --timeout only when the wait's own
-			// deadline has actually elapsed (wall clock, matching the poll
-			// loop). ctx.Err() alone is not enough: a parent context deadline
-			// (e.g. a caller's ExecuteContext budget) also surfaces as
-			// DeadlineExceeded on the derived context, and that failure must
-			// return the resolution error, not timed_out=true.
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) && run.expired() {
-				if err := emitWaitJSON(cmd, waitJSONOutput{
-					Results:  []waitResult{},
-					TimedOut: true,
-					Pending:  append([]string(nil), args...),
-				}); err != nil {
-					return err
-				}
-				return waitTimeoutError(opts.timeout, args)
+			if timedOut, timeoutErr := handleWaitTimeout(ctx, cmd, run, opts.timeout, args); timedOut {
+				return timeoutErr
 			}
 			return rerr
 		}
@@ -343,6 +340,35 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
+	}
+
+	if mode == waitReply {
+		recipient := os.Getenv("KATA_INBOX_USER")
+		if recipient == "" {
+			actor, _ := resolveActor(ctx, flags.As, nil)
+			var instance instanceStatusForCLI
+			if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
+				if timedOut, timeoutErr := handleWaitTimeout(ctx, cmd, run, opts.timeout, pendingRefs(targets)); timedOut {
+					return timeoutErr
+				}
+				return err
+			}
+			if flags.As == "" && instance.Auth.Actor != "" {
+				actor = instance.Auth.Actor
+			}
+			tm, err := resolveTeammate(cmd)
+			if err != nil {
+				return err
+			}
+			recipient = notification.Address(actor, tm)
+		}
+		recipient, err = normalizeNotificationRecipient(recipient)
+		if err != nil {
+			return err
+		}
+		for _, target := range targets {
+			target.replyKey = notification.MetadataKey(recipient)
+		}
 	}
 
 	// ctx carries both the wait deadline (installed above when --timeout > 0)
@@ -453,6 +479,31 @@ func waitTimeoutError(timeout time.Duration, pending []string) *cliError {
 	}
 }
 
+// handleWaitTimeout attributes a cancelled request to the command's own wait
+// budget only when that wall-clock deadline has elapsed. Parent-context
+// cancellation remains the original request error. It is shared by ref
+// resolution and reply-recipient discovery so every setup request honors the
+// same --timeout contract as the poll loop.
+func handleWaitTimeout(
+	ctx context.Context,
+	cmd *cobra.Command,
+	run waitRun,
+	timeout time.Duration,
+	pending []string,
+) (bool, error) {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || !run.expired() {
+		return false, nil
+	}
+	if err := emitWaitJSON(cmd, waitJSONOutput{
+		Results:  []waitResult{},
+		TimedOut: true,
+		Pending:  append([]string(nil), pending...),
+	}); err != nil {
+		return true, err
+	}
+	return true, waitTimeoutError(timeout, pending)
+}
+
 // waitPollLoop polls the still-pending targets on run.poll cadence until the
 // join condition is met, run's deadline passes, or the context is cancelled.
 // It returns an error only for a hard failure (context cancellation or a ref
@@ -560,7 +611,22 @@ func evalTarget(run waitRun, t *waitTarget, st issueState, msg string) bool {
 	if t.state != targetPending {
 		return false
 	}
+
 	satisfied, reason := evalWait(run.mode, st)
+	if run.mode == waitReply && st.status != "closed" {
+		slot := metadata.NormalizeJSON(st.reply)
+		if len(slot) == 0 || string(slot) == "null" {
+			slot = nil
+		}
+		if !t.replyBaselineSet {
+			t.replyBaseline = append(jsontext.Value(nil), slot...)
+			t.replyBaselineSet = true
+			return false
+		}
+		satisfied = !bytes.Equal(t.replyBaseline, slot)
+		reason = "reply"
+	}
+
 	if !satisfied {
 		return false
 	}
@@ -600,6 +666,7 @@ func waitFetchState(ctx context.Context, client *http.Client, baseURL string, t 
 	st := issueState{
 		status:    out.Issue.Status,
 		attention: decodeJSONString(out.Issue.Metadata[attentionKey]),
+		reply:     out.Issue.Metadata[t.replyKey],
 	}
 	return st, decodeJSONString(out.Issue.Metadata[attentionMsgKey]), nil
 }
@@ -768,6 +835,10 @@ func (r *waitReporter) reportHuman(t *waitTarget) error {
 	ref := textsafe.Line(t.arg)
 	if t.result.Reason == "closed" {
 		_, err := fmt.Fprintf(r.w, "%s closed\n", ref)
+		return err
+	}
+	if t.result.Reason == "reply" {
+		_, err := fmt.Fprintf(r.w, "%s reply\n", ref)
 		return err
 	}
 	line := fmt.Sprintf("%s attention: %s", ref, t.result.Attention)

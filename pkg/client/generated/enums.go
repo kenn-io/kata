@@ -118,6 +118,26 @@ func (c CloseActionRequestBodySource) Validate() error {
 	}
 }
 
+// CommentRequestBodyKind reply is a general response; confirm asserts verification or reproduction
+type CommentRequestBodyKind string
+
+const (
+	Confirm   CommentRequestBodyKind = "confirm"
+	Refute    CommentRequestBodyKind = "refute"
+	Reply     CommentRequestBodyKind = "reply"
+	Supersede CommentRequestBodyKind = "supersede"
+)
+
+// Validate checks if the CommentRequestBodyKind value is valid
+func (c CommentRequestBodyKind) Validate() error {
+	switch c {
+	case Confirm, Refute, Reply, Supersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CommentRequestBodyKind value, got: %v", c))
+	}
+}
+
 type CreateInitialLinkBodyType string
 
 const (
@@ -453,6 +473,25 @@ func (l ListAllIssuesQuerySort) Validate() error {
 	}
 }
 
+type ShowIssueByUIDQueryKind string
+
+const (
+	ShowIssueByUIDQueryKindConfirm   ShowIssueByUIDQueryKind = "confirm"
+	ShowIssueByUIDQueryKindRefute    ShowIssueByUIDQueryKind = "refute"
+	ShowIssueByUIDQueryKindReply     ShowIssueByUIDQueryKind = "reply"
+	ShowIssueByUIDQueryKindSupersede ShowIssueByUIDQueryKind = "supersede"
+)
+
+// Validate checks if the ShowIssueByUIDQueryKind value is valid
+func (s ShowIssueByUIDQueryKind) Validate() error {
+	switch s {
+	case ShowIssueByUIDQueryKindConfirm, ShowIssueByUIDQueryKindRefute, ShowIssueByUIDQueryKindReply, ShowIssueByUIDQueryKindSupersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ShowIssueByUIDQueryKind value, got: %v", s))
+	}
+}
+
 type ListIssuesQueryStatus string
 
 const (
@@ -486,6 +525,25 @@ func (l ListIssuesQuerySort) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListIssuesQuerySort value, got: %v", l))
+	}
+}
+
+type ShowIssueQueryKind string
+
+const (
+	ShowIssueQueryKindConfirm   ShowIssueQueryKind = "confirm"
+	ShowIssueQueryKindRefute    ShowIssueQueryKind = "refute"
+	ShowIssueQueryKindReply     ShowIssueQueryKind = "reply"
+	ShowIssueQueryKindSupersede ShowIssueQueryKind = "supersede"
+)
+
+// Validate checks if the ShowIssueQueryKind value is valid
+func (s ShowIssueQueryKind) Validate() error {
+	switch s {
+	case ShowIssueQueryKindConfirm, ShowIssueQueryKindRefute, ShowIssueQueryKindReply, ShowIssueQueryKindSupersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ShowIssueQueryKind value, got: %v", s))
 	}
 }
 

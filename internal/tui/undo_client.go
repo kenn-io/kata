@@ -302,3 +302,13 @@ func (c *undoClient) ReportScreenViewed(ctx context.Context, screen string) erro
 	}
 	return reporter.ReportScreenViewed(ctx, screen)
 }
+
+func (c *undoClient) AddCommentReply(ctx context.Context, pid int64, ref, body, actor, target, kind string, force bool, key string) (*MutationResp, error) {
+	client, ok := c.KataAPI.(typedCommentAPI)
+	if !ok {
+		return nil, errors.New("client does not support typed comment replies")
+	}
+	return c.boundaryWrite(ctx, "comment addition cannot be undone", func() (*MutationResp, error) {
+		return client.AddCommentReply(ctx, pid, ref, body, actor, target, kind, force, key)
+	})
+}

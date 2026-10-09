@@ -13,6 +13,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/time/rate"
 
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
@@ -310,6 +311,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setNumberBounds("limit", 1, maximumResultLimit)
 		forbidTrueWith("unowned", "owner")
 	case "kata.show":
+		setEnum("kind", "reply", "confirm", "refute", "supersede")
 		setStringBounds("ref", 1, 256)
 		setNumberBounds("comment_limit", 1, maximumResultLimit)
 	case "kata.create":
@@ -325,6 +327,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		forbidTrueWith("clear_timezone", "timezone")
 		forbidTogether("parent", "remove_parent")
 	case "kata.comment":
+		setEnum("kind", "reply", "confirm", "refute", "supersede")
 		setStringBounds("ref", 1, 256)
 		setStringBounds("body", 1, 1<<20)
 		setStringBounds("idempotency_key", 1, 256)
@@ -617,6 +620,10 @@ type LabelsInput struct {
 
 // ShowInput selects one bound-project issue.
 type ShowInput struct {
+	Thread       string `json:"thread,omitempty" jsonschema:"Comment reference whose transitive replies to show; maximum 50 including root"`
+	Inbound      string `json:"inbound,omitempty" jsonschema:"Author or author/teammate whose comments receive replies on this issue"`
+	Kind         string `json:"kind,omitempty" jsonschema:"Reply kind filter; requires thread or inbound"`
+	Since        string `json:"since,omitempty" jsonschema:"Comments strictly after this comment reference"`
 	Ref          string `json:"ref" jsonschema:"Bare short ID, qualified reference, or full issue UID"`
 	CommentLimit int    `json:"comment_limit,omitempty" jsonschema:"Maximum newest comments from 1 through 100; omit for 20"`
 }
@@ -667,6 +674,9 @@ type EditInput struct {
 
 // CommentInput appends an idempotent comment.
 type CommentInput struct {
+	ReplyTo        string  `json:"reply_to,omitempty" jsonschema:"Comment reference to reply to, confirm, refute, or supersede"`
+	Kind           string  `json:"kind,omitempty" jsonschema:"reply, confirm, refute, or supersede; confirm asserts verification/reproduction; confirm/refute need 40 evidence characters"`
+	Force          bool    `json:"force,omitempty" jsonschema:"Allow another same-kind reply by this actor and teammate"`
 	Teammate       *string `json:"teammate,omitempty" jsonschema:"Teammate handle; empty suppresses the startup default"`
 	Ref            string  `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Body           string  `json:"body" jsonschema:"Comment body"`
@@ -809,11 +819,18 @@ type LabelsOutput struct {
 
 // CommentSummary is a bounded comment representation.
 type CommentSummary struct {
-	Teammate  string `json:"teammate,omitempty"`
-	UID       string `json:"uid"`
-	Author    string `json:"author"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"created_at"`
+	Handle             string            `json:"handle,omitempty"`
+	Reply              *commentref.Link  `json:"reply,omitempty"`
+	Backlinks          []commentref.Link `json:"backlinks,omitempty"`
+	BacklinksTruncated bool              `json:"backlinks_truncated,omitempty"`
+	EditedAt           string            `json:"edited_at,omitempty"`
+	IssueUID           string            `json:"issue_uid,omitempty"`
+	IssueShortID       string            `json:"issue_short_id,omitempty"`
+	Teammate           string            `json:"teammate,omitempty"`
+	UID                string            `json:"uid"`
+	Author             string            `json:"author"`
+	Body               string            `json:"body"`
+	CreatedAt          string            `json:"created_at"`
 }
 
 // LinkSummary identifies a relationship endpoint.

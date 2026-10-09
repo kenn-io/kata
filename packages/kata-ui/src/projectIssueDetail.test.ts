@@ -4,9 +4,7 @@ import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/m
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
-function acceptCanonicalWire(
-  wire: ShowIssueResponseBody,
-): KataIssueDetailWire {
+function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
 
@@ -230,5 +228,39 @@ describe('projectIssueDetail', () => {
     expect(model.children[0]?.title).toBe('Child')
     expect(model.claim?.holder).toBe('agent-a')
     expect(model.pendingClaims[0]?.holder).toBe('agent-b')
+  })
+})
+
+it('preserves canonical comment links and edit state for navigation', () => {
+  const reply = {
+    uid: 'target-comment',
+    issue_uid: 'other-issue',
+    handle: 'abcd:abc123',
+    kind: 'reply',
+    author: 'finder',
+    target_edited: true,
+  }
+  const model = projectIssueDetail({
+    issue: { uid: 'source-issue', title: 'Source', status: 'open' },
+    comments: [
+      {
+        id: 1,
+        uid: 'source-comment',
+        author: 'worker',
+        body: 'Answer',
+        created_at: '2030-01-01T00:00:00Z',
+        handle: 'c:def456',
+        reply,
+        backlinks: [],
+        edited_at: '2030-01-02T00:00:00Z',
+      },
+    ],
+  })
+  expect(model.comments[0]).toMatchObject({
+    uid: 'source-comment',
+    handle: 'c:def456',
+    reply,
+    backlinks: [],
+    editedAt: '2030-01-02T00:00:00Z',
   })
 })

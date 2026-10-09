@@ -11,3 +11,7 @@ describe('supportsKataAPISchema', () => {
     expect(supportsKataAPISchema(version)).toBe(false)
   })
 })
+
+it('accepts the typed comment read contract', () => {
+  expect(supportsKataAPISchema('0.26.0')).toBe(true)
+})

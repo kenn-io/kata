@@ -13,11 +13,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
-
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/fslink"
 )
@@ -62,6 +61,7 @@ type callInitOpts struct {
 // Message is the human-readable text. ExitCode is what main() exits with.
 type cliError struct {
 	HTTPStatus int
+	Hint       string
 	Message    string
 	Kind       errKind
 	Code       string
@@ -667,6 +667,7 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
+			Hint    string         `json:"hint,omitempty"`
 			Code    string         `json:"code"`
 			Message string         `json:"message"`
 			Data    jsontext.Value `json:"data,omitempty"`
@@ -684,6 +685,7 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 	return &cliError{
 		HTTPStatus: status,
 		Message:    env.Error.Message,
+		Hint:       env.Error.Hint,
 		Code:       env.Error.Code,
 		Kind:       kindForStatus(status),
 		ExitCode:   mapStatusToExit(status, env.Error.Code),
