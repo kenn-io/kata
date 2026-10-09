@@ -234,6 +234,12 @@ on the spoke and should print `--adopt-existing`. The generated token printed
 in the `kata federation join ...` command is a separate spoke transport
 credential.
 
+Without a project argument or `--project`, `enroll` finds the project from the
+client's `.kata.toml` or Git alias and sends only that name or alias to the
+hub. An unbound directory fails with `project_not_initialized`, and a missing
+`--workspace` path fails with a validation error. The hub is never asked to
+search client directories, even when `--hub-url` is a loopback address.
+
 On hubs configured with `[auth].require_token_identity = true`, a DB-backed
 account token cannot create a legacy enrollment because that grant would outlive
 the account token. Use `kata federation bridge connect` to create a
