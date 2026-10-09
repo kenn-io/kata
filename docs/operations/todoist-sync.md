@@ -123,7 +123,8 @@ Todoist reports unknown (`null`) creation or update times. Kata uses the task's
 other known timestamps instead, or the history floor when none are known. Two-way
 status scans and imports never move such a task behind the version Kata
 already stored. While no one has edited the issue in Kata, its status and title still
-follow Todoist; other fields wait until Todoist reports an update time.
+follow Todoist. Other fields change only when a newer timestamp, such as a
+later completion time, moves the task past that version.
 
 An active task wins over historical completions of the same ID, including old
 recurring occurrences. A missing task is never treated as completion or
