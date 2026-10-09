@@ -211,8 +211,14 @@ func TestTokenIdentity_FederationPersonalTokenBridgeConnectAndPush(t *testing.T)
 	hubProject, err := hubDB.ProjectByName(ctx, projectName)
 	require.NoError(t, err)
 	pushed := waitForFederatedTitle(t, hubDB, pushedTitle, &safeBuffer{}, 10*time.Second)
-	assert.Equal(t, "wesm", pushed.Author)
-	assert.NotEqual(t, "mallory", pushed.Author)
+	assert.Equal(t, "mallory", pushed.Author, "the signed source actor remains the displayed issue author")
+	receipt, err := hubDB.EntityAttribution(ctx, hubProject.UID, "issue", pushed.UID)
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", receipt.AccountableActor)
+	assert.Equal(t, "mallory", receipt.SourceActor)
+	rootPin, err := hubDB.RootAuthority(ctx, hubProject.UID)
+	require.NoError(t, err)
+	require.NoError(t, db.VerifyRootReceipt(rootPin, receipt))
 
 	events, err := hubDB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: hubProject.ID, Limit: 100})
 	require.NoError(t, err)
@@ -224,12 +230,14 @@ func TestTokenIdentity_FederationPersonalTokenBridgeConnectAndPush(t *testing.T)
 		}
 	}
 	require.NotNil(t, createdEvent, "hub did not receive issue.created for %s", pushed.UID)
-	assert.Equal(t, "wesm", createdEvent.Actor)
+	assert.Equal(t, "mallory", createdEvent.Actor)
 
 	hubList := runRemoteCmdOutput(t, bin, hubWS, hubEnv,
 		"--project", projectName, "list", "--json")
-	assert.Contains(t, hubList, `"author":"wesm"`)
-	assert.NotContains(t, hubList, "mallory")
+	assert.Contains(t, hubList, `"author":"mallory"`)
+	assert.Contains(t, hubList, `"accountable_actor":"wesm"`)
+	assert.Contains(t, hubList, `"source_actor":"mallory"`)
+	assert.Contains(t, hubList, `"verification":"verified"`)
 }
 
 type rawHTTPResponse struct {
