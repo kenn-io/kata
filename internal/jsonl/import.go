@@ -32,6 +32,11 @@ type ImportOptions struct {
 	// cloned-from instance versus the new local one.
 	NewInstance bool
 
+	// AsStandalone creates a fresh, independently owned copy. It preserves
+	// content and history but drops federation state, claims, and replayable
+	// API-token events. Ordinary restore retains those records.
+	AsStandalone bool
+
 	// PreserveIssueSyncBindingEnabled is for trusted local schema cutover.
 	// External JSONL restores leave sync bindings disabled until re-enabled
 	// locally so restored provider config cannot use daemon credentials.
@@ -57,6 +62,13 @@ func Import(ctx context.Context, r io.Reader, store db.Storage) error {
 // atomically via store.ImportReplay. ImportWithOptions itself holds no SQL or
 // transaction state — the entire atomic insert lives in db.ImportReplay.
 func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts ImportOptions) error {
+	if opts.AsStandalone {
+		if opts.MergeProject || opts.PreserveIssueSyncBindingEnabled || opts.PreserveExternalRootBindingsEnabled {
+			return fmt.Errorf("standalone copy cannot merge projects or preserve enabled external bindings")
+		}
+		opts.RequireFreshTarget = true
+		opts.NewInstance = true
+	}
 	if opts.MergeProject && (opts.RequireFreshTarget || opts.NewInstance) {
 		return fmt.Errorf("project merge cannot use fresh-target or new-instance restore options")
 	}
@@ -93,6 +105,20 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		rec, err := toImportRecord(env, exportVersion, localInstanceUID, projectUIDByID)
 		if err != nil {
 			return err
+		}
+		if opts.AsStandalone {
+			switch record := rec.(type) {
+			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
+				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
+				*db.IssueClaimExport, *db.PendingClaimRequestExport:
+				continue
+			case *db.EventExport:
+				// Restore rebuilds token authority from these events. Omitting
+				// the projection alone would resurrect it on the next restore.
+				if record.Type == "token.created" || record.Type == "token.revoked" {
+					continue
+				}
+			}
 		}
 		recs = append(recs, rec)
 	}

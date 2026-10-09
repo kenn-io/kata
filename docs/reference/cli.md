@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-07
+last_edited: 2026-10-08
 ---
 
 # CLI reference
@@ -1682,6 +1682,7 @@ kata export [--project NAME] [--project-id N] [--output PATH]
 kata export --allow-running-daemon --output PATH
 
 kata import --input PATH --target PATH_OR_POSTGRES_DSN [--force]
+kata import --as-standalone --input PATH --target PATH_OR_POSTGRES_DSN
 kata import --merge --input PATH --target PATH_OR_POSTGRES_DSN
 kata import --source-format beads
 ```
@@ -1693,6 +1694,14 @@ database; run it on the daemon host with the intended storage configuration.
 Without `--merge`, the kata-format `import` creates a fresh SQLite database at a
 target path or a fresh Postgres `kata` schema at a Postgres DSN. An initialized
 target requires `--force`, which atomically replaces kata-owned state.
+
+Development feature: `--as-standalone` creates an independent copy with a new
+instance identity and no source federation or API-token authority. It keeps
+content and cross-project links from a full export. It requires a fresh target
+and cannot be combined with `--force` or `--merge`. Ordinary restore, including
+`--new-instance`, retains source authority. See
+[Make an independent copy](../operations/backup-restore.md#make-an-independent-copy-of-a-federated-hub)
+for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving
