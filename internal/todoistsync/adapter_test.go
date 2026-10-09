@@ -285,3 +285,45 @@ func TestRunnerReopensTaskWithUnknownUpdatedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Local title", issue.Title)
 }
+
+// Contract: a Todoist 404 covers both completed and deleted tasks. A saved
+// closed result never reopens-then-closes a Kata issue: after a local reopen
+// in one-way mode, a task that disappears from Todoist leaves the issue open.
+func TestRunnerMissingTaskDoesNotReuseClosedResultForOpenIssue(t *testing.T) {
+	ctx := t.Context()
+	store, binding, f := newRunnerFixture(t, "two-way")
+	_, err := f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	f.completeInTodoist()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	mapping, err := store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", "task:"+f.row.ID)
+	require.NoError(t, err)
+
+	setMode := func(mode string) {
+		c, err := DecodeConfig(binding.Config)
+		require.NoError(t, err)
+		c.StatusSync = mode
+		raw, err := EncodeConfig(c)
+		require.NoError(t, err)
+		binding, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+			ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey,
+			RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw,
+			IntervalSeconds: binding.IntervalSeconds,
+		})
+		require.NoError(t, err)
+	}
+	setMode("one-way")
+	_, _, changed, err := store.ReopenIssue(ctx, *mapping.IssueID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+	f.mu.Lock()
+	f.row.Deleted = true
+	f.mu.Unlock()
+	setMode("two-way")
+	_, _ = f.runner(store).RunOnce(ctx, binding.ID)
+	issue, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "open", issue.Status)
+	require.Empty(t, f.posts)
+}

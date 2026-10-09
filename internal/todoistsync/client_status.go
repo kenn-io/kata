@@ -18,10 +18,12 @@ type StatusSession interface {
 	WriteStatus(ctx context.Context, c Config, t StatusTarget, desired string, admit func() error) (issuesync.StatusObservation, error)
 }
 
-// StatusTarget names one mapped task and its last verified status observation.
+// StatusTarget names one mapped task, its last verified status observation,
+// and whether its Kata issue is closed.
 type StatusTarget struct {
-	ID    string
-	Prior *db.IssueStatusObservation
+	ID           string
+	Prior        *db.IssueStatusObservation
+	NativeClosed bool
 }
 
 // historyOverlap matches the cursor overlap used by the other issue sync providers.
@@ -114,15 +116,16 @@ func observationAfter(row Task, prior *db.IssueStatusObservation) issuesync.Stat
 	return o
 }
 
-// ReadStatus reports a task's current status. A task last seen closed and
-// still not active stays closed without another history scan.
+// ReadStatus reports a task's current status. Todoist returns 404 for both
+// completed and deleted tasks, so a task last seen closed reuses that result
+// without another history scan only while its Kata issue is closed too.
 func (s *clientSession) ReadStatus(ctx context.Context, c Config, t StatusTarget) (issuesync.StatusObservation, error) {
 	row, found, err := s.activeTask(ctx, c, t.ID)
 	if err != nil {
 		return issuesync.StatusObservation{}, err
 	}
 	if !found {
-		if t.Prior != nil && t.Prior.Raw != nil && *t.Prior.Raw == "closed" {
+		if t.NativeClosed && t.Prior != nil && t.Prior.Raw != nil && *t.Prior.Raw == "closed" {
 			raw := "closed"
 			return issuesync.StatusObservation{RawStatus: &raw, Status: "closed", ClosedReason: "done", Version: t.Prior.Version}, nil
 		}

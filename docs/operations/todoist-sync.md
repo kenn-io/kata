@@ -114,7 +114,9 @@ durable checkpoints and can progress independently of content failures.
 
 Two-way status scans read each mapped task's active state. A task whose
 completion Kata already verified is not looked up in history again while it
-stays inactive. A task last seen open is searched in history from that
+stays inactive and its Kata issue stays closed. Todoist returns `404` for both
+completed and deleted tasks, so an open Kata issue always needs fresh history
+evidence before it closes. A task last seen open is searched in history from that
 observation onward; other lookups start at the configured floor.
 
 Todoist reports unknown (`null`) creation or update times. Kata uses the task's

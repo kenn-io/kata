@@ -36,10 +36,11 @@ func (a *Adapter) OpenStatus(ctx context.Context, b db.IssueSyncBinding, _ time.
 	if !ok {
 		return nil, nil
 	}
-	return &todoistStatusRun{session: status, config: c}, nil
+	return &todoistStatusRun{store: a.store, session: status, config: c}, nil
 }
 
 type todoistStatusRun struct {
+	store   db.Storage
 	session StatusSession
 	config  Config
 }
@@ -59,7 +60,15 @@ func (r *todoistStatusRun) ReadStatus(ctx context.Context, m db.IssueStatusMappi
 	if err != nil {
 		return issuesync.StatusObservation{}, err
 	}
-	return r.session.ReadStatus(ctx, r.config, StatusTarget{ID: id, Prior: m.State.Observed})
+	t := StatusTarget{ID: id, Prior: m.State.Observed}
+	if t.Prior != nil && m.Mapping.IssueID != nil {
+		issue, err := r.store.IssueByID(ctx, *m.Mapping.IssueID)
+		if err != nil {
+			return issuesync.StatusObservation{}, err
+		}
+		t.NativeClosed = issue.Status == "closed"
+	}
+	return r.session.ReadStatus(ctx, r.config, t)
 }
 func (r *todoistStatusRun) WriteStatus(ctx context.Context, m db.IssueStatusMapping, desired string, admit func() error) (issuesync.StatusObservation, error) {
 	id, err := todoistStatusID(m)
