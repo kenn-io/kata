@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-04
+last_edited: 2026-10-07
 ---
 
 # HTTP API schema
@@ -745,3 +745,22 @@ and unstarted groups. Empty strings clear overrides. Intervals accept one of
 `interval` or `interval_seconds`. Origins and tokens are daemon-owned and rejected
 as request config. Source identity is immutable; validation reads project and
 states before a guarded upsert. See [Plane sync](../operations/plane-sync.md).
+
+Linear uses the issue-sync routes with provider `linear`. Initial enable config
+requires string `workspace_id` and `team_id` UUIDs. Optional string `project_id`
+restricts the team to a project. Scope is immutable. Optional `since`,
+`closed_state_id`, and `open_state_id` are strings; `title_prefix` is a boolean.
+Top-level `status_sync` and interval use the existing issue-sync contract.
+Re-enable preserves omitted options. Credentials and endpoint selection are
+not accepted in binding requests. See [Linear sync](../operations/linear-sync.md).
+
+Twenty uses the same issue-sync routes with provider `twenty`. Enable discovers
+and verifies workspace identity from the daemon-owned credential. Optional config
+keys are string `since`, boolean `title_prefix`, string `closed_status`, string
+`open_status`, and string array `open_statuses`. Top-level `status_sync` selects
+`one-way` or `two-way`; interval accepts `interval` or `interval_seconds`.
+Omitted settings preserve saved values. Origins, credential selectors, keys,
+and workspace IDs are rejected as request config. Status classification is
+validated against live metadata before a guarded upsert. Empty or
+whitespace-only `closed_status` and `open_status` values are rejected; omit a
+key to preserve its saved value. See [Twenty sync](../operations/twenty-sync.md).

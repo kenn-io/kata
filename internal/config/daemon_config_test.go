@@ -1506,3 +1506,27 @@ func TestApplyDaemonConfigEnv_AuthProxyListeners(t *testing.T) {
 		cfg.Auth.Proxy.TrustedProxyListeners,
 		"KATA_TRUSTED_PROXY_LISTENERS must split on commas, trim, drop empties, override config.toml")
 }
+
+// Literal affixes must survive config loading, including leading and trailing spaces.
+func TestEmbeddingAffixesLoadVerbatim(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://127.0.0.1:9/v1"
+model = "example-model"
+document_prefix = "title: none | text: "
+document_suffix = " document end "
+query_prefix = "task: search result | query: "
+query_suffix = " query end "
+request_dimensions = true
+`), 0o600))
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	ec := cfg.Search.Embeddings
+	assert.Equal(t, "title: none | text: ", ec.DocumentPrefix)
+	assert.Equal(t, " document end ", ec.DocumentSuffix)
+	assert.Equal(t, "task: search result | query: ", ec.QueryPrefix)
+	assert.Equal(t, " query end ", ec.QuerySuffix)
+	assert.True(t, ec.RequestDimensions)
+}

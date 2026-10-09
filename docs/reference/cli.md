@@ -1195,6 +1195,43 @@ groups close with `wontfix`, and other groups map to open. Explicit close/reopen
 other local fields stay in Kata. See [Plane sync](../operations/plane-sync.md) for permissions,
 self-hosting, timestamp ownership, polling limits, and recovery.
 
+### Linear
+
+```sh
+kata sync linear enable --linear-workspace UUID --linear-team UUID [--linear-project UUID]
+kata sync linear enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync linear enable --status-sync two-way [--closed-state UUID] [--open-state UUID]
+kata sync linear status
+kata sync linear once
+kata sync linear disable
+```
+
+Initial enable requires workspace and team UUIDs. The optional project restriction
+must be set initially; the source identity cannot change on re-enable. Omitted
+options preserve their saved values, and empty `--since` clears the cutoff.
+Credentials and authorization type belong to daemon `[linear_sync]` configuration.
+Two-way mode writes only completion/reopen state. See
+[Linear sync](../operations/linear-sync.md) for field ownership, permissions, and recovery.
+
+### Twenty
+
+```sh
+kata sync twenty enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync twenty enable --status-sync=two-way [--closed-status DONE] [--open-status TODO] [--open-statuses TODO,IN_PROGRESS]
+kata sync twenty status
+kata sync twenty once
+kata sync twenty disable
+```
+
+Enable discovers the workspace from the daemon's API key. Origins and the
+credential selector belong to `[twenty_sync]`; source identity is immutable.
+Omitted options preserve saved settings, and empty `--since` clears the cutoff.
+Status values are API option values. Every live option must be classified open
+or closed; null is open. New bindings use one-way status, `DONE` for closed, and
+`TODO,IN_PROGRESS` for open. Explicit close/reopen writes back in two-way mode,
+with `TODO` as the default reopen target. See [Twenty sync](../operations/twenty-sync.md)
+for self-hosting, schema compatibility, local edit ownership, and recovery.
+
 ### GitHub
 
 ```sh

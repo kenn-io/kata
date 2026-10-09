@@ -1,6 +1,10 @@
 package main
 
 import (
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/spf13/cobra"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -12,11 +16,31 @@ func issueSyncLabel(provider string) string {
 		return "GitHub"
 	case "notion":
 		return "Notion"
+	case "twenty":
+		return "Twenty"
 	case "plane":
 		return "Plane"
+	case "linear":
+		return "Linear"
 	default:
 		return provider
 	}
+}
+
+// issueSyncIntervalFlag accepts a duration or whole seconds, at least one second.
+func issueSyncIntervalFlag(provider, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	seconds, err := strconv.Atoi(value)
+	if err == nil && seconds >= 1 {
+		return value, nil
+	}
+	if err != nil {
+		duration, parseErr := time.ParseDuration(value)
+		if parseErr == nil && duration >= time.Second {
+			return value, nil
+		}
+	}
+	return "", &cliError{Message: issueSyncLabel(provider) + " sync interval must be at least one second", Kind: kindValidation, ExitCode: ExitValidation}
 }
 
 func newIssueSyncDisableCmd(provider string) *cobra.Command {

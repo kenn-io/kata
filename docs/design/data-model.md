@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-13
+last_edited: 2026-10-08
 ---
 
 # Data model and durability

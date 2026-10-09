@@ -76,7 +76,7 @@ func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T
 	require.Len(t, result.Hits, 1)
 	require.Equal(t, issue.UID, result.Hits[0].Issue.UID)
 	require.Contains(t, result.Hits[0].MatchedIn, "semantic")
-	require.Equal(t, [][]string{{"login\n\n"}}, requests, "serving must use stored document vectors and encode only the query")
+	require.Equal(t, [][]string{{"login"}}, requests, "serving must use stored document vectors and encode only the query")
 
 	updatedTitle := "repair session"
 	updated, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &updatedTitle, Actor: "example-author"})
@@ -88,7 +88,7 @@ func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T
 	require.NoError(t, err)
 	require.Empty(t, hits, "stale document vectors must not score the edited revision")
 	require.NoError(t, NewReconciler(store, index, client, ReconcilerConfig{}).reconcileOnce(ctx))
-	require.Equal(t, [][]string{{"login\n\n"}, {"repair session\n\nsession expired"}}, requests)
+	require.Equal(t, [][]string{{"login"}, {"repair session\n\nsession expired"}}, requests)
 	result, err = hybridSearch(ctx, store, index, client, hybridParams{
 		ProjectID: project.ID, Query: "session", Limit: 10, Requested: "hybrid",
 	})
