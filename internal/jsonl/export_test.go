@@ -609,7 +609,7 @@ func TestExportUsesSingleSnapshot(t *testing.T) {
 	assertRecordsDoNotContain(t, records, "created during export")
 }
 
-func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
+func TestLegacyExportUIDOnlyPeersRespectProjection(t *testing.T) {
 	for _, peerState := range []string{"same-project", "other-project", "missing", "soft-deleted"} {
 		t.Run(peerState, func(t *testing.T) {
 			ctx := context.Background()
@@ -674,6 +674,16 @@ func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
 						var event db.EventExport
 						require.NoError(t, json.Unmarshal(record.Data, &event))
 						got = append(got, event)
+					}
+					if peerState == "missing" {
+						require.Len(t, got, len(want))
+						for _, event := range got {
+							if event.Type == "issue.linked" || event.Type == "issue.links_changed" {
+								assert.Nil(t, event.RelatedIssueUID,
+									"legacy export must not preserve an unattested dangling peer UID")
+							}
+						}
+						return
 					}
 					assert.Equal(t, want, got)
 				})

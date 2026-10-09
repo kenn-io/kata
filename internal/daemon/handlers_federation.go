@@ -752,6 +752,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
+		ctx = db.WithFederationEventStream(ctx)
 		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
 	})
 

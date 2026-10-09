@@ -11,6 +11,21 @@ import (
 // event whose structured references cross the caller's project boundary.
 const ProjectScopeResetEventType = "sync.reset_required"
 
+type federationEventStreamScopeKey struct{}
+
+// WithFederationEventStream marks an authenticated federation poll. The
+// request is already limited to the enrolled source project, and its trusted
+// peer needs cross-project relationship UIDs to converge links after both
+// projects reach the same hub.
+func WithFederationEventStream(ctx context.Context) context.Context {
+	return context.WithValue(ctx, federationEventStreamScopeKey{}, true)
+}
+
+func federationEventStream(ctx context.Context) bool {
+	allowed, _ := ctx.Value(federationEventStreamScopeKey{}).(bool)
+	return allowed
+}
+
 // EventRequiresProjectScopeReset detects structured references that cannot be
 // released to a project-scoped reader. The lookup must honor ctx's authorized
 // project boundary so inaccessible issue identities resolve as not found.
@@ -20,6 +35,9 @@ func EventRequiresProjectScopeReset(
 	issueByUID func(string) (Issue, error),
 	issueByRef func(string, string) (Issue, error),
 ) (bool, error) {
+	if federationEventStream(ctx) {
+		return false, nil
+	}
 	allowedUIDs, restricted := AuthorizedProjects(ctx)
 	if !restricted {
 		return false, nil
