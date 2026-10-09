@@ -1080,11 +1080,12 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {
-			status, err := cfg.DB.ClaimStatus(ctx, issue.ProjectID, issue.UID, time.Now().UTC())
+			// Display reads must not compete with federation pushes for the
+			// writer lock. The sweeper and explicit status endpoint persist expiry.
+			status, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, time.Now().UTC())
 			if err != nil {
 				return nil, claimAPIError(err)
 			}
-			cfg.Publish().EventsByProject(status.Events)
 			hubNow := status.HubNow
 			if hubNow.IsZero() {
 				return nil, nil

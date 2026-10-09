@@ -51,6 +51,38 @@ func TestShowIssueClaimIncludesLiveHubClaimAndHubNow(t *testing.T) {
 	assert.Empty(t, body.PendingClaims)
 }
 
+func TestShowIssueClaimHubReturnsWhileSQLiteWriterIsHeld(t *testing.T) {
+	hub := testenv.New(t)
+	project, issue := createClaimHubIssue(t, hub)
+	var acquired claimResponseBody
+	resp := claimPost(t, hub, project.ID, issue.ShortID, "claim", map[string]any{
+		"holder":      "hub-cli",
+		"client_kind": "cli",
+		"claim_kind":  "hard",
+	}, nil, &acquired)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotNil(t, acquired.Claim)
+
+	// A federation push holds the same SQLite writer lock. Keep it held until
+	// the complete show response is read, without blocking other WAL readers.
+	conn, err := hub.DB.Conn(t.Context())
+	require.NoError(t, err)
+	defer func() {
+		_, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK")
+		assert.NoError(t, rollbackErr)
+		assert.NoError(t, conn.Close())
+	}()
+	_, err = conn.ExecContext(t.Context(), "BEGIN IMMEDIATE")
+	require.NoError(t, err)
+
+	body := getShowIssueClaimBodyWithTimeout(t, hub, project.ID, issue.ShortID, time.Second)
+
+	require.NotNil(t, body.Claim)
+	assert.Equal(t, acquired.Claim.ClaimUID, body.Claim.ClaimUID)
+	require.NotNil(t, body.ClaimHubNow)
+	assert.False(t, body.ClaimHubNow.IsZero())
+}
+
 func TestShowIssueClaimInsecureReadonlyOmitsUnauthenticatedClaimHydration(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t, testenv.WithInsecureReadonly())
@@ -130,7 +162,7 @@ func TestShowIssueClaimIncludesTimedClaimExpiresAt(t *testing.T) {
 	assert.True(t, body.Claim.ExpiresAt.After(body.Claim.AcquiredAt))
 }
 
-func TestShowIssueClaimExpiresTimedClaimBeforeViolationHydration(t *testing.T) {
+func TestShowIssueClaimKeepsViolationsUntilTimedClaimIsSwept(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)
 	project, issue := createClaimHubIssue(t, hub)
@@ -168,13 +200,33 @@ func TestShowIssueClaimExpiresTimedClaimBeforeViolationHydration(t *testing.T) {
 
 	body := getShowIssueClaimBody(t, hub, project.ID, issue.ShortID)
 
+	require.NotNil(t, body.Claim)
+	require.NotNil(t, body.Claim.ExpiresAt)
+	require.NotNil(t, body.ClaimHubNow)
+	assert.True(t, body.Claim.ExpiresAt.Before(*body.ClaimHubNow))
+	require.NotNil(t, body.ClaimViolationCount)
+	assert.Equal(t, int64(1), *body.ClaimViolationCount)
+	assert.Len(t, body.ClaimViolations, 1)
+	assertShowLiveClaimCount(t, hub.DB, issue.UID, 1)
+	assertShowEventCount(t, hub.DB, "claim.expired", 0)
+
+	sub := hub.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+	sweeper := daemon.NewTimedClaimSweeper(hub.DB, daemon.NewEventPublisher(hub.Broadcaster, nil))
+	require.NoError(t, sweeper.RunOnce(ctx, time.Now().UTC()))
+	msg := receiveMsg(t, sub.Ch, time.Second, "sweeper should broadcast claim expiry")
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, "claim.expired", msg.Event.Type)
+	assertShowLiveClaimCount(t, hub.DB, issue.UID, 0)
+	assertShowEventCount(t, hub.DB, "claim.expired", 1)
+
+	body = getShowIssueClaimBody(t, hub, project.ID, issue.ShortID)
 	assert.Nil(t, body.Claim)
 	assert.Nil(t, body.ClaimViolationCount)
 	assert.Empty(t, body.ClaimViolations)
-	assertShowEventCount(t, hub.DB, "claim.expired", 1)
 }
 
-func TestShowIssueClaimHubExpiryBroadcastsCommittedEvent(t *testing.T) {
+func TestShowIssueClaimHubDefersTimedExpiryToExplicitStatus(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)
 	project, issue := createClaimHubIssue(t, hub)
@@ -197,8 +249,31 @@ func TestShowIssueClaimHubExpiryBroadcastsCommittedEvent(t *testing.T) {
 
 	body := getShowIssueClaimBody(t, hub, project.ID, issue.ShortID)
 
+	require.NotNil(t, body.Claim)
+	require.NotNil(t, body.Claim.ExpiresAt)
+	require.NotNil(t, body.ClaimHubNow)
+	assert.True(t, body.Claim.ExpiresAt.Before(*body.ClaimHubNow))
+	assertShowLiveClaimCount(t, hub.DB, issue.UID, 1)
+	assertShowEventCount(t, hub.DB, "claim.expired", 0)
+	select {
+	case msg := <-sub.Ch:
+		t.Fatalf("show published an event: %+v", msg)
+	default:
+	}
+
+	// Explicit status remains authoritative even before a sweeper pass.
+	resp, raw := envDoRaw(t, hub, http.MethodGet, claimStatusPath(project.ID, issue.ShortID), nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var status claimStatusBody
+	require.NoError(t, json.Unmarshal(raw, &status))
+	assert.False(t, status.Held)
+	assert.Nil(t, status.Claim)
+	assert.False(t, status.HubNow.IsZero())
+	assertShowLiveClaimCount(t, hub.DB, issue.UID, 0)
+	assertShowEventCount(t, hub.DB, "claim.expired", 1)
+	body = getShowIssueClaimBody(t, hub, project.ID, issue.ShortID)
 	assert.Nil(t, body.Claim)
-	msg := receiveMsg(t, sub.Ch, time.Second, "show should broadcast claim expiry")
+	msg := receiveMsg(t, sub.Ch, time.Second, "explicit status should broadcast claim expiry")
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "claim.expired", msg.Event.Type)
 }
