@@ -107,6 +107,9 @@ func (s *clientSession) account(ctx context.Context) (string, error) {
 	if err := responseError(err, "read Todoist account"); err != nil {
 		return "", err
 	}
+	if resp == nil || resp.JSON200 == nil {
+		return "", emptyResponse("read Todoist account")
+	}
 	if s.config.AccountID != "" && resp.JSON200.ID != s.config.AccountID {
 		return "", blocked("Todoist credential account differs from the saved binding")
 	}
@@ -141,6 +144,9 @@ func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) 
 	if err := responseError(err, "read Todoist project"); err != nil {
 		return Project{}, err
 	}
+	if resp == nil || resp.JSON200 == nil {
+		return Project{}, emptyResponse("read Todoist project")
+	}
 	var p Project
 	if v := resp.JSON200.AnyProjectSyncViewResponse_AnyOf; v != nil && v.IsA() {
 		p = Project{ID: v.A.ID, Name: v.A.Name, Archived: v.A.IsArchived, Deleted: v.A.IsDeleted}
@@ -154,6 +160,12 @@ func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) 
 }
 
 func blocked(message string) error { return &issuesync.StatusError{Message: message, Blocked: true} }
+
+// emptyResponse reports a successful call that returned no decoded body. The
+// next run retries it.
+func emptyResponse(action string) error {
+	return &issuesync.StatusError{Message: "cannot " + action + ": Todoist returned no response body"}
+}
 
 // responseError classifies a generated client error. Context errors pass
 // through; 4xx responses other than 409 and 429 block the binding.

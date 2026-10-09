@@ -39,6 +39,9 @@ func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Ta
 	if err := responseError(err, "read Todoist task"); err != nil {
 		return Task{}, false, err
 	}
+	if resp == nil || resp.JSON200 == nil {
+		return Task{}, false, emptyResponse("read Todoist task")
+	}
 	t := taskFrom(*resp.JSON200, c.historyFloor())
 	if t.Deleted || t.ProjectID != c.ProjectID {
 		return Task{}, false, nil
@@ -200,6 +203,9 @@ func (s *clientSession) activeSection(ctx context.Context, id string) error {
 	})
 	if err := responseError(err, "read Todoist section"); err != nil {
 		return err
+	}
+	if resp == nil || resp.JSON200 == nil {
+		return emptyResponse("read Todoist section")
 	}
 	if resp.JSON200.IsArchived || resp.JSON200.IsDeleted {
 		return blocked("Todoist reopen would restore an archived section; reopen this task in Todoist")

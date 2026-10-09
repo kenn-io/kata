@@ -52,6 +52,9 @@ func (s *clientSession) activeTasks(ctx context.Context, c Config, parentID stri
 		if err := responseError(err, "list Todoist tasks"); err != nil {
 			return nil, err
 		}
+		if resp == nil || resp.JSON200 == nil {
+			return nil, emptyResponse("list Todoist tasks")
+		}
 		for _, v := range resp.JSON200.Results {
 			rows = append(rows, taskFrom(v, floor))
 		}
@@ -80,6 +83,9 @@ func (s *clientSession) completed(ctx context.Context, c Config, since, until ti
 			resp, err := s.api.TasksCompletedByCompletionDateAPIV1TasksCompletedByCompletionDateGetWithResponse(ctx, &todoistapi.TasksCompletedByCompletionDateAPIV1TasksCompletedByCompletionDateGetRequestOptions{Query: &query})
 			if err := responseError(err, "list completed Todoist tasks"); err != nil {
 				return nil, err
+			}
+			if resp == nil || resp.JSON200 == nil {
+				return nil, emptyResponse("list completed Todoist tasks")
 			}
 			for _, v := range resp.JSON200.Items {
 				task := taskFrom(v, floor)

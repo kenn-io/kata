@@ -35,7 +35,10 @@ func NormalizeTodoistSyncConfig(c TodoistSyncConfig) (TodoistSyncConfig, error) 
 	if err != nil {
 		return TodoistSyncConfig{}, errors.New("invalid todoist_sync.api_origin")
 	}
-	u, _ := url.Parse(origin)
+	u, err := url.Parse(origin)
+	if err != nil {
+		return TodoistSyncConfig{}, errors.New("invalid todoist_sync.api_origin")
+	}
 	ip := net.ParseIP(u.Hostname())
 	if origin != "https://api.todoist.com" && (u.Scheme != "http" || ip == nil || !ip.IsLoopback()) {
 		return TodoistSyncConfig{}, errors.New("todoist_sync.api_origin requires https://api.todoist.com or literal loopback HTTP")
