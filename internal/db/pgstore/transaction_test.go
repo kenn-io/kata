@@ -258,7 +258,7 @@ func TestAttributionUIResetWaitsForEventSequenceFence(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 		t.Fatal("receipt reset committed while the source event sequence fence was held")
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(time.Second):
 	}
 	require.NoError(t, blocker.Commit())
 	require.NoError(t, <-done)

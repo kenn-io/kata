@@ -364,20 +364,16 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 				where = append(where, `p.id=?`)
 				args = append(args, *filter.ProjectID)
 			}
-			if !filter.IncludeDeleted {
-				if kind == "federation_root_key" {
-					where = append(where, `(p.deleted_at IS NULL
+			if !filter.IncludeDeleted && kind == "federation_root_key" {
+				where = append(where, `(p.deleted_at IS NULL
 						OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=p.id)
 						OR EXISTS(SELECT 1 FROM meta m WHERE m.key=? || p.uid
 						           OR substr(m.key,1,length(? || p.uid || '.'))=? || p.uid || '.'
 						           OR substr(m.key,1,length(? || p.uid || '.'))=? || p.uid || '.'))`)
-					args = append(args,
-						db.RelayResetMetadataPrefix,
-						db.RelayResetMetadataPrefix, db.RelayResetMetadataPrefix,
-						db.RootKeyTransitionMetadataPrefix, db.RootKeyTransitionMetadataPrefix)
-				} else {
-					where = append(where, `p.deleted_at IS NULL`)
-				}
+				args = append(args,
+					db.RelayResetMetadataPrefix,
+					db.RelayResetMetadataPrefix, db.RelayResetMetadataPrefix,
+					db.RootKeyTransitionMetadataPrefix, db.RootKeyTransitionMetadataPrefix)
 			}
 			allowed, restricted := db.AuthorizedProjects(ctx)
 			if restricted {

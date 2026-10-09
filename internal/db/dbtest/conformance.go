@@ -70,6 +70,14 @@ var storageScenarios = []scenario{
 		RunProjectAccessTokenEnrollment(t, store)
 		return nil
 	}},
+	{name: "archived project portable export replay", methods: []string{"CreateProject", "CreateIssue", "RemoveProject", "UpsertFederationBinding", "PinRootAuthority", "ExportProjects", "ExportIssues", "ExportEvents", "ExportAttribution", "ImportReplay"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunArchivedPortableDataExport(t, store, backend)
+		return nil
+	}},
+	{name: "parent replacement with removed expected link", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "DeleteLinkAndEvent", "ParentOf"}, run: func(t *testing.T, store db.Storage) error {
+		RunParentReplacementMissingExpectedLink(t, store)
+		return nil
+	}},
 	{name: "screen view claims", methods: []string{"ClaimScreenView", "ReleaseScreenView"}, run: checkScreenViewClaims},
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},

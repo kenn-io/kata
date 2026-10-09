@@ -59,20 +59,20 @@ var alreadyImplemented = map[string]bool{
 	"AttributionReceiptsAfter": true, // federation_provenance.go
 	"ExportAttribution":        true, // federation_provenance.go
 
-	"CreateTeam":                     true, // project_access.go
-	"TeamByUID":                      true, // project_access.go
-	"ListTeams":                      true, // project_access.go
-	"DeleteTeam":                     true, // project_access.go
-	"TeamMembers":                    true, // project_access.go
-	"SetTeamMembership":              true, // project_access.go
-	"MigrateTeamActor":               true, // project_access.go
-	"ProjectAccessPolicy":            true, // project_access.go
-	"SetProjectAccessPolicy":         true, // project_access.go
-	"AccessibleProjectUIDs":          true, // project_access.go
-	"AnonymousAccessibleProjectUIDs": true, // project_access.go
-	"ProjectAccessRevision":          true, // project_access.go
-	"ProjectAccessTransactionFence":  true, // project_access.go
-	"ExportProjectAccess":            true, // project_access.go
+	"CreateTeam":                           true, // project_access.go
+	"TeamByUID":                            true, // project_access.go
+	"ListTeams":                            true, // project_access.go
+	"DeleteTeam":                           true, // project_access.go
+	"TeamMembers":                          true, // project_access.go
+	"SetTeamMembership":                    true, // project_access.go
+	"MigrateTeamActor":                     true, // project_access.go
+	"ProjectAccessPolicy":                  true, // project_access.go
+	"SetProjectAccessPolicy":               true, // project_access.go
+	"AccessibleProjectUIDs":                true, // project_access.go
+	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
+	"ProjectAccessRevision":                true, // project_access.go
+	"ProjectAccessTransactionFence":        true, // project_access.go
+	"ExportProjectAccess":                  true, // project_access.go
 	"ClaimScreenView":                      true, // store.go
 	"ReleaseScreenView":                    true, // store.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go

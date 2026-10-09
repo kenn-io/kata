@@ -21,13 +21,13 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 }
 
 func retireProjectFederationUIDStateTx(ctx context.Context, tx *sql.Tx, projectUID string) error {
-	for _, table := range []string{
-		"federation_relay_outbox",
-		"federation_relay_inbox",
-		"federation_relay_cursors",
+	for _, statement := range []struct{ table, query string }{
+		{"federation_relay_outbox", `DELETE FROM federation_relay_outbox WHERE project_uid = $1`},
+		{"federation_relay_inbox", `DELETE FROM federation_relay_inbox WHERE project_uid = $1`},
+		{"federation_relay_cursors", `DELETE FROM federation_relay_cursors WHERE project_uid = $1`},
 	} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_uid = $1`, projectUID); err != nil {
-			return fmt.Errorf("retire project relay %s: %w", table, mapSQLError(err, nil))
+		if _, err := tx.ExecContext(ctx, statement.query, projectUID); err != nil {
+			return fmt.Errorf("retire project relay %s: %w", statement.table, mapSQLError(err, nil))
 		}
 	}
 	if _, err := tx.ExecContext(ctx,

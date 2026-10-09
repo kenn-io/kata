@@ -118,8 +118,7 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 			if r.Key == "instance_uid" {
 				instanceUID = r.Value
 			}
-			if strings.HasPrefix(r.Key, RelayResetMetadataPrefix) {
-				suffix := strings.TrimPrefix(r.Key, RelayResetMetadataPrefix)
+			if suffix, ok := strings.CutPrefix(r.Key, RelayResetMetadataPrefix); ok {
 				if strings.Contains(suffix, ".") {
 					var checkpoint RelayResetCheckpoint
 					if err := json.Unmarshal([]byte(r.Value), &checkpoint, json.RejectUnknownMembers(true)); err != nil {

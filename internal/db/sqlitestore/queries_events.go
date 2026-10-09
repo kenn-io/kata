@@ -94,7 +94,9 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	var out []db.Event
+	// Keep empty event pages non-nil, matching the PostgreSQL store and making
+	// callers safe to consume without nil-slice special cases.
+	out := make([]db.Event, 0, len(events))
 	issueCache := make(map[string]db.Issue)
 	missingIssueUIDs := make(map[string]struct{})
 	refCache := make(map[string]db.Issue)

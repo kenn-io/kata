@@ -2,7 +2,6 @@ package sqlitestore
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// ReplaceParentAndEvents replaces an expected parent link and emits its events atomically.
 func (d *Store) ReplaceParentAndEvents(
 	ctx context.Context,
 	input db.ReplaceParentAndEventsParams,
@@ -58,7 +58,7 @@ func (d *Store) replaceParentAndEventsTx(
 
 	oldLink, err := scanLink(tx.QueryRowContext(ctx,
 		linkSelect+` WHERE from_issue_id = ? AND type = 'parent'`, input.Link.FromIssueID))
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return result, db.ErrParentMismatch
 	}
 	if err != nil {

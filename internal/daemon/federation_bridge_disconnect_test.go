@@ -275,7 +275,7 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					select {
 					case <-disconnectRequestStarted:
 						t.Error("disconnect reached the hub before the in-flight enrollment drained")
-					case <-time.After(100 * time.Millisecond):
+					case <-time.After(time.Second):
 					}
 					releaseEnrollmentRequest()
 					var connected, disconnected bridgeDisconnectResponse

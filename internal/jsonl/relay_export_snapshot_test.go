@@ -103,7 +103,7 @@ func TestOwnerBackupKeepsConcurrentRelayIngressOutsideItsSnapshot(t *testing.T) 
 			grant, err := source.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 				ProjectID: project.ID, ParentTokenID: parent.ID,
 				SpokeInstanceUID: "00000000000000000000000006",
-				ProtocolVersion: db.RelayProtocolVersion, Token: "snapshot-relay-token", ServeDownstream: true,
+				ProtocolVersion:  db.RelayProtocolVersion, Token: "snapshot-relay-token", ServeDownstream: true,
 			})
 			require.NoError(t, err)
 
@@ -134,7 +134,7 @@ func TestOwnerBackupKeepsConcurrentRelayIngressOutsideItsSnapshot(t *testing.T) 
 				ProjectUID: project.UID, AuthorityUID: source.InstanceUID(),
 				SenderInstanceUID: grant.Enrollment.SpokeInstanceUID, ReceiverInstanceUID: source.InstanceUID(),
 				Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent,
-				Path: []string{event.OriginInstanceUID, grant.Enrollment.SpokeInstanceUID},
+				Path:      []string{event.OriginInstanceUID, grant.Enrollment.SpokeInstanceUID},
 				SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body,
 			})
 			require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestOwnerBackupKeepsConcurrentRelayIngressOutsideItsSnapshot(t *testing.T) 
 			writeCtx := db.WithRootAttribution(ctx, db.RootAttributionSigner{
 				AuthorityUID: source.InstanceUID(), PrivateKey: privateKey,
 			}, "member")
-			accept := func(ctx context.Context) error {
+			accept := func(_ context.Context) error {
 				accepted, err := source.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, batch)
 				require.NoError(t, err)
 				require.Len(t, accepted.InsertedEvents, 1)

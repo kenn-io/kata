@@ -264,7 +264,7 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage, legacyCache ..
 	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: evidenceProject.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	evidenceGrant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: evidenceProject.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000011",
-		ProtocolVersion: db.RelayProtocolVersion, Token: "boundary-evidence-test-token",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "boundary-evidence-test-token", // #nosec G101 -- synthetic relay token used only in this test.
 	})
 	require.NoError(t, err)
 	evidenceReset, ok := store.(db.RelayResetBootstrapStore)

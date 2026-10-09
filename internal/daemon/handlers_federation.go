@@ -671,6 +671,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			case err != nil:
 				return nil, federationReplicaAPIError(err)
 			default:
+				recordProjectAccessRevisionAdvance(ctx)
 				cfg.Publish().Event(project.ID, *evt)
 				body.Project = dbProjectToOut(project)
 				body.Archived = true

@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// ReplaceParentAndEvents replaces an expected parent link and emits its events atomically.
 func (s *Store) ReplaceParentAndEvents(
 	ctx context.Context,
 	input db.ReplaceParentAndEventsParams,
@@ -53,7 +54,7 @@ func (s *Store) ReplaceParentAndEvents(
 		}
 		oldLink, err := scanLink(tx.QueryRowContext(ctx,
 			linkSelect+` WHERE from_issue_id = $1 AND type = 'parent' FOR UPDATE`, input.Link.FromIssueID))
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return db.ErrParentMismatch
 		}
 		if err != nil {

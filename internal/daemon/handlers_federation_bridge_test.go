@@ -38,7 +38,7 @@ func TestLegacyFederationEnrollmentRejectsExpiringAndRevokedAccountTokens(t *tes
 		})
 		require.NoError(t, err)
 
-		expires := time.Now().Add(2 * time.Second).UTC()
+		expires := time.Now().Add(time.Minute).UTC()
 		_, _, err = store.CreateAPIToken(ctx, db.CreateAPITokenParams{
 			PlaintextToken: "expiring-account-test-token", Actor: "member", AdminActor: "admin", ExpiresAt: &expires,
 		})
@@ -61,11 +61,8 @@ func TestLegacyFederationEnrollmentRejectsExpiringAndRevokedAccountTokens(t *tes
 		status, raw := createEnrollment("expiring-account-test-token", "expiring-legacy-grant-token", "00000000000000000000000006")
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), "federation_enrollment_requires_relay")
-		if delay := time.Until(expires); delay > 0 {
-			time.Sleep(delay + 20*time.Millisecond)
-		}
 		assert.NotEqual(t, http.StatusOK, metadataStatus("expiring-legacy-grant-token"),
-			"an expired account token must not leave a legacy grant it could have issued")
+			"a future-expiring account token must not leave a legacy grant")
 		_, err = store.AuthorizeFederationToken(ctx, "expiring-legacy-grant-token", f.public.ID, "pull")
 		require.ErrorIs(t, err, db.ErrNotFound)
 

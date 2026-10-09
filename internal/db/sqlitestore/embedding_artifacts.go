@@ -34,12 +34,9 @@ func (d *Store) RetainEmbeddingArtifact(ctx context.Context, artifact embedding.
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
-		enqueueRelay := true
-		if err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled && !binding.PushEnabled {
-			// A local encoder may finish after disconnect fenced project writes.
-			// Keep the artifact locally, but don't create relay work the leave can't drain.
-			enqueueRelay = false
-		}
+		// A local encoder may finish after disconnect fenced project writes.
+		// Keep the artifact locally, but don't create relay work the leave can't drain.
+		enqueueRelay := !(err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled && !binding.PushEnabled)
 		durable, err = d.retainEmbeddingArtifactTx(ctx, tx, artifact, enqueueRelay)
 		return err
 	})
@@ -232,7 +229,7 @@ func (d *Store) ExportEmbeddingArtifacts(ctx context.Context, filter db.ExportFi
 		query += " AND p.id=" + bind(*filter.ProjectID)
 	}
 	if !filter.IncludeDeleted {
-		query += " AND p.deleted_at IS NULL AND i.deleted_at IS NULL"
+		query += " AND i.deleted_at IS NULL"
 	}
 	query += " ORDER BY a.project_uid,a.digest"
 	scan := func(rows *sql.Rows) (db.ImportRecord, error) {

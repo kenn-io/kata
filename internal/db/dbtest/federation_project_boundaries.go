@@ -97,7 +97,8 @@ func checkProjectScopedRelayEnrollmentExportRoundTrip(
 		return err
 	}
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
-		PlaintextToken: "relay-export-parent-token", Actor: "member", AdminActor: "admin",
+		PlaintextToken: "relay-export-parent-token", // #nosec G101 -- synthetic in-memory credential for this storage test.
+		Actor:          "member", AdminActor: "admin",
 	})
 	if err != nil {
 		return err

@@ -162,7 +162,7 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peerUID,
-		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-ingress-test-token",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-ingress-test-token", // #nosec G101 -- synthetic relay token used only in this test.
 		ServeDownstream: true,
 	})
 	require.NoError(t, err)

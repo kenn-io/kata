@@ -576,7 +576,9 @@ function serial(slot,task) {
  const next=previous.catch(()=>{}).then(task);host.queues.set(slot,next);
  return next.finally(()=>{if(host.queues.get(slot)===next)host.queues.delete(slot)});
 }
-async function command(args,cwd,timeout=600,executable=options.executable) {
+// Windows needs more startup time for the bundled Go executable; stay below
+// the hook's 1500ms deadline while allowing the contract command to finish.
+async function command(args,cwd,timeout=1200,executable=options.executable) {
  return run(executable,args,{cwd,env:process.env,timeout,maxBuffer:16*1024*1024,windowsHide:true});
 }
 function attentionArgs(mode,row) {

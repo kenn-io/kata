@@ -291,8 +291,7 @@ func newClaimGateHelperStatusServer(t *testing.T, store *sqlitestore.Store, proj
 		ref := strings.TrimSuffix(r.URL.Path[start+len(issueMarker):], "/lease")
 		body, err := handleClaimStatus(r.Context(), ServerConfig{DB: store}, projectID, ref)
 		if err != nil {
-			var apiErr *api.APIError
-			if errors.As(err, &apiErr) {
+			if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 				api.WriteEnvelope(w, apiErr.Status, apiErr.Code, apiErr.Message)
 				return
 			}

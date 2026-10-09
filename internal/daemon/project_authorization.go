@@ -86,6 +86,17 @@ func recordProjectAccessMutationRevision(ctx context.Context, revision int64) {
 	decision.PolicyRevision = revision
 }
 
+func recordProjectAccessRevisionAdvance(ctx context.Context) {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil {
+		return
+	}
+	// The successful transaction advanced the durable revision exactly once.
+	// Keeping only that expected increment preserves the stale-policy check when
+	// another project-access mutation commits concurrently.
+	decision.PolicyRevision++
+}
+
 func recordProjectAccessCatalogMutation(ctx context.Context, projectUID string) {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	if decision == nil || decision.owner {

@@ -345,6 +345,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessRevisionAdvance(ctx)
 		cfg.Publish().Event(project.ID, *evt)
 		out := &api.RemoveProjectResponse{}
 		out.Body.Project = dbProjectToOut(project)

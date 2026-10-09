@@ -11,6 +11,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// RunProjectPurgeRemovesRelayMetadata verifies purge removes relay metadata.
 func RunProjectPurgeRemovesRelayMetadata(t *testing.T, store db.Storage, backend Backend) {
 	t.Helper()
 	ctx := t.Context()
@@ -26,6 +27,7 @@ func RunProjectPurgeRemovesRelayMetadata(t *testing.T, store db.Storage, backend
 	requirePortableBackupReplay(t, store, backend)
 }
 
+// RunProjectMergeRemovesRelayMetadata verifies merge removes source relay metadata.
 func RunProjectMergeRemovesRelayMetadata(t *testing.T, store db.Storage, backend Backend) {
 	t.Helper()
 	ctx := t.Context()
@@ -39,6 +41,7 @@ func RunProjectMergeRemovesRelayMetadata(t *testing.T, store db.Storage, backend
 	requirePortableBackupReplay(t, store, backend)
 }
 
+// RunArchivedDetachedRelayMetadataRetainsRootKeys verifies archival keeps root keys.
 func RunArchivedDetachedRelayMetadataRetainsRootKeys(t *testing.T, store db.Storage) {
 	t.Helper()
 	ctx := t.Context()

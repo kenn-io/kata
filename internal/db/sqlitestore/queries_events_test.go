@@ -134,6 +134,7 @@ func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
 
 	none, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 6, Limit: 100})
 	require.NoError(t, err)
+	require.NotNil(t, none, "an empty event page is an empty slice, not nil")
 	assert.Len(t, none, 0, "AfterID at the highest event id must return no rows (strict >)")
 }
 

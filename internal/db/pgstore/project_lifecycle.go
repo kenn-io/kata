@@ -59,6 +59,9 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = $1 WHERE id = $2`, archivedAt, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("advance project access revision after project archive: %w", err)
+		}
 		binding, bindingErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1 FOR UPDATE`, project.ID))
 		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
 			return bindingErr

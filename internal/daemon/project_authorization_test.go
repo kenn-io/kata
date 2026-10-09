@@ -377,6 +377,136 @@ func TestMoveIssueProjectAdvancesProjectAccessRevision(t *testing.T) {
 	})
 }
 
+func TestProjectAccessImportLinkRemovalRequiresPeerAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store, "import-link")
+		createdAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+		updatedAt := createdAt
+		_, _, err := store.ImportBatch(t.Context(), db.ImportBatchParams{
+			ProjectID: f.public.ID, Source: "example-sync", Actor: "admin",
+			Items: []db.ImportItem{
+				{
+					ExternalID: "source-task", Title: "Source task", Author: "example-actor", Status: "open",
+					CreatedAt: createdAt, UpdatedAt: updatedAt,
+					Links: []db.ImportLink{{Type: "related", TargetExternalID: "peer-task"}},
+				},
+				{
+					ExternalID: "peer-task", Title: "Peer task", Author: "example-actor", Status: "open",
+					CreatedAt: createdAt, UpdatedAt: updatedAt,
+				},
+				{
+					ExternalID: "unlinked-task", Title: "Unlinked task", Author: "example-actor", Status: "open",
+					CreatedAt: createdAt, UpdatedAt: updatedAt,
+				},
+			},
+		})
+		require.NoError(t, err)
+		sourceMapping, err := store.ImportMappingBySource(t.Context(), f.public.ID, "example-sync", "issue", "source-task")
+		require.NoError(t, err)
+		require.NotNil(t, sourceMapping.IssueID)
+		peerMapping, err := store.ImportMappingBySource(t.Context(), f.public.ID, "example-sync", "issue", "peer-task")
+		require.NoError(t, err)
+		require.NotNil(t, peerMapping.IssueID)
+		source, err := store.IssueByID(t.Context(), *sourceMapping.IssueID)
+		require.NoError(t, err)
+		peer, err := store.IssueByID(t.Context(), *peerMapping.IssueID)
+		require.NoError(t, err)
+		links, err := store.LinksByIssue(t.Context(), source.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+		link := links[0]
+
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: peer.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID,
+			IfMatchRev: peer.Revision, Actor: "admin",
+		})
+		require.NoError(t, err)
+
+		status, _, body := f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%d/imports", f.public.ID), "nonmember",
+			map[string]any{
+				"actor": "nonmember", "source": "example-sync",
+				"items": []map[string]any{{
+					"external_id": "source-task", "title": "Source task", "author": "example-actor", "status": "open",
+					"created_at": createdAt, "updated_at": createdAt.Add(time.Second),
+					"links": []map[string]any{},
+				}},
+			}, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		retained, err := store.LinkByID(t.Context(), link.ID)
+		require.NoError(t, err, "a reimport cannot remove a link whose peer moved into a restricted project")
+		assert.Equal(t, link, retained)
+
+		status, _, body = f.request(t, http.MethodPost,
+			fmt.Sprintf("/api/v1/projects/%d/imports", f.public.ID), "nonmember",
+			map[string]any{
+				"actor": "nonmember", "source": "example-sync",
+				"items": []map[string]any{{
+					"external_id": "unlinked-task", "title": "Unlinked task", "author": "example-actor", "status": "open",
+					"created_at": createdAt, "updated_at": createdAt.Add(2 * time.Second),
+					"links": []map[string]any{{"type": "related", "target_external_id": "peer-task"}},
+				}},
+			}, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		unlinkedMapping, err := store.ImportMappingBySource(t.Context(), f.public.ID, "example-sync", "issue", "unlinked-task")
+		require.NoError(t, err)
+		require.NotNil(t, unlinkedMapping.IssueID)
+		unlinkedIssue, err := store.IssueByID(t.Context(), *unlinkedMapping.IssueID)
+		require.NoError(t, err)
+		links, err = store.LinksByIssue(t.Context(), unlinkedIssue.ID)
+		require.NoError(t, err)
+		assert.Empty(t, links, "a reimport cannot add a link to a peer in a restricted project")
+	})
+}
+
+func TestRemoveProjectAdvancesProjectAccessRevisionAndReturnsSuccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store, "archive-epoch")
+		before, err := store.ProjectAccessRevision(t.Context())
+		require.NoError(t, err)
+		cursor, err := store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		streamCtx, cancelStream := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancelStream()
+		streamRequest, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
+			fmt.Sprintf("%s/api/v1/events/stream?project_id=%d&after_id=%d", f.server.URL, f.private.ID, cursor), nil)
+		require.NoError(t, err)
+		streamRequest.Header.Set("Authorization", "Bearer member-archive-epoch-test-token")
+		streamRequest.Header.Set("Accept", "text/event-stream")
+		streamResponse, err := f.server.Client().Do(streamRequest)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, streamResponse.StatusCode)
+		t.Cleanup(func() { _ = streamResponse.Body.Close() })
+		connected := make([]byte, len(": connected\n\n"))
+		_, err = io.ReadFull(streamResponse.Body, connected)
+		require.NoError(t, err)
+		assert.Equal(t, ": connected\n\n", string(connected))
+
+		server := daemon.NewServer(daemon.ServerConfig{
+			DB: store, Broadcaster: f.broadcaster, Auth: config.AuthConfig{Token: "static-owner-test-token"},
+		})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		httpServer := httptest.NewServer(server.Handler())
+		t.Cleanup(httpServer.Close)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodDelete,
+			fmt.Sprintf("%s/api/v1/projects/%d?actor=admin&force=true", httpServer.URL, f.private.ID), nil)
+		require.NoError(t, err)
+		request.Header.Set("Authorization", "Bearer static-owner-test-token")
+		response, err := httpServer.Client().Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		body, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, response.StatusCode, string(body))
+		after, err := store.ProjectAccessRevision(t.Context())
+		require.NoError(t, err)
+		assert.Greater(t, after, before, "archiving invalidates existing project-access admissions")
+		streamBytes, streamErr := io.ReadAll(streamResponse.Body)
+		assert.NoError(t, streamErr, "archival closes the stream before its deadline")
+		assert.Empty(t, string(streamBytes), "the archived project stream must not emit reset or archived content")
+	})
+}
+
 func TestProjectAccessAuthorizedMemberMoveReturnsCommittedResponse(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store, "authorized-move")

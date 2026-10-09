@@ -146,7 +146,7 @@ func TestEnsureFederationReplicaRelayDrainsExistingSync(t *testing.T) {
 		select {
 		case err := <-done:
 			require.FailNow(t, "relay setup completed while an existing sync was active", "%v", err)
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(time.Second):
 		}
 		binding, err := store.FederationBindingByProject(t.Context(), base.Project.ID)
 		require.NoError(t, err)

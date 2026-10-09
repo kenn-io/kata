@@ -238,8 +238,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					if errors.Is(err, db.ErrSelfLink) {
 						return nil, api.NewError(http.StatusBadRequest, "validation", "cannot link an issue to itself", "", nil)
 					}
-					var archived *db.LinkTargetArchivedError
-					if errors.As(err, &archived) {
+					if archived, ok := errors.AsType[*db.LinkTargetArchivedError](err); ok {
 						return nil, linkTargetArchivedError(archived)
 					}
 					if errors.Is(err, db.ErrNotFound) {
@@ -327,8 +326,7 @@ func checkLinkBoundaryBeforeMutation(ctx context.Context, store db.Storage, from
 		if errors.Is(err, db.ErrNotFound) {
 			return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 		}
-		var apiErr *api.APIError
-		if errors.As(err, &apiErr) {
+		if _, ok := errors.AsType[*api.APIError](err); ok {
 			return err
 		}
 		return internalAPIError(err)

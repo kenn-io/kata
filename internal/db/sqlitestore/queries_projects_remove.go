@@ -61,6 +61,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		project.ID); err != nil {
 		return db.Project{}, nil, fmt.Errorf("archive project: %w", err)
 	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, nil, fmt.Errorf("advance project access revision after project archive: %w", err)
+	}
 	binding, bindingErr := issueSyncBindingByProject(ctx, tx, project.ID)
 	if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
 		return db.Project{}, nil, bindingErr
