@@ -534,6 +534,7 @@ func (b *daemonResponseBody) Close() error {
 // with a client built by the hub-specific constructors; the local daemon's
 // token must never travel to a hub.
 type resolvedDaemonContextKey struct{}
+type pathFreeProjectContextKey struct{}
 
 type daemonAPI struct {
 	ctx      context.Context
@@ -584,8 +585,10 @@ func discoverDaemonAPI(ctx context.Context) (daemonAPI, error) {
 // hubAPI wraps an already-constructed federation hub client. It is a separate
 // constructor on purpose: hub credentials are resolved by the hub-specific
 // paths (resolveHubAdminAuth / federationEnrollHTTPClient) and must never come
-// from local daemon resolution.
+// from local daemon resolution. Project resolution against a hub never falls
+// back to sending client paths, even when the hub URL is loopback.
 func hubAPI(ctx context.Context, hubBaseURL string, hc *http.Client) daemonAPI {
+	ctx = context.WithValue(ctx, pathFreeProjectContextKey{}, true)
 	return daemonAPI{ctx: ctx, baseURL: strings.TrimRight(hubBaseURL, "/"), client: hc}
 }
 
