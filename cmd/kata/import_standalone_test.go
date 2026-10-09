@@ -83,7 +83,7 @@ func TestImportAsStandaloneDetachesCopyWithoutChangingRestore(t *testing.T) {
 		})
 	}
 
-	got, err := os.ReadFile(input)
+	got, err := os.ReadFile(input) //nolint:gosec // test-owned export under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, exported.Bytes(), got, "the source export is read-only")
 	_, err = source.ResolveAPIToken(ctx, apiToken)
