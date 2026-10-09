@@ -41,5 +41,11 @@ func retireProjectFederationUIDStateTx(ctx context.Context, tx *sql.Tx, projectU
 	if err := deleteProjectRelayMetadata(ctx, tx, projectUID); err != nil {
 		return fmt.Errorf("retire project relay metadata: %w", err)
 	}
+	pendingPrefix := db.PendingCreationMetadataPrefix + projectUID + "."
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta
+		WHERE key = ? OR substr(key, 1, length(?)) = ?`,
+		db.AttributionUIResetMetadataPrefix+projectUID, pendingPrefix, pendingPrefix); err != nil {
+		return fmt.Errorf("retire project attribution metadata: %w", err)
+	}
 	return nil
 }

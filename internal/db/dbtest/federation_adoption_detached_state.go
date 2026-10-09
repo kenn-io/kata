@@ -1,8 +1,11 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +57,9 @@ func checkFederationAdoptionAfterDisconnect(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.NoError(t, store.ApplyUpstreamAttribution(ctx, pin, proof),
 		"the detached namespace retains the original signed receipt")
+	creator, err := store.EntityAttribution(ctx, project.UID, "issue", issue.UID)
+	require.NoError(t, err)
+	require.Equal(t, proof, creator)
 	require.Equal(t, project.ID, issue.ProjectID)
 	for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt, db.RelayStreamArtifact} {
 		queued, err := store.PendingRelayDeliveries(ctx, bindingUID, stream, 10)
@@ -78,6 +84,40 @@ func checkFederationAdoptionAfterDisconnect(t *testing.T, store db.Storage) erro
 	transition, err := db.SignRootKeyTransition(pin, nextPin, private)
 	require.NoError(t, err)
 	require.NoError(t, store.RotateRootAuthority(ctx, transition))
+	var retainedProofs int
+	for record, err := range store.ExportAttribution(ctx, db.ExportFilter{ProjectID: &project.ID}) {
+		require.NoError(t, err)
+		switch value := record.(type) {
+		case *db.RootKeyPin:
+			require.Equal(t, project.UID, value.ProjectUID)
+			retainedProofs++
+		case *db.AttributionReceipt:
+			require.Equal(t, proof, *value, "the original signed receipt remains unchanged before adoption")
+			retainedProofs++
+		case *db.EntityProvenance:
+			require.Equal(t, project.UID, value.ProjectUID)
+			retainedProofs++
+		}
+	}
+	require.Equal(t, 4, retainedProofs,
+		"both root keys, the original receipt, and its entity reference belong to the old UID")
+	metadata, ok := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	require.True(t, ok)
+	uidMetadataKeys := []string{
+		db.AttributionUIResetMetadataPrefix + project.UID,
+		db.PendingCreationMetadataPrefix + project.UID + ".issue." + issue.UID,
+		db.RelayResetMetadataPrefix + project.UID,
+		db.RootKeyTransitionMetadataKey(transition),
+	}
+	for _, key := range uidMetadataKeys {
+		quotedKey := "'" + strings.ReplaceAll(key, "'", "''") + "'"
+		_, err := metadata.ExecContext(ctx,
+			`INSERT INTO meta(key,value) VALUES(`+quotedKey+`,'stale') ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+		require.NoError(t, err)
+	}
 
 	var retainedRelayRows int
 	for record, err := range store.ExportRelayState(ctx) {
@@ -117,7 +157,7 @@ func checkFederationAdoptionAfterDisconnect(t *testing.T, store db.Storage) erro
 				"old relay cursors cannot be rewritten into the adopted project namespace")
 		}
 	}
-	var retainedProofs int
+	retainedProofs = 0
 	for record, err := range store.ExportAttribution(ctx, db.ExportFilter{ProjectID: &project.ID}) {
 		require.NoError(t, err)
 		switch proof := record.(type) {
@@ -127,9 +167,23 @@ func checkFederationAdoptionAfterDisconnect(t *testing.T, store db.Storage) erro
 			retainedProofs++
 			require.Equal(t, project.UID, proof.ProjectUID,
 				"the signed receipt must retain its original project UID")
+		case *db.EntityProvenance:
+			retainedProofs++
+			require.Equal(t, project.UID, proof.ProjectUID,
+				"the entity reference must retain its original project UID")
 		}
 	}
 	require.Zero(t, retainedProofs,
 		"adoption retires old signed provenance instead of rewriting it for the new UID")
+	_, err = store.RootKeyTransitions(ctx, newHubUID)
+	require.ErrorIs(t, err, db.ErrNotFound,
+		"old root transition metadata must not be attributed to the adopted UID")
+	for _, key := range uidMetadataKeys {
+		quotedKey := "'" + strings.ReplaceAll(key, "'", "''") + "'"
+		var count int
+		err := metadata.QueryRowContext(ctx, `SELECT count(*) FROM meta WHERE key=`+quotedKey).Scan(&count)
+		require.NoError(t, err)
+		require.Zero(t, count, "old UID-scoped federation metadata must be retired")
+	}
 	return nil
 }
