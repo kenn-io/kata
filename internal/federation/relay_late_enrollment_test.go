@@ -35,6 +35,50 @@ func TestRelayLateEnrollmentAfterKeyRotation(t *testing.T) {
 	}
 }
 
+// A fresh relay must install a signed baseline before pulling mutations for
+// entities that only exist in that baseline after the root has purged history.
+func TestRelayLateEnrollmentAfterPurgeBeforeInitialSync(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "company-member")
+			replica := newRelayMatrixNode(t, backend, "personal-member")
+			project, err := root.store.CreateProject(t.Context(), "shared-project")
+			require.NoError(t, err)
+			root.project = project
+			_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+			require.NoError(t, err)
+			public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+			pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
+			require.NoError(t, root.store.PinRootAuthority(t.Context(), pin))
+			writeContext := db.WithRootAttribution(t.Context(), root.signer, root.account)
+			purged, _, err := root.store.CreateIssue(writeContext, db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Purged history"})
+			require.NoError(t, err)
+			retained, _, err := root.store.CreateIssue(writeContext, db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Current shared issue"})
+			require.NoError(t, err)
+			_, err = root.store.PurgeIssue(t.Context(), purged.ID, "admin", nil)
+			require.NoError(t, err)
+			enrollRelayMatrixReplica(t, root, replica, "replica-project", false)
+			title := "Updated before initial sync"
+			_, _, _, err = root.store.EditIssue(writeContext, db.EditIssueParams{IssueID: retained.ID, Actor: "source-agent", Title: &title})
+			require.NoError(t, err)
+			binding, err := replica.store.FederationBindingByProject(t.Context(), replica.project.ID)
+			require.NoError(t, err)
+			bootstrap := root.store.(db.RelayResetBootstrapStore)
+			required, err := bootstrap.RelayEnrollmentNeedsReset(t.Context(), binding.RelayConfig.BindingUID)
+			require.NoError(t, err)
+			require.True(t, required, "the purged history requires a signed baseline")
+			require.NoError(t, federation.SyncFederationOnce(t.Context(), replica.store, binding, replica.credential))
+			got, err := replica.store.IssueByUID(t.Context(), retained.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, title, got.Title)
+			require.Equal(t, "company-member", got.AccountableActor)
+			quarantines, err := replica.store.ActiveFederationQuarantinesByProject(t.Context(), replica.project.ID)
+			require.NoError(t, err)
+			require.Empty(t, quarantines, "a baseline-first bootstrap must not quarantine the pending root mutation")
+		})
+	}
+}
+
 func runRelayLateEnrollment(t *testing.T, backend string, compact, rotate bool) {
 	t.Helper()
 	root := newRelayMatrixNode(t, backend, "company-member")

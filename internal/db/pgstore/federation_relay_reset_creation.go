@@ -85,10 +85,17 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 			return err
 		}
 		var pending bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox WHERE binding_uid=$1 AND reset_epoch=$2 AND acknowledged=0)`, bindingUID, grant.RelayResetEpoch).Scan(&pending); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o
+WHERE o.binding_uid=$1 AND o.reset_epoch=$2 AND o.acknowledged=0
+  AND (o.stream NOT IN ('events','receipts') OR NOT EXISTS(
+    SELECT 1 FROM federation_event_provenance p
+    WHERE p.project_uid=o.project_uid AND p.event_uid=o.source_uid AND p.content_hash=o.source_hash)))`, bindingUID, grant.RelayResetEpoch).Scan(&pending); err != nil {
 			return err
 		}
-		if pending {
+		// An authoritative root can snapshot its current state and carry every
+		// retained delivery into the activated checkpoint epoch. Relay hops may
+		// carry event and receipt deliveries only after the root has accepted them.
+		if pending && pin.AuthorityUID != d.instanceUID {
 			return db.ErrFederationResetBlockedByPendingPush
 		}
 		if pin.AuthorityUID != d.instanceUID {

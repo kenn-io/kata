@@ -9,6 +9,13 @@ import (
 // Artifact exchange follows both directions of ordinary content delivery.
 // Staging can leave this independent stream pending until a later content sync.
 func syncRelayArtifacts(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
+	if err := syncRelayPushArtifacts(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
+		return err
+	}
+	return syncRelayPullArtifacts(ctx, store, binding, remoteProjectID, client, validateLease)
+}
+
+func syncRelayPushArtifacts(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
 	downloader, ok := store.(db.RelayArtifactStorage)
 	if !ok {
 		return db.ErrTransactionFinalizationFailed
@@ -55,6 +62,14 @@ func syncRelayArtifacts(ctx context.Context, store db.Storage, binding db.Federa
 			break
 		}
 	}
+	return nil
+}
+
+func syncRelayPullArtifacts(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
+	if _, ok := store.(db.RelayArtifactStorage); !ok {
+		return db.ErrTransactionFinalizationFailed
+	}
+	c := binding.RelayConfig
 	for {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err

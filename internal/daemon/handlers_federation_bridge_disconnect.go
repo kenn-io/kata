@@ -166,13 +166,17 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 			}
 			defer finish()
 		}
-		// Revalidate after draining and stop transport durably before network I/O.
+		// Revalidate after draining and persist a push-disabled leave state before
+		// network I/O. Keeping the spoke enabled makes the shared write gate reject
+		// ordinary project mutations until the upstream grant has been revoked and
+		// local detachment completes. A pending leave remains recoverable on retry.
 		ensureFederationReplicaMu.Lock()
 		err = validate()
 		if err == nil && project.ID != 0 {
 			binding, readErr := cfg.DB.FederationBindingByProject(ctx, project.ID)
-			if readErr == nil && binding.Enabled {
-				binding.Enabled = false
+			if readErr == nil && (!binding.Enabled || binding.PushEnabled) {
+				binding.Enabled = true
+				binding.PushEnabled = false
 				_, err = cfg.DB.UpsertFederationBinding(ctx, binding)
 			} else if readErr != nil && !errors.Is(readErr, db.ErrNotFound) {
 				err = readErr

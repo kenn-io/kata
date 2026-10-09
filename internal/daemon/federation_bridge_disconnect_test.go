@@ -77,7 +77,7 @@ type bridgeDisconnectResponse struct {
 // R9: disconnect previews without mutation, revokes exactly the retained narrow
 // grant, and safely resumes after a lost upstream response without losing data.
 func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
-	for _, mode := range []string{"normal", "lost_response", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
+	for _, mode := range []string{"normal", "lost_response", "disconnect_write_race", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				t.Setenv("KATA_HOME", t.TempDir())
@@ -101,6 +101,11 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					defer releaseEnrollmentRequest()
 				}
 				disconnectRequestStarted := make(chan struct{}, 1)
+				revokeResponseBlocked := make(chan struct{}, 1)
+				releaseRevokeResponse := make(chan struct{})
+				var releaseRevokeResponseOnce sync.Once
+				releaseRevokeResponseRequest := func() { releaseRevokeResponseOnce.Do(func() { close(releaseRevokeResponse) }) }
+				defer releaseRevokeResponseRequest()
 				upstreamURL, err := url.Parse(root.server.URL)
 				require.NoError(t, err)
 				remoteHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +153,13 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					defer func() { _ = response.Body.Close() }()
 					raw, readErr := io.ReadAll(response.Body)
 					require.NoError(t, readErr)
+					if mode == "disconnect_write_race" && response.StatusCode == http.StatusOK && r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/relay:disconnect", root.private.ID) {
+						select {
+						case revokeResponseBlocked <- struct{}{}:
+						default:
+						}
+						<-releaseRevokeResponse
+					}
 					if response.StatusCode == 200 && ((mode == "lost_response" && disconnectCalls.Load() == 1 && r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/relay:disconnect", root.private.ID)) || (mode == "pending_enrollment" && r.URL.Path == "/api/v1/federation/enrollments")) {
 						w.WriteHeader(http.StatusServiceUnavailable)
 						return
@@ -329,7 +341,29 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, found)
 				require.True(t, credential.Equal(current))
-				code, _, raw = request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
+				if mode == "disconnect_write_race" {
+					disconnectDone := make(chan bridgeDisconnectResponse, 1)
+					go func() {
+						status, _, body := request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
+						disconnectDone <- bridgeDisconnectResponse{status: status, body: body}
+					}()
+					select {
+					case <-revokeResponseBlocked:
+					case <-time.After(5 * time.Second):
+						t.Fatal("hub did not revoke the grant before the local write")
+					}
+					_, _, writeErr := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: root.private.ID, Author: "local-member", Title: "Write during disconnect"})
+					releaseRevokeResponseRequest()
+					select {
+					case response := <-disconnectDone:
+						code, raw = response.status, response.body
+					case <-time.After(5 * time.Second):
+						t.Fatal("disconnect did not finish after the hub response resumed")
+					}
+					require.ErrorIs(t, writeErr, db.ErrFederatedReadOnly, "disconnect must fence local writes before the hub grant is revoked")
+				} else {
+					code, _, raw = request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
+				}
 				if mode == "credential_changed" {
 					require.Equal(t, http.StatusConflict, code, string(raw))
 					current, found, err = config.DefaultFederationCredentialStore().FederationCredential(t.Context(), root.private.UID)
@@ -340,7 +374,8 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					require.NoError(t, err)
 					binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 					require.NoError(t, err)
-					require.False(t, binding.Enabled)
+					require.True(t, binding.Enabled)
+					require.False(t, binding.PushEnabled)
 					return
 				}
 				if mode == "lost_response" {

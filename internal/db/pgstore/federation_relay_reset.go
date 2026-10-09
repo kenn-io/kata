@@ -64,6 +64,16 @@ func (d *Store) InstallRelayReset(ctx context.Context, bindingUID string, manife
 		if err != nil {
 			return err
 		}
+		eventHashes := make(map[string]string, len(events))
+		for _, event := range events {
+			eventHashes[event.EventUID] = event.ContentHash
+		}
+		checkpointAcceptedEvents := make(map[string]string, len(provenance.Receipts))
+		for _, receipt := range provenance.Receipts {
+			if receipt.ProjectUID == projectUID && receipt.AuthorityUID == pin.AuthorityUID && eventHashes[receipt.EventUID] == receipt.ContentHash {
+				checkpointAcceptedEvents[receipt.EventUID] = receipt.ContentHash
+			}
+		}
 		checkpoint := db.RelayResetCheckpoint{Manifest: manifest, Snapshot: snapshot, Translation: translation}
 		raw, err := json.Marshal(checkpoint)
 		if err != nil {
@@ -96,7 +106,7 @@ func (d *Store) InstallRelayReset(ctx context.Context, bindingUID string, manife
 		if translation.Authority.Epoch <= grant.RelayResetEpoch {
 			return errors.New("stale immediate-hop reset epoch")
 		}
-		if err := d.validateRelayLifecycleTx(ctx, tx, projectID); err != nil {
+		if err := d.validateRelayLifecycleTx(ctx, tx, projectID, checkpointAcceptedEvents); err != nil {
 			return err
 		}
 		var blocked bool

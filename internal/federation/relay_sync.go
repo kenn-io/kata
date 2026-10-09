@@ -83,7 +83,10 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 		return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease)
 	}
 	if handshake.ResetRequired && handshake.ResetEpoch == c.ResetEpoch {
-		if err := syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease); err != nil {
+		// A fresh signed baseline can contain state needed to apply queued root
+		// mutations. Drain only this replica's outbound intent before requesting
+		// it; incoming event and artifact deliveries resume after installation.
+		if err := syncRelayPushBeforeReset(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
 			return err
 		}
 	}
@@ -120,8 +123,8 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease)
 }
 
-// Drain an existing namespace before requesting a new checkpoint. Native
-// acceptance and emitted-prefix ACK checks remain identical in either phase.
+// Exchange pending deliveries in both directions with native acceptance and
+// emitted-prefix ACK checks.
 func syncRelayStreams(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error) error {
 	c := binding.RelayConfig
 	quarantines, err := store.ActiveFederationQuarantinesByProject(ctx, binding.ProjectID)
@@ -134,32 +137,8 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 		}
 		return db.ErrFederationPushQuarantined
 	}
-	for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt} {
-		for {
-			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-				return err
-			}
-			pending, err := store.PendingRelayDeliveries(ctx, c.BindingUID, stream, federationPollLimit)
-			if err != nil {
-				return err
-			}
-			if len(pending) == 0 {
-				break
-			}
-			batch := db.RelayBatch{Stream: stream, Envelopes: pending}
-			accepted, err := client.AcceptRelayDeliveries(ctx, remoteProjectID, batch)
-			if err != nil {
-				return recordRelayEventQuarantine(ctx, store, binding, db.FederationQuarantineDirectionPush, batch, err, validateLease)
-			}
-			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-				return err
-			}
-			// Native ACK validation resolves the exact retained emitted endpoint,
-			// including a previously emitted prefix after a lost response.
-			if err := store.AckRelayDeliveries(ctx, c.BindingUID, c.ResetEpoch, stream, accepted.Through, accepted.Digest); err != nil {
-				return err
-			}
-		}
+	if err := syncRelayPushEvents(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
+		return err
 	}
 	if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 		return err
@@ -199,6 +178,100 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 	}
 	if err := syncRelayArtifacts(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
 		return err
+	}
+	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+}
+
+// syncRelayPushBeforeReset retains local event and artifact intent without
+// applying upstream deliveries against a projection that the signed baseline
+// has not installed yet.
+func syncRelayPushBeforeReset(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
+	quarantines, err := store.ActiveFederationQuarantinesByProject(ctx, binding.ProjectID)
+	if err != nil {
+		return err
+	}
+	if len(quarantines) > 0 {
+		if quarantines[0].Direction == db.FederationQuarantineDirectionPull {
+			return db.ErrFederationPullQuarantined
+		}
+		return db.ErrFederationPushQuarantined
+	}
+	if err := syncRelayPushEvents(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
+		return err
+	}
+	if err := syncRelayPushArtifacts(ctx, store, binding, remoteProjectID, client, validateLease); err != nil {
+		return err
+	}
+	if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
+		return err
+	}
+	return syncRelayPullReceiptsBeforeReset(ctx, store, binding, remoteProjectID, client, validateLease)
+}
+
+func syncRelayPushEvents(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
+	c := binding.RelayConfig
+	for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt} {
+		for {
+			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+				return err
+			}
+			pending, err := store.PendingRelayDeliveries(ctx, c.BindingUID, stream, federationPollLimit)
+			if err != nil {
+				return err
+			}
+			if len(pending) == 0 {
+				break
+			}
+			batch := db.RelayBatch{Stream: stream, Envelopes: pending}
+			accepted, err := client.AcceptRelayDeliveries(ctx, remoteProjectID, batch)
+			if err != nil {
+				return recordRelayEventQuarantine(ctx, store, binding, db.FederationQuarantineDirectionPush, batch, err, validateLease)
+			}
+			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+				return err
+			}
+			// Native ACK validation resolves the exact retained emitted endpoint,
+			// including a previously emitted prefix after a lost response.
+			if err := store.AckRelayDeliveries(ctx, c.BindingUID, c.ResetEpoch, stream, accepted.Through, accepted.Digest); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// syncRelayPullReceiptsBeforeReset records root proof for local events already
+// accepted upstream without applying event deliveries that depend on the new
+// baseline.
+func syncRelayPullReceiptsBeforeReset(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error) error {
+	c := binding.RelayConfig
+	if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
+		return err
+	}
+	for {
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
+		batch, err := client.OfferRelayDeliveries(ctx, remoteProjectID, db.RelayStreamReceipt, federationPollLimit, c.ResetEpoch)
+		if err != nil {
+			return err
+		}
+		if batch.Stream != db.RelayStreamReceipt {
+			return errors.New("relay offer uses a different stream")
+		}
+		if len(batch.Envelopes) == 0 {
+			break
+		}
+		accepted, err := store.AcceptRelayDeliveries(ctx, c.BindingUID, batch)
+		if err != nil {
+			return recordRelayEventQuarantine(ctx, store, binding, db.FederationQuarantineDirectionPull, batch, err, validateLease)
+		}
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
+		if err := client.AckRelayDeliveries(ctx, remoteProjectID, c.ResetEpoch, db.RelayStreamReceipt, accepted); err != nil {
+			return err
+		}
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
 }

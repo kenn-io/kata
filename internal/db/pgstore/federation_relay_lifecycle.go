@@ -15,7 +15,7 @@ func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) err
 
 // The binding lock serializes descendant enrollment with teardown. Recheck
 // durable intent in the transaction performing archive, detach or reset.
-func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64, checkpointAcceptedEvents ...map[string]string) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil
@@ -36,11 +36,41 @@ func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projec
 	config := binding.RelayConfig
 	var blocked bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o
-WHERE o.project_uid=$1 AND ((o.acknowledged=0 AND (o.binding_uid=$2 OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch AND e.revoked_at IS NULL))) OR (o.binding_uid=$2 AND o.reset_epoch=$3 AND o.stream='events' AND o.envelope::jsonb->'path'->>0=$4 AND NOT EXISTS(SELECT 1 FROM federation_event_provenance r WHERE r.project_uid=o.project_uid AND r.event_uid=o.source_uid AND r.content_hash=o.source_hash))))`, projectUID, config.BindingUID, config.ResetEpoch, d.instanceUID).Scan(&blocked); err != nil {
+WHERE o.project_uid=$1 AND o.acknowledged=0 AND (o.binding_uid=$2 OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch AND e.revoked_at IS NULL)))`, projectUID, config.BindingUID).Scan(&blocked); err != nil {
 		return err
 	}
 	if blocked {
 		return db.ErrFederationResetBlockedByPendingPush
+	}
+	var rootAccepted map[string]string
+	if len(checkpointAcceptedEvents) > 0 {
+		rootAccepted = checkpointAcceptedEvents[0]
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT o.source_uid,o.source_hash FROM federation_relay_outbox o
+WHERE o.project_uid=$1 AND o.binding_uid=$2 AND o.reset_epoch=$3 AND o.stream='events'
+  AND o.envelope::jsonb->'path'->>0=$4
+  AND NOT EXISTS(SELECT 1 FROM federation_event_provenance r WHERE r.project_uid=o.project_uid AND r.event_uid=o.source_uid AND r.content_hash=o.source_hash)
+ORDER BY o.id`, projectUID, config.BindingUID, config.ResetEpoch, d.instanceUID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var eventUID, contentHash string
+		if err := rows.Scan(&eventUID, &contentHash); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if rootAccepted[eventUID] != contentHash {
+			_ = rows.Close()
+			return db.ErrFederationResetBlockedByPendingPush
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pending_claim_requests WHERE project_id=$1)`, projectID).Scan(&blocked); err != nil {
 		return err
