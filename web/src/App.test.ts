@@ -2283,6 +2283,106 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Teams and visibility' })).not.toBeNull()
   })
 
+  it('refreshes authority when the initial SSE connection opens', async () => {
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    initial.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: '01J00000000000000000000003',
+        name: 'shared-project',
+        metadata: {},
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T11:00:00.000Z' },
+    })
+    initial.collection.push({
+      ...initial.collection[0]!,
+      id: 2,
+      uid: '01J00000000000000000000004',
+      project_id: 8,
+      project_uid: '01J00000000000000000000003',
+      project_name: 'shared-project',
+      short_id: 'b2',
+      qualified_id: 'shared-project#b2',
+      title: 'Revoked project issue',
+    })
+    const refreshed = snapshot()
+    refreshed.capabilities.updates = 'sse'
+    refreshed.cursor = initial.cursor
+
+    const snapshotRequests: Request[] = []
+    let completeInitialStream: ((response: Response) => void) | undefined
+    const initialStream = new Promise<Response>((resolve) => {
+      completeInitialStream = resolve
+    })
+    let initialStreamSignal: AbortSignal | undefined
+    let streamRequests = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          streamRequests += 1
+          if (streamRequests === 1) {
+            initialStreamSignal = init?.signal ?? undefined
+            return initialStream
+          }
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.close(), { once: true })
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          return Response.json(snapshotRequests.length === 1 ? initial : refreshed, {
+            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('button', { name: /Revoked project issue/ })).not.toBeNull()
+    await waitFor(() => expect(snapshotRequests).toHaveLength(1))
+    await waitFor(() => expect(streamRequests).toBe(1))
+
+    completeInitialStream?.(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            // The response stays open until App unmount aborts its request.
+            initialStreamSignal?.addEventListener('abort', () => controller.close(), { once: true })
+            controller.enqueue(new TextEncoder().encode(': connected\n\n'))
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    )
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull()
+  })
+
   it('refreshes membership after an SSE reconnect opens', async () => {
     history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
