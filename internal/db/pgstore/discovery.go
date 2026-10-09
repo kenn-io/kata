@@ -48,6 +48,7 @@ func (s *Store) ReadyIssues(
 		return fmt.Sprintf("$%d", len(args))
 	}
 	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
@@ -66,7 +67,8 @@ func (s *Store) ReadyIssues(
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := s.QueryContext(ctx, query.String(), args...)
+	statement, args := authorizeRelationshipQuery(ctx, query.String(), args, "l")
+	rows, err := s.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
 	}
@@ -134,6 +136,7 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		return fmt.Sprintf("$%d", len(args))
 	}
 	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
@@ -152,7 +155,8 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := s.QueryContext(ctx, query.String(), args...)
+	statement, args := authorizeRelationshipQuery(ctx, query.String(), args, "l")
+	rows, err := s.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", mapSQLError(err, nil))
 	}
@@ -171,6 +175,8 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
+		handle, _ := db.IssueTeammate(issue.Metadata)
+		issue.SourceFallback(issue.Author, handle)
 		due, err := metadata.ScheduledOnDue(
 			string(issue.Metadata), at,
 			scheduleDefaultTimezone(recurrenceTimezone.String, filter.DefaultTimezone),

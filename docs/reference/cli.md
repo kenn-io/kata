@@ -1719,10 +1719,30 @@ The `--source-format beads` form is different: it drives the `bd` CLI and
 merges into the current project. See [Migrating from
 Beads](../guide/migrating-from-beads.md).
 
+## Teams and project visibility
+
+```sh
+kata teams create <name>
+kata teams list
+kata teams show <team>
+kata teams members add <team> --actor <actor>
+kata teams members remove <team> --actor <actor>
+kata projects access show <project>
+kata projects access set <project> --visibility teams --team <team>
+kata projects access set <project> --visibility all
+```
+
+These commands require the selected daemon's owner authority. Team selectors
+accept names or UIDs. Repeat `--team` to select several teams; omit it with
+`--visibility teams` to deny ordinary access. Setting policy checks its current
+revision and returns a conflict if another administrator changed it meanwhile.
+See [team visibility](../operations/federation.md#team-visibility) for the
+membership and credential rules.
+
 ## Remote and identity tokens
 
 ```sh
-kata tokens create --actor <actor> [--name <name>]
+kata tokens create --actor <actor> [--name <name>] [--expires-in <duration>] [--team <team>]
 kata tokens create --actor <actor> --issue <project#ref> \
   --expires-in <duration> --token-file <new-private-path>
 kata tokens list
@@ -1740,8 +1760,17 @@ on a daemon with no shared token. The credential permits ordinary issue work
 and explicitly parented children. See the [scope guide](../design/issue-scoped-credentials.md)
 for allowed operations and membership changes.
 
-All three flags, `--issue`, `--expires-in`, and `--token-file`, are required
-together. `--expires-in` accepts a positive whole-second duration such as `4h`;
+Repeat `--team <name-or-uid>` to enroll the canonical actor in teams during
+token creation. Token issuance and initial membership commit together.
+The flag also works with issue-scoped credentials; project membership does not
+broaden their issue grant.
+
+An ordinary account credential may set `--expires-in 4h` without `--issue`.
+It keeps its normal account authority until it expires. Omit the flag for a
+non-expiring ordinary credential.
+
+For an issue-scoped credential, all three flags, `--issue`, `--expires-in`, and
+`--token-file`, are required together. `--expires-in` accepts a positive whole-second duration such as `4h`;
 zero, negative, fractional-second, and overflowing values are refused. `--issue`
 accepts a bare, qualified, or full UID ref on the selected daemon. A conflicting
 explicit `--project` fails with `conflicting_project_selector`.
@@ -1762,6 +1791,11 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 ```sh
 kata federation identity
+kata federation embedding-recipe
+kata federation bridge connect --project <local-project> --hub-daemon <catalog-name> \
+  --hub-project <hub-project> [--preflight] [--serve-downstream=false]
+kata federation bridge status --project <local-project>
+kata federation bridge disconnect --project <local-project> [--preflight]
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
   --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
@@ -1782,6 +1816,36 @@ kata federation quarantine show <id>
 kata federation quarantine retry <id> --confirm "RETRY FEDERATION BATCH <id>" --reason <text>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
+
+`kata federation embedding-recipe` exports JSON for the exact document recipe
+in the selected local Kata home's configuration. It makes no daemon or provider
+request and does not expose credentials or endpoints. Use that complete recipe
+with the existing root metadata API to
+[select a project producer](../operations/federation.md#select-an-embedding-producer).
+A remote server selection does not select a different local recipe.
+
+`kata federation bridge connect` asks the local daemon to use the selected
+catalog hub account for one bidirectional project enrollment. The CLI sends the
+catalog name, project names and local actor; the hub credential stays in the
+daemon. `--preflight` previews the accounts, identity and project without issuing
+a grant. Downstream serving is enabled by default; use
+`--serve-downstream=false` for a leaf. Retry the same command after a lost
+response to reuse the retained narrow enrollment token. See the
+[federation guide](../operations/federation.md#connect-a-project-through-the-daemon-catalog).
+
+`kata federation bridge status --project <local-project>` reads the selected
+bridge's locally recorded state without contacting its hub. It also shows a
+retained pending enrollment before the local replica exists. JSON output
+includes the negotiated path and existing sync diagnostics; no token values
+are returned. Check sync timestamps when assessing an observed connection state.
+
+`kata federation bridge disconnect --project <local-project>` revokes the
+retained narrow grant and detaches the bridge while preserving local data.
+`--preflight` checks the local credential and pending deliveries or downstream
+enrollments without contacting the hub or changing state. Interrupted cleanup
+can be retried; a completed retry needs no further upstream request. Resolve
+pending deliveries and downstream enrollments before disconnecting. See the
+[federation guide](../operations/federation.md#connect-a-project-through-the-daemon-catalog).
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog

@@ -43,6 +43,36 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
+	"AcceptRelayDeliveries":    true, // native relay storage
+	"AckRelayDeliveries":       true, // native relay storage
+	"CreateRelayEnrollment":    true, // native relay storage
+	"ExportRelayState":         true, // native relay storage
+	"PendingRelayDeliveries":   true, // native relay storage
+	"SetRelayBindingConfig":    true, // native relay storage
+	"RotateRootAuthority":      true, // federation_root_rotation.go
+	"RootKeyTransitions":       true, // federation_root_rotation.go
+	"PinRootAuthority":         true, // federation_provenance.go
+	"RootAuthority":            true, // federation_provenance.go
+	"RecordRootAttribution":    true, // federation_provenance.go
+	"ApplyUpstreamAttribution": true, // federation_provenance.go
+	"EntityAttribution":        true, // federation_provenance.go
+	"AttributionReceiptsAfter": true, // federation_provenance.go
+	"ExportAttribution":        true, // federation_provenance.go
+
+	"CreateTeam":                           true, // project_access.go
+	"TeamByUID":                            true, // project_access.go
+	"ListTeams":                            true, // project_access.go
+	"DeleteTeam":                           true, // project_access.go
+	"TeamMembers":                          true, // project_access.go
+	"SetTeamMembership":                    true, // project_access.go
+	"MigrateTeamActor":                     true, // project_access.go
+	"ProjectAccessPolicy":                  true, // project_access.go
+	"SetProjectAccessPolicy":               true, // project_access.go
+	"AccessibleProjectUIDs":                true, // project_access.go
+	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
+	"ProjectAccessRevision":                true, // project_access.go
+	"ProjectAccessTransactionFence":        true, // project_access.go
+	"ExportProjectAccess":                  true, // project_access.go
 	"ClaimScreenView":                      true, // store.go
 	"ReleaseScreenView":                    true, // store.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go

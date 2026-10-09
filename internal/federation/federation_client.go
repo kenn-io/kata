@@ -143,6 +143,108 @@ func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api
 	return body, err
 }
 
+// RelayReset retrieves a retained root-signed checkpoint through the same
+// origin-pinned enrollment credential as ordinary relay delivery.
+func (c *Client) RelayReset(ctx context.Context, projectID int64) (db.RelayResetCheckpoint, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return db.RelayResetCheckpoint{}, err
+	}
+	response, callErr := apiClient.GetRelayResetWithResponse(ctx, &generated.GetRelayResetRequestOptions{PathParams: &generated.GetRelayResetPath{ProjectID: projectID}})
+	var checkpoint db.RelayResetCheckpoint
+	if response == nil {
+		return checkpoint, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &checkpoint)
+	return checkpoint, err
+}
+
+// OfferRelayDeliveries polls the existing enrolled connection. Offers retain
+// their identity until the receiver commits and acknowledges their prefix.
+func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stream string, limit int, epoch ...int64) (db.RelayBatch, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return db.RelayBatch{}, err
+	}
+	queryStream := generated.OfferRelayDeliveriesQueryStream(stream)
+	queryLimit := int64(limit)
+	query := &generated.OfferRelayDeliveriesQuery{Stream: &queryStream, Limit: &queryLimit}
+	if len(epoch) > 0 {
+		query.Epoch = &epoch[0]
+	}
+	response, callErr := apiClient.OfferRelayDeliveriesWithResponse(ctx, &generated.OfferRelayDeliveriesRequestOptions{PathParams: &generated.OfferRelayDeliveriesPath{ProjectID: projectID}, Query: query})
+	var batch db.RelayBatch
+	if response == nil {
+		return batch, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &batch)
+	return batch, err
+}
+
+// AcceptRelayDeliveries submits an authenticated hop batch and returns its accepted prefix.
+func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, batch db.RelayBatch) (db.RelayAcceptance, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	raw, err := json.Marshal(batch)
+	if err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	var payload generated.AcceptRelayDeliveriesBody
+	if err = json.Unmarshal(raw, &payload); err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	response, callErr := apiClient.AcceptRelayDeliveriesWithResponse(ctx, &generated.AcceptRelayDeliveriesRequestOptions{PathParams: &generated.AcceptRelayDeliveriesPath{ProjectID: projectID}, Body: &payload})
+	var accepted db.RelayAcceptance
+	if response == nil {
+		return accepted, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &accepted)
+	return accepted, err
+}
+
+// DownloadRelayArtifacts requests complete misses from the same origin-pinned
+// relay route. The sender resolves each digest against its emitted epoch.
+func (c *Client) DownloadRelayArtifacts(ctx context.Context, projectID, epoch int64, digests []string) (db.RelayBatch, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return db.RelayBatch{}, err
+	}
+	stream := generated.OfferRelayDeliveriesQueryStream(db.RelayStreamArtifact)
+	response, callErr := apiClient.OfferRelayDeliveriesWithResponse(ctx, &generated.OfferRelayDeliveriesRequestOptions{PathParams: &generated.OfferRelayDeliveriesPath{ProjectID: projectID}, Query: &generated.OfferRelayDeliveriesQuery{Stream: &stream, ArtifactDigest: digests, Epoch: &epoch}})
+	var batch db.RelayBatch
+	if response == nil {
+		return batch, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &batch)
+	if err == nil && (batch.Stream != db.RelayStreamArtifact || len(batch.Envelopes) != 0 || len(batch.Artifacts) != len(digests)) {
+		return db.RelayBatch{}, db.ErrFederationIngestValidation
+	}
+	return batch, err
+}
+
+// AckRelayDeliveries acknowledges an exact emitted prefix for the authenticated hop.
+func (c *Client) AckRelayDeliveries(ctx context.Context, projectID, epoch int64, stream string, accepted db.RelayAcceptance) error {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return err
+	}
+	payload := generated.AckRelayDeliveriesBody{Epoch: epoch, Stream: generated.RelayAckRequestBodyStream(stream), Through: accepted.Through, Digest: accepted.Digest}
+	response, callErr := apiClient.AckRelayDeliveriesWithResponse(ctx, &generated.AckRelayDeliveriesRequestOptions{PathParams: &generated.AckRelayDeliveriesPath{ProjectID: projectID}, Body: &payload})
+	if response == nil {
+		return callErr
+	}
+	var body api.RelayAckResponse
+	if err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body.Body); err != nil {
+		return err
+	}
+	if !body.Body.Acknowledged {
+		return fmt.Errorf("relay acknowledgement was not retained")
+	}
+	return nil
+}
+
 // Keep the replication error body bounded before the generated runtime reads it.
 type replicationDoer struct{ client *http.Client }
 

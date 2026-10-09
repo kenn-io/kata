@@ -65,7 +65,7 @@ func requireFederatedIssueClaimForPrincipal(
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	principal = boundSpokeClaimPrincipal(binding, principal)
+	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 
 	if binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
@@ -122,7 +122,7 @@ func refreshSpokeClaimStatusForGate(
 	}
 	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
 	if err != nil {
-		if isTransportClaimError(err) {
+		if isTransportClaimError(err) || isOfflineClaimHubStatusError(err) {
 			return nil
 		}
 		pending, pendingErr := isPendingSpokePushClaimStatusMiss(ctx, cfg, binding, issue, err)
@@ -133,6 +133,10 @@ func refreshSpokeClaimStatusForGate(
 			return nil
 		}
 		return claimForwardError(err)
+	}
+	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
+	if err != nil {
+		return claimAPIError(err)
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
 		return claimAPIError(err)
@@ -217,6 +221,14 @@ func isOfflineClaimRefreshError(err error) bool {
 	}
 	return apiErr.Status == http.StatusServiceUnavailable &&
 		apiErr.Code == "federation_offline"
+}
+
+func isOfflineClaimHubStatusError(err error) bool {
+	var statusErr *claimHubStatusError
+	if !errors.As(err, &statusErr) || statusErr == nil || statusErr.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	return hubStatusErrorCode(statusErr) == "federation_offline"
 }
 
 func claimGateAPIError(err error) error {

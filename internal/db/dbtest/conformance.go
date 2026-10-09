@@ -19,16 +19,17 @@ import (
 // scenario must fail with the configured error, and unexpectedly passing it
 // fails the suite until the stale entry is removed.
 type Backend struct {
-	Name                           string
-	Open                           func(t *testing.T) db.Storage
-	InstallExternalRootClock       func(db.Storage, func() time.Time) func()
-	SeedLegacyPendingClaim         func(context.Context, db.Storage, string) error
-	SeedClaimViolation             func(context.Context, db.Storage, db.Project, db.Issue, string, jsontext.Value) error
-	SeedUnsupportedFederationEvent func(context.Context, db.Storage, db.Project, string) error
-	BackdateCommentCreated         func(context.Context, db.Storage, int64, time.Time) error
-	InstallEnrollmentInsertFailure func(context.Context, db.Storage) (func() error, error)
-	InstallEnrollmentRotationStage func(db.Storage, func(context.Context) error) func()
-	ExpectedFailures               map[string]error
+	Name                                string
+	Open                                func(t *testing.T) db.Storage
+	InstallExternalRootClock            func(db.Storage, func() time.Time) func()
+	InstallRelayHistoryFullScanObserver func(db.Storage, func()) func()
+	SeedLegacyPendingClaim              func(context.Context, db.Storage, string) error
+	SeedClaimViolation                  func(context.Context, db.Storage, db.Project, db.Issue, string, jsontext.Value) error
+	SeedUnsupportedFederationEvent      func(context.Context, db.Storage, db.Project, string) error
+	BackdateCommentCreated              func(context.Context, db.Storage, int64, time.Time) error
+	InstallEnrollmentInsertFailure      func(context.Context, db.Storage) (func() error, error)
+	InstallEnrollmentRotationStage      func(db.Storage, func(context.Context) error) func()
+	ExpectedFailures                    map[string]error
 }
 
 type scenario struct {
@@ -40,6 +41,49 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "close transcript", run: checkCloseTranscript},
+	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayIngressAtomicity(t, store); return nil }},
+	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
+	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
+	{name: "relay enrollment history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "ProjectAccessTransactionFence", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayEnrollmentHistoryValidationCache(t, store, backend)
+		return nil
+	}},
+	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayOutboxAtomicity(t, store)
+		seen := 0
+		for record, err := range store.ExportRelayState(t.Context()) {
+			require.NoError(t, err)
+			require.NoError(t, db.ValidateRelayDeliveryRecord(record))
+			seen++
+		}
+		require.Positive(t, seen)
+		return nil
+	}},
+
+	{name: "root key rotation", methods: []string{"RotateRootAuthority", "RootKeyTransitions"}, run: func(t *testing.T, store db.Storage) error {
+		RunRootKeyRotation(t, store)
+		return nil
+	}},
+
+	{name: "root attribution", methods: []string{"PinRootAuthority", "RootAuthority", "RecordRootAttribution", "ApplyUpstreamAttribution", "EntityAttribution", "AttributionReceiptsAfter", "ExportAttribution"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayAttribution(t, store)
+		RunUpstreamAttribution(t, store)
+		return nil
+	}},
+	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "AnonymousAccessibleProjectUIDs", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
+		RunProjectAccessMergeIsolation(t, store)
+		RunProjectAccessConformance(t, store)
+		RunProjectAccessTokenEnrollment(t, store)
+		return nil
+	}},
+	{name: "archived project portable export replay", methods: []string{"CreateProject", "CreateIssue", "RemoveProject", "UpsertFederationBinding", "PinRootAuthority", "ExportProjects", "ExportIssues", "ExportEvents", "ExportAttribution", "ImportReplay"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunArchivedPortableDataExport(t, store, backend)
+		return nil
+	}},
+	{name: "parent replacement with removed expected link", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "DeleteLinkAndEvent", "ParentOf"}, run: func(t *testing.T, store db.Storage) error {
+		RunParentReplacementMissingExpectedLink(t, store)
+		return nil
+	}},
 	{name: "screen view claims", methods: []string{"ClaimScreenView", "ReleaseScreenView"}, run: checkScreenViewClaims},
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},
@@ -147,6 +191,87 @@ var storageScenarios = []scenario{
 		run: checkPurgeReset,
 	},
 	{
+		name: "purge preserves signed peer event",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "LeaveFederationReplica",
+			"PurgeIssue", "PinRootAuthority", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunPurgePreservesSignedPeerEvent(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project purge preserves signed peer event",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "LeaveFederationReplica",
+			"PurgeProject", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectPurgePreservesSignedPeerEvent(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "live-only backup preserves signed soft-deleted peer",
+		methods: []string{
+			"ApplyUpstreamAttribution", "CreateIssue", "CreateLinkAndEvent", "CreateProject",
+			"ExportAttribution", "ExportEvents", "ImportReplay", "PinRootAuthority",
+			"SoftDeleteIssue", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunLiveOnlyBackupPreservesSignedSoftDeletedPeer(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project purge removes relay metadata",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
+			"ImportReplay", "LeaveFederationReplica", "PinRootAuthority",
+			"PurgeProject", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
+			"UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectPurgeRemovesRelayMetadata(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "project merge removes relay metadata",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "ExportMeta", "ExportProjects", "ExportEvents",
+			"ImportReplay", "LeaveFederationReplica", "MergeProjects",
+			"PinRootAuthority", "RotateRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunProjectMergeRemovesRelayMetadata(t, store, backend)
+			return nil
+		},
+	},
+	{
+		name: "archived detached relay metadata retains root keys",
+		methods: []string{
+			"CreateProject", "ExportAttribution", "LeaveFederationReplica",
+			"PinRootAuthority", "RemoveProject", "RotateRootAuthority", "SetRelayBindingConfig",
+			"UpsertFederationBinding",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchivedDetachedRelayMetadataRetainsRootKeys(t, store)
+			return nil
+		},
+	},
+	{
+		name:    "archived detached receipt export retains root keys",
+		methods: []string{"ApplyUpstreamAttribution", "CreateIssue", "CreateProject", "ExportAttribution", "ImportReplay", "LeaveFederationReplica", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding"},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunArchivedDetachedReceiptExport(t, store, backend)
+			return nil
+		},
+	},
+	{
 		name: "project lifecycle",
 		methods: []string{
 			"AttachAlias", "CountOpenIssues", "CreateIssue", "CreateProject", "DetachProjectAlias",
@@ -171,6 +296,36 @@ var storageScenarios = []scenario{
 			"MaxLocalOriginEventID",
 		},
 		run: checkEventQueries,
+	},
+	{
+		name: "event reference project scope",
+		methods: []string{
+			"CloseIssueWithEvents", "CreateIssue", "CreateLink", "CreateProject", "EventsAfter", "MoveIssueProject",
+			"EventsInWindow", "InsertCloseThrottledEvent", "InsertRemoteEvent",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunEventReferenceProjectScope(t, store)
+			return nil
+		},
+	},
+	{
+		name:    "archived federation root pin export",
+		methods: []string{"CreateProject", "ExportAttribution", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding"},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchivedFederationPinExport(t, store)
+			return nil
+		},
+	},
+	{
+		name: "archive and leave avoids relay debt",
+		methods: []string{
+			"CreateProject", "FederationBindingByProject", "LeaveFederationReplica", "PinRootAuthority", "RemoveProject",
+			"SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			RunArchiveAndLeaveDoesNotCreateRelayDebt(t, store)
+			return nil
+		},
 	},
 	{
 		name: "issue create envelope",
@@ -575,6 +730,36 @@ var storageScenarios = []scenario{
 			"PendingFederationPushStats", "ProjectByID", "RemoveProject",
 		},
 		run: checkFederationProjectAdoption,
+	},
+	{
+		name: "federation adoption after disconnect",
+		methods: []string{
+			"AckRelayDeliveries", "AdoptProjectIntoFederation", "ApplyUpstreamAttribution",
+			"CreateIssue", "CreateProject", "ExportAttribution", "ExportRelayState",
+			"LeaveFederationReplica", "PendingRelayDeliveries", "PinRootAuthority",
+			"RotateRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		run: checkFederationAdoptionAfterDisconnect,
+	},
+	{
+		name: "federation adoption project access",
+		methods: []string{
+			"AdoptProjectIntoFederation", "CreateProject", "CreateTeam", "ProjectAccessPolicy",
+			"ProjectAccessRevision", "SetProjectAccessPolicy",
+		},
+		run: func(t *testing.T, store db.Storage) error {
+			return checkAdoptionPreservesProjectAccessPolicy(t, store)
+		},
+	},
+	{
+		name: "federation enrollment project export",
+		methods: []string{
+			"CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "ExportFederationEnrollments",
+			"ImportReplay", "PinRootAuthority", "UpsertFederationBinding",
+		},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			return checkProjectScopedRelayEnrollmentExportRoundTrip(t, store, backend)
+		},
 	},
 	{
 		name:    "empty federation attachment",

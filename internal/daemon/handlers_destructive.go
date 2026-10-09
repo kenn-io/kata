@@ -53,6 +53,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, updated.UID, true)
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
@@ -90,6 +91,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, updated.UID, false)
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
@@ -142,6 +144,9 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if errors.Is(err, db.ErrExternalRootContentOwned) {
 			return nil, externalRootContentOwnedAPIError()
+		}
+		if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) {
+			return nil, api.NewError(409, "federation_pending_delivery", "relay delivery is still pending", "sync the retained deliveries or explicitly revoke their enrollments before purging", nil)
 		}
 		if err != nil {
 			return nil, internalAPIError(err)

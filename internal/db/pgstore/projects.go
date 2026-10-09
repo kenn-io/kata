@@ -98,7 +98,13 @@ func (s *Store) createProjectWithUID(ctx context.Context, name, projectUID, acto
 			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
 			Type: "project.created", Actor: actor, Payload: string(payload),
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("advance project access revision after project creation: %w", err)
+		}
+		return nil
 	})
 	return project, event, err
 }
@@ -198,8 +204,10 @@ func (s *Store) listProjects(ctx context.Context, includeArchived bool) ([]db.Pr
 	if !includeArchived {
 		query += ` AND deleted_at IS NULL`
 	}
+	args := []any{db.SystemProjectName}
+	query += " AND " + authorizedProjectPredicate(ctx, "uid", &args)
 	query += ` ORDER BY id ASC`
-	rows, err := s.QueryContext(ctx, query, db.SystemProjectName)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

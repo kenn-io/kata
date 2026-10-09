@@ -35,6 +35,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return out, err
+	}
 
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
@@ -135,6 +138,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	); err != nil {
 		return out, err
 	}
+	if err := rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, toProjectUID); err != nil {
+		return out, fmt.Errorf("rehome embedding artifacts: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issue_claims SET project_id = ? WHERE issue_id = ?`, in.ToProjectID, in.IssueID); err != nil {
 		return out, fmt.Errorf("rehome issue claims: %w", err)
@@ -182,6 +188,14 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	})
 	if err != nil {
 		return out, err
+	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return out, fmt.Errorf("bump project access revision after issue move: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT CAST(value AS BIGINT) FROM meta WHERE key='project_access_revision'`,
+	).Scan(&out.ProjectAccessRevision); err != nil {
+		return out, fmt.Errorf("read project access revision after issue move: %w", err)
 	}
 
 	issue, err := issueByIDTx(ctx, tx, in.IssueID)

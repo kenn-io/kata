@@ -77,6 +77,10 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 	}{
 		{name: "snapshot", method: http.MethodGet, path: "/api/v1/ui/snapshot", want: http.StatusNoContent},
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
+		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
+		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
+		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},
+		{name: "project federation mutation", method: http.MethodPost, path: "/api/v1/projects/7/federation/status", want: http.StatusForbidden},
 		{name: "credential audit", method: http.MethodGet, path: "/api/v1/tokens", want: http.StatusForbidden},
 		{name: "issue reference", method: http.MethodGet, path: "/api/v1/ui/issue-reference?project_id=7&ref=abc4", want: http.StatusNoContent},
 		{name: "proxied snapshot", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/snapshot", want: http.StatusNoContent},
@@ -784,4 +788,29 @@ func TestKeylessBrowserListenerDoesNotGrantAuthorityForArbitraryBearer(t *testin
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
+}
+
+func TestBrowserAccessAdministrationBoundary(t *testing.T) {
+	for _, principal := range []Principal{{Kind: PrincipalBootstrap}, {Kind: PrincipalStaticToken}, {Kind: PrincipalWebLocal}, {Kind: PrincipalDBToken, TokenID: 7, Actor: "member"}, {Kind: PrincipalTrustedProxy}, {}} {
+		t.Run(string(principal.Kind), func(t *testing.T) {
+			manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "adminboundary")
+			manager.db = &webSessionActiveTokenStore{token: db.APIToken{ID: 7, Actor: "member"}}
+			issued, err := manager.IssueSession(principal, "/kata")
+			require.NoError(t, err)
+			wantAdmin := principal.Kind == PrincipalBootstrap || principal.Kind == PrincipalStaticToken
+			require.Equal(t, wantAdmin, manager.CanAdministerAccess(principal))
+			// This tests the separate administrative exception; ordinary writers
+			// retain their existing path, so use a read-only manager for every role.
+			manager.writable = false
+			require.False(t, manager.CanAdministerAccess(principal))
+			handler := requireBrowserSession(manager, ListenerPolicy{Kind: ListenerBrowser, Origin: manager.Origin(), RequireBrowserSession: true}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+			request := httptest.NewRequest(http.MethodPost, manager.Origin()+"/api/v1/teams", strings.NewReader(`{"name":"blocked"}`))
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusForbidden, response.Code)
+		})
+	}
 }

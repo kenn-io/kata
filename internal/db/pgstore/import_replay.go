@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -36,6 +37,7 @@ func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opt
 		return err
 	}
 	s.instanceUID = finalInstanceUID
+	s.invalidateRelayHistoryValidationCache()
 	return nil
 }
 
@@ -105,6 +107,9 @@ func (s *Store) importReplayTx(
 			skippedMappings)
 	}
 
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES('project_access_revision','1') ON CONFLICT(key) DO NOTHING`); err != nil {
+		return err
+	}
 	if err := pgReplayEnsureSystemProject(ctx, tx); err != nil {
 		return err
 	}
@@ -219,6 +224,36 @@ func (s *Store) importReplayRecord(
 	switch rec := record.(type) {
 	case *db.MetaKV:
 		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
+	case *db.EmbeddingArtifactExport:
+		return replayLinkInserted, importEmbeddingArtifact(ctx, tx, rec)
+	case *db.RootKeyPin:
+		active := 1
+		if rec.Retired {
+			active = 0
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key,active) VALUES($1,$2,$3,$4,$5)`, rec.ProjectUID, rec.AuthorityUID, rec.KeyID, base64.StdEncoding.EncodeToString(rec.PublicKey), active)
+		return replayLinkInserted, err
+	case *db.AttributionReceipt:
+		return replayLinkInserted, persistReceiptTx(db.WithRelayStateCapture(ctx), tx, *rec, nil, false)
+	case *db.EntityProvenance:
+		_, err := tx.ExecContext(ctx, `INSERT INTO federation_entity_provenance(project_uid,kind,entity_uid,event_uid) VALUES($1,$2,$3,$4)`, rec.ProjectUID, rec.Kind, rec.EntityUID, rec.EventUID)
+		return replayLinkInserted, err
+	case *db.Team:
+		_, err := tx.ExecContext(ctx, `INSERT INTO teams(uid,name,revision) VALUES($1,$2,$3)`, rec.UID, rec.Name, rec.Revision)
+		return replayLinkInserted, err
+	case *db.TeamMembership:
+		_, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES($1,$2)`, rec.TeamUID, rec.Actor)
+		return replayLinkInserted, err
+	case *db.ProjectAccessPolicy:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES($1,$2,$3)`, rec.ProjectUID, rec.Visibility, rec.Revision); err != nil {
+			return replayLinkInserted, err
+		}
+		for _, teamUID := range rec.TeamUIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_teams(project_uid,team_uid) VALUES($1,$2)`, rec.ProjectUID, teamUID); err != nil {
+				return replayLinkInserted, err
+			}
+		}
+		return replayLinkInserted, nil
 	case *db.ProjectExport:
 		return replayLinkInserted, pgReplayProject(ctx, tx, rec)
 	case *db.AliasExport:
@@ -251,6 +286,8 @@ func (s *Store) importReplayRecord(
 		)
 	case *db.ExternalFieldStateExport:
 		return replayLinkInserted, pgReplayExternalFieldState(ctx, tx, rec)
+	case *db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
+		return replayLinkInserted, importRelayState(ctx, tx, rec)
 	case *db.FederationBindingExport:
 		return replayLinkInserted, pgReplayFederationBinding(ctx, tx, rec)
 	case *db.FederationSyncStatusExport:

@@ -69,6 +69,10 @@ separate:
   fetches, and forwarded lease actions. Each enrollment is bound to one actor;
   pushed event actors and forwarded lease holders must match that bound actor.
   They are not general daemon API tokens.
+  A relay enrollment candidate may be retained with
+  `relay_enrollment_pending = true` for an exact enrollment retry. Its status is
+  `enrollment_pending`; sync, forwarded claims and shared-project embedding
+  generation wait until the negotiated binding activates that credential.
 
 Lease commands have two hops on a spoke. The CLI first talks to the local spoke
 daemon using the normal daemon API auth rules. The spoke then forwards the lease
@@ -274,6 +278,13 @@ old hub must not blindly materialize events from a newer spoke whose payloads or
 fold semantics may have changed.
 
 ### Forward And Backward Compatibility
+
+`GET /api/v1/instance` advertises `relay_protocol_version`,
+`provenance_protocol_version`, and `embedding_artifact_protocol_version`
+independently of `schema_version`. These fields describe wire support and
+currently report version 1. Artifact manifests and complete vector transfers
+use the same artifact protocol. Older daemons omit these fields; omission does
+not advertise relay support.
 
 Federation compatibility is asymmetric during rolling upgrades:
 
@@ -750,14 +761,17 @@ if they have unaccepted local work or quarantine.
 Use a shared daemon when destructive administrative actions must be instantly
 visible to all users.
 
-### No Multi-Tenant Authorization Model
+### Project Authorization And Trusted Peers
 
-Enrollment tokens authorize spokes, not individual global users. The local
-daemon remains a single-user local tool. Project-scoped user ACLs and a global
-identity model belong to shared-daemon or later hardening work.
+Daemon user credentials carry actor identities. Team membership controls project
+visibility on the daemon, and enrollment transport checks the authenticated
+credential's bound actor against that policy. See
+[project access](../reference/http-api.md#project-access) for the API boundary.
 
-Use a shared daemon when different human users require centrally enforced roles
-on the same project.
+An enrolled federation peer remains trusted with the projects it is authorized
+to exchange. Project policy does not turn a personal spoke into an adversarial
+sandbox or provide a global identity directory. Daemon-owner authority controls
+local policy, credentials and backup restore.
 
 ## Historical Design Context
 

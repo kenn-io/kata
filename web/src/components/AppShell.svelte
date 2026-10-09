@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { DetailDrawer, IconButton, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
@@ -27,7 +28,10 @@
   } from '../lib/kata/types'
   import type { UISnapshot } from '../lib/state/snapshot'
   import { defaultPreferences, type Preferences } from '../lib/state/preferences'
+  import AccessManagement from './AccessManagement.svelte'
+  import type { MutationContext, MutationResult } from '../lib/mutations/controller'
   import CredentialAudit from './CredentialAudit.svelte'
+  import ProjectSyncStatus from './ProjectSyncStatus.svelte'
   import IssueCollection from './IssueCollection.svelte'
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
@@ -64,6 +68,12 @@
     credentialError?: string | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
+    onAccessMutation?:
+      | ((
+          draft: unknown,
+          mutate: (context: MutationContext) => Promise<MutationResult>,
+        ) => Promise<boolean>)
+      | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
@@ -121,6 +131,7 @@
     credentialError = undefined,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
+    onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
     onNavigate,
@@ -146,12 +157,59 @@
     onDeleteRecurrence,
   }: Props = $props()
 
+  let connectionNow = $state(Date.now())
+  onMount(() => {
+    const timer = setInterval(() => {
+      connectionNow = Date.now()
+    }, 1000)
+    return () => clearInterval(timer)
+  })
+  let activeConnection = $derived(daemons.find((daemon) => daemon.id === activeDaemonID))
+  let credentialExpired = $derived(
+    snapshot.capabilities.expires_at !== undefined &&
+      Date.parse(snapshot.capabilities.expires_at) <= connectionNow,
+  )
+  let connectionStatus = $derived(
+    daemonSwitching
+      ? 'Connecting'
+      : activeConnection?.health === 'auth_required' ||
+          /authentication required/i.test(daemonError ?? '')
+        ? 'Authentication required'
+        : credentialExpired
+          ? 'Credential expired'
+          : reconnecting
+            ? 'Reconnecting'
+            : stale || daemonError || activeConnection?.health === 'down'
+              ? 'Connection unavailable'
+              : activeConnection?.health === 'upgrade_required'
+                ? 'Upgrade required'
+                : loading
+                  ? 'Connecting'
+                  : readOnly || !snapshot.capabilities.writable
+                    ? 'Read-only'
+                    : 'Connected',
+  )
+  let connectionAccount = $derived(
+    daemonSwitching || stale || reconnecting || loading || daemonError || credentialExpired
+      ? '—'
+      : snapshot.capabilities.account || 'Local connection',
+  )
+
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
   let mobileNavigationOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let credentialRoute = $derived(route.view === 'credentials')
+  let accessAdministrationAvailable = $derived(
+    snapshot.capabilities.access_admin === true &&
+      !credentialExpired &&
+      !stale &&
+      !reconnecting &&
+      !daemonError &&
+      !daemonSwitching &&
+      (!activeDaemonID || activeConnection?.local === true),
+  )
   let graphSelectedUID = $derived<string | null>(
     route.issueUID && route.graph ? route.issueUID : null,
   )
@@ -425,6 +483,13 @@
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
+  <div class="active-connection" role="status" aria-label="Active connection">
+    <span
+      >Hub: <strong>{activeDaemonID ?? (globalThis.location?.host || 'Local daemon')}</strong></span
+    >
+    <span>Account: <strong>{connectionAccount}</strong></span>
+    <span>Credential: <strong>{connectionStatus}</strong></span>
+  </div>
   <TopBar class="kata-header" ariaLabel="Kata workspace">
     {#snippet left()}
       <h1 class="kata-brand">Kata</h1>
@@ -511,6 +576,11 @@
         : 'This Kata session is read-only.'}
     </aside>
   {/if}
+  {#if selectedProject && !credentialRoute && !loading && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+    {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
+      <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
+    {/key}
+  {/if}
   <div class="kata-layout" aria-busy={loading}>
     <div class="desktop-navigation">
       {@render navigationSidebar()}
@@ -518,15 +588,32 @@
 
     <div class="kata-main">
       {#if credentialRoute}
-        <CredentialAudit
-          tokens={credentialTokens}
-          loading={credentialLoading}
-          error={snapshot.capabilities.token_audit_read
-            ? credentialError
-            : 'Credential inventory is unavailable for this session.'}
-          onRefresh={onRefreshCredentials}
-          onBack={onBackFromCredentials}
-        />
+        <div class="credential-scene">
+          <CredentialAudit
+            tokens={credentialTokens}
+            loading={credentialLoading}
+            error={snapshot.capabilities.token_audit_read
+              ? credentialError
+              : 'Credential inventory is unavailable for this session.'}
+            onRefresh={onRefreshCredentials}
+            onBack={onBackFromCredentials}
+          />
+          {#if accessAdministrationAvailable}
+            <section class="access-administration" aria-labelledby="access-administration-heading">
+              <h2 id="access-administration-heading">Teams and visibility</h2>
+              {#if onAccessMutation}
+                {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
+                  <AccessManagement
+                    projects={snapshot.catalog}
+                    pending={mutationPending || loading || !accessAdministrationAvailable}
+                    message={mutationMessage}
+                    onMutation={onAccessMutation}
+                  />
+                {/key}
+              {/if}
+            </section>
+          {/if}
+        </div>
       {:else}
         {#if mutationMessage}
           <p class="mutation-message" role="alert">{mutationMessage}</p>
@@ -578,7 +665,7 @@
           }}
         />
       {:else}
-        <section class="detail-unavailable" role="status">
+        <section class="detail-unavailable" role="status" aria-label="Selected issue status">
           The reachable graph is unavailable from the current authority.
         </section>
       {/if}
@@ -650,7 +737,7 @@
         {onDeleteRecurrence}
       />
     {:else}
-      <section class="detail-unavailable" role="status">
+      <section class="detail-unavailable" role="status" aria-label="Selected issue status">
         {projection.selected_state === 'archived'
           ? 'This issue is archived.'
           : 'This issue is unavailable from the current authority.'}
@@ -696,6 +783,18 @@
     position: relative;
   }
 
+  .active-connection {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    padding: 0.375rem 0.75rem;
+    border-inline-start: 0.25rem solid var(--accent-yellow);
+    background: var(--bg-connection);
+    color: var(--text-connection);
+    font-size: var(--font-size-xs);
+    overflow-wrap: anywhere;
+  }
+
   .kata-brand {
     margin: 0;
     font-size: var(--font-size-lg);
@@ -720,7 +819,7 @@
     right: var(--space-3);
     z-index: 20;
     max-width: min(360px, calc(100% - 24px));
-    border: 1px solid var(--accent-amber);
+    border: 1px solid var(--accent-yellow);
     border-radius: var(--radius-sm);
     background: var(--bg-surface);
     box-shadow: var(--shadow-lg);
@@ -788,6 +887,24 @@
     display: flex;
     position: relative;
     overflow: hidden;
+  }
+
+  .credential-scene {
+    min-width: 0;
+    flex: 1;
+    overflow: auto;
+  }
+
+  .access-administration {
+    padding: var(--space-5);
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-default);
+  }
+
+  .access-administration h2 {
+    margin-bottom: var(--space-4);
+    font-size: var(--font-size-xl);
+    line-height: 1.25;
   }
 
   .list-column {

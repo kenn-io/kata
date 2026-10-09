@@ -54,6 +54,7 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	var roster struct {
 		Daemons []struct {
 			ID      string `json:"id"`
+			Local   bool   `json:"local"`
 			Default bool   `json:"default"`
 			Auth    string `json:"auth"`
 			Health  string `json:"health"`
@@ -61,6 +62,9 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &roster))
 	require.Len(t, roster.Daemons, 3)
+	assert.True(t, roster.Daemons[0].Local, "roster must identify the native local mux rather than infer authority from a URL or name")
+	assert.False(t, roster.Daemons[1].Local)
+	assert.False(t, roster.Daemons[2].Local)
 	assert.Equal(t, "connected", roster.Daemons[0].Health)
 	assert.Equal(t, "connected", roster.Daemons[1].Health)
 	assert.True(t, roster.Daemons[1].Default)

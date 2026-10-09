@@ -32,6 +32,9 @@ func (s *Store) AdoptProjectIntoFederation(
 	var output db.AdoptProjectIntoFederationResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.AdoptProjectIntoFederationResult{}
+		if err := lockProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("lock project access for federation adoption: %w", mapSQLError(err, nil))
+		}
 		project, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id=$1 FOR UPDATE`, params.ProjectID))
 		if err != nil {
@@ -39,6 +42,17 @@ func (s *Store) AdoptProjectIntoFederation(
 		}
 		if project.DeletedAt != nil {
 			return fmt.Errorf("adopt project into federation: project %d is archived", params.ProjectID)
+		}
+		if params.RelayProtocolVersion != 0 {
+			if params.RelayProtocolVersion != db.RelayProtocolVersion {
+				return db.ErrFederationIngestValidation
+			}
+			if !db.ProjectAttributionVisible(ctx, project.UID) {
+				return db.ErrNotFound
+			}
+			if err := rejectRelayProjectLinksTx(ctx, tx, project.ID); err != nil {
+				return err
+			}
 		}
 		existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, params.ProjectID))
@@ -93,6 +107,9 @@ func (s *Store) AdoptProjectIntoFederation(
 		if project.UID != params.HubProjectUID {
 			if err := replaceProjectUIDTx(ctx, tx, project.ID, params.HubProjectUID); err != nil {
 				return err
+			}
+			if err := bumpProjectAccess(ctx, tx); err != nil {
+				return fmt.Errorf("advance project access revision after federation adoption: %w", mapSQLError(err, nil))
 			}
 			project.UID = params.HubProjectUID
 		}
@@ -204,9 +221,100 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND `+pgFederationPushEventTypeCo
 }
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
+	var oldUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&oldUID); err != nil {
+		return fmt.Errorf("read project uid before adoption: %w", mapSQLError(err, nil))
+	}
+	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
+		return err
+	}
+	accessPolicy, err := takeProjectAccessPolicyForUIDRewriteTx(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	if err := retireProjectFederationUIDStateTx(ctx, tx, oldUID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`SELECT rewrite_project_uid_for_adoption($1, $2)`, projectID, projectUID); err != nil {
 		return fmt.Errorf("rewrite project uid for adoption: %w", mapSQLError(err, nil))
+	}
+	if err := restoreProjectAccessPolicyAfterUIDRewriteTx(ctx, tx, accessPolicy, projectUID); err != nil {
+		return err
+	}
+	return restoreArtifactAdoptionTx(ctx, tx, projectUID)
+}
+
+type projectAccessPolicyForAdoption struct {
+	projectUID string
+	visibility string
+	revision   int64
+	teamUIDs   []string
+}
+
+func takeProjectAccessPolicyForUIDRewriteTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+) (*projectAccessPolicyForAdoption, error) {
+	var policy projectAccessPolicyForAdoption
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid,a.visibility,a.revision
+		  FROM projects p
+		  JOIN project_access_policies a ON a.project_uid=p.uid
+		 WHERE p.id=$1`, projectID).Scan(&policy.projectUID, &policy.visibility, &policy.revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read adoption project access policy: %w", mapSQLError(err, nil))
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT team_uid FROM project_access_teams WHERE project_uid=$1 ORDER BY team_uid`, policy.projectUID)
+	if err != nil {
+		return nil, fmt.Errorf("read adoption project access teams: %w", mapSQLError(err, nil))
+	}
+	for rows.Next() {
+		var teamUID string
+		if err := rows.Scan(&teamUID); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan adoption project access team: %w", mapSQLError(err, nil))
+		}
+		policy.teamUIDs = append(policy.teamUIDs, teamUID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate adoption project access teams: %w", mapSQLError(err, nil))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close adoption project access teams: %w", mapSQLError(err, nil))
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM project_access_policies WHERE project_uid=$1`, policy.projectUID); err != nil {
+		return nil, fmt.Errorf("detach adoption project access policy: %w", mapSQLError(err, nil))
+	}
+	return &policy, nil
+}
+
+func restoreProjectAccessPolicyAfterUIDRewriteTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	policy *projectAccessPolicyForAdoption,
+	projectUID string,
+) error {
+	if policy == nil {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES($1,$2,$3)`,
+		projectUID, policy.visibility, policy.revision); err != nil {
+		return fmt.Errorf("restore adopted project access policy: %w", mapSQLError(err, nil))
+	}
+	for _, teamUID := range policy.teamUIDs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO project_access_teams(project_uid,team_uid) VALUES($1,$2)`, projectUID, teamUID); err != nil {
+			return fmt.Errorf("restore adopted project access team: %w", mapSQLError(err, nil))
+		}
 	}
 	return nil
 }

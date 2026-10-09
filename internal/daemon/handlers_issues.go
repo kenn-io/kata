@@ -973,6 +973,17 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	out.Body.WebURL = issueWebURL(cfg, issue.UID)
 	addIssueWebURLs(cfg, childOuts)
 	out.Body.Children = childOuts
+	recordProjectAccessHydratedIssue(ctx, issue.UID, includeDeleted)
+	if parent != nil {
+		recordProjectAccessHydratedIssue(ctx, parent.UID, true)
+	}
+	for _, link := range links {
+		recordProjectAccessHydratedIssue(ctx, link.From.UID, true)
+		recordProjectAccessHydratedIssue(ctx, link.To.UID, true)
+	}
+	for _, child := range childOuts {
+		recordProjectAccessHydratedIssue(ctx, child.UID, true)
+	}
 	claimRelevant, err := showIssueClaimRelevant(ctx, cfg.DB, issue.ProjectID)
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -1053,6 +1064,9 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 		return nil, err
 	}
 	parent, err := store.IssueByID(ctx, link.ToIssueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

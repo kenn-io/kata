@@ -1046,7 +1046,7 @@ func (d *Store) UpsertExternalCommentProjection(
 			}
 			mutationAt := nowStoredTimestamp()
 			comment, err = scanComment(tx.QueryRowContext(ctx, `UPDATE comments SET body=$1 WHERE id=$2
- RETURNING id,uid,issue_id,author,body,created_at,teammate`, desiredBody, comment.ID))
+ RETURNING `+commentColumns, desiredBody, comment.ID))
 			if err != nil {
 				return db.Comment{}, nil, false, err
 			}
@@ -1073,7 +1073,7 @@ func (d *Store) UpsertExternalCommentProjection(
 			return db.Comment{}, nil, false, fmt.Errorf("generate external comment projection uid: %w", err)
 		}
 		comment, err := scanComment(tx.QueryRowContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at)
- VALUES($1,$2,$3,$4,$5) RETURNING id,uid,issue_id,author,body,created_at,teammate`,
+ VALUES($1,$2,$3,$4,$5) RETURNING `+commentColumns,
 			commentUID, issue.ID, integrationActor, desiredBody, formatExternalObservationTime(params.ExternalCreatedAt)))
 		if err != nil {
 			return db.Comment{}, nil, false, fmt.Errorf("insert external comment projection: %w", err)
@@ -1225,7 +1225,7 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 			return db.Comment{}, nil, false, fmt.Errorf("generate external lifecycle comment uid: %w", err)
 		}
 		comment, err := scanComment(tx.QueryRowContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at)
- VALUES($1,$2,$3,$4,$5) RETURNING id,uid,issue_id,author,body,created_at,teammate`,
+ VALUES($1,$2,$3,$4,$5) RETURNING `+commentColumns,
 			commentUID, issue.ID, integrationActor, params.Body, formatExternalObservationTime(params.ExternalCreatedAt)))
 		if err != nil {
 			return db.Comment{}, nil, false, fmt.Errorf("insert external lifecycle comment: %w", err)

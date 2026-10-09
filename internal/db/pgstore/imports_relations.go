@@ -286,6 +286,9 @@ ORDER BY id FOR UPDATE`, params.ProjectID, params.Source, issue.ID)
 					!db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
+				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+					return nil, 0, err
+				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=$1`, link.ID); err != nil {
 					return nil, 0, fmt.Errorf("delete source link: %w", mapSQLError(err, nil))
 				}
@@ -313,6 +316,9 @@ ORDER BY id FOR UPDATE`, params.ProjectID, params.Source, issue.ID)
 		}
 		fromID, toID, err := importLinkEndpoints(ctx, tx, params, issue, importLink, states)
 		if err != nil {
+			return nil, 0, err
+		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, fromID, toID); err != nil {
 			return nil, 0, err
 		}
 		if _, err := scanLink(tx.QueryRowContext(ctx,

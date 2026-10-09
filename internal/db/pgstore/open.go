@@ -133,7 +133,8 @@ func openInternal(
 	}
 	s := &Store{
 		DB: sdb, dsn: dsn, schema: pgConfig.Schema, schemaOwner: schemaOwner, readOnly: readOnly,
-		federationLease: &federationRunnerLeaseState{},
+		federationLease:   &federationRunnerLeaseState{},
+		relayHistoryCache: newRelayHistoryValidationCache(),
 	}
 	if bypassLifecycle {
 		return s, nil
@@ -483,10 +484,14 @@ func (s *Store) validateSchema(ctx context.Context) error {
 }
 
 var canonicalTableNames = map[string]struct{}{
+	"teams": {}, "team_memberships": {}, "project_access_policies": {}, "project_access_teams": {},
 	"api_tokens": {}, "comments": {}, "events": {}, "external_field_mappings": {},
 	"external_field_states": {}, "external_root_bindings": {}, "federation_bindings": {},
-	"federation_enrollments": {}, "federation_quarantine": {}, "federation_sync_status": {},
-	"import_mappings": {}, "issue_claims": {}, "issue_labels": {}, "issue_sync_bindings": {},
+	"federation_embedding_artifacts": {}, "federation_enrollments": {}, "federation_event_provenance": {},
+	"federation_entity_provenance": {}, "federation_quarantine": {}, "federation_relay_cursors": {},
+	"federation_relay_inbox": {}, "federation_relay_outbox": {}, "federation_root_keys": {},
+	"federation_sync_status": {},
+	"import_mappings":        {}, "issue_claims": {}, "issue_labels": {}, "issue_sync_bindings": {},
 	"issue_sync_status": {}, "issues": {}, "issues_search": {},
 	"links": {}, "meta": {}, "pending_claim_requests": {}, "project_aliases": {},
 	"project_purge_log": {}, "projects": {}, "purge_log": {}, "recurrences": {},

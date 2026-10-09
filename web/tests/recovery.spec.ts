@@ -56,7 +56,6 @@ test('daemon restart keeps an old draft visible but unsubmittable', async ({ pag
   await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('Draft survives process restart')
   await kata.restart()
-  await page.getByRole('button', { name: 'Add comment' }).click()
   await expect(page.getByRole('textbox', { name: 'Comment' })).toHaveValue(
     'Draft survives process restart',
   )

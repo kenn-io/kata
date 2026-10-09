@@ -186,11 +186,45 @@ request schema and are rejected for strict request objects.
 
 `GET /api/v1/health` without credentials provides liveness and version fields.
 `db_path`, `embeddings`, and `federation_config` are optional diagnostics:
-authenticated unscoped principals and the owner-local transport receive them
+daemon-owner credentials and genuine owner-local transport receive them
 when configured. Public remote probes and scoped credentials do not. An
 explicit scoped bearer remains scoped over loopback; an invalid bearer returns
 an authentication error. Clients must handle the public response without these
 fields. `idle_shutdown` keeps its availability rules described above.
+
+## Project access
+
+Ordinary identity credentials can read and write an active project when its
+visibility is `all`, or when their authenticated actor belongs to any team
+assigned to a project with visibility `teams`. A project restricted to teams
+with no assigned teams is inaccessible to ordinary credentials. The system
+project is administrative state. Missing proxy identity and anonymous clients
+receive only unrestricted projects; a request-supplied actor grants no team
+membership. Explicit tokenless private-network writes remain limited to
+unrestricted projects.
+
+Project access applies to direct references, collections, search candidates,
+counts, graphs, relationships, audit events and browser snapshots. Unauthorized
+references return a generic `404`, including references supplied in request
+bodies. Project access intersects issue-subtree and hosted grants. Mutations
+recheck membership inside their transaction. Streams close on policy changes,
+and browser cache validators include the principal and policy revision.
+
+Daemon-owner credentials retain administrative authority. Diagnostics, token
+administration, integrations and the enrollment catalog require that authority.
+Ordinary user credentials may create or rotate an enrollment for an authorized
+project; they cannot create an all-project transport grant. Enrollment transport
+checks the actor bound to its authenticated credential against current project
+access. It cannot claim team authority from an event's source labels.
+
+A restricted browser principal cannot use configured gateway credentials to
+read another daemon. The daemon roster omits those targets for that principal.
+Project delegation across the browser gateway requires a separate protocol.
+
+An ordinary account token may also supply `expires_in_seconds` without `scope`.
+The lifetime must be positive and fit the server's duration range. The token
+keeps its account authority until expiration; omitted or zero lifetime retains
+the existing non-expiring ordinary credential.
 
 ## Issue-scoped credentials
 

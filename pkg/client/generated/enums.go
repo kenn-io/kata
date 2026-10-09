@@ -118,6 +118,24 @@ func (c CloseActionRequestBodySource) Validate() error {
 	}
 }
 
+type CommentVerification string
+
+const (
+	Legacy   CommentVerification = "legacy"
+	Pending  CommentVerification = "pending"
+	Verified CommentVerification = "verified"
+)
+
+// Validate checks if the CommentVerification value is valid
+func (c CommentVerification) Validate() error {
+	switch c {
+	case Legacy, Pending, Verified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CommentVerification value, got: %v", c))
+	}
+}
+
 type CreateInitialLinkBodyType string
 
 const (
@@ -187,6 +205,93 @@ func (e EnableIssueSyncRequestBodyStatusSync) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid EnableIssueSyncRequestBodyStatusSync value, got: %v", e))
+	}
+}
+
+type FederationBridgeBodyDirection string
+
+const (
+	Bidirectional FederationBridgeBodyDirection = "bidirectional"
+)
+
+// Validate checks if the FederationBridgeBodyDirection value is valid
+func (f FederationBridgeBodyDirection) Validate() error {
+	switch f {
+	case Bidirectional:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeBodyDirection value, got: %v", f))
+	}
+}
+
+type FederationBridgeBodyStatus string
+
+const (
+	Connected FederationBridgeBodyStatus = "connected"
+	Ready     FederationBridgeBodyStatus = "ready"
+)
+
+// Validate checks if the FederationBridgeBodyStatus value is valid
+func (f FederationBridgeBodyStatus) Validate() error {
+	switch f {
+	case Connected, Ready:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeBodyStatus value, got: %v", f))
+	}
+}
+
+type FederationBridgeDisconnectResultStatus string
+
+const (
+	Disconnected                                FederationBridgeDisconnectResultStatus = "disconnected"
+	FederationBridgeDisconnectResultStatusReady FederationBridgeDisconnectResultStatus = "ready"
+)
+
+// Validate checks if the FederationBridgeDisconnectResultStatus value is valid
+func (f FederationBridgeDisconnectResultStatus) Validate() error {
+	switch f {
+	case Disconnected, FederationBridgeDisconnectResultStatusReady:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeDisconnectResultStatus value, got: %v", f))
+	}
+}
+
+type FederationBridgeStatusBodyDirection string
+
+const (
+	FederationBridgeStatusBodyDirectionBidirectional FederationBridgeStatusBodyDirection = "bidirectional"
+	PullOnly                                         FederationBridgeStatusBodyDirection = "pull_only"
+)
+
+// Validate checks if the FederationBridgeStatusBodyDirection value is valid
+func (f FederationBridgeStatusBodyDirection) Validate() error {
+	switch f {
+	case FederationBridgeStatusBodyDirectionBidirectional, PullOnly:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeStatusBodyDirection value, got: %v", f))
+	}
+}
+
+type FederationBridgeStatusBodyState string
+
+const (
+	EnrollmentPending                        FederationBridgeStatusBodyState = "enrollment_pending"
+	FederationBridgeStatusBodyStateConnected FederationBridgeStatusBodyState = "connected"
+	Offline                                  FederationBridgeStatusBodyState = "offline"
+	Paused                                   FederationBridgeStatusBodyState = "paused"
+	Revoked                                  FederationBridgeStatusBodyState = "revoked"
+)
+
+// Validate checks if the FederationBridgeStatusBodyState value is valid
+func (f FederationBridgeStatusBodyState) Validate() error {
+	switch f {
+	case EnrollmentPending, FederationBridgeStatusBodyStateConnected, Offline, Paused, Revoked:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeStatusBodyState value, got: %v", f))
 	}
 }
 
@@ -265,6 +370,60 @@ func (i ImportLinkInputType) Validate() error {
 	}
 }
 
+type IssueVerification string
+
+const (
+	IssueVerificationLegacy   IssueVerification = "legacy"
+	IssueVerificationPending  IssueVerification = "pending"
+	IssueVerificationVerified IssueVerification = "verified"
+)
+
+// Validate checks if the IssueVerification value is valid
+func (i IssueVerification) Validate() error {
+	switch i {
+	case IssueVerificationLegacy, IssueVerificationPending, IssueVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid IssueVerification value, got: %v", i))
+	}
+}
+
+type IssueOutVerification string
+
+const (
+	IssueOutVerificationLegacy   IssueOutVerification = "legacy"
+	IssueOutVerificationPending  IssueOutVerification = "pending"
+	IssueOutVerificationVerified IssueOutVerification = "verified"
+)
+
+// Validate checks if the IssueOutVerification value is valid
+func (i IssueOutVerification) Validate() error {
+	switch i {
+	case IssueOutVerificationLegacy, IssueOutVerificationPending, IssueOutVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid IssueOutVerification value, got: %v", i))
+	}
+}
+
+type ListGlobalIssueOutVerification string
+
+const (
+	ListGlobalIssueOutVerificationLegacy   ListGlobalIssueOutVerification = "legacy"
+	ListGlobalIssueOutVerificationPending  ListGlobalIssueOutVerification = "pending"
+	ListGlobalIssueOutVerificationVerified ListGlobalIssueOutVerification = "verified"
+)
+
+// Validate checks if the ListGlobalIssueOutVerification value is valid
+func (l ListGlobalIssueOutVerification) Validate() error {
+	switch l {
+	case ListGlobalIssueOutVerificationLegacy, ListGlobalIssueOutVerificationPending, ListGlobalIssueOutVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListGlobalIssueOutVerification value, got: %v", l))
+	}
+}
+
 type MetadataPatchGuardOneOf1IfAbsent bool
 
 const (
@@ -296,6 +455,24 @@ func (r ReachableGraphEdgeKind) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReachableGraphEdgeKind value, got: %v", r))
+	}
+}
+
+type ReachableGraphNodeVerification string
+
+const (
+	ReachableGraphNodeVerificationLegacy   ReachableGraphNodeVerification = "legacy"
+	ReachableGraphNodeVerificationPending  ReachableGraphNodeVerification = "pending"
+	ReachableGraphNodeVerificationVerified ReachableGraphNodeVerification = "verified"
+)
+
+// Validate checks if the ReachableGraphNodeVerification value is valid
+func (r ReachableGraphNodeVerification) Validate() error {
+	switch r {
+	case ReachableGraphNodeVerificationLegacy, ReachableGraphNodeVerificationPending, ReachableGraphNodeVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReachableGraphNodeVerification value, got: %v", r))
 	}
 }
 
@@ -334,18 +511,89 @@ func (r ReachableGraphUnresolvedRefSide) Validate() error {
 	}
 }
 
+type ReadyGlobalIssueOutVerification string
+
+const (
+	ReadyGlobalIssueOutVerificationLegacy   ReadyGlobalIssueOutVerification = "legacy"
+	ReadyGlobalIssueOutVerificationPending  ReadyGlobalIssueOutVerification = "pending"
+	ReadyGlobalIssueOutVerificationVerified ReadyGlobalIssueOutVerification = "verified"
+)
+
+// Validate checks if the ReadyGlobalIssueOutVerification value is valid
+func (r ReadyGlobalIssueOutVerification) Validate() error {
+	switch r {
+	case ReadyGlobalIssueOutVerificationLegacy, ReadyGlobalIssueOutVerificationPending, ReadyGlobalIssueOutVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReadyGlobalIssueOutVerification value, got: %v", r))
+	}
+}
+
+type RelayAckRequestBodyStream string
+
+const (
+	Artifacts RelayAckRequestBodyStream = "artifacts"
+	Events    RelayAckRequestBodyStream = "events"
+	Receipts  RelayAckRequestBodyStream = "receipts"
+)
+
+// Validate checks if the RelayAckRequestBodyStream value is valid
+func (r RelayAckRequestBodyStream) Validate() error {
+	switch r {
+	case Artifacts, Events, Receipts:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RelayAckRequestBodyStream value, got: %v", r))
+	}
+}
+
+type SetProjectAccessRequestBodyVisibility string
+
+const (
+	All   SetProjectAccessRequestBodyVisibility = "all"
+	Teams SetProjectAccessRequestBodyVisibility = "teams"
+)
+
+// Validate checks if the SetProjectAccessRequestBodyVisibility value is valid
+func (s SetProjectAccessRequestBodyVisibility) Validate() error {
+	switch s {
+	case All, Teams:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SetProjectAccessRequestBodyVisibility value, got: %v", s))
+	}
+}
+
+type ShowIssueOutVerification string
+
+const (
+	ShowIssueOutVerificationLegacy   ShowIssueOutVerification = "legacy"
+	ShowIssueOutVerificationPending  ShowIssueOutVerification = "pending"
+	ShowIssueOutVerificationVerified ShowIssueOutVerification = "verified"
+)
+
+// Validate checks if the ShowIssueOutVerification value is valid
+func (s ShowIssueOutVerification) Validate() error {
+	switch s {
+	case ShowIssueOutVerificationLegacy, ShowIssueOutVerificationPending, ShowIssueOutVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ShowIssueOutVerification value, got: %v", s))
+	}
+}
+
 type TokenOutState string
 
 const (
-	Expired TokenOutState = "expired"
-	Live    TokenOutState = "live"
-	Revoked TokenOutState = "revoked"
+	Expired              TokenOutState = "expired"
+	Live                 TokenOutState = "live"
+	TokenOutStateRevoked TokenOutState = "revoked"
 )
 
 // Validate checks if the TokenOutState value is valid
 func (t TokenOutState) Validate() error {
 	switch t {
-	case Expired, Live, Revoked:
+	case Expired, Live, TokenOutStateRevoked:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TokenOutState value, got: %v", t))
@@ -418,6 +666,24 @@ func (u UICapabilitiesUpdates) Validate() error {
 	}
 }
 
+type UIIssueVerification string
+
+const (
+	UIIssueVerificationLegacy   UIIssueVerification = "legacy"
+	UIIssueVerificationPending  UIIssueVerification = "pending"
+	UIIssueVerificationVerified UIIssueVerification = "verified"
+)
+
+// Validate checks if the UIIssueVerification value is valid
+func (u UIIssueVerification) Validate() error {
+	switch u {
+	case UIIssueVerificationLegacy, UIIssueVerificationPending, UIIssueVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid UIIssueVerification value, got: %v", u))
+	}
+}
+
 type UILaunchTargetResponseBodyReason string
 
 const (
@@ -467,6 +733,24 @@ func (l ListAllIssuesQuerySort) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListAllIssuesQuerySort value, got: %v", l))
+	}
+}
+
+type OfferRelayDeliveriesQueryStream string
+
+const (
+	OfferRelayDeliveriesQueryStreamArtifacts OfferRelayDeliveriesQueryStream = "artifacts"
+	OfferRelayDeliveriesQueryStreamEvents    OfferRelayDeliveriesQueryStream = "events"
+	OfferRelayDeliveriesQueryStreamReceipts  OfferRelayDeliveriesQueryStream = "receipts"
+)
+
+// Validate checks if the OfferRelayDeliveriesQueryStream value is valid
+func (o OfferRelayDeliveriesQueryStream) Validate() error {
+	switch o {
+	case OfferRelayDeliveriesQueryStreamArtifacts, OfferRelayDeliveriesQueryStreamEvents, OfferRelayDeliveriesQueryStreamReceipts:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid OfferRelayDeliveriesQueryStream value, got: %v", o))
 	}
 }
 

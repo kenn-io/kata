@@ -145,6 +145,11 @@ func readVisibleEvents(
 		if err != nil {
 			return nil, afterID, 0, internalAPIError(err)
 		}
+		for _, event := range rows {
+			if event.Type == db.ProjectScopeResetEventType {
+				return nil, event.ID, event.ID, nil
+			}
+		}
 		next := nextAfterID(rows, afterID)
 		if len(rows) == 0 && throughID > next {
 			next = throughID
@@ -195,6 +200,9 @@ func readVisibleEvents(
 		for _, event := range rows {
 			cursor = event.ID
 			scanned++
+			if event.Type == db.ProjectScopeResetEventType {
+				return nil, event.ID, event.ID, nil
+			}
 			projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
 			if ok && event.Type != "issue.links_changed" {
 				visible = append(visible, projected)
@@ -701,6 +709,9 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	if !ok {
 		return
 	}
+	if revalidateEventStreamAuthority(hctx.Context(), cfg.DB) != nil {
+		return
+	}
 	hctx.SetHeader("Content-Type", "text/event-stream")
 	hctx.SetHeader("Cache-Control", "private, no-cache")
 	hctx.SetHeader("Connection", "keep-alive")
@@ -874,6 +885,23 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 			if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 				return
 			}
+			// A late receipt can change creation proof without another event
+			// wakeup. The durable reset also covers reconnects and missed notices.
+			resetProjectID := projectID
+			if issueScopeFromContext(ctx) != nil {
+				resetProjectID = 0
+			}
+			resetTo, err := deps.cfg.DB.PurgeResetCheck(ctx, lastSent, resetProjectID)
+			if err != nil {
+				return
+			}
+			if resetTo > 0 {
+				if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
+					return
+				}
+				_ = writeSSEFrame(deps.w, deps.flusher, resetFrameBytes(resetTo))
+				return
+			}
 			if !writeSSEFrame(deps.w, deps.flusher, []byte(": keepalive\n\n")) {
 				return
 			}
@@ -894,6 +922,11 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 				// A hand-built envelope with a nil Event stays droppable here.
 				if msg.Event == nil {
 					continue
+				}
+				// A catalog or policy mutation can change the admitted project set
+				// even when its event is not visible through that existing set.
+				if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
+					return
 				}
 				// Defensive ordering: a concurrent purge can commit before
 				// this event's broadcast is processed (broadcaster lock race
@@ -998,6 +1031,15 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 }
 
 func revalidateEventStreamAuthority(ctx context.Context, store db.Storage) error {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		revision, err := store.ProjectAccessRevision(ctx)
+		if err != nil {
+			return err
+		}
+		if revision != decision.PolicyRevision {
+			return projectAccessDenied()
+		}
+	}
 	if err := revalidateSSEAuthority(ctx); err != nil {
 		return err
 	}

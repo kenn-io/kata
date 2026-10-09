@@ -121,6 +121,7 @@ func (d *Store) scanRelationshipPairs(
 	out map[int64]db.IssueRelationships,
 	assign func(rel *db.IssueRelationships, peer int64),
 ) error {
+	query, args = authorizeRelationshipQuery(ctx, query, args, "l")
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -153,6 +154,7 @@ func (d *Store) appendChildCountsToRelationships(
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          GROUP BY l.to_issue_id
 	          ORDER BY l.to_issue_id ASC`
+	query, args = authorizeRelationshipQuery(ctx, query, args, "l")
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("child counts by parents: %w", err)
@@ -193,6 +195,7 @@ func (d *Store) appendActivelyBlockedToRelationships(
 	            AND blocker.deleted_at IS NULL
 	            AND bp.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)`
+	query, args = authorizeRelationshipQuery(ctx, query, args, "l")
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("actively blocked issue ids: %w", err)

@@ -399,6 +399,16 @@ type LinkEventParams struct {
 	Actor        string
 }
 
+// ReplaceParentAndEventsParams atomically swaps one existing parent link for
+// a new parent and records both link events in the same transaction.
+type ReplaceParentAndEventsParams struct {
+	ExpectedParentLinkID  int64
+	ExpectedParentIssueID int64
+	Link                  CreateLinkParams
+	UnlinkEvent           LinkEventParams
+	LinkEvent             LinkEventParams
+}
+
 // LabelEventParams describes the event-emission side of a label mutation. The
 // DB-layer methods AddLabelAndEvent and RemoveLabelAndEvent split the mutation
 // (label insert/delete) from the event metadata so the handler can emit the
@@ -455,6 +465,9 @@ type RemoveProjectParams struct {
 	ProjectID int64
 	Actor     string
 	Force     bool
+	// SkipFederationRelay preserves the archive audit event but omits its
+	// relay delivery when the caller will immediately detach the replica.
+	SkipFederationRelay bool
 }
 
 // PurgeProjectParams are the inputs to Storage.PurgeProject.
@@ -520,10 +533,11 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
-	Issue       Issue
-	EventID     int64
-	NewShortID  string
-	NewRevision int64
+	Issue                 Issue
+	EventID               int64
+	NewShortID            string
+	NewRevision           int64
+	ProjectAccessRevision int64
 }
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the
@@ -721,6 +735,10 @@ type RecordFederationQuarantineParams struct {
 	EventUIDs    []string
 	Error        string
 	CreatedAt    time.Time
+	// Negotiated relay failures use hop sequences and must still belong to the
+	// live upstream binding/epoch when the rejection is recorded.
+	RelayBindingUID string
+	RelayResetEpoch int64
 }
 
 // SkipFederationQuarantineParams resolves an active quarantine by advancing the
@@ -733,7 +751,7 @@ type SkipFederationQuarantineParams struct {
 	Now       time.Time
 }
 
-// RetryFederationQuarantineParams resolves an active push quarantine without
+// RetryFederationQuarantineParams resolves an active supported quarantine without
 // advancing the cursor, so the quarantined batch is retried on the next sync.
 type RetryFederationQuarantineParams struct {
 	ID        int64
@@ -753,6 +771,8 @@ type AdoptProjectIntoFederationParams struct {
 	ReplayHorizonEventID int64
 	Actor                string
 	AllowInsecure        bool
+	// RelayProtocolVersion records the authenticated negotiated adoption mode.
+	RelayProtocolVersion int
 	// EmptyOnly attaches an empty project without importing its local history.
 	EmptyOnly bool
 }
@@ -868,6 +888,8 @@ type APIToken struct {
 
 // CreateAPITokenParams carries the inputs for minting an API token.
 type CreateAPITokenParams struct {
+	// TeamUIDs enroll the canonical actor atomically with token creation.
+	TeamUIDs       []string
 	PlaintextToken string
 	Actor          string
 	Name           *string

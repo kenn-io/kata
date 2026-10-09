@@ -18,6 +18,13 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 	var result db.EditIssueAtomicResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result = db.EditIssueAtomicResult{}
+		projectUID, err := issueProjectUIDTx(ctx, tx, params.IssueID)
+		if err != nil {
+			return err
+		}
+		if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+			return err
+		}
 		current, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -136,6 +143,42 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 	return result, err
 }
 
+func issueProjectUIDTx(ctx context.Context, tx *sql.Tx, issueID int64) (string, error) {
+	var projectUID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = $1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL
+		 FOR UPDATE OF i`,
+		issueID,
+	).Scan(&projectUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", mapSQLError(err, nil)
+	}
+	return projectUID, nil
+}
+
+func linkedParentProjectUIDTx(ctx context.Context, tx *sql.Tx, issueID int64) (string, error) {
+	var projectUID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.uid
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = $1
+		 FOR UPDATE OF i`,
+		issueID,
+	).Scan(&projectUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", mapSQLError(err, nil)
+	}
+	return projectUID, nil
+}
+
 func validateExpectedLinkProjectUIDsTx(ctx context.Context, tx *sql.Tx, expected map[int64]string) error {
 	ids := make([]int64, 0, len(expected))
 	for issueID := range expected {
@@ -212,6 +255,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		if target.ID == issue.ID {
 			return changed, db.ErrSelfLink
 		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
+			return changed, err
+		}
 		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
 			return changed, err
 		}
@@ -224,6 +270,13 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if errors.Is(err, db.ErrNotFound) || existing.ToIssueID != target.ID {
 			if err == nil {
+				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
+				if uidErr != nil {
+					return changed, uidErr
+				}
+				if err := db.CheckProjectAccessTransaction(ctx, tx, parentProjectUID); err != nil {
+					return changed, err
+				}
 				identity, identityErr := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
 				if identityErr != nil {
 					return changed, identityErr
@@ -264,6 +317,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if existing.ToIssueID != *params.RemoveParent {
 			return changed, db.ErrParentMismatch
+		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+			return changed, err
 		}
 		identity, err := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
 		if err != nil {
@@ -363,6 +419,9 @@ func atomicAddEdgeTx(
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
+		return false, db.PeerIdentity{}, err
+	}
 	if target.ID == issue.ID {
 		return false, db.PeerIdentity{}, db.ErrSelfLink
 	}
@@ -397,6 +456,12 @@ func atomicAddEdgeTx(
 }
 
 func insertAtomicEdgeTx(ctx context.Context, tx *sql.Tx, params db.CreateLinkParams) (bool, error) {
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return false, err
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
+		return false, err
+	}
 	var id int64
 	err := tx.QueryRowContext(ctx, `INSERT INTO links(
   from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author
@@ -425,6 +490,9 @@ func atomicRemoveEdgeTx(
 		return false, db.PeerIdentity{}, nil
 	}
 	if err != nil {
+		return false, db.PeerIdentity{}, err
+	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	fromID, toID := issue.ID, target.ID

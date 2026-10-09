@@ -164,3 +164,9 @@ ON CONFLICT(key) DO NOTHING;`)
 	}
 	return nil
 }
+
+// ArtifactDimensionsSupported separates portable limits from PostgreSQL's
+// halfvec limit. It does not create generations or spend on embeddings.
+func (ix *Index) ArtifactDimensionsSupported(dimensions int) bool {
+	return ix != nil && dimensions > 0 && (ix.pg == nil || dimensions <= maxPostgresHalfvecDimensions)
+}

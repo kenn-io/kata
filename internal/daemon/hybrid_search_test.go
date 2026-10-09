@@ -1197,10 +1197,9 @@ func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
 
 // TestUnfilteredSearchNeverSetsCeilingDegraded guards the unfiltered path over
 // the very corpus that degrades a filtered search. Searching the corpus project
-// fills the first batch and never retries; searching a sibling project starved
-// beyond the ceiling does take the deep retry and still comes up short — the
-// pre-existing cross-project miss, which stays silent because the signal is
-// only ever about label filters.
+// fills the first batch; searching a sibling project still retrieves its own
+// vector because project authorization is applied before candidate limits.
+// The ceiling signal remains specific to label filters.
 func TestUnfilteredSearchNeverSetsCeilingDegraded(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
@@ -1213,8 +1212,8 @@ func TestUnfilteredSearchNeverSetsCeilingDegraded(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedLabelCeilingCorpus(ctx, t, store, proj.ID)
-	// Ranked below every distractor, so the corpus crowds it out of the deep
-	// batch exactly as it crowds out the labeled issue past the ceiling.
+	// Ranked below every distractor in the other project. Those candidates must
+	// not crowd out a project-scoped search.
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: sibling.ID, Title: "target login race in the sibling project", Body: "x", Author: "a",
 	}); err != nil {
@@ -1246,7 +1245,7 @@ func TestUnfilteredSearchNeverSetsCeilingDegraded(t *testing.T) {
 	if res.Degraded || res.DegradedReason != "" {
 		t.Fatalf("cross-project starvation is not a label-filter degrade, got %q", res.DegradedReason)
 	}
-	if len(res.Hits) != 0 {
-		t.Fatalf("fixture is wrong: the sibling issue must rank beyond the ceiling, got %q", hitTitles(res.Hits))
+	if len(res.Hits) != 1 || res.Hits[0].Issue.Title != "target login race in the sibling project" {
+		t.Fatalf("project-scoped candidates must retrieve the sibling issue, got %q", hitTitles(res.Hits))
 	}
 }

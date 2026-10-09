@@ -114,6 +114,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		recordProjectAccessHydratedIssue(ctx, res.Issue.UID, false)
 
 		out := &api.PatchIssueMetadataResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
@@ -183,11 +184,15 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			return nil, err
 		}
 		designateInbox := inboxDesignationPatch(in.Body.Patch)
+		_, producerChange := in.Body.Patch[db.ProjectEmbeddingMetadataKey]
+		if producerChange && !projectDiagnosticOwnerAuthority(ctx) {
+			return nil, api.NewError(http.StatusForbidden, "forbidden", "producer configuration requires daemon owner authority", "", nil)
+		}
 		if designateInbox && len(in.Body.Patch) != 1 {
 			return nil, api.NewError(400, "invalid_inbox_designation",
 				"Inbox designation cannot be combined with other metadata changes", "", nil)
 		}
-		ctx, err = authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, designateInbox)
+		ctx, err = authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, designateInbox || producerChange)
 		if err != nil {
 			return nil, err
 		}
@@ -201,6 +206,9 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 				return nil, api.NewError(412, "revision_conflict",
 					fmt.Sprintf("project revision is %d", conflict.CurrentRevision), "", nil)
+			}
+			if errors.Is(err, db.ErrNotFound) {
+				return nil, projectAccessDenied()
 			}
 			if errors.Is(err, db.ErrFederatedReadOnly) {
 				return nil, federationReadOnlyError(err)

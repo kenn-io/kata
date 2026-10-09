@@ -3579,7 +3579,7 @@ func TestPendingClaimRetryResolvesAfterHubReconnectWithFreshTimedTTL(t *testing.
 func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)
-	project, issue, _ := createPendingClaimRetrySpoke(t, spoke.DB, "legacy-claim-response")
+	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "legacy-claim-response")
 	pending, err := spoke.DB.EnqueuePendingClaim(
 		ctx, pendingClaimParams(spoke.DB, project.ID, issue.ShortID, "legacy-client"),
 	)
@@ -3609,7 +3609,7 @@ func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
 	client, err := NewClient(ctx, hub.URL, "token", clientOptsWithDefault(clientpkg.Opts{}))
 	require.NoError(t, err)
 
-	require.NoError(t, retryPendingClaim(ctx, spoke.DB, client, 42, pending, nil))
+	require.NoError(t, retryPendingClaim(ctx, spoke.DB, client, 42, binding, pending, nil))
 
 	var resolved, rejected int
 	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
@@ -3623,6 +3623,35 @@ func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
 	require.True(t, status.Held)
 	require.NotNil(t, status.Claim)
 	assert.Equal(t, "legacy-client", status.Claim.Holder)
+}
+
+func TestPendingClaimRetryKeepsQueuedUpstreamRequestPending(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", spoke.Home)
+	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "pending-upstream-claim")
+	pending, err := spoke.DB.EnqueuePendingClaim(ctx,
+		pendingClaimParams(spoke.DB, project.ID, issue.ShortID, "pending-client"),
+	)
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{
+			Pending: true, RequestUID: "01HZNQ7VFPK1XGD8R5MABCD4EZ",
+		}))
+	}))
+	t.Cleanup(hub.Close)
+	client, err := NewClient(ctx, hub.URL, "token", clientOptsWithDefault(clientpkg.Opts{}))
+	require.NoError(t, err)
+
+	require.NoError(t, retryPendingClaim(ctx, spoke.DB, client, 42, binding, pending, nil))
+
+	var resolved, rejected int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
+		SELECT resolved_at IS NOT NULL, rejected_at IS NOT NULL
+		  FROM pending_claim_requests
+		 WHERE request_uid = ?`, pending.RequestUID).Scan(&resolved, &rejected))
+	assert.Zero(t, resolved)
+	assert.Zero(t, rejected, "a downstream pending response is retryable, not a hub denial")
 }
 
 func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconnect(t *testing.T) {

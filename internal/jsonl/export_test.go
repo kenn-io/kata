@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -484,6 +486,48 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 	assertProjectIDs(t, records, map[int64]bool{p1.ID: true})
 }
 
+func TestExportProjectIDOmitsRelayEnrollmentsWithSystemParents(t *testing.T) {
+	ctx := context.Background()
+	d := openExportTestDB(t)
+	project, err := d.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, d.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: d.InstanceUID(),
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}))
+	parent, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "project-export-parent-token", Actor: "member", AdminActor: "admin",
+	})
+	require.NoError(t, err)
+	_, err = d.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID,
+		SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion,
+		Token: "project-export-relay-token",
+	})
+	require.NoError(t, err)
+
+	version, err := d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, version, 33)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value = '33' WHERE key = 'schema_version'`)
+	require.NoError(t, err)
+	version, err = d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 33, version)
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true})
+	for _, rec := range records {
+		assert.NotEqual(t, "federation_enrollment", rec["kind"],
+			"project-scoped exports cannot include a relay grant whose parent token is omitted")
+	}
+}
+
 func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
 	for _, includeDeleted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("include_deleted=%t", includeDeleted), func(t *testing.T) {
@@ -565,7 +609,7 @@ func TestExportUsesSingleSnapshot(t *testing.T) {
 	assertRecordsDoNotContain(t, records, "created during export")
 }
 
-func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
+func TestLegacyExportUIDOnlyPeersRespectProjection(t *testing.T) {
 	for _, peerState := range []string{"same-project", "other-project", "missing", "soft-deleted"} {
 		t.Run(peerState, func(t *testing.T) {
 			ctx := context.Background()
@@ -630,6 +674,16 @@ func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
 						var event db.EventExport
 						require.NoError(t, json.Unmarshal(record.Data, &event))
 						got = append(got, event)
+					}
+					if peerState == "missing" {
+						require.Len(t, got, len(want))
+						for _, event := range got {
+							if event.Type == "issue.linked" || event.Type == "issue.links_changed" {
+								assert.Nil(t, event.RelatedIssueUID,
+									"legacy export must not preserve an unattested dangling peer UID")
+							}
+						}
+						return
 					}
 					assert.Equal(t, want, got)
 				})
@@ -847,6 +901,61 @@ func TestExportNoIncludeDeletedPreservesLinksChangedReferencingDeleted(t *testin
 		}
 	}
 	assert.True(t, found, "expected an exported issue.links_changed event referencing the soft-deleted peer")
+}
+
+func TestExportV32AndV33LiveOnlyPreservesSignedSoftDeletedPeerOnRestore(t *testing.T) {
+	for _, sourceVersion := range []int{32, 33} {
+		t.Run(fmt.Sprintf("schema_%d", sourceVersion), func(t *testing.T) {
+			ctx, source, project := newExportEnv(t)
+			subject := createTesterIssue(ctx, t, source, project.ID, "subject", "")
+			peer := createTesterIssue(ctx, t, source, project.ID, "peer", "")
+			_, event, err := source.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+				FromIssueID: subject.ID, ToIssueID: peer.ID, Type: "blocks", Author: "example-actor",
+			}, db.LinkEventParams{
+				EventType: "issue.links_changed", EventIssueID: subject.ID,
+				FromShortID: subject.ShortID, FromUID: subject.UID,
+				ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "example-actor",
+			})
+			require.NoError(t, err)
+
+			publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+			require.NoError(t, err)
+			pin := db.RootKeyPin{
+				ProjectUID: project.UID, AuthorityUID: "00000000000000000000000002",
+				KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+			}
+			require.NoError(t, source.PinRootAuthority(ctx, pin))
+			_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+				HubProjectID: 42, HubProjectUID: project.UID, Actor: "example-actor", Enabled: true,
+			})
+			require.NoError(t, err)
+			receipt, err := db.SignRootReceipt(db.AttributionReceipt{
+				Version: 1, ProjectUID: project.UID, AuthorityUID: pin.AuthorityUID,
+				KeyID: pin.KeyID, EventUID: event.UID, ContentHash: event.ContentHash,
+				AccountableActor: "example-actor", SourceActor: event.Actor,
+				IngressInstanceUID: pin.AuthorityUID, AcceptedAt: time.Now().UTC(),
+				ResetEpoch: 1, Sequence: 1,
+			}, privateKey)
+			require.NoError(t, err)
+			require.NoError(t, source.ApplyUpstreamAttribution(ctx, pin, receipt))
+			_, err = source.LeaveFederationReplica(ctx, project.ID)
+			require.NoError(t, err)
+			_, _, changed, err := source.SoftDeleteIssue(ctx, peer.ID, "example-actor")
+			require.NoError(t, err)
+			require.True(t, changed)
+			_, err = source.ExecContext(ctx,
+				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, sourceVersion)
+			require.NoError(t, err)
+
+			var backup bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &backup,
+				jsonl.ExportOptions{IncludeDeleted: false}))
+			target := openImportTargetDB(t)
+			require.NoError(t, jsonl.Import(ctx, bytes.NewReader(backup.Bytes()), target),
+				"restoring a live-only backup must preserve the receipt-covered event hash")
+		})
+	}
 }
 
 // TestExportNoIncludeDeletedPreservesNonAggregatedRelatedOrphan: a

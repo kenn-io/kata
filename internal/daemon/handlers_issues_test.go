@@ -430,7 +430,7 @@ func TestIssues_ListAndShow(t *testing.T) {
 func TestIssues_ListMissingProjectIs404(t *testing.T) {
 	h, _ := bootstrapProject(t)
 	resp, bs := getStatusBody(t, h.ts.(*httptest.Server), "/api/v1/projects/9999/issues")
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestIssues_PatchEditTitleAndBody(t *testing.T) {
@@ -2417,7 +2417,7 @@ func TestListAllIssues_ProjectFilter(t *testing.T) {
 func TestListAllIssues_ProjectNotFound(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envGetRaw(t, env, "/api/v1/issues?project_id=9999")
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "not_found")
 }
 
 // TestListAllIssues_RejectsRemovedViewParams guards against silent semantic

@@ -39,6 +39,8 @@ func newFederationCmd() *cobra.Command {
 	cmd.AddCommand(
 		federationIdentityCmd(),
 		federationSigningCmd(),
+		federationEmbeddingRecipeCmd(),
+		federationBridgeCmd(),
 		federationEnableCmd(),
 		federationEnrollCmd(),
 		federationEnrollmentsCmd(),
@@ -2078,6 +2080,9 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			}
 			lines = append(lines, "provider: "+provider)
 		}
+		if status.Embedding != nil {
+			lines = append(lines, federationEmbeddingLines(status.Embedding)...)
+		}
 		if status.CredentialExpiresAt != nil {
 			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
 		}
@@ -2178,6 +2183,28 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("recent_violations", strconv.FormatInt(status.RecentViolationCount, 10)),
 		); err != nil {
 			return err
+		}
+		if status.Embedding != nil {
+			e := status.Embedding
+			counts := e.ArtifactCounts()
+			producer := "none"
+			if e.Producer != nil {
+				producer = e.Producer.ProducerInstanceUID
+			}
+			if err := writeAgentKVRow(out,
+				agentRowField("embedding_project", status.ProjectName),
+				agentRowField("state", e.State),
+				agentRowField("producer", producer),
+				agentRowField("generated", strconv.Itoa(counts["generated"])),
+				agentRowField("reused", strconv.Itoa(counts["reused"])),
+				agentRowField("incompatible", strconv.Itoa(counts["incompatible"])),
+				agentRowField("stored_unindexed", strconv.Itoa(counts["stored_unindexed"])),
+				agentRowField("retained", strconv.Itoa(len(e.Artifacts))),
+				agentRowField("limit", strconv.Itoa(e.ArtifactLimit)),
+				agentRowField("limited", strconv.FormatBool(e.Limited)),
+			); err != nil {
+				return err
+			}
 		}
 		for _, violation := range status.RecentViolations {
 			if err := writeAgentKVRow(out,

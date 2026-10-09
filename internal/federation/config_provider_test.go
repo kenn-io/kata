@@ -66,7 +66,7 @@ func TestRemovedProviderCleanupSurvivesPurgedProjectAndDatabaseRetry(t *testing.
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(3 * time.Second):
+	case <-time.After(federationprovider.AttemptTimeout + time.Second):
 		require.FailNow(t, "cleanup did not retry the retained request")
 	}
 	_, found, err := credentials.FindManagedFederationCredential(t.Context(), project.Name)
@@ -180,7 +180,7 @@ func TestRemovedProviderCleanupDoesNotFollowReusedName(t *testing.T) {
 			select {
 			case err := <-done:
 				require.ErrorIs(t, err, context.Canceled)
-			case <-time.After(10 * time.Second):
+			case <-time.After(2 * federationprovider.AttemptTimeout):
 				cancel()
 				<-done
 				require.FailNow(t, "renamed project's request was not cleaned up", "health: %+v", r.Health())
@@ -244,7 +244,8 @@ func TestReconcilerRemovesProviderMappingAndRetriesExactCleanup(t *testing.T) {
 	})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, 3*time.Second, 10*time.Millisecond)
+	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, federationprovider.AttemptTimeout+time.Second, 10*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
 	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
@@ -433,7 +434,8 @@ func TestProviderInputErrorIsVisibleAndRetainsExactRequest(t *testing.T) {
 	})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, 3*time.Second, 10*time.Millisecond)
+	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	require.Eventually(t, func() bool { return r.Health().LastErrorCategory != "" }, federationprovider.AttemptTimeout+time.Second, 10*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
 	assert.Equal(t, "configuration_conflict", r.Health().LastErrorCategory)
@@ -476,7 +478,8 @@ func TestReconcilerStopsTerminalProviderDecisionsWithoutDroppingCleanup(t *testi
 						cancel()
 						require.ErrorIs(t, <-done, context.Canceled)
 					}()
-					require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, 3*time.Second, time.Millisecond)
+					//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+					require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, federationprovider.AttemptTimeout+time.Second, time.Millisecond)
 					assert.Equal(t, 1, r.Health().Conflicted)
 					assert.Zero(t, r.Health().Pending)
 					attemptAt := *r.Health().LastAttemptAt

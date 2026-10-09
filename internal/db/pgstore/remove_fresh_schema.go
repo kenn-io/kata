@@ -153,17 +153,19 @@ func validateFreshSchema(
 	tables []string,
 	expectedInstanceUID string,
 ) error {
-	var instanceUID, schemaVersion string
-	var metaRows int
+	var instanceUID, schemaVersion, policyRevision string
+	var metaRows, unknownKeys int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
 			COALESCE(MAX(value) FILTER (WHERE key='instance_uid'), ''),
-			COALESCE(MAX(value) FILTER (WHERE key='schema_version'), '')
-		FROM meta WHERE key<>$1`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
+			COALESCE(MAX(value) FILTER (WHERE key='schema_version'), ''),
+ COALESCE(MAX(value) FILTER (WHERE key='project_access_revision'), ''),
+ COUNT(*) FILTER(WHERE key NOT IN ('instance_uid','schema_version','created_by_version','project_access_revision'))
+		FROM meta WHERE key<>$1`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion, &policyRevision, &unknownKeys); err != nil {
 		return fmt.Errorf("inspect fresh schema metadata: %w", mapSQLError(err, nil))
 	}
-	if metaRows != 3 || instanceUID != expectedInstanceUID ||
+	if metaRows != 4 || unknownKeys != 0 || policyRevision != "1" || instanceUID != expectedInstanceUID ||
 		schemaVersion != strconv.Itoa(db.CurrentSchemaVersion()) {
 		return fmt.Errorf("remove fresh postgres schema: target metadata changed")
 	}

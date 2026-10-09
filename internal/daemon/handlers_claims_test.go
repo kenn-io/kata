@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -25,6 +27,14 @@ const claimTestOtherSpokeUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 func TestClaimAuthLocalDaemonBearerCanClaimHubProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)
+	team, _, err := env.DB.CreateTeam(context.Background(), "claim-private-team", "admin")
+	require.NoError(t, err)
+	_, err = env.DB.SetTeamMembership(context.Background(), team.UID, "different-member", true, "admin")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(context.Background(), db.ProjectAccessPolicy{
+		ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+	}, "admin")
+	require.NoError(t, err)
 
 	var out claimResponseBody
 	resp := claimPost(t, env, project.ID, issue.ShortID, "claim", map[string]any{
@@ -821,6 +831,175 @@ func TestClaimStatusForwardRefreshesSpokeCache(t *testing.T) {
 	assert.Equal(t, claimTestOtherSpokeUID, cached.Holder.HolderInstanceUID)
 }
 
+func TestClaimStatusForwardDoesNotExpireLocallyStaleLeaseBeforeApplyingRenewal(t *testing.T) {
+	ctx := context.Background()
+	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	now := time.Now().UTC()
+	claimUID, err := katauid.New()
+	require.NoError(t, err)
+	oldHubNow := now.Add(-2 * time.Minute)
+	expiredAt := now.Add(-time.Minute)
+	localClaim := showIssueCachedClaim(issue, "remote-holder", oldHubNow.Add(-time.Minute))
+	localClaim.ClaimUID = claimUID
+	localClaim.ClaimKind = "timed"
+	localClaim.HolderInstanceUID = claimTestOtherSpokeUID
+	localClaim.ExpiresAt = &expiredAt
+	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, spokeProject.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: claimTestOtherSpokeUID,
+			Holder:            "remote-holder",
+			ClientKind:        "cli",
+		},
+		Claim:  localClaim,
+		HubNow: oldHubNow,
+	}))
+	remoteHubNow := now.Add(-time.Second)
+	freshExpiresAt := now.Add(10 * time.Minute)
+	hubMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
+			Held: true,
+			Holder: api.ClaimPrincipalOut{
+				HolderInstanceUID: claimTestOtherSpokeUID,
+				Holder:            "remote-holder",
+				ClientKind:        "cli",
+			},
+			Claim: &api.IssueClaimOut{
+				ClaimUID: claimUID, ProjectID: hubProject.ID, IssueUID: issue.UID,
+				Holder: "remote-holder", HolderInstanceUID: claimTestOtherSpokeUID,
+				ClientKind: "cli", ClaimKind: "timed", AcquiredAt: oldHubNow.Add(-time.Minute),
+				ExpiresAt: &freshExpiresAt, Revision: 2, UpdatedAt: remoteHubNow,
+			},
+			HubNow: remoteHubNow,
+		}))
+	}))
+	t.Cleanup(hubMock.Close)
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL: hubMock.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim",
+	}))
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, hubMock.URL)
+
+	resp, raw := envDoRaw(t, spoke, http.MethodGet, claimStatusPath(spokeProject.ID, issue.ShortID), nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	cached, err := spoke.DB.ClaimStatusReadOnly(ctx, spokeProject.ID, issue.UID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, cached.Held, "the renewed root lease must replace an expired local cache row")
+	require.NotNil(t, cached.Claim)
+	assert.Equal(t, claimUID, cached.Claim.ClaimUID)
+	assert.True(t, cached.Claim.ExpiresAt.After(time.Now().UTC()))
+	var expiredEvents int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM events WHERE project_id=? AND issue_uid=? AND type='claim.expired'`,
+		spokeProject.ID, issue.UID).Scan(&expiredEvents))
+	assert.Zero(t, expiredEvents, "forwarding status must not publish a local expiry for a root lease that was renewed")
+}
+
+func TestShowIssueClaimRefreshPreservesDownstreamHolder(t *testing.T) {
+	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	claimUID, err := katauid.New()
+	require.NoError(t, err)
+	leafUID, err := katauid.New()
+	require.NoError(t, err)
+	cachedAt := time.Now().UTC().Add(-time.Minute)
+	cachedExpiresAt := cachedAt.Add(10 * time.Minute)
+	leafHolder := db.ClaimPrincipal{HolderInstanceUID: leafUID, Holder: "leaf-agent", ClientKind: "cli"}
+	localClaim := showIssueCachedClaim(issue, leafHolder.Holder, cachedAt)
+	localClaim.ClaimUID = claimUID
+	localClaim.ClaimKind = "timed"
+	localClaim.ExpiresAt = &cachedExpiresAt
+	localClaim.HolderInstanceUID = leafHolder.HolderInstanceUID
+	localClaim.ClientKind = leafHolder.ClientKind
+	require.NoError(t, spoke.DB.ApplyClaimStatus(t.Context(), spokeProject.ID, issue.UID, db.ClaimStatus{
+		Held: true, Holder: leafHolder, Claim: localClaim, HubNow: cachedAt,
+	}))
+	upstreamNow := time.Now().UTC()
+	expiresAt := upstreamNow.Add(10 * time.Minute)
+	rootHolder := api.ClaimPrincipalOut{
+		HolderInstanceUID: spoke.DB.InstanceUID(), Holder: "tester", ClientKind: "relay:v1:upstream",
+	}
+	rootLease := &api.IssueClaimOut{
+		ClaimUID: claimUID, ProjectID: hubProject.ID, IssueUID: issue.UID,
+		Holder: rootHolder.Holder, HolderInstanceUID: rootHolder.HolderInstanceUID,
+		ClientKind: rootHolder.ClientKind, ClaimKind: "timed", AcquiredAt: cachedAt.Add(-time.Minute),
+		ExpiresAt: &expiresAt, Revision: 2, UpdatedAt: upstreamNow,
+	}
+	hubMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
+			Held: true, Holder: rootHolder, Claim: rootLease, HubNow: upstreamNow,
+		}))
+	}))
+	t.Cleanup(hubMock.Close)
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, hubMock.URL)
+	configureClaimRelayBinding(t, hub, spoke, spokeProject)
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL: hubMock.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim",
+	}))
+	shown := getShowIssueClaimBody(t, spoke, spokeProject.ID, issue.ShortID)
+	require.NotNil(t, shown.Claim)
+	assert.Equal(t, leafHolder.Holder, shown.Claim.Holder)
+	assert.Equal(t, leafHolder.HolderInstanceUID, shown.Claim.HolderInstanceUID)
+	assert.Equal(t, leafHolder.ClientKind, shown.Claim.ClientKind)
+	cached, err := spoke.DB.ClaimStatusReadOnly(t.Context(), spokeProject.ID, issue.UID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, cached.Held)
+	assert.Equal(t, leafHolder, cached.Holder)
+}
+
+func TestDeniedClaimAcquirePreservesDownstreamHolder(t *testing.T) {
+	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	claimUID, err := katauid.New()
+	require.NoError(t, err)
+	leafUID, err := katauid.New()
+	require.NoError(t, err)
+	cachedAt := time.Now().UTC().Add(-time.Minute)
+	cachedExpiresAt := cachedAt.Add(10 * time.Minute)
+	leafHolder := db.ClaimPrincipal{HolderInstanceUID: leafUID, Holder: "leaf-agent", ClientKind: "cli"}
+	localClaim := showIssueCachedClaim(issue, leafHolder.Holder, cachedAt)
+	localClaim.ClaimUID = claimUID
+	localClaim.ClaimKind = "timed"
+	localClaim.ExpiresAt = &cachedExpiresAt
+	localClaim.HolderInstanceUID = leafHolder.HolderInstanceUID
+	localClaim.ClientKind = leafHolder.ClientKind
+	require.NoError(t, spoke.DB.ApplyClaimStatus(t.Context(), spokeProject.ID, issue.UID, db.ClaimStatus{
+		Held: true, Holder: leafHolder, Claim: localClaim, HubNow: cachedAt,
+	}))
+	upstreamNow := time.Now().UTC()
+	expiresAt := upstreamNow.Add(10 * time.Minute)
+	rootHolder := api.ClaimPrincipalOut{
+		HolderInstanceUID: spoke.DB.InstanceUID(), Holder: "tester", ClientKind: "relay:v1:upstream",
+	}
+	rootLease := &api.IssueClaimOut{
+		ClaimUID: claimUID, ProjectID: hubProject.ID, IssueUID: issue.UID,
+		Holder: rootHolder.Holder, HolderInstanceUID: rootHolder.HolderInstanceUID,
+		ClientKind: rootHolder.ClientKind, ClaimKind: "timed", AcquiredAt: cachedAt.Add(-time.Minute),
+		ExpiresAt: &expiresAt, Revision: 2, UpdatedAt: upstreamNow,
+	}
+	hubMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{
+			Granted: false, Holder: rootHolder, Lease: rootLease, Claim: rootLease,
+		}))
+	}))
+	t.Cleanup(hubMock.Close)
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, hubMock.URL)
+	configureClaimRelayBinding(t, hub, spoke, spokeProject)
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL: hubMock.URL, HubProjectID: hubProject.ID, Token: token, Capabilities: "claim",
+	}))
+	var denied claimResponseBody
+	resp := claimPost(t, spoke, spokeProject.ID, issue.ShortID, "claim", map[string]any{
+		"holder": "other-leaf-agent", "client_kind": "cli", "claim_kind": "hard",
+	}, nil, &denied)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.False(t, denied.Granted)
+	assert.Equal(t, leafHolder.Holder, denied.Holder.Holder)
+	assert.Equal(t, leafHolder.HolderInstanceUID, denied.Holder.HolderInstanceUID)
+	assert.Equal(t, leafHolder.ClientKind, denied.Holder.ClientKind)
+	cached, err := spoke.DB.ClaimStatusReadOnly(t.Context(), spokeProject.ID, issue.UID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, cached.Held)
+	assert.Equal(t, leafHolder, cached.Holder)
+}
+
 func TestClaimForwardDeniedAcquireCachesHubHolder(t *testing.T) {
 	ctx := context.Background()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
@@ -1141,6 +1320,26 @@ func createClaimForwardingPair(
 	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, spokeProject.ID))
 	enrollment := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)
 	return hub, spoke, hubProject, spokeProject, issue, enrollment.Token
+}
+
+func configureClaimRelayBinding(t *testing.T, hub, spoke *testenv.Env, spokeProject db.Project) {
+	t.Helper()
+	rootUID := hub.DB.InstanceUID()
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, spoke.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
+		ProjectUID: spokeProject.UID, AuthorityUID: rootUID,
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	bindingUID, err := katauid.New()
+	require.NoError(t, err)
+	_, err = spoke.DB.SetRelayBindingConfig(t.Context(), spokeProject.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath: []string{rootUID, spoke.DB.InstanceUID()}, LocalActor: "tester",
+		ServeDownstream: true, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
 }
 
 func setClaimBindingHubURL(t *testing.T, spoke *testenv.Env, projectID int64, hubURL string) {

@@ -174,7 +174,7 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 
 func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context {
 	ctx = huma.WithValue(ctx, hostAccessStateContextKey{}, state)
-	fenced := db.WithTransactionFence(ctx.Context(), func(
+	fenced := db.WithAdditionalTransactionFence(ctx.Context(), func(
 		fenceCtx context.Context,
 		transaction db.Transaction,
 	) error {
@@ -194,6 +194,51 @@ func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context 
 	return huma.WithContext(ctx, fenced)
 }
 
+func authorizeAdditionalHostOperation(ctx context.Context, operationID string) (context.Context, error) {
+	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
+	if !ok || state == nil || !state.authorized || state.controller == nil {
+		return ctx, projectAccessDenied()
+	}
+	policy, ok := hostOperationPolicy(operationID)
+	if !ok {
+		return ctx, api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "access decision unavailable", "", nil)
+	}
+	operation := state.request.Operation
+	operation.ID = operationID
+	operation.Policy = policy
+	if operationID == "removeProject" {
+		operation.Method = http.MethodDelete
+		operation.Path = "/api/v1/projects/{project_id}"
+	}
+	decision, err := state.controller.Authorize(ctx, HostAccessRequest{
+		Subject:   state.request.Subject,
+		Actor:     state.request.Actor,
+		Operation: operation,
+	})
+	if errors.Is(err, ErrHostAccessDenied) {
+		return ctx, projectAccessDenied()
+	}
+	if err != nil || decision.TransactionFence == nil {
+		return ctx, api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "transaction access decision unavailable", "", nil)
+	}
+	ctx = db.WithAdditionalTransactionFence(ctx, func(
+		fenceCtx context.Context,
+		transaction db.Transaction,
+	) error {
+		if err := decision.TransactionFence(fenceCtx, transaction); err != nil {
+			if errors.Is(err, ErrHostAccessDenied) {
+				return errors.Join(api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil), err)
+			}
+			return errors.Join(api.NewError(http.StatusServiceUnavailable,
+				"access_unavailable", "transaction access decision unavailable", "", nil), err)
+		}
+		return nil
+	})
+	return ctx, nil
+}
+
 func positiveProjectID(raw string) (int64, bool) {
 	projectID, err := strconv.ParseInt(raw, 10, 64)
 	return projectID, err == nil && projectID > 0
@@ -205,6 +250,31 @@ func authorizeHostProjectScope(
 	projectUIDs []string,
 	allProjects bool,
 ) (context.Context, error) {
+	if projectDecision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); projectDecision != nil {
+		for _, id := range projectIDs {
+			if id <= 0 {
+				continue
+			}
+			project, err := projectDecision.store.ProjectByID(ctx, id)
+			if err != nil || authorizeProjectTarget(ctx, project.UID) != nil {
+				return ctx, projectAccessDenied()
+			}
+		}
+		for _, uid := range projectUIDs {
+			if err := authorizeProjectTarget(ctx, uid); err != nil {
+				return ctx, err
+			}
+		}
+		if allProjects {
+			// A global operation may depend on any project in the actor's
+			// authorized set, so revalidate that set inside its transaction.
+			for _, uid := range projectDecision.ProjectUIDs {
+				if err := authorizeProjectTarget(ctx, uid); err != nil {
+					return ctx, err
+				}
+			}
+		}
+	}
 	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
 	if !ok {
 		return ctx, nil

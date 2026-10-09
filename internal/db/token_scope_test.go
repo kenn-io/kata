@@ -13,3 +13,8 @@ func TestActiveAPITokenGrantExpiresAtBoundary(t *testing.T) {
 	require.True(t, ActiveAPITokenGrantMatches(token, token, expiresAt.Add(-time.Nanosecond)))
 	require.False(t, ActiveAPITokenGrantMatches(token, token, expiresAt))
 }
+
+func TestActiveAPITokenGrantMatchesUnscopedNonExpiringToken(t *testing.T) {
+	token := APIToken{ID: 1, Actor: "member"}
+	require.True(t, ActiveAPITokenGrantMatches(token, token, time.Now().UTC()))
+}

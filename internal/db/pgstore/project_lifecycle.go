@@ -36,6 +36,9 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if project.DeletedAt != nil {
 			return db.ErrProjectAlreadyArchived
 		}
+		if err := s.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
 		var openIssues, aliasCount int64
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues
           WHERE project_id = $1 AND status = 'open' AND deleted_at IS NULL`, project.ID).Scan(&openIssues); err != nil {
@@ -55,6 +58,9 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		archivedAt := nowStoredTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = $1 WHERE id = $2`, archivedAt, project.ID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("advance project access revision after project archive: %w", err)
 		}
 		binding, bindingErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1 FOR UPDATE`, project.ID))
 		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
@@ -87,7 +93,7 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		}
 		event, err = s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
-			Type: "project.removed", Actor: params.Actor, Payload: string(payload),
+			Type: "project.removed", Actor: params.Actor, Payload: string(payload), SkipRelay: params.SkipFederationRelay,
 		})
 		if err != nil {
 			return err
@@ -137,6 +143,9 @@ func (s *Store) restoreProject(
 		})
 		if err != nil {
 			return err
+		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return fmt.Errorf("advance project access revision after project restore: %w", err)
 		}
 		event = &created
 		changed = true
@@ -268,7 +277,7 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		if err != nil {
 			return err
 		}
-		if err := deleteProjectScopedTx(ctx, tx, project.ID); err != nil {
+		if err := deleteProjectScopedTx(ctx, tx, project); err != nil {
 			return err
 		}
 		var resetCursor sql.NullInt64
@@ -342,6 +351,9 @@ func (s *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := deleteProjectRelayMetadataTx(ctx, tx, project.UID); err != nil {
+			return err
+		}
 		var resetCursor sql.NullInt64
 		if counts.minEventID.Valid {
 			if err := lockEventSequenceTx(ctx, tx); err != nil {
@@ -391,27 +403,21 @@ func countProjectPurgeTx(ctx context.Context, tx *sql.Tx, projectID int64) (proj
 	return counts, nil
 }
 
-func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, project db.Project) error {
+	if err := deleteProjectRelayMetadataTx(ctx, tx, project.UID); err != nil {
+		return err
+	}
+	projectID := project.ID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, projectID); err != nil {
 		return mapSQLError(err, nil)
 	}
-	var detachedEventIDs []int64
 	for _, statement := range []string{
-		`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
-		`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
+		`UPDATE events SET issue_id = NULL WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
+		`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
 	} {
-		rows, err := tx.QueryContext(ctx, statement, projectID)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, statement, projectID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		ids, err := collectEventIDs(rows)
-		if err != nil {
-			return err
-		}
-		detachedEventIDs = append(detachedEventIDs, ids...)
-	}
-	if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
-		return err
 	}
 	statements := []string{
 		`DELETE FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,

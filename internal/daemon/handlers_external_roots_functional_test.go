@@ -79,6 +79,12 @@ func TestExternalRootIdentityAdministrationUsesTokenActor(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	team, _, err := database.db.CreateTeam(t.Context(), "connector-team", "admin")
+	require.NoError(t, err)
+	_, err = database.db.SetTeamMembership(t.Context(), team.UID, "operator", true, "admin")
+	require.NoError(t, err)
+	_, _, err = database.db.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin")
+	require.NoError(t, err)
 	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
 	client := &daemonExternalRootClient{
 		description: connector.Description{
@@ -114,6 +120,11 @@ func TestExternalRootIdentityAdministrationUsesTokenActor(t *testing.T) {
 		"connector": "example-connector", "external": "opaque-locator", "actor": "mallory",
 	}, "identity-token")
 	require.Equal(t, http.StatusOK, status, string(body))
+	_, err = database.db.SetTeamMembership(t.Context(), team.UID, "operator", false, "admin")
+	require.NoError(t, err)
+	status, body = requestExternalRootJSONWithBearer(t, ts.URL, http.MethodPost, bridgePath, map[string]any{"connector": "example-connector", "external": "opaque-locator", "actor": "operator"}, "identity-token")
+	require.Equal(t, http.StatusNotFound, status, string(body), "connector opt-in never bypasses current project membership")
+
 	events, err := database.db.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
 	require.NoError(t, err)
 	for _, event := range events {

@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -69,18 +70,22 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		curMetadata string
 		curRevision int64
 		projectID   int64
+		projectUID  string
 		projectName string
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT i.metadata, i.revision, i.project_id, p.name
+		SELECT i.metadata, i.revision, i.project_id, p.uid, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.deleted_at IS NULL`,
 		in.IssueID,
-	).Scan(&curMetadata, &curRevision, &projectID, &projectName)
+	).Scan(&curMetadata, &curRevision, &projectID, &projectUID, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, fmt.Errorf("issue %d not found", in.IssueID)
 	}
 	if err != nil {
+		return out, err
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
 		return out, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {
@@ -215,6 +220,16 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	if err := ensureProjectWritableTx(ctx, tx, in.ProjectID); err != nil {
 		return out, err
 	}
+	if _, producerChange := in.Patch[db.ProjectEmbeddingMetadataKey]; producerChange {
+		var role string
+		err := tx.QueryRowContext(ctx, `SELECT role FROM federation_bindings WHERE project_id=?`, in.ProjectID).Scan(&role)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return out, err
+		}
+		if role == string(db.FederationRoleSpoke) {
+			return out, errors.Join(db.ErrFederatedReadOnly, db.ErrFederatedSpokeUnsupported)
+		}
+	}
 
 	// nil IfMatchRev = unconditional last-write-wins, as on the issue path.
 	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
@@ -226,6 +241,12 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	newBlob, err := db.ApplyMetadataPatch(jsontext.Value(curMetadata), in.Patch)
 	if err != nil {
 		return out, fmt.Errorf("apply patch: %w", err)
+	}
+
+	if _, changed := in.Patch[db.ProjectEmbeddingMetadataKey]; changed {
+		if _, err := db.ProjectEmbeddingProducerFromMetadata(db.JSONBlob(string(newBlob))); err != nil {
+			return out, fmt.Errorf("%w: invalid embedding producer configuration", metadata.ErrInvalidValue)
+		}
 	}
 
 	diff, err := metadata.Diff(jsontext.Value(curMetadata), newBlob)
@@ -319,13 +340,14 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 
 	type projectState struct {
 		id       int64
+		uid      string
 		name     string
 		metadata string
 		revision int64
 		deleted  sql.NullString
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, name, metadata, revision, deleted_at
+		SELECT id, uid, name, metadata, revision, deleted_at
 		  FROM projects
 		 ORDER BY id`)
 	if err != nil {
@@ -335,7 +357,7 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 	for rows.Next() {
 		var project projectState
 		if err := rows.Scan(
-			&project.id, &project.name, &project.metadata, &project.revision, &project.deleted,
+			&project.id, &project.uid, &project.name, &project.metadata, &project.revision, &project.deleted,
 		); err != nil {
 			_ = rows.Close()
 			return out, err
@@ -365,6 +387,7 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 
 	roleInbox := jsontext.Value(`"inbox"`)
 	roleClear := jsontext.Value(`null`)
+	authorizedProjects, restricted := db.AuthorizedProjects(ctx)
 	for _, project := range projects {
 		role := roleClear
 		if project.id == in.ProjectID {
@@ -377,6 +400,11 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 			if string(current["role"]) != `"inbox"` {
 				continue
 			}
+		}
+		if restricted && !slices.Contains(authorizedProjects, project.uid) {
+			// Reassignment also clears the old Inbox project. Keep hidden
+			// projects indistinguishable from missing ones.
+			return out, db.ErrNotFound
 		}
 		if err := ensureProjectWritableTx(ctx, tx, project.id); err != nil {
 			return out, err

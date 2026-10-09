@@ -36,8 +36,10 @@ cancellation are checked again before atomic replay admission and after durable
 publication. Separate admission pools span handler execution: two ingests and
 sixteen metadata, poll or lease requests. Control requests have a 64 KiB body
 limit, while the native 64 MiB adoption limit remains available for ingests.
-Bounded memory buffering avoids a second temporary-file lifecycle for incoming
-event bodies. Saturated pools return `429` with `Retry-After`.
+Signed relay envelopes have a 128 MiB request budget so JSON and base64
+encoding fit around the 64 MiB raw relay batch limit. Bounded memory buffering
+avoids a second temporary-file lifecycle for incoming event bodies. Saturated
+pools return `429` with `Retry-After`.
 
 A durable maximum-admitted-expiry watermark complements the bounded nonce
 cache. Atomic publication fsyncs the file and directory before dispatch. One
@@ -68,10 +70,12 @@ An opt-in private listener reuses native route handlers through an explicit
 operation allowlist. It requires signing configuration, valid signatures and
 project-scoped enrollments, and cannot expose UI, administrator, enrollment
 creation, force-release or arbitrary API routes.
-The same verifier protects all daemon listeners. Native connection, header,
-body, duration and concurrent admission limits bound work before execution.
+Relay reset, offer, accept, acknowledgement, and self-disconnect operations
+use the same signer and their existing pull or push capability. The same
+verifier protects all daemon listeners. Native connection, header, body,
+duration and concurrent admission limits bound work before execution.
 
 The [operator guide](../operations/federation-signing.md) owns the exact wire
-profile, limits, configuration, rotation and recovery procedures. Future hub
-relay endpoints must be explicitly reviewed before entering this allowlist;
-using the common native client transport will sign their outbound requests.
+profile, limits, configuration, rotation and recovery procedures. Additional
+federation routes must be explicitly reviewed before entering this allowlist;
+using the common native client transport signs their outbound requests.

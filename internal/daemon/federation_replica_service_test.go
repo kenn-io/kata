@@ -83,6 +83,27 @@ func (s *replicaCredentialStore) FederationCredential(
 	return credential, ok, nil
 }
 
+func (s *replicaCredentialStore) PendingRelayCredentialMetadata(
+	_ context.Context,
+	projectName string,
+) (string, config.FederationCredentialMetadata, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var projectUID string
+	var metadata config.FederationCredentialMetadata
+	for uid, credential := range s.credentials {
+		if !credential.RelayEnrollmentPending || credential.SpokeProjectName != projectName {
+			continue
+		}
+		if projectUID != "" {
+			return "", config.FederationCredentialMetadata{}, false, config.ErrFederationCredentialConflict
+		}
+		projectUID = uid
+		metadata = credential.Metadata()
+	}
+	return projectUID, metadata, projectUID != "", nil
+}
+
 func (s *replicaCredentialStore) StoreFederationCredential(
 	_ context.Context, projectUID string, credential config.FederationCredential,
 ) error {

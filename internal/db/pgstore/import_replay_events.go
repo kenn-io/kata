@@ -285,6 +285,7 @@ var replayIdentityTables = []string{
 	"issue_sync_bindings",
 	"federation_quarantine",
 	"federation_enrollments",
+	"federation_relay_outbox",
 	"issue_claims",
 	"pending_claim_requests",
 	"import_mappings",

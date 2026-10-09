@@ -84,8 +84,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
-			description: "Load typed federation status, enrollment revocation, rebind, leave, and quarantine tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status"},
+			description: "Load typed project bridge connect/status/disconnect, federation status, enrollment revocation, rebind, leave, and quarantine tools, then refresh the MCP tool list.",
+			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{
@@ -143,6 +143,12 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 			loader: "kata.load_system", section: "system", title: "Load system tools",
 			description: "Load the typed redacted daemon system-information tool, then refresh the MCP tool list.",
 			tools:       []string{"kata.system"}, available: true, register: registerSystemTools,
+		},
+		{
+			loader: "kata.load_teams", section: "teams", title: "Load team access tools",
+			description: "Load owner team membership and project access tools when token administration is explicitly enabled with daemon-wide scope.",
+			tools:       []string{"kata.project_access_set", "kata.project_access_show", "kata.team_create", "kata.team_delete", "kata.team_member_set", "kata.team_show", "kata.teams"},
+			available:   tokenAdminAvailable, register: registerTeamTools,
 		},
 		{
 			loader: "kata.load_tokens", section: "tokens", title: "Load token tools",

@@ -33,7 +33,7 @@ const (
 	ClockSkew = 5 * time.Second
 	// Quarantine includes one second for integer timestamps at the boundary.
 	Quarantine     = Lifetime + ClockSkew + time.Second
-	MaxBodyBytes   = 64 << 20
+	MaxBodyBytes   = 128 << 20
 	MaxHeaderBytes = 16 << 10
 )
 

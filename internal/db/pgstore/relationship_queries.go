@@ -13,11 +13,12 @@ func (s *Store) ParentShortIDsByIssues(ctx context.Context, issueIDs []int64) (m
 	if len(issueIDs) == 0 {
 		return parents, nil
 	}
-	rows, err := s.QueryContext(ctx, `SELECT l.from_issue_id, parent.short_id
+	query, args := authorizeRelationshipQuery(ctx, `SELECT l.from_issue_id, parent.short_id
 		FROM links l
 		JOIN issues parent ON parent.id = l.to_issue_id
 		WHERE l.type = 'parent' AND l.from_issue_id = ANY($1::bigint[])
-		ORDER BY l.from_issue_id ASC`, issueIDs)
+		ORDER BY l.from_issue_id ASC`, []any{issueIDs}, "l")
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -111,7 +112,8 @@ func (s *Store) scanRelationshipPairs(
 	out map[int64]db.IssueRelationships,
 	assign func(rel *db.IssueRelationships, peer int64),
 ) error {
-	rows, err := s.QueryContext(ctx, query, issueIDs)
+	query, args := authorizeRelationshipQuery(ctx, query, []any{issueIDs}, "l")
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -131,7 +133,7 @@ func (s *Store) scanRelationshipPairs(
 func (s *Store) appendChildCountsToRelationships(
 	ctx context.Context, issueIDs []int64, out map[int64]db.IssueRelationships,
 ) error {
-	rows, err := s.QueryContext(ctx, `SELECT l.to_issue_id,
+	query, args := authorizeRelationshipQuery(ctx, `SELECT l.to_issue_id,
 		COUNT(*) FILTER (WHERE child.status = 'open'), COUNT(*)
 		FROM links l
 		JOIN issues child ON child.id = l.from_issue_id
@@ -141,7 +143,8 @@ func (s *Store) appendChildCountsToRelationships(
 		  AND child_project.deleted_at IS NULL
 		  AND l.to_issue_id = ANY($1::bigint[])
 		GROUP BY l.to_issue_id
-		ORDER BY l.to_issue_id ASC`, issueIDs)
+		ORDER BY l.to_issue_id ASC`, []any{issueIDs}, "l")
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -162,7 +165,7 @@ func (s *Store) appendChildCountsToRelationships(
 func (s *Store) appendActivelyBlockedToRelationships(
 	ctx context.Context, issueIDs []int64, out map[int64]db.IssueRelationships,
 ) error {
-	rows, err := s.QueryContext(ctx, `SELECT DISTINCT l.to_issue_id
+	query, args := authorizeRelationshipQuery(ctx, `SELECT DISTINCT l.to_issue_id
 		FROM links l
 		JOIN issues blocked ON blocked.id = l.to_issue_id
 		JOIN issues blocker ON blocker.id = l.from_issue_id
@@ -173,7 +176,8 @@ func (s *Store) appendActivelyBlockedToRelationships(
 		  AND blocker.status = 'open'
 		  AND blocker.deleted_at IS NULL
 		  AND blocker_project.deleted_at IS NULL
-		  AND l.to_issue_id = ANY($1::bigint[])`, issueIDs)
+		  AND l.to_issue_id = ANY($1::bigint[])`, []any{issueIDs}, "l")
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -192,13 +196,14 @@ func (s *Store) appendActivelyBlockedToRelationships(
 
 // ChildrenOfIssue returns visible direct children in list order.
 func (s *Store) ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]db.Issue, error) {
-	rows, err := s.QueryContext(ctx, issueSelect+`
+	query, args := authorizeRelationshipQuery(ctx, issueSelect+`
 		JOIN links l ON l.from_issue_id = i.id
 		WHERE l.type = 'parent'
 		  AND l.to_issue_id = $1
 		  AND i.deleted_at IS NULL
 		  AND p.deleted_at IS NULL
-		ORDER BY i.updated_at DESC, i.id DESC`, parentIssueID)
+		ORDER BY i.updated_at DESC, i.id DESC`, []any{parentIssueID}, "l")
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

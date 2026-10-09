@@ -240,6 +240,9 @@ func (p *postgresIndex) QueryGeneration(ctx context.Context, gen string, query k
 	if err != nil {
 		return nil, err
 	}
+	args := []any{gen, value}
+	predicate := db.AuthorizedProjectPredicate(ctx, "m.project_uid", func(value any) string { args = append(args, value); return fmt.Sprintf("$%d", len(args)) })
+	args = append(args, limit)
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT c.issue_uid, c.chunk_index,
 		       1 - (c.embedding OPERATOR(public.<=>) $2::public.halfvec) AS score
@@ -248,9 +251,9 @@ func (p *postgresIndex) QueryGeneration(ctx context.Context, gen string, query k
 		JOIN issue_vector_stamps s
 		  ON s.gen_key = c.gen_key AND s.issue_uid = c.issue_uid
 		 AND s.revision = m.content_revision
-		WHERE c.gen_key = $1
+		WHERE c.gen_key = $1 AND `+predicate+`
 		ORDER BY c.embedding OPERATOR(public.<=>) $2::public.halfvec
-		LIMIT $3`, gen, value, limit)
+		LIMIT `+fmt.Sprintf("$%d", len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector: query postgres generation: %w", err)
 	}
@@ -284,8 +287,10 @@ func postgresVectorValue(vector kitvec.Vector) (string, error) {
 	return value.String(), nil
 }
 
+const maxPostgresHalfvecDimensions = 4000
+
 func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitvec.Generation) error {
-	if gen.Dimensions > 4000 {
+	if gen.Dimensions > maxPostgresHalfvecDimensions {
 		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
 	}
 	executor, err := p.reconcilerExecutor()

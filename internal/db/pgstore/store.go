@@ -31,22 +31,24 @@ import (
 // derived from it.
 type Store struct {
 	*sql.DB
-	dsn                  string
-	schema               string
-	schemaOwner          string
-	instanceUID          string
-	readOnly             bool
-	installedFreshSchema bool
-	servingConn          *sql.Conn
-	federationLease      *federationRunnerLeaseState
-	federationLockDB     *sql.DB
-	idempotencyDB        *sql.DB
-	exportQ              exportQueryer
-	rotationStage        func(context.Context) error
-	uiReadStage          func(context.Context) error
-	uiProjectStatsRead   func()
-	uiLinkDetailRead     func()
-	externalRootNow      func() time.Time
+	dsn                          string
+	schema                       string
+	schemaOwner                  string
+	instanceUID                  string
+	readOnly                     bool
+	installedFreshSchema         bool
+	servingConn                  *sql.Conn
+	federationLease              *federationRunnerLeaseState
+	federationLockDB             *sql.DB
+	idempotencyDB                *sql.DB
+	exportQ                      exportQueryer
+	rotationStage                func(context.Context) error
+	uiReadStage                  func(context.Context) error
+	uiProjectStatsRead           func()
+	uiLinkDetailRead             func()
+	externalRootNow              func() time.Time
+	relayHistoryFullScanObserver func()
+	relayHistoryCache            *relayHistoryValidationCache
 	// federationFoldObserver, when non-nil, is called with each project ID
 	// whose raw event log a federated materialization reads. Tests use it to
 	// assert the log is read once per project per pass; production leaves it

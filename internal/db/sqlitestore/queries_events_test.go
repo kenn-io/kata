@@ -134,7 +134,38 @@ func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
 
 	none, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 6, Limit: 100})
 	require.NoError(t, err)
+	require.NotNil(t, none, "an empty event page is an empty slice, not nil")
 	assert.Len(t, none, 0, "AfterID at the highest event id must return no rows (strict >)")
+}
+
+func TestEventsAfterResolvesScopedReferencesWithOneConnection(t *testing.T) {
+	t.Parallel()
+	d := openTestDB(t)
+	ctx := context.Background()
+	visible := createProject(ctx, t, d, "visible")
+	hidden := createProject(ctx, t, d, "hidden")
+	hiddenIssue, _ := createTesterIssue(ctx, t, d, hidden.ID, "restricted peer")
+	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: visible.ID, Title: "Visible issue", Author: "member",
+		Links: []db.InitialLink{{
+			Type: "related", ToNumber: hiddenIssue.ID, ExpectedProjectUID: hidden.UID,
+		}},
+	})
+	require.NoError(t, err)
+
+	d.SetMaxOpenConns(1)
+	bounded, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	events, err := d.EventsAfter(db.WithAuthorizedProjects(bounded, []string{visible.UID}),
+		db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
+	for _, event := range events {
+		if event.Type == db.ProjectScopeResetEventType {
+			assert.Empty(t, event.Payload)
+			assert.Nil(t, event.IssueUID)
+		}
+	}
 }
 
 func TestEventsInWindow_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {

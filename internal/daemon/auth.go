@@ -67,7 +67,8 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 			// Non-API paths reach the optional, public web-assets handler.
 			// Keep the static shell public; listener Host policy still wraps it.
 			if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api" &&
-				r.URL.Path != "/openapi.yaml" && r.URL.Path != "/openapi.json" {
+				r.URL.Path != "/openapi.yaml" && r.URL.Path != "/openapi.json" &&
+				!strings.HasPrefix(r.URL.Path, "/debug/pprof/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -80,6 +81,9 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				isWebSessionBootstrapRequest(r) {
 				next.ServeHTTP(w, r)
 				return
+			}
+			if p.Token == "" && p.AllowUnauthenticatedPrivateNetworkWrites && !p.InsecureReadonly {
+				r = r.WithContext(withUnauthenticatedPrivateNetworkRequest(r.Context()))
 			}
 			if p.RequireTokenIdentity && p.SelfAuthenticatedRoutes.matches(r) &&
 				hasBearerHeader(r.Header.Get(authHeader)) && tokenStore != nil {
@@ -131,9 +135,6 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 					return
 				}
 				if !p.InsecureReadonly {
-					if p.AllowUnauthenticatedPrivateNetworkWrites {
-						r = r.WithContext(withUnauthenticatedPrivateNetworkRequest(r.Context()))
-					}
 					next.ServeHTTP(w, r)
 					return
 				}

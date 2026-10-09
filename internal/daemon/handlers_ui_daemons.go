@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/pkg/client/generated"
 
@@ -48,6 +49,7 @@ type webDaemonResponse struct {
 	ID      string `json:"id"`
 	URL     string `json:"url"`
 	Default bool   `json:"default"`
+	Local   bool   `json:"local"`
 	Auth    string `json:"auth"`
 	Health  string `json:"health"`
 	Hint    string `json:"hint,omitempty"`
@@ -103,16 +105,7 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 }
 
 func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
-	catalog := g.effectiveCatalog()
-	if insecureReadonlyRequest(r.Context()) {
-		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
-		for _, configured := range catalog {
-			if !webDaemonCredentialsConfigured(configured) {
-				visible = append(visible, configured)
-			}
-		}
-		catalog = visible
-	}
+	catalog := g.visibleCatalog(r.Context())
 	resolved := make([]resolvedWebDaemon, len(catalog))
 	states := make([]string, len(catalog))
 	var wg sync.WaitGroup
@@ -143,7 +136,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Daemons = append(out.Daemons, webDaemonResponse{
 			ID: configured.Name, URL: redactWebDaemonURL(d.baseURL),
-			Default: configured.Name == defaultID, Auth: auth,
+			Default: configured.Name == defaultID, Local: d.local, Auth: auth,
 			Health: states[i], Hint: hint,
 		})
 	}
@@ -152,6 +145,39 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	if err := json.MarshalWrite(w, out); err != nil {
 		slog.Debug("write web daemon roster", "err", err)
 	}
+}
+
+func (g *webDaemonGateway) visibleCatalog(ctx context.Context) []config.CatalogDaemonConfig {
+	catalog := g.effectiveCatalog()
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// No project delegation protocol exists for configured target tokens.
+		// Do not expose or probe another daemon's authority on this user's behalf.
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if configured.Local {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
+	if insecureReadonlyRequest(ctx) {
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if !webDaemonCredentialsConfigured(configured) {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
+	if len(catalog) == 0 {
+		if _, restricted := db.AuthorizedProjects(ctx); restricted || insecureReadonlyRequest(ctx) {
+			// Preserve the source daemon's ordinary local authority when a
+			// scoped or anonymous-read-only principal cannot use any catalog
+			// target. Use the same synthetic ID in selection below.
+			return []config.CatalogDaemonConfig{g.localFallbackDaemon()}
+		}
+	}
+	return catalog
 }
 
 func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -172,12 +198,31 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "read_only")
 		return
 	}
-	d, err := g.selectDaemon(r.Header.Get(webDaemonHeaderName))
+	requestedDaemon := strings.TrimSpace(r.Header.Get(webDaemonHeaderName))
+	d, err := g.selectDaemon(r.Context(), requestedDaemon)
 	if err != nil {
+		if requestedDaemon != "" {
+			if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
+				// Keep configured targets hidden while giving a scoped principal the
+				// same denial as a target that resolved but has no delegated grant.
+				writeWebDaemonError(w, http.StatusForbidden, "project_authority_not_delegated")
+				return
+			}
+			if policy.insecureReadonly {
+				writeWebDaemonError(w, http.StatusForbidden, "web_daemon_readonly_target_forbidden")
+				return
+			}
+		}
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !d.local {
+		if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
+			// Configured target credentials carry no delegated project grant.
+			// A source with project policy cannot borrow their wider authority.
+			writeWebDaemonError(w, http.StatusForbidden, "project_authority_not_delegated")
+			return
+		}
 		policy = delegatedWebDaemonSourcePolicy(policy)
 		if isMutation(r.Method) && !readOnlyProjectRequest && !policy.writable {
 			writeWebDaemonError(w, http.StatusForbidden, "read_only")
@@ -380,6 +425,10 @@ func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 	if len(visible) > 0 {
 		return visible
 	}
+	return []config.CatalogDaemonConfig{g.localFallbackDaemon()}
+}
+
+func (g *webDaemonGateway) localFallbackDaemon() config.CatalogDaemonConfig {
 	name := "local"
 	for {
 		collision := false
@@ -394,7 +443,7 @@ func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 		}
 		name += "-local"
 	}
-	return []config.CatalogDaemonConfig{{Name: name, Local: true}}
+	return config.CatalogDaemonConfig{Name: name, Local: true}
 }
 
 func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) string {
@@ -416,8 +465,8 @@ func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) strin
 	return ""
 }
 
-func (g *webDaemonGateway) selectDaemon(requested string) (resolvedWebDaemon, error) {
-	catalog := g.effectiveCatalog()
+func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (resolvedWebDaemon, error) {
+	catalog := g.visibleCatalog(ctx)
 	id := strings.TrimSpace(requested)
 	if id == "" {
 		id = g.defaultID(catalog)
@@ -696,6 +745,7 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	// Target credentials stay server-side and may not upgrade the source
 	// browser into a token-audit principal.
 	capabilities.TokenAuditRead = false
+	capabilities.AccessAdmin = false
 	encodedCapabilities, err := json.Marshal(capabilities)
 	if err != nil {
 		return fmt.Errorf("encode daemon capabilities: %w", err)
@@ -760,6 +810,11 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	// Project sync status is a source-origin read. Target credentials must not
+	// expose federation topology through the ordinary SPA gateway.
+	if strings.Contains(path, "/federation/") {
+		return false
+	}
 	if strings.HasPrefix(path, webDaemonProxyPrefix) {
 		return false
 	}

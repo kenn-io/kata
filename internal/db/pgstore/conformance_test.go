@@ -49,6 +49,9 @@ func TestStorageConformance(t *testing.T) {
 		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
 			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
 		},
+		InstallRelayHistoryFullScanObserver: func(store db.Storage, observe func()) func() {
+			return pgstore.InstallRelayHistoryFullScanObserverForTest(store.(*pgstore.Store), observe)
+		},
 		BackdateCommentCreated: backdateCommentCreated,
 		SeedLegacyPendingClaim: func(ctx context.Context, store db.Storage, requestUID string) error {
 			postgresStore := store.(*pgstore.Store)

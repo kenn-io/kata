@@ -41,6 +41,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		return db.Project{}, nil, db.ErrProjectAlreadyArchived
 	}
 
+	if err := d.validateRelayLifecycleTx(ctx, tx, project.ID); err != nil {
+		return db.Project{}, nil, err
+	}
 	openIssues, err := countOpenIssues(ctx, tx, project.ID)
 	if err != nil {
 		return db.Project{}, nil, err
@@ -57,6 +60,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		`UPDATE projects SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
 		project.ID); err != nil {
 		return db.Project{}, nil, fmt.Errorf("archive project: %w", err)
+	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, nil, fmt.Errorf("advance project access revision after project archive: %w", err)
 	}
 	binding, bindingErr := issueSyncBindingByProject(ctx, tx, project.ID)
 	if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
@@ -98,6 +104,7 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		Type:        "project.removed",
 		Actor:       p.Actor,
 		Payload:     string(payload),
+		SkipRelay:   p.SkipFederationRelay,
 	})
 	if err != nil {
 		return db.Project{}, nil, err
@@ -173,6 +180,9 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 	})
 	if err != nil {
 		return db.Project{}, nil, false, err
+	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, nil, false, fmt.Errorf("advance project access revision after project restore: %w", err)
 	}
 	updated, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, project.ID))
 	if err != nil {

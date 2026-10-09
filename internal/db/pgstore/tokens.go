@@ -74,6 +74,11 @@ func (s *Store) CreateAPIToken(
 	if err := db.ValidateAPITokenGrant(params.Scope, params.ExpiresAt); err != nil {
 		return db.APIToken{}, db.Event{}, err
 	}
+	initialTeams, err := db.NormalizeInitialTeams(params.TeamUIDs)
+	if err != nil {
+		return db.APIToken{}, db.Event{}, err
+	}
+	params.TeamUIDs = initialTeams
 	if params.ExpiresAt != nil {
 		expiresAt := params.ExpiresAt.UTC()
 		params.ExpiresAt = &expiresAt
@@ -81,7 +86,14 @@ func (s *Store) CreateAPIToken(
 
 	var token db.APIToken
 	var event db.Event
-	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+
+		if len(initialTeams) > 0 {
+			var revision string
+			if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='project_access_revision' FOR UPDATE`).Scan(&revision); err != nil {
+				return err
+			}
+		}
 		systemProject, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE name = $1 FOR SHARE`, db.SystemProjectName))
 		if err != nil {
@@ -108,8 +120,28 @@ func (s *Store) CreateAPIToken(
 		if err != nil {
 			return err
 		}
+
+		for _, teamUID := range initialTeams {
+			result, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES($1,$2) ON CONFLICT DO NOTHING`, teamUID, params.Actor)
+			if err != nil {
+				return err
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if changed > 0 {
+				if _, err := tx.ExecContext(ctx, `UPDATE teams SET revision=revision+1 WHERE uid=$1`, teamUID); err != nil {
+					return err
+				}
+				if err := bumpProjectAccess(ctx, tx); err != nil {
+					return err
+				}
+			}
+		}
 		payload, err := json.Marshal(db.ReplayTokenCreated{
-			TokenID: token.ID, TokenHash: token.TokenHash, TargetActor: token.Actor, Name: token.Name,
+			TeamUIDs: initialTeams,
+			TokenID:  token.ID, TokenHash: token.TokenHash, TargetActor: token.Actor, Name: token.Name,
 			Scope: token.Scope, ExpiresAt: token.ExpiresAt,
 		})
 		if err != nil {
@@ -290,7 +322,7 @@ func scanAPIToken(row rowScanner) (db.APIToken, error) {
 	token.LastUsedAt = lastUsedAt.Time
 	token.RevokedAt = revokedAt.Time
 	token.ExpiresAt = expiresAt.Time
-	if scopeKind.Valid || scopeProjectUID.Valid || scopeRootIssueUID.Valid || token.ExpiresAt != nil {
+	if scopeKind.Valid || scopeProjectUID.Valid || scopeRootIssueUID.Valid {
 		token.Scope = &db.APITokenScope{
 			Kind:         db.APITokenScopeKind(scopeKind.String),
 			ProjectUID:   scopeProjectUID.String,

@@ -107,6 +107,7 @@ func newRootCmd() *cobra.Command {
 	// (hammer-test finding #9). Applies to every subcommand because
 	// FlagErrorFunc is inherited from the root.
 	cmd.SetFlagErrorFunc(translateFlagError)
+	cmd.AddGroup(&cobra.Group{ID: "admin", Title: "Administrative commands"})
 
 	subs := []*cobra.Command{
 		newDaemonCmd(),
@@ -158,6 +159,7 @@ func newRootCmd() *cobra.Command {
 		newOpenAPICmd(),
 		newProjectsCmd(),
 		newTokensCmd(),
+		newTeamsCmd(),
 		newUICmd(),
 		newTUICmd(),
 		newUpdateCmd(),

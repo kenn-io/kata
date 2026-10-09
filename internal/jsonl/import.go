@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -110,8 +111,17 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 			switch record := rec.(type) {
 			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
-				*db.IssueClaimExport, *db.PendingClaimRequestExport:
+				*db.IssueClaimExport, *db.PendingClaimRequestExport,
+				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
+				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
 				continue
+			case *db.MetaKV:
+				if strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix) {
+					continue
+				}
 			case *db.EventExport:
 				// Restore rebuilds token authority from these events. Omitting
 				// the projection alone would resurrect it on the next restore.
@@ -221,6 +231,48 @@ func collectProjectUIDs(envs []Envelope) (map[int64]string, error) {
 
 func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, projectUIDByID map[int64]string) (db.ImportRecord, error) {
 	switch env.Kind {
+	case KindEmbeddingArtifact:
+		var record db.EmbeddingArtifactExport
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindRootKey:
+		var record db.RootKeyPin
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindEventProvenance:
+		var record db.AttributionReceipt
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindEntityProvenance:
+		var record db.EntityProvenance
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindTeam:
+		var record db.Team
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindTeamMembership:
+		var record db.TeamMembership
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
+	case KindProjectAccessPolicy:
+		var record db.ProjectAccessPolicy
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
 	case KindMeta:
 		var rec metaRecord
 		if err := decodeData(env, &rec); err != nil {
@@ -401,6 +453,25 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		return &rec, nil
+	case KindRelayOutbox:
+		var r db.RelayOutboxExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+	case KindRelayInbox:
+		var r db.RelayInboxExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+	case KindRelayCursors:
+		var r db.RelayCursorExport
+		if err := decodeData(env, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+
 	case KindFederationEnrollment:
 		var rec db.FederationEnrollmentExport
 		if err := decodeData(env, &rec); err != nil {

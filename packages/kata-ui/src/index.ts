@@ -3,6 +3,8 @@ export { default as IssueDetail } from './IssueDetail.svelte'
 export { projectIssueDetail } from './projectIssueDetail.js'
 export type {
   KataChecklistItem,
+  KataCreationAttributionModel,
+  KataCreationAttributionWire,
   KataIssueDetailModel,
   KataIssueDetailProps,
   KataIssueDetailWire,

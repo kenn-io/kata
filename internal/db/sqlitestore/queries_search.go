@@ -104,6 +104,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		scopeFilter.WriteString(" AND i.id IN (" + strings.NewReplacer("$1", "?", "$2", "?").Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
 		filterArgs = append(filterArgs, scope.RootIssueUID, scope.ProjectUID, scope.ProjectUID)
 	}
+	scopeFilter.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &filterArgs))
 	rowFilter += scopeFilter.String()
 	helper, err := sqlitefts.New(
 		sqlitefts.WithIndexTable("issues_fts"), sqlitefts.WithIndexKey("rowid"),
@@ -123,10 +124,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	query := fmt.Sprintf(`WITH candidates AS (%s)
-		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision,
-		       i.recurrence_id, i.occurrence_key,
-		       i.created_at, i.updated_at, i.closed_at, i.deleted_at,
+		SELECT `+issueColumns+`,
 		       candidates.score,
 		       (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
 		       (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
@@ -153,10 +151,12 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		if err := rows.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status,
 			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
 			&i.RecurrenceID, &i.OccurrenceKey,
-			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt,
+			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView,
 			&score, &inTitle, &inBody, &inComments); err != nil {
 			return nil, fmt.Errorf("scan search row: %w", err)
 		}
+		handle, _ := db.IssueTeammate(i.Metadata)
+		i.SourceFallback(i.Author, handle)
 		matched := make([]string, 0, 3)
 		if inTitle {
 			matched = append(matched, "title")

@@ -43,6 +43,10 @@ const defaultFederationClientTimeout = 60 * time.Second
 // spoke refreshed federation metadata and replayed from the new horizon.
 var ErrFederationResetRequired = errors.New("federation reset required")
 
+// ErrRelayEnrollmentPending defers transport until negotiated local setup has
+// activated the retained candidate enrollment credential.
+var ErrRelayEnrollmentPending = errors.New("relay enrollment pending")
+
 // ErrFederationResetBlockedByPendingPush reports that a spoke cannot safely
 // reset because it still has local-origin events that the hub has not accepted.
 var ErrFederationResetBlockedByPendingPush = db.ErrFederationResetBlockedByPendingPush
@@ -106,6 +110,9 @@ func syncFederationOnceWithFence(
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
 ) error {
+	if creds.RelayEnrollmentPending {
+		return ErrRelayEnrollmentPending
+	}
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 		return err
 	}
@@ -129,6 +136,16 @@ func syncFederationOnceWithFence(
 	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+	}
+	if binding.RelayConfig != nil {
+		if err := syncRelayBinding(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease); err != nil {
+			if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+				return leaseErr
+			}
+			err = recordRelayUpstreamRejection(ctx, store, binding, err)
+			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+		}
+		return nil
 	}
 	runStartBinding := binding
 	if binding.PushEnabled {
@@ -735,13 +752,16 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
-	DB             db.Storage
-	Credentials    config.FederationCredentialStore
-	Opts           clientpkg.Opts
-	Interval       time.Duration
-	Wake           <-chan struct{}
-	Debounce       time.Duration
-	OnError        func(error)
+	DB          db.Storage
+	Credentials config.FederationCredentialStore
+	Opts        clientpkg.Opts
+	Interval    time.Duration
+	Wake        <-chan struct{}
+	Debounce    time.Duration
+	OnError     func(error)
+	// OnSyncComplete wakes local reconciliation after a sync attempt. A failed
+	// acknowledgement can leave valid artifacts durably committed.
+	OnSyncComplete func()
 	OnPulledEvents func(projectID int64, events []db.Event)
 	// OnPulledEventsFrom takes precedence over OnPulledEvents and receives the
 	// fork source for hook jobs caused by this admitted spoke pass. The source
@@ -904,7 +924,11 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease); err != nil {
+	syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease)
+	if r.OnSyncComplete != nil {
+		r.OnSyncComplete()
+	}
+	if err := syncErr; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 			return err
 		}
@@ -951,6 +975,9 @@ func retryPendingClaimsOnceWithFence(
 	opts clientpkg.Opts,
 	validateLease func(context.Context) error,
 ) error {
+	if creds.RelayEnrollmentPending {
+		return ErrRelayEnrollmentPending
+	}
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 		return err
 	}
@@ -1006,7 +1033,7 @@ func retryPendingClaimsOnceWithFence(
 	}
 	var errs []error
 	for _, req := range pending {
-		if err := retryPendingClaim(ctx, store, client, hubProjectID, req, validateLease); err != nil {
+		if err := retryPendingClaim(ctx, store, client, hubProjectID, binding, req, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
@@ -1052,12 +1079,27 @@ func retryPendingClaim(
 	store db.Storage,
 	client *Client,
 	hubProjectID int64,
+	binding db.FederationBinding,
 	pending db.PendingClaimRequest,
 	validateLease func(context.Context) error,
 ) error {
+	incoming := db.ClaimPrincipal{
+		HolderInstanceUID: pending.HolderInstanceUID,
+		Holder:            pending.Holder,
+		ClientKind:        pending.ClientKind,
+	}
+	upstream := incoming
+	alreadyForwarded := binding.RelayConfig != nil &&
+		incoming.HolderInstanceUID == store.InstanceUID() &&
+		incoming.Holder == binding.Actor && strings.HasPrefix(incoming.ClientKind, "relay:v1:")
+	if binding.Role == db.FederationRoleSpoke && !alreadyForwarded {
+		upstream = db.BoundSpokeClaimPrincipal(binding, incoming, store.InstanceUID())
+	}
+	remapToIncoming := binding.Role == db.FederationRoleSpoke && binding.RelayConfig != nil &&
+		incoming.HolderInstanceUID != store.InstanceUID()
 	req := ClaimRequest{
-		Holder:     pending.Holder,
-		ClientKind: pending.ClientKind,
+		Holder:     upstream.Holder,
+		ClientKind: upstream.ClientKind,
 		ClaimKind:  pending.ClaimKind,
 		Purpose:    pending.Purpose,
 	}
@@ -1084,8 +1126,18 @@ func retryPendingClaim(
 		return err
 	}
 	lease := resp.canonicalLease()
+	if resp.Pending && !resp.Granted && lease == nil {
+		return store.MarkPendingClaimAttempt(ctx, pending.RequestUID, "claim request remains pending upstream", now)
+	}
 	if resp.Granted && lease != nil {
-		return store.ResolvePendingClaim(ctx, pending.RequestUID, issueClaimFromAPI(lease))
+		resolved := issueClaimFromAPI(lease)
+		if remapToIncoming && lease.HolderInstanceUID == upstream.HolderInstanceUID &&
+			lease.Holder == upstream.Holder && lease.ClientKind == upstream.ClientKind {
+			resolved.HolderInstanceUID = incoming.HolderInstanceUID
+			resolved.Holder = incoming.Holder
+			resolved.ClientKind = incoming.ClientKind
+		}
+		return store.ResolvePendingClaim(ctx, pending.RequestUID, resolved)
 	}
 	return store.RejectPendingClaim(ctx, pending.RequestUID, "lease denied by hub", now)
 }

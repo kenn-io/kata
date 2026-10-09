@@ -67,7 +67,7 @@ func FederationEnrollmentMatchesCreate(
 	enrollment FederationEnrollment,
 	input CreateFederationEnrollmentParams,
 ) bool {
-	return enrollment.RevokedAt == nil &&
+	return enrollment.RelayProtocolVersion == 0 && enrollment.RevokedAt == nil &&
 		enrollment.SpokeInstanceUID == input.SpokeInstanceUID &&
 		sameOptionalInt64(enrollment.ProjectID, input.ProjectID) &&
 		enrollment.Capabilities == input.Capabilities &&

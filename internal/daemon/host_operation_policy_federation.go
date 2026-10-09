@@ -3,7 +3,7 @@ package daemon
 func registerFederationOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationRead, Capability: hostCapabilityRead,
-	}, "getFederationStatus", "getProjectFederation", "getProjectFederationStatus")
+	}, "getFederationStatus", "getProjectFederation", "getProjectFederationStatus", "getFederationBridgeStatus")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationAdministration, Capability: hostCapabilityFederate,
@@ -15,12 +15,13 @@ func registerFederationOperationPolicies(policies map[string]HostOperationPolicy
 	}, "enableProjectFederation", "skipFederationQuarantine", "retryFederationQuarantine",
 		"createFederationEnrollment", "rotateFederationEnrollment",
 		"revokeFederationEnrollment", "createFederationReplica",
-		"leaveFederationReplica", "rebindFederationReplica", "configureFederationSigning")
+		"leaveFederationReplica", "rebindFederationReplica", "configureFederationSigning",
+		"connectFederationBridge", "disconnectFederationBridge")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate,
 	}, "getFederationProjectMetadata", "pollFederationProjectEvents")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate, Mutation: true,
-	}, "ingestFederationProjectEvents")
+	}, "disconnectRelayEnrollment", "ingestFederationProjectEvents", "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries")
 }

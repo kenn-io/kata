@@ -154,7 +154,8 @@ func TestRoot_NoArgsPrintsHelp(t *testing.T) {
 	for _, args := range [][]string{nil, {"--json"}} {
 		out := string(executeRoot(t, newRootCmd(), args...))
 		assert.Contains(t, out, "lightweight issue tracker")
-		assert.Contains(t, out, "Available Commands:")
+		assert.Contains(t, out, "Administrative commands")
+		assert.Contains(t, out, "Additional Commands:")
 	}
 }
 

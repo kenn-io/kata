@@ -20,7 +20,7 @@ func (s *Store) ResetFederatedProject(
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err
 		}
-		if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
 		if err := clearFederatedProjectTx(ctx, tx, projectID); err != nil {
@@ -49,7 +49,7 @@ func (s *Store) ResetFederatedProjectIfNoPendingPush(
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err
 		}
-		if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
 		var quarantineID int64
@@ -83,7 +83,17 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err !
 	})
 }
 
-func rejectFederationResetExternalRootHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var relayConfig *string
+	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&relayConfig); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		return mapSQLError(err, nil)
+	}
+	if relayConfig != nil {
+		return db.ErrRelayResetRequiresRootProof
+	}
 	var bindingID int64
 	err := tx.QueryRowContext(ctx,
 		`SELECT id FROM external_root_bindings WHERE project_id=$1 LIMIT 1 FOR UPDATE`, projectID).Scan(&bindingID)

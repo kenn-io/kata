@@ -128,14 +128,17 @@ type FederationConfigHealth struct {
 // further calls.
 type InstanceResponse struct {
 	Body struct {
-		InstanceUID          string         `json:"instance_uid"`
-		Version              string         `json:"version"`
-		SchemaVersion        int64          `json:"schema_version"`
-		WebUIContractVersion string         `json:"web_ui_contract_version,omitempty"`
-		WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
-		IssueStatusSync      bool           `json:"issue_status_sync"`
-		IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
-		Auth                 AuthInfoOut    `json:"auth"`
+		InstanceUID                      string         `json:"instance_uid"`
+		Version                          string         `json:"version"`
+		SchemaVersion                    int64          `json:"schema_version"`
+		RelayProtocolVersion             int            `json:"relay_protocol_version,omitempty"`
+		ProvenanceProtocolVersion        int            `json:"provenance_protocol_version,omitempty"`
+		EmbeddingArtifactProtocolVersion int            `json:"embedding_artifact_protocol_version,omitempty"`
+		WebUIContractVersion             string         `json:"web_ui_contract_version,omitempty"`
+		WebUICapabilities                UICapabilities `json:"web_ui_capabilities"`
+		IssueStatusSync                  bool           `json:"issue_status_sync"`
+		IssueSubtreeTokens               bool           `json:"issue_subtree_tokens"`
+		Auth                             AuthInfoOut    `json:"auth"`
 	}
 }
 
@@ -174,6 +177,7 @@ type CreateTokenRequest struct {
 		Name             string        `json:"name,omitempty"`
 		Scope            *TokenScopeIn `json:"scope,omitempty"`
 		ExpiresInSeconds int64         `json:"expires_in_seconds,omitempty"`
+		TeamUIDs         []string      `json:"team_uids,omitempty" maxItems:"256"`
 	}
 }
 

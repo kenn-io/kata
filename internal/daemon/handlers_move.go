@@ -104,6 +104,9 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		if !in.Body.DryRun {
+			recordProjectAccessMutationRevision(ctx, res.ProjectAccessRevision)
+		}
 
 		out := &api.MoveIssueResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)

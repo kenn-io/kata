@@ -51,6 +51,29 @@ describe('event invalidation control', () => {
     expect(refresh).toHaveBeenNthCalledWith(3, false)
   })
 
+  it('keeps a second reconnect refresh unconditional while the first is pending', async () => {
+    let completeFirst: ((accepted: boolean) => void) | undefined
+    const refresh = vi
+      .fn<(full: boolean) => Promise<boolean>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            completeFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(true)
+    const controller = new InvalidationController(refresh)
+
+    controller.reconnect()
+    expect(refresh).toHaveBeenNthCalledWith(1, true)
+    controller.reconnect()
+    completeFirst?.(true)
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+    expect(refresh).toHaveBeenNthCalledWith(2, true)
+    controller.stop()
+  })
+
   it('keeps a reset latched across an authentication pause and reauthentication', async () => {
     const refresh = vi
       .fn<(full: boolean) => Promise<boolean>>()

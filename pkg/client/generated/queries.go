@@ -139,6 +139,38 @@ type PollFederationProjectEventsQuery struct {
 	Limit   *int64 `json:"limit,omitempty"`
 }
 
+type OfferRelayDeliveriesQuery struct {
+	Stream         *OfferRelayDeliveriesQueryStream `json:"stream,omitempty"`
+	Limit          *int64                           `json:"limit,omitempty" validate:"omitempty,gte=1,lte=1024"`
+	ArtifactDigest []string                         `json:"artifact_digest,omitempty"`
+	Epoch          *int64                           `json:"epoch,omitempty" validate:"omitempty,gte=0"`
+}
+
+func (o OfferRelayDeliveriesQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if o.Stream != nil {
+		if v, ok := any(o.Stream).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Stream", err)
+			}
+		}
+	}
+	if o.Limit != nil {
+		if err := typesValidator.Var(o.Limit, "omitempty,gte=1,lte=1024"); err != nil {
+			errors = errors.Append("Limit", err)
+		}
+	}
+	if o.Epoch != nil {
+		if err := typesValidator.Var(o.Epoch, "omitempty,gte=0"); err != nil {
+			errors = errors.Append("Epoch", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ListIssuesQuery struct {
 	Status *ListIssuesQueryStatus `json:"status,omitempty"`
 

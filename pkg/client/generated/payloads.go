@@ -6,6 +6,10 @@ type ReconcileExternalRootByKeyBody = ReconcileExternalRootByKeyRequestBody
 
 type MapConnectorFieldBody = MapConnectorFieldRequestBody
 
+type ConnectFederationBridgeBody = ConnectFederationBridgeRequestBody
+
+type DisconnectFederationBridgeBody = DisconnectFederationBridgeRequestBody
+
 type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
 type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
@@ -24,6 +28,8 @@ type ResolveProjectBody = ResolveProjectRequestBody
 
 type RenameProjectBody = RenameProjectRequestBody
 
+type SetProjectAccessBody = SetProjectAccessRequestBody
+
 type PurgeProjectBody = ProjectPurgeRequestBody
 
 type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
@@ -35,6 +41,12 @@ type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody
 type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
 
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
+
+type AcceptRelayDeliveriesBody = RelayBatch
+
+type AckRelayDeliveriesBody = RelayAckRequestBody
+
+type DisconnectRelayEnrollmentBody = DisconnectRelayRequestBody
 
 type ImportIssuesBody = ImportRequestBody
 
@@ -105,6 +117,8 @@ type PatchProjectMetadataBody = PatchProjectMetadataRequestBody
 type CreateRecurrenceBody = CreateRecurrenceRequestBody
 
 type PatchRecurrenceBody = PatchRecurrenceRequestBody
+
+type CreateTeamBody = CreateTeamRequestBody
 
 type CreateTokenBody = CreateTokenRequestBody
 

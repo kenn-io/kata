@@ -21,10 +21,17 @@ func (s *Store) annotateFederationIngestClaimWorkTx(
 	tx *sql.Tx,
 	projectID int64,
 	event db.RemoteEvent,
+	rootHolder db.ClaimPrincipal,
 ) ([]db.Event, error) {
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(event)
 	if err != nil || len(issueUIDs) == 0 {
 		return nil, err
+	}
+	if rootHolder.HolderInstanceUID == "" {
+		rootHolder.HolderInstanceUID = event.OriginInstanceUID
+	}
+	if rootHolder.Holder == "" {
+		rootHolder.Holder = event.Actor
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1`, projectID))
@@ -49,7 +56,8 @@ func (s *Store) annotateFederationIngestClaimWorkTx(
 		events, auditErr := s.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
 			Project: project, Issue: issue, OffendingEventUID: event.EventUID,
 			EventType: event.Type, Actor: event.Actor,
-			HolderInstanceUID: event.OriginInstanceUID, RequireClaim: candidate.RequireClaim,
+			HolderActor: rootHolder.Holder, HolderInstanceUID: rootHolder.HolderInstanceUID,
+			OffendingOriginInstanceUID: event.OriginInstanceUID, RequireClaim: candidate.RequireClaim,
 		})
 		if auditErr != nil {
 			return nil, auditErr
@@ -96,13 +104,15 @@ func federationIngestClaimAuditIssueUIDs(
 }
 
 type claimWorkMutationInput struct {
-	Project           db.Project
-	Issue             db.Issue
-	OffendingEventUID string
-	EventType         string
-	Actor             string
-	HolderInstanceUID string
-	RequireClaim      bool
+	Project                    db.Project
+	Issue                      db.Issue
+	OffendingEventUID          string
+	EventType                  string
+	Actor                      string
+	HolderActor                string
+	HolderInstanceUID          string
+	OffendingOriginInstanceUID string
+	RequireClaim               bool
 }
 
 func (s *Store) annotateClaimWorkMutationTx(
@@ -125,8 +135,12 @@ func (s *Store) annotateClaimWorkMutationTx(
 	if err != nil {
 		return nil, err
 	}
+	holderActor := input.HolderActor
+	if holderActor == "" {
+		holderActor = input.Actor
+	}
 	if (input.RequireClaim || claimWorkMutationRequiresClaim(input.EventType)) &&
-		!claimWorkCoveredByLiveClaim(live, input.HolderInstanceUID, input.Actor) {
+		!claimWorkCoveredByLiveClaim(live, input.HolderInstanceUID, holderActor) {
 		violation, err := s.insertClaimViolationEventTx(ctx, tx, input, live)
 		if err != nil {
 			return nil, err
@@ -150,6 +164,10 @@ func (s *Store) insertClaimViolationEventTx(
 	input claimWorkMutationInput,
 	claim db.IssueClaim,
 ) (db.Event, error) {
+	offendingOrigin := input.OffendingOriginInstanceUID
+	if offendingOrigin == "" {
+		offendingOrigin = input.HolderInstanceUID
+	}
 	payload := map[string]any{
 		"claim_uid": claim.ClaimUID, "holder": claim.Holder,
 		"holder_instance_uid": claim.HolderInstanceUID, "client_kind": claim.ClientKind,
@@ -157,7 +175,7 @@ func (s *Store) insertClaimViolationEventTx(
 		"acquired_at": formatStoredTime(claim.AcquiredAt), "reason": "uncovered_work",
 		"issue_uid": claim.IssueUID, "offending_event_uid": input.OffendingEventUID,
 		"offending_event_type":          input.EventType,
-		"offending_origin_instance_uid": input.HolderInstanceUID, "actor": input.Actor,
+		"offending_origin_instance_uid": offendingOrigin, "actor": input.Actor,
 	}
 	if claim.ExpiresAt != nil {
 		payload["expires_at"] = formatStoredTime(*claim.ExpiresAt)

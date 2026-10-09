@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,6 +39,10 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	m.authCapabilitiesRequired = true
 	if msg.err != nil {
 		m.authCapabilitiesReady = false
+		m.activeAuth = AuthInfo{}
+		m.activeAuthError = msg.err.Error()
+		var apiError *APIError
+		m.activeAuthRejected = errors.As(msg.err, &apiError) && apiError != nil && apiError.Status == http.StatusUnauthorized
 		m.input = inputState{}
 		if m.view == viewCredentials && m.credentials.capabilityPending {
 			m.credentials.capabilityPending = false
@@ -63,6 +69,10 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		client.mu.Unlock()
 	}
 	m.authCapabilitiesReady = true
+	m.activeAuth = msg.auth
+	m.activeAuthError = ""
+	m.activeAuthRejected = false
+	expiryCmd := m.activeCredentialExpiryCmd()
 	m.tokenAuditRead = msg.auth.TokenAuditRead
 	m.issueScoped = msg.auth.Scope != nil
 	m.scopedWritable = slices.Contains(msg.auth.AllowedActions, "issue.edit")
@@ -75,10 +85,10 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		m.credentials.available = m.tokenAuditRead
 		m.credentials.loading = m.credentials.available
 		if m.credentials.available {
-			return m, m.fetchCredentials(m.credentials.gen)
+			return m, combineCmds(m.fetchCredentials(m.credentials.gen), expiryCmd)
 		}
 	}
-	return m, nil
+	return m, expiryCmd
 }
 
 func (m Model) inputMutationAllowed() bool {

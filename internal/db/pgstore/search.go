@@ -70,6 +70,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 	var scopeFilter strings.Builder
 	appendAllowedIssueIDsPostgresBuilder(&scopeFilter, &args, request.params.AllowedIssueIDs)
+	scopeFilter.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&scopeFilter, &args, request.params.IssueScope)
 	rowFilter += scopeFilter.String()
 
@@ -93,9 +94,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
   SELECT %s AS any_query
 )
-SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
-       i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at,
+SELECT `+issueColumns+`,
        candidates.score,
        to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
        to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
@@ -129,6 +128,8 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
+		handle, _ := db.IssueTeammate(issue.Metadata)
+		issue.SourceFallback(issue.Author, handle)
 		matchedIn := make([]string, 0, 3)
 		if inTitle {
 			matchedIn = append(matchedIn, "title")

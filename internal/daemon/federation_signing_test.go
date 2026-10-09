@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -45,7 +46,14 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		spokeDB, err := sqlitestore.Open(t.Context(), filepath.Join(home, "spoke.db"))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, spokeDB.Close()) })
-		spokeServer := daemon.NewServer(daemon.ServerConfig{DB: spokeDB, FederationCredentials: credentials})
+		_, _, err = spokeDB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "spoke-user-token", Actor: "enrolled-actor", AdminActor: db.BootstrapActor,
+		})
+		require.NoError(t, err)
+		spokeServer := daemon.NewServer(daemon.ServerConfig{
+			DB: spokeDB, FederationCredentials: credentials,
+			Auth: config.AuthConfig{Token: "spoke-owner-token", RequireTokenIdentity: true},
+		})
 		spokeHTTP := httptest.NewTestServer(t, spokeServer.Handler())
 		spoke := &testenv.Env{DB: spokeDB, URL: "http://spoke.example", HTTP: spokeHTTP.Client()}
 		project, issue := createClaimHubIssueNamed(t, env, "hub-project")
@@ -53,12 +61,29 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 			Token: "enrollment-secret", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "pull,push,claim", Actor: "enrolled-actor",
 		})
 		require.NoError(t, err)
+		relayPublic, _, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		require.NoError(t, env.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
+			ProjectUID: project.UID, AuthorityUID: env.DB.InstanceUID(),
+			KeyID: db.RootPublicKeyID(relayPublic), PublicKey: relayPublic,
+		}))
+		relayParent, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "relay-cleanup-parent-token", Actor: "enrolled-actor", AdminActor: "admin",
+		})
+		require.NoError(t, err)
+		relayGrant, err := env.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{
+			ProjectID: project.ID, ParentTokenID: relayParent.ID, SpokeInstanceUID: spoke.DB.InstanceUID(),
+			ProtocolVersion: db.RelayProtocolVersion, ServeDownstream: true,
+		})
+		require.NoError(t, err)
 		t.Setenv("TEST_GLOBAL_KEY", strings.Repeat("g", 64))
 		t.Setenv("TEST_PULL_KEY", strings.Repeat("p", 64))
 		t.Setenv("TEST_REMOVED_KEY", strings.Repeat("r", 64))
+		t.Setenv("TEST_RELAY_CLEANUP_KEY", strings.Repeat("c", 64))
 		globalSource := federationsigning.Source{KeyID: "global-key", KeyEnv: "TEST_GLOBAL_KEY"}
 		pullSource := federationsigning.Source{KeyID: "pull-key", KeyEnv: "TEST_PULL_KEY"}
 		removedSource := federationsigning.Source{KeyID: "removed-key", KeyEnv: "TEST_REMOVED_KEY"}
+		relayCleanupSource := federationsigning.Source{KeyID: "relay-cleanup-key", KeyEnv: "TEST_RELAY_CLEANUP_KEY"}
 		globalEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "global-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Capabilities: "pull", Actor: "global-actor"})
 		require.NoError(t, err)
 		pullEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "pull-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ProjectID: &project.ID, Capabilities: "pull", Actor: "pull-actor"})
@@ -80,7 +105,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		base := "https://hub.example/mount"
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}}, state)
+		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}, {Source: relayCleanupSource, EnrollmentID: relayGrant.Enrollment.ID}}, state)
 		t.Cleanup(func() { _ = v.Close() })
 		previous := http.DefaultTransport
 		http.DefaultTransport = public.Client().Transport
@@ -100,6 +125,22 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		metadata, err := client.ProjectFederation(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.Equal(t, project.UID, metadata.ProjectUID)
+		disconnectPath := fmt.Sprintf("/api/v1/projects/%d/federation/relay:disconnect", project.ID)
+		disconnectBody, err := json.Marshal(map[string]string{"spoke_instance_uid": spoke.DB.InstanceUID()})
+		require.NoError(t, err)
+		disconnectSigned := func() *httptest.ResponseRecorder {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+disconnectPath, bytes.NewReader(disconnectBody))
+			require.NoError(t, err)
+			request.Header.Set("Authorization", "Bearer "+relayGrant.Token)
+			request.Header.Set("Content-Type", "application/json")
+			require.NoError(t, federationsigning.Sign(request, relayCleanupSource))
+			request.URL.Path = disconnectPath
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			return recorder
+		}
+		firstDisconnect := disconnectSigned()
+		require.Equal(t, http.StatusOK, firstDisconnect.Code, firstDisconnect.Body.String())
 		mainHandler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://daemon.example"})
 		require.NoError(t, err)
 		headRequest := httptest.NewRequest(http.MethodHead, "https://daemon.example"+projectPath(project.ID)+"/federation/metadata", nil)
@@ -122,6 +163,27 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		server.Handler().ServeHTTP(recorder, mainRequest)
 		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		require.Len(t, access.snapshot(), before+1, "verified ingest must reuse native host admission")
+		parentRecord, err := env.DB.ResolveAPIToken(t.Context(), "relay-cleanup-parent-token")
+		require.NoError(t, err)
+		_, _, err = env.DB.RevokeAPIToken(t.Context(), parentRecord.ID, "admin")
+		require.NoError(t, err)
+		cleanupTeam, _, err := env.DB.CreateTeam(t.Context(), "relay-cleanup-other-team", "admin")
+		require.NoError(t, err)
+		_, err = env.DB.SetTeamMembership(t.Context(), cleanupTeam.UID, "other-member", true, "admin")
+		require.NoError(t, err)
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{cleanupTeam.UID},
+		}, "admin")
+		require.NoError(t, err)
+		retryDisconnect := disconnectSigned()
+		require.Equal(t, http.StatusOK, retryDisconnect.Code,
+			"signed self-revocation retry must survive revoked grant and parent authority; response=%s", retryDisconnect.Body.String())
+		_, err = client.RelayReset(t.Context(), project.ID)
+		require.ErrorContains(t, err, "404", "ordinary relay data access still obeys project visibility")
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: project.UID, Visibility: "all",
+		}, "admin")
+		require.NoError(t, err)
 
 		credential := config.FederationCredential{HubURL: base, HubProjectID: project.ID, Token: enrollment.Token, Capabilities: "pull,push,claim", Actor: "enrolled-actor", Signing: &source}
 		replica, err := daemon.EnsureFederationReplica(t.Context(), spoke.DB, credentials, nil, daemon.EnsureFederationReplicaParams{HubURL: base, HubProjectID: project.ID, HubProjectUID: project.UID, ProjectName: "spoke-project", ReplayHorizonEventID: metadata.ReplayHorizonEventID, Credential: credential, PushEnabled: true})
@@ -156,13 +218,14 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		_, err = client.ReleaseClaim(t.Context(), project.ID, issue.ShortID, claim)
 		require.NoError(t, err)
 		// The spoke's real local API forwards with its saved signing source.
+		spokeAuth := map[string]string{"Authorization": "Bearer spoke-user-token"}
 		for _, action := range []string{"acquire", "renew", "release"} {
-			resp, raw := envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/%s", replica.Project.ID, mirrored.ShortID, action), map[string]any{"holder": "enrolled-actor", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 300, "purpose": "edit"}, nil)
+			resp, raw := envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/%s", replica.Project.ID, mirrored.ShortID, action), map[string]any{"holder": "enrolled-actor", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 300, "purpose": "edit"}, spokeAuth)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		}
-		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", replica.Project.ID, mirrored.ShortID), nil, nil)
+		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", replica.Project.ID, mirrored.ShortID), nil, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-		resp, raw = envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.Project.ID, mirrored.ShortID), map[string]any{"actor": "enrolled-actor", "ttl_seconds": 300}, nil)
+		resp, raw = envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.Project.ID, mirrored.ShortID), map[string]any{"actor": "enrolled-actor", "ttl_seconds": 300}, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		// Valid MACs cannot widen the bearer capability or global project scope.
 		globalClient, err := federation.NewClient(t.Context(), base, globalEnrollment.Token, clientpkg.Opts{FederationSigning: &globalSource})
@@ -202,6 +265,55 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		_ = removedResponse.Body.Close()
 		require.Equal(t, http.StatusUnauthorized, removedResponse.StatusCode)
+	})
+}
+
+func TestSignedRelayAcceptAllowsSupportedBulkBody(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("TEST_RELAY_SIGNING_KEY", strings.Repeat("k", 64))
+		home := t.TempDir()
+		t.Setenv("KATA_HOME", home)
+		t.Setenv("KATA_WORKSPACE", filepath.Join(home, "workspace"))
+		source := federationsigning.Source{KeyID: "relay-key", KeyEnv: "TEST_RELAY_SIGNING_KEY"}
+		state := filepath.Join(home, "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		project, err := store.CreateProject(t.Context(), "spoke-project")
+		require.NoError(t, err)
+		enrollment, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+			Token: "relay-token", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID,
+			Capabilities: "push", Actor: "example-actor",
+		})
+		require.NoError(t, err)
+		verifier, err := federationsigning.NewVerifier("https://daemon.example", []federationsigning.Key{{
+			Source: source, EnrollmentID: enrollment.Enrollment.ID,
+		}}, state)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, verifier.Close()) })
+		time.Sleep(federationsigning.Quarantine)
+		server := daemon.NewServer(daemon.ServerConfig{
+			DB: store, FederationSigning: verifier, FederationSigningRequired: true,
+		})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+
+		body, err := json.Marshal(db.RelayBatch{
+			Stream:    db.RelayStreamEvent,
+			Envelopes: []db.RelayEnvelope{{Body: bytes.Repeat([]byte("x"), 70*1024)}},
+		})
+		require.NoError(t, err)
+		require.Greater(t, len(body), 64*1024)
+		request := httptest.NewRequest(http.MethodPost,
+			fmt.Sprintf("https://daemon.example/api/v1/projects/%d/federation/relay:accept", project.ID), bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer relay-token")
+		request.Header.Set("Content-Type", "application/json")
+		require.NoError(t, federationsigning.Sign(request, source))
+		require.Greater(t, request.ContentLength, int64(64*1024))
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		require.NotEqual(t, http.StatusRequestEntityTooLarge, recorder.Code, recorder.Body.String(),
+			"acceptRelayDeliveries supports the route's 128 MiB batch budget")
 	})
 }
 

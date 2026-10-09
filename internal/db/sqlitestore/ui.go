@@ -168,6 +168,7 @@ func readUIGraphIssues(
 	statement := issueSelect + `
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
 	if allowPredicate != "" {
 		statement += ` AND ` + allowPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
@@ -292,6 +293,7 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	`
 	ownerArgs := []any{db.SystemProjectName}
 	ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+	ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
 	ownerStatement += ` ORDER BY i.owner LIMIT ?`
 	ownerArgs = append(ownerArgs, limit)
 	data.Owners, err = readUIReferenceStrings(ctx, tx, ownerStatement, ownerArgs...)
@@ -307,6 +309,7 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	`
 	labelArgs := []any{db.SystemProjectName}
 	labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
+	labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
 	labelStatement += ` ORDER BY il.label LIMIT ?`
 	labelArgs = append(labelArgs, limit)
 	data.Labels, err = readUIReferenceStrings(ctx, tx, labelStatement, labelArgs...)
@@ -345,6 +348,8 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 			SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM purge_log
 			UNION ALL
 			SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM project_purge_log
+			UNION ALL
+			SELECT COALESCE(MAX(CAST(value AS BIGINT)), 0) FROM meta WHERE substr(key,1,length('attribution_ui_reset.'))='attribution_ui_reset.'
 		)`).Scan(&cursor); err != nil {
 		return 0, fmt.Errorf("read UI event cursor: %w", err)
 	}
@@ -354,8 +359,11 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 func readUIProjects(
 	ctx context.Context, tx *sql.Tx, onStatsRead func(),
 ) ([]db.UIProject, map[int64]string, error) {
-	rows, err := tx.QueryContext(ctx, projectSelect+
-		` WHERE deleted_at IS NULL AND name <> ? ORDER BY name ASC`, db.SystemProjectName)
+	args := []any{db.SystemProjectName}
+	statement := projectSelect + ` WHERE deleted_at IS NULL AND name <> ?`
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement += " AND " + authorizedProjectPredicate(ctx, "uid", &args) + ` ORDER BY name ASC`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read UI projects: %w", err)
 	}
@@ -390,9 +398,10 @@ func readUIProjects(
 }
 
 func readUIProjectNames(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id, name FROM projects WHERE deleted_at IS NULL AND name <> ? ORDER BY name`,
-		db.SystemProjectName)
+	args := []any{db.SystemProjectName}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement := `SELECT id, name FROM projects WHERE deleted_at IS NULL AND name <> ? AND ` + authorizedProjectPredicate(ctx, "uid", &args) + ` ORDER BY name`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI project names: %w", err)
 	}
@@ -413,6 +422,8 @@ func readUIProjectNames(ctx context.Context, tx *sql.Tx) (map[int64]string, erro
 }
 
 func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectStats, error) {
+	args := []any{db.SystemProjectName}
+	predicate := authorizedProjectPredicate(ctx, "p.uid", &args)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT p.id,
 			COUNT(i.id) FILTER (WHERE i.status = 'open'),
@@ -420,8 +431,8 @@ func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectSt
 			(SELECT e.created_at FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1)
 		FROM projects p
 		LEFT JOIN issues i ON i.project_id = p.id AND i.deleted_at IS NULL
-		WHERE p.deleted_at IS NULL AND p.name <> ?
-		GROUP BY p.id`, db.SystemProjectName)
+		WHERE p.deleted_at IS NULL AND p.name <> ? AND `+predicate+`
+		GROUP BY p.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI project stats: %w", err)
 	}
@@ -453,6 +464,7 @@ func readUIIssues(
 ) ([]db.UIIssue, error) {
 	statement := scheduledIssueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if query.ProjectUID != "" {
 		statement += ` AND p.uid = ?`
 		args = append(args, query.ProjectUID)
@@ -563,6 +575,7 @@ func readUIIssues(
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}
+	statement, args = authorizeRelationshipQuery(ctx, statement, args, "ready_link", "relation")
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI issues: %w", err)
@@ -722,6 +735,7 @@ func readUIIssueByUID(
 ) (db.UIIssue, error) {
 	statement := issueSelect + ` WHERE i.uid = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	statement, args := appendUIReferenceIssueScopeSQLite(statement, []any{issueUID, db.SystemProjectName}, allowedIssueIDs)
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	issue, err := scanIssue(tx.QueryRowContext(ctx, statement, args...))
 	if err != nil {
 		return db.UIIssue{}, err
@@ -734,11 +748,13 @@ func readUIIssueByUID(
 }
 
 func readUISelectedState(ctx context.Context, tx *sql.Tx, issueUID string) (string, error) {
+	args := []any{issueUID}
+	predicate := authorizedProjectPredicate(ctx, "p.uid", &args)
 	var archived int
 	err := tx.QueryRowContext(ctx, `
 		SELECT CASE WHEN i.deleted_at IS NOT NULL OR p.deleted_at IS NOT NULL THEN 1 ELSE 0 END
 		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.uid = ?`, issueUID).Scan(&archived)
+		WHERE i.uid = ? AND `+predicate, args...).Scan(&archived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "missing", nil
 	}
@@ -780,9 +796,7 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 }
 
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, uid, issue_id, author, body, created_at, teammate
-		FROM comments WHERE issue_id = ?`, issueID)
+	rows, err := tx.QueryContext(ctx, `SELECT `+commentColumns+` FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", err)
 	}
@@ -846,6 +860,8 @@ func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64, allowed
 		statement += ` AND ` + toPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
 		args = append(args, toArgs...)
 	}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement += " AND " + authorizedLinkPredicate(ctx, "", &args)
 	statement += ` ORDER BY id`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
@@ -879,6 +895,8 @@ func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db
 		` FROM recurrences r JOIN projects p ON p.id = r.project_id
 		 WHERE r.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if projectUID != "" {
 		statement += ` AND p.uid = ?`
 		args = append(args, projectUID)
@@ -901,18 +919,20 @@ func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db
 }
 
 func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
+	args := []any{issueUID, issueUID}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement := `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
 		e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 		FROM events e
 		JOIN projects p ON p.id = e.project_id
 		LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
 		LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
-		WHERE e.issue_uid = ? OR e.related_issue_uid = ? ORDER BY e.id DESC LIMIT 500`, issueUID, issueUID)
+		WHERE (e.issue_uid = ? OR e.related_issue_uid = ?) AND ` + authorizedEventPredicate(ctx, &args) + ` ORDER BY e.id DESC LIMIT 500`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI history: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 	history := []db.Event{}
 	for rows.Next() {
 		event, err := scanEvent(rows)
@@ -921,7 +941,30 @@ func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event
 		}
 		history = append(history, event)
 	}
-	return history, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	filtered := make([]db.Event, 0, len(history))
+	for _, event := range history {
+		if event.Type == "close.throttled" {
+			reset, err := db.EventRequiresProjectScopeReset(ctx, event, nil,
+				func(projectUID, ref string) (db.Issue, error) {
+					return eventIssueByRef(ctx, tx, projectUID, ref)
+				})
+			if err != nil {
+				return nil, fmt.Errorf("check UI history project scope: %w", err)
+			}
+			if reset {
+				continue
+			}
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered, nil
 }
 
 func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]db.UILink, error) {
@@ -951,7 +994,10 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 func readUIGraphUnresolved(
 	ctx context.Context, tx *sql.Tx, issues []db.UIIssue,
 ) ([]db.UIGraphEdge, []db.UIGraphUnresolvedRef, error) {
-	if len(issues) == 0 {
+	// A missing endpoint has no current project to authorize. Only owner
+	// diagnostics may expose its retained UID.
+	_, restricted := db.AuthorizedProjects(ctx)
+	if len(issues) == 0 || restricted {
 		return []db.UIGraphEdge{}, []db.UIGraphUnresolvedRef{}, nil
 	}
 	visible := make(map[int64]struct{}, len(issues))
@@ -1036,6 +1082,7 @@ func readUICollectionLinks(
 		statement += ` AND ` + toPredicate
 		args = append(args, toArgs...)
 	}
+	statement += " AND " + authorizedLinkPredicate(ctx, "l.", &args)
 	statement += ` ORDER BY l.id`
 	if onDetailRead != nil {
 		onDetailRead()
@@ -1158,6 +1205,7 @@ func readUIReferenceIssues(
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if query.ProjectUID != "" {
 		statement += ` AND p.uid = ?`
 		args = append(args, query.ProjectUID)

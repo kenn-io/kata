@@ -81,6 +81,9 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if err := db.ValidateEmbeddingProducerEvent(ev, ""); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 		if boundActor != "" && ev.Actor != boundActor {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
 				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
@@ -175,7 +178,10 @@ func (d *Store) ingestFederationEventsOnce(
 		// claim.violated is best-effort audit metadata evaluated against
 		// current hub claim state at ingest time. It is not a causally precise
 		// historical authorization judgment for offline work.
-		auditEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, ev)
+		auditEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, ev, db.ClaimPrincipal{
+			HolderInstanceUID: p.SpokeInstanceUID,
+			Holder:            p.BoundActor,
+		})
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -875,6 +881,7 @@ func validateFederationProjectEvent(
 	projectUID, spokeInstanceUID string,
 	ev db.RemoteEvent,
 	knownIssueUIDs map[string]struct{},
+	allowLocalLifecycle ...bool,
 ) error {
 	if ev.ProjectUID != projectUID {
 		return fmt.Errorf("%w: event %s targets project %s", db.ErrFederationIngestValidation, ev.EventUID, ev.ProjectUID)
@@ -889,6 +896,18 @@ func validateFederationProjectEvent(
 		return fmt.Errorf("%w: event type %s unsupported in phase 2", db.ErrFederationIngestValidation, ev.Type)
 	}
 	payload := db.PayloadMap(ev.Payload)
+	// Relay lifecycle records audit one instance's local archive/restore.
+	// The issue fold never applies them to another node's project catalog.
+	// Legacy direct-spoke ingress retains its original strict allowlist.
+	if len(allowLocalLifecycle) > 0 && allowLocalLifecycle[0] && (ev.Type == "project.removed" || ev.Type == "project.restored") {
+		if ev.IssueUID != nil || ev.RelatedIssueUID != nil {
+			return db.ErrFederationIngestValidation
+		}
+		if target, ok := db.StringValue(payload["project_uid"]); ok && target != projectUID {
+			return db.ErrFederationIngestValidation
+		}
+		return nil
+	}
 	if ev.Type == "project.metadata_updated" {
 		if payloadProjectUID, ok := db.StringValue(payload["project_uid"]); ok && payloadProjectUID != projectUID {
 			return fmt.Errorf("%w: project metadata payload targets %s", db.ErrFederationIngestValidation, payloadProjectUID)

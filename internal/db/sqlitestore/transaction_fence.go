@@ -19,7 +19,11 @@ func (d *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, erro
 	if opts != nil && opts.ReadOnly {
 		return tx, nil
 	}
-	if err := db.ApplyTransactionFence(ctx, tx); err != nil {
+	err = db.ApplyTransactionFence(ctx, tx)
+	if err == nil {
+		err = db.ApplyRootAttributionFence(ctx, d, tx)
+	}
+	if err != nil {
 		rollbackErr := tx.Rollback()
 		return nil, db.FinishTransactionRollback(ctx, err, rollbackErr)
 	}
@@ -51,7 +55,11 @@ func (d *Store) beginImmediateTransaction(ctx context.Context, conn *sql.Conn) e
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION"); err != nil {
 		return err
 	}
-	if err := db.ApplyTransactionFence(ctx, conn); err != nil {
+	err := db.ApplyTransactionFence(ctx, conn)
+	if err == nil {
+		err = db.ApplyRootAttributionFence(ctx, d, conn)
+	}
+	if err != nil {
 		_, rollbackErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 		// Return the connection before host cleanup needs a separate transaction.
 		closeErr := conn.Close()

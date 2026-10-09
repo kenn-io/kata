@@ -22,6 +22,16 @@ func selfAuthenticatedRoutes(doc *huma.OpenAPI) []routeTemplate {
 	return routes
 }
 
+func noProjectDataRoutes(doc *huma.OpenAPI) []routeTemplate {
+	var routes []routeTemplate
+	for operationID, template := range registeredOperations(doc) {
+		if hostAccessRuleFor(operationID).NoProjectData {
+			routes = append(routes, template)
+		}
+	}
+	return routes
+}
+
 // selfAuthenticatedRouteMatcher answers "does this request address a route
 // whose handler authenticates itself?". It is an http.ServeMux built from the
 // registered route templates, so matching is the same method-and-wildcard
@@ -71,6 +81,43 @@ func (m selfAuthenticatedRouteMatcher) matches(r *http.Request) bool {
 	matched := false
 	probe := r.WithContext(context.WithValue(
 		r.Context(), selfAuthenticatedMatchKey{}, &matched))
+	m.mux.ServeHTTP(discardResponseWriter{}, probe)
+	return matched
+}
+
+type noProjectDataRouteMatcher struct {
+	mux *http.ServeMux
+}
+
+type noProjectDataMatchKey struct{}
+
+func newNoProjectDataRouteMatcher(routes []routeTemplate) noProjectDataRouteMatcher {
+	mux := http.NewServeMux()
+	for _, route := range routes {
+		mux.Handle(route.Method+" "+route.Path, markNoProjectDataMatch(route.Method))
+	}
+	return noProjectDataRouteMatcher{mux: mux}
+}
+
+func markNoProjectDataMatch(method string) http.HandlerFunc {
+	return func(_ http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			return
+		}
+		matched, ok := r.Context().Value(noProjectDataMatchKey{}).(*bool)
+		if ok {
+			*matched = true
+		}
+	}
+}
+
+func (m noProjectDataRouteMatcher) matches(r *http.Request) bool {
+	if m.mux == nil {
+		return false
+	}
+	matched := false
+	probe := r.WithContext(context.WithValue(
+		r.Context(), noProjectDataMatchKey{}, &matched))
 	m.mux.ServeHTTP(discardResponseWriter{}, probe)
 	return matched
 }

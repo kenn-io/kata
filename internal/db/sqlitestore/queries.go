@@ -125,6 +125,9 @@ func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID, acto
 	if err != nil {
 		return db.Project{}, db.Event{}, err
 	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.Project{}, db.Event{}, fmt.Errorf("advance project access revision after project creation: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return db.Project{}, db.Event{}, err
 	}
@@ -276,8 +279,10 @@ func (d *Store) listProjects(ctx context.Context, includeArchived bool) ([]db.Pr
 	} else {
 		q += ` WHERE name <> ?`
 	}
+	args := []any{db.SystemProjectName}
+	q += " AND " + authorizedProjectPredicate(ctx, "uid", &args)
 	q += ` ORDER BY id ASC`
-	rows, err := d.QueryContext(ctx, q, db.SystemProjectName)
+	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -690,12 +695,18 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 		if l.ExpectedProjectUID != "" && toProjectUID != l.ExpectedProjectUID {
 			return 0, db.Event{}, db.ErrInitialLinkTargetNotFound
 		}
+		if err := db.CheckProjectAccessTransaction(ctx, tx, toProjectUID); err != nil {
+			return 0, db.Event{}, err
+		}
 		if projectArchived {
 			return 0, db.Event{}, &db.LinkTargetArchivedError{Number: toIssueID, ShortID: toIssueShortID, Project: toProjectName}
 		}
 		resolvedTargets = append(resolvedTargets, createdLinkTarget{UID: toIssueUID, ShortID: toIssueShortID})
 		// Canonical ordering is a storage concern: the payload reports the
 		// peer's stable identity (UID + short_id), not a numeric ref.
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, toIssueID); err != nil {
+			return 0, db.Event{}, err
+		}
 		fromID, toID := issueID, toIssueID
 		if l.Incoming && l.Type == "blocks" {
 			// "this issue is blocked by N" → link runs FROM N TO new issue.
@@ -905,7 +916,9 @@ func sortStrings(in []string) {
 // (The destructive ladder and the idempotency-deleted path both need to see
 // soft-deleted rows, which is why the filter isn't pushed into the query.)
 func (d *Store) IssueByID(ctx context.Context, id int64) (db.Issue, error) {
-	row := d.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, id)
+	args := []any{id}
+	query := issueSelect + ` WHERE i.id=? AND ` + authorizedIssuePredicate(ctx, "i.project_id", &args)
+	row := d.QueryRowContext(ctx, query, args...)
 	return scanIssue(row)
 }
 
@@ -923,7 +936,9 @@ func (d *Store) IssueByShortID(ctx context.Context, projectID int64, shortID str
 	if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
-	row := d.QueryRowContext(ctx, q, projectID, shortID)
+	args := []any{projectID, shortID}
+	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
+	row := d.QueryRowContext(ctx, q, args...)
 	return scanIssue(row)
 }
 
@@ -935,7 +950,9 @@ func (d *Store) IssueByUID(ctx context.Context, issueUID string, include db.Incl
 	if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
-	row := d.QueryRowContext(ctx, q, issueUID)
+	args := []any{issueUID}
+	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
+	row := d.QueryRowContext(ctx, q, args...)
 	return scanIssue(row)
 }
 
@@ -1001,8 +1018,11 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
+	args := []any{prefix}
+	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	q += ` ORDER BY i.uid ASC LIMIT ?`
-	rows, err := d.QueryContext(ctx, q, prefix, limit)
+	args = append(args, limit)
+	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("issue uid prefix match: %w", err)
 	}
@@ -1024,6 +1044,7 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 	q.WriteString(issueSelect + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`)
 	args := []any{p.ProjectID}
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
+	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
@@ -1104,6 +1125,7 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 	q.WriteString(issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`)
 	var args []any
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
+	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
 	if p.ProjectID > 0 {
 		q.WriteString(` AND i.project_id = ?`)
@@ -1172,7 +1194,7 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 // failures; production uses the direct comment query through this function.
 var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (db.Comment, error) {
 	c, err := scanComment(d.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		`SELECT `+commentColumns+` FROM comments WHERE id = ?`,
 		commentID))
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
@@ -1182,7 +1204,7 @@ var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (d
 
 func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {
 	c, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ? AND uid = ?`,
+		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND uid = ?`,
 		issueID, commentUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
@@ -1195,7 +1217,7 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 
 func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
 	c, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		`SELECT `+commentColumns+` FROM comments WHERE id = ?`,
 		commentID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
@@ -1238,6 +1260,13 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	projectUID, err := issueProjectUIDTx(ctx, tx, p.IssueID)
+	if err != nil {
+		return 0, db.Event{}, err
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+		return 0, db.Event{}, err
+	}
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return 0, db.Event{}, err
@@ -1417,7 +1446,7 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ?`, issueID)
+		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -1447,11 +1476,12 @@ func scanComment(row rowScanner) (db.Comment, error) {
 	var teammate sql.NullString
 	if err := row.Scan(
 		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body,
-		&comment.CreatedAt, &teammate,
+		&comment.CreatedAt, &teammate, &comment.AttributionView,
 	); err != nil {
 		return db.Comment{}, err
 	}
 	comment.Teammate = teammate.String
+	comment.SourceFallback(comment.Author, comment.Teammate)
 	return comment, nil
 }
 
@@ -1903,31 +1933,32 @@ func joinComma(parts []string) string {
 // lifecycle mutations (close/reopen/edit/comment) cannot operate on hidden
 // rows; callers see ErrNotFound for both nonexistent and deleted issues.
 func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Issue, string, error) {
-	const q = `
-		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision,
-		       i.recurrence_id, i.occurrence_key,
-		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
+	const q = `SELECT ` + issueColumns + `, p.name
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
 		WHERE i.id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`
 	var i db.Issue
 	var projectName string
 	err := tx.QueryRowContext(ctx, q, issueID).
-		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &projectName)
+		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
 	if err != nil {
 		return db.Issue{}, "", fmt.Errorf("lookup issue: %w", err)
 	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, i.ProjectUID); err != nil {
+		return db.Issue{}, "", err
+	}
 	if err := ensureProjectWritableTx(ctx, tx, i.ProjectID); err != nil {
 		return db.Issue{}, "", err
 	}
+	handle, _ := db.IssueTeammate(i.Metadata)
+	i.SourceFallback(i.Author, handle)
 	return i, projectName, nil
 }
 
-const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at`
+const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
 
 const issueSelect = `SELECT ` + issueColumns + ` FROM issues i JOIN projects p ON p.id = i.project_id`
 
@@ -1938,26 +1969,30 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
 
 func scanIssue(r rowScanner) (db.Issue, error) {
 	var i db.Issue
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.Issue{}, fmt.Errorf("scan issue: %w", err)
 	}
+	handle, _ := db.IssueTeammate(i.Metadata)
+	i.SourceFallback(i.Author, handle)
 	return i, nil
 }
 
 func scanScheduledIssue(r rowScanner) (db.Issue, string, error) {
 	var i db.Issue
 	var recurrenceTimezone sql.NullString
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &recurrenceTimezone)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &recurrenceTimezone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
 	if err != nil {
 		return db.Issue{}, "", fmt.Errorf("scan scheduled issue: %w", err)
 	}
+	handle, _ := db.IssueTeammate(i.Metadata)
+	i.SourceFallback(i.Author, handle)
 	return i, recurrenceTimezone.String, nil
 }
 
@@ -1978,6 +2013,7 @@ type eventInsert struct {
 	HLC               *db.EventHLCTimestamp
 	CreatedAt         string
 	ContentHash       string
+	SkipRelay         bool
 }
 
 // UpdateOwner sets issues.owner to the new value and emits the matching
@@ -2256,6 +2292,7 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		  )`)
 	args := []any{projectID}
 	appendAllowedIssueIDsSQLite(&q, &args, filter.AllowedIssueIDs)
+	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, filter.IssueScope)
 
 	// Apply owner filters
@@ -2280,7 +2317,8 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 	}
 
 	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	statement, args := authorizeRelationshipQuery(ctx, q.String(), args, "l")
+	rows, err := d.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", err)
 	}
@@ -2344,6 +2382,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		  )`)
 	args := []any{}
 	appendAllowedIssueIDsSQLite(&q, &args, filter.AllowedIssueIDs)
+	q.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopeSQLite(&q, &args, filter.IssueScope)
 
 	// Apply owner filters (same semantics as ReadyIssues)
@@ -2368,7 +2407,8 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	}
 
 	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	statement, args := authorizeRelationshipQuery(ctx, q.String(), args, "l")
+	rows, err := d.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
 	}
@@ -2382,7 +2422,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			&r.ShortID, &r.Title, &r.Body, &r.Status,
 			&r.ClosedReason, &r.Owner, &r.AssignmentExpiresOn, &r.Priority, &r.Author,
 			&r.Metadata, &r.Revision, &r.RecurrenceID, &r.OccurrenceKey,
-			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt,
+			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt, &r.AttributionView,
 			&r.ProjectName, &recurrenceTimezone,
 		); err != nil {
 			return nil, fmt.Errorf("scan ready global issue: %w", err)
@@ -2400,6 +2440,8 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			r.Owner = nil
 			r.AssignmentExpiresOn = nil
 		}
+		handle, _ := db.IssueTeammate(r.Metadata)
+		r.SourceFallback(r.Author, handle)
 		out = append(out, r)
 		if limit > 0 && len(out) == limit {
 			break
@@ -2502,6 +2544,18 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	e, err := scanEvent(tx.QueryRowContext(ctx, eventSelectByID, id))
 	if err != nil {
 		return db.Event{}, fmt.Errorf("read event: %w", err)
+	}
+	if in.ContentHash == "" {
+		if err := d.recordNativeRootAttributionTx(ctx, tx, e); err != nil {
+			return db.Event{}, err
+		}
+	} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
+		return db.Event{}, err
+	}
+	if !in.SkipRelay {
+		if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {
+			return db.Event{}, err
+		}
 	}
 	return e, nil
 }

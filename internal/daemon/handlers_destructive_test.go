@@ -9,9 +9,30 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type pendingRelayPurgeStore struct{ db.Storage }
+
+func (s pendingRelayPurgeStore) PurgeIssue(context.Context, int64, string, *string) (db.PurgeLog, error) {
+	return db.PurgeLog{}, db.ErrFederationResetBlockedByPendingPush
+}
+
+// The native purge guard retains pending artifact bytes. Its owner-facing
+// route must report a retryable conflict rather than an internal failure.
+func TestPurge_PendingRelayDeliveryIsConflict(t *testing.T) {
+	h, projectID := bootstrapProject(t, func(cfg *daemon.ServerConfig) {
+		cfg.DB = pendingRelayPurgeStore{cfg.DB}
+	})
+	issue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectID, Title: "Pending delivery", Author: "member"})
+	require.NoError(t, err)
+	response := postWithHeader(t, h.ts.(*httptest.Server), issueURLRef(projectID, issue.ShortID, "actions/purge"), map[string]string{"X-Kata-Confirm": confirmHeader(t, h, projectID, issue.ID, "PURGE")}, map[string]any{"actor": "member"})
+	assertAPIError(t, response.status, response.body, http.StatusConflict, "federation_pending_delivery")
+	_, err = h.DB().IssueByUID(t.Context(), issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+}
 
 // confirmHeader builds the X-Kata-Confirm value for an issue. After Task 11
 // the daemon expects "<verb> <project>#<short_id>" rather than the old
@@ -226,7 +247,7 @@ func TestPurge_FederatedHubRequiresIssueClaim(t *testing.T) {
 	assert.Contains(t, string(resp.body), `"purge_log"`)
 }
 
-func TestPurge_FederatedHubUsesResolvedIdentityActorForClaimGate(t *testing.T) {
+func TestPurge_FederatedHubClaimHolderCannotAdministerProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	ctx := context.Background()
 	project, issue := createClaimHubIssue(t, env)
@@ -254,8 +275,14 @@ func TestPurge_FederatedHubUsesResolvedIdentityActorForClaimGate(t *testing.T) {
 			"X-Kata-Confirm": "PURGE " + project.Name + "#" + issue.ShortID,
 		})
 
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), `"purge_log"`)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "not_found")
+	preserved, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, issue.ID, preserved.ID)
+	state, err := env.DB.ClaimStatusReadOnly(ctx, project.ID, issue.UID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, state.Held)
+	require.Equal(t, "alice", state.Claim.Holder)
 }
 
 // TestDelete_UnknownIssueIs404 covers the handler-level translation of

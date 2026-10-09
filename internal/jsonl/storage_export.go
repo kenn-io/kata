@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"strconv"
+	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -55,8 +56,31 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		return err
 	}
 
-	if err := streamExport(enc, KindMeta, store.ExportMeta(ctx)); err != nil {
-		return err
+	var selectedProjectUID string
+	if opts.ProjectID > 0 {
+		project, err := store.ProjectByID(ctx, opts.ProjectID)
+		if err != nil {
+			return err
+		}
+		selectedProjectUID = project.UID
+	}
+	for record, err := range store.ExportMeta(ctx) {
+		if err != nil {
+			return err
+		}
+		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix)) {
+			continue
+		}
+		if opts.ProjectID > 0 && record.Key == "project_access_revision" {
+			continue
+		}
+		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) && !strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".") {
+			continue
+		}
+
+		if err := writeRecord(enc, KindMeta, record); err != nil {
+			return err
+		}
 	}
 	if err := streamExport(enc, KindProject, store.ExportProjects(ctx, f)); err != nil {
 		return err
@@ -124,7 +148,30 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	if err := streamExport(enc, KindProjectPurgeLog, store.ExportProjectPurgeLog(ctx, f)); err != nil {
 		return err
 	}
-	return streamExport(enc, KindSQLiteSequence, store.ExportSequences(ctx))
+	if err := streamExport(enc, KindSQLiteSequence, store.ExportSequences(ctx)); err != nil {
+		return err
+	}
+
+	if f.ProjectID == nil {
+		for record, err := range store.ExportProjectAccess(ctx) {
+			if err != nil {
+				return err
+			}
+			if err := writeRecord(enc, Kind(record.ImportKind()), record); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := exportAttribution(ctx, enc, store, f); err != nil {
+		return err
+	}
+	if f.ProjectID == nil {
+		if err := exportRelayState(ctx, enc, store); err != nil {
+			return err
+		}
+	}
+	return exportEmbeddingArtifacts(ctx, enc, store, f)
 }
 
 // streamExport ranges seq and writes each row as a kind-tagged envelope to enc.
@@ -134,6 +181,52 @@ func streamExport[T any](enc *Encoder, kind Kind, seq iter.Seq2[T, error]) error
 			return err
 		}
 		if err := writeRecord(enc, kind, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Provenance is portable, unlike the owning hub's team policy. The public keys
+// and signatures contain no signing material. Keep this path shared with cutover.
+func exportAttribution(ctx context.Context, enc *Encoder, store interface {
+	ExportAttribution(context.Context, db.ExportFilter) iter.Seq2[db.ImportRecord, error]
+}, filter db.ExportFilter) error {
+	for record, err := range store.ExportAttribution(ctx, filter) {
+		if err != nil {
+			return err
+		}
+		if err := writeRecord(enc, Kind(record.ImportKind()), record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func exportRelayState(ctx context.Context, enc *Encoder, store interface {
+	ExportRelayState(context.Context) iter.Seq2[db.ImportRecord, error]
+}) error {
+	for r, err := range store.ExportRelayState(ctx) {
+		if err != nil {
+			return err
+		}
+		if err := writeRecord(enc, Kind(r.ImportKind()), r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func exportEmbeddingArtifacts(ctx context.Context, enc *Encoder, store any, filter db.ExportFilter) error {
+	exporter, ok := store.(db.EmbeddingArtifactExporter)
+	if !ok {
+		return fmt.Errorf("source cannot export portable embedding artifacts")
+	}
+	for record, err := range exporter.ExportEmbeddingArtifacts(ctx, filter) {
+		if err != nil {
+			return err
+		}
+		if err := writeRecord(enc, KindEmbeddingArtifact, record); err != nil {
 			return err
 		}
 	}

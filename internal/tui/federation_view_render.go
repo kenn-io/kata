@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kata/internal/api"
 	hubfederation "go.kenn.io/kata/internal/federation"
 )
 
@@ -731,6 +732,10 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		return strings.Join(fitFederationLines(body, m.height), "\n")
 	}
 	row := rows[cursor]
+	if row.Embedding != nil {
+		body = append(body, federationEmbeddingLines(row.Embedding, m.width)...)
+		body = append(body, "")
+	}
 	body = append(body,
 		titleStyle.Render(sanitizeForLine(row.ProjectName)),
 		"hub URL: "+sanitizeForLine(row.HubURL),
@@ -772,6 +777,14 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		renderAuxiliaryFooter(m, "[esc] back  [r] refresh  [q] quit  [?] help"),
 	)
 	return strings.Join(fitFederationLines(body, m.height), "\n")
+}
+
+func federationEmbeddingLines(status *api.FederationEmbeddingStatus, width int) []string {
+	var lines []string
+	for _, field := range status.DisplayFields() {
+		lines = append(lines, wrapBody(sanitizeForLine(field), max(1, width))...)
+	}
+	return lines
 }
 
 func fitFederationLines(lines []string, height int) []string {

@@ -746,7 +746,8 @@ kata tokens revoke 1
 ```
 
 Unscoped `tokens create` prints plaintext once. The daemon stores only a SHA-256 hash.
-Lost tokens must be revoked and recreated.
+Lost tokens must be revoked and recreated. Set `--expires-in 4h` to bound an
+ordinary token's lifetime; omitting it keeps the existing non-expiring lifetime.
 
 Kata refuses `tokens create` when a shared token is configured but
 `require_token_identity` is false. This prevents minting a credential that the

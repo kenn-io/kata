@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -11,6 +12,10 @@ import (
 )
 
 type federationPrincipal struct {
+	RelayBindingUID              string
+	RelayProtocolVersion         int
+	RelayServeDownstream         bool
+	RelayResetEpoch              int64
 	ScopedProjectID              int64
 	EnrollmentID                 int64
 	SpokeInstanceUID             string
@@ -23,6 +28,7 @@ type federationPrincipal struct {
 type federationAuthorization struct {
 	principal        federationPrincipal
 	transactionFence db.TransactionFence
+	projectUID       string
 }
 
 type federationAuthorizationContextKey struct{}
@@ -55,6 +61,7 @@ func authorizeFederationRequest(
 			return ctx, federationPrincipal{}, err
 		}
 	}
+	ctx = withFederationProjectAuthority(ctx, authorization)
 	return db.WithAdditionalTransactionFence(ctx, authorization.transactionFence),
 		authorization.principal, nil
 }
@@ -67,10 +74,20 @@ func withFederationAuthorization(
 	operation HostFederationOperation,
 	authorization federationAuthorization,
 ) context.Context {
+	ctx = withFederationProjectAuthority(ctx, authorization)
 	return context.WithValue(ctx, federationAuthorizationContextKey{}, cachedFederationAuthorization{
 		authHeader: authHeader, projectID: projectID, capability: capability,
 		operation: operation, authorization: authorization,
 	})
+}
+
+func withFederationProjectAuthority(ctx context.Context, authorization federationAuthorization) context.Context {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		decision.Actor = authorization.principal.Actor
+		decision.ProjectUIDs = []string{authorization.projectUID}
+		decision.targets = []string{authorization.projectUID}
+	}
+	return db.WithAuthorizedProjects(ctx, []string{authorization.projectUID})
 }
 
 func federationAuthorizationFromContext(
@@ -117,15 +134,45 @@ func evaluateFederationRequest(
 		}
 		return federationAuthorization{}, internalAPIError(err)
 	}
-	project, err := activeProjectByID(ctx, cfg.DB, projectID)
+	var project db.Project
+	if _, authenticated := PrincipalFromContext(ctx); authenticated {
+		project, err = activeProjectByID(ctx, cfg.DB, projectID)
+	} else {
+		// A native enrollment is itself the authenticated transport principal.
+		// The outer project middleware can only supply anonymous scope before
+		// this token is validated, so resolve the target first and apply the
+		// enrollment actor's project boundary below.
+		project, err = cfg.DB.ProjectByID(ctx, projectID)
+		if errors.Is(err, db.ErrNotFound) || (err == nil && project.DeletedAt != nil) {
+			err = api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+		} else if err != nil {
+			err = internalAPIError(err)
+		}
+	}
 	if err != nil {
 		return federationAuthorization{}, err
+	}
+	accessCtx := ctx
+	if _, authenticated := PrincipalFromContext(ctx); !authenticated {
+		// The outer HTTP scope for a native federation bearer is anonymous until
+		// the enrollment has been validated. Recompute this one membership check
+		// from the enrollment actor, then replace the request scope below with
+		// that actor's single authorized project.
+		accessCtx = db.WithAuthorizedProjects(ctx, nil)
+	}
+	allowed, err := cfg.DB.AccessibleProjectUIDs(accessCtx, enrollment.Actor)
+	if err != nil {
+		return federationAuthorization{}, internalAPIError(err)
+	}
+	if !slices.Contains(allowed, project.UID) {
+		return federationAuthorization{}, projectAccessDenied()
 	}
 	var transactionFence db.TransactionFence
 	if operation.Mutation {
 		transactionFence = sanitizeNativeFederationTransactionFence(
 			cfg.DB.FederationEnrollmentTransactionFence(enrollment, projectID, capability),
 		)
+		transactionFence = composeFederationTransactionFences(transactionFence, sanitizeNativeFederationTransactionFence(cfg.DB.ProjectAccessTransactionFence(enrollment.Actor, []string{project.UID})))
 	}
 	if cfg.HostFederationAccess != nil {
 		decision, accessErr := cfg.HostFederationAccess.AuthorizeFederation(
@@ -162,7 +209,12 @@ func evaluateFederationRequest(
 		scopedProjectID = *enrollment.ProjectID
 	}
 	return federationAuthorization{
+		projectUID: project.UID,
 		principal: federationPrincipal{
+			RelayBindingUID:              enrollment.RelayBindingUID,
+			RelayProtocolVersion:         enrollment.RelayProtocolVersion,
+			RelayServeDownstream:         enrollment.RelayServeDownstream,
+			RelayResetEpoch:              enrollment.RelayResetEpoch,
 			EnrollmentID:                 enrollment.ID,
 			ScopedProjectID:              scopedProjectID,
 			SpokeInstanceUID:             enrollment.SpokeInstanceUID,

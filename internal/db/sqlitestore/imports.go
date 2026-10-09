@@ -671,6 +671,9 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 				if !db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
+				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+					return nil, 0, err
+				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
 					return nil, 0, fmt.Errorf("delete source link: %w", err)
 				}
@@ -696,6 +699,9 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		}
 		fromID, toID, err := importLinkEndpoints(ctx, tx, p, issue, importLink, states)
 		if err != nil {
+			return nil, 0, err
+		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, fromID, toID); err != nil {
 			return nil, 0, err
 		}
 		if _, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE from_issue_id = ? AND to_issue_id = ? AND type = ?`, fromID, toID, importLink.Type)); err == nil {

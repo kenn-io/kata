@@ -5,6 +5,8 @@ import type { TokenScopeOut } from './tokenScopeOut.ts'
 import type { UICapabilitiesUpdates } from './uICapabilitiesUpdates.ts'
 
 export interface UICapabilities {
+  access_admin?: boolean
+  account?: string
   actor_policy: string
   allowed_actions?: string[]
   close_requires_evidence?: boolean

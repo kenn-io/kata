@@ -28,7 +28,9 @@ type projectLookupGateStorage struct {
 }
 
 func (s *projectLookupGateStorage) ProjectByID(ctx context.Context, projectID int64) (db.Project, error) {
-	if projectID == s.projectID && s.lookups.Add(1) == 2 {
+	// Project policy admission and route validation precede the post-subscribe
+	// existence check. Pause that final check, after headers have been flushed.
+	if projectID == s.projectID && s.lookups.Add(1) == 3 {
 		close(s.entered)
 		<-s.release
 	}
@@ -426,7 +428,7 @@ func TestPollEvents_PerProject_NonPositiveProjectIDIs400(t *testing.T) {
 func TestPollEvents_PerProject_UnknownProjectIs404(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envGetRaw(t, env, "/api/v1/projects/9999/events?after_id=0&limit=10")
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestPollEvents_PerProject_SystemProjectIs404(t *testing.T) {
@@ -435,7 +437,7 @@ func TestPollEvents_PerProject_SystemProjectIs404(t *testing.T) {
 	require.NoError(t, err)
 	resp, bs := envGetRaw(t, env,
 		"/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/events?after_id=0&limit=10")
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 type sseFrame struct {
@@ -802,7 +804,7 @@ func TestSSE_ProjectMergeBetweenValidationAndSubscriptionResetsAndCloses(t *test
 	select {
 	case <-gated.entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("stream did not reach its second project existence check")
+		t.Fatal("stream did not reach its post-subscription project existence check")
 	}
 
 	envPostJSON(t, env, projectPath(targetID)+"/merge", map[string]any{
@@ -846,6 +848,43 @@ func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
 	visible, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok, "normal live event should still arrive")
 	assert.Equal(t, "issue.created", visible.event)
+}
+
+func TestSSE_UnscopedDBTokenExpiryClosesStream(t *testing.T) {
+	env := testenv.New(t, testenv.WithRequireTokenIdentity())
+	projectID := mkProject(t, env, "example-project", "example-project")
+	token := strings.Repeat("x", 64)
+	expiresAt := time.Now().UTC().Add(750 * time.Millisecond)
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: token, Actor: "worker", AdminActor: db.BootstrapActor,
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+	afterID, err := env.DB.MaxEventID(context.Background())
+	require.NoError(t, err)
+
+	resp := openSSE(t, env, "after_id="+strconv.FormatInt(afterID, 10),
+		http.Header{"Authorization": {"Bearer " + token}})
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	framer := newSSEFramer(resp.Body)
+
+	expiryWait := time.NewTimer(time.Until(expiresAt) + 10*time.Millisecond)
+	defer expiryWait.Stop()
+	<-expiryWait.C
+	_, event, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "after expiry", Author: "worker",
+	})
+	require.NoError(t, err)
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(projectID, event))
+
+	select {
+	case <-framer.doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("event stream stayed open after its database token expired")
+	}
+	_, ok := framer.Next(t, time.Second)
+	assert.False(t, ok, "the expired token must not receive the event broadcast after expiry")
 }
 
 func TestSSE_LiveResetClosesStream(t *testing.T) {
@@ -922,7 +961,7 @@ func TestSSE_UnknownProjectIDReturns404(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/events/stream?project_id=99999", nil,
 		map[string]string{"Accept": "text/event-stream"})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestSSE_SystemProjectIDReturns404(t *testing.T) {
@@ -932,7 +971,7 @@ func TestSSE_SystemProjectIDReturns404(t *testing.T) {
 	resp, bs := envDoRaw(t, env, http.MethodGet,
 		"/api/v1/events/stream?project_id="+strconv.FormatInt(sys.ID, 10), nil,
 		map[string]string{"Accept": "text/event-stream"})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestSSE_LiveHeartbeatKeepsConnectionAlive(t *testing.T) {

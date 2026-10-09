@@ -77,3 +77,70 @@ exclusive lock on `import_mappings`; schedule the operation while imports are
 stopped. Existing table grants cover the new columns. Validation-only runtime
 credentials cannot perform this upgrade. Schema 29 binaries cannot reopen
 schema 30; rollback requires the pre-upgrade backup and matching older binary.
+
+## Schema 31: project access policy
+
+The 30→31 migration creates `teams`, `team_memberships`,
+`project_access_policies`, and `project_access_teams`. It also initializes the
+`project_access_revision` metadata key. Membership belongs to a canonical actor,
+so rotating or revoking an individual token does not remove that membership.
+Existing projects default to `all` visibility for authenticated users. A `teams`
+policy with no remaining teams stays restricted.
+
+Stop the daemon and run `kata storage postgres migrate` as the schema owner.
+The migration locks the schema and stamps version 31 in the same transaction.
+Refresh runtime grants for the four new tables using the grants procedure in
+[PostgreSQL operations](../operations/postgres.md), then start the matching
+binary. Validation-only runtime credentials cannot perform this upgrade. Schema
+30 binaries cannot reopen schema 31; rollback requires a pre-upgrade backup and
+the matching older binary. Whole-database backups retain policies and team
+memberships; project exports exclude these hub-local administrative objects.
+
+## Schema 32: root attribution
+
+The 31→32 migration creates `federation_root_keys`,
+`federation_event_provenance`, and `federation_entity_provenance`. Public-key
+pins identify each project's root authority. Receipts and issue/comment creation
+references survive event-history compaction. Existing rows remain legacy; the
+migration does not manufacture attribution for historical authors. Private
+signing keys are not stored in these tables.
+
+Stop the daemon and run `kata storage postgres migrate` as the schema owner.
+Refresh runtime grants for the three new tables, then start the matching binary.
+The migration and version stamp commit under the existing schema advisory lock.
+Validation-only credentials cannot migrate. Schema 31 binaries cannot reopen
+schema 32; rollback requires a pre-upgrade backup and the matching older binary.
+
+## Schema 33: project relay
+
+The 32→33 migration widens the `api_tokens` scope constraint so an expiring
+relay parent token can have no issue-subtree scope. It adds `relay_config` to
+`federation_bindings` and adds `relay_binding_uid`, `relay_protocol_version`,
+`parent_token_id`, `relay_reset_epoch`, and `relay_serve_downstream` to
+`federation_enrollments`. It creates `federation_relay_outbox`,
+`federation_relay_inbox`, and `federation_relay_cursors`, with indexes for
+pending relay work.
+
+Stop the daemon and run `kata storage postgres migrate` as the schema owner.
+Refresh runtime grants for the three new tables using the procedure in
+[PostgreSQL operations](../operations/postgres.md), then start the matching
+binary. The migration and version stamp commit under the existing schema
+advisory lock. Validation-only credentials cannot migrate. Schema 32 binaries
+cannot reopen schema 33; rollback requires a pre-upgrade backup and the matching
+older binary.
+
+## Schema 34: portable embedding artifacts
+
+The 33→34 migration adds `federation_embedding_artifacts`. It retains original
+little-endian float32 vectors and their complete chunk manifests independently
+of the local vector index. Existing projects, relay grants, receipts, cursors,
+and access policies keep their identities. Pre-content staging is limited to
+32 artifacts and 32 MiB of retained artifact/manifest data per project for 24
+hours; staging is excluded from durable presence. The new table starts empty; upgrading
+does not request embeddings or convert a lossy index into original vectors.
+
+Stop the daemon and run `kata storage postgres migrate` as the schema owner.
+Refresh runtime grants for the new table, then start the matching binary. The
+migration and version stamp commit under the existing schema advisory lock.
+Validation-only credentials cannot migrate. Schema 33 binaries cannot reopen
+schema 34; rollback requires a pre-upgrade backup and the matching older binary.

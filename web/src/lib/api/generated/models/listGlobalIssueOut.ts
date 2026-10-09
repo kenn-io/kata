@@ -4,10 +4,13 @@
 import type { ChildCounts } from './childCounts.ts'
 import type { LinkPeer } from './linkPeer.ts'
 import type { ListGlobalIssueOutMetadata } from './listGlobalIssueOutMetadata.ts'
+import type { ListGlobalIssueOutVerification } from './listGlobalIssueOutVerification.ts'
 
 export interface ListGlobalIssueOut {
+  accountable_actor?: string
   assignment_expires_on?: string
   author: string
+  authority_uid?: string
   blocked?: boolean
   blocked_by?: LinkPeer[]
   blocks?: LinkPeer[]
@@ -32,10 +35,13 @@ export interface ListGlobalIssueOut {
   related?: LinkPeer[]
   revision: number
   short_id: string
+  source_actor?: string
   status: string
+  teammate?: string
   title: string
   uid: string
   updated_at: string
+  verification?: ListGlobalIssueOutVerification
   /** Browser URL for this issue in the owning daemon. */
   web_url?: string
   [key: string]: unknown

@@ -61,6 +61,12 @@ func PrepareProjectMergeRecords(
 	importedExternalMappings := make(map[externalFieldMappingIdentity]struct{})
 	for _, rec := range recs {
 		switch rec := rec.(type) {
+		case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
+			return nil, fmt.Errorf("project merge does not accept hub-local relay delivery records")
+		case *RootKeyPin, *AttributionReceipt, *EntityProvenance:
+			return nil, fmt.Errorf("project merge does not accept trusted provenance; use enrolled federation reset")
+		case *Team, *TeamMembership, *ProjectAccessPolicy:
+			return nil, fmt.Errorf("project merge does not accept hub-local access policy records")
 		case *ProjectExport:
 			if rec.UID == SystemProjectUID || rec.Name == SystemProjectName {
 				return nil, fmt.Errorf("project merge requires one non-system project")

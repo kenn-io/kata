@@ -26,6 +26,12 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, err
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, err
+	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
@@ -135,6 +141,7 @@ func (d *Store) ParentShortIDsByIssues(
 		          JOIN issues parent ON parent.id = l.to_issue_id
 		          WHERE l.type = 'parent'
 		            AND l.from_issue_id IN (` + placeholders + `)`
+		query, args = authorizeRelationshipQuery(ctx, query, args, "l")
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("parent short ids by issues: %w", err)
@@ -279,7 +286,8 @@ func (d *Store) ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]db.
 		  AND i.deleted_at IS NULL
 		  AND p.deleted_at IS NULL
 		ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := d.QueryContext(ctx, query, parentIssueID)
+	query, args := authorizeRelationshipQuery(ctx, query, []any{parentIssueID}, "l")
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("children of issue: %w", err)
 	}
@@ -312,9 +320,9 @@ func relationshipChunkPlaceholders(chunk []int64) (string, []any) {
 // by id ASC. Used to build the show-issue response and to back the
 // list-then-delete flow used by `kata edit --remove-*`.
 func (d *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, error) {
-	rows, err := d.QueryContext(ctx,
-		linkSelect+` WHERE from_issue_id = ? OR to_issue_id = ? ORDER BY id ASC`,
-		issueID, issueID)
+	args := []any{issueID, issueID}
+	statement := linkSelect + ` WHERE (from_issue_id = ? OR to_issue_id = ?) AND ` + authorizedLinkPredicate(ctx, "", &args) + ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list links: %w", err)
 	}
@@ -406,6 +414,9 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, db.Event{}, err
+	}
 	requestedActor := strings.TrimSpace(ev.Actor)
 	if requestedActor == "" {
 		requestedActor = p.Author
@@ -432,6 +443,9 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 		return db.Link{}, db.Event{}, err
 	}
 
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+		return db.Link{}, db.Event{}, err
+	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
@@ -531,6 +545,9 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 
 	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
 	if err != nil {
+		return db.Event{}, err
+	}
+	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
 		return db.Event{}, err
 	}
 
