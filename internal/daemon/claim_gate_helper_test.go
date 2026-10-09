@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +201,107 @@ func TestClaimGateHelperRelayOfflineResponseFallsBackToCachedClaim(t *testing.T)
 	require.True(t, status.Held)
 	require.NotNil(t, status.Claim)
 	assert.Equal(t, claimUID, status.Claim.ClaimUID)
+}
+
+func TestClaimGateHelperTwoRelaysPreserveOfflineFallbackAndErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		rootStatus int
+		rootCode   string
+		offline    bool
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "offline root uses leaf cached lease", offline: true},
+		{name: "authorization failure remains an error", rootStatus: http.StatusForbidden, rootCode: "forbidden", wantStatus: http.StatusForbidden, wantCode: "hub_claim_failed"},
+		{name: "lease denial remains an error", rootStatus: http.StatusConflict, rootCode: "claim_denied", wantStatus: http.StatusConflict, wantCode: "hub_claim_failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			leafStore := openClaimGateHelperDB(t)
+			leafProject, issue := createClaimGateHelperIssue(t, leafStore)
+			relay2Store := openClaimGateHelperDB(t)
+			relay2Project, _ := createClaimGateHelperIssue(t, relay2Store)
+			relay1Store := openClaimGateHelperDB(t)
+			relay1Project, _ := createClaimGateHelperIssue(t, relay1Store)
+
+			var rootURL string
+			if tt.offline {
+				root := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+				rootURL = root.URL
+				root.Close()
+			} else {
+				root := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					api.WriteEnvelope(w, tt.rootStatus, tt.rootCode, "root rejected claim status")
+				}))
+				t.Cleanup(root.Close)
+				rootURL = root.URL
+			}
+
+			enableClaimGateHelperSpoke(t, relay1Store, relay1Project, rootURL, 99)
+			relay1 := newClaimGateHelperStatusServer(t, relay1Store, relay1Project.ID)
+			t.Cleanup(relay1.Close)
+			enableClaimGateHelperSpoke(t, relay2Store, relay2Project, relay1.URL, relay1Project.ID)
+			relay2 := newClaimGateHelperStatusServer(t, relay2Store, relay2Project.ID)
+			t.Cleanup(relay2.Close)
+			enableClaimGateHelperSpoke(t, leafStore, leafProject, relay2.URL, relay2Project.ID)
+
+			now := time.Now().UTC()
+			claimUID := newClaimGateHelperUID(t)
+			require.NoError(t, leafStore.ApplyClaimStatus(ctx, leafProject.ID, issue.UID, db.ClaimStatus{
+				Held: true,
+				Holder: db.ClaimPrincipal{
+					HolderInstanceUID: leafStore.InstanceUID(),
+					Holder:            "agent",
+				},
+				Claim: &db.IssueClaim{
+					ClaimUID: claimUID, ProjectID: leafProject.ID, IssueID: issue.ID, IssueUID: issue.UID,
+					Holder: "agent", HolderInstanceUID: leafStore.InstanceUID(), ClaimKind: "hard",
+					AcquiredAt: now.Add(-time.Minute), Revision: 1, UpdatedAt: now,
+				},
+				HubNow: now,
+			}))
+
+			err := requireFederatedIssueClaim(ctx, ServerConfig{DB: leafStore}, leafProject.ID, issue, "agent")
+			if tt.offline {
+				require.NoError(t, err, "offline status must survive both relays so the leaf can use its cached lease")
+				status, statusErr := leafStore.ClaimStatusReadOnly(ctx, leafProject.ID, issue.UID, now)
+				require.NoError(t, statusErr)
+				require.True(t, status.Held)
+				require.NotNil(t, status.Claim)
+				assert.Equal(t, claimUID, status.Claim.ClaimUID)
+				return
+			}
+			assertClaimGateHelperAPIError(t, err, tt.wantStatus, tt.wantCode)
+		})
+	}
+}
+
+func newClaimGateHelperStatusServer(t *testing.T, store *sqlitestore.Store, projectID int64) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const issueMarker = "/issues/"
+		start := strings.LastIndex(r.URL.Path, issueMarker)
+		if start < 0 {
+			api.WriteEnvelope(w, http.StatusNotFound, "route_not_found", "claim status route not found")
+			return
+		}
+		ref := strings.TrimSuffix(r.URL.Path[start+len(issueMarker):], "/lease")
+		body, err := handleClaimStatus(r.Context(), ServerConfig{DB: store}, projectID, ref)
+		if err != nil {
+			var apiErr *api.APIError
+			if errors.As(err, &apiErr) {
+				api.WriteEnvelope(w, apiErr.Status, apiErr.Code, apiErr.Message)
+				return
+			}
+			api.WriteEnvelope(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+	}))
 }
 
 func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.T) {
