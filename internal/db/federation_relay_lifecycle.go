@@ -7,3 +7,9 @@ import "context"
 type RelayLifecycleStore interface {
 	ValidateRelayLifecycle(context.Context, int64) error
 }
+
+// RelayDisconnectFenceStore validates retained relay work and disables relay
+// writes in the same native transaction before upstream revocation.
+type RelayDisconnectFenceStore interface {
+	FenceRelayDisconnect(context.Context, int64) error
+}

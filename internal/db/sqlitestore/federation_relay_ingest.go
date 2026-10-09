@@ -147,6 +147,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err != nil && !errors.Is(err, db.ErrNotFound) {
 					return err
 				}
+				sourceInserted := false
 				if errors.Is(err, db.ErrNotFound) {
 					clock := db.EventHLCTimestamp{PhysicalMS: source.HLCPhysicalMS, Counter: source.HLCCounter}
 					insertedEvent, err := d.insertEventTx(ingressCtx, tx, eventInsert{ProjectID: projectID, ProjectUID: projectUID, ProjectName: source.ProjectName, IssueUID: source.IssueUID, RelatedIssueUID: source.RelatedIssueUID, Type: source.Type, Actor: source.Actor, Payload: string(source.Payload), UID: source.EventUID, OriginInstanceUID: source.OriginInstanceUID, HLC: &clock, CreatedAt: source.CreatedAt.UTC().Format(sqliteTimeFormat), ContentHash: source.ContentHash})
@@ -156,6 +157,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 					result.InsertedEventUIDs = append(result.InsertedEventUIDs, source.EventUID)
 					result.InsertedEvents = append(result.InsertedEvents, insertedEvent)
 					linksAffected = linksAffected || db.FederationEventAffectsLinks(source.Type)
+					sourceInserted = true
 				}
 				rememberIngestIssueUIDs(source, known)
 				if pin.AuthorityUID == d.instanceUID {
@@ -168,13 +170,18 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 					if _, err := d.recordRootAttributionTx(db.WithRelayForwardPath(ctx, nil), tx, grant.ID, source, signer); err != nil {
 						return err
 					}
-					claimEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, projectID, source)
-					if err != nil {
-						return err
-					}
-					for _, event := range claimEvents {
-						result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
-						result.InsertedEvents = append(result.InsertedEvents, event)
+					if sourceInserted {
+						claimEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, projectID, source, db.ClaimPrincipal{
+							HolderInstanceUID: grant.SpokeInstanceUID,
+							Holder:            grant.Actor,
+						})
+						if err != nil {
+							return err
+						}
+						for _, event := range claimEvents {
+							result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
+							result.InsertedEvents = append(result.InsertedEvents, event)
+						}
 					}
 				}
 			case db.RelayStreamReceipt:

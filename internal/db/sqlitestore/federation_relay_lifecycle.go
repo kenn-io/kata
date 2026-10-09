@@ -13,6 +13,53 @@ func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) err
 	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
 }
 
+// FenceRelayDisconnect validates retained relay work and disables writes in
+// one transaction so a concurrent local mutation cannot slip between the two.
+func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		var exists int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE id=?`, projectID).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return db.ErrNotFound
+			}
+			return err
+		}
+		if err := d.validateRelayLifecycleTx(ctx, tx, projectID); err != nil {
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=?`, projectID))
+		if errors.Is(err, db.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if binding.Role != db.FederationRoleSpoke {
+			return db.ErrFederationRebindConflict
+		}
+		next := binding
+		next.Enabled = true
+		next.PushEnabled = false
+		if err := db.CheckRelayBindingUpdate(&binding, next); err != nil {
+			return err
+		}
+		if err := rejectIssueSyncedFederationProject(ctx, tx, projectID); err != nil {
+			return err
+		}
+		if err := rejectExternalRootFederationProject(ctx, tx, projectID); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE federation_bindings
+SET enabled=1,push_enabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE project_id=? AND role=?`, projectID, string(db.FederationRoleSpoke))
+		if err != nil {
+			return err
+		}
+		return reconcileFederationBindingTransitionLinks(ctx, tx, &binding, next)
+	})
+}
+
 // The binding lock serializes descendant enrollment with teardown. Recheck
 // durable intent in the transaction performing archive, detach or reset.
 func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64, checkpointAcceptedEvents ...map[string]string) error {

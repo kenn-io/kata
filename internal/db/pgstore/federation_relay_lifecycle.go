@@ -13,6 +13,63 @@ func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) err
 	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
 }
 
+// FenceRelayDisconnect validates retained relay work and disables writes in
+// one transaction so a concurrent local mutation cannot slip between the two.
+func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		if _, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id=$1 FOR UPDATE`, projectID)); err != nil {
+			return err
+		}
+		if err := d.validateRelayLifecycleTx(ctx, tx, projectID); err != nil {
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+		if errors.Is(err, db.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if binding.Role != db.FederationRoleSpoke {
+			return db.ErrFederationRebindConflict
+		}
+		next := binding
+		next.Enabled = true
+		next.PushEnabled = false
+		if err := db.CheckRelayBindingUpdate(&binding, next); err != nil {
+			return err
+		}
+		var issueSyncProjectID int64
+		err = tx.QueryRowContext(ctx, `SELECT project_id FROM issue_sync_bindings
+WHERE project_id=$1 AND enabled=1`, projectID).Scan(&issueSyncProjectID)
+		if err == nil {
+			return db.ErrIssueSyncFederationBinding
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return mapSQLError(err, nil)
+		}
+		var externalRootBindingID int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
+WHERE project_id=$1 AND active=1 LIMIT 1`, projectID).Scan(&externalRootBindingID)
+		if err == nil {
+			return db.ErrExternalRootFederationConflict
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return mapSQLError(err, nil)
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE federation_bindings
+SET enabled=1,push_enabled=0,
+    updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$1 AND role=$2`, projectID, string(db.FederationRoleSpoke))
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		return reconcileFederationBindingTransitionLinks(ctx, tx, &binding, next)
+	})
+}
+
 // The binding lock serializes descendant enrollment with teardown. Recheck
 // durable intent in the transaction performing archive, detach or reset.
 func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64, checkpointAcceptedEvents ...map[string]string) error {

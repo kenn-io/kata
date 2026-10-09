@@ -178,7 +178,10 @@ func (d *Store) ingestFederationEventsOnce(
 		// claim.violated is best-effort audit metadata evaluated against
 		// current hub claim state at ingest time. It is not a causally precise
 		// historical authorization judgment for offline work.
-		auditEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, ev)
+		auditEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, ev, db.ClaimPrincipal{
+			HolderInstanceUID: p.SpokeInstanceUID,
+			Holder:            p.BoundActor,
+		})
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}

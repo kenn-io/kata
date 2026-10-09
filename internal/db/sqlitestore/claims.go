@@ -1088,15 +1088,17 @@ func (d *Store) releaseClaimTx(
 }
 
 type claimWorkMutationInput struct {
-	ProjectID         int64
-	ProjectName       string
-	IssueID           int64
-	IssueUID          string
-	OffendingEventUID string
-	EventType         string
-	Actor             string
-	HolderInstanceUID string
-	RequireClaim      bool
+	ProjectID                  int64
+	ProjectName                string
+	IssueID                    int64
+	IssueUID                   string
+	OffendingEventUID          string
+	EventType                  string
+	Actor                      string
+	HolderActor                string
+	HolderInstanceUID          string
+	OffendingOriginInstanceUID string
+	RequireClaim               bool
 }
 
 type federationIngestClaimAuditIssue struct {
@@ -1109,6 +1111,7 @@ func (d *Store) annotateFederationIngestClaimWorkTx(
 	tx *sql.Tx,
 	projectID int64,
 	ev db.RemoteEvent,
+	rootHolder db.ClaimPrincipal,
 ) ([]db.Event, error) {
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(ev)
 	if err != nil {
@@ -1116,6 +1119,12 @@ func (d *Store) annotateFederationIngestClaimWorkTx(
 	}
 	if len(issueUIDs) == 0 {
 		return nil, nil
+	}
+	if rootHolder.HolderInstanceUID == "" {
+		rootHolder.HolderInstanceUID = ev.OriginInstanceUID
+	}
+	if rootHolder.Holder == "" {
+		rootHolder.Holder = ev.Actor
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
@@ -1136,15 +1145,17 @@ func (d *Store) annotateFederationIngestClaimWorkTx(
 			return nil, err
 		}
 		auditEvents, err := d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
-			ProjectID:         target.ProjectID,
-			ProjectName:       target.ProjectName,
-			IssueID:           target.IssueID,
-			IssueUID:          issue.UID,
-			OffendingEventUID: ev.EventUID,
-			EventType:         ev.Type,
-			Actor:             ev.Actor,
-			HolderInstanceUID: ev.OriginInstanceUID,
-			RequireClaim:      issue.RequireClaim,
+			ProjectID:                  target.ProjectID,
+			ProjectName:                target.ProjectName,
+			IssueID:                    target.IssueID,
+			IssueUID:                   issue.UID,
+			OffendingEventUID:          ev.EventUID,
+			EventType:                  ev.Type,
+			Actor:                      ev.Actor,
+			HolderActor:                rootHolder.Holder,
+			HolderInstanceUID:          rootHolder.HolderInstanceUID,
+			OffendingOriginInstanceUID: ev.OriginInstanceUID,
+			RequireClaim:               issue.RequireClaim,
 		})
 		if err != nil {
 			return nil, err
@@ -1246,12 +1257,20 @@ func (d *Store) annotateClaimWorkMutationTx(
 	if !shouldAuditClaim {
 		return events, nil
 	}
-	if !claimWorkCoveredByLiveClaim(live, in.HolderInstanceUID, in.Actor) {
+	holderActor := in.HolderActor
+	if holderActor == "" {
+		holderActor = in.Actor
+	}
+	if !claimWorkCoveredByLiveClaim(live, in.HolderInstanceUID, holderActor) {
+		offendingOrigin := in.OffendingOriginInstanceUID
+		if offendingOrigin == "" {
+			offendingOrigin = in.HolderInstanceUID
+		}
 		evt, err := d.insertClaimEventTx(ctx, tx, claimEventInput{
 			ProjectID: in.ProjectID, ProjectName: in.ProjectName, IssueID: in.IssueID,
 			Type: "claim.violated", Actor: in.Actor, Claim: live, Reason: "uncovered_work",
 			OffendingEventUID: in.OffendingEventUID, OffendingEventType: in.EventType,
-			OffendingOriginInstanceUID: in.HolderInstanceUID,
+			OffendingOriginInstanceUID: offendingOrigin,
 		})
 		if err != nil {
 			return nil, err

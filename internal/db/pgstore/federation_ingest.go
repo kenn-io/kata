@@ -164,7 +164,10 @@ func (s *Store) IngestFederationEvents(
 			}
 			result.InsertedEventUIDs = append(result.InsertedEventUIDs, input.event.EventUID)
 			auditEvents, err := s.annotateFederationIngestClaimWorkTx(
-				ctx, tx, params.ProjectID, input.event,
+				ctx, tx, params.ProjectID, input.event, db.ClaimPrincipal{
+					HolderInstanceUID: params.SpokeInstanceUID,
+					Holder:            params.BoundActor,
+				},
 			)
 			if err != nil {
 				return err

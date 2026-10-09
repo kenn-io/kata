@@ -135,6 +135,9 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 // RunRelayIngressClaimLifecycle checks that root acceptance applies the same
 // claim release and violation audit as direct federation ingest.
 func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
+	t.Run("duplicate close replay preserves a later lease", func(t *testing.T) {
+		runRelayIngressDuplicateClosePreservesLease(t, store)
+	})
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
@@ -167,16 +170,16 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	created := newRemoteEvent(t, project, &issueUID, "issue.created", "leaf-member", leafUID, 300,
 		jsontext.Value(`{"uid":"`+issueUID+`","short_id":"`+strings.ToLower(issueUID[len(issueUID)-4:])+`","title":"Relayed task","body":"","author":"leaf-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
-	seal := func(event db.RemoteEvent, sequence int64) db.RelayEnvelope {
+	seal := func(enrollment db.FederationEnrollment, senderUID string, event db.RemoteEvent, sequence int64) db.RelayEnvelope {
 		t.Helper()
 		body, err := db.EncodeRelaySourceEvent(event)
 		require.NoError(t, err)
 		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
-			Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID,
+			Version: db.RelayProtocolVersion, BindingUID: enrollment.RelayBindingUID,
 			ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
-			SenderInstanceUID: peerUID, ReceiverInstanceUID: store.InstanceUID(),
+			SenderInstanceUID: senderUID, ReceiverInstanceUID: store.InstanceUID(),
 			Epoch: 1, Sequence: sequence, Stream: db.RelayStreamEvent,
-			Path: []string{leafUID, peerUID}, SourceUID: event.EventUID,
+			Path: []string{leafUID, senderUID}, SourceUID: event.EventUID,
 			SourceHash: event.ContentHash, Body: body,
 		})
 		require.NoError(t, err)
@@ -184,15 +187,15 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	}
 	signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}
 	writeCtx := db.WithRootAttribution(ctx, signer, "root-member")
-	accept := func(event db.RemoteEvent, sequence, after int64) db.RelayAcceptance {
+	accept := func(enrollment db.FederationEnrollment, senderUID string, event db.RemoteEvent, sequence, after int64) db.RelayAcceptance {
 		t.Helper()
-		accepted, err := store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{
-			Stream: db.RelayStreamEvent, After: after, Envelopes: []db.RelayEnvelope{seal(event, sequence)},
+		accepted, err := store.AcceptRelayDeliveries(writeCtx, enrollment.RelayBindingUID, db.RelayBatch{
+			Stream: db.RelayStreamEvent, After: after, Envelopes: []db.RelayEnvelope{seal(enrollment, senderUID, event, sequence)},
 		})
 		require.NoError(t, err)
 		return accepted
 	}
-	createdAcceptance := accept(created, 1, 0)
+	createdAcceptance := accept(grant.Enrollment, peerUID, created, 1, 0)
 	require.Len(t, createdAcceptance.InsertedEvents, 1)
 	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: project.ID, IssueRef: issueUID,
@@ -202,7 +205,7 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	closed := newRemoteEvent(t, project, &issueUID, "issue.closed", "leaf-member", leafUID, 301,
 		jsontext.Value(`{"issue_uid":"`+issueUID+`","reason":"done","closed_at":"2026-05-23T12:01:00.000Z"}`))
-	closedAcceptance := accept(closed, 2, 1)
+	closedAcceptance := accept(grant.Enrollment, peerUID, closed, 2, 1)
 	closedTypes := map[string]bool{}
 	closedUIDs := map[string]bool{}
 	var violationFound bool
@@ -228,16 +231,16 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	status, err := store.ClaimStatus(ctx, project.ID, issueUID, time.Now().UTC())
 	require.NoError(t, err)
 	require.False(t, status.Held)
-
 	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: project.ID, IssueRef: issueUID,
 		Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli"},
 		ClaimKind: "hard", Now: time.Now().UTC(),
 	})
 	require.NoError(t, err)
+
 	updated := newRemoteEvent(t, project, &issueUID, "issue.updated", "leaf-member", leafUID, 302,
 		jsontext.Value(`{"issue_uid":"`+issueUID+`","title":"Offline update"}`))
-	updatedAcceptance := accept(updated, 3, 2)
+	updatedAcceptance := accept(grant.Enrollment, peerUID, updated, 3, 2)
 	updatedTypes := map[string]bool{}
 	updatedUIDs := map[string]bool{}
 	for _, event := range updatedAcceptance.InsertedEvents {
@@ -251,4 +254,120 @@ func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
 	status, err = store.ClaimStatus(ctx, project.ID, issueUID, time.Now().UTC())
 	require.NoError(t, err)
 	require.True(t, status.Held, "an uncovered update must not release the live claim")
+	_, err = store.ReleaseClaim(ctx, db.ReleaseClaimParams{
+		ProjectID: project.ID, IssueRef: issueUID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli"},
+		Reason:    "replace test lease", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issueUID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: grant.Enrollment.SpokeInstanceUID,
+			Holder:            grant.Enrollment.Actor,
+			ClientKind:        "relay:v1:root-facing-holder",
+		},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	validRelayUpdate := newRemoteEvent(t, project, &issueUID, "issue.updated", "leaf-member", leafUID, 303,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","title":"Valid relayed update"}`))
+	validRelayAcceptance := accept(grant.Enrollment, peerUID, validRelayUpdate, 4, 3)
+	for _, event := range validRelayAcceptance.InsertedEvents {
+		require.NotEqual(t, "claim.violated", event.Type,
+			"valid descendant work must be checked as the authenticated root-facing relay holder")
+	}
+	status, err = store.ClaimStatusReadOnly(ctx, project.ID, issueUID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, status.Held, "valid relay-owned work must preserve the live lease")
+}
+
+func runRelayIngressDuplicateClosePreservesLease(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "duplicate-claim-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	public, private, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		Actor: "root-member", AdminActor: "admin", PlaintextToken: "relay-claim-duplicate-parent-test-token",
+	})
+	require.NoError(t, err)
+	firstPeerUID, err := uid.New()
+	require.NoError(t, err)
+	secondPeerUID, err := uid.New()
+	require.NoError(t, err)
+	leafUID, err := uid.New()
+	require.NoError(t, err)
+	first, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: firstPeerUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-first-test-token",
+		ServeDownstream: true,
+	})
+	require.NoError(t, err)
+	second, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: secondPeerUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-second-test-token",
+		ServeDownstream: true,
+	})
+	require.NoError(t, err)
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+	created := newRemoteEvent(t, project, &issueUID, "issue.created", "leaf-member", leafUID, 410,
+		jsontext.Value(`{"uid":"`+issueUID+`","short_id":"`+strings.ToLower(issueUID[len(issueUID)-4:])+`","title":"Duplicate close task","body":"","author":"leaf-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+	closed := newRemoteEvent(t, project, &issueUID, "issue.closed", "leaf-member", leafUID, 411,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","reason":"done","closed_at":"2026-05-23T12:01:00.000Z"}`))
+	seal := func(enrollment db.FederationEnrollment, senderUID string, event db.RemoteEvent, sequence int64) db.RelayEnvelope {
+		t.Helper()
+		body, err := db.EncodeRelaySourceEvent(event)
+		require.NoError(t, err)
+		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+			Version: db.RelayProtocolVersion, BindingUID: enrollment.RelayBindingUID,
+			ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+			SenderInstanceUID: senderUID, ReceiverInstanceUID: store.InstanceUID(),
+			Epoch: 1, Sequence: sequence, Stream: db.RelayStreamEvent,
+			Path: []string{leafUID, senderUID}, SourceUID: event.EventUID,
+			SourceHash: event.ContentHash, Body: body,
+		})
+		require.NoError(t, err)
+		return envelope
+	}
+	writeCtx := db.WithRootAttribution(ctx,
+		db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}, "root-member")
+	accept := func(enrollment db.FederationEnrollment, senderUID string, event db.RemoteEvent, sequence, after int64) db.RelayAcceptance {
+		t.Helper()
+		accepted, err := store.AcceptRelayDeliveries(writeCtx, enrollment.RelayBindingUID, db.RelayBatch{
+			Stream: db.RelayStreamEvent, After: after,
+			Envelopes: []db.RelayEnvelope{seal(enrollment, senderUID, event, sequence)},
+		})
+		require.NoError(t, err)
+		return accepted
+	}
+	require.Len(t, accept(first.Enrollment, firstPeerUID, created, 1, 0).InsertedEvents, 1)
+	accept(first.Enrollment, firstPeerUID, closed, 2, 1)
+	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issueUID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli"},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	replayed := accept(second.Enrollment, secondPeerUID, closed, 1, 0)
+	for _, event := range replayed.InsertedEvents {
+		require.NotContains(t, []string{"claim.released", "claim.violated"}, event.Type,
+			"replaying an already accepted source event must not repeat claim bookkeeping")
+	}
+	status, err := store.ClaimStatusReadOnly(ctx, project.ID, issueUID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, status.Held, "duplicate close through a new relay binding must not release a later live claim")
+	require.NotNil(t, status.Claim)
+	require.Nil(t, status.Claim.ReleasedAt)
 }

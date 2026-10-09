@@ -173,13 +173,11 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 		ensureFederationReplicaMu.Lock()
 		err = validate()
 		if err == nil && project.ID != 0 {
-			binding, readErr := cfg.DB.FederationBindingByProject(ctx, project.ID)
-			if readErr == nil && (!binding.Enabled || binding.PushEnabled) {
-				binding.Enabled = true
-				binding.PushEnabled = false
-				_, err = cfg.DB.UpsertFederationBinding(ctx, binding)
-			} else if readErr != nil && !errors.Is(readErr, db.ErrNotFound) {
-				err = readErr
+			fencer, ok := cfg.DB.(db.RelayDisconnectFenceStore)
+			if !ok {
+				err = db.ErrTransactionFinalizationFailed
+			} else {
+				err = fencer.FenceRelayDisconnect(ctx, project.ID)
 			}
 		}
 		ensureFederationReplicaMu.Unlock()

@@ -24,8 +24,9 @@ import (
 
 type bridgeDisconnectPartialSetupStore struct {
 	db.Storage
-	failSpokeBinding bool
-	failRelayConfig  bool
+	failSpokeBinding         bool
+	failRelayConfig          bool
+	afterLifecycleValidation func(context.Context) error
 }
 
 func (s *bridgeDisconnectPartialSetupStore) UpsertFederationBinding(ctx context.Context, binding db.FederationBinding) (db.FederationBinding, error) {
@@ -49,7 +50,21 @@ func (s *bridgeDisconnectPartialSetupStore) ValidateRelayLifecycle(ctx context.C
 	if !ok {
 		return db.ErrTransactionFinalizationFailed
 	}
-	return lifecycle.ValidateRelayLifecycle(ctx, projectID)
+	if err := lifecycle.ValidateRelayLifecycle(ctx, projectID); err != nil {
+		return err
+	}
+	if s.afterLifecycleValidation != nil {
+		return s.afterLifecycleValidation(ctx)
+	}
+	return nil
+}
+
+func (s *bridgeDisconnectPartialSetupStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	fencer, ok := s.Storage.(db.RelayDisconnectFenceStore)
+	if !ok {
+		return db.ErrTransactionFinalizationFailed
+	}
+	return fencer.FenceRelayDisconnect(ctx, projectID)
 }
 
 type bridgeDisconnectObservedCredentials struct {
@@ -77,7 +92,7 @@ type bridgeDisconnectResponse struct {
 // R9: disconnect previews without mutation, revokes exactly the retained narrow
 // grant, and safely resumes after a lost upstream response without losing data.
 func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
-	for _, mode := range []string{"normal", "lost_response", "disconnect_write_race", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
+	for _, mode := range []string{"normal", "lost_response", "disconnect_write_race", "disconnect_validation_write_race", "pending_enrollment", "precommit_enrollment_failure", "partial_project_only", "partial_binding_without_relay", "partial_project_archived", "inflight_enrollment", "parent_revoked", "credential_changed", "archived", "archived_pending", "signed_disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				t.Setenv("KATA_HOME", t.TempDir())
@@ -190,11 +205,31 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				}
 				t.Cleanup(remote.Close)
 				localStore := store
+				raceIssueUID := ""
+				var raceWriteErr error
+				var raceArmed atomic.Bool
+				var armedValidationCalls atomic.Int32
 				switch mode {
 				case "partial_project_only", "partial_project_archived":
 					localStore = &bridgeDisconnectPartialSetupStore{Storage: store, failSpokeBinding: true}
 				case "partial_binding_without_relay":
 					localStore = &bridgeDisconnectPartialSetupStore{Storage: store, failRelayConfig: true}
+				case "disconnect_validation_write_race":
+					localStore = &bridgeDisconnectPartialSetupStore{Storage: store, afterLifecycleValidation: func(ctx context.Context) error {
+						if !raceArmed.Load() || armedValidationCalls.Add(1) != 2 {
+							return nil
+						}
+						project, projectErr := store.ProjectByUID(ctx, root.private.UID)
+						if projectErr != nil {
+							return projectErr
+						}
+						issue, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
+							ProjectID: project.ID, Author: "local-member", Title: "Write in disconnect validation window",
+						})
+						raceIssueUID = issue.UID
+						raceWriteErr = createErr
+						return createErr
+					}}
 				}
 				var credentialStore config.FederationCredentialStore = config.DefaultFederationCredentialStore()
 				var leavePendingMarked <-chan struct{}
@@ -341,6 +376,9 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, found)
 				require.True(t, credential.Equal(current))
+				if mode == "disconnect_validation_write_race" {
+					raceArmed.Store(true)
+				}
 				if mode == "disconnect_write_race" {
 					disconnectDone := make(chan bridgeDisconnectResponse, 1)
 					go func() {
@@ -363,6 +401,29 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 					require.ErrorIs(t, writeErr, db.ErrFederatedReadOnly, "disconnect must fence local writes before the hub grant is revoked")
 				} else {
 					code, _, raw = request.request(t, http.MethodPost, path, "", map[string]any{}, headers)
+				}
+				if mode == "disconnect_validation_write_race" {
+					require.NotEmpty(t, raceIssueUID, "the disconnect race hook must commit an issue before the push fence")
+					require.NoError(t, raceWriteErr)
+					_, err := store.IssueByUID(t.Context(), raceIssueUID, db.IncludeDeletedNo)
+					require.NoError(t, err, "the injected issue write must be durable")
+					require.NotEqual(t, http.StatusOK, code, string(raw), "disconnect must leave while the newly committed issue is still pending upstream")
+					require.Zero(t, disconnectCalls.Load(), "upstream access must remain live when the atomic lifecycle fence sees new pending work")
+					retained, found, err := config.DefaultFederationCredentialStore().FederationCredential(t.Context(), root.private.UID)
+					require.NoError(t, err)
+					require.True(t, found)
+					require.True(t, retained.LeavePending)
+					project, err := store.ProjectByUID(t.Context(), root.private.UID)
+					require.NoError(t, err)
+					binding, err := store.FederationBindingByProject(t.Context(), project.ID)
+					require.NoError(t, err)
+					require.True(t, binding.Enabled)
+					require.True(t, binding.PushEnabled, "failed lifecycle fence must not persist a disabled push state")
+					grants, err := rootStore.ListFederationEnrollments(t.Context())
+					require.NoError(t, err)
+					require.Len(t, grants, 1)
+					require.Nil(t, grants[0].RevokedAt)
+					return
 				}
 				if mode == "credential_changed" {
 					require.Equal(t, http.StatusConflict, code, string(raw))
