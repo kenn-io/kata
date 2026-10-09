@@ -431,41 +431,29 @@ func scopedMutationEvent(
 }
 
 // projectScopedMutationEvent applies the event-read reference boundary to
-// close mutation receipts. A caller can close an issue in an accessible
-// project after its parent project becomes inaccessible, so the close-time
-// parent snapshot must be checked independently from the subject project.
+// mutation receipts. A receipt may refer to issues that are no longer inside
+// the caller's authorized project scope, even when its subject issue remains
+// accessible.
 func projectScopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
-	if event.Type != "issue.closed" || event.Payload == "" {
-		return event, nil
-	}
-	var payload struct {
-		ParentUID     *string `json:"parent_uid"`
-		ParentShortID *string `json:"parent_short_id"`
-	}
-	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-		return nil, nil
-	}
-	parentUID := ""
-	if payload.ParentUID != nil {
-		parentUID = *payload.ParentUID
-	}
-	parentShortID := ""
-	if payload.ParentShortID != nil {
-		parentShortID = *payload.ParentShortID
-	}
-	if parentUID == "" {
-		if parentShortID != "" {
-			return nil, nil
-		}
-		return event, nil
-	}
-	if _, err := store.IssueByUID(ctx, parentUID, db.IncludeDeletedYes); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, nil
-		}
+	reset, err := db.EventRequiresProjectScopeReset(ctx, *event,
+		func(uid string) (db.Issue, error) {
+			return store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
+		},
+		func(projectUID, ref string) (db.Issue, error) {
+			project, err := store.ProjectByUID(ctx, projectUID)
+			if err != nil {
+				return db.Issue{}, err
+			}
+			return store.IssueByShortID(ctx, project.ID, ref, db.IncludeDeletedYes)
+		},
+	)
+	if err != nil {
 		return nil, err
+	}
+	if reset {
+		return nil, nil
 	}
 	return event, nil
 }

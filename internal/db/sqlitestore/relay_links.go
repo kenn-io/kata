@@ -57,6 +57,7 @@ func filterRelayCrossProjectLinkEvents(
 		return events, nil
 	}
 	placeholders, args := projectIDPlaceholders(projectIDs)
+	//nolint:gosec // The IN clause contains only count-derived placeholders; project IDs stay bound.
 	relayRows, err := tx.QueryContext(ctx, `
 		SELECT i.project_uid, i.source_uid
 		  FROM federation_relay_inbox i
@@ -85,6 +86,7 @@ func filterRelayCrossProjectLinkEvents(
 	if len(relaySources) == 0 {
 		return events, nil
 	}
+	//nolint:gosec // The IN clause contains only count-derived placeholders; project IDs stay bound.
 	issueRows, err := tx.QueryContext(ctx, `
 		SELECT i.uid, p.uid
 		  FROM issues i JOIN projects p ON p.id=i.project_id

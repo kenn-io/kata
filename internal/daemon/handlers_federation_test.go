@@ -2228,7 +2228,7 @@ func TestTrustedProxyMembersCannotManageLegacyFederationEnrollments(t *testing.T
 		server, store, _ := startBearerProxyTestServer(
 			t,
 			"X-Kata-Actor",
-			bearerProxyOpts{Token: "federation-enrollment-proxy-token"},
+			bearerProxyOpts{Token: "federation-enrollment-proxy-token"}, //nolint:gosec // Test-only proxy credential.
 		)
 		project, err := store.CreateProject(t.Context(), "proxy-enrollment-project")
 		require.NoError(t, err)
@@ -2238,7 +2238,7 @@ func TestTrustedProxyMembersCannotManageLegacyFederationEnrollments(t *testing.T
 			"spoke_instance_uid": federationTestSpokeUID,
 			"project_id":         project.ID,
 			"capabilities":       "pull",
-			"token":              "proxy-member-created-grant",
+			"token":              "proxy-member-created-grant", //nolint:gosec // Test-only grant credential.
 			"actor":              "project-member",
 		}, headers)
 		assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "not_found")
@@ -2254,7 +2254,7 @@ func TestTrustedProxyMembersCannotManageLegacyFederationEnrollments(t *testing.T
 		server, store, _ := startBearerProxyTestServer(
 			t,
 			"X-Kata-Actor",
-			bearerProxyOpts{Token: "federation-enrollment-rotate-proxy-token"},
+			bearerProxyOpts{Token: "federation-enrollment-rotate-proxy-token"}, //nolint:gosec // Test-only proxy credential.
 		)
 		project, err := store.CreateProject(t.Context(), "proxy-rotate-project")
 		require.NoError(t, err)
