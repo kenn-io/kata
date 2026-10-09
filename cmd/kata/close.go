@@ -136,6 +136,11 @@ Instead, label and comment:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
+			if len(parsed) > 0 {
+				if ref := closeTranscript(cmd); ref != nil {
+					extra["transcript"] = ref
+				}
+			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
 			if dryRun && currentOutputMode() == outputHuman && !flags.Quiet {

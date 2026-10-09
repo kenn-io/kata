@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 // CloseRetryProtocol marks a close request whose retry headers must be
@@ -929,11 +930,12 @@ type CloseActionRequest struct {
 }
 
 // CloseActionRequestBody extends the legacy action body with a close-only
-// protocol marker. Older daemons reject the unknown marker before they can
-// ignore retry headers and mutate an issue.
+// protocol marker and optional session provenance. Older daemons reject unknown
+// fields before they can ignore retry headers or provenance and mutate an issue.
 type CloseActionRequestBody struct {
 	ActionRequestBody
-	RetryProtocol string `json:"retry_protocol,omitempty" enum:"close-v1,"`
+	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
+	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.

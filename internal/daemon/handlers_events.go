@@ -445,7 +445,7 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		"issue.metadata_updated": keySet("diff", "revision_new", "updated_at"),
 		"issue.linked":           keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
 		"issue.unlinked":         keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
-		"issue.closed":           keySet("reason", "closed_at", "message", "evidence"),
+		"issue.closed":           keySet("reason", "closed_at", "message", "evidence", "transcript"),
 		"issue.reopened":         keySet("reopened_at"),
 		// Ladder verbs carry only mutation timestamps.
 		"issue.soft_deleted": keySet("deleted_at"),

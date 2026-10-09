@@ -384,6 +384,23 @@ func (t TokenScopeOutKind) Validate() error {
 	}
 }
 
+type TranscriptAgent string
+
+const (
+	Claude TranscriptAgent = "claude"
+	Codex  TranscriptAgent = "codex"
+)
+
+// Validate checks if the TranscriptAgent value is valid
+func (t TranscriptAgent) Validate() error {
+	switch t {
+	case Claude, Codex:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TranscriptAgent value, got: %v", t))
+	}
+}
+
 type UICapabilitiesUpdates string
 
 const (

@@ -1,13 +1,96 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-08
+last_edited: 2026-10-09
 ---
 
 # Configuration
 
 kata configuration is split between environment variables, committed workspace
 bindings, local per-machine overrides, and daemon config.
+
+## Closing-session transcripts
+
+To help readers find the chat that completed an issue, enable transcript
+attachment in the **invoking CLI client's** `<KATA_HOME>/config.toml`:
+
+```toml
+[close.transcript]
+enabled = true
+agentsview_url = "https://agentsview.example" # optional; a base path is supported
+```
+
+This is off by default and needs no daemon restart. Use a daemon with HTTP API
+`0.26.0` or newer. With attachment disabled, close requests remain unchanged.
+Older daemons reject an attached transcript before closing; Kata never retries
+without provenance automatically.
+
+When `kata close` supplies evidence, it attaches a separate `transcript` object
+to the same durable `issue.closed` event. Evidence and substantive-message
+requirements still apply: a chat identifier is provenance, not proof that work
+passed. No transcript body, local filename, token, or hook ownership hash is
+copied. The setting affects CLI closes, including remote-daemon calls; browser
+closes do not infer a session from the daemon's environment.
+
+Codex context comes from `CODEX_THREAD_ID`, falling back to `CODEX_SESSION_ID`.
+If both are populated they must agree. For Claude Code or an explicit harness
+handoff, pass the actual current native session UUID as a pair:
+
+```sh
+KATA_TRANSCRIPT_AGENT=claude \
+KATA_TRANSCRIPT_SESSION_ID=00000000-0000-4000-8000-000000000001 \
+kata close example-project#abc4 --done \
+  --message "Implemented the requested behavior and ran the focused tests." \
+  --test "go test ./internal/example"
+```
+
+Only Claude Code and Codex native UUID sessions are supported initially. Kata
+never scans recent chat files or reuses another issue's session. Missing,
+invalid, partially supplied, or ambiguous context warns on stderr and skips the
+attachment; the close can still succeed. An unconfigured AgentsView URL simply
+stores the identifier. An invalid URL warns and stores only the identifier.
+URLs must be absolute HTTP(S), with no embedded credentials, query, or fragment.
+
+AgentsView's native session IDs and routes are `codex:<UUID>` at
+`/sessions/codex/<UUID>` and Claude's bare `<UUID>` at `/sessions/<UUID>`. These
+routes are supported by the [AgentsView v0.44.0 router](https://github.com/kenn-io/agentsview/blob/v0.44.0/frontend/src/lib/stores/router.svelte.ts),
+including its PostgreSQL server.
+Set `agentsview_url` only for an installation indexing those native IDs.
+Imported archives can namespace IDs (for example, `workstation~codex:<UUID>`);
+for those installations omit the base URL and use AgentsView's [**Go to
+session** lookup](https://github.com/kenn-io/agentsview/blob/v0.44.0/frontend/src/lib/utils/go-to-session.ts)
+with the saved UUID, or supply its verified exact URL through the HTTP close
+API. If multiple archives contain that UUID, lookup reports ambiguity; use the
+archive's canonical ID or a verified locator. Kata does not infer an import
+namespace.
+
+Kata makes no AgentsView request during close. A generated URL is a locator,
+not an availability receipt: offline hosting, delayed indexing, authentication,
+or a session excluded from the archive can prevent it from opening. The
+identifier remains useful for lookup after indexing catches up. Retry the
+AgentsView lookup, not the close, when indexing lags.
+
+An unkeyed close of an already closed issue adds no event and cannot replace
+its provenance. Reopen/reclose records a new session on a new close event and
+retains the old event. Keyed retries return their original event; keep the
+original session, link configuration, evidence, actor, and other request fields
+unchanged. Retrying from another chat with different automatic context conflicts;
+explicitly pass the original agent/session pair and retain the original base URL.
+`--dry` validates without writing an event or attaching persistent provenance.
+
+Readers can open the session link in the web issue's **Events** history, or
+retrieve provenance with the event API. For example, in a small project:
+
+```sh
+kata --project example-project events --after 0 --limit 100 --json |
+  jq '.events[] | select(.type == "issue.closed" and .issue_short_id == "abc4") |
+      .payload.transcript'
+```
+
+For a larger history, continue with `next_after_id` until the desired event is
+found. A saved close receipt also contains `event.payload`, encoded as a JSON
+string; on a keyed retry use `original_event.payload`. Both contain the same
+`transcript` object as the parsed event stream.
 
 ## Environment variables
 
@@ -22,6 +105,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
+| `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`codex` or `claude`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override Codex environment context. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
