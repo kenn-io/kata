@@ -129,3 +129,25 @@ func TestStatusReopenFindsTaskEditedAfterCompletion(t *testing.T) {
 	require.Equal(t, "open", got.Status)
 	require.Len(t, f.posts, 1)
 }
+
+// Contract: a task Todoist returns deleted or in another project is out of
+// scope. Kata reports it as blocked instead of reusing an earlier closed result.
+func TestStatusOutOfScopeTaskIsBlockedNotClosed(t *testing.T) {
+	for _, kind := range []string{"moved", "deleted"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newAPIFixture(t)
+			s, c := statusSession(t, f)
+			if kind == "moved" {
+				f.row.ProjectID = "foreign"
+			} else {
+				f.row.Deleted = true
+			}
+			closed := "closed"
+			prior := &db.IssueStatusObservation{Raw: &closed, Version: f.row.UpdatedAt}
+			_, err := s.ReadStatus(t.Context(), c, StatusTarget{ID: f.row.ID, Prior: prior})
+			statusErr, ok := errors.AsType[*issuesync.StatusError](err)
+			require.True(t, ok, "got %v", err)
+			require.True(t, statusErr.Blocked)
+		})
+	}
+}

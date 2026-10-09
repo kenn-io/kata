@@ -27,6 +27,11 @@ func (a *Adapter) OpenStatus(ctx context.Context, b db.IssueSyncBinding, _ time.
 	if err != nil {
 		return nil, err
 	}
+	// Status delivery runs before the content import's project check, so an
+	// archived or deleted project must stop it here.
+	if _, err := session.Project(ctx, c); err != nil {
+		return nil, err
+	}
 	status, ok := session.(StatusSession)
 	if !ok {
 		return nil, nil

@@ -204,3 +204,23 @@ func TestRunnerReopenWithUnknownUpdateTimeClearsPendingIntent(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, f.posts, 1, "a completed task must not be reopened again")
 }
+
+// Contract: an archived Todoist project receives no status writes, even though
+// status delivery runs before the content import that also rejects it.
+func TestRunnerArchivedProjectSendsNoStatusWrite(t *testing.T) {
+	ctx := t.Context()
+	store, binding, f := newRunnerFixture(t, "two-way")
+	_, err := f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	mapping, err := store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", "task:"+f.row.ID)
+	require.NoError(t, err)
+	_, _, changed, err := store.CloseIssueWithEvents(ctx, *mapping.IssueID, "done", "worker", "Completed task", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	f.mu.Lock()
+	f.projectArchived = true
+	f.mu.Unlock()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.Error(t, err)
+	require.Empty(t, f.posts)
+}

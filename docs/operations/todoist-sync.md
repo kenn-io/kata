@@ -128,7 +128,7 @@ An active task wins over historical completions of the same ID, including old
 recurring occurrences. A missing task is never treated as completion or
 deletion: Kata accepts a completion only when the exact task is found in scoped
 history. Deleted, moved or inaccessible tasks block delivery and preserve native
-issues. Tasks completed before the configured history floor cannot be resolved
+issues. An archived or deleted project stops status delivery before any write. Tasks completed before the configured history floor cannot be resolved
 through that history.
 
 Reads retry `429` and `5xx` responses with exponential backoff, honoring

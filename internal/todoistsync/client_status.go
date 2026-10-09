@@ -28,7 +28,8 @@ type StatusTarget struct {
 const historyOverlap = 2 * time.Minute
 
 // activeTask reads one task. Todoist serves only active tasks here, so found
-// is false for completed tasks and for tasks deleted or moved out of the project.
+// is false for completed tasks. A task Todoist returns deleted or in another
+// project is out of scope and blocks instead of reading as missing.
 func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Task, bool, error) {
 	resp, err := s.api.GetTaskAPIV1TasksTaskIDGetWithResponse(ctx, &todoistapi.GetTaskAPIV1TasksTaskIDGetRequestOptions{
 		PathParams: &todoistapi.GetTaskAPIV1TasksTaskIDGetPath{TaskID: url.PathEscape(id)},
@@ -44,7 +45,7 @@ func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Ta
 	}
 	t := taskFrom(*resp.JSON200, c.historyFloor())
 	if t.Deleted || t.ProjectID != c.ProjectID {
-		return Task{}, false, nil
+		return Task{}, false, blocked("Todoist task was deleted or moved out of the selected project")
 	}
 	return t, true, nil
 }

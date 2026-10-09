@@ -37,7 +37,8 @@ type apiFixture struct {
 	wrong           bool
 	nullFields      []string
 	// empty answers these paths with HTTP 200 and no body.
-	empty map[string]bool
+	empty           map[string]bool
+	projectArchived bool
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -98,7 +99,7 @@ func (f *apiFixture) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/user":
 		reply(map[string]any{"id": f.account, "email": "person@example.com"})
 	case "/api/v1/projects/" + testConfig().ProjectID:
-		reply(map[string]any{"id": testConfig().ProjectID, "name": "Example tasks", "is_archived": false, "is_deleted": false})
+		reply(map[string]any{"id": testConfig().ProjectID, "name": "Example tasks", "is_archived": f.projectArchived, "is_deleted": false})
 	case "/api/v1/tasks":
 		f.queries = append(f.queries, r.URL.Query())
 		rows := []any{}
@@ -123,7 +124,8 @@ func (f *apiFixture) serve(w http.ResponseWriter, r *http.Request) {
 		// The spec omits next_cursor on the last page.
 		reply(map[string]any{"items": items})
 	case "/api/v1/tasks/" + testTask().ID:
-		if f.row.Checked || !inProject {
+		// Todoist serves an active task here even after it moves to another project.
+		if f.row.Checked {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
