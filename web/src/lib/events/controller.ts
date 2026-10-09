@@ -19,9 +19,15 @@ export class InvalidationController {
 
   frame(frame: EventFrame): void {
     if (frame.event === 'sync.reset_required') {
-      this.#full = true
-      this.#fullGeneration += 1
+      this.refreshAll()
+      return
     }
+    this.refresh()
+  }
+
+  refreshAll(): void {
+    this.#full = true
+    this.#fullGeneration += 1
     this.refresh()
   }
 
