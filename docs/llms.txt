@@ -72,3 +72,5 @@ for machine readers.
   Pin personal/work homes and recover existing spokes without changing routing.
 
 - [Plane sync](https://katatracker.com/docs/operations/plane-sync.md): Mirror a Plane project using daemon-owned read-only API credentials.
+- [Linear sync](https://katatracker.com/docs/operations/linear-sync.md): Scope, credentials, field ownership, status synchronization, and recovery.
+- [Twenty sync](https://katatracker.com/docs/operations/twenty-sync.md): Mirror Twenty workspace tasks with self-hosted support and optional two-way status sync.

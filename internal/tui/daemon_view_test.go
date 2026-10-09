@@ -519,10 +519,5 @@ func setupDaemonView() Model {
 }
 
 func runBatchCmd(cmd tea.Cmd) {
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		if len(batch) > 0 && batch[0] != nil {
-			_ = batch[0]()
-		}
-	}
+	runCmd(cmd)
 }

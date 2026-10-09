@@ -18,6 +18,7 @@ describe('createDevChildEnvironment', () => {
         GOFLAGS:
           "'-p=2' -p=2 -p 2 -mod=mod -tags=example '-ldflags=-X example.message=hello world'",
         GOMAXPROCS: '2',
+        GOPROXY: 'https://proxy.example|direct',
         KATA_DSN: 'postgres://daemon.example/kata',
         KATA_DB: '/var/lib/kata.db',
         KATA_SERVER: 'https://daemon.example',
@@ -45,6 +46,7 @@ describe('createDevChildEnvironment', () => {
       SystemRoot: 'C:\\Windows',
       TEMP: '/example/tmp',
       GOFLAGS: "-mod=mod -tags=example '-ldflags=-X example.message=hello world'",
+      GOPROXY: 'https://proxy.example|direct',
       KATA_HOME: '/tmp/kata-web/home',
       KATA_DB: '/tmp/kata-web/home/kata.db',
       KATA_WORKSPACE: '/tmp/kata-web/workspace',

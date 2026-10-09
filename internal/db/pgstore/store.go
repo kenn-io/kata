@@ -254,3 +254,29 @@ func (s *Store) cacheInstanceUIDIfPresent(ctx context.Context) error {
 	s.instanceUID = v
 	return nil
 }
+
+// ClaimScreenView atomically claims one screen's day across all clients sharing this database.
+func (s *Store) ClaimScreenView(ctx context.Context, screen, day string) (bool, error) {
+	var claimed bool
+	err := s.RetryTransient(ctx, func() error {
+		result, err := s.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1, $2)
+   ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE meta.value <> excluded.value`,
+			"screen_viewed:"+screen, s.instanceUID+":"+day)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		claimed = count == 1
+		return err
+	})
+	return claimed, err
+}
+
+// ReleaseScreenView preserves newer claims when an earlier enqueue fails.
+func (s *Store) ReleaseScreenView(ctx context.Context, screen, day string) error {
+	return s.RetryTransient(ctx, func() error {
+		_, err := s.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 AND value=$2`,
+			"screen_viewed:"+screen, s.instanceUID+":"+day)
+		return err
+	})
+}

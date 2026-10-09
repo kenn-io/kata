@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -78,15 +77,9 @@ func newPlaneSyncEnableCmd() *cobra.Command {
 			config[target.key] = value
 		}
 		if cmd.Flags().Changed("interval") {
-			value := strings.TrimSpace(interval)
-			seconds, err := strconv.Atoi(value)
+			value, err := issueSyncIntervalFlag("plane", interval)
 			if err != nil {
-				duration, parseErr := time.ParseDuration(value)
-				if parseErr != nil || duration < time.Second {
-					return invalid("Plane sync interval must be at least one second")
-				}
-			} else if seconds < 1 {
-				return invalid("Plane sync interval must be at least one second")
+				return err
 			}
 			body.Interval = &value
 		}

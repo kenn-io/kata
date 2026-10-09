@@ -47,7 +47,7 @@ func TestPostgresReconcilerLeaseFencesWorkAfterSessionLoss(t *testing.T) {
 	select {
 	case <-secondAcquired:
 		require.FailNow(t, "standby acquired reconciler lease before leader loss")
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond): //nolint:kennlint // absence window; the leader's session holds the lease, so the standby must not acquire it
 	}
 
 	var terminated bool

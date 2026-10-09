@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-01
+last_edited: 2026-10-08
 ---
 
 # Semantic search technical notes
@@ -144,14 +144,17 @@ embedded:
 
 The generation fingerprint is `kitvec.Generation{Model, Dimensions,
 Params}.Fingerprint()` over `{model, dims, recipe_version,
-fingerprint_salt}`. Any component change starts a *new generation* rather
-than marking existing rows stale in place: the reconciler fills it in the
-background while the previous generation keeps serving searches, then cuts
-over automatically once the fill completes and reclaims the retired
+fingerprint_salt}`, plus each nonempty literal `document_prefix`,
+`document_suffix`, `query_prefix`, and `query_suffix`, and
+`request_dimensions` when true. Empty affixes and a false dimension request
+preserve the existing fingerprint. Any component change re-embeds all issue
+text in a *new generation* rather than marking existing rows stale in place:
+the reconciler fills it in the background while lexical search remains
+available, then cuts over automatically once the fill completes and reclaims the retired
 generation's storage (see "Storage"). Mid-swap the vector leg is
 **unavailable**: the active generation's fingerprint no longer matches the
-configured embedder's, and scoring a new-model query vector against
-old-model stored vectors would be meaningless (same dims) or an error (dims
+configured embedder's, and scoring a new-configuration query vector against
+old-configuration stored vectors would be meaningless (same dims) or an error (dims
 change), so the search handler refuses the leg until the cutover: auto
 degrades to labeled lexical, and explicit hybrid/semantic return 503. Lexical
 search carries throughout, and semantic results resume the moment the new
@@ -409,10 +412,10 @@ cost.
 Both legs start concurrently; the FTS leg never waits on the embedder.
 Per-leg output depth is `max(limit*3, 50)`, capped at 200. The vector leg
 first checks that the active generation's fingerprint matches the configured
-embedder's; on mismatch (model change mid-backfill) the leg is unavailable
-(degraded / 503) rather than scoring a new-model query against old-model
-vectors. The leg then embeds the query (3s timeout, `embedding.EmbedText`,
-unchunked, same as any query string), queries the active generation for
+embedder's; on mismatch during backfill after a configuration change, the leg
+is unavailable (degraded / 503) rather than scoring a query against vectors
+from the previous embedding configuration. The leg then embeds the raw query
+text (3s timeout, unchunked, with any configured query affixes), queries the active generation for
 `fetchCap = 200` raw KNN hits (over-fetched ahead of the project/liveness
 hydration in "Storage", with one bounded deep retry at `knnDeepLimit` when a
 full batch filters down short), and drops hits below cosine 0.3 so weak

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-03
+last_edited: 2026-10-08
 ---
 
 # Backup and restore
@@ -152,6 +152,65 @@ schema upgrades. JSONL is the portable logical backup; a managed snapshot or
 `pg_dump` archive is the exact-version rollback artifact. The split-role
 upgrade and restore ordering is documented in [PostgreSQL
 operations](postgres.md).
+
+## Make an independent copy of a federated hub
+
+Development feature: `--as-standalone` is not in a released version yet.
+Use it to copy a hub's data for a rehearsal or a move to a different hub.
+Ordinary restore recreates the source's federation bindings, enrollments, and
+database-managed API tokens. `--new-instance` changes the instance identity
+but keeps that authority. Neither option detaches a federated hub.
+
+Start with a full JSONL export, including deleted rows. Keep the protected
+original export: it contains the source's credential hashes and token events.
+Run the copy on a machine with the export and a Kata build that supports
+`--as-standalone`. Select a fresh local home, with no daemon running in it.
+For example, in Bash, replace the export path below with its absolute path:
+
+```sh
+bash -euo pipefail <<'EOF'
+umask 077
+kata_binary=$(command -v kata)
+source_export=/absolute/path/to/hub-export.jsonl
+copy_home=$(mktemp -d)
+printf 'Copy home: %s\n' "$copy_home"
+cd "$copy_home"
+env -i PATH="$PATH" HOME="$HOME" KATA_HOME="$copy_home" \
+  KATA_DB="$copy_home/kata.db" KATA_TELEMETRY_ENABLED=0 \
+  "$kata_binary" import --as-standalone \
+  --input "$source_export" --target "$copy_home/kata.db"
+EOF
+```
+
+The destination is a new database. `--force` and `--merge` are refused with
+`--as-standalone`; use another fresh target to repeat the copy. A fresh Postgres
+schema is also supported through `--target` with its schema-owner DSN, under
+the same [Postgres restore rules](#restore).
+
+The copy preserves projects, task identities and short IDs, content, authors,
+comments, labels, and links whose two endpoints are in the export. Archived
+projects and deleted tasks stay archived or deleted. Task history retains its
+event identities and origins. The existing JSONL timestamp normalization
+still applies; task timestamps are stored at millisecond precision.
+
+The copy removes federation bindings, enrollments, cursors, quarantine, and
+live or pending claims. It also removes the API-token creation and revocation
+events that ordinary restore uses to rebuild token authority. Exporting the
+copy and restoring that export cannot bring back those source tokens. Task
+claim history remains, but its old claims cannot lock work in the copy.
+Issue-sync bindings stay disabled and external-root bindings stay paused,
+as in ordinary restore.
+
+Keep the new home separate. Do not copy the source's daemon configuration,
+credential files, or environment into it: those are outside the JSONL
+operation and could reconnect it to the source. The source hub and its
+clients remain unchanged. Configure any new federation connection explicitly
+with credentials issued for the destination. Archived projects must first be
+restored explicitly if you intend to adopt them into a new hub.
+
+An error can arrive while closing an import that already committed. Keep the
+printed copy home for inspection and do not retry against it with `--force`.
+The original export remains your recovery artifact.
 
 ## Versioned backups
 

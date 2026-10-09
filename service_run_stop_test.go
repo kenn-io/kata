@@ -20,7 +20,7 @@ func TestServiceRunTreatsCallerDeadlineAsCleanShutdown(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	runCtx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	runCtx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; Run serves until the caller deadline ends it
 	defer cancel()
 
 	require.NoError(t, service.Run(runCtx))

@@ -49,6 +49,9 @@ type Storage interface {
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
 	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 	// identity / lifecycle
+	// ClaimScreenView records one installation/screen/UTC-day visit; Release clears a rejected enqueue.
+	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
+	ReleaseScreenView(ctx context.Context, screen, day string) error
 	InstanceUID() string
 	RefreshInstanceUID(ctx context.Context) error
 	// InstanceCreatedAt reports when InstanceUID was generated, or zero when

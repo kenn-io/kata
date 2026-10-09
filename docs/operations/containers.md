@@ -1,7 +1,7 @@
 ---
 title: Containers
 description: Run the stock Kata image using environment settings, mounted secrets, and persistent storage.
-last_edited: 2026-10-02
+last_edited: 2026-10-08
 ---
 
 # Containers
@@ -67,6 +67,10 @@ Semantic search needs no seeded TOML. Set
 `KATA_SEARCH_EMBEDDINGS_MODEL=example-model`, and, when needed,
 `KATA_SEARCH_EMBEDDINGS_DIMS=1024` and
 `KATA_SEARCH_EMBEDDINGS_API_KEY_FILE=/run/secrets/embedding-key`.
+Role prompts and dimension requests use
+`KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX`, `_DOCUMENT_SUFFIX`, `_QUERY_PREFIX`,
+`_QUERY_SUFFIX`, and `_REQUEST_DIMENSIONS`; see the
+[environment reference](../reference/configuration.md#environment-variables).
 The embedding file has the same owner-only requirements. Existing inline and
 named-env embedding credentials retain their precedence and failure policy.
 

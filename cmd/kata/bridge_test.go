@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func timeAfterForExternalCLITest() <-chan time.Time { return time.After(400 * time.Millisecond) }
+func timeAfterForExternalCLITest() <-chan time.Time { return time.After(400 * time.Millisecond) } //nolint:kennlint // absence window; the fake holds the response past the 250ms KATA_HTTP_TIMEOUT, so a long-running client must not cancel first
 
 func bridgeFixtureForRequest(r *http.Request, requestBody map[string]any) map[string]any {
 	bridge := map[string]any{
@@ -260,7 +260,7 @@ func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
 func TestBridgeLongRunningClientHonorsCancellation(t *testing.T) {
 	f := newExternalCLIFixture(t)
 	f.delay = true
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the delayed fake holds the response until it fires
 	defer cancel()
 	_, err := runExternalCLI(ctx, t, f, "bridge", "reconcile", "example-project#abc4")
 	require.Error(t, err)

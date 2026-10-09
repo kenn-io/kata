@@ -73,7 +73,8 @@ var alreadyImplemented = map[string]bool{
 	"ProjectAccessRevision":          true, // project_access.go
 	"ProjectAccessTransactionFence":  true, // project_access.go
 	"ExportProjectAccess":            true, // project_access.go
-
+	"ClaimScreenView":                      true, // store.go
+	"ReleaseScreenView":                    true, // store.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go
 	"ActiveFederationQuarantine":           true, // federation_quarantine.go
 	"ActiveFederationQuarantinesByProject": true, // federation_quarantine.go

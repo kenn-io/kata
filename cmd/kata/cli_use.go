@@ -22,6 +22,9 @@ import (
 // cliUseReportTimeout bounds the use report on the command's exit path; var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
+// agentUseReportTimeout keeps exit reports within installed hook deadlines.
+var agentUseReportTimeout = 100 * time.Millisecond
+
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
 var cliUseNow = time.Now
 
@@ -68,27 +71,51 @@ func isAgentFacingCommand(cmd *cobra.Command) bool {
 	return false
 }
 
-// reportCLIUse sends app_opened with surface cli to the daemon the command used,
-// at most once per UTC day per daemon once that daemon accepts it. It never
-// resolves or starts a daemon, and drops every outcome.
+func reportsAgentUse(cmd *cobra.Command) bool {
+	path := strings.Join(strings.Fields(cmd.CommandPath())[1:], " ")
+	switch path {
+	case "agent-hook contract", "agent-contract-hook":
+		return true
+	case "mcp serve":
+		return false
+	}
+	return cliUseTarget.Load() != nil && (isAgentFacingCommand(cmd) || os.Getenv(hooks.HookVersionEnv) != "")
+}
+
+// reportCLIUse discovers an existing target only for contract hooks.
 func reportCLIUse(cmd *cobra.Command) {
+	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
-	if target == nil || !reportsCLIUse(cmd) {
+	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
 	day := cliUseNow().UTC().Format(time.DateOnly)
-	marker := cliUseMarkerPath(*target)
-	if readCLIUseDay(marker) == day {
-		return
-	}
 	parent := cmd.Context()
 	if parent == nil {
 		parent = context.Background()
 	}
 	// Detached so a command that ends by cancelling its own context still reports.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cliUseReportTimeout)
+	timeout := cliUseReportTimeout
+	if agent {
+		timeout = agentUseReportTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: cliUseReportTimeout})
+	if target == nil {
+		resolved, err := discoverDaemonResolved(ctx)
+		if err != nil {
+			return
+		}
+		target = &resolved
+	}
+	marker := ""
+	if !agent {
+		marker = cliUseMarkerPath(*target)
+		if readCLIUseDay(marker) == day {
+			return
+		}
+	}
+	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 	if err != nil {
 		return
 	}
@@ -96,10 +123,14 @@ func reportCLIUse(cmd *cobra.Command) {
 	if err != nil {
 		return
 	}
+	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
+	if agent {
+		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
+	}
 	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}},
+		Body: body,
 	})
-	if err == nil && resp.JSON202 != nil {
+	if !agent && err == nil && resp.JSON202 != nil {
 		recordCLIUseDay(marker, day)
 	}
 }

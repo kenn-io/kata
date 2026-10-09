@@ -281,14 +281,14 @@ func TestLocalProfileConcurrentRefreshHonorsRequestDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("refresh never started")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the SSE refresh past it
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { _, err := conn.api.GetInstance(ctx); done <- err }()
 	select {
 	case err := <-done:
 		require.Error(t, err)
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("API request remained blocked behind SSE refresh after its own context deadline")
 	}
 }

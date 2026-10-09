@@ -581,7 +581,7 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	parentCtx, cancel := context.WithTimeout(
+	parentCtx, cancel := context.WithTimeout( //nolint:kennlint // the parent deadline is the expected result; the fake holds resolution until the client disconnects
 		contextWithBaseURL(context.Background(), srv.URL), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := executeRootCapture(t, parentCtx,

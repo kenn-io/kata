@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-10-01
+last_edited: 2026-10-07
 ---
 
 # Semantic search
@@ -186,9 +186,13 @@ stale `last_success_at` are the signal in that case.
 
 Each stored vector belongs to a generation keyed by a fingerprint of the
 model, dimensionality, and text recipe it was produced under. If you switch
-`model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
-background. While that backfill runs, the vector leg is **unavailable**:
-queries embedded under the new model cannot be scored against the old
+`model`, `dims`, `fingerprint_salt`, any literal document/query prefix or
+suffix, or `request_dimensions`, kata builds a new generation and re-embeds
+all issue text in the background. See the
+[configuration reference](../reference/configuration.md#semantic-search)
+for the exact controls. Empty affixes and `request_dimensions = false`
+keep the existing generation. While that backfill runs, the vector leg is
+**unavailable**: queries embedded under the new configuration cannot be scored against the old
 generation's vectors, so auto mode serves labeled degraded lexical results
 and explicit `--hybrid`/`--semantic` requests return 503. Lexical search is
 unaffected throughout. When the new generation finishes filling, kata cuts

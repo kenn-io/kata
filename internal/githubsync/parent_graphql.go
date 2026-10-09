@@ -59,6 +59,9 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 	if request.Since != nil {
 		return f.incrementalParentData(ctx, client, binding, request)
 	}
+	if request.IssueNumbers != nil {
+		return f.selectedParentData(ctx, client, binding, request, ParentScanComplete, &gitHubRetryBudget{})
+	}
 	return f.fullParentData(ctx, client, binding)
 }
 

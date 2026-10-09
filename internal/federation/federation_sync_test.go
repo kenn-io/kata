@@ -3332,7 +3332,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; the offline hub keeps sync failing, and Run must not exit before cancel
 	}
 
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{

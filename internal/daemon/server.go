@@ -27,9 +27,11 @@ import (
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
 	"golang.org/x/net/netutil"
 )
@@ -82,6 +84,14 @@ type ServerConfig struct {
 	PlaneSyncFetcher         planesync.Fetcher
 	PlaneSyncProgress        *issuesync.ProgressTracker
 	PlaneSyncWake            func()
+	LinearSyncConfig         config.LinearSyncConfig
+	LinearSyncFetcher        linearsync.Fetcher
+	LinearSyncProgress       *issuesync.ProgressTracker
+	LinearSyncWake           func()
+	TwentySyncConfig         config.TwentySyncConfig
+	TwentySyncFetcher        twentysync.Fetcher
+	TwentySyncProgress       *issuesync.ProgressTracker
+	TwentySyncWake           func()
 	Hooks                    hooks.Sink
 	ExternalRootRegistry     *rootbridge.Registry
 	ExternalRootService      *rootbridge.Service
@@ -257,11 +267,23 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.TwentySyncProgress == nil {
+		cfg.TwentySyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.TwentySyncFetcher == nil {
+		cfg.TwentySyncFetcher = twentySyncFetcher(cfg)
+	}
 	if cfg.PlaneSyncProgress == nil {
 		cfg.PlaneSyncProgress = issuesync.NewProgressTracker()
 	}
 	if cfg.PlaneSyncFetcher == nil {
 		cfg.PlaneSyncFetcher = planeSyncFetcher(cfg)
+	}
+	if cfg.LinearSyncProgress == nil {
+		cfg.LinearSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.LinearSyncFetcher == nil {
+		cfg.LinearSyncFetcher = linearSyncFetcher(cfg)
 	}
 	if cfg.NotionSyncProgress == nil {
 		cfg.NotionSyncProgress = issuesync.NewProgressTracker()

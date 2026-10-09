@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   web-static:
     name: Web static checks
@@ -114,7 +118,7 @@ jobs:
         run: make web-install
 
       - name: Check Huma API conventions
-        run: go run go.kenn.io/kit/cmd/huma-check@3e1f59e9011e878ec595aa04aebc8a77c5292c4d ./...
+        run: go run go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68 ./...
 
       - name: Run tests
         env:

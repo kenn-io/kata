@@ -20,6 +20,7 @@ describe('App', () => {
     document.documentElement.classList.remove('dark')
     vi.unstubAllGlobals()
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('renders the Kata application shell while loading', () => {
@@ -1490,6 +1491,10 @@ describe('App', () => {
   })
 
   it('switches configured daemons in place and restores each daemon route', async () => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const telemetry: Request[] = []
     history.replaceState(null, '', '/kata?view=all-open')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1508,6 +1513,11 @@ describe('App', () => {
             ? input
             : new Request(new URL(String(input), window.location.origin), init)
         const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/telemetry') {
+          const event = (await request.clone().json()).event
+          if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
+          return telemetryAccepted()
+        }
         if (path === '/api/v1/ui/daemons') {
           return Response.json({
             daemons: [
@@ -1541,10 +1551,18 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
     expect(window.location.search).toBe('?view=all-open')
+    now += 10_000
+    window.dispatchEvent(new Event('pagehide'))
+    await waitFor(() => expect(telemetry).toHaveLength(2))
+    expect(telemetry[1]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+    await expect(telemetry[1]!.json()).resolves.toMatchObject({
+      properties: { duration_bucket: '1_to_5m' },
+    })
     expect(
       referenceRequests.find(
         (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
@@ -2485,7 +2503,61 @@ describe('App', () => {
       expect(request!.headers.get('X-Kata-CSRF')).toBe(csrf)
     }
 
+    it('reports accepted screens through the serving daemon and revisits on UTC focus', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+      storeSession()
+      const telemetry: Request[] = []
+      let rejectedSnapshots = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          const path = target.pathname
+          if (
+            path.endsWith('/api/v1/ui/snapshot') &&
+            target.searchParams.get('view') === 'delegated'
+          ) {
+            rejectedSnapshots += 1
+            return new Response('', { status: 503 })
+          }
+          if (path === telemetryPath) {
+            if ((await request.clone().json()).event === 'screen_viewed') telemetry.push(request)
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await waitFor(() => expect(telemetry).toHaveLength(1))
+      expectServingDaemonPost(telemetry[0])
+      await expect(telemetry[0]!.clone().json()).resolves.toEqual({
+        event: 'screen_viewed',
+        properties: { screen: 'inbox', surface: 'web' },
+      })
+      history.pushState(null, '', '/kata?view=today')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      history.pushState(null, '', '/kata?view=delegated')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() => expect(rejectedSnapshots).toBeGreaterThan(0))
+      await tick()
+      expect(telemetry).toHaveLength(2)
+      window.dispatchEvent(new Event('focus'))
+      await tick()
+      expect(telemetry).toHaveLength(2)
+      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
+      window.dispatchEvent(new Event('focus'))
+      await waitFor(() => expect(telemetry).toHaveLength(3))
+    })
+
     it('reports app_opened once on load', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
       storeSession()
       const telemetry: Request[] = []
       vi.stubGlobal(
@@ -2494,7 +2566,8 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            telemetry.push(request)
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
@@ -2511,6 +2584,15 @@ describe('App', () => {
       await expect(telemetry[0]!.json()).resolves.toEqual({
         event: 'app_opened',
         properties: { surface: 'web' },
+      })
+      now = 120_000
+      window.dispatchEvent(new Event('pagehide'))
+      await waitFor(() => expect(telemetry).toHaveLength(2))
+      expectServingDaemonPost(telemetry[1])
+      expect(telemetry[1]!.keepalive).toBe(true)
+      await expect(telemetry[1]!.json()).resolves.toEqual({
+        event: 'session_ended',
+        properties: { surface: 'web', duration_bucket: '1_to_5m' },
       })
     })
 
@@ -2541,10 +2623,14 @@ describe('App', () => {
       window.dispatchEvent(new Event('focus'))
       await tick()
       expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      window.dispatchEvent(new Event('pagehide'))
       expect(telemetry).toHaveLength(0)
     })
 
     it('reports app_opened with the renewed session when the stored one is stale', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
       storeSession('stale-session', 'stale-csrf')
       const telemetry: Request[] = []
       vi.stubGlobal(
@@ -2552,7 +2638,10 @@ describe('App', () => {
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
-          if (path === telemetryPath) telemetry.push(request)
+          if (path === telemetryPath) {
+            const event = (await request.clone().json()).event
+            if (event === 'app_opened' || event === 'session_ended') telemetry.push(request)
+          }
           if (path === '/api/v1/ui/session/local') {
             return Response.json({
               session: 'local-session',
@@ -2581,6 +2670,10 @@ describe('App', () => {
       expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
       await waitFor(() => expect(telemetry).toHaveLength(2))
       expectServingDaemonPost(telemetry[1], 'local-session', 'local-csrf')
+      now = 120_000
+      window.dispatchEvent(new Event('pagehide'))
+      await waitFor(() => expect(telemetry).toHaveLength(3))
+      expectServingDaemonPost(telemetry[2], 'local-session', 'local-csrf')
     })
 
     it('a background refresh after UTC midnight is not an opening', async () => {
@@ -2599,7 +2692,7 @@ describe('App', () => {
           const request = requestOf(input, init)
           const path = new URL(request.url).pathname
           if (path === telemetryPath) {
-            telemetry.push(request)
+            if ((await request.clone().json()).event === 'app_opened') telemetry.push(request)
             return telemetryAccepted()
           }
           if (path === '/api/v1/events/stream') {

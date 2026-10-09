@@ -20,6 +20,11 @@ type Config struct {
 	BaseURL             string
 	Model               string
 	Credential          config.EmbeddingCredential
+	DocumentPrefix      string
+	DocumentSuffix      string
+	QueryPrefix         string
+	QuerySuffix         string
+	RequestDimensions   bool
 	Salt                string
 	Dims                int
 	BatchSize           int
@@ -65,6 +70,11 @@ func New(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
 	}
+	parts.Model.RequestDimensions = cfg.RequestDimensions
+	parts.Roles.DocumentPrefix = cfg.DocumentPrefix
+	parts.Roles.DocumentSuffix = cfg.DocumentSuffix
+	parts.Roles.QueryPrefix = cfg.QueryPrefix
+	parts.Roles.QuerySuffix = cfg.QuerySuffix
 	parts.Transport.Timeout = timeout
 	options := embedclient.Options{
 		Model: parts.Model, Roles: parts.Roles, Deployment: parts.Deployment,
@@ -76,6 +86,17 @@ func New(cfg Config) (*Client, error) {
 	params := map[string]string{"recipe": strconv.Itoa(RecipeVersion)}
 	if cfg.Salt != "" {
 		params["salt"] = cfg.Salt
+	}
+	for key, value := range map[string]string{
+		"document_prefix": cfg.DocumentPrefix, "document_suffix": cfg.DocumentSuffix,
+		"query_prefix": cfg.QueryPrefix, "query_suffix": cfg.QuerySuffix,
+	} {
+		if value != "" {
+			params[key] = value
+		}
+	}
+	if cfg.RequestDimensions {
+		params["request_dimensions"] = "true"
 	}
 	generation := kitvec.Generation{Model: cfg.Model, Dimensions: dims, Params: params}
 	space := embedmodel.Descriptor{
@@ -115,7 +136,17 @@ func (c *Client) EncodeFunc() kitvec.EncodeFunc {
 	}
 }
 
+// Embed applies document affixes to already prepared document text.
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return c.embed(ctx, embedconfig.RoleDocument, texts)
+}
+
+// EmbedQuery applies query affixes to already prepared query text.
+func (c *Client) EmbedQuery(ctx context.Context, texts []string) ([][]float32, error) {
+	return c.embed(ctx, embedconfig.RoleQuery, texts)
+}
+
+func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
@@ -130,7 +161,7 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	if err != nil {
 		return nil, err
 	}
-	vectors, err := provider.EmbedTexts(ctx, embedconfig.RoleDocument, texts)
+	vectors, err := provider.EmbedTexts(ctx, role, texts)
 	if err != nil {
 		if rejected, ok := errors.AsType[*embedclient.APIError](err); ok && rejected.CredentialsRejected() {
 			return nil, c.rejectCredential(credential, revision, rejected)

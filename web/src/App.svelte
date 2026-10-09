@@ -63,7 +63,7 @@
     RefreshScheduler,
   } from './lib/events/controller'
   import { openEventStream } from './lib/events/sse'
-  import { parseRoute, serializeRoute, type KataRoute } from './lib/router'
+  import { parseRoute, serializeRoute, screenNameForRoute, type KataRoute } from './lib/router'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -88,6 +88,7 @@
   } from './lib/state/snapshot'
   import { loadPreferences, savePreferences, type Preferences } from './lib/state/preferences'
   import { applicationRoutePath, currentApplicationBaseURL } from './lib/applicationBase'
+  import { startSessionEndedReporting } from './lib/session-ended'
 
   type ShellMode = 'loading' | 'launch' | 'login' | 'route-error' | 'ready'
   type AppRoute = Exclude<KataRoute, { kind: 'route-error' }>
@@ -158,8 +159,20 @@
   )
   setGeneratedFetch(browserFetch)
   let stopAppOpened: (() => void) | undefined
+  let sessionEnded: ReturnType<typeof startSessionEndedReporting> | undefined
   // Only a signed-in tab counts as an opening; anonymous viewers send nothing.
   function reportAppOpened(): void {
+    if (destroyed || loadSessionCredentials() === undefined) return
+    sessionEnded ??= startSessionEndedReporting((duration) =>
+      captureTelemetryEvent(
+        {
+          event: 'session_ended',
+          properties: { surface: 'web', duration_bucket: duration },
+        },
+        { keepalive: true },
+      ),
+    )
+    sessionEnded.resume()
     stopAppOpened ??= startAppOpenedReporting({
       route: '/api/v1/ui/telemetry',
       surface: 'web',
@@ -174,10 +187,35 @@
   // Stopping before the 401 resolves keeps the day unrecorded; the renewed
   // session, now or after navigateAfterAuthentication, reports it instead.
   function restartAppOpenedAfterAuthentication(): void {
+    sessionEnded?.pause()
     stopAppOpened?.()
     stopAppOpened = undefined
-    if (!destroyed && loadSessionCredentials() !== undefined) reportAppOpened()
+    reportAppOpened()
   }
+  let reportedScreen: string | undefined
+  let reportedScreenDay: string | undefined
+  function reportScreenViewed(visit = false): void {
+    if (destroyed || mode !== 'ready' || !acceptedRoute || !loadSessionCredentials()) return
+    const screen = screenNameForRoute(acceptedRoute)
+    const day = new Date().toISOString().slice(0, 10)
+    if (!screen || (reportedScreen === screen && (reportedScreenDay === day || !visit))) return
+    reportedScreen = screen
+    reportedScreenDay = day
+    void captureTelemetryEvent(
+      { event: 'screen_viewed', properties: { screen, surface: 'web' } },
+      { signal: AbortSignal.timeout(1000) },
+    )
+      .then((response) => {
+        if (response.status >= 400 && reportedScreen === screen && reportedScreenDay === day)
+          reportedScreen = undefined
+      })
+      .catch(() => {
+        if (reportedScreen === screen && reportedScreenDay === day) reportedScreen = undefined
+      })
+  }
+  $effect(() => {
+    reportScreenViewed()
+  })
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
@@ -257,7 +295,10 @@
       scheduler.visibilityChanged(!document.hidden)
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }
-    const focus = () => scheduler.focused()
+    const focus = () => {
+      scheduler.focused()
+      reportScreenViewed(true)
+    }
     const environment = () => scheduler.environmentChanged()
     const showVersionMismatch = () => {
       versionMismatch = true
@@ -281,7 +322,7 @@
     const credentialRefreshTimer = window.setInterval(() => {
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }, 30_000)
-    if (loadSessionCredentials() !== undefined) reportAppOpened()
+    reportAppOpened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()
@@ -298,6 +339,7 @@
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
       window.clearInterval(credentialRefreshTimer)
       stopAppOpened?.()
+      sessionEnded?.stop()
       scheduler.stop()
       stream.stop()
       invalidations.stop()
@@ -839,6 +881,7 @@
   }
 
   function rejectCredentialsAndRequireAuthentication(): boolean {
+    sessionEnded?.pause()
     fenceCredentialAudit()
     clearSessionCredentials()
     draftFenceGeneration += 1

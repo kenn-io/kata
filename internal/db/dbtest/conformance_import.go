@@ -758,7 +758,7 @@ func checkImportTransactionRollback(ctx context.Context, t *testing.T, store db.
 }
 
 func checkImportIssueSyncGuard(ctx context.Context, t *testing.T, store db.Storage) error {
-	for _, provider := range []string{"example", "github", "notion", "plane"} {
+	for _, provider := range []string{"example", "github", "notion", "plane", "twenty"} {
 		if err := checkImportIssueSyncGuardProvider(ctx, t, store, provider); err != nil {
 			return err
 		}

@@ -28,6 +28,7 @@ var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 type Client interface {
 	posthog.Client
 	EventAllowed(event string) bool
+	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 }
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
@@ -72,8 +73,38 @@ func NewReporter(opts Options) (*Reporter, error) {
 		posthog.WithAllowedEvent("app_opened",
 			posthog.AllowProperty("surface", appOpenedSurfaces),
 		),
+		posthog.WithAllowedEvent("session_ended",
+			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
+			posthog.AllowProperty("duration_bucket", posthog.AllowStringValues("under_1m", "1_to_5m", "5_to_30m", "over_30m")),
+		),
+		posthog.WithAllowedEvent("agent_active",
+			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
+		),
+		posthog.WithAllowedEvent("agent_call_count",
+			posthog.AllowProperty("call_count_bucket", agentCallCountBuckets),
+		),
+		posthog.WithAllowedEvent("screen_viewed",
+			posthog.AllowProperty("screen", screenNames),
+			posthog.AllowProperty("surface", screenSurfaces),
+		),
 	)
 }
+
+// DurationBucket groups elapsed time without sending an exact duration.
+func DurationBucket(elapsed time.Duration) string {
+	switch {
+	case elapsed < time.Minute:
+		return "under_1m"
+	case elapsed < 5*time.Minute:
+		return "1_to_5m"
+	case elapsed <= 30*time.Minute:
+		return "5_to_30m"
+	default:
+		return "over_30m"
+	}
+}
+
+var agentCallCountBuckets = posthog.AllowStringValues("1-10", "11-100", "over-100")
 
 // appOpenedSurfaces is the app_opened surface filter shared by the allowlist and the daemon's daily gate.
 var appOpenedSurfaces = posthog.AllowStringValues("web", "tui", "cli")
@@ -106,3 +137,6 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 	}
 	return reporter
 }
+
+var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
+var screenSurfaces = posthog.AllowStringValues("web", "tui")

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseRoute, serializeRoute } from './router'
+import { parseRoute, serializeRoute, screenNameForRoute } from './router'
 
 const issueUID = '01HZNQ7VFPK1XGD8R5MABCD4EX'
 
@@ -109,5 +109,25 @@ describe('canonical Kata routes', () => {
 
     expect(route).toMatchObject({ kind: 'kata', view: 'today' })
     expect(serializeRoute(route, routePath)).toBe('/tools/tasks/?view=today&label=ready')
+  })
+})
+
+describe('screen names', () => {
+  it.each([
+    ['', 'inbox'],
+    ['?view=all-open', 'issues'],
+    ['?view=today', 'today'],
+    ['?view=delegated', 'delegated'],
+    ['?view=scheduled', 'scheduled'],
+    ['?view=logbook', 'logbook'],
+    [`?scope=${issueUID}`, 'issues'],
+    [`?issue=${issueUID}`, 'issue'],
+    [`?issue=${issueUID}&graph=1`, 'graph'],
+    [`?view=credentials&issue=${issueUID}`, 'credentials'],
+    ['?view=unknown', undefined],
+  ])('maps %s to %s', (query, screen) => {
+    expect(screenNameForRoute(parseRoute(new URL(`https://daemon.example/kata${query}`)))).toBe(
+      screen,
+    )
   })
 })

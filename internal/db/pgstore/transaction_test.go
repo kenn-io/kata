@@ -176,7 +176,7 @@ func TestPurgeWaitsForEventSequenceFence(t *testing.T) {
 	select {
 	case result := <-done:
 		require.Failf(t, "purge bypassed event fence", "result=%+v err=%v", result.log, result.err)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the blocker transaction holds the event fence, so the purge must not finish
 	}
 	require.NoError(t, blocker.Commit())
 	result := <-done

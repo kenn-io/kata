@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-04
+last_edited: 2026-10-08
 ---
 
 # CLI reference
@@ -1195,6 +1195,43 @@ groups close with `wontfix`, and other groups map to open. Explicit close/reopen
 other local fields stay in Kata. See [Plane sync](../operations/plane-sync.md) for permissions,
 self-hosting, timestamp ownership, polling limits, and recovery.
 
+### Linear
+
+```sh
+kata sync linear enable --linear-workspace UUID --linear-team UUID [--linear-project UUID]
+kata sync linear enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync linear enable --status-sync two-way [--closed-state UUID] [--open-state UUID]
+kata sync linear status
+kata sync linear once
+kata sync linear disable
+```
+
+Initial enable requires workspace and team UUIDs. The optional project restriction
+must be set initially; the source identity cannot change on re-enable. Omitted
+options preserve their saved values, and empty `--since` clears the cutoff.
+Credentials and authorization type belong to daemon `[linear_sync]` configuration.
+Two-way mode writes only completion/reopen state. See
+[Linear sync](../operations/linear-sync.md) for field ownership, permissions, and recovery.
+
+### Twenty
+
+```sh
+kata sync twenty enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync twenty enable --status-sync=two-way [--closed-status DONE] [--open-status TODO] [--open-statuses TODO,IN_PROGRESS]
+kata sync twenty status
+kata sync twenty once
+kata sync twenty disable
+```
+
+Enable discovers the workspace from the daemon's API key. Origins and the
+credential selector belong to `[twenty_sync]`; source identity is immutable.
+Omitted options preserve saved settings, and empty `--since` clears the cutoff.
+Status values are API option values. Every live option must be classified open
+or closed; null is open. New bindings use one-way status, `DONE` for closed, and
+`TODO,IN_PROGRESS` for open. Explicit close/reopen writes back in two-way mode,
+with `TODO` as the default reopen target. See [Twenty sync](../operations/twenty-sync.md)
+for self-hosting, schema compatibility, local edit ownership, and recovery.
+
 ### GitHub
 
 ```sh
@@ -1645,6 +1682,7 @@ kata export [--project NAME] [--project-id N] [--output PATH]
 kata export --allow-running-daemon --output PATH
 
 kata import --input PATH --target PATH_OR_POSTGRES_DSN [--force]
+kata import --as-standalone --input PATH --target PATH_OR_POSTGRES_DSN
 kata import --merge --input PATH --target PATH_OR_POSTGRES_DSN
 kata import --source-format beads
 ```
@@ -1656,6 +1694,14 @@ database; run it on the daemon host with the intended storage configuration.
 Without `--merge`, the kata-format `import` creates a fresh SQLite database at a
 target path or a fresh Postgres `kata` schema at a Postgres DSN. An initialized
 target requires `--force`, which atomically replaces kata-owned state.
+
+Development feature: `--as-standalone` creates an independent copy with a new
+instance identity and no source federation or API-token authority. It keeps
+content and cross-project links from a full export. It requires a fresh target
+and cannot be combined with `--force` or `--merge`. Ordinary restore, including
+`--new-instance`, retains source authority. See
+[Make an independent copy](../operations/backup-restore.md#make-an-independent-copy-of-a-federated-hub)
+for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving

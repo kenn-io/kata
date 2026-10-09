@@ -291,7 +291,7 @@ func TestExternalRootHandlersFullLifecycleAndDelivery(t *testing.T) {
 	select {
 	case early := <-manualDone:
 		t.Fatalf("long-running manual reconcile returned before connector completed: %#v", early)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; readRelease holds the connector read, so the manual reconcile must not return
 	}
 	close(client.readRelease)
 	manual := <-manualDone
