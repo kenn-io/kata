@@ -133,3 +133,81 @@ func TestEmbeddingPreparedPageRechecksBeforePaidDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddingPreparedPageRevalidatesProjectAuthorityOncePerDispatchBatch(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []string{"serial", "parallel"} {
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				ctx := t.Context()
+				var source db.Storage
+				var ix *vector.Index
+				if backend == "sqlite" {
+					s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
+					require.NoError(t, err)
+					source = s
+					t.Cleanup(func() { require.NoError(t, s.Close()) })
+					ix, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, ix.Close()) })
+				} else {
+					dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+					t.Cleanup(cleanup)
+					s, err := pgstore.Open(ctx, dsn)
+					require.NoError(t, err)
+					source = s
+					t.Cleanup(func() { require.NoError(t, s.Close()) })
+					ix, err = vector.OpenPostgres(ctx, s.DB)
+					require.NoError(t, err)
+					release, err := ix.AcquireReconcilerLease(ctx)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, release()) })
+				}
+
+				project, err := source.CreateProject(ctx, "authority-batch-project")
+				require.NoError(t, err)
+				for _, title := range []string{"First authority document", "Second authority document"} {
+					_, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+						ProjectID: project.ID, Title: title, Body: strings.Repeat("界", 2500), Author: "member",
+					})
+					require.NoError(t, err)
+				}
+				_, err = ix.RefreshMirror(ctx, source)
+				require.NoError(t, err)
+				client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
+				require.NoError(t, err)
+				recipe, err := client.ArtifactIdentity("", "", source.InstanceUID())
+				require.NoError(t, err)
+				key := client.Generation().Fingerprint()
+				require.NoError(t, ix.EnsureBuilding(ctx, key, client.Generation()))
+
+				options := []kitvec.BatchOption(nil)
+				expectedDispatches := int32(1)
+				if mode == "parallel" {
+					options = []kitvec.BatchOption{kitvec.WithBatchSize(1), kitvec.WithBatchConcurrency(4)}
+					expectedDispatches = 4
+				}
+				var checks, dispatches atomic.Int32
+				eligible := func(_ context.Context, projectUID string) (bool, error) {
+					require.Equal(t, project.UID, projectUID)
+					checks.Add(1)
+					return true, nil
+				}
+				encode := func(_ context.Context, texts []string) ([][]float32, error) {
+					dispatches.Add(1)
+					vectors := make([][]float32, len(texts))
+					for i := range vectors {
+						vectors[i] = []float32{1, 0}
+					}
+					return vectors, nil
+				}
+
+				_, err = ix.FillWithArtifacts(ctx, key, source, recipe, encode, 2, options, nil, eligible)
+				require.NoError(t, err)
+				require.Equal(t, expectedDispatches, dispatches.Load())
+				// Preparation checks both documents. Each actual encoder batch then
+				// revalidates the shared project exactly once.
+				require.Equal(t, int32(2)+expectedDispatches, checks.Load())
+			})
+		}
+	}
+}

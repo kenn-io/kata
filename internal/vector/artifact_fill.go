@@ -111,8 +111,35 @@ func (s *artifactCaptureStore) beforeDispatch(enc kitvec.EncodeFunc) kitvec.Enco
 			if s.dispatchErr != nil {
 				return s.dispatchErr
 			}
+			projectEligibility := make(map[string]bool)
+			projectEligibilityChecked := make(map[string]struct{})
+			denied := false
 			for _, doc := range s.prepared {
-				ready, err := s.checkPending(ctx, doc)
+				scanned, ok := s.pending[doc.Doc]
+				if !ok {
+					return kitvec.ErrStale
+				}
+				if s.eligible != nil {
+					if _, checked := projectEligibilityChecked[scanned.projectUID]; !checked {
+						allowed, err := s.eligible(ctx, scanned.projectUID)
+						if err != nil {
+							return err
+						}
+						projectEligibility[scanned.projectUID] = allowed
+						projectEligibilityChecked[scanned.projectUID] = struct{}{}
+					}
+					if !projectEligibility[scanned.projectUID] {
+						s.deferred[doc.Doc] = true
+						s.ineligible[doc.Doc] = struct{}{}
+						denied = true
+					}
+				}
+			}
+			if denied {
+				return kitvec.ErrStale
+			}
+			for _, doc := range s.prepared {
+				ready, err := s.checkPendingContent(ctx, doc)
 				if err != nil {
 					return err
 				}
@@ -238,6 +265,14 @@ func (s *artifactCaptureStore) checkPending(ctx context.Context, doc kitvec.Pend
 			s.ineligible[doc.Doc] = struct{}{}
 			return false, nil
 		}
+	}
+	return s.checkPendingContent(ctx, doc)
+}
+
+func (s *artifactCaptureStore) checkPendingContent(ctx context.Context, doc kitvec.Pending[string]) (bool, error) {
+	scanned, ok := s.pending[doc.Doc]
+	if !ok {
+		return false, kitvec.ErrStale
 	}
 	// Eligibility may pull new content after the mirror scan. Narrow the native
 	// read to the admitted project and defer stale input before paid dispatch.
