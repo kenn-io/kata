@@ -5,6 +5,7 @@ import type { CloseActionRequestBodyReason } from './closeActionRequestBodyReaso
 import type { CloseActionRequestBodyRetryProtocol } from './closeActionRequestBodyRetryProtocol.ts'
 import type { CloseActionRequestBodySource } from './closeActionRequestBodySource.ts'
 import type { Evidence } from './evidence.ts'
+import type { Transcript } from './transcript.ts'
 
 export interface CloseActionRequestBody {
   actor?: string
@@ -14,4 +15,5 @@ export interface CloseActionRequestBody {
   reason?: CloseActionRequestBodyReason
   retry_protocol?: CloseActionRequestBodyRetryProtocol
   source?: CloseActionRequestBodySource
+  transcript?: Transcript
 }

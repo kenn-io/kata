@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/tokenactor"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 // IncludeDeleted controls whether a lookup is allowed to return soft-deleted
@@ -95,6 +96,7 @@ type CloseIssueParams struct {
 	Actor                  string
 	Message                string
 	Evidence               []Evidence
+	Transcript             *transcript.Transcript
 	IfMatchRev             *int64
 	IdempotencyKey         string
 	IdempotencyFingerprint string

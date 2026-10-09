@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/transcript"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -1569,19 +1570,21 @@ func (d *Store) closeIssueGuarded(
 		*parentSIDForPayload = parentSID
 	}
 	payloadBytes, err := json.Marshal(struct {
-		Reason                 string        `json:"reason"`
-		ClosedAt               string        `json:"closed_at"`
-		Message                string        `json:"message,omitempty"`
-		Evidence               []db.Evidence `json:"evidence,omitempty"`
-		ParentUID              *string       `json:"parent_uid,omitzero"`
-		ParentShortID          *string       `json:"parent_short_id,omitzero"`
-		IdempotencyKey         string        `json:"idempotency_key,omitempty"`
-		IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
+		Reason                 string                 `json:"reason"`
+		ClosedAt               string                 `json:"closed_at"`
+		Message                string                 `json:"message,omitempty"`
+		Evidence               []db.Evidence          `json:"evidence,omitempty"`
+		Transcript             *transcript.Transcript `json:"transcript,omitempty"`
+		ParentUID              *string                `json:"parent_uid,omitzero"`
+		ParentShortID          *string                `json:"parent_short_id,omitzero"`
+		IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
+		IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 	}{
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
 		Evidence:               p.Evidence,
+		Transcript:             p.Transcript,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,
 		IdempotencyKey:         p.IdempotencyKey,

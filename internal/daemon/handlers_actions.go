@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 // registerActionsHandlers installs POST /actions/close and /actions/reopen.
@@ -33,6 +34,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
+		}
+		if in.Body.Transcript != nil {
+			if err := in.Body.Transcript.Validate(); err != nil {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			}
 		}
 		// Owner-local TUI closes bypass substance / evidence validation:
 		// the interactive human path is "press x to close" and a 40-char
@@ -80,7 +86,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
@@ -91,7 +97,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-				in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -191,6 +197,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: in.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
+				Transcript:     in.Body.Transcript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
 			})
@@ -447,21 +454,30 @@ func closeIdempotencyFingerprint(
 	evidence []api.Evidence,
 	dryRun bool,
 	ifMatchRev *int64,
+	ref *transcript.Transcript,
 ) string {
+	// The session identifies the request; its URL is a derived locator, so a
+	// changed AgentsView base still replays the original close.
+	var session *transcript.Transcript
+	if ref != nil {
+		session = &transcript.Transcript{Agent: ref.Agent, SessionID: ref.SessionID}
+	}
 	encoded, _ := json.Marshal(struct {
-		IssueUID   string         `json:"issue_uid"`
-		RequestRef string         `json:"request_ref"`
-		Actor      string         `json:"actor"`
-		Reason     string         `json:"reason"`
-		Message    string         `json:"message"`
-		Source     string         `json:"source"`
-		Evidence   []api.Evidence `json:"evidence"`
-		DryRun     bool           `json:"dry_run"`
-		IfMatchRev *int64         `json:"if_match_revision"`
+		IssueUID   string                 `json:"issue_uid"`
+		RequestRef string                 `json:"request_ref"`
+		Actor      string                 `json:"actor"`
+		Reason     string                 `json:"reason"`
+		Message    string                 `json:"message"`
+		Source     string                 `json:"source"`
+		Evidence   []api.Evidence         `json:"evidence"`
+		DryRun     bool                   `json:"dry_run"`
+		IfMatchRev *int64                 `json:"if_match_revision"`
+		Transcript *transcript.Transcript `json:"transcript,omitempty"`
 	}{
 		IssueUID: issueUID, RequestRef: requestRef,
 		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
+		Transcript: session,
 	})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])

@@ -136,6 +136,11 @@ Instead, label and comment:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
+			if len(parsed) > 0 {
+				if ref := closeTranscript(cmd); ref != nil {
+					extra["transcript"] = ref
+				}
+			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
 			if dryRun && currentOutputMode() == outputHuman && !flags.Quiet {
@@ -266,6 +271,11 @@ func runActionWithHeaders(
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
+	}
+	if action == "close" && body["transcript"] != nil {
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
+			return err
+		}
 	}
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
