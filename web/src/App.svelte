@@ -259,9 +259,8 @@
     onFrame: (frame) => invalidations.frame(frame),
     onAuthenticationRequired: requireAuthentication,
     onState: (state) => {
-      const wasReconnecting = liveUpdatesReconnecting
       liveUpdatesReconnecting = state === 'reconnecting'
-      if (state === 'reconnecting' || (state === 'online' && wasReconnecting)) {
+      if (state === 'reconnecting' || state === 'online') {
         invalidations.reconnect()
       }
     },
