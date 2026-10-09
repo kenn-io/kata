@@ -483,7 +483,7 @@ func TestRemoveProjectAdvancesProjectAccessRevisionAndReturnsSuccess(t *testing.
 		assert.Equal(t, ": connected\n\n", string(connected))
 
 		server := daemon.NewServer(daemon.ServerConfig{
-			DB: store, Broadcaster: f.broadcaster, Auth: config.AuthConfig{Token: "static-owner-test-token"},
+			DB: store, Broadcaster: f.broadcaster, Auth: config.AuthConfig{Token: "static-owner-test-token"}, // #nosec G101 -- synthetic test-server token used only by this test.
 		})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		httpServer := httptest.NewServer(server.Handler())

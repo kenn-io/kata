@@ -67,7 +67,7 @@ func TestLegacyFederationEnrollmentRejectsExpiringAndRevokedAccountTokens(t *tes
 		require.ErrorIs(t, err, db.ErrNotFound)
 
 		parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
-			PlaintextToken: "revocable-account-test-token", Actor: "member", AdminActor: "admin",
+			PlaintextToken: "revocable-account-test-token", Actor: "member", AdminActor: "admin", // #nosec G101 -- synthetic in-memory token used only by this test.
 		})
 		require.NoError(t, err)
 		status, raw = createEnrollment("revocable-account-test-token", "revocable-legacy-grant-token", "00000000000000000000000007")
