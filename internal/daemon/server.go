@@ -371,7 +371,10 @@ func (s *Server) Handler() http.Handler { return s.handler }
 // HandlerFor returns the shared route stack wrapped for one listener.
 func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if policy.Kind == ListenerFederation {
-		return s.withFederationSigning(s.baseHandler, true), nil
+		base := s.withFederationSigning(s.baseHandler, true)
+		base = withProjectAuthorization(s.cfg.DB, s.cfg.HostAccess != nil, s.cfg.TrustCallerAuthentication,
+			s.authPolicy.SelfAuthenticatedRoutes, s.noProjectDataRoutes, base)
+		return base, nil
 	}
 	base := s.baseHandler
 	if base == nil {
