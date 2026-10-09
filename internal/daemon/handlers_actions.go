@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/transcript"
 )
 
@@ -442,11 +443,24 @@ func projectScopedMutationEvent(
 			return store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
 		},
 		func(projectUID, ref string) (db.Issue, error) {
-			project, err := store.ProjectByUID(ctx, projectUID)
+			parsed, err := shortid.Parse(ref)
+			if err != nil {
+				return db.Issue{}, db.ErrNotFound
+			}
+			if parsed.ULID != "" {
+				return store.IssueByUID(ctx, parsed.ULID, db.IncludeDeletedYes)
+			}
+
+			var project db.Project
+			if parsed.Project != "" {
+				project, err = store.ProjectByNameIncludingArchived(ctx, parsed.Project)
+			} else {
+				project, err = store.ProjectByUID(ctx, projectUID)
+			}
 			if err != nil {
 				return db.Issue{}, err
 			}
-			return store.IssueByShortID(ctx, project.ID, ref, db.IncludeDeletedYes)
+			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
 		},
 	)
 	if err != nil {

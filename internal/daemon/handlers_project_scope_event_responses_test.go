@@ -104,6 +104,56 @@ func TestProjectScopedCloseRetryHidesRestrictedEvidenceReference(t *testing.T) {
 	})
 }
 
+func TestProjectScopedCloseReceiptsResolveEvidenceReferenceForms(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		fixture := newProjectAccessFixture(t, store)
+		for _, refCase := range []struct {
+			name string
+			ref  string
+		}{
+			{name: "ULID", ref: fixture.visible.UID},
+			{name: "qualified short ID", ref: fixture.public.Name + "#" + fixture.visible.ShortID},
+		} {
+			t.Run(refCase.name, func(t *testing.T) {
+				source, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+					ProjectID: fixture.public.ID, Title: "Duplicate request " + refCase.name, Author: "member",
+				})
+				require.NoError(t, err)
+				path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", fixture.public.ID, source.ShortID)
+				headers := map[string]string{"Idempotency-Key": "close-visible-evidence-" + source.ShortID}
+				body := map[string]any{
+					"actor": "member", "reason": "duplicate",
+					"message":        "This request duplicates the existing tracked issue.",
+					"retry_protocol": "close-v1",
+					"evidence":       []map[string]any{{"type": "duplicate-of", "issue_ref": refCase.ref}},
+				}
+
+				status, _, responseBody := fixture.request(t, "POST", path, "member", body, headers)
+				require.Equalf(t, 200, status, "first close response: %s", responseBody)
+				var first struct {
+					Event *db.Event `json:"event"`
+				}
+				require.NoError(t, json.Unmarshal(responseBody, &first))
+				require.NotNil(t, first.Event,
+					"a successful close must retain its receipt when evidence uses a supported reference form")
+				require.Contains(t, first.Event.Payload, refCase.ref)
+
+				status, _, responseBody = fixture.request(t, "POST", path, "member", body, headers)
+				require.Equalf(t, 200, status, "idempotent close retry response: %s", responseBody)
+				var retry struct {
+					OriginalEvent *db.Event `json:"original_event"`
+					Reused        bool      `json:"reused"`
+				}
+				require.NoError(t, json.Unmarshal(responseBody, &retry))
+				require.True(t, retry.Reused)
+				require.NotNil(t, retry.OriginalEvent,
+					"a keyed retry must retain its receipt when evidence uses a supported reference form")
+				require.Contains(t, retry.OriginalEvent.Payload, refCase.ref)
+			})
+		}
+	})
+}
+
 func TestProjectScopedIssueShowOmitsRestrictedParent(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		fixture := newProjectAccessFixture(t, store)
