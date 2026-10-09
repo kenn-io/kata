@@ -112,11 +112,21 @@ func checkFederationAdoptionAfterDisconnect(t *testing.T, store db.Storage) erro
 		db.RelayResetMetadataPrefix + project.UID,
 		db.RootKeyTransitionMetadataKey(transition),
 	}
-	for _, key := range uidMetadataKeys {
+	for _, key := range []string{
+		db.PendingCreationMetadataPrefix + project.UID + ".issue." + issue.UID,
+		db.RelayResetMetadataPrefix + project.UID,
+	} {
 		quotedKey := "'" + strings.ReplaceAll(key, "'", "''") + "'"
 		_, err := metadata.ExecContext(ctx,
 			`INSERT INTO meta(key,value) VALUES(`+quotedKey+`,'stale') ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
 		require.NoError(t, err)
+	}
+	for _, key := range uidMetadataKeys {
+		quotedKey := "'" + strings.ReplaceAll(key, "'", "''") + "'"
+		var count int
+		err := metadata.QueryRowContext(ctx, `SELECT count(*) FROM meta WHERE key=`+quotedKey).Scan(&count)
+		require.NoError(t, err)
+		require.Equal(t, 1, count, "all expected old UID metadata exists before adoption")
 	}
 
 	var retainedRelayRows int
