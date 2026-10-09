@@ -105,27 +105,7 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 }
 
 func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
-	catalog := g.effectiveCatalog()
-	if _, restricted := db.AuthorizedProjects(r.Context()); restricted {
-		// No project delegation protocol exists for configured target tokens.
-		// Do not expose or probe another daemon's authority on this user's behalf.
-		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
-		for _, configured := range catalog {
-			if configured.Local {
-				visible = append(visible, configured)
-			}
-		}
-		catalog = visible
-	}
-	if insecureReadonlyRequest(r.Context()) {
-		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
-		for _, configured := range catalog {
-			if !webDaemonCredentialsConfigured(configured) {
-				visible = append(visible, configured)
-			}
-		}
-		catalog = visible
-	}
+	catalog := g.visibleCatalog(r.Context())
 	resolved := make([]resolvedWebDaemon, len(catalog))
 	states := make([]string, len(catalog))
 	var wg sync.WaitGroup
@@ -167,6 +147,39 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (g *webDaemonGateway) visibleCatalog(ctx context.Context) []config.CatalogDaemonConfig {
+	catalog := g.effectiveCatalog()
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// No project delegation protocol exists for configured target tokens.
+		// Do not expose or probe another daemon's authority on this user's behalf.
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if configured.Local {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
+	if insecureReadonlyRequest(ctx) {
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if !webDaemonCredentialsConfigured(configured) {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
+	if len(catalog) == 0 {
+		if _, restricted := db.AuthorizedProjects(ctx); restricted || insecureReadonlyRequest(ctx) {
+			// Preserve the source daemon's ordinary local authority when a
+			// scoped or anonymous-read-only principal cannot use any catalog
+			// target. Use the same synthetic ID in selection below.
+			return []config.CatalogDaemonConfig{g.localFallbackDaemon()}
+		}
+	}
+	return catalog
+}
+
 func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", webDaemonHeaderName)
 	if !webDaemonProxyRequestAllowed(r, r.URL.Path) {
@@ -185,7 +198,7 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "read_only")
 		return
 	}
-	d, err := g.selectDaemon(r.Header.Get(webDaemonHeaderName))
+	d, err := g.selectDaemon(r.Context(), r.Header.Get(webDaemonHeaderName))
 	if err != nil {
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -399,6 +412,10 @@ func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 	if len(visible) > 0 {
 		return visible
 	}
+	return []config.CatalogDaemonConfig{g.localFallbackDaemon()}
+}
+
+func (g *webDaemonGateway) localFallbackDaemon() config.CatalogDaemonConfig {
 	name := "local"
 	for {
 		collision := false
@@ -413,7 +430,7 @@ func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 		}
 		name += "-local"
 	}
-	return []config.CatalogDaemonConfig{{Name: name, Local: true}}
+	return config.CatalogDaemonConfig{Name: name, Local: true}
 }
 
 func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) string {
@@ -435,8 +452,8 @@ func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) strin
 	return ""
 }
 
-func (g *webDaemonGateway) selectDaemon(requested string) (resolvedWebDaemon, error) {
-	catalog := g.effectiveCatalog()
+func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (resolvedWebDaemon, error) {
+	catalog := g.visibleCatalog(ctx)
 	id := strings.TrimSpace(requested)
 	if id == "" {
 		id = g.defaultID(catalog)

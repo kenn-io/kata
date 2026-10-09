@@ -141,6 +141,7 @@ func (d *Store) ParentShortIDsByIssues(
 		          JOIN issues parent ON parent.id = l.to_issue_id
 		          WHERE l.type = 'parent'
 		            AND l.from_issue_id IN (` + placeholders + `)`
+		query, args = authorizeRelationshipQuery(ctx, query, args, "l")
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("parent short ids by issues: %w", err)

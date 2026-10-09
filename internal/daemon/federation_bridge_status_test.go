@@ -62,6 +62,67 @@ func TestFederationBridgePendingStatus(t *testing.T) {
 	})
 }
 
+func TestFederationBridgeStatusReportsPendingEnrollmentForPartialProject(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		binding        bool
+		credentialName string
+		wantStatus     int
+	}{
+		{name: "project only", credentialName: "shared-replica", wantStatus: http.StatusOK},
+		{name: "binding before relay config", binding: true, credentialName: "shared-replica", wantStatus: http.StatusOK},
+		{name: "unmatched pending credential", binding: true, credentialName: "other-project", wantStatus: http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+				t.Setenv("KATA_HOME", t.TempDir())
+				const projectUID = "00000000000000000000000006"
+				project, err := store.CreateProjectWithUID(t.Context(), "shared-replica", projectUID)
+				require.NoError(t, err)
+				if test.binding {
+					_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{
+						ProjectID: project.ID, Role: db.FederationRoleSpoke,
+						HubURL: "https://hub.example", HubProjectID: 7,
+						HubProjectUID: "00000000000000000000000007",
+						Actor:         "upstream-member", Enabled: true,
+					})
+					require.NoError(t, err)
+				}
+				credential := config.FederationCredential{
+					HubURL: "https://hub.example", HubProjectID: 7,
+					Token: "pending-bridge-test-token", Capabilities: "claim,pull,push",
+					Actor: "upstream-member", HubCatalog: "example-hub",
+					RequestedActor: "local-member", SpokeProjectName: test.credentialName,
+					RelayEnrollmentPending: true,
+				}
+				require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(
+					t.Context(), project.UID, credential,
+				))
+				server := daemon.NewServer(daemon.ServerConfig{
+					DB: store, Auth: config.AuthConfig{Token: "local-owner-test-token"},
+				})
+				t.Cleanup(func() { require.NoError(t, server.Close()) })
+				endpoint := httptest.NewServer(server.Handler())
+				t.Cleanup(endpoint.Close)
+				request := projectAccessFixture{store: store, server: endpoint}
+				code, _, raw := request.request(t, http.MethodGet,
+					"/api/v1/federation/bridges/shared-replica", "", nil,
+					map[string]string{"Authorization": "Bearer local-owner-test-token"})
+				require.Equal(t, test.wantStatus, code, string(raw))
+				if test.wantStatus == http.StatusOK {
+					var status map[string]any
+					require.NoError(t, json.Unmarshal(raw, &status))
+					require.Equal(t, "enrollment_pending", status["state"])
+					require.Equal(t, project.UID, status["project_uid"])
+					require.Equal(t, "local-member", status["local_account"])
+					require.Equal(t, "upstream-member", status["upstream_account"])
+					require.NotContains(t, string(raw), credential.Token)
+				}
+			})
+		})
+	}
+}
+
 // R9: active status derives its accounts and observed connection state from
 // the existing binding/credential/sync diagnostics, with no network request.
 func TestFederationBridgeActiveStatus(t *testing.T) {

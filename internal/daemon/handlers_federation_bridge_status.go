@@ -25,6 +25,31 @@ func registerFederationBridgeStatus(humaAPI huma.API, cfg ServerConfig) {
 		}
 		binding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
 		if errors.Is(err, db.ErrNotFound) || (err == nil && binding.RelayConfig == nil) {
+			credential, found, credentialErr := cfg.federationCredentialStore().FederationCredential(
+				ctx, project.UID,
+			)
+			if credentialErr != nil {
+				return nil, api.NewError(
+					http.StatusServiceUnavailable, "federation_credentials_unavailable",
+					"cannot read the bridge credential status", "", nil,
+				)
+			}
+			pending := found && credential.RelayEnrollmentPending && credential.SpokeProjectName == project.Name
+			if err == nil {
+				pending = pending && binding.Role == db.FederationRoleSpoke &&
+					credential.HubURL == binding.HubURL && credential.HubProjectID == binding.HubProjectID &&
+					credential.Actor == binding.Actor
+			}
+			if pending {
+				metadata := credential.Metadata()
+				return &api.FederationBridgeStatusResponse{Body: api.FederationBridgeStatusBody{
+					ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+					HubURL: metadata.HubURL, HubCatalog: metadata.HubCatalog,
+					LocalAccount: metadata.RequestedActor, UpstreamAccount: metadata.Actor,
+					Direction: "bidirectional", State: "enrollment_pending",
+					CredentialStatus: metadata.Status,
+				}}, nil
+			}
 			return nil, api.NewError(404, "not_found", "bridge not found", "", nil)
 		}
 		if err != nil {

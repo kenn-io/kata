@@ -1712,11 +1712,21 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		scrubCondition += ` OR (peer.id IS NOT NULL AND peer.project_id <> ?)`
 		selectArgs = append(selectArgs, opts.ProjectID, opts.ProjectID, opts.ProjectID)
 	}
+	relatedUIDScrub := `(` + scrubCondition + `)`
+	if sourceSchemaVersion >= 32 {
+		// Root receipts sign related_issue_uid. Preserve it when the omitted
+		// peer belongs to an event whose exact content hash is still attested.
+		relatedUIDScrub += ` AND NOT EXISTS (
+			SELECT 1 FROM federation_event_provenance signed_receipt
+			 WHERE signed_receipt.project_uid=export_project.uid
+			   AND signed_receipt.event_uid=events.uid
+			   AND signed_receipt.content_hash=events.content_hash)`
+	}
 	// Moving an issue changes its project, but its earlier events retain
 	// their original project. Resolve the subject by identity alone.
 	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, %s, events.issue_uid,
 	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_id END,
-	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_uid END,
+	                 CASE WHEN `+relatedUIDScrub+` THEN NULL ELSE events.related_issue_uid END,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events%s
