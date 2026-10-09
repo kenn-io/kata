@@ -11,7 +11,11 @@ import (
 )
 
 func projectsAccessCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "access", Short: "manage project team visibility"}
+	cmd := &cobra.Command{
+		Use:   "access",
+		Short: "manage project team visibility",
+		Long:  "Control which teams can see a project. Needs the daemon owner's authority.",
+	}
 	cmd.AddCommand(projectsAccessActionCmd(false), projectsAccessActionCmd(true))
 	return cmd
 }
@@ -23,7 +27,13 @@ func projectsAccessActionCmd(write bool) *cobra.Command {
 	}
 	var visibility string
 	var teamNames []string
-	cmd := &cobra.Command{Use: action + " <project>", Short: action + " project visibility", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	long := "Show the project's visibility (all or teams) and the teams that can see it."
+	example := "  kata projects access show example-project --agent"
+	if write {
+		long = "Set who can see the project: --visibility all, or --visibility teams with one\n--team per team (name or UID). --visibility teams with no --team denies\nordinary access. Fails with conflict (exit 5) if another administrator\nchanged the policy in the meantime; re-read with access show and retry."
+		example = "  kata projects access set example-project --visibility teams --team reviewers --agent\n  kata projects access set example-project --visibility all --agent"
+	}
+	cmd := &cobra.Command{Use: action + " <project>", Short: action + " project visibility", Long: long, Example: example, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if write && (visibility != "all" && visibility != "teams") {
 			return &cliError{Message: "--visibility must be all or teams", Kind: kindValidation, ExitCode: ExitValidation}
 		}

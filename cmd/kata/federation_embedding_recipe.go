@@ -10,10 +10,11 @@ import (
 
 func federationEmbeddingRecipeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "embedding-recipe",
-		Short: "export the exact local configured document recipe as JSON",
-		Long:  "Export the exact document recipe from the selected Kata home's configuration. This does not inspect a remote daemon, open a vector index, or make an embedding request. Use the JSON with the root's existing project metadata API to select a producer.",
-		Args:  cobra.NoArgs,
+		Use:     "embedding-recipe",
+		Short:   "export the exact local configured document recipe as JSON",
+		Long:    "Export the exact document recipe from the selected Kata home's configuration. This does not inspect a remote daemon, open a vector index, or make an embedding request. Use the JSON with the root's existing project metadata API to select a producer.",
+		Example: "  kata federation embedding-recipe",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.ReadDaemonConfig()
 			if err != nil {
