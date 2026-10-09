@@ -3,8 +3,10 @@ package todoistsync
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/issuesync"
 )
 
@@ -45,7 +47,7 @@ func TestStatusCloseVerifyAndReopen(t *testing.T) {
 // Contract: Kata refuses writes that Todoist would apply to more than the
 // mapped task, and nothing is sent when delivery admission fails.
 func TestStatusGuardsBeforeMutation(t *testing.T) {
-	for _, kind := range []string{"recurring", "child cascade", "ancestor cascade", "archived section", "admission", "moved"} {
+	for _, kind := range []string{"recurring", "child cascade", "ancestor cascade", "archived section", "admission", "moved", "empty subtask reply", "empty section reply"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newAPIFixture(t)
 			s, c := statusSession(t, f)
@@ -68,6 +70,13 @@ func TestStatusGuardsBeforeMutation(t *testing.T) {
 				admit = func() error { return errors.New("intent changed") }
 			case "moved":
 				f.row.ProjectID = "foreign"
+			case "empty subtask reply":
+				f.child = true
+				f.empty = map[string]bool{"/api/v1/tasks": true}
+			case "empty section reply":
+				closed()
+				f.row.SectionID = "section123"
+				f.empty = map[string]bool{"/api/v1/sections/section123": true}
 			}
 			_, err := s.WriteStatus(t.Context(), c, StatusTarget{ID: f.row.ID}, desired, admit)
 			require.Error(t, err)
@@ -102,5 +111,21 @@ func TestStatusWrongVerificationKeepsAmbiguousIntent(t *testing.T) {
 	statusErr, ok := errors.AsType[*issuesync.StatusError](err)
 	require.True(t, ok)
 	require.True(t, statusErr.Ambiguous)
+	require.Len(t, f.posts, 1)
+}
+
+// Contract: a task last seen closed may have been edited after completion, so
+// a reopen searches its history from the floor and still finds the task.
+func TestStatusReopenFindsTaskEditedAfterCompletion(t *testing.T) {
+	f := newAPIFixture(t)
+	s, c := statusSession(t, f)
+	completed := f.row.UpdatedAt.Add(time.Hour)
+	f.row.Checked, f.row.CompletedAt = true, new(completed)
+	f.row.UpdatedAt = completed.Add(time.Hour)
+	closed := "closed"
+	prior := &db.IssueStatusObservation{Raw: &closed, Version: f.row.UpdatedAt}
+	got, err := s.WriteStatus(t.Context(), c, StatusTarget{ID: f.row.ID, Prior: prior}, "open", admitAll)
+	require.NoError(t, err)
+	require.Equal(t, "open", got.Status)
 	require.Len(t, f.posts, 1)
 }

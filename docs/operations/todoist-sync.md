@@ -118,9 +118,11 @@ stays inactive. A task last seen open is searched in history from that
 observation onward; other lookups start at the configured floor.
 
 Todoist reports unknown (`null`) creation or update times. Kata uses the task's
-other known timestamps instead, or the history floor when none are known. A
-task whose update time is unknown cannot be ordered against Kata's stored
-version, so a reopen in Todoist reaches Kata only after the task changes again.
+other known timestamps instead, or the history floor when none are known.
+Two-way status scans never move a task's status version backwards, so a reopen
+in Todoist still reaches Kata. One-way imports cannot order such a task against
+Kata's stored version. For those, a reopen in Todoist and a `--title-prefix`
+change reach the task only after it changes again in Todoist.
 
 An active task wins over historical completions of the same ID, including old
 recurring occurrences. A missing task is never treated as completion or
@@ -130,8 +132,9 @@ issues. Tasks completed before the configured history floor cannot be resolved
 through that history.
 
 Reads retry `429` and `5xx` responses with exponential backoff, honoring
-`Retry-After`. Authentication and permission failures block the binding. A
-close or reopen is sent once and verified with a fresh read. A lost or
+`Retry-After`. A successful response with an empty body fails that run without
+advancing it, so no safety check or history read relies on missing data.
+Authentication and permission failures block the binding. A close or reopen is sent once and verified with a fresh read. A lost or
 unverified response retains pending intent; the next run reads the provider
 before deciding whether another write is needed. Check `status` for pending
 changes and blocked errors. Repair credentials or provider state, then run

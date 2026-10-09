@@ -107,7 +107,7 @@ func (s *clientSession) account(ctx context.Context) (string, error) {
 	if err := responseError(err, "read Todoist account"); err != nil {
 		return "", err
 	}
-	if resp == nil || resp.JSON200 == nil {
+	if resp == nil || resp.JSON200 == nil || len(resp.Body) == 0 {
 		return "", emptyResponse("read Todoist account")
 	}
 	if s.config.AccountID != "" && resp.JSON200.ID != s.config.AccountID {
@@ -144,7 +144,7 @@ func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) 
 	if err := responseError(err, "read Todoist project"); err != nil {
 		return Project{}, err
 	}
-	if resp == nil || resp.JSON200 == nil {
+	if resp == nil || resp.JSON200 == nil || len(resp.Body) == 0 {
 		return Project{}, emptyResponse("read Todoist project")
 	}
 	var p Project
@@ -161,8 +161,9 @@ func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) 
 
 func blocked(message string) error { return &issuesync.StatusError{Message: message, Blocked: true} }
 
-// emptyResponse reports a successful call that returned no decoded body. The
-// next run retries it.
+// emptyResponse reports a successful call that returned no body. The generated
+// client still decodes an empty body to a zero value, which could pass a
+// safety check, so the caller fails the read and the next run retries it.
 func emptyResponse(action string) error {
 	return &issuesync.StatusError{Message: "cannot " + action + ": Todoist returned no response body"}
 }

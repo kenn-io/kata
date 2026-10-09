@@ -36,6 +36,8 @@ type apiFixture struct {
 	lost            bool
 	wrong           bool
 	nullFields      []string
+	// empty answers these paths with HTTP 200 and no body.
+	empty map[string]bool
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -86,6 +88,10 @@ func (f *apiFixture) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if f.empty[r.URL.Path] {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	reply := func(v any) { raw, err := json.Marshal(v); require.NoError(f.t, err); _, _ = w.Write(raw) }
 	inProject := f.row.ProjectID == testConfig().ProjectID
 	switch r.URL.Path {

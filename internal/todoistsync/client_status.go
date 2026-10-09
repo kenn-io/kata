@@ -39,7 +39,7 @@ func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Ta
 	if err := responseError(err, "read Todoist task"); err != nil {
 		return Task{}, false, err
 	}
-	if resp == nil || resp.JSON200 == nil {
+	if resp == nil || resp.JSON200 == nil || len(resp.Body) == 0 {
 		return Task{}, false, emptyResponse("read Todoist task")
 	}
 	t := taskFrom(*resp.JSON200, c.historyFloor())
@@ -54,7 +54,9 @@ func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Ta
 // from disappearance.
 func (s *clientSession) completedTask(ctx context.Context, c Config, t StatusTarget) (Task, error) {
 	var since time.Time
-	if t.Prior != nil {
+	// Only an open observation bounds the completion. A closed task may have
+	// been edited after completion, so its version can follow completed_at.
+	if t.Prior != nil && t.Prior.Raw != nil && *t.Prior.Raw == "open" {
 		since = t.Prior.Version.Add(-historyOverlap)
 	}
 	history, err := s.completed(ctx, c, since, time.Now())
@@ -92,6 +94,21 @@ func observation(row Task) issuesync.StatusObservation {
 	return o
 }
 
+// observationAfter keeps a fresh read from going backwards. With a null
+// update time, a reopened task falls back to an older timestamp than the
+// stored observation, and the status store would reject it.
+func observationAfter(row Task, prior *db.IssueStatusObservation) issuesync.StatusObservation {
+	o := observation(row)
+	if prior == nil || o.Version.After(prior.Version) {
+		return o
+	}
+	o.Version = prior.Version
+	if prior.Raw == nil || *prior.Raw != *o.RawStatus {
+		o.Version = prior.Version.Add(time.Millisecond)
+	}
+	return o
+}
+
 // ReadStatus reports a task's current status. A task last seen closed and
 // still not active stays closed without another history scan.
 func (s *clientSession) ReadStatus(ctx context.Context, c Config, t StatusTarget) (issuesync.StatusObservation, error) {
@@ -108,7 +125,7 @@ func (s *clientSession) ReadStatus(ctx context.Context, c Config, t StatusTarget
 			return issuesync.StatusObservation{}, err
 		}
 	}
-	return observation(row), nil
+	return observationAfter(row, t.Prior), nil
 }
 
 // WriteStatus closes or reopens one task. It refuses writes that Todoist
@@ -122,7 +139,7 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, t StatusTarge
 	if err != nil {
 		return zero, err
 	}
-	observed := observation(row)
+	observed := observationAfter(row, t.Prior)
 	if observed.Status == desired {
 		return observed, nil
 	}
@@ -204,7 +221,7 @@ func (s *clientSession) activeSection(ctx context.Context, id string) error {
 	if err := responseError(err, "read Todoist section"); err != nil {
 		return err
 	}
-	if resp == nil || resp.JSON200 == nil {
+	if resp == nil || resp.JSON200 == nil || len(resp.Body) == 0 {
 		return emptyResponse("read Todoist section")
 	}
 	if resp.JSON200.IsArchived || resp.JSON200.IsDeleted {

@@ -154,3 +154,53 @@ func TestRunnerSweepOfCompletedTaskSkipsHistoryReplay(t *testing.T) {
 	require.Equal(t, 2, f.requestsTo("/api/v1/user"), "one account check per session")
 	require.Empty(t, f.posts)
 }
+
+// Contract: an empty completion-history reply fails the run, so the saved sync
+// point cannot move past completions that were never imported.
+func TestRunnerEmptyHistoryReplyKeepsSyncPoint(t *testing.T) {
+	ctx := t.Context()
+	store, binding, f := newRunnerFixture(t, "one-way")
+	_, err := f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	binding, err = store.IssueSyncBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, binding.LastCursorAt)
+	saved := *binding.LastCursorAt
+	f.completeInTodoist()
+	f.mu.Lock()
+	f.empty = map[string]bool{"/api/v1/tasks/completed/by_completion_date": true}
+	f.mu.Unlock()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.Error(t, err)
+	binding, err = store.IssueSyncBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.True(t, binding.LastCursorAt.Equal(saved))
+}
+
+// Contract: when Todoist reports a null update time, a verified Kata reopen
+// still clears its pending intent, so a later Todoist completion stands.
+func TestRunnerReopenWithUnknownUpdateTimeClearsPendingIntent(t *testing.T) {
+	ctx := t.Context()
+	store, binding, f := newRunnerFixture(t, "two-way")
+	f.nullFields = []string{"updated_at"}
+	_, err := f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	f.completeInTodoist()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	mapping, err := store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", "task:"+f.row.ID)
+	require.NoError(t, err)
+	_, _, changed, err := store.ReopenIssue(ctx, *mapping.IssueID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	require.Len(t, f.posts, 1)
+	pending, err := store.CountPendingIssueStatuses(ctx, binding.ID)
+	require.NoError(t, err)
+	require.Zero(t, pending)
+	f.completeInTodoist()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	require.Len(t, f.posts, 1, "a completed task must not be reopened again")
+}
