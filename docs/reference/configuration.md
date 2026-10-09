@@ -20,10 +20,11 @@ enabled = true
 agentsview_url = "https://agentsview.example" # optional; a base path is supported
 ```
 
-This is off by default and needs no daemon restart. Use a daemon with HTTP API
-`0.26.0` or newer. With attachment disabled, close requests remain unchanged.
-Older daemons reject an attached transcript before closing; Kata never retries
-without provenance automatically.
+This is off by default and needs no daemon restart. Attachment needs a daemon
+with HTTP API `0.26.0` or newer. Before attaching a transcript, `kata close`
+checks the daemon's API version; an older daemon gets a warning on stderr and
+the close proceeds without the transcript. With attachment disabled, close
+requests remain unchanged.
 
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
@@ -32,9 +33,12 @@ passed. No transcript body, local filename, token, or hook ownership hash is
 copied. The setting affects CLI closes, including remote-daemon calls; browser
 closes do not infer a session from the daemon's environment.
 
-Codex context comes from `CODEX_THREAD_ID`, falling back to `CODEX_SESSION_ID`.
-If both are populated they must agree. For Claude Code or an explicit harness
-handoff, pass the actual current native session UUID as a pair:
+Claude Code context comes from `CLAUDE_CODE_SESSION_ID`. Codex context comes
+from `CODEX_THREAD_ID`, falling back to `CODEX_SESSION_ID`; if both Codex
+variables are populated they must agree. A child agent inherits its parent's
+variables, so Claude Code and Codex context together is ambiguous and skipped.
+For a nested agent or an explicit harness handoff, pass the actual current
+native session UUID as a pair:
 
 ```sh
 KATA_TRANSCRIPT_AGENT=claude \
@@ -73,9 +77,10 @@ AgentsView lookup, not the close, when indexing lags.
 An unkeyed close of an already closed issue adds no event and cannot replace
 its provenance. Reopen/reclose records a new session on a new close event and
 retains the old event. Keyed retries return their original event; keep the
-original session, link configuration, evidence, actor, and other request fields
-unchanged. Retrying from another chat with different automatic context conflicts;
-explicitly pass the original agent/session pair and retain the original base URL.
+original session, evidence, actor, and other request fields unchanged. The
+AgentsView link is not part of retry identity, so changing `agentsview_url`
+does not break a retry. Retrying from another chat with different automatic
+context conflicts; explicitly pass the original agent/session pair.
 `--dry` validates without writing an event or attaching persistent provenance.
 
 Readers can open the session link in the web issue's **Events** history, or
@@ -105,7 +110,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
-| `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`codex` or `claude`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override Codex environment context. |
+| `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`codex` or `claude`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override Claude Code and Codex environment context. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |

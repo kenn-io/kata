@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -25,7 +26,7 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 		return CloseTranscriptConfig{}, nil
 	}
 	if err != nil {
-		return CloseTranscriptConfig{}, errors.New("cannot read close transcript configuration")
+		return CloseTranscriptConfig{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	var file struct {
 		Close struct {
@@ -33,7 +34,7 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 		} `toml:"close"`
 	}
 	if _, err = toml.Decode(string(data), &file); err != nil {
-		return CloseTranscriptConfig{}, errors.New("cannot parse close transcript configuration")
+		return CloseTranscriptConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return file.Close.Transcript, nil
 }

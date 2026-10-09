@@ -29,6 +29,11 @@ func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 	second := postWithHeader(t, ts, path, headers, body)
 	requireOK(t, second)
 	assert.Contains(t, string(second.body), `"reused":true`)
+	// The link is a derived locator: a changed AgentsView base still replays.
+	transcript["url"] = "https://agentsview.example/archive/sessions/codex/00000000-0000-4000-8000-000000000001"
+	relinked := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, relinked)
+	assert.Contains(t, string(relinked.body), `"reused":true`)
 	transcript["session_id"] = "00000000-0000-4000-8000-000000000002"
 	delete(transcript, "url")
 	conflict := postWithHeader(t, ts, path, headers, body)

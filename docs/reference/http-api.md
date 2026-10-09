@@ -119,8 +119,8 @@ The agent is `codex` or `claude`, `session_id` is its native UUID, and `url` is
 optional absolute HTTP(S) without credentials, query, or fragment. Supply a
 verified locator for namespaced imported archives. The daemon stores this
 separately from evidence in the close event; it does not fetch or verify the
-chat. The object participates in retry identity and is preserved in scoped
-responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
+chat. Its `agent` and `session_id` participate in retry identity; `url` does
+not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
 not daemon-side session discovery.
 
 Guarded close requests use a request-local compatibility check instead of a

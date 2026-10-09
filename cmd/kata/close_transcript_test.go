@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +27,7 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			t.Setenv("KATA_HOME", home)
 			t.Setenv("CODEX_THREAD_ID", transcriptSessionOne)
 			t.Setenv("CODEX_SESSION_ID", transcriptSessionOne)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 			t.Setenv("KATA_TRANSCRIPT_AGENT", "")
 			t.Setenv("KATA_TRANSCRIPT_SESSION_ID", "")
 			if enabled {
@@ -68,12 +72,15 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	for _, tc := range []struct {
-		name, agent, id, thread, session, base, wantAgent, wantID, warning string
+		name, agent, id, thread, session, claude, base, wantAgent, wantID, warning string
 	}{
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
 		{name: "partial explicit context", agent: "claude", thread: transcriptSessionOne, warning: "current session unavailable"},
 		{name: "explicit Claude overrides inherited Codex", agent: "claude", id: transcriptSessionTwo, thread: transcriptSessionOne, wantAgent: "claude", wantID: transcriptSessionTwo},
+		{name: "Claude Code context", claude: transcriptSessionOne, wantAgent: "claude", wantID: transcriptSessionOne},
+		{name: "nested agent context", claude: transcriptSessionTwo, thread: transcriptSessionOne, warning: "ambiguous"},
+		{name: "explicit pair resolves nested context", agent: "codex", id: transcriptSessionOne, claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantAgent: "codex", wantID: transcriptSessionOne},
 		{name: "session alias", session: transcriptSessionOne, wantAgent: "codex", wantID: transcriptSessionOne},
 		{name: "no AgentsView integration", thread: transcriptSessionOne, wantAgent: "codex", wantID: transcriptSessionOne},
 		{name: "bad link retains ID", thread: transcriptSessionOne, base: "https://user:secret@agentsview.example?token=secret", wantAgent: "codex", wantID: transcriptSessionOne, warning: "URL invalid"},
@@ -83,7 +90,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("KATA_HOME", home)
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"), 0600))
-			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": tc.agent, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session} {
+			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": tc.agent, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
 				t.Setenv(name, value)
 			}
 			cmd := &cobra.Command{}
@@ -107,4 +114,52 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			assert.NotContains(t, stderr.String(), "/private")
 		})
 	}
+}
+
+func TestCloseTranscript_OldDaemonClosesWithoutProvenance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\n"), 0600))
+	t.Setenv("CODEX_THREAD_ID", transcriptSessionOne)
+	for _, name := range []string{"CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID"} {
+		t.Setenv(name, "")
+	}
+	var sent map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.25.0"}`))
+		case "/api/v1/projects/1/issues/abc1/actions/close":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
+			_, _ = w.Write([]byte(`{"changed":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	_, stderr, err := executeRootCapture(t,
+		contextWithBaseURL(context.Background(), server.URL),
+		"--project", "example-project", "close", "abc1", "--done",
+		"--message", "Implemented the example behavior and ran the focused tests.",
+		"--test", "go test ./internal/example")
+	require.NoError(t, err)
+	require.NotNil(t, sent)
+	assert.NotContains(t, sent, "transcript")
+	assert.Contains(t, stderr, "reports 0.25.0")
+	assert.Contains(t, stderr, "skipping attachment")
+}
+
+func TestCloseTranscript_MalformedConfigurationNamesFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript\n"), 0600))
+	cmd := &cobra.Command{}
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	assert.Nil(t, closeTranscript(cmd))
+	assert.Contains(t, stderr.String(), filepath.Join(home, "config.toml"))
+	assert.Contains(t, stderr.String(), "skipping attachment")
 }

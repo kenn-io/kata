@@ -456,6 +456,12 @@ func closeIdempotencyFingerprint(
 	ifMatchRev *int64,
 	ref *transcript.Transcript,
 ) string {
+	// The session identifies the request; its URL is a derived locator, so a
+	// changed AgentsView base still replays the original close.
+	var session *transcript.Transcript
+	if ref != nil {
+		session = &transcript.Transcript{Agent: ref.Agent, SessionID: ref.SessionID}
+	}
 	encoded, _ := json.Marshal(struct {
 		IssueUID   string                 `json:"issue_uid"`
 		RequestRef string                 `json:"request_ref"`
@@ -471,7 +477,7 @@ func closeIdempotencyFingerprint(
 		IssueUID: issueUID, RequestRef: requestRef,
 		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
-		Transcript: ref,
+		Transcript: session,
 	})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])

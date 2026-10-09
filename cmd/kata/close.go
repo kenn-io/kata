@@ -272,6 +272,11 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
+	if action == "close" && body["transcript"] != nil {
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
+			return err
+		}
+	}
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
