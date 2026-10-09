@@ -2234,11 +2234,11 @@ func TestTrustedProxyMembersCannotManageLegacyFederationEnrollments(t *testing.T
 		require.NoError(t, err)
 		headers := bearer("federation-enrollment-proxy-token")
 		headers["X-Kata-Actor"] = "project-member"
-		response, raw := doReq(t, server, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		response, raw := doReq(t, server, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{ //nolint:gosec // Fixed test-only enrollment token.
 			"spoke_instance_uid": federationTestSpokeUID,
 			"project_id":         project.ID,
 			"capabilities":       "pull",
-			"token":              "proxy-member-created-grant", //nolint:gosec // Test-only grant credential.
+			"token":              "proxy-member-created-grant",
 			"actor":              "project-member",
 		}, headers)
 		assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "not_found")

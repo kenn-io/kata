@@ -211,6 +211,9 @@ func TestArtifactCaptureRuneWindowBoundsPreserveLocalIndexing(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, s.Close()) })
 				idx, err = vector.OpenPostgres(ctx, s.DB)
 				require.NoError(t, err)
+				release, err := idx.AcquireReconcilerLease(ctx)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, release()) })
 			}
 
 			project, err := source.CreateProject(ctx, "rune-window-project")
