@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -17,4 +18,24 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 		   OR left(key, length($3)) = $3`,
 		resetKey, resetPrefix, transitionPrefix)
 	return mapSQLError(err, nil)
+}
+
+func retireProjectFederationUIDStateTx(ctx context.Context, tx *sql.Tx, projectUID string) error {
+	for _, table := range []string{
+		"federation_relay_outbox",
+		"federation_relay_inbox",
+		"federation_relay_cursors",
+	} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE project_uid = $1`, projectUID); err != nil {
+			return fmt.Errorf("retire project relay %s: %w", table, mapSQLError(err, nil))
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM federation_root_keys WHERE project_uid = $1`, projectUID); err != nil {
+		return fmt.Errorf("retire project root provenance: %w", mapSQLError(err, nil))
+	}
+	if err := deleteProjectRelayMetadataTx(ctx, tx, projectUID); err != nil {
+		return fmt.Errorf("retire project relay metadata: %w", err)
+	}
+	return nil
 }

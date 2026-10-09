@@ -1064,6 +1064,9 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 		return nil, err
 	}
 	parent, err := store.IssueByID(ctx, link.ToIssueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

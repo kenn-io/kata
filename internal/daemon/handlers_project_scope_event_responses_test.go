@@ -50,3 +50,34 @@ func TestProjectScopedCloseMutationHidesRestrictedParentReference(t *testing.T) 
 			"filtering response event references must not undo or block the close")
 	})
 }
+
+func TestProjectScopedIssueShowOmitsRestrictedParent(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		fixture := newProjectAccessFixture(t, store)
+		child, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: fixture.public.ID, Title: "Visible child", Author: "member",
+		})
+		require.NoError(t, err)
+		_, err = store.CreateLink(t.Context(), db.CreateLinkParams{
+			FromIssueID: child.ID, ToIssueID: fixture.issue.ID, Type: "parent", Author: "member",
+		})
+		require.NoError(t, err)
+
+		status, _, body := fixture.request(t, "GET",
+			fmt.Sprintf("/api/v1/projects/%d/issues/%s", fixture.public.ID, child.ShortID),
+			"nonmember", nil, nil)
+		require.Equalf(t, 200, status, "showing a visible issue must omit its inaccessible parent: %s", body)
+		var response struct {
+			Parent *struct {
+				UID         string `json:"uid"`
+				ShortID     string `json:"short_id"`
+				QualifiedID string `json:"qualified_id"`
+			} `json:"parent"`
+		}
+		require.NoError(t, json.Unmarshal(body, &response))
+		require.Nil(t, response.Parent, "an inaccessible parent must be omitted from the visible child")
+		require.NotContains(t, string(body), fixture.issue.UID)
+		require.NotContains(t, string(body), fixture.issue.ShortID)
+		require.NotContains(t, string(body), projectAccessCanary)
+	})
+}

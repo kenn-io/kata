@@ -2896,11 +2896,18 @@ func restoreProjectAccessPolicyAfterUIDRewriteTx(
 }
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid string) error {
+	var oldUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&oldUID); err != nil {
+		return fmt.Errorf("read project uid before adoption: %w", err)
+	}
 	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
 		return err
 	}
 	accessPolicy, err := takeProjectAccessPolicyForUIDRewriteTx(ctx, tx, projectID)
 	if err != nil {
+		return err
+	}
+	if err := retireProjectFederationUIDStateTx(ctx, tx, oldUID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS trg_projects_uid_immutable`); err != nil {

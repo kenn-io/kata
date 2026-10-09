@@ -710,6 +710,16 @@ var storageScenarios = []scenario{
 		run: checkFederationProjectAdoption,
 	},
 	{
+		name: "federation adoption after disconnect",
+		methods: []string{
+			"AckRelayDeliveries", "AdoptProjectIntoFederation", "ApplyUpstreamAttribution",
+			"CreateIssue", "CreateProject", "ExportAttribution", "ExportRelayState",
+			"LeaveFederationReplica", "PendingRelayDeliveries", "PinRootAuthority",
+			"RotateRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding",
+		},
+		run: checkFederationAdoptionAfterDisconnect,
+	},
+	{
 		name: "federation adoption project access",
 		methods: []string{
 			"AdoptProjectIntoFederation", "CreateProject", "CreateTeam", "ProjectAccessPolicy",

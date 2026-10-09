@@ -221,11 +221,18 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND `+pgFederationPushEventTypeCo
 }
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
+	var oldUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&oldUID); err != nil {
+		return fmt.Errorf("read project uid before adoption: %w", mapSQLError(err, nil))
+	}
 	if err := stageArtifactAdoptionTx(ctx, tx, projectID); err != nil {
 		return err
 	}
 	accessPolicy, err := takeProjectAccessPolicyForUIDRewriteTx(ctx, tx, projectID)
 	if err != nil {
+		return err
+	}
+	if err := retireProjectFederationUIDStateTx(ctx, tx, oldUID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
