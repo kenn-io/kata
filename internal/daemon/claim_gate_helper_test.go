@@ -160,6 +160,47 @@ func TestClaimGateHelperSpokeTransportFailureFallsBackToCachedClaim(t *testing.T
 	require.NoError(t, err)
 }
 
+func TestClaimGateHelperRelayOfflineResponseFallsBackToCachedClaim(t *testing.T) {
+	ctx := context.Background()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": http.StatusServiceUnavailable,
+			"error": map[string]any{
+				"code": "federation_offline", "message": "the upstream hub is unavailable",
+			},
+		})
+	}))
+	t.Cleanup(hub.Close)
+	enableClaimGateHelperSpoke(t, store, project, hub.URL, 99)
+	now := time.Now().UTC()
+	claimUID := newClaimGateHelperUID(t)
+	require.NoError(t, store.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: store.InstanceUID(), Holder: "agent", ClientKind: "",
+		},
+		Claim: &db.IssueClaim{
+			ClaimUID: claimUID, ProjectID: project.ID, IssueID: issue.ID, IssueUID: issue.UID,
+			Holder: "agent", HolderInstanceUID: store.InstanceUID(), ClaimKind: "hard",
+			AcquiredAt: now.Add(-time.Minute), Revision: 1, UpdatedAt: now,
+		},
+		HubNow: now,
+	}))
+
+	err := requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
+
+	require.NoError(t, err, "a relay's offline status is equivalent to transport unavailability for cached gate state")
+	status, err := store.ClaimStatusReadOnly(ctx, project.ID, issue.UID, now)
+	require.NoError(t, err)
+	require.True(t, status.Held)
+	require.NotNil(t, status.Claim)
+	assert.Equal(t, claimUID, status.Claim.ClaimUID)
+}
+
 func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.T) {
 	ctx := context.Background()
 	store := openClaimGateHelperDB(t)

@@ -1033,7 +1033,7 @@ func retryPendingClaimsOnceWithFence(
 	}
 	var errs []error
 	for _, req := range pending {
-		if err := retryPendingClaim(ctx, store, client, hubProjectID, req, validateLease); err != nil {
+		if err := retryPendingClaim(ctx, store, client, hubProjectID, binding, req, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
@@ -1079,12 +1079,27 @@ func retryPendingClaim(
 	store db.Storage,
 	client *Client,
 	hubProjectID int64,
+	binding db.FederationBinding,
 	pending db.PendingClaimRequest,
 	validateLease func(context.Context) error,
 ) error {
+	incoming := db.ClaimPrincipal{
+		HolderInstanceUID: pending.HolderInstanceUID,
+		Holder:            pending.Holder,
+		ClientKind:        pending.ClientKind,
+	}
+	upstream := incoming
+	alreadyForwarded := binding.RelayConfig != nil &&
+		incoming.HolderInstanceUID == store.InstanceUID() &&
+		incoming.Holder == binding.Actor && strings.HasPrefix(incoming.ClientKind, "relay:v1:")
+	if binding.Role == db.FederationRoleSpoke && !alreadyForwarded {
+		upstream = db.BoundSpokeClaimPrincipal(binding, incoming, store.InstanceUID())
+	}
+	remapToIncoming := binding.Role == db.FederationRoleSpoke && binding.RelayConfig != nil &&
+		incoming.HolderInstanceUID != store.InstanceUID()
 	req := ClaimRequest{
-		Holder:     pending.Holder,
-		ClientKind: pending.ClientKind,
+		Holder:     upstream.Holder,
+		ClientKind: upstream.ClientKind,
 		ClaimKind:  pending.ClaimKind,
 		Purpose:    pending.Purpose,
 	}
@@ -1111,8 +1126,18 @@ func retryPendingClaim(
 		return err
 	}
 	lease := resp.canonicalLease()
+	if resp.Pending && !resp.Granted && lease == nil {
+		return store.MarkPendingClaimAttempt(ctx, pending.RequestUID, "claim request remains pending upstream", now)
+	}
 	if resp.Granted && lease != nil {
-		return store.ResolvePendingClaim(ctx, pending.RequestUID, issueClaimFromAPI(lease))
+		resolved := issueClaimFromAPI(lease)
+		if remapToIncoming && lease.HolderInstanceUID == upstream.HolderInstanceUID &&
+			lease.Holder == upstream.Holder && lease.ClientKind == upstream.ClientKind {
+			resolved.HolderInstanceUID = incoming.HolderInstanceUID
+			resolved.Holder = incoming.Holder
+			resolved.ClientKind = incoming.ClientKind
+		}
+		return store.ResolvePendingClaim(ctx, pending.RequestUID, resolved)
 	}
 	return store.RejectPendingClaim(ctx, pending.RequestUID, "lease denied by hub", now)
 }

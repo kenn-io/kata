@@ -25,6 +25,13 @@ func TestArtifactIssuePurgeAfterMove(t *testing.T) {
 	dbtest.RunArtifactIssuePurgeAfterMove(t, store)
 }
 
+func TestArtifactIssueMovePreservesPortableBytes(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "artifact-move-preserve.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunArtifactIssueMovePreservesPortableBytes(t, store)
+}
+
 func TestArtifactStagingExpiryRetry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "staging.db")
 	store, err := sqlitestore.Open(t.Context(), path)

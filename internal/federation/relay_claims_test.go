@@ -91,6 +91,46 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 	})
 }
 
+func TestRelayPendingClaimRetainsIncomingLeafHolder(t *testing.T) {
+	root, relay, leaf, issue := newRelayClaimChain(t)
+	ctx := t.Context()
+	binding, err := relay.store.FederationBindingByProject(ctx, relay.project.ID)
+	require.NoError(t, err)
+	const offlineURL = "http://127.0.0.1:1"
+	binding, err = relay.store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{
+		ProjectID: relay.project.ID, ExpectedHubURL: binding.HubURL,
+		HubProjectID: binding.HubProjectID, HubProjectUID: binding.HubProjectUID,
+		TargetHubURL: offlineURL,
+	})
+	require.NoError(t, err)
+	relay.credential.HubURL = offlineURL
+	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, relay.project.UID, relay.credential))
+
+	status, response := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
+	require.Equal(t, http.StatusOK, status)
+	require.True(t, response.Pending)
+	pending, err := relay.store.ListPendingClaimRequests(ctx, relay.project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, leaf.store.InstanceUID(), pending[0].HolderInstanceUID,
+		"a relay must retain the incoming child holder while the upstream grant is pending")
+
+	binding, err = relay.store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{
+		ProjectID: relay.project.ID, ExpectedHubURL: offlineURL,
+		HubProjectID: binding.HubProjectID, HubProjectUID: binding.HubProjectUID,
+		TargetHubURL: root.http.URL,
+	})
+	require.NoError(t, err)
+	relay.credential.HubURL = root.http.URL
+	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, relay.project.UID, relay.credential))
+	require.NoError(t, federation.RetryPendingClaimsOnce(ctx, relay.store, binding, relay.credential, clientpkg.Opts{}))
+	claimStatus, err := relay.store.ClaimStatusReadOnly(ctx, relay.project.ID, issue.UID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, claimStatus.Held)
+	require.Equal(t, leaf.store.InstanceUID(), claimStatus.Holder.HolderInstanceUID,
+		"the asynchronously resolved grant is cached under the incoming leaf identity")
+}
+
 func newRelayClaimChain(t *testing.T) (*relayMatrixNode, *relayMatrixNode, *relayMatrixNode, db.Issue) {
 	t.Helper()
 	root := newRelayMatrixNode(t, "sqlite", "company-member")

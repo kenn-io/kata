@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -623,6 +624,12 @@ func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testin
 	require.Len(t, events, 2)
 	assert.Equal(t, "project.created", events[0].Type)
 	assert.Equal(t, evt.ID, events[1].ID)
+}
+
+func TestResetFederatedProjectIgnoresRejectedPendingClaims(t *testing.T) {
+	t.Parallel()
+	d := openTestDB(t)
+	dbtest.RunFederationResetIgnoresRejectedPendingClaims(t, d)
 }
 
 func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *testing.T) {

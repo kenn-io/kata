@@ -170,7 +170,10 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 	return result, err
 }
 
-func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUID, targetUID string) error {
+func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUID, targetUID string, issueUIDs ...string) error {
+	if len(issueUIDs) > 1 {
+		return fmt.Errorf("rebind artifacts accepts at most one issue UID")
+	}
 	type retainedArtifact struct {
 		digest, issueUID, raw string
 		expiresAt             sql.NullString
@@ -178,7 +181,14 @@ func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUI
 	after := ""
 	for {
 		var item retainedArtifact
-		err := tx.QueryRowContext(ctx, `SELECT digest,issue_uid,artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=$1 AND digest>$2 ORDER BY digest LIMIT 1`, sourceUID, after).Scan(&item.digest, &item.issueUID, &item.raw, &item.expiresAt)
+		query := `SELECT digest,issue_uid,artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=$1 AND digest>$2`
+		args := []any{sourceUID, after}
+		if len(issueUIDs) == 1 {
+			query += ` AND issue_uid=$3`
+			args = append(args, issueUIDs[0])
+		}
+		query += ` ORDER BY digest LIMIT 1`
+		err := tx.QueryRowContext(ctx, query, args...).Scan(&item.digest, &item.issueUID, &item.raw, &item.expiresAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -234,6 +244,36 @@ func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUI
 			return err
 		}
 	}
+}
+
+func rebindIssueEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, issueUID, targetUID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT project_uid FROM federation_embedding_artifacts
+WHERE issue_uid=$1 AND project_uid<>$2 ORDER BY project_uid`, issueUID, targetUID)
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	var sourceUIDs []string
+	for rows.Next() {
+		var sourceUID string
+		if err := rows.Scan(&sourceUID); err != nil {
+			_ = rows.Close()
+			return mapSQLError(err, nil)
+		}
+		sourceUIDs = append(sourceUIDs, sourceUID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return mapSQLError(err, nil)
+	}
+	for _, sourceUID := range sourceUIDs {
+		if err := rebindProjectEmbeddingArtifactsTx(ctx, tx, sourceUID, targetUID, issueUID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func rejectProjectMergeBindingsTx(ctx context.Context, tx *sql.Tx, sourceID, targetID int64) error {

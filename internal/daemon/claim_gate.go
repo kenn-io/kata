@@ -122,7 +122,7 @@ func refreshSpokeClaimStatusForGate(
 	}
 	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
 	if err != nil {
-		if isTransportClaimError(err) {
+		if isTransportClaimError(err) || isOfflineClaimHubStatusError(err) {
 			return nil
 		}
 		pending, pendingErr := isPendingSpokePushClaimStatusMiss(ctx, cfg, binding, issue, err)
@@ -221,6 +221,14 @@ func isOfflineClaimRefreshError(err error) bool {
 	}
 	return apiErr.Status == http.StatusServiceUnavailable &&
 		apiErr.Code == "federation_offline"
+}
+
+func isOfflineClaimHubStatusError(err error) bool {
+	var statusErr *claimHubStatusError
+	if !errors.As(err, &statusErr) || statusErr == nil || statusErr.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	return hubStatusErrorCode(statusErr) == "federation_offline"
 }
 
 func claimGateAPIError(err error) error {

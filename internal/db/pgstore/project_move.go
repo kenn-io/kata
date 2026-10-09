@@ -90,6 +90,9 @@ SET project_id = $1, short_id = $2, revision = $3, updated_at = $4
 WHERE id = $5`, target.ID, newShortID, newRevision, updatedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := rebindIssueEmbeddingArtifactsTx(ctx, tx, current.UID, target.UID); err != nil {
+			return fmt.Errorf("rehome embedding artifacts: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE issue_claims SET project_id = $1 WHERE issue_id = $2`, target.ID, current.ID); err != nil {
 			return fmt.Errorf("rehome issue claims: %w", mapSQLError(err, nil))

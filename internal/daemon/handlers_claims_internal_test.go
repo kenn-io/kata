@@ -48,6 +48,39 @@ func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
 	}
 }
 
+func TestApplyForwardedPendingClaimResponsePreservesCachedLease(t *testing.T) {
+	ctx := context.Background()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	now := time.Now().UTC()
+	claimUID := newClaimGateHelperUID(t)
+	holder := db.ClaimPrincipal{
+		HolderInstanceUID: store.InstanceUID(), Holder: "competing-agent", ClientKind: "cli",
+	}
+	claim := &db.IssueClaim{
+		ClaimUID: claimUID, ProjectID: project.ID, IssueID: issue.ID, IssueUID: issue.UID,
+		Holder: holder.Holder, HolderInstanceUID: holder.HolderInstanceUID,
+		ClientKind: holder.ClientKind, ClaimKind: "hard", AcquiredAt: now,
+		Revision: 1, UpdatedAt: now,
+	}
+	require.NoError(t, store.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true, Holder: holder, Claim: claim, HubNow: now,
+	}))
+
+	err := applyForwardedClaimAction(ctx, store, project.ID, issue.ShortID,
+		api.ClaimActionResponseBody{
+			Pending: true,
+			Holder:  api.ClaimPrincipalOut{HolderInstanceUID: "pending-leaf", Holder: "requesting-agent", ClientKind: "cli"},
+		}, true)
+	require.NoError(t, err)
+
+	status, err := store.ClaimStatusReadOnly(ctx, project.ID, issue.UID, now)
+	require.NoError(t, err)
+	require.True(t, status.Held, "a queued acquire is not an authoritative no-lease status")
+	require.NotNil(t, status.Claim)
+	assert.Equal(t, claimUID, status.Claim.ClaimUID)
+}
+
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 

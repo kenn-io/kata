@@ -138,6 +138,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	); err != nil {
 		return out, err
 	}
+	if err := rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, toProjectUID); err != nil {
+		return out, fmt.Errorf("rehome embedding artifacts: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issue_claims SET project_id = ? WHERE issue_id = ?`, in.ToProjectID, in.IssueID); err != nil {
 		return out, fmt.Errorf("rehome issue claims: %w", err)

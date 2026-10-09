@@ -3,8 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -235,10 +233,14 @@ func handleClaimAcquire(
 	resp, err := remote.AcquireClaim(ctx, cred.HubProjectID, ref, forwardedClaimRequest(body, principal))
 	if err != nil {
 		if isTransportClaimError(err) {
+			pendingPrincipal := principal
+			if binding.RelayConfig != nil && incomingPrincipal.HolderInstanceUID != cfg.DB.InstanceUID() {
+				pendingPrincipal = incomingPrincipal
+			}
 			pending, enqueueErr := cfg.DB.EnqueuePendingClaim(ctx, db.PendingClaimParams{
 				ProjectID: projectID,
 				IssueRef:  ref,
-				Principal: principal,
+				Principal: pendingPrincipal,
 				ClaimKind: claimKindOrDefault(body.ClaimKind),
 				TTL:       ttlDuration(body.TTLSeconds),
 				Purpose:   strings.TrimSpace(body.Purpose),
@@ -250,7 +252,7 @@ func handleClaimAcquire(
 			return api.ClaimActionResponseBody{
 				Pending:    true,
 				RequestUID: pending.RequestUID,
-				Holder:     claimPrincipalOut(principal),
+				Holder:     claimPrincipalOut(pendingPrincipal),
 			}, nil
 		}
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
@@ -468,33 +470,7 @@ func boundSpokeClaimPrincipal(
 	principal db.ClaimPrincipal,
 	localInstanceUID string,
 ) db.ClaimPrincipal {
-	if binding.Role != db.FederationRoleSpoke {
-		return principal
-	}
-	actor := strings.TrimSpace(binding.Actor)
-	if actor == "" {
-		return principal
-	}
-	if binding.RelayConfig != nil {
-		// Each authenticated hop binds the existing holder tuple into an opaque
-		// client identity before replacing the account with its upstream account.
-		// A caller-supplied client label cannot impersonate another leaf instance.
-		identity, _ := json.Marshal([3]string{principal.HolderInstanceUID, principal.Holder, principal.ClientKind})
-		digest := sha256.Sum256(append([]byte("kata:relay-claim-holder:v1\x00"), identity...))
-		principal.HolderInstanceUID = localInstanceUID
-		principal.ClientKind = "relay:v1:" + base64.RawURLEncoding.EncodeToString(digest[:])
-		principal.Holder = actor
-		return principal
-	}
-	// Existing clients keep their established actor/client-kind identity.
-	// Mounted callers carry an opaque subject-bound identity through the shared
-	// spoke credential so one subject cannot control another subject's lease.
-	if principal.AuthenticatedHost {
-		ownerDigest := sha256.Sum256([]byte("kata:spoke-host-claim-owner:v1\x00" + principal.Holder))
-		principal.ClientKind = "spoke-host:v1:" + base64.RawURLEncoding.EncodeToString(ownerDigest[:])
-	}
-	principal.Holder = actor
-	return principal
+	return db.BoundSpokeClaimPrincipal(binding, principal, localInstanceUID)
 }
 
 func remapRelayClaimActionResponse(
@@ -638,6 +614,9 @@ func applyForwardedClaimAction(
 	resp api.ClaimActionResponseBody,
 	held bool,
 ) error {
+	if resp.Pending {
+		return nil
+	}
 	lease := resp.Lease
 	if lease == nil {
 		lease = resp.Claim

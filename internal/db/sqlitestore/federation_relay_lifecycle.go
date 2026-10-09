@@ -119,7 +119,8 @@ ORDER BY o.id`, projectUID, config.BindingUID, config.ResetEpoch, d.instanceUID)
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pending_claim_requests WHERE project_id=?)`, projectID).Scan(&blocked); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pending_claim_requests
+WHERE project_id=? AND rejected_at IS NULL AND resolved_at IS NULL)`, projectID).Scan(&blocked); err != nil {
 		return err
 	}
 	if blocked {
