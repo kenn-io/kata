@@ -168,6 +168,14 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 					if _, err := d.recordRootAttributionTx(db.WithRelayForwardPath(ctx, nil), tx, grant.ID, source, signer); err != nil {
 						return err
 					}
+					claimEvents, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, projectID, source)
+					if err != nil {
+						return err
+					}
+					for _, event := range claimEvents {
+						result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
+						result.InsertedEvents = append(result.InsertedEvents, event)
+					}
 				}
 			case db.RelayStreamReceipt:
 				var receipt db.AttributionReceipt

@@ -3,7 +3,10 @@ package dbtest
 import (
 	"crypto/ed25519"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -127,4 +130,125 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, batch)
 	require.Error(t, err, "replay rechecks the current human credential")
+}
+
+// RunRelayIngressClaimLifecycle checks that root acceptance applies the same
+// claim release and violation audit as direct federation ingest.
+func RunRelayIngressClaimLifecycle(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	public, private, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		Actor: "root-member", AdminActor: "admin", PlaintextToken: "relay-claim-parent-test-token",
+	})
+	require.NoError(t, err)
+	peerUID, err := uid.New()
+	require.NoError(t, err)
+	leafUID, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peerUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-ingress-test-token",
+		ServeDownstream: true,
+	})
+	require.NoError(t, err)
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+	created := newRemoteEvent(t, project, &issueUID, "issue.created", "leaf-member", leafUID, 300,
+		jsontext.Value(`{"uid":"`+issueUID+`","short_id":"`+strings.ToLower(issueUID[len(issueUID)-4:])+`","title":"Relayed task","body":"","author":"leaf-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+	seal := func(event db.RemoteEvent, sequence int64) db.RelayEnvelope {
+		t.Helper()
+		body, err := db.EncodeRelaySourceEvent(event)
+		require.NoError(t, err)
+		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+			Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID,
+			ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+			SenderInstanceUID: peerUID, ReceiverInstanceUID: store.InstanceUID(),
+			Epoch: 1, Sequence: sequence, Stream: db.RelayStreamEvent,
+			Path: []string{leafUID, peerUID}, SourceUID: event.EventUID,
+			SourceHash: event.ContentHash, Body: body,
+		})
+		require.NoError(t, err)
+		return envelope
+	}
+	signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}
+	writeCtx := db.WithRootAttribution(ctx, signer, "root-member")
+	accept := func(event db.RemoteEvent, sequence, after int64) db.RelayAcceptance {
+		t.Helper()
+		accepted, err := store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{
+			Stream: db.RelayStreamEvent, After: after, Envelopes: []db.RelayEnvelope{seal(event, sequence)},
+		})
+		require.NoError(t, err)
+		return accepted
+	}
+	createdAcceptance := accept(created, 1, 0)
+	require.Len(t, createdAcceptance.InsertedEvents, 1)
+	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issueUID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli"},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	closed := newRemoteEvent(t, project, &issueUID, "issue.closed", "leaf-member", leafUID, 301,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","reason":"done","closed_at":"2026-05-23T12:01:00.000Z"}`))
+	closedAcceptance := accept(closed, 2, 1)
+	closedTypes := map[string]bool{}
+	closedUIDs := map[string]bool{}
+	var violationFound bool
+	for _, event := range closedAcceptance.InsertedEvents {
+		closedTypes[event.Type] = true
+		closedUIDs[event.UID] = true
+		if event.Type == "claim.violated" {
+			violationFound = true
+			var payload struct {
+				OffendingOriginInstanceUID string `json:"offending_origin_instance_uid"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
+			require.Equal(t, "leaf-member", event.Actor)
+			require.Equal(t, leafUID, payload.OffendingOriginInstanceUID)
+		}
+	}
+	require.True(t, closedTypes["claim.violated"], "non-holder close must create a claim violation audit")
+	require.True(t, violationFound)
+	require.True(t, closedTypes["claim.released"], "accepted close must release the live root claim")
+	for _, eventUID := range closedAcceptance.InsertedEventUIDs {
+		require.True(t, closedUIDs[eventUID], "every accepted or generated event must be returned for publication")
+	}
+	status, err := store.ClaimStatus(ctx, project.ID, issueUID, time.Now().UTC())
+	require.NoError(t, err)
+	require.False(t, status.Held)
+
+	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issueUID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli"},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	updated := newRemoteEvent(t, project, &issueUID, "issue.updated", "leaf-member", leafUID, 302,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","title":"Offline update"}`))
+	updatedAcceptance := accept(updated, 3, 2)
+	updatedTypes := map[string]bool{}
+	updatedUIDs := map[string]bool{}
+	for _, event := range updatedAcceptance.InsertedEvents {
+		updatedTypes[event.Type] = true
+		updatedUIDs[event.UID] = true
+	}
+	require.True(t, updatedTypes["claim.violated"], "uncovered offline work must create a claim violation audit")
+	for _, eventUID := range updatedAcceptance.InsertedEventUIDs {
+		require.True(t, updatedUIDs[eventUID], "the relay acceptance must return generated audits for publication")
+	}
+	status, err = store.ClaimStatus(ctx, project.ID, issueUID, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, status.Held, "an uncovered update must not release the live claim")
 }

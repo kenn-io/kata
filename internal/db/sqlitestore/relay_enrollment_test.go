@@ -52,6 +52,13 @@ func TestRelayIngressAtomicity(t *testing.T) {
 	dbtest.RunRelayIngressAtomicity(t, store)
 }
 
+func TestRelayIngressClaimLifecycle(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayIngressClaimLifecycle(t, store)
+}
+
 func TestRelayUpstreamLocalAuthority(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
 	require.NoError(t, err)

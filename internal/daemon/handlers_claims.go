@@ -256,6 +256,10 @@ func handleClaimAcquire(
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
 	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
+	resp, err = remapCachedClaimActionResponse(ctx, cfg.DB, projectID, ref, resp)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, true); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -308,6 +312,10 @@ func handleClaimRenew(
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
 	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
+	resp, err = remapCachedClaimActionResponse(ctx, cfg.DB, projectID, ref, resp)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, true); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -363,6 +371,10 @@ func handleClaimRelease(
 		return api.ClaimActionResponseBody{}, claimForwardError(err)
 	}
 	resp = remapRelayClaimActionResponse(resp, binding, cfg.DB.InstanceUID(), principal, incomingPrincipal)
+	resp, err = remapCachedClaimActionResponse(ctx, cfg.DB, projectID, ref, resp)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 	if err := applyForwardedClaimAction(ctx, cfg.DB, projectID, ref, resp, false); err != nil {
 		return api.ClaimActionResponseBody{}, claimAPIError(err)
 	}
@@ -537,7 +549,7 @@ func remapCachedClaimStatus(
 	if remoteLease == nil {
 		return remote, nil
 	}
-	cached, err := store.ClaimStatus(ctx, projectID, issueRef, time.Now().UTC())
+	cached, err := store.ClaimStatusReadOnly(ctx, projectID, issueRef, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return remote, nil
@@ -551,6 +563,32 @@ func remapCachedClaimStatus(
 	remote.Holder = claimPrincipalOut(cached.Holder)
 	remote.Lease = remapIssueClaimOut(remote.Lease, remoteHolder, cached.Holder)
 	remote.Claim = remapIssueClaimOut(remote.Claim, remoteHolder, cached.Holder)
+	return remote, nil
+}
+
+func remapCachedClaimActionResponse(
+	ctx context.Context,
+	store db.Storage,
+	projectID int64,
+	issueRef string,
+	remote api.ClaimActionResponseBody,
+) (api.ClaimActionResponseBody, error) {
+	if remote.Lease == nil && remote.Claim == nil {
+		return remote, nil
+	}
+	status := api.ClaimStatusBody{
+		Held:   true,
+		Holder: remote.Holder,
+		Lease:  remote.Lease,
+		Claim:  remote.Claim,
+	}
+	status, err := remapCachedClaimStatus(ctx, store, projectID, issueRef, status)
+	if err != nil {
+		return remote, err
+	}
+	remote.Holder = status.Holder
+	remote.Lease = status.Lease
+	remote.Claim = status.Claim
 	return remote, nil
 }
 
@@ -1218,6 +1256,10 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		}
 		return nil, markShowClaimStatusRefreshFailure(ctx, cfg.DB, issue, 0,
 			fmt.Sprintf("status refresh transport: %s", err.Error()), now)
+	}
+	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
+	if err != nil {
+		return nil, claimAPIError(err)
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
 		return nil, claimAPIError(err)

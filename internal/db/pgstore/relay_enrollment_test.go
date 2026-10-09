@@ -64,6 +64,15 @@ func TestRelayIngressAtomicity(t *testing.T) {
 	dbtest.RunRelayIngressAtomicity(t, store)
 }
 
+func TestRelayIngressClaimLifecycle(t *testing.T) {
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayIngressClaimLifecycle(t, store)
+}
+
 func TestRelayUpstreamLocalAuthority(t *testing.T) {
 	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 	t.Cleanup(cleanup)
