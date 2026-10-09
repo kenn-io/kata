@@ -20,6 +20,15 @@ func TestEmbeddingArtifactStorage(t *testing.T) {
 	dbtest.RunEmbeddingArtifactStorage(t, store)
 }
 
+func TestArtifactIssuePurgeAfterMove(t *testing.T) {
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunArtifactIssuePurgeAfterMove(t, store)
+}
+
 func TestArtifactStagingExpiryRetry(t *testing.T) {
 	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 	t.Cleanup(cleanup)

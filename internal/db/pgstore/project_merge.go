@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/shortid"
 )
 
@@ -22,6 +25,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 	}
 	var result db.ProjectMergeResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
+			return err
+		}
 		firstID, secondID := params.SourceProjectID, params.TargetProjectID
 		if firstID > secondID {
 			firstID, secondID = secondID, firstID
@@ -106,6 +112,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := rebindProjectEmbeddingArtifactsTx(ctx, tx, source.UID, target.UID); err != nil {
+			return mapSQLError(err, nil)
+		}
 		rows, err := tx.QueryContext(ctx,
 			`UPDATE events SET project_id = $1, project_name = $2 WHERE project_id = $3 RETURNING id`,
 			target.ID, target.Name, source.ID)
@@ -147,6 +156,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err != nil {
 			return fmt.Errorf("insert project merge event: %w", err)
 		}
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
 		result = db.ProjectMergeResult{
 			Source: source, Target: mergedTarget,
 			IssuesMoved: issuesMoved, AliasesMoved: aliasesMoved,
@@ -156,6 +168,72 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		return nil
 	})
 	return result, err
+}
+
+func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUID, targetUID string) error {
+	type retainedArtifact struct {
+		digest, issueUID, raw string
+		expiresAt             sql.NullString
+	}
+	after := ""
+	for {
+		var item retainedArtifact
+		err := tx.QueryRowContext(ctx, `SELECT digest,issue_uid,artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=$1 AND digest>$2 ORDER BY digest LIMIT 1`, sourceUID, after).Scan(&item.digest, &item.issueUID, &item.raw, &item.expiresAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		after = item.digest
+		var artifact embedding.EmbeddingArtifact
+		if err := json.Unmarshal([]byte(item.raw), &artifact, json.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
+		if artifact.ProjectUID != sourceUID || artifact.IssueUID != item.issueUID || artifact.Digest != item.digest {
+			return db.ErrFederationIngestValidation
+		}
+		rebound, err := embedding.RebindArtifactProject(artifact, targetUID)
+		if err != nil {
+			return err
+		}
+		reboundRaw, err := json.Marshal(rebound)
+		if err != nil {
+			return err
+		}
+		manifestRaw, err := json.Marshal(rebound.Manifest())
+		if err != nil {
+			return err
+		}
+		var existingRaw string
+		var existingExpiry sql.NullString
+		err = tx.QueryRowContext(ctx, `SELECT artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=$1 AND digest=$2`, targetUID, rebound.Digest).Scan(&existingRaw, &existingExpiry)
+		if err == nil {
+			var existing embedding.EmbeddingArtifact
+			if json.Unmarshal([]byte(existingRaw), &existing, json.RejectUnknownMembers(true)) != nil || !reflect.DeepEqual(existing, rebound) {
+				return db.ErrRemoteEventConflict
+			}
+			if !item.expiresAt.Valid && existingExpiry.Valid {
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET staging_expires_at=NULL WHERE project_uid=$1 AND digest=$2`, targetUID, rebound.Digest); err != nil {
+					return err
+				}
+			} else if item.expiresAt.Valid && existingExpiry.Valid && item.expiresAt.String > existingExpiry.String {
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET staging_expires_at=$1 WHERE project_uid=$2 AND digest=$3`, item.expiresAt.String, targetUID, rebound.Digest); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=$1 AND digest=$2`, sourceUID, item.digest); err != nil {
+				return err
+			}
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET project_uid=$1,digest=$2,input_hash=$3,recipe_fingerprint=$4,manifest=$5,artifact=$6 WHERE project_uid=$7 AND digest=$8`, targetUID, rebound.Digest, rebound.InputHash, rebound.RecipeFingerprint, string(manifestRaw), string(reboundRaw), sourceUID, item.digest); err != nil {
+			return err
+		}
+	}
 }
 
 func rejectProjectMergeBindingsTx(ctx context.Context, tx *sql.Tx, sourceID, targetID int64) error {

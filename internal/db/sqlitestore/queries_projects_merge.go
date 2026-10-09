@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 )
 
 // MergeProjects moves every project-scoped row from SourceProjectID into
@@ -33,6 +36,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		return db.ProjectMergeResult{}, fmt.Errorf("begin merge projects: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("lock project access revision: %w", err)
+	}
 
 	source, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, p.SourceProjectID))
 	if err != nil {
@@ -108,6 +114,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("move issues: %w", err)
 	}
+	if err := rebindProjectEmbeddingArtifactsTx(ctx, tx, source.UID, target.UID); err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("move embedding artifacts: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE issue_claims SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("move issue claims: %w", err)
 	}
@@ -176,6 +185,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("insert project merge event: %w", err)
 	}
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("advance project access revision: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("commit merge projects: %w", err)
 	}
@@ -190,6 +202,72 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		ShortIDExtensions: extensions,
 		Event:             event,
 	}, nil
+}
+
+func rebindProjectEmbeddingArtifactsTx(ctx context.Context, tx *sql.Tx, sourceUID, targetUID string) error {
+	type retainedArtifact struct {
+		digest, issueUID, raw string
+		expiresAt             sql.NullString
+	}
+	after := ""
+	for {
+		var item retainedArtifact
+		err := tx.QueryRowContext(ctx, `SELECT digest,issue_uid,artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=? AND digest>? ORDER BY digest LIMIT 1`, sourceUID, after).Scan(&item.digest, &item.issueUID, &item.raw, &item.expiresAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		after = item.digest
+		var artifact embedding.EmbeddingArtifact
+		if err := json.Unmarshal([]byte(item.raw), &artifact, json.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
+		if artifact.ProjectUID != sourceUID || artifact.IssueUID != item.issueUID || artifact.Digest != item.digest {
+			return db.ErrFederationIngestValidation
+		}
+		rebound, err := embedding.RebindArtifactProject(artifact, targetUID)
+		if err != nil {
+			return err
+		}
+		reboundRaw, err := json.Marshal(rebound)
+		if err != nil {
+			return err
+		}
+		manifestRaw, err := json.Marshal(rebound.Manifest())
+		if err != nil {
+			return err
+		}
+		var existingRaw string
+		var existingExpiry sql.NullString
+		err = tx.QueryRowContext(ctx, `SELECT artifact,staging_expires_at FROM federation_embedding_artifacts WHERE project_uid=? AND digest=?`, targetUID, rebound.Digest).Scan(&existingRaw, &existingExpiry)
+		if err == nil {
+			var existing embedding.EmbeddingArtifact
+			if json.Unmarshal([]byte(existingRaw), &existing, json.RejectUnknownMembers(true)) != nil || !reflect.DeepEqual(existing, rebound) {
+				return db.ErrRemoteEventConflict
+			}
+			if !item.expiresAt.Valid && existingExpiry.Valid {
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET staging_expires_at=NULL WHERE project_uid=? AND digest=?`, targetUID, rebound.Digest); err != nil {
+					return err
+				}
+			} else if item.expiresAt.Valid && existingExpiry.Valid && item.expiresAt.String > existingExpiry.String {
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET staging_expires_at=? WHERE project_uid=? AND digest=?`, item.expiresAt.String, targetUID, rebound.Digest); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=? AND digest=?`, sourceUID, item.digest); err != nil {
+				return err
+			}
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_embedding_artifacts SET project_uid=?,digest=?,input_hash=?,recipe_fingerprint=?,manifest=?,artifact=? WHERE project_uid=? AND digest=?`, targetUID, rebound.Digest, rebound.InputHash, rebound.RecipeFingerprint, string(manifestRaw), string(reboundRaw), sourceUID, item.digest); err != nil {
+			return err
+		}
+	}
 }
 
 func rejectFederatedProjectMerge(ctx context.Context, tx *sql.Tx, sourceID, targetID int64) error {

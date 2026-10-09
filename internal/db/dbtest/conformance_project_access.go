@@ -178,6 +178,48 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	assertProjectAccessUIDs(t, access, "outsider", []string{project.UID})
 	assertProjectAccessUIDs(t, access, "", nil)
+
+	// A merge can remove an admitted source while leaving its target outside the
+	// member's policy. The revision invalidates streams that filter project.merged.
+	mergePolicy, ok := store.(db.ProjectAccessStorage)
+	require.True(t, ok)
+	mergeSource, err := store.CreateProject(ctx, "merge-visible-source")
+	require.NoError(t, err)
+	mergeTarget, err := store.CreateProject(ctx, "merge-hidden-target")
+	require.NoError(t, err)
+	sourceTeam, _, err := mergePolicy.CreateTeam(ctx, "merge-source-team", "admin")
+	require.NoError(t, err)
+	targetTeam, _, err := mergePolicy.CreateTeam(ctx, "merge-target-team", "admin")
+	require.NoError(t, err)
+	_, err = mergePolicy.SetTeamMembership(ctx, sourceTeam.UID, "merge-member", true, "admin")
+	require.NoError(t, err)
+	_, err = mergePolicy.SetTeamMembership(ctx, targetTeam.UID, "merge-outsider", true, "admin")
+	require.NoError(t, err)
+	sourcePolicy, err := mergePolicy.ProjectAccessPolicy(ctx, mergeSource.UID)
+	require.NoError(t, err)
+	sourcePolicy.Visibility, sourcePolicy.TeamUIDs = "teams", []string{sourceTeam.UID}
+	_, _, err = mergePolicy.SetProjectAccessPolicy(ctx, sourcePolicy, "admin")
+	require.NoError(t, err)
+	targetPolicy, err := mergePolicy.ProjectAccessPolicy(ctx, mergeTarget.UID)
+	require.NoError(t, err)
+	targetPolicy.Visibility, targetPolicy.TeamUIDs = "teams", []string{targetTeam.UID}
+	_, _, err = mergePolicy.SetProjectAccessPolicy(ctx, targetPolicy, "admin")
+	require.NoError(t, err)
+	mergeVisibleUIDs, err := access.AccessibleProjectUIDs(ctx, "merge-member")
+	require.NoError(t, err)
+	require.Contains(t, mergeVisibleUIDs, mergeSource.UID)
+	require.NotContains(t, mergeVisibleUIDs, mergeTarget.UID)
+	beforeMergeRevision, err := mergePolicy.ProjectAccessRevision(ctx)
+	require.NoError(t, err)
+	_, err = store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: mergeSource.ID, TargetProjectID: mergeTarget.ID, Actor: "admin"})
+	require.NoError(t, err)
+	afterMergeRevision, err := mergePolicy.ProjectAccessRevision(ctx)
+	require.NoError(t, err)
+	require.Greater(t, afterMergeRevision, beforeMergeRevision, "merge advances the revision used by project access stream fences")
+	mergeVisibleUIDs, err = access.AccessibleProjectUIDs(ctx, "merge-member")
+	require.NoError(t, err)
+	require.NotContains(t, mergeVisibleUIDs, mergeSource.UID)
+	require.NotContains(t, mergeVisibleUIDs, mergeTarget.UID)
 }
 
 // RunProjectAccessTokenEnrollment exercises project access token enrollment on the supplied native store.

@@ -448,7 +448,7 @@ func purgeCascade(
 	}
 
 	// Portable vectors are issue data even when their input is stale.
-	if _, err := c.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=? AND issue_uid=?`, issue.ProjectUID, issue.UID); err != nil {
+	if _, err := c.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE issue_uid=?`, issue.UID); err != nil {
 		return 0, fmt.Errorf("delete embedding artifacts: %w", err)
 	}
 

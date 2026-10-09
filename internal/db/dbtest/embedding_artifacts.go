@@ -73,6 +73,73 @@ func RunEmbeddingArtifactStorage(t *testing.T, store db.Storage) {
 	retained, err = artifacts.StoredEmbeddingArtifact(ctx, project.UID, large.Digest)
 	require.NoError(t, err)
 	require.Equal(t, large, retained)
+
+	// Project merge rekeys retained bytes without regenerating stale vectors.
+	source, err := store.CreateProject(ctx, "artifact-merge-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "artifact-merge-target")
+	require.NoError(t, err)
+	mergeIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Before merge", Author: "member"})
+	require.NoError(t, err)
+	mergeIdentity := embedding.ArtifactIdentity{ProjectUID: source.UID, IssueUID: mergeIssue.UID, ProducerInstanceUID: store.InstanceUID(), Provider: "openai-compatible", Model: "example-model", Dimensions: 2, InputType: "none", Normalization: "none", Preprocessing: "kata.issue/v2", RecipeVersion: 2, SplitMaxRunes: 2000, SplitOverlap: 200, RecipeFingerprint: strings.Repeat("b", 64)}
+	stale, err := embedding.NewArtifact(mergeIdentity, embedding.EmbedText(mergeIssue.Title, mergeIssue.Body), [][]float32{{0.25, 0.75}})
+	require.NoError(t, err)
+	durable, err = artifacts.RetainEmbeddingArtifact(ctx, stale)
+	require.NoError(t, err)
+	require.True(t, durable)
+	changedTitle := "After merge"
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: mergeIssue.ID, Title: &changedTitle, Actor: "member"})
+	require.NoError(t, err)
+	rebound, err := embedding.RebindArtifactProject(stale, target.UID)
+	require.NoError(t, err)
+	require.NotEqual(t, stale.Digest, rebound.Digest, "project identity is part of the artifact digest")
+	_, err = store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID, Actor: "member"})
+	require.NoError(t, err)
+	retained, err = artifacts.StoredEmbeddingArtifact(ctx, target.UID, rebound.Digest)
+	require.NoError(t, err, "merge must preserve even stale original portable vectors")
+	require.Equal(t, rebound, retained)
+	require.Equal(t, stale.Chunks[0].VectorBytes, retained.Chunks[0].VectorBytes, "rekeying keeps the original float32 bytes")
+	manifests, err = artifacts.EmbeddingArtifactManifests(ctx, target.UID, 10)
+	require.NoError(t, err)
+	require.Equal(t, []embedding.ArtifactManifest{rebound.Manifest()}, manifests)
+}
+
+// RunArtifactIssuePurgeAfterMove verifies purge removes portable bytes retained
+// under an issue's former project UID after the issue has moved.
+func RunArtifactIssuePurgeAfterMove(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	artifacts := store.(embeddingArtifactStore)
+	// Purge follows an issue across its project move to remove old namespaces.
+	moveSource, err := store.CreateProject(ctx, "artifact-move-source")
+	require.NoError(t, err)
+	moveTarget, err := store.CreateProject(ctx, "artifact-move-target")
+	require.NoError(t, err)
+	movingIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: moveSource.ID, Title: "Portable vectors to purge", Author: "member"})
+	require.NoError(t, err)
+	moveIdentity := embedding.ArtifactIdentity{ProjectUID: moveSource.UID, IssueUID: movingIssue.UID, ProducerInstanceUID: store.InstanceUID(), Provider: "openai-compatible", Model: "example-model", Dimensions: 2, InputType: "none", Normalization: "none", Preprocessing: "kata.issue/v2", RecipeVersion: 2, SplitMaxRunes: 2000, SplitOverlap: 200, RecipeFingerprint: strings.Repeat("c", 64)}
+	movedArtifact, err := embedding.NewArtifact(moveIdentity, embedding.EmbedText(movingIssue.Title, movingIssue.Body), [][]float32{{0.5, 0.5}})
+	require.NoError(t, err)
+	durable, err := artifacts.RetainEmbeddingArtifact(ctx, movedArtifact)
+	require.NoError(t, err)
+	require.True(t, durable)
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: movingIssue.ID, FromProjectID: moveSource.ID, ToProjectID: moveTarget.ID, IfMatchRev: movingIssue.Revision, Actor: "member"})
+	require.NoError(t, err)
+	require.Equal(t, moveTarget.ID, moved.Issue.ProjectID)
+	_, err = artifacts.StoredEmbeddingArtifact(ctx, moveSource.UID, movedArtifact.Digest)
+	require.NoError(t, err, "move preserves the old artifact until issue purge")
+	targetIdentity := moveIdentity
+	targetIdentity.ProjectUID = moveTarget.UID
+	currentArtifact, err := embedding.NewArtifact(targetIdentity, embedding.EmbedText(moved.Issue.Title, moved.Issue.Body), [][]float32{{0.25, 0.75}})
+	require.NoError(t, err)
+	durable, err = artifacts.RetainEmbeddingArtifact(ctx, currentArtifact)
+	require.NoError(t, err)
+	require.True(t, durable)
+	_, err = store.PurgeIssue(ctx, movingIssue.ID, "member", nil)
+	require.NoError(t, err)
+	_, err = artifacts.StoredEmbeddingArtifact(ctx, moveSource.UID, movedArtifact.Digest)
+	require.ErrorIs(t, err, db.ErrNotFound, "purge removes artifacts by issue UID across project namespaces")
+	_, err = artifacts.StoredEmbeddingArtifact(ctx, moveTarget.UID, currentArtifact.Digest)
+	require.ErrorIs(t, err, db.ErrNotFound, "purge removes current artifacts under the issue's new project UID")
 }
 
 // RunArtifactStagingExpiryRetry exercises artifact staging expiry retry on the supplied native store.

@@ -130,7 +130,7 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			return mapSQLError(err, nil)
 		}
 		// Portable vectors are issue data even when their input is stale.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE project_uid=$1 AND issue_uid=$2`, issue.ProjectUID, issue.UID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE issue_uid=$1`, issue.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = $1`, issue.ID); err != nil {

@@ -18,6 +18,13 @@ func TestEmbeddingArtifactStorage(t *testing.T) {
 	dbtest.RunEmbeddingArtifactStorage(t, store)
 }
 
+func TestArtifactIssuePurgeAfterMove(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "artifact-move-purge.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunArtifactIssuePurgeAfterMove(t, store)
+}
+
 func TestArtifactStagingExpiryRetry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "staging.db")
 	store, err := sqlitestore.Open(t.Context(), path)
