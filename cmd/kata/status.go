@@ -44,7 +44,7 @@ type instanceStatusForCLI struct {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <issue-ref>",
-		Short: "show compact issue identity and hold status",
+		Short: "show owner, your actor, and holds for one issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueStatus(cmd, args[0])

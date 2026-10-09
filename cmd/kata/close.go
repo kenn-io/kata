@@ -35,7 +35,7 @@ func newCloseCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "close <issue-ref>",
-		Short: "close an issue (asserts the work is complete)",
+		Short: "close finished work with a reason, message, and evidence",
 		Long: `Closing an issue asserts that the work it describes is complete.
 This is a stronger claim than a comment. Provide evidence and a
 substantive message.
@@ -50,8 +50,10 @@ claim and that the message and evidence should be specific to the issue.
 
 If you have not completed and tested this work, do not close it.
 Instead, label and comment:
-    kata edit <ref> --label needs-review
-    kata comment <ref> --body "what was attempted, what remains"`,
+    kata label add <ref> needs-review --comment "<what remains>"
+    kata comment <ref> --body "what was attempted, what remains"
+
+Message floors: done and audit-no-change 40 chars, duplicate and superseded 20, wontfix 60.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {

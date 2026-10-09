@@ -153,8 +153,9 @@ func TestVersion_RootFlagHonorsOutputMode(t *testing.T) {
 func TestRoot_NoArgsPrintsHelp(t *testing.T) {
 	for _, args := range [][]string{nil, {"--json"}} {
 		out := string(executeRoot(t, newRootCmd(), args...))
-		assert.Contains(t, out, "lightweight issue tracker")
-		assert.Contains(t, out, "Available Commands:")
+		assert.Contains(t, out, "issue tracker for coding agents")
+		assert.Contains(t, out, "Find and read work:")
+		assert.Contains(t, out, "Administer (rarely needed by agents):")
 	}
 }
 

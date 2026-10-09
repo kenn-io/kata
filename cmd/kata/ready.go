@@ -18,7 +18,7 @@ func newReadyCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "ready",
-		Short: "list open issues with no open blocks predecessor",
+		Short: "list open issues that are ready to work on",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options := readyOptions{

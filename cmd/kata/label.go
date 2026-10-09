@@ -69,9 +69,10 @@ func labelAddCmd() *cobra.Command {
 
 func labelRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "rm <issue-ref> <label>",
-		Short: "detach a label from an issue",
-		Args:  cobra.ExactArgs(2),
+		Use:     "rm <issue-ref> <label>",
+		Aliases: []string{"remove"},
+		Short:   "detach a label from an issue",
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			label := args[1]
 			// Empty label here used to URL-encode to "" and hit

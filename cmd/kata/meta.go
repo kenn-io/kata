@@ -21,7 +21,7 @@ import (
 func newMetaCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "meta",
-		Short: "read and write issue metadata",
+		Short: "read and write issue metadata (work.attention, someday, ...)",
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd
@@ -34,7 +34,7 @@ func newMetaSetCmd() *cobra.Command {
 	var ifAbsent bool
 	cmd := &cobra.Command{
 		Use:   "set <ref> <key> <value>",
-		Short: "set issue metadata",
+		Short: "set one metadata key",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := parseMetaSetValue(args[2], jsonValue)

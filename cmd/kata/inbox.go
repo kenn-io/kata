@@ -46,7 +46,7 @@ func newInboxCmd() *cobra.Command {
 	var allProjects bool
 	cmd := &cobra.Command{
 		Use:   "inbox",
-		Short: "list requests for a teammate's attention",
+		Short: "list attention requests for an address (actor or actor/teammate)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if allProjects && (cmd.Root().PersistentFlags().Changed("project") || cmd.Root().PersistentFlags().Changed("workspace")) {

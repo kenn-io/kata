@@ -27,7 +27,7 @@ func newListCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "list issues",
+		Short: "list issues with filters (default: open, this project)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if sortOrder != "" && sortOrder != "oldest" {
 				return &cliError{Message: "--sort must be oldest", Kind: kindValidation, ExitCode: ExitValidation}

@@ -23,7 +23,7 @@ func newNotifyCmd() *cobra.Command {
 	var clearRequest bool
 	cmd := &cobra.Command{
 		Use:   "notify <issue-ref>",
-		Short: "request a teammate's attention on an issue",
+		Short: "ask an actor or teammate to look at an issue (or --clear)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, recipientErr := normalizeNotificationRecipient(recipient)

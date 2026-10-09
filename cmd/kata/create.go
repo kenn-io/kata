@@ -36,7 +36,7 @@ func newCreateCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "create <title>",
-		Short: "create a new issue",
+		Short: "create an issue (search first; use --idempotency-key)",
 		Args:  cobra.ExactArgs(1),
 	}
 	var idempotencyKey string

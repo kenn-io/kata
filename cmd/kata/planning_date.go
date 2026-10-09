@@ -8,18 +8,22 @@ import (
 )
 
 func newDeadlineCmd() *cobra.Command {
-	return newPlanningDateCmd("deadline", "deadline_on", "deadline")
+	return newPlanningDateCmd("deadline", "deadline_on")
 }
 
 func newScheduleCmd() *cobra.Command {
-	return newPlanningDateCmd("schedule", "scheduled_on", "schedule")
+	return newPlanningDateCmd("schedule", "scheduled_on")
 }
 
-func newPlanningDateCmd(name, metadataKey, noun string) *cobra.Command {
+func newPlanningDateCmd(name, metadataKey string) *cobra.Command {
 	var ifMatch string
+	short := "set or clear a due date (does not hide from ready)"
+	if name == "schedule" {
+		short = "park an issue until a date (hidden from ready until then)"
+	}
 	cmd := &cobra.Command{
 		Use:   name + " <issue-ref> <date-or-time|->",
-		Short: "set or clear an issue " + noun,
+		Short: short,
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {

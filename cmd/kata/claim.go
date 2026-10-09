@@ -19,7 +19,7 @@ func newClaimCmd() *cobra.Command {
 	var ttl time.Duration
 	cmd := &cobra.Command{
 		Use:   "claim <issue-ref>",
-		Short: "claim ownership of an issue",
+		Short: "take ownership of an issue (refuses if someone else owns it)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ttlSeconds, err := assignmentTTLSeconds(cmd, ttl)

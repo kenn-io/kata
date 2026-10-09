@@ -1,25 +1,32 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-08
+last_edited: 2026-10-09
 ---
 
 # CLI reference
 
 This page summarizes the command surface. Run `kata <command> --help` for the
-current flag list in your installed binary.
+current flag list in your installed binary. Root help includes the agent workflow,
+ref syntax, output modes, environment variables, and exit codes.
+
+## Command groups
+
+Root help groups commands into find/read, issue changes, agent coordination,
+setup/diagnosis, and administration. Subcommand help lists global flag names
+compactly; `kata --help` has their full descriptions.
 
 ## Global flags
 
 | Flag | Meaning |
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
-| `--project <name>` | Select a project explicitly for project-scoped commands. |
-| `--daemon <name>` | Target a named daemon catalog entry for this command. |
+| `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
+| `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. |
 | `--teammate <handle>` | Attribute supported comments and new issues to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
-| `--agent` | Emit concise agent-readable text. |
-| `--json` | Emit machine-readable JSON. |
+| `--agent` | Emit one `OK`/`ERR` line plus `key=value` rows. Use in agent sessions. |
+| `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |
 
@@ -32,6 +39,22 @@ pass `--all` to select projects across the chosen daemon. These commands
 remain project-scoped by default. `--all` cannot be combined with explicit
 `--project` or `--workspace`. Update scripts and MCP launch configurations
 that use `--all-projects` to use `--all`; the old spelling is no longer accepted.
+
+## Exit codes
+
+Errors go to stderr in the selected output mode.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success, including an empty `next` result. |
+| 1 | Internal error. |
+| 2 | Usage error. |
+| 3 | Validation error. |
+| 4 | Not found. |
+| 5 | Conflict. |
+| 6 | Confirmation required. |
+| 7 | Daemon unavailable. |
+| 8 | Wait timeout. |
 
 ## Workspace initialization
 
