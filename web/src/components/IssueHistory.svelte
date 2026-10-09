@@ -20,6 +20,41 @@
     if (Number.isNaN(parsed.getTime())) return undefined
     return { short: formatTimestamp(value), full: fullTimestamp.format(parsed) }
   }
+
+  function closingSession(event: KataTaskEvent): { label: string; url?: string } | undefined {
+    if (event.type !== 'issue.closed') return undefined
+    const value = event.payload?.transcript
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const ref = value as Record<string, unknown>
+    if (
+      (ref.agent !== 'codex' && ref.agent !== 'claude') ||
+      typeof ref.session_id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
+    ) {
+      return undefined
+    }
+
+    const session: { label: string; url?: string } = {
+      label: `Session: ${ref.agent} ${ref.session_id}`,
+    }
+    if (typeof ref.url === 'string') {
+      try {
+        const url = new URL(ref.url)
+        if (
+          (url.protocol === 'http:' || url.protocol === 'https:') &&
+          !url.username &&
+          !url.password &&
+          !ref.url.includes('?') &&
+          !ref.url.includes('#')
+        ) {
+          session.url = ref.url
+        }
+      } catch {
+        // A valid identifier remains useful without a usable locator.
+      }
+    }
+    return session
+  }
 </script>
 
 <section class="events" aria-labelledby="kata-events-title">
@@ -32,6 +67,7 @@
         {@const descriptor = describeKataEvent(event)}
         {@const EventIcon = descriptor.icon}
         {@const time = eventTime(event.created_at)}
+        {@const session = closingSession(event)}
         <li class="event-row" data-tone={descriptor.tone}>
           <span class="event-icon" aria-hidden="true">
             <EventIcon size={14} strokeWidth={1.8} />
@@ -41,6 +77,20 @@
             <time class="event-time" datetime={event.created_at} title={time.full}
               >{time.short}</time
             >
+          {/if}
+          {#if session}
+            <span class="event-session">
+              {#if session.url}
+                <a
+                  href={session.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open session in AgentsView">{session.label}</a
+                >
+              {:else}
+                {session.label}
+              {/if}
+            </span>
           {/if}
         </li>
       {/each}
@@ -80,6 +130,12 @@
 
   .event-label {
     overflow-wrap: anywhere;
+  }
+
+  .event-session {
+    grid-column: 2 / -1;
+    overflow-wrap: anywhere;
+    font-size: var(--font-size-xs);
   }
 
   .event-time {

@@ -41,6 +41,12 @@ func TestScopedEventPayloadPreservesTypedEmitterFields(t *testing.T) {
 		want      map[string]any
 	}{
 		{
+			name:      "close transcript",
+			eventType: "issue.closed",
+			payload:   `{"transcript":{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001"},"idempotency_key":"private-retry-key"}`,
+			want:      map[string]any{"evidence": nil, "transcript": map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}},
+		},
+		{
 			name:      "metadata diff and revision",
 			eventType: "issue.metadata_updated",
 			payload:   `{"diff":{"work.attention":"ok"},"revision_new":4,"updated_at":"2026-09-15T01:02:03Z"}`,

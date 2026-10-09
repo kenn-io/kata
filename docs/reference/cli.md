@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-08
+last_edited: 2026-10-09
 ---
 
 # CLI reference
@@ -842,6 +842,10 @@ post the comment twice. Keep the comment text unchanged when retrying.
 close transaction and returns a revision conflict when it has changed. An
 exact retry with a matching idempotency key returns the committed receipt even
 after the original close advanced the issue state.
+
+An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
+attaches the current agent session and optional AgentsView link alongside the
+close evidence. It never supplies completion evidence on its own.
 
 Evidence is validated against the close reason:
 

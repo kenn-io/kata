@@ -440,6 +440,8 @@ components:
             - tui
             - ""
           type: string
+        transcript:
+          $ref: "#/components/schemas/Transcript"
       type: object
     Comment:
       properties:
@@ -5299,6 +5301,22 @@ components:
         - project_uid
         - root_issue_uid
       type: object
+    Transcript:
+      additionalProperties: false
+      properties:
+        agent:
+          enum:
+            - claude
+            - codex
+          type: string
+        session_id:
+          type: string
+        url:
+          type: string
+      required:
+        - agent
+        - session_id
+      type: object
     UICapabilities:
       properties:
         access_admin:
@@ -5708,7 +5726,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.25.0
+  version: 0.26.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

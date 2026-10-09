@@ -585,6 +585,7 @@ type CloseActionRequestBody struct {
 	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
 	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
 	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
+	Transcript    *Transcript                          `json:"transcript,omitempty"`
 }
 
 func (c CloseActionRequestBody) Validate() error {
@@ -614,6 +615,13 @@ func (c CloseActionRequestBody) Validate() error {
 		if v, ok := any(c.Source).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Source", err)
+			}
+		}
+	}
+	if c.Transcript != nil {
+		if v, ok := any(c.Transcript).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Transcript", err)
 			}
 		}
 	}
@@ -5451,6 +5459,28 @@ func (t TokenScopeOut) Validate() error {
 	}
 	if err := typesValidator.Var(t.RootIssueUID, "required"); err != nil {
 		errors = errors.Append("RootIssueUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type Transcript struct {
+	Agent     TranscriptAgent `json:"agent" validate:"required"`
+	SessionID string          `json:"session_id" validate:"required"`
+	URL       *string         `json:"url,omitempty"`
+}
+
+func (t Transcript) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(t.Agent).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Agent", err)
+		}
+	}
+	if err := typesValidator.Var(t.SessionID, "required"); err != nil {
+		errors = errors.Append("SessionID", err)
 	}
 	if len(errors) == 0 {
 		return nil
