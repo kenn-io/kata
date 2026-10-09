@@ -2380,7 +2380,9 @@ describe('App', () => {
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
     expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
-    expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
+    )
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
