@@ -267,6 +267,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 		Error struct {
 			Kind     errKind        `json:"kind"`
 			Code     string         `json:"code,omitempty"`
+			Hint     string         `json:"hint,omitempty"`
 			Message  string         `json:"message"`
 			ExitCode int            `json:"exit_code"`
 			Data     jsontext.Value `json:"data,omitempty"`
@@ -274,6 +275,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 	}{}
 	env.Error.Kind = cli.Kind
 	env.Error.Code = cli.Code
+	env.Error.Hint = cli.Hint
 	env.Error.Message = cli.Message
 	env.Error.ExitCode = cli.ExitCode
 	env.Error.Data = cli.Data
@@ -288,6 +290,9 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
 	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	if cli.Hint != "" {
+		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
+	}
 }
 
 func cliErrorForErr(err error, runEReached bool) *cliError {
@@ -333,36 +338,36 @@ func exitCodeForErr(err error, runEReached bool) int {
 	return exitCodeFor(err, runEReached)
 }
 
-// translateFlagError rewrites pflag's "unknown shorthand flag: 'N' in
-// -N..." message into a useful cliError when N is a digit, so users
-// who typed `kata show -1` get a clear pointer at the `--` separator
-// workaround (hammer-test finding #9) instead of a cryptic flag-parse
-// trace. All other flag errors pass through unchanged.
-//
-// The detection is intentionally narrow: we look for a leading digit
-// after the dash because that's the exact pflag message shape for the
-// negative-integer-as-positional case. Other "-x" flag typos still
-// produce pflag's regular message.
-func translateFlagError(_ *cobra.Command, err error) error {
+// translateFlagError adds command-specific help to unknown flags and keeps
+// the separator advice for negative numbers parsed as shorthand flags.
+func translateFlagError(cmd *cobra.Command, err error) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
 	const prefix = "unknown shorthand flag: '"
 	_, after, ok := strings.Cut(msg, prefix)
-	if !ok {
-		return err
+	if ok && after != "" && isDigit(after[0]) {
+		return &cliError{
+			Message: "negative numbers in positional args need the `--` " +
+				"separator (e.g. `kata show -- -1`)",
+			Kind:     kindUsage,
+			ExitCode: ExitUsage,
+		}
 	}
-	rest := after
-	if rest == "" || !isDigit(rest[0]) {
-		return err
+	if strings.HasPrefix(msg, "unknown flag:") || strings.HasPrefix(msg, prefix) {
+		path := "kata"
+		if cmd != nil {
+			path = cmd.CommandPath()
+		}
+		return &cliError{
+			Message:  msg,
+			Hint:     fmt.Sprintf("run %q for flags", path+" --help"),
+			Kind:     kindUsage,
+			ExitCode: ExitUsage,
+		}
 	}
-	return &cliError{
-		Message: "negative numbers in positional args need the `--` " +
-			"separator (e.g. `kata show -- -1`)",
-		Kind:     kindUsage,
-		ExitCode: ExitUsage,
-	}
+	return err
 }
 
 func isDigit(b byte) bool { return b >= '0' && b <= '9' }

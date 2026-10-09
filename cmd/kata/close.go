@@ -85,21 +85,23 @@ Instead, label and comment:
 				sugarSet = append(sugarSet, "superseded")
 			}
 			if len(sugarSet) > 1 {
-				return fmt.Errorf("flag conflict: multiple reason sugar flags set: %s",
-					strings.Join(sugarSet, ", "))
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage,
+					Message: fmt.Sprintf("flag conflict: multiple reason sugar flags set: %s", strings.Join(sugarSet, ", "))}
 			}
 			sugarReason := ""
 			if len(sugarSet) == 1 {
 				sugarReason = sugarSet[0]
 			}
 			if sugarReason != "" && reason != "" {
-				return fmt.Errorf("flag conflict: --reason=%s and corresponding sugar flag both set", reason)
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage,
+					Message: fmt.Sprintf("flag conflict: --reason=%s and corresponding sugar flag both set", reason)}
 			}
 			if sugarReason != "" {
 				reason = sugarReason
 			}
 			if reason == "" {
-				return fmt.Errorf("--reason is required (one of: done, wontfix, duplicate, superseded, audit-no-change)")
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage,
+					Message: "close needs a reason: --done (with --commit, --pr, --test, or --reviewed), --wontfix, --duplicate-of <ref>, --superseded-by <ref>, or --audit-no-change"}
 			}
 
 			// Resolve sugar -> evidence (appended to user-supplied --evidence values).
@@ -127,7 +129,8 @@ Instead, label and comment:
 				return err
 			}
 			if dup := findDuplicateEvidence(parsed); dup != "" {
-				return fmt.Errorf("flag conflict: duplicate evidence item %s (provided via both canonical and sugar)", dup)
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage,
+					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided via both canonical and sugar)", dup)}
 			}
 
 			extra := map[string]any{
@@ -198,7 +201,7 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 	for _, s := range raw {
 		before, after, ok := strings.Cut(s, ":")
 		if !ok {
-			return nil, fmt.Errorf("evidence %q: expected <type>:<value>", s)
+			return nil, evidenceFlagUsageError("evidence %q: expected <type>:<value>", s)
 		}
 		kind, value := api.EvidenceType(before), after
 		switch kind {
@@ -210,7 +213,7 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 			out = append(out, api.Evidence{Type: kind, Command: value})
 		case api.EvidenceReviewedPaths:
 			if _, dup := seenReviewedPath[value]; dup {
-				return nil, fmt.Errorf("evidence reviewed-paths:%s: duplicate path (provided more than once via canonical and/or sugar)", value)
+				return nil, evidenceFlagUsageError("evidence reviewed-paths:%s: duplicate path (provided more than once via canonical and/or sugar)", value)
 			}
 			seenReviewedPath[value] = struct{}{}
 			reviewedPaths = append(reviewedPaths, value)
@@ -220,22 +223,30 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 			out = append(out, api.Evidence{Type: kind, Rationale: value})
 		case api.EvidenceDuplicateOf:
 			if value == "" {
-				return nil, fmt.Errorf("evidence duplicate-of: expected issue ref, got empty value")
+				return nil, evidenceFlagUsageError("evidence duplicate-of: expected issue ref, got empty value")
 			}
 			out = append(out, api.Evidence{Type: kind, IssueRef: value})
 		case api.EvidenceSupersededBy:
 			if value == "" {
-				return nil, fmt.Errorf("evidence superseded-by: expected issue ref, got empty value")
+				return nil, evidenceFlagUsageError("evidence superseded-by: expected issue ref, got empty value")
 			}
 			out = append(out, api.Evidence{Type: kind, IssueRef: value})
 		default:
-			return nil, fmt.Errorf("evidence %q: unknown type %q", s, kind)
+			return nil, evidenceFlagUsageError("evidence %q: unknown type %q", s, kind)
 		}
 	}
 	if len(reviewedPaths) > 0 {
 		out = append(out, api.Evidence{Type: api.EvidenceReviewedPaths, Paths: reviewedPaths})
 	}
 	return out, nil
+}
+
+func evidenceFlagUsageError(format string, args ...any) *cliError {
+	return &cliError{
+		Message:  fmt.Sprintf(format, args...),
+		Kind:     kindUsage,
+		ExitCode: ExitUsage,
+	}
 }
 
 // runAction is shared by close and reopen. It resolves the issue reference,

@@ -425,10 +425,13 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 					assert.Empty(t, stdout)
 					if mode == "agent" {
 						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
+						lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+						require.Len(t, lines, 2)
+						require.NotEmpty(t, cli.Hint)
+						assert.Equal(t, "Hint: "+cli.Hint, lines[1])
 						for _, ref := range refs {
-							assert.Contains(t, stderr, ref)
+							assert.Contains(t, lines[0], ref)
 						}
-						assert.Equal(t, 1, strings.Count(stderr, "\n"))
 						return
 					}
 					var envelope struct {

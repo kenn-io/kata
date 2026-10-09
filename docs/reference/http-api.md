@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-07
+last_edited: 2026-10-09
 ---
 
 # HTTP API schema
@@ -28,6 +28,20 @@ kata openapi > openapi.yaml
 definitions, so it needs neither a running daemon nor a database. The runtime
 `/openapi.json` route stays disabled; the committed artifact and this command
 are the supported way to obtain the schema.
+
+## Errors
+
+Daemon API errors use an `error` object with a stable `code` and a readable
+`message`. Optional `hint` text gives the caller a next step; optional `data`
+contains structured details. Use the code to branch in scripts, rather than
+matching the message or hint.
+
+```json
+{"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the repository root, or pass --project <name>"}}
+```
+
+The CLI preserves the hint in human, agent, and JSON errors. See
+[agent output](agent-output.md#errors) for its stderr format.
 
 ## What the schema is
 

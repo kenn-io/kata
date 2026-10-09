@@ -610,7 +610,7 @@ func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput
 
 	return nil, api.NewError(404, "project_not_initialized",
 		"no .kata.toml ancestor and no git ancestor",
-		`run "kata init" inside a workspace`, nil)
+		`run "kata init --project <name>" in the repository root, or pass --project <name>`, nil)
 }
 
 // resolveByAliasInput handles the alias-aware path-free resolve flow.
