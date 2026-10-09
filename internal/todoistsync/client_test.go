@@ -35,6 +35,7 @@ type apiFixture struct {
 	sectionArchived bool
 	lost            bool
 	wrong           bool
+	reopenOnHistory bool
 	nullFields      []string
 	// empty answers these paths with HTTP 200 and no body.
 	empty           map[string]bool
@@ -123,6 +124,9 @@ func (f *apiFixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		// The spec omits next_cursor on the last page.
 		reply(map[string]any{"items": items})
+		if f.reopenOnHistory && len(items) > 0 {
+			f.row.Checked, f.row.CompletedAt = false, nil
+		}
 	case "/api/v1/tasks/" + testTask().ID:
 		// Todoist serves an active task here even after it moves to another project.
 		if f.row.Checked {
@@ -323,4 +327,17 @@ func TestClientAuthenticationFailureIsTerminal(t *testing.T) {
 		require.Equal(t, 1, requests)
 		server.Close()
 	}
+}
+
+// Contract: Todoist's task view carries is_deleted; deleted tasks in
+// completion history never import.
+func TestClientSkipsDeletedCompletions(t *testing.T) {
+	f := newAPIFixture(t)
+	f.row.Checked, f.row.CompletedAt, f.row.Deleted = true, new(f.row.UpdatedAt), true
+	c := f.cfg()
+	s, err := f.client().ForRun(t.Context(), c)
+	require.NoError(t, err)
+	rows, err := s.Tasks(t.Context(), c, time.Time{}, f.now)
+	require.NoError(t, err)
+	require.Empty(t, rows)
 }

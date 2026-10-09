@@ -224,3 +224,64 @@ func TestRunnerArchivedProjectSendsNoStatusWrite(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, f.posts)
 }
+
+// Contract: Todoist may report updated_at as null. A reopen in Todoist and a
+// title-prefix change still reach an imported issue that has no local edits.
+func TestRunnerReopensTaskWithUnknownUpdatedAt(t *testing.T) {
+	ctx := context.Background()
+	store, binding, f := newRunnerFixture(t, "one-way")
+	_, err := f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	f.completeInTodoist()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	mapping, err := store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", "task:"+f.row.ID)
+	require.NoError(t, err)
+	issue, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", issue.Status)
+
+	f.mu.Lock()
+	f.now = f.now.Add(time.Minute)
+	f.row.Checked, f.row.CompletedAt, f.row.UpdatedAt = false, nil, f.now
+	f.nullFields = []string{"updated_at"}
+	f.mu.Unlock()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	issue, err = store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "open", issue.Status)
+
+	c, err := DecodeConfig(binding.Config)
+	require.NoError(t, err)
+	c.TitlePrefix = new(false)
+	raw, err := EncodeConfig(c)
+	require.NoError(t, err)
+	binding, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey,
+		RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw,
+		IntervalSeconds: binding.IntervalSeconds,
+	})
+	require.NoError(t, err)
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	issue, err = store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "Example task", issue.Title)
+	labels, err := store.LabelsForIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Contains(t, labels, "todoist")
+
+	// A newer local edit stays authoritative over an unknown-time observation.
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: new("Local title"), Actor: "editor"})
+	require.NoError(t, err)
+	f.completeInTodoist()
+	f.mu.Lock()
+	f.nullFields = []string{"updated_at"}
+	f.mu.Unlock()
+	_, err = f.runner(store).RunOnce(ctx, binding.ID)
+	require.NoError(t, err)
+	issue, err = store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "Local title", issue.Title)
+}

@@ -22,6 +22,9 @@ func taskFrom(v todoistapi.ItemSyncView, floor time.Time) Task {
 		Labels: v.Labels, Priority: v.Priority, Checked: v.Checked, Deleted: v.IsDeleted,
 	}
 	t.Recurring, _ = v.Due["is_recurring"].(bool)
+	if _, err := time.Parse(time.RFC3339Nano, v.UpdatedAt); err != nil {
+		t.UpdatedAtUnknown = true
+	}
 	var known []time.Time
 	for _, raw := range []string{v.AddedAt, v.UpdatedAt, v.CompletedAt} {
 		if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
@@ -56,7 +59,9 @@ func (s *clientSession) activeTasks(ctx context.Context, c Config, parentID stri
 			return nil, emptyResponse("list Todoist tasks")
 		}
 		for _, v := range resp.JSON200.Results {
-			rows = append(rows, taskFrom(v, floor))
+			if !v.IsDeleted {
+				rows = append(rows, taskFrom(v, floor))
+			}
 		}
 		if resp.JSON200.NextCursor == "" {
 			return rows, nil
@@ -88,6 +93,9 @@ func (s *clientSession) completed(ctx context.Context, c Config, since, until ti
 				return nil, emptyResponse("list completed Todoist tasks")
 			}
 			for _, v := range resp.JSON200.Items {
+				if v.IsDeleted {
+					continue
+				}
 				task := taskFrom(v, floor)
 				task.Checked = true
 				rows = append(rows, task)

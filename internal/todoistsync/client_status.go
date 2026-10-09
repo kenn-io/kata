@@ -50,9 +50,10 @@ func (s *clientSession) activeTask(ctx context.Context, c Config, id string) (Ta
 	return t, true, nil
 }
 
-// completedTask finds a task that is no longer active in completion history,
-// starting just before its last open observation. It never infers completion
-// from disappearance.
+// completedTask finds a task that is no longer active in completion history.
+// A task last seen open is searched from just before that observation; other
+// lookups start at the history floor. It never infers completion from
+// disappearance, and a task that reopens during the history read stays open.
 func (s *clientSession) completedTask(ctx context.Context, c Config, t StatusTarget) (Task, error) {
 	var since time.Time
 	// Only an open observation bounds the completion. A closed task may have
@@ -63,6 +64,9 @@ func (s *clientSession) completedTask(ctx context.Context, c Config, t StatusTar
 	history, err := s.completed(ctx, c, since, time.Now())
 	if err != nil {
 		return Task{}, err
+	}
+	if row, found, err := s.activeTask(ctx, c, t.ID); err != nil || found {
+		return row, err
 	}
 	for _, row := range mergeTasks(nil, history) {
 		if row.ID == t.ID {

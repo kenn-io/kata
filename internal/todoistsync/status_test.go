@@ -151,3 +151,14 @@ func TestStatusOutOfScopeTaskIsBlockedNotClosed(t *testing.T) {
 		})
 	}
 }
+
+// Contract: a task that reopens while Kata reads completion history is open.
+func TestStatusReopenDuringHistoryReadWins(t *testing.T) {
+	f := newAPIFixture(t)
+	f.row.Checked, f.row.CompletedAt = true, new(f.row.UpdatedAt)
+	f.reopenOnHistory = true
+	s, c := statusSession(t, f)
+	got, err := s.ReadStatus(t.Context(), c, StatusTarget{ID: f.row.ID})
+	require.NoError(t, err)
+	require.Equal(t, "open", got.Status)
+}

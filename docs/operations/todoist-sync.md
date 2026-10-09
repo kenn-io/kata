@@ -118,17 +118,18 @@ stays inactive. A task last seen open is searched in history from that
 observation onward; other lookups start at the configured floor.
 
 Todoist reports unknown (`null`) creation or update times. Kata uses the task's
-other known timestamps instead, or the history floor when none are known.
-Two-way status scans never move a task's status version backwards, so a reopen
-in Todoist still reaches Kata. One-way imports cannot order such a task against
-Kata's stored version. For those, a reopen in Todoist and a `--title-prefix`
-change reach the task only after it changes again in Todoist.
+other known timestamps instead, or the history floor when none are known. Two-way
+status scans and imports never move such a task behind the version Kata
+already stored. While no one has edited the issue in Kata, its status and title still
+follow Todoist; other fields wait until Todoist reports an update time.
 
 An active task wins over historical completions of the same ID, including old
 recurring occurrences. A missing task is never treated as completion or
 deletion: Kata accepts a completion only when the exact task is found in scoped
-history. Deleted, moved or inaccessible tasks block delivery and preserve native
-issues. An archived or deleted project stops status delivery before any write. Tasks completed before the configured history floor cannot be resolved
+history and is still not active after that read. Deleted tasks in completion
+history are skipped. Deleted, moved or inaccessible tasks block delivery and
+preserve native issues. An archived or deleted project stops status delivery
+before any write. Tasks completed before the configured history floor cannot be resolved
 through that history.
 
 Reads retry `429` and `5xx` responses with exponential backoff, honoring

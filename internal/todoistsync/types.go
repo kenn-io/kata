@@ -48,4 +48,7 @@ type Task struct {
 	Checked     bool
 	Deleted     bool
 	Recurring   bool
+	// UpdatedAtUnknown records that Todoist reported updated_at as null, so
+	// UpdatedAt holds a fallback that cannot order observations.
+	UpdatedAtUnknown bool
 }

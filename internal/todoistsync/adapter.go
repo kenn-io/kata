@@ -2,6 +2,7 @@ package todoistsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -66,6 +67,9 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 		return prepared, err
 	}
 	batch.ProjectID = binding.ProjectID
+	if err := a.versionUnknownUpdates(ctx, binding, &batch, tasks); err != nil {
+		return prepared, err
+	}
 	issuesync.ReportProgress(ctx, "content", len(tasks), len(tasks))
 	name := project.Name
 	if strings.TrimSpace(name) == "" {
@@ -80,6 +84,36 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 	}
 	prepared.Batch = batch
 	return prepared, nil
+}
+
+// versionUnknownUpdates keeps a task whose updated_at Todoist reports as null
+// at its imported issue's source version instead of an older fallback. At that
+// version, import still applies a status change or a title-prefix change while
+// the issue has no newer local edit.
+func (a *Adapter) versionUnknownUpdates(ctx context.Context, binding db.IssueSyncBinding, batch *db.ImportBatchParams, tasks []Task) error {
+	unknown := map[string]bool{}
+	for _, t := range tasks {
+		if t.UpdatedAtUnknown {
+			unknown["task:"+t.ID] = true
+		}
+	}
+	for i := range batch.Items {
+		item := &batch.Items[i]
+		if !unknown[item.ExternalID] {
+			continue
+		}
+		mapping, err := a.store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", item.ExternalID)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if mapping.SourceUpdatedAt != nil && mapping.SourceUpdatedAt.After(item.UpdatedAt) {
+			item.UpdatedAt = *mapping.SourceUpdatedAt
+		}
+	}
+	return nil
 }
 
 // RunnerConfig supplies the existing durable worker, scheduling and event lifecycle.
