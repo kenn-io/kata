@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
@@ -130,6 +131,114 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, batch)
 	require.Error(t, err, "replay rechecks the current human credential")
+	RunRelayIngressRejectsCrossProjectLinks(t, store)
+}
+
+// RunRelayIngressRejectsCrossProjectLinks ensures negotiated relay events
+// cannot materialize relationships to issues in a different local project.
+func RunRelayIngressRejectsCrossProjectLinks(t *testing.T, store db.Storage) {
+	for _, eventType := range []string{"issue.created", "issue.linked"} {
+		t.Run(eventType, func(t *testing.T) {
+			ctx := t.Context()
+			project, err := store.CreateProject(ctx, "relay-link-"+strings.TrimPrefix(eventType, "issue."))
+			require.NoError(t, err)
+			privateProject, err := store.CreateProject(ctx, "relay-link-private-"+strings.TrimPrefix(eventType, "issue."))
+			require.NoError(t, err)
+			for _, p := range []db.Project{project, privateProject} {
+				_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+					ProjectID: p.ID, Role: db.FederationRoleHub,
+					HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true,
+				})
+				require.NoError(t, err)
+			}
+			peerUID, err := uid.New()
+			require.NoError(t, err)
+			if eventType == "issue.linked" {
+				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: privateProject.ID, UID: peerUID, Title: "private peer", Author: "private-member",
+				})
+				require.NoError(t, err)
+			}
+
+			parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+				Actor: "relay-member", AdminActor: "admin",
+				PlaintextToken: "relay-cross-project-parent-" + strings.TrimPrefix(eventType, "issue.") + "-test-token", // #nosec G101 -- synthetic parent token used only by this test.
+			})
+			require.NoError(t, err)
+			publicKey, privateKey, err := ed25519.GenerateKey(nil)
+			require.NoError(t, err)
+			require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{
+				ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+				KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+			}))
+			peerInstanceUID, err := uid.New()
+			require.NoError(t, err)
+			leafInstanceUID, err := uid.New()
+			require.NoError(t, err)
+			grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+				ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peerInstanceUID,
+				ProtocolVersion: db.RelayProtocolVersion,
+				Token:           "relay-cross-project-enrollment-" + strings.TrimPrefix(eventType, "issue.") + "-test-token", // #nosec G101 -- synthetic relay token used only by this test.
+				ServeDownstream: true,
+			})
+			require.NoError(t, err)
+
+			var sourceUID string
+			var payload jsontext.Value
+			var relatedUID *string
+			if eventType == "issue.created" {
+				sourceUID, err = uid.New()
+				require.NoError(t, err)
+				payload = jsontext.Value(`{"uid":"` + sourceUID + `","title":"relayed issue","body":"","author":"relay-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peerUID + `","author":"relay-member"},{"type":"parent","to_issue_uid":"` + peerUID + `","author":"relay-member"},{"type":"related","to_issue_uid":"` + peerUID + `","author":"relay-member"}]}`)
+			} else {
+				source, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: project.ID, Title: "relayed issue", Author: "relay-member",
+				})
+				require.NoError(t, createErr)
+				sourceUID = source.UID
+				relatedUID = &peerUID
+				payload = jsontext.Value(`{"issue_uid":"` + source.UID + `","from_uid":"` + source.UID + `","to_uid":"` + peerUID + `","type":"blocks"}`)
+			}
+			event := newRemoteEvent(t, project, &sourceUID, eventType, "relay-member", leafInstanceUID, 500, payload)
+			event.RelatedIssueUID = relatedUID
+			event.ContentHash = remoteEventHash(t, event)
+			body, err := db.EncodeRelaySourceEvent(event)
+			require.NoError(t, err)
+			envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+				Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID,
+				ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+				SenderInstanceUID: peerInstanceUID, ReceiverInstanceUID: store.InstanceUID(),
+				Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent,
+				Path: []string{leafInstanceUID, peerInstanceUID}, SourceUID: event.EventUID,
+				SourceHash: event.ContentHash, Body: body,
+			})
+			require.NoError(t, err)
+			writeCtx := db.WithRootAttribution(ctx, db.RootAttributionSigner{
+				AuthorityUID: store.InstanceUID(), PrivateKey: privateKey,
+			}, "relay-member")
+			_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID,
+				db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+			if eventType == "issue.created" {
+				require.NoError(t, err, "unresolved same-project peers remain deferred at relay ingress")
+				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: privateProject.ID, UID: peerUID, Title: "private peer", Author: "private-member",
+				})
+				require.NoError(t, err)
+				require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+			} else {
+				assert.ErrorIs(t, err, db.ErrFederationIngestValidation,
+					"a resolved relay link endpoint in another project must be rejected")
+			}
+			issue, lookupErr := store.IssueByUID(ctx, sourceUID, db.IncludeDeletedYes)
+			if lookupErr == nil {
+				links, linksErr := store.LinksByIssue(ctx, issue.ID)
+				require.NoError(t, linksErr)
+				assert.Empty(t, links, "relay links must stay within the enrolled project")
+			} else {
+				assert.ErrorIs(t, lookupErr, db.ErrNotFound)
+			}
+		})
+	}
 }
 
 // RunRelayIngressClaimLifecycle checks that root acceptance applies the same

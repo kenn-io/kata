@@ -37,6 +37,14 @@ func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 	if err := ValidateImportRecords(records); err != nil {
 		return err
 	}
+	if opts.NewInstance {
+		for _, record := range records {
+			binding, ok := record.(*FederationBindingExport)
+			if ok && binding.RelayConfig != nil {
+				return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
+			}
+		}
+	}
 	if !opts.PreserveIssueSyncBindingEnabled {
 		return nil
 	}

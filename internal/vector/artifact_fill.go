@@ -15,16 +15,30 @@ import (
 // FillWithArtifacts uses the existing kit fill flow and local serialization.
 // Canonical artifacts are retained before backend-specific vector conversion.
 func (ix *Index) FillWithArtifacts(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, error) {
+	stats, _, err := ix.FillWithArtifactsDetailed(ctx, key, source, recipe, enc, scanBatch, batchOptions, onDocument, eligibility...)
+	return stats, err
+}
+
+// FillWithArtifactsDetailed reports documents still pending only because the
+// caller denied generation eligibility. They remain unstamped and retryable,
+// but do not block cutover once all eligible work is complete.
+func (ix *Index) FillWithArtifactsDetailed(ctx context.Context, key string, source db.Storage, recipe embedding.ArtifactIdentity, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool), eligibility ...func(context.Context, string) (bool, error)) (kitvec.FillStats, int, error) {
 	artifacts, ok := source.(db.EmbeddingArtifactStorage)
 	if !ok {
-		return ix.Fill(ctx, key, enc, scanBatch, batchOptions, onDocument)
+		stats, err := ix.Fill(ctx, key, enc, scanBatch, batchOptions, onDocument)
+		return stats, 0, err
 	}
 	exporter, _ := source.(db.EmbeddingArtifactExporter)
-	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}}
+	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}, ineligible: map[string]struct{}{}}
 	if len(eligibility) > 0 {
 		backing.eligible = eligibility[0]
 	}
-	return fill(ctx, backing, key, backing.beforeDispatch(enc), scanBatch, batchOptions, onDocument, backing.prepare)
+	stats, err := fill(ctx, backing, key, backing.beforeDispatch(enc), scanBatch, batchOptions, onDocument, backing.prepare)
+	deferred, deferredErr := backing.ineligiblePendingCount(ctx, key)
+	if err == nil {
+		err = deferredErr
+	}
+	return stats, deferred, err
 }
 
 type artifactPending struct {
@@ -44,8 +58,34 @@ type artifactCaptureStore struct {
 	prepared    map[string]kitvec.Pending[string]
 	eligible    func(context.Context, string) (bool, error)
 	deferred    map[string]bool
+	ineligible  map[string]struct{}
 	dispatchMu  sync.Mutex
 	dispatchErr error
+}
+
+func (s *artifactCaptureStore) ineligiblePendingCount(ctx context.Context, key string) (int, error) {
+	if len(s.ineligible) == 0 {
+		return 0, nil
+	}
+	backlog, err := s.index.Backlog(ctx, key)
+	if err != nil || backlog == 0 {
+		return 0, err
+	}
+	limit := int(backlog)
+	if int64(limit) < backlog {
+		limit = int(^uint(0) >> 1)
+	}
+	pending, err := s.Store.PendingForGeneration(ctx, key, limit)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, doc := range pending {
+		if _, ok := s.ineligible[doc.Doc]; ok {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // Kit prepares an entire page before encoding its chunk batches. A later
@@ -194,6 +234,7 @@ func (s *artifactCaptureStore) checkPending(ctx context.Context, doc kitvec.Pend
 		}
 		if !allowed {
 			s.deferred[doc.Doc] = true
+			s.ineligible[doc.Doc] = struct{}{}
 			return false, nil
 		}
 	}

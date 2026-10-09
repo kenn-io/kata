@@ -128,6 +128,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err := validateFederationProjectEvent(projectUID, source.OriginInstanceUID, source, known, true); err != nil {
 					return err
 				}
+				if err := validateRelayLinkEndpointsInProject(ctx, tx, projectID, source); err != nil {
+					return err
+				}
 				producerAuthorityUID := pin.AuthorityUID
 				if grant.ID > 0 {
 					// Enrollment authenticates the direct downstream peer, not the
@@ -228,7 +231,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			result.Digest = envelope.Digest
 		}
 		if len(result.InsertedEventUIDs) > 0 {
-			if err := d.materializeFederatedProjectTx(ctx, tx, projectID, linksAffected, result.InsertedEventUIDs); err != nil {
+			if err := d.materializeFederatedProjectRelayTx(ctx, tx, projectID, linksAffected, result.InsertedEventUIDs); err != nil {
 				return err
 			}
 		}

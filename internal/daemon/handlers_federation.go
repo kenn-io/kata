@@ -31,6 +31,14 @@ func requireLegacyFederationEnrollmentAuthority(ctx context.Context) error {
 	return nil
 }
 
+func rejectRelayCredentialOnLegacyEvents(principal federationPrincipal) error {
+	if principal.RelayBindingUID == "" {
+		return nil
+	}
+	return api.NewError(http.StatusForbidden, "relay_protocol_required",
+		"negotiated relay credentials must use the relay transport endpoints", "", nil)
+}
+
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	registerFederationSigningHandlers(humaAPI, cfg)
 	registerRelayHandlers(humaAPI, cfg)
@@ -742,9 +750,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/federation/events",
 	}, func(ctx context.Context, in *api.FederationPollEventsRequest) (*api.PollEventsResponse, error) {
 		var err error
-		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+		var principal federationPrincipal
+		ctx, principal, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
 			federationTransportOperation("pollFederationProjectEvents"))
 		if err != nil {
+			return nil, err
+		}
+		if err := rejectRelayCredentialOnLegacyEvents(principal); err != nil {
 			return nil, err
 		}
 		if in.ProjectID <= 0 {
@@ -766,6 +778,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		ctx, principal, err := authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "push",
 			federationTransportOperation("ingestFederationProjectEvents"))
 		if err != nil {
+			return nil, err
+		}
+		if err := rejectRelayCredentialOnLegacyEvents(principal); err != nil {
 			return nil, err
 		}
 		if in.ProjectID <= 0 {

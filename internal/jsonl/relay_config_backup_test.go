@@ -128,3 +128,43 @@ func TestRelayConfigurationOwnerBackup(t *testing.T) {
 		})
 	}
 }
+
+func TestNewInstanceImportRejectsNegotiatedRelayConfigBeforeMutation(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	rootUID := "00000000000000000000000002"
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	_, err = source.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: project.UID, Actor: "hub-member", PushEnabled: true, Enabled: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, source.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	_, err = source.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000005",
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath: []string{rootUID, source.InstanceUID()}, LocalActor: "local-member",
+		ServeDownstream: true, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
+	var backup bytes.Buffer
+	require.NoError(t, Export(ctx, source, &backup, ExportOptions{}))
+
+	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	targetUID := target.InstanceUID()
+	err = ImportWithOptions(ctx, bytes.NewReader(backup.Bytes()), target, ImportOptions{NewInstance: true})
+	require.Error(t, err, "a new target identity cannot retain a negotiated source authority path")
+	require.Contains(t, err.Error(), "--as-standalone")
+	require.Equal(t, targetUID, target.InstanceUID())
+	_, err = target.ProjectByName(ctx, "shared-project")
+	require.ErrorIs(t, err, db.ErrNotFound, "rejected restore must leave the target untouched")
+}

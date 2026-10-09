@@ -421,6 +421,27 @@ func (s *Store) materializeFederatedProjectTx(
 	reconcileLinks bool,
 	acceptedEventUIDs []string,
 ) error {
+	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, false)
+}
+
+func (s *Store) materializeFederatedProjectRelayTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+) error {
+	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, true)
+}
+
+func (s *Store) materializeFederatedProjectTxScoped(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+	projectOnlyLinks bool,
+) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if err != nil {
@@ -465,9 +486,13 @@ func (s *Store) materializeFederatedProjectTx(
 		// — is the transaction's lock-acquisition order under concurrent
 		// materialization of two projects in one group. Do not hoist it into the
 		// struct's construction above.
-		m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
-		if err != nil {
-			return err
+		if projectOnlyLinks {
+			m.groupProjectIDs = []int64{projectID}
+		} else {
+			m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+			if err != nil {
+				return err
+			}
 		}
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err

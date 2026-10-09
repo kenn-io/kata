@@ -23,10 +23,13 @@ import (
 
 func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{OperationID: "connectFederationBridge", Method: http.MethodPost, Path: "/api/v1/federation/bridges", Summary: "Connect one project to a configured hub"}, func(ctx context.Context, in *api.ConnectFederationBridgeRequest) (*api.ConnectFederationBridgeResponse, error) {
-		actor, err := attributedActor(ctx, in.Body.Actor)
-		if err != nil {
+		if err := ensureTokenAdminAllowed(ctx); err != nil {
 			return nil, err
 		}
+		// The local account is owner-supplied bridge metadata. It is not the
+		// bootstrap principal's attributed actor, and must not grant it ordinary
+		// write authority elsewhere.
+		actor := strings.TrimSpace(in.Body.Actor)
 		if db.ValidateTokenActor(actor) != nil || config.ValidateProjectName(in.Body.ProjectName) != nil || strings.TrimSpace(in.Body.HubProject) == "" {
 			return nil, api.NewError(400, "validation", "valid local account and project names are required", "", nil)
 		}

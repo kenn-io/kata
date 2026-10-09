@@ -2593,6 +2593,75 @@ func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 	assert.Equal(t, normal, federated)
 }
 
+func TestNegotiatedRelayCredentialCannotUseLegacyFederationEvents(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	shared, err := env.DB.CreateProject(ctx, "shared-project")
+	require.NoError(t, err)
+	private, err := env.DB.CreateProject(ctx, "private-project")
+	require.NoError(t, err)
+	from, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: shared.ID, Title: "shared issue", Author: "member"})
+	require.NoError(t, err)
+	to, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: private.ID, Title: "private issue", Author: "member"})
+	require.NoError(t, err)
+	link, _, err := env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+		FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "member",
+	}, db.LinkEventParams{
+		EventType: "issue.linked", EventIssueID: from.ID,
+		FromShortID: from.ShortID, FromUID: from.UID,
+		ToShortID: to.ShortID, ToUID: to.UID, Actor: "member",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: from.ID,
+		FromShortID: from.ShortID, FromUID: from.UID,
+		ToShortID: to.ShortID, ToUID: to.UID, Actor: "member",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(ctx, shared.ID, "admin")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(ctx, private.ID, "admin")
+	require.NoError(t, err)
+
+	parent, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		Actor: "member", AdminActor: "admin", PlaintextToken: "relay-parent-test-token", // #nosec G101 -- synthetic parent token used only by this test.
+	})
+	require.NoError(t, err)
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, env.DB.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: shared.UID, AuthorityUID: env.DB.InstanceUID(),
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}))
+	//nolint:gosec // Synthetic relay credential used only by this test.
+	relay, err := env.DB.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: shared.ID, ParentTokenID: parent.ID, SpokeInstanceUID: federationTestSpokeUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "negotiated-relay-test-token", ServeDownstream: true,
+	})
+	require.NoError(t, err)
+	legacy, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token: "owner-issued-legacy-poll-token", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EB",
+		ProjectID: &shared.ID, Capabilities: "pull", Actor: "member",
+	})
+	require.NoError(t, err)
+
+	path := projectPath(shared.ID) + "/federation/events?after_id=0&limit=100"
+	legacyResp, legacyBody := envDoRaw(t, env, http.MethodGet, path, nil, bearer(legacy.Token))
+	require.Equal(t, http.StatusOK, legacyResp.StatusCode, string(legacyBody))
+	require.Contains(t, string(legacyBody), to.UID, "owner-issued legacy enrollment retains its historical stream")
+
+	relayResp, relayBody := envDoRaw(t, env, http.MethodGet, path, nil, bearer(relay.Token))
+	if relayResp.StatusCode == http.StatusOK {
+		assert.Contains(t, string(relayBody), to.UID, "current behavior leaks the cross-project link endpoint")
+	}
+	assert.Equal(t, http.StatusForbidden, relayResp.StatusCode, "negotiated relay tokens must use the relay event protocol")
+
+	ingestResp, ingestBody := envDoRaw(t, env, http.MethodPost,
+		projectPath(shared.ID)+"/federation/events:ingest", federationIngestBody(), bearer(relay.Token))
+	assert.Equal(t, http.StatusForbidden, ingestResp.StatusCode, "negotiated relay tokens must not enter legacy ingestion")
+	assert.NotContains(t, string(ingestBody), "accepted")
+}
+
 func TestFederationTransportRejectsWrongCapability(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()

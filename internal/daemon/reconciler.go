@@ -287,17 +287,18 @@ func requestRejected(apiErr *embedclient.APIError) bool {
 		!apiErr.Retryable()
 }
 
-// reconcileOnce refreshes the mirror, drains the fill for the desired
-// generation, cuts over when the fill completes, and updates health. Fill
-// loops internally until no eligible documents remain. Deferred shared content
-// stays pending; only a complete generation replaces an existing active one.
+// reconcileOnce refreshes the mirror, fills eligible documents for the desired
+// generation, cuts over when no eligible backfill remains, and updates health.
+// Deferred shared content stays pending and retryable without blocking eligible
+// private search from moving to the configured recipe.
 //
 // Cold start (no active generation: fresh sidecar or first upgrade) cuts the
 // new generation over immediately, before the fill, so search serves partial
 // results during the initial backfill and the health backlog explains the
 // coverage. A model change (an active generation exists) keeps the
-// build-then-cutover path: the old generation stays active until the new one
-// is fully filled.
+// build-then-cutover path: the old generation stays active until all eligible
+// documents are filled; documents withheld by shared-project policy do not
+// keep the old recipe active.
 func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if _, err := r.idx.RefreshMirror(ctx, r.store); err != nil {
 		r.markError(err)
@@ -342,12 +343,13 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
 	var fillErr error
+	var eligibilityDeferred int
 	if portableRecipe != nil {
 		// Reconcile each project's upstream artifacts once per fill. A failed
 		// connection defers its remaining documents until the next fill, while
 		// successful connections still revalidate live authority per document.
 		checked := make(map[string]bool)
-		_, fillErr = r.idx.FillWithArtifacts(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
+		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, func(ctx context.Context, projectUID string) (bool, error) {
 			previous, exists := checked[projectUID]
 			if exists && !previous {
 				return false, nil
@@ -373,7 +375,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		r.markError(err)
 		return err
 	}
-	if backlog == 0 {
+	if backlog == 0 || (eligibilityDeferred > 0 && backlog == int64(eligibilityDeferred)) {
 		if err := r.idx.CutOver(ctx, key); err != nil {
 			r.markError(err)
 			return err

@@ -1105,6 +1105,27 @@ func (d *Store) materializeFederatedProjectTx(
 	reconcileLinks bool,
 	acceptedEventUIDs []string,
 ) error {
+	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, false)
+}
+
+func (d *Store) materializeFederatedProjectRelayTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+) error {
+	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, true)
+}
+
+func (d *Store) materializeFederatedProjectTxScoped(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+	projectOnlyLinks bool,
+) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
@@ -1135,7 +1156,12 @@ func (d *Store) materializeFederatedProjectTx(
 		return err
 	}
 	if reconcileLinks {
-		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
+		if projectOnlyLinks {
+			err = reconcileFederatedLinkGroup(ctx, tx, []int64{projectID}, []int64{projectID}, projectID, issueIDs)
+		} else {
+			err = reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -2415,6 +2441,10 @@ func federationGroupFoldProjection(
 			return db.FoldProjection{}, err
 		}
 		events = append(events, projectEvents...)
+	}
+	events, err := filterRelayCrossProjectLinkEvents(ctx, tx, projectIDs, events)
+	if err != nil {
+		return db.FoldProjection{}, err
 	}
 	return db.FoldEvents(events), nil
 }

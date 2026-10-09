@@ -24,7 +24,7 @@ import (
 // R3/R9/R10: preview is read-only, resolves only the selected catalog user
 // credential and project, and rejects an unsupported peer before enrollment.
 func TestFederationBridgeCatalogPreflight(t *testing.T) {
-	for _, mode := range []string{"normal", "lost_response", "revoked_retry", "credential_changed", "leave_overlap", "parent_rebind"} {
+	for _, mode := range []string{"normal", "lost_response", "revoked_retry", "credential_changed", "leave_overlap", "parent_rebind", "identity_owner"} {
 		t.Run(mode, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				credentials := newReplicaCredentialStore()
@@ -39,7 +39,7 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 				var enrollmentCalls, wrongCredentials atomic.Int32
 				var unsupported atomic.Bool
 				remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.Header.Get("Authorization") != "Bearer member-test-token" && (mode != "parent_rebind" || r.Header.Get("Authorization") != "Bearer replacement-member-test-token") {
+					if r.Header.Get("Authorization") != "Bearer member-test-token" && ((mode != "parent_rebind" && mode != "identity_owner") || r.Header.Get("Authorization") != "Bearer replacement-member-test-token") {
 						wrongCredentials.Add(1)
 					}
 					if r.URL.Path == "/api/v1/federation/enrollments" {
@@ -111,7 +111,8 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 					started = &relayReplicaBindingStartedStore{relayReplicaStartedStore: &relayReplicaStartedStore{Storage: store, started: make(chan struct{})}, bindingWritten: make(chan struct{})}
 					localStore = started
 				}
-				localServer := daemon.NewServer(daemon.ServerConfig{DB: localStore, Auth: config.AuthConfig{Token: "local-owner-test-token"}, FederationCredentials: credentials, FederationCatalog: []config.CatalogDaemonConfig{
+				localAuth := config.AuthConfig{Token: "local-owner-test-token", RequireTokenIdentity: mode == "identity_owner"}
+				localServer := daemon.NewServer(daemon.ServerConfig{DB: localStore, Auth: localAuth, FederationCredentials: credentials, FederationCatalog: []config.CatalogDaemonConfig{
 					{Name: "selected-hub", URL: remote.URL, InstanceUID: rootStore.InstanceUID(), Token: "member-test-token", AllowInsecure: true},
 					{Name: "unrelated-hub", URL: "https://unrelated.example", Token: "unrelated-test-token"},
 				}})
@@ -120,6 +121,13 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 				t.Cleanup(localHTTP.Close)
 				request := projectAccessFixture{store: store, server: localHTTP}
 				body := map[string]any{"hub_catalog": "selected-hub", "hub_project": "restricted-project", "project_name": "shared-replica", "actor": "local-member", "preflight": true}
+				if mode == "identity_owner" {
+					_, _, err = store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{Actor: "local-member", AdminActor: "admin", PlaintextToken: "local-account-test-token"})
+					require.NoError(t, err)
+					code, _, raw := request.request(t, http.MethodPost, "/api/v1/federation/bridges", "", body, map[string]string{"Authorization": "Bearer local-account-test-token"})
+					require.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, code, string(raw))
+					require.Zero(t, enrollmentCalls.Load(), "a user token cannot administer bridge enrollment")
+				}
 				code, _, raw := request.request(t, http.MethodPost, "/api/v1/federation/bridges", "", body, map[string]string{"Authorization": "Bearer local-owner-test-token"})
 				require.Equal(t, http.StatusOK, code, string(raw))
 				var preview map[string]any
@@ -192,7 +200,7 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 				require.Len(t, enrollments, 1)
 				require.Equal(t, "member", enrollments[0].Actor)
 				require.Equal(t, "claim,pull,push", enrollments[0].Capabilities)
-				if mode == "parent_rebind" {
+				if mode == "parent_rebind" || mode == "identity_owner" {
 					before := enrollments[0]
 					_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Work retained through credential replacement", Author: "local-member"})
 					require.NoError(t, err)
@@ -204,7 +212,7 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 					require.NoError(t, err)
 					_, _, err = rootStore.RevokeAPIToken(t.Context(), *before.ParentTokenID, "admin")
 					require.NoError(t, err)
-					replacementServer := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{Token: "local-owner-test-token"}, FederationCredentials: credentials, FederationCatalog: []config.CatalogDaemonConfig{{Name: "selected-hub", URL: remote.URL, InstanceUID: rootStore.InstanceUID(), Token: "replacement-member-test-token", AllowInsecure: true}}})
+					replacementServer := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: localAuth, FederationCredentials: credentials, FederationCatalog: []config.CatalogDaemonConfig{{Name: "selected-hub", URL: remote.URL, InstanceUID: rootStore.InstanceUID(), Token: "replacement-member-test-token", AllowInsecure: true}}})
 					t.Cleanup(func() { require.NoError(t, replacementServer.Close()) })
 					replacementHTTP := httptest.NewServer(replacementServer.Handler())
 					t.Cleanup(replacementHTTP.Close)
