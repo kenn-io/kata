@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -14,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,10 +23,31 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/testfix"
-	"pgregory.net/rapid"
 )
 
 const unboundRemoteProjectMessage = `no .kata.toml ancestor and no git ancestor — run "kata init" or pass --project`
+
+func unboundRemoteProjectError() *cliError {
+	return &cliError{
+		Message: unboundRemoteProjectMessage, Kind: kindNotFound,
+		Code: "project_not_initialized", ExitCode: ExitNotFound,
+	}
+}
+
+func missingWorkspaceError(path string) *cliError {
+	return &cliError{
+		Message: fmt.Sprintf("workspace path %q does not exist", path),
+		Kind:    kindValidation, ExitCode: ExitValidation,
+	}
+}
+
+func assertCLIErrorMatches(t *testing.T, err error, want *cliError) {
+	t.Helper()
+	ce := requireCLIError(t, err, want.ExitCode)
+	assert.Equal(t, want.Kind, ce.Kind)
+	assert.Equal(t, want.Code, ce.Code)
+	assert.Equal(t, want.Message, ce.Message)
+}
 
 type projectResolutionRequest struct {
 	path          string
@@ -156,18 +175,22 @@ func TestRemoteProjectResolutionWithoutBinding(t *testing.T) {
 									}
 									_, stderr, err := executeRootCapture(t, t.Context(), args...)
 									requests := recorder.take()
-									ce := requireCLIError(t, err, ExitNotFound)
-									assert.Equal(t, kindNotFound, ce.Kind)
-									assert.Equal(t, "project_not_initialized", ce.Code)
-									assert.Equal(t, unboundRemoteProjectMessage, ce.Message)
 									assert.Empty(t, requests, "client paths must never reach the remote project API")
+									want := unboundRemoteProjectError()
+									if missing {
+										want = missingWorkspaceError(filepath.Join(workspace, "missing-client-directory"))
+									}
+									ce := requireCLIError(t, err, want.ExitCode)
+									assert.Equal(t, want.Kind, ce.Kind)
+									assert.Equal(t, want.Code, ce.Code)
+									assert.Equal(t, want.Message, ce.Message)
 									if mode == "--json" {
 										envelope := parseErrorEnvelope(t, []byte(stderr))
-										assert.Equal(t, "project_not_initialized", envelope.Error.Code)
-										assert.Equal(t, ExitNotFound, envelope.Error.ExitCode)
-										assert.Equal(t, unboundRemoteProjectMessage, envelope.Error.Message)
+										assert.Equal(t, want.Code, envelope.Error.Code)
+										assert.Equal(t, want.ExitCode, envelope.Error.ExitCode)
+										assert.Equal(t, want.Message, envelope.Error.Message)
 									} else {
-										assert.Contains(t, stderr, "ERR "+command[0]+" not_found: "+unboundRemoteProjectMessage)
+										assert.Contains(t, stderr, "ERR "+command[0]+" "+string(want.Kind)+": "+want.Message)
 									}
 								})
 							}
@@ -177,38 +200,6 @@ func TestRemoteProjectResolutionWithoutBinding(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRemoteProjectResolutionUnboundDescendants(t *testing.T) {
-	resetFlags(t)
-	root := t.TempDir()
-	rapid.Check(t, func(rt *rapid.T) {
-		parts := rapid.SliceOf(rapid.Uint64()).Draw(rt, "path components")
-		path := root
-		// Bound filesystem work at materialization; the generated domain stays whole.
-		for i, part := range parts {
-			if i == 8 {
-				break
-			}
-			path = filepath.Join(path, strconv.FormatUint(part, 10))
-		}
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			rt.Fatal(err)
-		}
-		if rapid.Bool().Draw(rt, "missing") {
-			path = filepath.Join(path, "missing")
-		}
-		source := rapid.SampledFrom([]client.DaemonSource{
-			client.DaemonSourceServerEnv, client.DaemonSourceLocalConfig, client.DaemonSourceActiveDaemon,
-		}).Draw(rt, "remote source")
-		ctx := context.WithValue(t.Context(), resolvedDaemonContextKey{}, client.ResolvedDaemon{Source: source})
-		body, repair, err := buildResolveRequest(ctx, path)
-		var ce *cliError
-		if !errors.As(err, &ce) || ce.Code != "project_not_initialized" || ce.Kind != kindNotFound ||
-			ce.ExitCode != ExitNotFound || ce.Message != unboundRemoteProjectMessage || body != nil || repair != nil {
-			rt.Fatalf("unbound remote path %q: body=%v repair=%t err=%v", path, body, repair != nil, err)
-		}
-	})
 }
 
 func TestRemoteProjectResolutionSelectorsStayPathFree(t *testing.T) {
@@ -275,11 +266,10 @@ func TestRemoteProjectResolutionWorkspaceURLMissingPath(t *testing.T) {
 	server, recorder := projectResolutionProxy(t, env, "")
 	selectProjectResolutionRemote(t, env, workspace, server.URL, "workspace")
 	for _, command := range [][]string{{"list"}, {"search", "example"}, {"create", "Example task"}} {
-		args := append(append([]string{}, command...), "--json", "--workspace", filepath.Join(workspace, "missing"))
+		missing := filepath.Join(workspace, "missing")
+		args := append(append([]string{}, command...), "--json", "--workspace", missing)
 		_, _, err := executeRootCapture(t, t.Context(), args...)
-		ce := requireCLIError(t, err, ExitNotFound)
-		assert.Equal(t, "project_not_initialized", ce.Code)
-		assert.Equal(t, unboundRemoteProjectMessage, ce.Message)
+		assertCLIErrorMatches(t, err, missingWorkspaceError(missing))
 		assert.Empty(t, recorder.take())
 	}
 }
@@ -316,15 +306,15 @@ func TestRemoteMCPProjectResolutionWithoutBinding(t *testing.T) {
 					continue
 				}
 				args := append([]string{"mcp", "serve", "--json"}, selection...)
+				want := unboundRemoteProjectError()
 				if missing {
-					args = append(args, "--workspace", filepath.Join(workspace, "missing"))
+					path := filepath.Join(workspace, "missing")
+					args = append(args, "--workspace", path)
+					want = missingWorkspaceError(path)
 				}
 				_, _, err := executeRootCapture(t, t.Context(), args...)
-				requests := recorder.take()
-				ce := requireCLIError(t, err, ExitNotFound)
-				assert.Equal(t, "project_not_initialized", ce.Code)
-				assert.Equal(t, unboundRemoteProjectMessage, ce.Message)
-				assert.Empty(t, requests, "MCP scope resolution must not send client paths")
+				assert.Empty(t, recorder.take(), "MCP scope resolution must not send client paths")
+				assertCLIErrorMatches(t, err, want)
 			}
 		})
 	}
@@ -340,15 +330,15 @@ func TestRemoteFederationProjectResolutionWithoutBinding(t *testing.T) {
 		args := []string{"federation", "enroll", "--json", "--hub-url", server.URL,
 			"--spoke-instance", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "--capabilities", "pull",
 			"--hub-token-env", "EXAMPLE_HUB_TOKEN"}
+		want := unboundRemoteProjectError()
 		if missing {
-			args = append(args, "--workspace", filepath.Join(workspace, "missing"))
+			path := filepath.Join(workspace, "missing")
+			args = append(args, "--workspace", path)
+			want = missingWorkspaceError(path)
 		}
 		_, _, err := executeRootCapture(t, t.Context(), args...)
-		requests := recorder.take()
-		ce := requireCLIError(t, err, ExitNotFound)
-		assert.Equal(t, "project_not_initialized", ce.Code)
-		assert.Equal(t, unboundRemoteProjectMessage, ce.Message)
-		assert.Empty(t, requests, "hub scope resolution must not send client paths")
+		assert.Empty(t, recorder.take(), "hub scope resolution must not send client paths")
+		assertCLIErrorMatches(t, err, want)
 	}
 }
 

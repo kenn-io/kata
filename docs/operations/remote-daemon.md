@@ -87,12 +87,14 @@ If none of those are set, clients next honor `active_daemon` in
 auto-start.
 
 For project-scoped CLI commands such as `list`, `search`, and `create`, the
-client resolves `.kata.toml` and Git aliases on its own host. Without either
-binding, a remote client reports `project_not_initialized` (exit code 4) with
-guidance to run `kata init` or pass `--project`. A missing `--workspace` path
-gets the same guidance. The client does not send these paths to the daemon.
-Explicit `--hub-url` project lookups follow this rule too, including loopback
-hub URLs.
+client resolves `.kata.toml` and Git aliases on its own host. It never asks a
+remote daemon to search client directories:
+
+- Without either binding, the command fails with `project_not_initialized`
+  (exit code 4) and suggests `kata init` or `--project`.
+- A `--workspace` path that does not exist on the client fails with a
+  validation error (exit code 3) that names the path.
+
 Bind a client directory or select an existing project for one command:
 
 ```sh

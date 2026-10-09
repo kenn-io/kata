@@ -492,10 +492,18 @@ func buildResolveRequest(ctx context.Context, startPath string) (map[string]any,
 	disc, err := config.DiscoverPaths(startPath)
 	if err != nil {
 		// Local clients retain daemon-side validation for a missing
-		// --workspace. Configured remotes cannot resolve client paths.
-		// Other stat failures (permission, etc.) propagate.
+		// --workspace; remote clients report it here because the daemon
+		// cannot see client paths. Other stat failures (permission,
+		// etc.) propagate.
 		if errors.Is(err, os.ErrNotExist) {
-			return buildPathResolveRequest(ctx, startPath)
+			if resolvesPathFree(ctx) {
+				return nil, nil, &cliError{
+					Message:  fmt.Sprintf("workspace path %q does not exist", startPath),
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
+			return map[string]any{"start_path": startPath}, nil, nil
 		}
 		return nil, nil, &cliError{
 			Message:  err.Error(),
@@ -567,12 +575,18 @@ func buildResolveRequest(ctx context.Context, startPath string) (map[string]any,
 	return buildPathResolveRequest(ctx, startPath)
 }
 
-func buildPathResolveRequest(ctx context.Context, startPath string) (map[string]any, func(string) error, error) {
-	pathFree, _ := ctx.Value(pathFreeProjectContextKey{}).(bool)
-	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(client.ResolvedDaemon); ok && resolved.ConfiguredRemote() {
-		pathFree = true
+// resolvesPathFree reports whether the target daemon cannot see this
+// client's filesystem: a configured remote daemon or a federation hub.
+func resolvesPathFree(ctx context.Context) bool {
+	if pathFree, _ := ctx.Value(pathFreeProjectContextKey{}).(bool); pathFree {
+		return true
 	}
-	if pathFree {
+	resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(client.ResolvedDaemon)
+	return ok && resolved.ConfiguredRemote()
+}
+
+func buildPathResolveRequest(ctx context.Context, startPath string) (map[string]any, func(string) error, error) {
+	if resolvesPathFree(ctx) {
 		return nil, nil, &cliError{
 			Message:  `no .kata.toml ancestor and no git ancestor — run "kata init" or pass --project`,
 			Kind:     kindNotFound,

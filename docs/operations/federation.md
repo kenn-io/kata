@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-03
+last_edited: 2026-10-08
 ---
 
 # Federation
@@ -79,6 +79,12 @@ default/spoke daemon only to detect whether the named project already exists
 on the spoke and should print `--adopt-existing`. The generated token printed
 in the `kata federation join ...` command is a separate spoke transport
 credential.
+
+Without a project argument or `--project`, `enroll` finds the project from the
+client's `.kata.toml` or Git alias and sends only that name or alias to the
+hub. An unbound directory fails with `project_not_initialized`, and a missing
+`--workspace` path fails with a validation error. The hub is never asked to
+search client directories, even when `--hub-url` is a loopback address.
 
 On hubs configured with `[auth].require_token_identity = true`, authenticate
 `kata federation enroll` with the hub's DB-backed personal token for the actor

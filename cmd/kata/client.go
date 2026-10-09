@@ -585,8 +585,8 @@ func discoverDaemonAPI(ctx context.Context) (daemonAPI, error) {
 // hubAPI wraps an already-constructed federation hub client. It is a separate
 // constructor on purpose: hub credentials are resolved by the hub-specific
 // paths (resolveHubAdminAuth / federationEnrollHTTPClient) and must never come
-// from local daemon resolution. Explicit hub endpoints also resolve projects
-// path-free, including loopback URLs; this mode carries no daemon credentials.
+// from local daemon resolution. Project resolution against a hub never falls
+// back to sending client paths, even when the hub URL is loopback.
 func hubAPI(ctx context.Context, hubBaseURL string, hc *http.Client) daemonAPI {
 	ctx = context.WithValue(ctx, pathFreeProjectContextKey{}, true)
 	return daemonAPI{ctx: ctx, baseURL: strings.TrimRight(hubBaseURL, "/"), client: hc}
