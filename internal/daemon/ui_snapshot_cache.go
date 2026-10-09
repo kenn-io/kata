@@ -141,6 +141,19 @@ func cloneUISnapshotEnrichment(data db.UISnapshotData) db.UISnapshotData {
 		AuthorityReused: false,
 	}
 	cloned.Comments = slices.Clone(data.Comments)
+	cloned.CommentGraph.Comments = slices.Clone(data.CommentGraph.Comments)
+	cloned.CommentGraph.CommentUIDsByProject = make(map[int64][]string, len(data.CommentGraph.CommentUIDsByProject))
+	for id, uids := range data.CommentGraph.CommentUIDsByProject {
+		cloned.CommentGraph.CommentUIDsByProject[id] = slices.Clone(uids)
+	}
+	cloned.CommentGraph.Targets = make(map[string]db.CommentGraphTarget, len(data.CommentGraph.Targets))
+	for id, target := range data.CommentGraph.Targets {
+		if target.Record != nil {
+			r := *target.Record
+			target.Record = &r
+		}
+		cloned.CommentGraph.Targets[id] = target
+	}
 	cloned.SelectedLabels = slices.Clone(data.SelectedLabels)
 	cloned.SelectedLinks = slices.Clone(data.SelectedLinks)
 	cloned.Recurrences = slices.Clone(data.Recurrences)

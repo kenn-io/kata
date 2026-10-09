@@ -110,7 +110,9 @@ var alreadyImplemented = map[string]bool{
 	"CloseIssueGuarded":                    true, // issue_lifecycle.go
 	"CloseIssueWithEvents":                 true, // issue_lifecycle.go
 	"CommentBodyByID":                      true, // comments.go
+	"CommentIssueIDsByUIDs":                true, // comments.go
 	"CommentsByIssue":                      true, // comments.go
+	"ReadCommentGraph":                     true, // comment_graph.go
 	"CountOpenIssues":                      true, // project_lifecycle.go
 	"CountLiveClaims":                      true, // claims_core.go
 	"CountPendingClaims":                   true, // claims_core.go

@@ -66,11 +66,14 @@ func ValidateRemoteEventContentHash(event RemoteEvent) (jsontext.Value, string, 
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
-	if eventType == "issue.commented" {
+	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 			return fmt.Errorf("%w: event %s %s payload is invalid JSON",
 				ErrFederationIngestValidation, eventUID, eventType)
+		}
+		if err := validateCommentEntry(payload); err != nil {
+			return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, eventType, err)
 		}
 		return validateFederationTeammate(payload["teammate"], eventUID, eventType)
 	}
@@ -94,6 +97,9 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.
 					ErrFederationIngestValidation, eventUID, eventType, field)
 			}
 			if field == "comments" {
+				if err := validateCommentEntry(entry); err != nil {
+					return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, eventType, err)
+				}
 				if err := validateFederationTeammate(entry["teammate"], eventUID, eventType); err != nil {
 					return err
 				}

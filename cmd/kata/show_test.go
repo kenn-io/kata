@@ -231,6 +231,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 }
 
 func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
+	t.Setenv("KATA_TEAMMATE", "")
 	env, dir, pid := setupCLIWorkspace(t)
 	type createResp struct {
 		Issue struct {
@@ -255,7 +256,7 @@ func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
 	assert.Contains(t, out, "Labels: bug,safari\n")
 	assert.Contains(t, out, "Priority: 2\n")
 	assert.Contains(t, out, "Body:\n```text\nSafari can double-submit the callback.\n```\n")
-	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester created_at=[^ \n]+$`), out)
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester handle=c:[0-9a-hjkmnp-tv-z]{6,26} issue_uid=[0-9A-HJKMNP-TV-Z]{26} issue_short_id=[0-9a-z]{4,26} created_at=[^ \n]+$`), out)
 	assert.Contains(t, out, "\n```text\nReproduced on macOS.\n```")
 	assert.NotContains(t, out, "Owner:")
 }

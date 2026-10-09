@@ -476,3 +476,28 @@ func recordPayloadAs[T any](t *testing.T, record ImportRecord) *T {
 	require.NotNil(t, payload)
 	return payload
 }
+
+func TestProjectMergeCommentReplyKeepsPortableTargetIdentity(t *testing.T) {
+	source, target := int64(1), int64(2)
+	sourceUID, targetUID := "01AAAAAAAAAAAAAAAAAAAAAAAA", "01BBBBBBBBBBBBBBBBBBBBBBBB"
+	records := []ImportRecord{
+		&ProjectExport{ID: 1, UID: "01CCCCCCCCCCCCCCCCCCCCCCCC", Name: "example-project"},
+		&IssueExport{ID: source, UID: sourceUID, ProjectID: 1},
+		&IssueExport{ID: target, UID: targetUID, ProjectID: 1},
+		&CommentExport{ID: 1, UID: "01DDDDDDDDDDDDDDDDDDDDDDDD", IssueID: source, ReplyToUID: "01EEEEEEEEEEEEEEEEEEEEEEEE", ReplyKind: "reply", EditedAt: commentEditTime},
+		&CommentExport{ID: 2, UID: "01EEEEEEEEEEEEEEEEEEEEEEEE", IssueID: target},
+		&EventExport{ID: 1, UID: "01FFFFFFFFFFFFFFFFFFFFFFFF", ProjectID: 1, IssueID: &source, IssueUID: &sourceUID, RelatedIssueID: &target, RelatedIssueUID: &targetUID, Type: "issue.commented", Payload: jsontext.Value(`{"comment_uid":"01DDDDDDDDDDDDDDDDDDDDDDDD","reply_to_uid":"01EEEEEEEEEEEEEEEEEEEEEEEE","reply_kind":"reply"}`)},
+	}
+	result, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{TargetProjectID: 5, Issue: 10, Comment: 20, Event: 30}, nil)
+	require.NoError(t, err)
+	reply := result[3].(*CommentExport)
+	require.Equal(t, int64(21), reply.ID)
+	require.Equal(t, int64(11), reply.IssueID)
+	require.Equal(t, result[4].(*CommentExport).UID, reply.ReplyToUID)
+	require.Equal(t, commentEditTime, reply.EditedAt)
+	event := result[5].(*EventExport)
+	require.Equal(t, int64(11), *event.IssueID)
+	require.Equal(t, int64(12), *event.RelatedIssueID)
+	require.Equal(t, records[5].(*EventExport).Payload, event.Payload)
+	require.Equal(t, int64(1), records[3].(*CommentExport).ID)
+}

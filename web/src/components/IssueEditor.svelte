@@ -15,6 +15,7 @@
     KataProjectSummary,
     KataRecurrence,
     KataTaskDetail,
+    KataCommentReplyIntent,
     KataTaskCloseRequest,
     KataTaskEditPatch,
     KataTaskEvent,
@@ -32,6 +33,8 @@
 
   type Reference = UIIssueReference
   interface IssueNavigationTarget {
+    commentUID?: string | undefined
+    returnComment?: { issueUID: string; commentUID: string } | undefined
     uid: string
   }
 
@@ -43,6 +46,10 @@
   }
 
   interface Props {
+    selectedCommentUID?: string | undefined
+    navigationActive?: boolean | undefined
+    returnComment?: { issueUID: string; commentUID: string } | undefined
+    commentError?: string | undefined
     issue: KataTaskDetail
     events?: readonly KataTaskEvent[] | undefined
     issueCatalog?: readonly KataTaskSummary[] | undefined
@@ -60,7 +67,9 @@
     movePending?: boolean | undefined
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
-    onAddComment?: ((uid: string, body: string) => boolean | Promise<boolean>) | undefined
+    onAddComment?:
+      | ((uid: string, body: string, reply?: KataCommentReplyIntent) => boolean | Promise<boolean>)
+      | undefined
     onEditIssue: (uid: string, patch: KataTaskEditPatch) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
     onClaimAssignment?:
@@ -87,6 +96,9 @@
 
   let {
     issue,
+    selectedCommentUID,
+    navigationActive = true,
+    commentError = undefined,
     events = [],
     issueCatalog = [],
     searchReferences = async () => [],
@@ -529,12 +541,17 @@
       {onSelectIssue}
     />
     <Comments
+      {selectedCommentUID}
+      {navigationActive}
       {issue}
       {searchReferences}
       {actionsDisabled}
       {draftResetGeneration}
       {draftFenceGeneration}
       {onAddComment}
+      {commentError}
+      onOpenComment={(uid, commentUID, returnComment) =>
+        void onSelectIssue?.({ uid, commentUID, returnComment })}
     />
     <IssueHistory {events} />
   {/key}

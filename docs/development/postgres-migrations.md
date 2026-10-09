@@ -77,3 +77,23 @@ exclusive lock on `import_mappings`; schedule the operation while imports are
 stopped. Existing table grants cover the new columns. Validation-only runtime
 credentials cannot perform this upgrade. Schema 29 binaries cannot reopen
 schema 30; rollback requires the pre-upgrade backup and matching older binary.
+
+## Schema 31: comment replies and edit times
+
+The 30→31 migration adds nullable `reply_to_uid`, `reply_kind`, and `edited_at`
+columns to `comments`. Existing comments keep their identities and receive
+NULL in all three columns. CHECK constraints require paired reply fields, one
+of `reply`, `confirm`, `refute`, or `supersede`, and a 26-character target
+distinct from the comment's own UID. `reply` is a general response; `confirm`
+asserts verification or reproduction. The partial `idx_comments_reply_to`
+index supports target lookups.
+There is no target foreign key, so a reply can arrive before its target and
+survive target purge.
+
+Upgrade federated hubs before spokes: a schema-30 hub rejects schema-31 pushes.
+Stop the daemon and run `kata storage postgres migrate` with schema-owner
+credentials before starting the matching binary. Adding the columns, constraints,
+and index takes an exclusive lock on `comments`; schedule a brief offline
+window. Existing table grants cover the new columns. Validation-only runtime
+credentials cannot migrate. Schema-30 binaries cannot reopen schema 31;
+rollback requires the pre-upgrade backup and its matching older binary.

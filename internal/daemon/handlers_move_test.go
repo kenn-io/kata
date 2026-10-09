@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -40,6 +41,10 @@ func seedMovePair(t *testing.T, env *testenv.Env) (db.Project, db.Project, db.Is
 func TestMoveIssue_HappyPath(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, tgt, iss := seedMovePair(t, env)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
 
 	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
 	ifMatch := fmt.Sprintf(`"rev-%d"`, iss.Revision)
@@ -67,6 +72,24 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, tgt.ID, stored.ProjectID)
 	assert.Equal(t, out.NewShortID, stored.ShortID)
+
+	committed, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
+		AfterID: before, ProjectID: tgt.ID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, committed, 1)
+	assert.Equal(t, out.EventID, committed[0].ID)
+	assert.Equal(t, "issue.moved", committed[0].Type)
+
+	select {
+	case wakeup := <-sub.Ch:
+		require.Equal(t, daemon.StreamKindEvent, wakeup.Kind)
+		require.NotNil(t, wakeup.Event)
+		assert.Equal(t, tgt.ID, wakeup.ProjectID)
+		assert.Equal(t, committed[0], *wakeup.Event)
+	case <-time.After(time.Second):
+		t.Fatal("move committed without publishing its event wakeup")
+	}
 }
 
 // TestMoveIssue_ImportMappingCollisionReturns409 returns a move-specific

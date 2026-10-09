@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -277,11 +278,17 @@ type ProjectSummaryWithStats struct {
 
 // CommentEntry is the per-comment projection rendered in the comments tab.
 type CommentEntry struct {
-	ID        int64     `json:"id"`
-	Author    string    `json:"author"`
-	Teammate  string    `json:"teammate,omitempty"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
+	UID                string            `json:"uid"`
+	Handle             string            `json:"handle"`
+	EditedAt           *time.Time        `json:"edited_at,omitempty"`
+	Reply              *commentref.Link  `json:"reply,omitempty"`
+	Backlinks          []commentref.Link `json:"backlinks,omitempty"`
+	BacklinksTruncated bool              `json:"backlinks_truncated,omitempty"`
+	ID                 int64             `json:"id"`
+	Author             string            `json:"author"`
+	Teammate           string            `json:"teammate,omitempty"`
+	Body               string            `json:"body"`
+	CreatedAt          time.Time         `json:"created_at"`
 }
 
 // EventLogEntry is the per-event projection used by the events tab.

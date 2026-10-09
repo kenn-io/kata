@@ -271,17 +271,18 @@ SELECT DISTINCT recurrence_id FROM issues WHERE recurrence_id IS NOT NULL AND de
 func (s *Store) ExportComments(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.CommentExport, error] {
 	where, args := pgExportWhere("issues", filter)
 	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author,
-	       comments.body, comments.created_at, comments.teammate
+	       comments.body, comments.created_at, comments.teammate, comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)
   FROM comments JOIN issues ON issues.id = comments.issue_id` + where + ` ORDER BY comments.id ASC`
 	return streamExportRows(ctx, s, "comments", query, args,
 		func(rows *sql.Rows) (db.CommentExport, error) {
 			var record db.CommentExport
-			var teammate sql.NullString
+			var teammate, replyTo, replyKind, editedAt sql.NullString
 			if err := rows.Scan(&record.ID, &record.UID, &record.IssueID, &record.Author,
-				&record.Body, &record.CreatedAt, &teammate); err != nil {
+				&record.Body, &record.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 				return db.CommentExport{}, pgExportScanError("comment", err)
 			}
 			record.Teammate = teammate.String
+			record.ReplyToUID, record.ReplyKind, record.EditedAt = replyTo.String, replyKind.String, editedAt.String
 			return record, nil
 		})
 }
@@ -789,18 +790,21 @@ func (s *Store) ExportPendingClaimRequests(ctx context.Context, filter db.Export
 // ExportEvents streams replay-safe event envelopes under the export visibility rules.
 func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.EventExport, error] {
 	issueIDExpression := `events.issue_id`
-	relatedScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type <> 'issue.commented')`
 	var args []any
 	if filter.ProjectID != nil {
 		issueIDExpression = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> $1 THEN NULL ELSE events.issue_id END`
-		relatedScrub += ` OR (peer.id IS NOT NULL AND peer.project_id <> $1)`
+		relatedIDScrub += ` OR (peer.id IS NOT NULL AND peer.project_id <> $1)`
+		relatedUIDScrub += ` OR (peer.id IS NOT NULL AND peer.project_id <> $1)`
 		args = append(args, *filter.ProjectID)
 	}
 	if !filter.IncludeDeleted {
-		relatedScrub += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
+		relatedIDScrub += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) OR (events.type = 'issue.commented' AND peer.deleted_at IS NOT NULL)`
+		relatedUIDScrub += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
-	relatedIDExpression := `CASE WHEN ` + relatedScrub + ` THEN NULL ELSE events.related_issue_id END`
-	relatedUIDExpression := `CASE WHEN ` + relatedScrub + ` THEN NULL ELSE events.related_issue_uid END`
+	relatedIDExpression := `CASE WHEN ` + relatedIDScrub + ` THEN NULL ELSE events.related_issue_id END`
+	relatedUIDExpression := `CASE WHEN ` + relatedUIDScrub + ` THEN NULL ELSE events.related_issue_uid END`
 	subjectLive := `(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`
 	if !filter.IncludeDeleted {
 		subjectLive = `((events.issue_id IS NULL AND subject_issue.id IS NULL)
@@ -825,7 +829,7 @@ OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 		clauses = append(clauses,
 			`(events.issue_id IS NULL OR EXISTS (
 SELECT 1 FROM issues WHERE issues.id = events.issue_id AND issues.deleted_at IS NULL))`,
-			`(events.type = 'issue.links_changed' OR (
+			`(events.type IN ('issue.links_changed', 'issue.commented') OR (
 (events.related_issue_id IS NULL OR NOT EXISTS (
   SELECT 1 FROM issues WHERE issues.id = events.related_issue_id AND issues.deleted_at IS NOT NULL))
 AND (events.related_issue_uid IS NULL OR NOT EXISTS (

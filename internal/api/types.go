@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"time"
 
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -627,7 +628,18 @@ type IssueRef struct {
 // 26-char ULID; the daemon's path resolver picks the matching column.
 // IncludeDeleted=true allows fetching soft-deleted issues; default returns 404
 // for them.
+type CommentSelectors struct {
+	Thread  string `query:"thread,omitempty"`
+	Inbound string `query:"inbound,omitempty"`
+	Kind    string `query:"kind,omitempty" enum:"reply,confirm,refute,supersede"`
+	Since   string `query:"since,omitempty"`
+}
+
+// CommentOut adds authorized graph annotations to a persisted comment.
+type CommentOut = commentref.Record
+
 type ShowIssueRequest struct {
+	CommentSelectors
 	ProjectID      int64  `path:"project_id" required:"true"`
 	Ref            string `path:"ref" required:"true"`
 	IncludeDeleted bool   `query:"include_deleted,omitempty"`
@@ -636,6 +648,7 @@ type ShowIssueRequest struct {
 // ShowIssueByUIDRequest is GET /api/v1/issues/{uid}. UID is globally unique
 // across projects, so the route does not need a project path segment.
 type ShowIssueByUIDRequest struct {
+	CommentSelectors
 	UID            string `path:"uid" required:"true"`
 	IncludeDeleted bool   `query:"include_deleted,omitempty"`
 }
@@ -750,7 +763,8 @@ type ShowIssueResponse struct {
 type ShowIssueResponseBody struct {
 	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue               ShowIssueOut        `json:"issue"`
-	Comments            []db.Comment        `json:"comments"`
+	Comments            []CommentOut        `json:"comments"`
+	CommentsTruncated   bool                `json:"comments_truncated,omitempty"`
 	Links               []LinkOut           `json:"links"`
 	Labels              []db.IssueLabel     `json:"labels"`
 	Parent              *IssueRef           `json:"parent,omitempty"`
@@ -881,6 +895,9 @@ type CommentRequest struct {
 		Teammate *string `json:"teammate,omitempty"`
 		Actor    string  `json:"actor,omitempty"`
 		Body     string  `json:"body" required:"true"`
+		ReplyTo  string  `json:"reply_to,omitempty"`
+		Kind     string  `json:"kind,omitempty" enum:"reply,confirm,refute,supersede" doc:"reply is a general response; confirm asserts verification or reproduction"`
+		Force    bool    `json:"force,omitempty"`
 	}
 }
 

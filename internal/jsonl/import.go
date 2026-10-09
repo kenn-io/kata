@@ -889,7 +889,10 @@ func normalizeIssueTimes(rec *db.IssueExport) error {
 }
 
 func normalizeCommentTimes(rec *db.CommentExport) error {
-	return normalizePrecisionImportTime("comment.created_at", &rec.CreatedAt)
+	if err := normalizePrecisionImportTime("comment.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizePrecisionImportTime("comment.edited_at", &rec.EditedAt)
 }
 
 func normalizeIssueLabelTimes(rec *db.IssueLabelExport) error {

@@ -97,6 +97,48 @@ describe('Comments', () => {
     await waitFor(() => expect(comments[0]?.textContent).toContain('Newest comment'))
     expect(comments[1]?.textContent).toContain('First comment')
   })
+
+  it('offers force only for the draft that received a duplicate refusal', async () => {
+    const onAddComment = vi.fn(async () => false)
+    const initialReply = { replyTo: 'target-one', kind: 'reply' as const, force: false }
+    const view = renderComments({ initialReply, onAddComment })
+    await fireEvent.input(screen.getByLabelText('Reply evidence'), {
+      target: { value: 'First response' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    await view.rerender({ commentError: 'duplicate_reply: a reply of this kind already exists' })
+    expect(screen.getByRole('button', { name: 'Send another reply' })).toBeTruthy()
+
+    const other = issue()
+    other.issue.uid = 'issue-two'
+    await view.rerender({
+      issue: other,
+      initialReply: { ...initialReply, replyTo: 'target-two' },
+    })
+    expect(screen.queryByRole('button', { name: 'Send another reply' })).toBeNull()
+
+    await fireEvent.input(screen.getByLabelText('Reply evidence'), {
+      target: { value: 'Second response' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    expect(await screen.findByRole('button', { name: 'Send another reply' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Send another reply' }))
+    expect(onAddComment.mock.calls.at(-1)).toEqual([
+      'issue-two',
+      'Second response',
+      { replyTo: 'target-two', kind: 'reply', force: true },
+    ])
+    await fireEvent.input(screen.getByLabelText('Reply evidence'), {
+      target: { value: 'Changed response' },
+    })
+    expect(screen.queryByRole('button', { name: 'Send another reply' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    expect(onAddComment.mock.calls.at(-1)).toEqual([
+      'issue-two',
+      'Changed response',
+      { replyTo: 'target-two', kind: 'reply', force: false },
+    ])
+  })
 })
 
 function renderComments(overrides: Record<string, unknown> = {}) {
@@ -164,3 +206,49 @@ function reference(overrides: Partial<Reference> = {}): Reference {
     ...overrides,
   }
 }
+
+describe('comment evidence navigation', () => {
+  afterEach(cleanup)
+  it('focuses a selected editor comment after its destination data arrives without stealing later focus', async () => {
+    const model = issue()
+    model.comments = []
+    const view = renderComments({ issue: model, selectedCommentUID: 'destination' })
+    await view.rerender({
+      issue: {
+        ...model,
+        comments: [
+          {
+            id: 1,
+            uid: 'destination',
+            issue_id: 1,
+            author: 'worker',
+            body: 'Evidence',
+            created_at: '2030-01-01T00:00:00Z',
+          },
+        ],
+      },
+      selectedCommentUID: 'destination',
+    })
+    const row = view.container.querySelector('[data-comment-uid="destination"]') as HTMLElement
+    await waitFor(() => expect(document.activeElement).toBe(row))
+    const composer = screen.getByLabelText('Comment') as HTMLTextAreaElement
+    composer.focus()
+    await view.rerender({
+      issue: {
+        ...model,
+        comments: [
+          {
+            id: 1,
+            uid: 'destination',
+            issue_id: 1,
+            author: 'worker',
+            body: 'Updated evidence',
+            created_at: '2030-01-01T00:00:00Z',
+          },
+        ],
+      },
+      selectedCommentUID: 'destination',
+    })
+    expect(document.activeElement).toBe(composer)
+  })
+})

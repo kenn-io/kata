@@ -23,6 +23,7 @@ type keymap struct {
 	Close, Reopen, Undo                               key
 	NextTab, PrevTab, JumpRef, Back                   key
 	EditBody, NewComment                              key
+	ReplyComment, NextCommentLink, PrevCommentLink    key
 	SetParent, AddBlocker, AddLink                    key
 	AddLabel, RemoveLabel, AssignOwner, ClearOwner    key
 	TimedAssignment                                   key
@@ -96,6 +97,9 @@ func newKeymap() keymap {
 		Back:            key{Keys: []string{"esc", "backspace"}, Help: "back"},
 		EditBody:        key{Keys: []string{"e"}, Help: "edit body"},
 		NewComment:      key{Keys: []string{"c"}, Help: "new comment"},
+		ReplyComment:    key{Keys: []string{"R"}, Help: "typed reply to selected comment"},
+		NextCommentLink: key{Keys: []string{"]"}, Help: "next comment link"},
+		PrevCommentLink: key{Keys: []string{"["}, Help: "previous comment link"},
 		SetParent:       key{Keys: []string{"p"}, Help: "set parent"},
 		AddBlocker:      key{Keys: []string{"b"}, Help: "add blocker"},
 		AddLink:         key{Keys: []string{"l"}, Help: "add related"},

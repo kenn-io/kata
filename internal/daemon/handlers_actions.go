@@ -409,11 +409,14 @@ func scopedMutationEvent(
 	if err != nil {
 		return nil, err
 	}
-	projected, ok := projectIssueScopedEvent(*event, allowed, scope.ProjectUID)
-	if !ok {
+	projectedEvents, visibleEvents, err := projectIssueScopedEvents(ctx, store, []db.Event{*event}, allowed, scope.ProjectUID)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	if !visibleEvents[0] {
 		return nil, nil
 	}
-	return &projected, nil
+	return &projectedEvents[0], nil
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for
@@ -431,13 +434,16 @@ func scopedMutationEvents(
 	if err != nil {
 		return nil, true, err
 	}
+	projected, visible, err := projectIssueScopedEvents(ctx, store, events, allowed, scope.ProjectUID)
+	if err != nil {
+		return nil, true, internalAPIError(err)
+	}
 	projectedEvents := make([]db.Event, 0, len(events))
-	for _, event := range events {
-		projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
-		if !ok {
+	for index := range events {
+		if !visible[index] {
 			continue
 		}
-		projectedEvents = append(projectedEvents, projected)
+		projectedEvents = append(projectedEvents, projected[index])
 	}
 	return projectedEvents, true, nil
 }

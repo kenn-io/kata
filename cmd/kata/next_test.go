@@ -140,6 +140,7 @@ func TestNext_HumanFullUsesShowDetail(t *testing.T) {
 }
 
 func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) {
+	t.Setenv("KATA_TEAMMATE", "")
 	env, dir, _ := setupCLIWorkspace(t)
 	ref := createFullNextTestIssue(t, env, dir, "agent full candidate")
 
@@ -152,7 +153,7 @@ func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) {
 	assert.Contains(t, out, "Priority: 1\n")
 	assert.Contains(t, out, "Body:\n```text\nDetailed issue context.\n```\n")
 	assert.Contains(t, out, "Comments:\n")
-	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester created_at=[^ \n]+$`), out)
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester handle=c:[0-9a-hjkmnp-tv-z]{6,26} issue_uid=[0-9A-HJKMNP-TV-Z]{26} issue_short_id=[0-9a-z]{4,26} created_at=[^ \n]+$`), out)
 	assert.Contains(t, out, "Detailed comment record.")
 }
 

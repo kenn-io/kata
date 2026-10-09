@@ -506,13 +506,16 @@ func TestEditIssueAtomic_LinksChangedNullsEnvelopePeerForMultiEdge(t *testing.T)
 	assert.Nil(t, evt.RelatedIssueUID, "multi-peer aggregated event must leave related_issue_uid NULL")
 }
 
-func TestPurgeIssue_NoEventsLeavesResetCursorNull(t *testing.T) {
+func TestPurgeIssue_NoEventsStillReservesResetCursor(t *testing.T) {
 	t.Parallel()
 	// Manually craft an issue row with no events: insert directly so we
-	// bypass CreateIssue's automatic issue.created event. Verify that
-	// PurgeIssue sees zero attached events and leaves PurgeResetAfterEventID
-	// as nil (no SSE cursor reservation needed).
+	// bypass CreateIssue's automatic issue.created event. The project itself
+	// has a creation event; capture its maximum so the purge cursor must advance
+	// even though this issue has no attached events.
 	d, ctx, p := setupTestProject(t)
+	var maxBefore int64
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM events`).Scan(&maxBefore))
 	issueUID, err := uid.New()
 	require.NoError(t, err)
 	// short_id is the lowercased trailing-4 ULID suffix (cf. shortid.Derive).
@@ -529,7 +532,9 @@ func TestPurgeIssue_NoEventsLeavesResetCursorNull(t *testing.T) {
 	assert.Equal(t, int64(0), pl.EventCount)
 	assert.Nil(t, pl.EventsDeletedMinID)
 	assert.Nil(t, pl.EventsDeletedMaxID)
-	assert.Nil(t, pl.PurgeResetAfterEventID, "no events deleted → no reset cursor")
+	require.NotNil(t, pl.PurgeResetAfterEventID)
+	assert.Greater(t, *pl.PurgeResetAfterEventID, maxBefore,
+		"issue purge must advance snapshot cursors even when no events were deleted")
 }
 
 func TestPurgeIssue_ReservesSqliteSequenceAboveMaxEventID(t *testing.T) {

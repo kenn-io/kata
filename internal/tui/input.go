@@ -357,10 +357,17 @@ type listSelectionSnapshot struct {
 // (none today, but the shape leaves room for forward-looking
 // shells).
 type formTarget struct {
-	projectID    int64
-	issueShortID string
-	detailGen    int64
-	origin       string
+	issueUID       string
+	replyUID       string
+	replyKind      string
+	forceReply     bool
+	idempotencyKey string
+	submittedBody  string
+	submittedKind  string
+	projectID      int64
+	issueShortID   string
+	detailGen      int64
+	origin         string
 }
 
 // inputAction names what the caller should do after Update. Actions
@@ -826,9 +833,13 @@ func newBodyEditForm(target formTarget, current string) inputState {
 // blocks commit per the kind-specific gate (comments must have content;
 // clearing a body is legitimate but posting an empty comment is not).
 func newCommentForm(target formTarget) inputState {
+	title := fmt.Sprintf("comment on #%s", target.issueShortID)
+	if target.replyUID != "" {
+		title = fmt.Sprintf("%s reply on #%s (Ctrl+r changes kind)", target.replyKind, target.issueShortID)
+	}
 	return inputState{
 		kind:   inputCommentForm,
-		title:  fmt.Sprintf("comment on #%s", target.issueShortID),
+		title:  title,
 		fields: []inputField{newFormTextarea(fieldComment, "")},
 		target: target,
 	}

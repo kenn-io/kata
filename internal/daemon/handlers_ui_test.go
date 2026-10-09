@@ -10,6 +10,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -395,6 +396,56 @@ func TestUISnapshotReusesCollectionAuthorityAcrossSelection(t *testing.T) {
 	require.Len(t, envelope.Catalog, 1)
 	require.Len(t, envelope.Collection, 1)
 	require.Equal(t, "available", envelope.Selected.State)
+}
+
+func TestUISnapshotCollectionOnlyOmitsCachedSelection(t *testing.T) {
+	store := &countingUIStore{cursor: 1, snapshotCursor: 1, snapshot: db.UISnapshotData{
+		SelectedIssue: &db.UIIssue{UID: "01J00000000000000000000000", Title: "a"},
+	}}
+	ts := newUISnapshotServer(t, store, true)
+	resp, body := getUISnapshot(t, ts, url.Values{"view": {"all-open"}}, "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.NotContains(t, envelope, "selected")
+}
+
+func FuzzUISnapshotSelectionMatchesRequest(f *testing.F) {
+	f.Add(false, true, "Cached selection", uint16(5))
+	f.Add(true, true, "Selected issue", uint16(5))
+	f.Add(true, false, "Missing selection", uint16(1))
+	f.Fuzz(func(t *testing.T, requested, cached bool, title string, cursor uint16) {
+		if !utf8.ValidString(title) {
+			return
+		}
+		selectedUID := "01J00000000000000000000000"
+		store := &countingUIStore{cursor: int64(cursor) + 1, snapshotCursor: int64(cursor) + 1}
+		if cached {
+			store.snapshot.SelectedState = "available"
+			store.snapshot.SelectedIssue = &db.UIIssue{UID: selectedUID, Title: title}
+		}
+		ts := newUISnapshotServer(t, store, true)
+		query := url.Values{"view": {"all-open"}}
+		if requested {
+			query.Set("selected_issue_uid", selectedUID)
+		}
+		resp, body := getUISnapshot(t, ts, query, "")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var envelope struct {
+			Selected *struct {
+				State string `json:"state"`
+			} `json:"selected"`
+		}
+		require.NoError(t, json.Unmarshal(body, &envelope))
+		require.Equal(t, requested, envelope.Selected != nil, "selection authority must follow the request, not cached enrichment")
+		if requested {
+			state := "missing"
+			if cached {
+				state = "available"
+			}
+			require.Equal(t, state, envelope.Selected.State)
+		}
+	})
 }
 
 func TestUISnapshotReusesRecentSelectedEnrichment(t *testing.T) {

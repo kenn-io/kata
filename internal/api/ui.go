@@ -59,7 +59,7 @@ func (in *UISnapshotRequest) Resolve(ctx huma.Context) []error {
 type UISelectedAuthority struct {
 	State       string          `json:"state"`
 	Issue       *db.UIIssue     `json:"issue,omitempty"`
-	Comments    []db.Comment    `json:"comments"`
+	Comments    []CommentOut    `json:"comments"`
 	Labels      []db.IssueLabel `json:"labels"`
 	Links       []db.UILink     `json:"links"`
 	Recurrences []db.Recurrence `json:"recurrences"`
