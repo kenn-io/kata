@@ -184,3 +184,77 @@ func TestArtifactCaptureBoundsPreserveLocalIndexing(t *testing.T) {
 		})
 	}
 }
+
+// Portable artifact capture must preserve the existing local fill contract
+// when the raw splitter window exceeds the bounded artifact format, even when
+// whitespace keeps the actual encoded chunk count small.
+func TestArtifactCaptureRuneWindowBoundsPreserveLocalIndexing(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			var source db.Storage
+			var idx *vector.Index
+			if backend == "sqlite" {
+				s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
+				require.NoError(t, err)
+				source = s
+				t.Cleanup(func() { require.NoError(t, s.Close()) })
+				idx, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, idx.Close()) })
+			} else {
+				dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+				t.Cleanup(cleanup)
+				s, err := pgstore.Open(ctx, dsn)
+				require.NoError(t, err)
+				source = s
+				t.Cleanup(func() { require.NoError(t, s.Close()) })
+				idx, err = vector.OpenPostgres(ctx, s.DB)
+				require.NoError(t, err)
+			}
+
+			project, err := source.CreateProject(ctx, "rune-window-project")
+			require.NoError(t, err)
+			maxRawRunes := embedding.RecipeSplitMaxRunes +
+				(embedding.MaxArtifactChunks-1)*(embedding.RecipeSplitMaxRunes-embedding.RecipeSplitOverlap)
+			title := "Whitespace window"
+			body := strings.Repeat("prefix ", 10) + strings.Repeat(" ", maxRawRunes) + "suffix"
+			require.Less(t, len(embedding.EmbedText(title, body)), embedding.MaxArtifactInputBytes,
+				"input stays below the byte limit while its raw rune window exceeds the portable limit")
+			_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID,
+				Title:     title,
+				Body:      body,
+				Author:    "member",
+			})
+			require.NoError(t, err)
+			_, err = idx.RefreshMirror(ctx, source)
+			require.NoError(t, err)
+			client, err := embedding.New(embedding.Config{BaseURL: "https://encoder.example/v1", Model: "example-model", Dims: 2})
+			require.NoError(t, err)
+			recipe, err := client.ArtifactIdentity("", "", source.InstanceUID())
+			require.NoError(t, err)
+			key := client.Generation().Fingerprint()
+			require.NoError(t, idx.EnsureBuilding(ctx, key, client.Generation()))
+			encode := func(_ context.Context, texts []string) ([][]float32, error) {
+				values := make([][]float32, len(texts))
+				for i := range values {
+					values[i] = []float32{1, 0}
+				}
+				return values, nil
+			}
+
+			stats, err := idx.FillWithArtifacts(ctx, key, source, recipe, encode, 0, nil, nil)
+			require.NoError(t, err, "successful local vectors must not fail portable artifact capture")
+			require.Positive(t, stats.Chunks)
+			embedded, skipped, pending, err := idx.Coverage(ctx, key)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, embedded)
+			require.Zero(t, skipped)
+			require.Zero(t, pending)
+			manifests, err := source.(db.EmbeddingArtifactStorage).EmbeddingArtifactManifests(ctx, project.UID, 10)
+			require.NoError(t, err)
+			require.Empty(t, manifests, "inputs beyond the portable raw window remain local-only")
+		})
+	}
+}

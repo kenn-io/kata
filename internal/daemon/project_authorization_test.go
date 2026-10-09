@@ -1799,6 +1799,73 @@ func TestProjectAccessAnonymousPrivateNetworkWrites(t *testing.T) {
 	})
 }
 
+func TestProjectAccessAnonymousPrivateNetworkLeaseActions(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, err := store.EnableProjectFederation(t.Context(), f.public.ID, "admin")
+		require.NoError(t, err)
+		server := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		request := func(method, path string, body any) (int, []byte) {
+			t.Helper()
+			var encoded []byte
+			if body != nil {
+				var err error
+				encoded, err = json.Marshal(body)
+				require.NoError(t, err)
+			}
+			req := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+			if body != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			req.RemoteAddr = "192.168.1.10:43210"
+			req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey,
+				&net.TCPAddr{IP: net.ParseIP("192.168.1.20"), Port: 7777}))
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, req)
+			return recorder.Code, recorder.Body.Bytes()
+		}
+
+		leasePath := fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", f.public.ID, f.visible.ShortID)
+		claimBody := map[string]any{
+			"holder": "network-cli", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": int64(120),
+		}
+		status, raw := request(http.MethodPost, leasePath+"/actions/acquire", claimBody)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var acquired claimResponseBody
+		require.NoError(t, json.Unmarshal(raw, &acquired), string(raw))
+		require.True(t, acquired.Granted, string(raw))
+
+		status, raw = request(http.MethodGet, leasePath, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var lease claimStatusBody
+		require.NoError(t, json.Unmarshal(raw, &lease), string(raw))
+		require.True(t, lease.Held, string(raw))
+
+		status, raw = request(http.MethodPost, leasePath+"/actions/renew", map[string]any{
+			"holder": "network-cli", "client_kind": "cli", "ttl_seconds": int64(300),
+		})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var renewed claimResponseBody
+		require.NoError(t, json.Unmarshal(raw, &renewed), string(raw))
+		require.True(t, renewed.Granted, string(raw))
+
+		status, raw = request(http.MethodPost, leasePath+"/actions/release", map[string]any{
+			"holder": "network-cli", "client_kind": "cli",
+		})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var released claimResponseBody
+		require.NoError(t, json.Unmarshal(raw, &released), string(raw))
+		require.True(t, released.Granted, string(raw))
+
+		status, raw = request(http.MethodGet, leasePath, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		lease = claimStatusBody{}
+		require.NoError(t, json.Unmarshal(raw, &lease), string(raw))
+		require.False(t, lease.Held, string(raw))
+	})
+}
+
 func TestProjectAccessArchivedSelectionIsIndistinguishable(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)

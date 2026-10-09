@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
@@ -308,7 +309,11 @@ func (s *artifactCaptureStore) SaveVectors(ctx context.Context, key, doc string,
 		// Transport bounds do not shrink the existing local index contract.
 		// An oversized successful local result remains local; it must not be
 		// stamped as a partial artifact or trigger another paid fill attempt.
-		if len(scanned.Content) > embedding.MaxArtifactInputBytes || len(vectors) > embedding.MaxArtifactChunks || s.recipe.Dimensions > embedding.MaxArtifactDimensions || int64(len(vectors))*int64(s.recipe.Dimensions)*4 > embedding.MaxArtifactVectorBytes {
+		if len(scanned.Content) > embedding.MaxArtifactInputBytes ||
+			artifactRawWindowExceeded(scanned.Content, s.recipe) ||
+			len(vectors) > embedding.MaxArtifactChunks ||
+			s.recipe.Dimensions > embedding.MaxArtifactDimensions ||
+			int64(len(vectors))*int64(s.recipe.Dimensions)*4 > embedding.MaxArtifactVectorBytes {
 			return s.saveVectors(ctx, key, doc, revision, vectors)
 		}
 		chunks := kitvec.Split(scanned.Content, kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap})
@@ -337,6 +342,18 @@ func (s *artifactCaptureStore) SaveVectors(ctx context.Context, key, doc string,
 		}
 	}
 	return s.saveVectors(ctx, key, doc, revision, vectors)
+}
+
+func artifactRawWindowExceeded(input string, identity embedding.ArtifactIdentity) bool {
+	if !utf8.ValidString(input) ||
+		identity.SplitMaxRunes < 1 ||
+		identity.SplitMaxRunes > embedding.MaxArtifactInputBytes ||
+		identity.SplitOverlap < 0 ||
+		identity.SplitOverlap >= identity.SplitMaxRunes {
+		return false
+	}
+	maxRunes := int64(identity.SplitMaxRunes) + int64(embedding.MaxArtifactChunks-1)*int64(identity.SplitMaxRunes-identity.SplitOverlap)
+	return int64(utf8.RuneCountInString(input)) > maxRunes
 }
 
 func (s *artifactCaptureStore) saveVectors(ctx context.Context, key, doc string, revision any, vectors []kitvec.ChunkVector) error {

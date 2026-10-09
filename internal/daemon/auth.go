@@ -82,6 +82,9 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				next.ServeHTTP(w, r)
 				return
 			}
+			if p.Token == "" && p.AllowUnauthenticatedPrivateNetworkWrites && !p.InsecureReadonly {
+				r = r.WithContext(withUnauthenticatedPrivateNetworkRequest(r.Context()))
+			}
 			if p.RequireTokenIdentity && p.SelfAuthenticatedRoutes.matches(r) &&
 				hasBearerHeader(r.Header.Get(authHeader)) && tokenStore != nil {
 				presented := strings.TrimPrefix(r.Header.Get(authHeader), authBearerPrefix)
@@ -132,9 +135,6 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 					return
 				}
 				if !p.InsecureReadonly {
-					if p.AllowUnauthenticatedPrivateNetworkWrites {
-						r = r.WithContext(withUnauthenticatedPrivateNetworkRequest(r.Context()))
-					}
 					next.ServeHTTP(w, r)
 					return
 				}
