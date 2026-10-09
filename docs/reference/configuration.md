@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-07
+last_edited: 2026-10-08
 ---
 
 # Configuration
@@ -33,6 +33,8 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_SEARCH_EMBEDDINGS_MODEL` | Overrides `[search.embeddings].model`. |
 | `KATA_SEARCH_EMBEDDINGS_DIMS` | Overrides `[search.embeddings].dims`. Must be a non-negative integer; `0` keeps the default dimensionality. |
 | `KATA_SEARCH_EMBEDDINGS_API_KEY_FILE` | Overrides `[search.embeddings].api_key_file`; the existing credential precedence and file restrictions apply. |
+| `KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX`, `KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX`, `KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX`, `KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX` | Override the matching `[search.embeddings]` affix. Kata keeps the value's leading and trailing spaces; a blank value leaves the file setting in place. |
+| `KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS` | Overrides `[search.embeddings].request_dimensions`. Accepts `true` or `false` (also `1`/`0`); any other value stops startup. |
 | `KATA_BACKUP_DIR` | Destination for [scheduled full JSONL backups](../operations/backup-restore.md#scheduled-backups); overrides `[backup].dir`. |
 | `KATA_BACKUP_INTERVAL` | Overrides `[backup].interval`. Positive duration; defaults to `24h` when a backup directory is configured. |
 | `KATA_BACKUP_RETAIN` | Overrides `[backup].retain`. Positive duration; defaults to `720h`. |
@@ -744,6 +746,11 @@ model    = "nomic-embed-text"
 # api_key_file = "~/.config/kata/embedding.key"
 # api_key_env  = "VOYAGE_API_KEY"
 # fingerprint_salt = ""         # bump to force re-embed when model weights change
+# document_prefix = ""          # literal affix applied to each indexed chunk
+# document_suffix = ""
+# query_prefix = ""             # literal affix applied to each search query
+# query_suffix = ""
+# request_dimensions = false    # send dims only if the provider supports it
 # dims                          # expected vector dimensionality (default 768)
 # batch_size                    # inputs per request (default 64)
 # model_context_tokens          # model's maximum tokens for one input
@@ -756,6 +763,58 @@ model    = "nomic-embed-text"
 one is a startup error rather than a silent disable. With no credential source
 configured, requests omit the `Authorization` header. Keyless local providers
 such as Ollama need only `base_url` and `model`.
+
+Affixes preserve every space and newline. Kata applies document affixes once
+around each prepared issue chunk and query affixes once around the search
+query text, which Kata sends as entered. With empty affixes and
+`request_dimensions = false`, existing generation fingerprints stay unchanged
+and stored vectors are reused. Setting any affix or enabling dimension requests
+creates a separate generation. `dims` always validates response width;
+`request_dimensions` additionally sends that width as the request's
+`dimensions` field. Kata never slices vectors to fit.
+
+### Optional EmbeddingGemma 2 text endpoint
+
+For a conforming OpenAI-compatible text server, this optional configuration
+uses the [EmbeddingGemma 2 model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2)
+retrieval recipe and native 768 dimensions:
+
+```toml
+[search.embeddings]
+base_url = "http://127.0.0.1:8080/v1"
+model = "embeddinggemma-2-text-r914f7f8-bf16" # example server alias
+fingerprint_salt = "914f7f89142e33e77833254d9c9b90c3cef7303b"
+dims = 768
+document_prefix = "title: none | text: "
+query_prefix = "task: search result | query: "
+```
+
+The operator must bind that alias to `google/embeddinggemma-2` at the specified
+revision, tokenizer, pooling, precision and dimension policy. The alias and
+salt record that assertion; Kata does not verify the server's weights. Use
+mean pooling including prompts, L2 normalization, and bfloat16 or float32
+activations, rather than float16. Configure the server to accept literal client
+prompts without adding them again. Kata sends text only; this transport does
+not enable image, audio or video input.
+
+The model card recommends `title: {title}` when a title exists. Affixes are
+fixed text, so every chunk uses `title: none` and the issue title stays at the
+start of the first chunk's text.
+
+The server must enforce the shared 8192-token input window, including prompt
+overhead. Kata's `model_context_tokens` and `max_batch_tokens` only bound batch
+packing; they do not tokenize or enforce admission for an individual input.
+Character-based chunk limits also do not establish that token bound.
+
+Kata does not download weights or configure the serving runtime.
+
+For 512, 256 or 128 dimensions, set `dims` to that width and
+`request_dimensions = true` only if the server supports explicit truncation
+followed by L2 renormalization. Both queries and documents must use the same
+width. A server that returns the wrong width is rejected. Changing these
+settings requires restart and backfill before semantic search can resume.
+
+### Credentials and batching
 
 Credential resolution uses `api_key` > `api_key_file` > `api_key_env`. The first
 selected source wins. If its file is missing, unreadable, or empty, or its
@@ -811,6 +870,8 @@ example Ollama on loopback) so issue text never leaves the host. Embeddings are
 local derived state and **do not federate**: each daemon embeds only what it
 stores, and no vectors are sent to or pulled from federated hubs.
 
+### Index freshness
+
 The daemon keeps the index fresh on its own: a background reconciler embeds new
 and edited issues within seconds, and `kata` reports its state under
 `embeddings` in the `/health` response (`configured`, `last_success_at`,
@@ -843,13 +904,14 @@ until they are embedded. Search degrades (labeled in `auto` mode, 503 for
 explicit `--hybrid`/`--semantic`) when the vector leg is unavailable or when
 bounded label filtering exhausts its candidate ceiling before filling the
 requested result limit. Unavailability includes the period before any index is
-activated (fresh vector storage before the first reconcile cycle) and model
-changes while the replacement index is still backfilling.
+activated (fresh vector storage before the first reconcile cycle) and embedding
+configuration changes while the replacement index is still backfilling.
 
-Changing `model`, `dims`, or `fingerprint_salt` builds a new index generation
+Changing `model`, `dims`, `fingerprint_salt`, any literal affix, or
+`request_dimensions` builds a new index generation
 in the background and cuts over automatically once it finishes filling.
 During that backfill the vector leg is unavailable (queries embedded under
-the new model cannot be scored against the old generation's vectors), so
+the new configuration cannot be scored against the old generation's vectors), so
 `auto` searches degrade to labeled lexical results and explicit
 `--hybrid`/`--semantic` requests return 503 until the cutover.
 

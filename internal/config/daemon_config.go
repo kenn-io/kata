@@ -128,6 +128,13 @@ type EmbeddingsConfig struct {
 	// FingerprintSalt is the operator's lever for "same model name,
 	// different weights"; changing it invalidates every stored vector.
 	FingerprintSalt string `toml:"fingerprint_salt"`
+	// Affixes are literal text applied once by the embedding client.
+	DocumentPrefix string `toml:"document_prefix"`
+	DocumentSuffix string `toml:"document_suffix"`
+	QueryPrefix    string `toml:"query_prefix"`
+	QuerySuffix    string `toml:"query_suffix"`
+	// RequestDimensions sends dims to a provider supporting explicit widths.
+	RequestDimensions bool `toml:"request_dimensions"`
 	// Dims is the expected vector dimensionality. 0 means use the client
 	// default. Negative values are rejected.
 	Dims int `toml:"dims"`

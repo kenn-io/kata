@@ -203,10 +203,10 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		return nil, false, errors.New("no active embedding generation (backfill in progress)")
 	}
 	// The active generation must match the configured embedder's fingerprint.
-	// After a model change the old generation keeps its vectors while the new
-	// one backfills; ranking a new-model query vector against old-model stored
-	// vectors is meaningless (same dims) or an error (dims change), so the leg
-	// is unavailable until cutover.
+	// After an embedding configuration change the old generation keeps its
+	// vectors while the new one backfills. Scoring a query against vectors
+	// from another configuration can yield meaningless scores or a dimension
+	// error, so the leg is unavailable until cutover.
 	matches, err := emb.Space().Matches(key)
 	if err != nil {
 		return nil, false, err
@@ -215,11 +215,11 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		if h := emb.CredentialHealth(); h.Credential != "ok" {
 			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
 		}
-		return nil, false, errors.New("embedding model changed; new index is backfilling")
+		return nil, false, errors.New("embedding configuration changed; new index is backfilling")
 	}
 	ectx, cancel := context.WithTimeout(ctx, queryEmbedTimeout)
 	defer cancel()
-	vecs, err := emb.Embed(ectx, []string{embedding.EmbedText(p.Query, "")})
+	vecs, err := emb.EmbedQuery(ectx, []string{p.Query})
 	if err != nil {
 		return nil, false, err
 	}
