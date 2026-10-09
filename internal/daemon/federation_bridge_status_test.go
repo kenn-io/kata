@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -171,5 +173,60 @@ func TestFederationBridgeActiveStatus(t *testing.T) {
 		_, err = store.SetRelayBindingConfig(t.Context(), result.Project.ID, relay)
 		require.NoError(t, err)
 		read("revoked")
+	})
+}
+
+func TestFederationStatusCountsRelayDescendants(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		t.Setenv("KATA_HOME", t.TempDir())
+		credentials := newReplicaCredentialStore()
+		params := relayReplicaParams(t, store)
+		params.Credential.HubCatalog = "example-hub"
+		result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+		require.NoError(t, err)
+
+		parent, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: "relay-descendant-parent-test-token",
+			Actor:          "local-member",
+			AdminActor:     "admin",
+		})
+		require.NoError(t, err)
+		_, err = store.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{
+			ProjectID:        result.Project.ID,
+			ParentTokenID:    parent.ID,
+			SpokeInstanceUID: federationTestSpokeUID,
+			ProtocolVersion:  db.RelayProtocolVersion,
+			Token:            "relay-descendant-test-token",
+			ServeDownstream:  false,
+		})
+		require.NoError(t, err)
+
+		server := daemon.NewServer(daemon.ServerConfig{
+			DB: store, Auth: config.AuthConfig{Token: "local-owner-test-token"},
+			FederationCredentials: credentials,
+		})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		endpoint := httptest.NewServer(server.Handler())
+		t.Cleanup(endpoint.Close)
+		request := projectAccessFixture{store: store, server: endpoint}
+		headers := map[string]string{"Authorization": "Bearer local-owner-test-token"}
+
+		code, _, raw := request.request(t, http.MethodGet,
+			projectPath(result.Project.ID)+"/federation/status", "", nil, headers)
+		require.Equal(t, http.StatusOK, code, string(raw))
+		var federationStatus api.FederationStatusBody
+		require.NoError(t, json.Unmarshal(raw, &federationStatus))
+		require.Len(t, federationStatus.Statuses, 1)
+		assert.Equal(t, int64(1), federationStatus.Statuses[0].EnrollmentCount,
+			"a relay that serves descendants reports its active child enrollment")
+
+		code, _, raw = request.request(t, http.MethodGet,
+			"/api/v1/federation/bridges/"+result.Project.Name, "", nil, headers)
+		require.Equal(t, http.StatusOK, code, string(raw))
+		var bridgeStatus api.FederationBridgeStatusBody
+		require.NoError(t, json.Unmarshal(raw, &bridgeStatus))
+		require.NotNil(t, bridgeStatus.Federation)
+		assert.Equal(t, int64(1), bridgeStatus.Federation.EnrollmentCount,
+			"bridge status reports the same downstream enrollment count")
 	})
 }

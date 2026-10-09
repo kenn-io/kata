@@ -1277,7 +1277,11 @@ func federationPendingPushStats(ctx context.Context, store db.Storage, binding d
 }
 
 func federationEnrollmentCount(ctx context.Context, store db.Storage, binding db.FederationBinding) (int64, error) {
-	if binding.Role != db.FederationRoleHub {
+	// Negotiated relay spokes can own active descendant grants too; those
+	// grants block detach and reset just like enrollments on a hub.
+	servesDescendants := binding.Role == db.FederationRoleSpoke &&
+		binding.RelayConfig != nil && binding.RelayConfig.ServeDownstream
+	if binding.Role != db.FederationRoleHub && !servesDescendants {
 		return 0, nil
 	}
 	return store.CountActiveFederationEnrollments(ctx, binding.ProjectID)
