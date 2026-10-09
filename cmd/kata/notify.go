@@ -25,6 +25,17 @@ func newNotifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "notify <issue-ref>",
 		Short: "request a teammate's attention on an issue",
+		Long: `Put a request in the recipient's inbox. --to takes an address: <actor> or
+<actor>/<teammate>. --message is required unless --clear. One request per
+issue and recipient; a new one replaces the old. Clear it after handling.
+--re <comment> asks the recipient to answer that comment; their reply with
+comment --reply clears the request, and wait --until reply wakes you.
+--broadcast replaces --to: it asks this issue's participants and those of
+its open children (at most 50); --teammates adds their teammate inboxes.`,
+		Example: `  kata notify abc4 --to coordinator --message "Need a decision on the schema" --agent
+  kata notify abc4 --to reviewer/teammate-2 --re c:abc123 --message "Please confirm or refute this finding" --agent
+  kata notify abc4 --broadcast --message "Schema changed; re-check your branches" --agent
+  kata notify abc4 --to coordinator/teammate-1 --clear --agent`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to := ""
@@ -153,8 +164,8 @@ func newNotifyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&re, "re", "", "comment reference to open and reply to")
 	cmd.Flags().BoolVar(&broadcast, "broadcast", false, "request attention from issue and open-child participants")
 	cmd.Flags().BoolVar(&teammates, "teammates", false, "include exact teammate inboxes in a broadcast")
-	cmd.Flags().StringVar(&recipient, "to", "", "teammate whose attention is requested (max 128 UTF-8 bytes)")
-	cmd.Flags().StringVar(&message, "message", "", "reason their attention is needed (max 1024 bytes)")
+	cmd.Flags().StringVar(&recipient, "to", "", "recipient: <actor> or <actor>/<teammate> (required unless --broadcast)")
+	cmd.Flags().StringVar(&message, "message", "", "why their attention is needed (required unless --clear; max 1024 bytes)")
 	cmd.Flags().BoolVar(&clearRequest, "clear", false, "remove this teammate's request")
 	return cmd
 }

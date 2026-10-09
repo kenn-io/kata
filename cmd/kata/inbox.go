@@ -50,6 +50,10 @@ func newInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "list requests for a teammate's attention",
+		Long: `A row with re=<comment> asks you to answer that comment; answering with
+comment --reply <comment> on that issue clears it. A row with kind= reports
+a reply to one of your comments; broadcast=true marks a notify --broadcast.`,
+		Example: `  kata inbox --for coordinator/teammate-2 --agent`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if allProjects && (cmd.Root().PersistentFlags().Changed("project") || cmd.Root().PersistentFlags().Changed("workspace")) {

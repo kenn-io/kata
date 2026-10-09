@@ -246,6 +246,7 @@ attention completions; pending lists refs still unmet on timeout. abandoned
 (present only when non-empty) lists refs dropped from an --any join after a
 permanent daemon error such as a deleted issue; in --all a permanent error
 aborts the whole wait with the daemon's exit code instead.`,
+		Example: `  kata wait abc4 --until reply --timeout 30m --agent`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWait(cmd, args, opts)
