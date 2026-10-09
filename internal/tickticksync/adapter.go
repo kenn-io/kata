@@ -21,11 +21,12 @@ import (
 type Adapter struct {
 	store   db.Storage
 	fetcher Fetcher
+	now     func() time.Time
 }
 
 // NewAdapter connects scoped observations to durable shared sync storage.
 func NewAdapter(store db.Storage, fetcher Fetcher) *Adapter {
-	return &Adapter{store: store, fetcher: fetcher}
+	return &Adapter{store: store, fetcher: fetcher, now: time.Now}
 }
 
 // Provider names this adapter for binding selection.
@@ -67,6 +68,9 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
+	// Date content by when it was fetched. In two-way mode the status pass runs
+	// first and can take minutes after the claim started.
+	observedAt := a.now()
 	visible := map[string]bool{}
 	for _, t := range data.Tasks {
 		visible[t.ID] = true
@@ -79,7 +83,10 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
-	batch, next, err := BuildImportBatch(c, data, cp, started)
+	if err = a.seedReturningTasks(ctx, b, data, &cp); err != nil {
+		return p, err
+	}
+	batch, next, err := BuildImportBatch(c, data, cp, observedAt)
 	if err != nil {
 		return p, err
 	}
@@ -225,6 +232,47 @@ func markPending(staged, cp Checkpoint, id string, recovery, status bool) {
 	staged.Versions[id] = observed
 }
 
+// seedReturningTasks gives a mapped task with no checkpoint entry, such as one
+// that sync stopped tracking, its saved source version as a baseline. Unchanged
+// content then cannot replace newer local edits. Its status is marked pending so
+// the import compares it with the recorded observation once.
+func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) error {
+	returning := map[string]Task{}
+	for _, t := range data.Tasks {
+		if _, tracked := cp.Versions[t.ID]; tracked || t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
+			continue
+		}
+		returning[t.ID] = t
+	}
+	if len(returning) == 0 {
+		return nil
+	}
+	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
+	if err != nil {
+		return err
+	}
+	for _, m := range mappings {
+		if m.ObjectType != "issue" || m.SourceUpdatedAt == nil {
+			continue
+		}
+		id, err := mappingTaskID(m.ExternalID)
+		if err != nil {
+			return err
+		}
+		task, ok := returning[id]
+		if !ok {
+			continue
+		}
+		hash, err := taskContentHash(task)
+		if err != nil {
+			return err
+		}
+		saved := m.SourceUpdatedAt.UTC().Truncate(time.Millisecond)
+		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved, PendingStatus: true}
+	}
+	return nil
+}
+
 // openMissingTasks lists mapped tasks absent from the current collection whose
 // Kata issue is still open. The collection omits completed tasks, so only these
 // can still change status; closed history is not read again. A task that
@@ -268,14 +316,11 @@ func (a *Adapter) openMissingTasks(ctx context.Context, b db.IssueSyncBinding, v
 	return missing, nil
 }
 
-// closedMissingTaskCandidates keeps locally closed two-way tasks eligible for
-// bounded reads. The read establishes whether the task still belongs to this
-// sync; completed tasks also need one final content import.
+// closedMissingTaskCandidates keeps locally closed tasks that TickTick last
+// showed open eligible for bounded reads. The read records the completion
+// before sync stops tracking the task, so a later TickTick reopen is a real
+// status change, and it imports the task's final content.
 func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyncBinding, visible map[string]bool, checkpoint Checkpoint) (map[string]bool, error) {
-	config, err := bindingConfig(b)
-	if err != nil {
-		return nil, err
-	}
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
 	if err != nil {
 		return nil, err
@@ -297,7 +342,7 @@ func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyn
 		if !ok {
 			continue
 		}
-		if !version.PendingRecovery && (config.StatusSync != "two-way" || version.Status != 0) {
+		if !version.PendingRecovery && version.Status != 0 {
 			continue
 		}
 		taskByIssue[*mapping.IssueID] = id
@@ -386,5 +431,13 @@ type RunnerConfig struct {
 
 // NewRunner uses shared scheduling, guarded imports, and status intent delivery.
 func NewRunner(c RunnerConfig) *issuesync.Runner {
-	return issuesync.NewRunner(issuesync.RunnerConfig{Store: c.Store, Adapter: NewAdapter(c.Store, c.Fetcher), Progress: c.Progress, Clock: c.Clock, Logger: c.Logger, Interval: c.Interval, Wake: c.Wake, EventSink: c.EventSink, EventSinkFrom: c.EventSinkFrom, DrainAdmission: c.DrainAdmission, RunTimeout: 20 * time.Minute, StaleLockTTL: 30 * time.Minute, InitialBatchSize: 5000})
+	return issuesync.NewRunner(issuesync.RunnerConfig{Store: c.Store, Adapter: newRunnerAdapter(c), Progress: c.Progress, Clock: c.Clock, Logger: c.Logger, Interval: c.Interval, Wake: c.Wake, EventSink: c.EventSink, EventSinkFrom: c.EventSinkFrom, DrainAdmission: c.DrainAdmission, RunTimeout: 20 * time.Minute, StaleLockTTL: 30 * time.Minute, InitialBatchSize: 5000})
+}
+
+func newRunnerAdapter(c RunnerConfig) *Adapter {
+	adapter := NewAdapter(c.Store, c.Fetcher)
+	if c.Clock != nil {
+		adapter.now = c.Clock
+	}
+	return adapter
 }

@@ -1028,3 +1028,104 @@ func TestObservedStatusEncodingMatchesAcrossModes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *imported, *obs.RawStatus)
 }
+
+// A task that sync stopped tracking keeps its saved source version when it
+// returns, so unchanged TickTick content cannot replace newer local edits.
+func TestReturningRetiredTaskKeepsNewerLocalEdits(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := sourceData()
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	f.missing["task-1"] = Task{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(2)}
+	f.data.Tasks = nil
+	for range 2 {
+		at = at.Add(time.Minute)
+		_, err = r.RunOnce(ctx, b.ID)
+		require.NoError(t, err)
+	}
+	issue := mappedIssue(t, s, b, "task-1")
+	require.Equal(t, "closed", issue.Status)
+	_, _, _, err = s.ReopenIssue(ctx, issue.ID, "worker")
+	require.NoError(t, err)
+	local := "Local title"
+	_, _, _, err = s.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &local, Actor: "worker"})
+	require.NoError(t, err)
+	at = time.Now().UTC().Add(time.Minute)
+	f.reads = nil
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"task-1"}, f.reads)
+	got := mappedIssue(t, s, b, "task-1")
+	require.Equal(t, local, got.Title)
+	require.Equal(t, "open", got.Status, "the already-recorded completion must not close the issue again")
+}
+
+// In one-way mode, a locally closed task that TickTick completes is read once
+// before sync stops tracking it, so a later TickTick reopen reopens the issue.
+func TestOneWayRemoteReopenAfterLocalCloseReopensIssue(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := sourceData()
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	issue := mappedIssue(t, s, b, "task-1")
+	_, _, _, err = s.CloseIssueWithEvents(ctx, issue.ID, "done", "worker", "", nil)
+	require.NoError(t, err)
+	f.missing["task-1"] = Task{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(2), CompletedTime: "2026-10-01T09:00:00.000+0000"}
+	f.data.Tasks = nil
+	f.reads = nil
+	at = at.Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"task-1"}, f.reads, "the completion is read before tracking stops")
+	f.reads = nil
+	at = at.Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Empty(t, f.reads, "a recorded completion is not read again")
+	f.data.Tasks = []Task{{ID: "task-1", ProjectID: "project-1", Title: "Task", Status: new(0)}}
+	at = at.Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, "open", mappedIssue(t, s, b, "task-1").Status)
+}
+
+type dataHookFixture struct {
+	*sourceFixture
+	onData func()
+}
+
+func (f *dataHookFixture) ForRun(context.Context, Config) (Session, error) { return f, nil }
+func (f *dataHookFixture) Data(ctx context.Context) (ProjectData, error) {
+	f.onData()
+	return f.sourceFixture.Data(ctx)
+}
+
+// Content is dated when the task list is fetched, not when the run started, so
+// a local edit made earlier in the same run cannot hide a newer TickTick change.
+func TestContentIsDatedWhenFetched(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := &dataHookFixture{sourceFixture: sourceData(), onData: func() {}}
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	issue := mappedIssue(t, s, b, "task-1")
+	at = time.Now().UTC().Add(-time.Minute)
+	f.data.Tasks[0].Title = "Remote change"
+	f.onData = func() {
+		local := "Local edit during the run"
+		_, _, _, err := s.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &local, Actor: "worker"})
+		require.NoError(t, err)
+		at = time.Now().UTC().Add(time.Second)
+	}
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Remote change", mappedIssue(t, s, b, "task-1").Title)
+}
