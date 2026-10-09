@@ -108,7 +108,8 @@ func RunRelayReconnectOfflineIntent(t *testing.T, store db.Storage, compact func
 	for _, scenario := range []struct {
 		name         string
 		requireReset bool
-	}{{name: "without-reset"}, {name: "reset-required", requireReset: true}} {
+		movePrivate  bool
+	}{{name: "without-reset"}, {name: "reset-required", requireReset: true}, {name: "moved-to-private", movePrivate: true}} {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx := t.Context()
 			project, err := store.CreateProject(ctx, "reconnected-project-"+scenario.name)
@@ -144,6 +145,23 @@ func RunRelayReconnectOfflineIntent(t *testing.T, store db.Storage, compact func
 			})
 			require.NoError(t, err)
 			retainedTitle := issue.Title
+			if scenario.movePrivate {
+				privateProject, err := store.CreateProject(ctx, "private-project-for-"+scenario.name)
+				require.NoError(t, err)
+				_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+					IssueID: issue.ID, FromProjectID: project.ID, ToProjectID: privateProject.ID,
+					IfMatchRev: issue.Revision, Actor: "source-assistant",
+				})
+				require.NoError(t, err)
+				retainedEvents, err := store.EventsByUIDs(ctx, project.ID, []string{event.UID})
+				require.NoError(t, err)
+				require.Len(t, retainedEvents, 1)
+				require.Equal(t, event.ContentHash, retainedEvents[0].ContentHash, "moving an issue preserves its original hashed event")
+				require.Equal(t, event.Payload, retainedEvents[0].Payload, "moving an issue does not rewrite the original payload")
+				moved, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, privateProject.ID, moved.ProjectID)
+			}
 			if scenario.requireReset {
 				require.NoError(t, compact(ctx, project.ID))
 				issueTitle := "retained post-compaction edit"
@@ -163,11 +181,20 @@ func RunRelayReconnectOfflineIntent(t *testing.T, store db.Storage, compact func
 			require.NoError(t, err)
 			pending, err := store.PendingRelayDeliveries(ctx, relay.BindingUID, db.RelayStreamEvent, 10)
 			require.NoError(t, err)
-			require.Len(t, pending, 1, "reconnect must queue the retained standalone source event")
-			require.Equal(t, event.UID, pending[0].SourceUID)
-			require.NoError(t, store.AckRelayDeliveries(ctx, relay.BindingUID, pending[0].Epoch, pending[0].Stream, pending[0].Sequence, pending[0].Digest))
+			if scenario.movePrivate {
+				require.Empty(t, pending, "reconnect must not send creation bytes for an issue now owned by a private project")
+			} else {
+				require.Len(t, pending, 1, "reconnect must queue the retained standalone source event")
+				require.Equal(t, event.UID, pending[0].SourceUID)
+				require.NoError(t, store.AckRelayDeliveries(ctx, relay.BindingUID, pending[0].Epoch, pending[0].Stream, pending[0].Sequence, pending[0].Digest))
+			}
 			count, highWater, err := store.PendingFederationPushStats(ctx, project.ID, store.InstanceUID(), 0)
 			require.NoError(t, err)
+			if scenario.movePrivate {
+				require.Zero(t, count, "an issue moved to a private project is not pending for relay delivery")
+				require.Zero(t, highWater)
+				return
+			}
 			require.Equal(t, int64(1), count, "a reconnected edit remains pending until root acceptance")
 			require.Equal(t, event.ID, highWater)
 

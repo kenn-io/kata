@@ -147,6 +147,14 @@ func (d *Store) seedRelayLocalEventsTx(ctx context.Context, tx *sql.Tx, grant db
 			if err != nil {
 				return err
 			}
+			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event))
+			if err != nil {
+				return err
+			}
+			if crossing {
+				// Retain the original hashed event locally without replaying private issue data.
+				continue
+			}
 			body, err := db.EncodeRelaySourceEvent(db.RemoteEventFromStored(event))
 			if err != nil {
 				return err
