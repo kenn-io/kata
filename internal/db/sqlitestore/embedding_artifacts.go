@@ -23,15 +23,31 @@ func (d *Store) RetainEmbeddingArtifact(ctx context.Context, artifact embedding.
 	}
 	durable := false
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		durable, err = d.retainEmbeddingArtifactTx(ctx, tx, artifact)
+		var projectID int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=? AND deleted_at IS NULL`, artifact.ProjectUID).Scan(&projectID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return db.ErrNotFound
+			}
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		enqueueRelay := true
+		if err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled && !binding.PushEnabled {
+			// A local encoder may finish after disconnect fenced project writes.
+			// Keep the artifact locally, but don't create relay work the leave can't drain.
+			enqueueRelay = false
+		}
+		durable, err = d.retainEmbeddingArtifactTx(ctx, tx, artifact, enqueueRelay)
 		return err
 	})
 	return durable && err == nil, err
 }
 
 // The receiver uses the same transaction for portable bytes and hop acceptance.
-func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artifact embedding.EmbeddingArtifact) (bool, error) {
+func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artifact embedding.EmbeddingArtifact, enqueueRelay bool) (bool, error) {
 	if !db.ProjectAttributionVisible(ctx, artifact.ProjectUID) {
 		return false, db.ErrNotFound
 	}
@@ -100,7 +116,7 @@ func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artif
 				}
 			}
 			durable = !expiry.Valid || contentExists
-			if durable {
+			if durable && enqueueRelay {
 				return queueRelayBodyTx(ctx, tx, projectID, artifact.ProjectUID, db.RelayStreamArtifact, artifact.Digest, artifact.Digest, manifestRaw, d.instanceUID)
 			}
 			return nil
@@ -123,7 +139,7 @@ func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artif
 			return err
 		}
 		durable = contentExists
-		if durable {
+		if durable && enqueueRelay {
 			return queueRelayBodyTx(ctx, tx, projectID, artifact.ProjectUID, db.RelayStreamArtifact, artifact.Digest, artifact.Digest, manifestRaw, d.instanceUID)
 		}
 		return nil

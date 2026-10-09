@@ -133,7 +133,7 @@ func (d *Store) acceptRelayArtifacts(ctx context.Context, bindingUID string, bat
 				}
 				ingressCtx := db.WithRelayArtifactSourceUID(db.WithRelayForwardPath(ctx, append(slices.Clone(envelope.Path), d.instanceUID)), envelope.SourceUID)
 				if !retired {
-					durable, err = d.retainEmbeddingArtifactTx(ingressCtx, tx, artifact)
+					durable, err = d.retainEmbeddingArtifactTx(ingressCtx, tx, artifact, true)
 				}
 				if err != nil && !errors.Is(err, db.ErrEmbeddingArtifactMiss) {
 					return err
@@ -150,7 +150,7 @@ func (d *Store) acceptRelayArtifacts(ctx context.Context, bindingUID string, bat
 					// Reuse exact retained bytes under the same live issue/project
 					// fence. Staging becomes durable only after content exists.
 					ingressCtx := db.WithRelayArtifactSourceUID(db.WithRelayForwardPath(ctx, append(slices.Clone(envelope.Path), d.instanceUID)), envelope.SourceUID)
-					durable, err = d.retainEmbeddingArtifactTx(ingressCtx, tx, artifact)
+					durable, err = d.retainEmbeddingArtifactTx(ingressCtx, tx, artifact, true)
 					if err != nil && !errors.Is(err, db.ErrEmbeddingArtifactMiss) {
 						return err
 					}
