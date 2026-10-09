@@ -190,7 +190,7 @@ func beginFederationBridgeEnrollment(
 }
 
 func federationBridgeProjectCollision(ctx context.Context, store db.Storage, projectUID, name string) error {
-	project, err := store.ProjectByName(ctx, name)
+	project, err := store.ProjectByNameIncludingArchived(ctx, name)
 	if err == nil && project.UID != projectUID {
 		return api.NewError(409, "project_name_collision", "local project name belongs to another project", "choose a different local project name", nil)
 	}
@@ -207,6 +207,28 @@ func federationBridgeProjectCollision(ctx context.Context, store db.Storage, pro
 	return nil
 }
 
+func federationBridgePendingCredentialCollision(
+	ctx context.Context,
+	credentials config.FederationCredentialStore,
+	projectUID, name string,
+) error {
+	reader, ok := credentials.(config.FederationRelayPendingMetadataReader)
+	if !ok {
+		return api.NewError(http.StatusServiceUnavailable, "federation_credentials_unavailable", "credential storage cannot check pending bridge names", "configure pending bridge metadata lookup before connecting", nil)
+	}
+	pendingUID, _, found, err := reader.PendingRelayCredentialMetadata(ctx, name)
+	if errors.Is(err, config.ErrFederationCredentialConflict) {
+		return api.NewError(409, "federation_credential_conflict", "multiple pending bridge credentials reserve this local project name", "resolve pending bridge setup before connecting", nil)
+	}
+	if err != nil {
+		return api.NewError(http.StatusServiceUnavailable, "federation_credentials_unavailable", "cannot check pending bridge names before enrollment", "retry after credential storage is available", nil)
+	}
+	if found && pendingUID != projectUID {
+		return api.NewError(409, "federation_credential_conflict", "another pending bridge enrollment reserves this local project name", "resolve pending bridge setup before connecting to a different hub project", nil)
+	}
+	return nil
+}
+
 func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, body api.FederationBridgeBody, allowInsecure bool) (config.FederationCredential, error) {
 	if credentials == nil {
 		return config.FederationCredential{}, api.NewError(503, "federation_credentials_unavailable", "federation credential storage is unavailable", "", nil)
@@ -216,6 +238,14 @@ func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, cr
 	key := federationReplicaTransitionKey(store, body.ProjectName)
 	if federationReplicaTransitions.state(key) == federationReplicaLeavePending {
 		return config.FederationCredential{}, federationReplicaAPIError(federationReplicaTransitions.leaveBlockedError(key))
+	}
+	if err := federationBridgeProjectCollision(ctx, store, body.HubProjectUID, body.ProjectName); err != nil {
+		return config.FederationCredential{}, err
+	}
+	if err := federationBridgePendingCredentialCollision(
+		ctx, credentials, body.HubProjectUID, body.ProjectName,
+	); err != nil {
+		return config.FederationCredential{}, err
 	}
 	current, found, err := credentials.FederationCredential(ctx, body.HubProjectUID)
 	if err != nil {
