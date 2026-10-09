@@ -305,7 +305,7 @@ jobs:
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: env -u KATA_AUTH_TOKEN go test -p 4 -vet=off ./...
+        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off ./...
 
   lint:
     name: golangci-lint

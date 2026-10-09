@@ -36,7 +36,11 @@ func (d *Store) ImportReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if err != nil {
 		return err
 	}
-	return d.RefreshInstanceUID(ctx)
+	d.invalidateRelayHistoryValidationCache()
+	if err := d.RefreshInstanceUID(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts db.ImportOptions) error {

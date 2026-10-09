@@ -368,6 +368,7 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 				first := len(args) + 1
 				where = append(where, fmt.Sprintf(`(p.deleted_at IS NULL
 						OR EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=p.id)
+						OR EXISTS(SELECT 1 FROM federation_event_provenance ep WHERE ep.project_uid=p.uid)
 						OR EXISTS(SELECT 1 FROM meta m WHERE m.key=$%d || p.uid
 						           OR left(m.key,length($%d || p.uid || '.'))=$%d || p.uid || '.'
 						           OR left(m.key,length($%d || p.uid || '.'))=$%d || p.uid || '.'))`,

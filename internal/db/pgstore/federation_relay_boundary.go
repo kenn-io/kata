@@ -166,7 +166,10 @@ func relayCloseParentCrossesProjectTx(
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
-	var after int64
+	return relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, 0)
+}
+
+func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
 		// #nosec G202 -- The event-type predicate is fixed native SQL; all project and cursor values remain bound.
 		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.id>$2 AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)

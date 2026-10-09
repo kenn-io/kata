@@ -133,7 +133,8 @@ func openInternal(
 	}
 	s := &Store{
 		DB: sdb, dsn: dsn, schema: pgConfig.Schema, schemaOwner: schemaOwner, readOnly: readOnly,
-		federationLease: &federationRunnerLeaseState{},
+		federationLease:   &federationRunnerLeaseState{},
+		relayHistoryCache: newRelayHistoryValidationCache(),
 	}
 	if bypassLifecycle {
 		return s, nil

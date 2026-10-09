@@ -5,11 +5,79 @@ import (
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+// RunArchivedDetachedReceiptExport keeps the verification key for receipts
+// retained by a spoke after disconnect and archive.
+func RunArchivedDetachedReceiptExport(t *testing.T, store db.Storage, backend Backend) {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID,
+		Actor: "example-actor", Enabled: true, PushEnabled: true,
+	})
+	require.NoError(t, err)
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	pin := db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: "00000000000000000000000002",
+		KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+	}
+	require.NoError(t, store.PinRootAuthority(ctx, pin))
+	issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Retained source issue", Author: "example-assistant",
+	})
+	require.NoError(t, err)
+	receipt, err := db.SignRootReceipt(db.AttributionReceipt{
+		Version: 1, ProjectUID: project.UID, AuthorityUID: pin.AuthorityUID, KeyID: pin.KeyID,
+		EventUID: event.UID, ContentHash: event.ContentHash,
+		AccountableActor: "example-account", SourceActor: event.Actor,
+		IngressInstanceUID: "00000000000000000000000003", AcceptedAt: time.Now().UTC(),
+		ResetEpoch: 1, Sequence: 1,
+	}, privateKey)
+	require.NoError(t, err)
+	require.NoError(t, store.ApplyUpstreamAttribution(ctx, pin, receipt))
+
+	leave, err := store.LeaveFederationReplica(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, db.FederationRoleSpoke, leave.Role)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "example-operator", Force: true,
+	})
+	require.NoError(t, err)
+
+	filter := db.ExportFilter{IncludeDeleted: false}
+	records, err := CollectImportRecords(ctx, store, filter)
+	require.NoError(t, err)
+	var exportedPin, exportedReceipt bool
+	for record, exportErr := range store.(db.AttributionStorage).ExportAttribution(ctx, filter) {
+		require.NoError(t, exportErr)
+		switch value := record.(type) {
+		case *db.RootKeyPin:
+			exportedPin = exportedPin || value.ProjectUID == project.UID && value.KeyID == pin.KeyID
+		case *db.AttributionReceipt:
+			exportedReceipt = exportedReceipt || value.ProjectUID == project.UID && value.EventUID == receipt.EventUID
+		}
+		records = append(records, record)
+	}
+	require.True(t, exportedPin, "live-only export retains the verification key for an archived detached receipt")
+	require.True(t, exportedReceipt, "live-only export retains the archived detached receipt")
+
+	backup := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, backup.Close()) })
+	require.NoError(t, backup.ImportReplay(ctx, records, db.ImportOptions{}))
+	restored, err := backup.(db.AttributionStorage).EntityAttribution(ctx, project.UID, "issue", issue.UID)
+	require.NoError(t, err)
+	require.NoError(t, db.VerifyRootReceipt(pin, restored))
+}
 
 // RunProjectPurgeRemovesRelayMetadata verifies purge removes relay metadata.
 func RunProjectPurgeRemovesRelayMetadata(t *testing.T, store db.Storage, backend Backend) {

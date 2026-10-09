@@ -37,6 +37,7 @@ func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opt
 		return err
 	}
 	s.instanceUID = finalInstanceUID
+	s.invalidateRelayHistoryValidationCache()
 	return nil
 }
 

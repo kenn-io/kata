@@ -299,7 +299,7 @@ func runRelayIngressDuplicateClosePreservesLease(t *testing.T, store db.Storage)
 		KeyID: db.RootPublicKeyID(public), PublicKey: public,
 	}))
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
-		Actor: "root-member", AdminActor: "admin", PlaintextToken: "relay-claim-duplicate-parent-test-token",
+		Actor: "root-member", AdminActor: "admin", PlaintextToken: "relay-claim-duplicate-parent-test-token", // #nosec G101 -- synthetic in-memory parent token used only by this test.
 	})
 	require.NoError(t, err)
 	firstPeerUID, err := uid.New()
@@ -310,13 +310,13 @@ func runRelayIngressDuplicateClosePreservesLease(t *testing.T, store db.Storage)
 	require.NoError(t, err)
 	first, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: firstPeerUID,
-		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-first-test-token",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-first-test-token", // #nosec G101 -- synthetic relay token used only by this test.
 		ServeDownstream: true,
 	})
 	require.NoError(t, err)
 	second, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: secondPeerUID,
-		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-second-test-token",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-claim-duplicate-second-test-token", // #nosec G101 -- synthetic relay token used only by this test.
 		ServeDownstream: true,
 	})
 	require.NoError(t, err)

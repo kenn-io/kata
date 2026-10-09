@@ -36,7 +36,7 @@ func (d *Store) RetainEmbeddingArtifact(ctx context.Context, artifact embedding.
 		}
 		// A local encoder may finish after disconnect fenced project writes.
 		// Keep the artifact locally, but don't create relay work the leave can't drain.
-		enqueueRelay := !(err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled && !binding.PushEnabled)
+		enqueueRelay := err != nil || binding.Role != db.FederationRoleSpoke || !binding.Enabled || binding.PushEnabled
 		durable, err = d.retainEmbeddingArtifactTx(ctx, tx, artifact, enqueueRelay)
 		return err
 	})

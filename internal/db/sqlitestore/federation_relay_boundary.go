@@ -166,7 +166,10 @@ func relayCloseParentCrossesProjectTx(
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
-	var after int64
+	return relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, 0)
+}
+
+func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
 		//nolint:gosec // Only fixed event-type SQL is concatenated; values use placeholders.
 		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.id>? AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)

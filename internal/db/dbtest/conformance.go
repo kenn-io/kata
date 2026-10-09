@@ -19,16 +19,17 @@ import (
 // scenario must fail with the configured error, and unexpectedly passing it
 // fails the suite until the stale entry is removed.
 type Backend struct {
-	Name                           string
-	Open                           func(t *testing.T) db.Storage
-	InstallExternalRootClock       func(db.Storage, func() time.Time) func()
-	SeedLegacyPendingClaim         func(context.Context, db.Storage, string) error
-	SeedClaimViolation             func(context.Context, db.Storage, db.Project, db.Issue, string, jsontext.Value) error
-	SeedUnsupportedFederationEvent func(context.Context, db.Storage, db.Project, string) error
-	BackdateCommentCreated         func(context.Context, db.Storage, int64, time.Time) error
-	InstallEnrollmentInsertFailure func(context.Context, db.Storage) (func() error, error)
-	InstallEnrollmentRotationStage func(db.Storage, func(context.Context) error) func()
-	ExpectedFailures               map[string]error
+	Name                                string
+	Open                                func(t *testing.T) db.Storage
+	InstallExternalRootClock            func(db.Storage, func() time.Time) func()
+	InstallRelayHistoryFullScanObserver func(db.Storage, func()) func()
+	SeedLegacyPendingClaim              func(context.Context, db.Storage, string) error
+	SeedClaimViolation                  func(context.Context, db.Storage, db.Project, db.Issue, string, jsontext.Value) error
+	SeedUnsupportedFederationEvent      func(context.Context, db.Storage, db.Project, string) error
+	BackdateCommentCreated              func(context.Context, db.Storage, int64, time.Time) error
+	InstallEnrollmentInsertFailure      func(context.Context, db.Storage) (func() error, error)
+	InstallEnrollmentRotationStage      func(db.Storage, func(context.Context) error) func()
+	ExpectedFailures                    map[string]error
 }
 
 type scenario struct {
@@ -42,6 +43,10 @@ var storageScenarios = []scenario{
 	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries"}, run: func(t *testing.T, store db.Storage) error { RunRelayIngressAtomicity(t, store); return nil }},
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
+	{name: "relay enrollment history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "ProjectAccessTransactionFence", "RelayEnrollmentNeedsReset", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayEnrollmentHistoryValidationCache(t, store, backend)
+		return nil
+	}},
 	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOutboxAtomicity(t, store)
 		seen := 0
@@ -254,6 +259,14 @@ var storageScenarios = []scenario{
 		},
 		run: func(t *testing.T, store db.Storage) error {
 			RunArchivedDetachedRelayMetadataRetainsRootKeys(t, store)
+			return nil
+		},
+	},
+	{
+		name:    "archived detached receipt export retains root keys",
+		methods: []string{"ApplyUpstreamAttribution", "CreateIssue", "CreateProject", "ExportAttribution", "ImportReplay", "LeaveFederationReplica", "PinRootAuthority", "RemoveProject", "UpsertFederationBinding"},
+		runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+			RunArchivedDetachedReceiptExport(t, store, backend)
 			return nil
 		},
 	},

@@ -200,7 +200,7 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		required, err = relayHistoryNeedsResetTx(ctx, tx, *grant.ProjectID, projectUID)
+		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID)
 		return err
 	})
 	return required, err
