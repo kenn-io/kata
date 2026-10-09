@@ -23,10 +23,27 @@ import (
 
 func requireLegacyFederationEnrollmentAuthority(ctx context.Context) error {
 	principal, ok := PrincipalFromContext(ctx)
-	if ok && principal.Kind == PrincipalDBToken && principal.TokenID > 0 {
-		return api.NewError(http.StatusForbidden, "federation_enrollment_requires_relay",
-			"database account tokens must use relay enrollments",
-			"include relay configuration so the enrollment remains bound to this account token", nil)
+	if ok {
+		switch principal.Kind {
+		case PrincipalDBToken:
+			if principal.TokenID > 0 {
+				return api.NewError(http.StatusForbidden, "federation_enrollment_requires_relay",
+					"database account tokens must use relay enrollments",
+					"include relay configuration so the enrollment remains bound to this account token", nil)
+			}
+			return projectAccessDenied()
+		case PrincipalHost:
+			// The mounted host's operation middleware has already checked its
+			// independent federation-administration grant and project scope.
+			return nil
+		case PrincipalBootstrap, PrincipalStaticToken:
+			return nil
+		default:
+			return projectAccessDenied()
+		}
+	}
+	if !projectOwnerAuthority(ctx) {
+		return projectAccessDenied()
 	}
 	return nil
 }

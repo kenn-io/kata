@@ -193,13 +193,15 @@ projects and deleted tasks stay archived or deleted. Task history retains its
 event identities and origins. The existing JSONL timestamp normalization
 still applies; task timestamps are stored at millisecond precision.
 
-The copy removes federation bindings, enrollments, cursors, quarantine, and
-live or pending claims. It also removes the API-token creation and revocation
-events that ordinary restore uses to rebuild token authority. Exporting the
-copy and restoring that export cannot bring back those source tokens. Task
-claim history remains, but its old claims cannot lock work in the copy.
-Issue-sync bindings stay disabled and external-root bindings stay paused,
-as in ordinary restore.
+The copy removes federation bindings, enrollments, root pins and signed
+provenance, root-key transitions, relay delivery and reset metadata, pending
+attribution state, sync status, quarantine, and live or pending claims. It also
+removes the API-token creation and revocation events that ordinary restore uses
+to rebuild token authority.
+Exporting the copy and restoring that export cannot bring back those source
+authorities or tokens. Task claim history remains, but its old claims cannot
+lock work in the copy. Issue-sync bindings stay disabled and external-root
+bindings stay paused, as in ordinary restore.
 
 Keep the new home separate. Do not copy the source's daemon configuration,
 credential files, or environment into it: those are outside the JSONL

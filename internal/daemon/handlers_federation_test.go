@@ -2223,6 +2223,70 @@ func TestRotateFederationEnrollment(t *testing.T) {
 	})
 }
 
+func TestTrustedProxyMembersCannotManageLegacyFederationEnrollments(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		server, store, _ := startBearerProxyTestServer(
+			t,
+			"X-Kata-Actor",
+			bearerProxyOpts{Token: "federation-enrollment-proxy-token"},
+		)
+		project, err := store.CreateProject(t.Context(), "proxy-enrollment-project")
+		require.NoError(t, err)
+		headers := bearer("federation-enrollment-proxy-token")
+		headers["X-Kata-Actor"] = "project-member"
+		response, raw := doReq(t, server, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+			"spoke_instance_uid": federationTestSpokeUID,
+			"project_id":         project.ID,
+			"capabilities":       "pull",
+			"token":              "proxy-member-created-grant",
+			"actor":              "project-member",
+		}, headers)
+		assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "not_found")
+		var count int
+		require.NoError(t, store.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash=?`,
+			db.FederationTokenHash("proxy-member-created-grant"),
+		).Scan(&count))
+		assert.Zero(t, count)
+	})
+
+	t.Run("rotate", func(t *testing.T) {
+		server, store, _ := startBearerProxyTestServer(
+			t,
+			"X-Kata-Actor",
+			bearerProxyOpts{Token: "federation-enrollment-rotate-proxy-token"},
+		)
+		project, err := store.CreateProject(t.Context(), "proxy-rotate-project")
+		require.NoError(t, err)
+		old, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+			Token: "proxy-member-old-grant", SpokeInstanceUID: federationTestSpokeUID,
+			ProjectID: &project.ID, Capabilities: "pull", Actor: "project-member",
+		})
+		require.NoError(t, err)
+		headers := bearer("federation-enrollment-rotate-proxy-token")
+		headers["X-Kata-Actor"] = "project-member"
+		response, raw := doReq(t, server, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", map[string]any{
+			"spoke_instance_uid": federationTestSpokeUID,
+			"project_id":         project.ID,
+			"capabilities":       "pull",
+			"token":              "proxy-member-replacement-grant",
+			"actor":              "project-member",
+		}, headers)
+		assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "not_found")
+		var revokedAt sql.NullString
+		require.NoError(t, store.QueryRowContext(t.Context(),
+			`SELECT revoked_at FROM federation_enrollments WHERE id=?`, old.Enrollment.ID,
+		).Scan(&revokedAt))
+		assert.False(t, revokedAt.Valid)
+		var count int
+		require.NoError(t, store.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash=?`,
+			db.FederationTokenHash("proxy-member-replacement-grant"),
+		).Scan(&count))
+		assert.Zero(t, count)
+	})
+}
+
 func TestFederationEnrollmentExplicitTokenMismatchReturnsConflict(t *testing.T) {
 	env := testenv.New(t)
 	request := map[string]any{

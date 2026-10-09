@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -110,8 +111,17 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 			switch record := rec.(type) {
 			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
-				*db.IssueClaimExport, *db.PendingClaimRequestExport:
+				*db.IssueClaimExport, *db.PendingClaimRequestExport,
+				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
+				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
 				continue
+			case *db.MetaKV:
+				if strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix) {
+					continue
+				}
 			case *db.EventExport:
 				// Restore rebuilds token authority from these events. Omitting
 				// the projection alone would resurrect it on the next restore.
