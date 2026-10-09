@@ -23,6 +23,7 @@ func newImportCmd() *cobra.Command {
 	var target string
 	var force bool
 	var newInstance bool
+	var asStandalone bool
 	var merge bool
 	var sourceFormat string
 	cmd := &cobra.Command{
@@ -35,7 +36,7 @@ func newImportCmd() *cobra.Command {
 			}
 			switch strings.TrimSpace(format) {
 			case "", "kata":
-				return runKataJSONLImport(cmd, input, target, force, newInstance, merge)
+				return runKataJSONLImport(cmd, input, target, force, newInstance, merge, asStandalone)
 			case "beads":
 				if err := validateBeadsImportFlags(cmd); err != nil {
 					return err
@@ -58,6 +59,8 @@ func newImportCmd() *cobra.Command {
 		"keep the target database's new identity instead of reusing the source identity; useful when restoring into a separate copy")
 	cmd.Flags().BoolVar(&merge, "merge", false,
 		"merge one project snapshot into an existing target database")
+	cmd.Flags().BoolVar(&asStandalone, "as-standalone", false,
+		"create an independent copy without source connections, credentials, or claims")
 	return cmd
 }
 
@@ -97,7 +100,7 @@ func legacyImportSourceFormat() string {
 }
 
 func validateBeadsImportFlags(cmd *cobra.Command) error {
-	for _, name := range []string{"input", "target", "force", "new-instance", "merge"} {
+	for _, name := range []string{"input", "target", "force", "new-instance", "merge", "as-standalone"} {
 		if cmd.Flags().Changed(name) {
 			return &cliError{
 				Message:  fmt.Sprintf("--%s is not supported with --source-format beads", name),
@@ -109,7 +112,13 @@ func validateBeadsImportFlags(cmd *cobra.Command) error {
 	return nil
 }
 
-func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInstance, merge bool) error {
+func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInstance, merge, asStandalone bool) error {
+	if asStandalone && force {
+		return &cliError{Message: "--as-standalone cannot be combined with --force", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	if asStandalone && merge {
+		return &cliError{Message: "--as-standalone cannot be combined with --merge", Kind: kindValidation, ExitCode: ExitValidation}
+	}
 	if merge && force {
 		return &cliError{Message: "--force cannot be combined with --merge", Kind: kindValidation, ExitCode: ExitValidation}
 	}
@@ -134,7 +143,7 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 		if merge {
 			return runPostgresJSONLMerge(cmd, input, target)
 		}
-		return runPostgresJSONLImport(cmd, input, target, force, newInstance)
+		return runPostgresJSONLImport(cmd, input, target, force, newInstance, asStandalone)
 	}
 	if merge {
 		return runSQLiteJSONLMerge(cmd, input, target)
@@ -144,6 +153,9 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 		return fmt.Errorf("stat import target: %w", err)
 	}
 	if targetExists && !force {
+		if asStandalone {
+			return &cliError{Message: "standalone copy requires a fresh target; choose another --target", Kind: kindValidation, ExitCode: ExitValidation}
+		}
 		return &cliError{
 			Message:  "target already exists; pass --force to replace it",
 			Kind:     kindValidation,
@@ -172,6 +184,7 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if err := jsonl.ImportWithOptions(cmd.Context(), in, d, jsonl.ImportOptions{
 		RequireFreshTarget: true,
 		NewInstance:        newInstance,
+		AsStandalone:       asStandalone,
 	}); err != nil {
 		_ = d.Close()
 		return err
@@ -254,7 +267,7 @@ func runPostgresJSONLMerge(cmd *cobra.Command, input, target string) error {
 	return writeImportSuccess(cmd, identity)
 }
 
-func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, newInstance bool) error {
+func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, newInstance, asStandalone bool) error {
 	identity, err := config.CanonicalDSNIdentity(target)
 	if err != nil {
 		return err
@@ -268,6 +281,9 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 		return err
 	}
 	if version != 0 && !force {
+		if asStandalone {
+			return &cliError{Message: "standalone copy requires a fresh target; choose another --target", Kind: kindValidation, ExitCode: ExitValidation}
+		}
 		return &cliError{
 			Message:  "target already exists; pass --force to replace it",
 			Kind:     kindValidation,
@@ -288,6 +304,7 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	if err := jsonl.ImportWithOptions(cmd.Context(), in, store, jsonl.ImportOptions{
 		RequireFreshTarget: version == 0,
 		NewInstance:        newInstance,
+		AsStandalone:       asStandalone,
 	}); err != nil {
 		_ = store.Close()
 		if installedFreshSchema {
