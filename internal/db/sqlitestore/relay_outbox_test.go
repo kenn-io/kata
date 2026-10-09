@@ -22,6 +22,10 @@ func TestRelayOfflineIntent(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	dbtest.RunRelayOfflineIntent(t, store)
+	dbtest.RunRelayReconnectOfflineIntent(t, store, func(ctx context.Context, projectID int64) error {
+		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=?`, projectID)
+		return err
+	})
 }
 
 func TestRelayRootAcceptanceStatus(t *testing.T) {

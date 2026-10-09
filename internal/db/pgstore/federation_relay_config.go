@@ -108,6 +108,9 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if err := d.seedRelayArtifactManifestsTx(ctx, tx, grant, projectUID); err != nil {
 			return err
 		}
+		if err := d.seedRelayLocalEventsTx(ctx, tx, grant, projectUID, binding.PushCursorEventID); err != nil {
+			return err
+		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
 		return err
 	})
