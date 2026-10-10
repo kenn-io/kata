@@ -134,8 +134,7 @@ Closing an issue asserts that the work is complete. This is a stronger
 claim than a comment. If the work is not actually done, DO NOT close.
 Instead:
 
-    kata label add <ref> needs-review
-    kata comment <ref> --body "what was attempted, what remains"
+    kata label add <ref> needs-review --comment "<what remains>"
 
 Close each issue as soon as its work is verified, not at the end of a
 batch. By default the daemon allows sibling close bursts when each close
