@@ -35,7 +35,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	limit := request.params.Limit
 	if limit <= 0 {
 		limit = 20
-	} else if limit > 200 {
+	} else if limit > 200 && !request.params.StableOrder {
 		limit = 200
 	}
 	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
@@ -72,6 +72,10 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	appendAllowedIssueIDsPostgresBuilder(&scopeFilter, &args, request.params.AllowedIssueIDs)
 	appendIssueScopePostgres(&scopeFilter, &args, request.params.IssueScope)
 	rowFilter += scopeFilter.String()
+	if request.params.After != nil {
+		args = append(args, formatStoredTime(request.params.After.CreatedAt), request.params.After.ID)
+		rowFilter += fmt.Sprintf(" AND (i.created_at,i.id) > ($%d,$%d)", len(args)-1, len(args))
+	}
 
 	predicate := "EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = $1 " + rowFilter + ")"
 	var predicateArgs []any
@@ -89,7 +93,13 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY score DESC, doc_key DESC", 1)
+	order := "candidates.score DESC, i.id DESC"
+	if request.params.StableOrder {
+		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY (SELECT created_at FROM issues WHERE id = d.issue_id) ASC, doc_key ASC", 1)
+		order = "i.created_at ASC, i.id ASC"
+	} else {
+		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY score DESC, doc_key DESC", 1)
+	}
 	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
   SELECT %s AS any_query
 )
@@ -106,7 +116,7 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
   JOIN issues i ON i.id = candidates.doc_key
   JOIN projects p ON p.id = i.project_id
  CROSS JOIN queries
- ORDER BY candidates.score DESC, i.id DESC`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1))
+ ORDER BY %s`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1), order)
 	args = relation.Args
 
 	rows, err := s.QueryContext(ctx, query, args...)

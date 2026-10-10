@@ -284,8 +284,7 @@ func (s *Store) IssueUIDPrefixMatch(
 	return issues, mapSQLError(rows.Err(), nil)
 }
 
-// ListIssues returns active issues matching the project filters.
-func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]db.Issue, error) {
+func buildListIssuesQuery(params db.ListIssuesParams, count bool) (string, []any) {
 	conditions := []string{"i.project_id = $1", "i.deleted_at IS NULL"}
 	args := []any{params.ProjectID}
 	add := func(predicate string, value any) {
@@ -300,6 +299,9 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
+	}
+	if params.PriorityUnset {
+		conditions = append(conditions, "i.priority IS NULL")
 	}
 	if params.Priority != nil {
 		add("i.priority = $%d", *params.Priority)
@@ -332,7 +334,22 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
 		}
 	}
+	if count {
+		return `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id WHERE ` + strings.Join(conditions, " AND "), args
+	}
+	if params.After != nil {
+		op := "<"
+		if params.OldestFirst {
+			op = ">"
+		}
+		args = append(args, formatStoredTime(params.After.CreatedAt), params.After.ID)
+		conditions = append(conditions, fmt.Sprintf("(i.created_at, i.id) %s ($%d, $%d)", op, len(args)-1, len(args)))
+	}
+
 	order := `i.updated_at DESC, i.id DESC`
+	if params.CreatedFirst {
+		order = `i.created_at DESC, i.id DESC`
+	}
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
 	}
@@ -341,6 +358,12 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 		args = append(args, params.Limit)
 		query += fmt.Sprintf(` LIMIT $%d`, len(args))
 	}
+	return query, args
+}
+
+// ListIssues returns active issues matching the project filters and requested order.
+func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]db.Issue, error) {
+	query, args := buildListIssuesQuery(params, false)
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -360,8 +383,15 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 	return issues, nil
 }
 
-// ListAllIssues returns a newest-first cross-project issue page.
-func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams) ([]db.Issue, error) {
+// CountIssues counts matching project issues independently of the cursor and limit.
+func (s *Store) CountIssues(ctx context.Context, params db.ListIssuesParams) (int64, error) {
+	query, args := buildListIssuesQuery(params, true)
+	var total int64
+	err := s.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+func buildListAllIssuesQuery(params db.ListAllIssuesParams, count bool) (string, []any) {
 	conditions := []string{"i.deleted_at IS NULL", "p.deleted_at IS NULL"}
 	var args []any
 	add := func(predicate string, value any) {
@@ -374,11 +404,27 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 	if scopeFilter.Len() > 0 {
 		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
 	}
+	if params.AllowedProjectIDs != nil {
+		if len(params.AllowedProjectIDs) == 0 {
+			conditions = append(conditions, "FALSE")
+		} else {
+			var slots []string
+			for _, id := range params.AllowedProjectIDs {
+				args = append(args, id)
+				slots = append(slots, fmt.Sprintf("$%d", len(args)))
+			}
+			conditions = append(conditions, "i.project_id IN ("+strings.Join(slots, ",")+")")
+		}
+	}
+
 	if params.ProjectID > 0 {
 		add("i.project_id = $%d", params.ProjectID)
 	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
+	}
+	if params.PriorityUnset {
+		conditions = append(conditions, "i.priority IS NULL")
 	}
 	if params.Priority != nil {
 		add("i.priority = $%d", *params.Priority)
@@ -411,6 +457,18 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
 		}
 	}
+	if count {
+		return `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id WHERE ` + strings.Join(conditions, " AND "), args
+	}
+	if params.After != nil {
+		op := "<"
+		if params.OldestFirst {
+			op = ">"
+		}
+		args = append(args, formatStoredTime(params.After.CreatedAt), params.After.ID)
+		conditions = append(conditions, fmt.Sprintf("(i.created_at, i.id) %s ($%d, $%d)", op, len(args)-1, len(args)))
+	}
+
 	order := `i.created_at DESC, i.id DESC`
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
@@ -420,6 +478,12 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 		args = append(args, params.Limit)
 		query += fmt.Sprintf(` LIMIT $%d`, len(args))
 	}
+	return query, args
+}
+
+// ListAllIssues returns active issues across the permitted projects in creation order.
+func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams) ([]db.Issue, error) {
+	query, args := buildListAllIssuesQuery(params, false)
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -434,6 +498,14 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 		issues = append(issues, issue)
 	}
 	return issues, mapSQLError(rows.Err(), nil)
+}
+
+// CountAllIssues counts permitted matching issues independently of the cursor and limit.
+func (s *Store) CountAllIssues(ctx context.Context, params db.ListAllIssuesParams) (int64, error) {
+	query, args := buildListAllIssuesQuery(params, true)
+	var total int64
+	err := s.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
 }
 
 func (s *Store) resolveShortIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid, override string) (string, error) {

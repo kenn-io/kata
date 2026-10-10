@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/pagination"
 	"go.kenn.io/kata/internal/similarity"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -240,24 +242,30 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		priority, err := parsePriorityQuery(in.Priority, "priority")
+		priority, maxPriority, unset, err := listPriorities(in.Priority, in.MaxPriority)
 		if err != nil {
 			return nil, err
 		}
-		maxPriority, err := parsePriorityQuery(in.MaxPriority, "max_priority")
-		if err != nil {
-			return nil, err
-		}
+
 		metaFilters, err := parseMetaFilters(in.Meta)
 		if err != nil {
 			return nil, err
 		}
-		issues, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
+		probeLimit, err := pageProbeLimit(in.Limit)
+		if err != nil {
+			return nil, err
+		}
+		if in.Cursor != "" && in.Sort == "" {
+			return nil, api.NewError(400, "validation", "cursor requires sort=created or sort=oldest", "", nil)
+		}
+		params := db.ListAllIssuesParams{
 			ProjectID:     in.ProjectID,
 			Status:        in.Status,
 			Priority:      priority,
 			MaxPriority:   maxPriority,
-			Limit:         in.Limit,
+			Limit:         probeLimit,
+			PriorityUnset: unset,
+			CreatedFirst:  in.Sort == "created",
 			OldestFirst:   in.Sort == "oldest",
 			Unowned:       in.Unowned,
 			Owner:         in.Owner,
@@ -265,9 +273,23 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			ExcludeLabels: in.ExcludeLabels,
 			Meta:          metaFilters,
 			IssueScope:    issueScopeFromContext(ctx),
-		})
+		}
+		hash := listPageHash(cfg, "project-list", params)
+		params.After, err = pagination.Decode(in.Cursor, hash)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		issues, err := cfg.DB.ListIssues(ctx, scopedListParams(params))
 		if err != nil {
 			return nil, internalAPIError(err)
+		}
+		issues, page := pageBoundary(issues, in.Limit, hash, in.Sort != "")
+		if in.IncludeTotal {
+			count, countErr := cfg.DB.CountIssues(ctx, scopedListParams(params))
+			if countErr != nil {
+				return nil, internalAPIError(countErr)
+			}
+			page.Total = &count
 		}
 		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
 		out := &api.ListIssuesResponse{}
@@ -275,6 +297,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		addIssueWebURLs(cfg, issueOuts)
+		out.Body.PageMetadata = page
 		out.Body.Issues = issueOuts
 		return out, nil
 	})
@@ -299,11 +322,22 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(400, "validation",
 				"--unowned and --owner are mutually exclusive", "", nil)
 		}
-		var projectIDs []int64
+		projectIDs := slices.Clone(in.ProjectIDs)
+		if in.ProjectID > 0 && len(projectIDs) > 0 {
+			return nil, api.NewError(400, "validation", "project_id and project_ids are mutually exclusive", "", nil)
+		}
+		for _, id := range projectIDs {
+			if id <= 0 {
+				return nil, api.NewError(400, "validation", "project_ids must contain positive integers", "", nil)
+			}
+		}
+		slices.Sort(projectIDs)
+		projectIDs = slices.Compact(projectIDs)
 		if in.ProjectID > 0 {
 			projectIDs = []int64{in.ProjectID}
 		}
-		ctx, err := authorizeHostProjectScope(ctx, projectIDs, nil, in.ProjectID == 0)
+
+		ctx, err := authorizeHostProjectScope(ctx, projectIDs, nil, len(projectIDs) == 0)
 		if err != nil {
 			return nil, err
 		}
@@ -312,40 +346,61 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
-		priority, err := parsePriorityQuery(in.Priority, "priority")
+		priority, maxPriority, unset, err := listPriorities(in.Priority, in.MaxPriority)
 		if err != nil {
 			return nil, err
 		}
-		maxPriority, err := parsePriorityQuery(in.MaxPriority, "max_priority")
-		if err != nil {
-			return nil, err
-		}
+
 		metaFilters, err := parseMetaFilters(in.Meta)
 		if err != nil {
 			return nil, err
 		}
-		issues, err := cfg.DB.ListAllIssues(ctx, db.ListAllIssuesParams{
-			ProjectID:     in.ProjectID,
-			Status:        in.Status,
-			Priority:      priority,
-			MaxPriority:   maxPriority,
-			Limit:         in.Limit,
-			OldestFirst:   in.Sort == "oldest",
-			Unowned:       in.Unowned,
-			Owner:         in.Owner,
-			Labels:        in.Labels,
-			ExcludeLabels: in.ExcludeLabels,
-			Meta:          metaFilters,
-			IssueScope:    issueScopeFromContext(ctx),
-		})
+		probeLimit, err := pageProbeLimit(in.Limit)
+		if err != nil {
+			return nil, err
+		}
+		params := db.ListAllIssuesParams{
+			ProjectID:         in.ProjectID,
+			Status:            in.Status,
+			Priority:          priority,
+			MaxPriority:       maxPriority,
+			Limit:             probeLimit,
+			PriorityUnset:     unset,
+			CreatedFirst:      true,
+			AllowedProjectIDs: projectIDs,
+			OldestFirst:       in.Sort == "oldest",
+			Unowned:           in.Unowned,
+			Owner:             in.Owner,
+			Labels:            in.Labels,
+			ExcludeLabels:     in.ExcludeLabels,
+			Meta:              metaFilters,
+			IssueScope:        issueScopeFromContext(ctx),
+		}
+		hash := listPageHash(cfg, "global-list", params)
+		params.After, err = pagination.Decode(in.Cursor, hash)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		issues, err := cfg.DB.ListAllIssues(ctx, params)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+
+		issues, page := pageBoundary(issues, in.Limit, hash, true)
+		if in.IncludeTotal {
+			count, countErr := cfg.DB.CountAllIssues(ctx, params)
+			if countErr != nil {
+				return nil, internalAPIError(countErr)
+			}
+			page.Total = &count
+		}
+
 		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, issues)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
 		out := &api.ListAllIssuesResponse{}
+		out.Body.PageMetadata = page
 		out.Body.Issues = make([]api.ListGlobalIssueOut, len(issueOuts))
 		names := projectNames{store: cfg.DB, byID: map[int64]string{}}
 		for i, issueOut := range issueOuts {

@@ -389,7 +389,7 @@ func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 
 	out := runCLI(t, env, dir, "--agent", "list")
 
-	assert.Contains(t, out, "OK list count=1\n")
+	assert.Contains(t, out, "OK list count=1 complete=true\n")
 	assert.Contains(t, out, `title="unowned task"`)
 	assert.Contains(t, out, "revision=1")
 	assert.NotContains(t, out, "owner=")
@@ -401,7 +401,7 @@ func TestList_AgentOutputEscapesQuotedTitle(t *testing.T) {
 
 	out := runCLI(t, env, dir, "--agent", "list")
 
-	assert.Contains(t, out, "OK list count=1\n")
+	assert.Contains(t, out, "OK list count=1 complete=true\n")
 	assert.Contains(t, out, "title="+strconv.Quote(`quoted "title"`))
 }
 

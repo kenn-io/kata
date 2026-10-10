@@ -1865,14 +1865,16 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"limit":        {Style: "form", Explode: &[]bool{false}[0]},
-		"max_priority": {Style: "form", Explode: &[]bool{false}[0]},
-		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
-		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
-		"project_id":   {Style: "form", Explode: &[]bool{false}[0]},
-		"sort":         {Style: "form", Explode: &[]bool{false}[0]},
-		"status":       {Style: "form", Explode: &[]bool{false}[0]},
-		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
+		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
+		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
+		"max_priority":  {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":         {Style: "form", Explode: &[]bool{false}[0]},
+		"priority":      {Style: "form", Explode: &[]bool{false}[0]},
+		"project_id":    {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":          {Style: "form", Explode: &[]bool{false}[0]},
+		"status":        {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/issues",
@@ -4621,13 +4623,15 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"limit":        {Style: "form", Explode: &[]bool{false}[0]},
-		"max_priority": {Style: "form", Explode: &[]bool{false}[0]},
-		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
-		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
-		"sort":         {Style: "form", Explode: &[]bool{false}[0]},
-		"status":       {Style: "form", Explode: &[]bool{false}[0]},
-		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
+		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
+		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
+		"max_priority":  {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":         {Style: "form", Explode: &[]bool{false}[0]},
+		"priority":      {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":          {Style: "form", Explode: &[]bool{false}[0]},
+		"status":        {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues",
@@ -7615,10 +7619,12 @@ func (c *Client) SearchIssues(ctx context.Context, options *SearchIssuesRequestO
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"cursor":          {Style: "form", Explode: &[]bool{false}[0]},
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":           {Style: "form", Explode: &[]bool{false}[0]},
 		"mode":            {Style: "form", Explode: &[]bool{false}[0]},
 		"q":               {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":            {Style: "form", Explode: &[]bool{false}[0]},
 		"status":          {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

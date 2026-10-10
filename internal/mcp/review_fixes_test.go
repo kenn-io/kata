@@ -447,6 +447,8 @@ func TestScopedServersCannotAdministerProjects(t *testing.T) {
 func TestMultiProjectSearchFusesByRankAndOmitsSingularProject(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/api/v1/health":
+			writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.25.0"})
 		case "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
@@ -1566,7 +1568,17 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 		t.Run(map[bool]string{false: "list", true: "ready"}[ready], func(t *testing.T) {
 			var globalRequests atomic.Int64
 			client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+				if discoveryHealth(writer, request) {
+					return
+				}
 				switch request.URL.Path {
+				case "/api/v1/issues":
+					globalRequests.Add(1)
+					require.False(t, ready)
+					require.ElementsMatch(t, []string{"1", "2"}, request.URL.Query()["project_ids"])
+					require.Equal(t, "1", request.URL.Query().Get("limit"))
+					issue := globalIssueJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project", "hub1")
+					writeJSON(writer, map[string]any{"issues": []any{issue}, "complete": false, "next_cursor": "next"})
 				case "/api/v1/projects":
 					writeJSON(writer, map[string]any{"projects": []any{
 						projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
@@ -1602,7 +1614,7 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, output.Truncated)
 			require.Equal(t, "hub-project#hub1", output.Issues[0].QualifiedRef)
-			require.Zero(t, globalRequests.Load())
+			require.Equal(t, map[bool]int64{true: 0, false: 1}[ready], globalRequests.Load())
 		})
 	}
 }

@@ -3253,7 +3253,11 @@ type LinksDelta struct {
 }
 
 type ListAllIssuesResponseBody struct {
-	Issues []ListGlobalIssueOut `json:"issues" validate:"required"`
+	Complete   bool                 `json:"complete"`
+	Issues     []ListGlobalIssueOut `json:"issues" validate:"required"`
+	NextCursor *string              `json:"next_cursor,omitempty"`
+	Total      *int64               `json:"total,omitempty"`
+	Truncated  bool                 `json:"truncated"`
 }
 
 func (l ListAllIssuesResponseBody) Validate() error {
@@ -3438,7 +3442,11 @@ func (l ListGlobalIssueOut) Validate() error {
 }
 
 type ListIssuesResponseBody struct {
-	Issues []IssueOut `json:"issues" validate:"required"`
+	Complete   bool       `json:"complete"`
+	Issues     []IssueOut `json:"issues" validate:"required"`
+	NextCursor *string    `json:"next_cursor,omitempty"`
+	Total      *int64     `json:"total,omitempty"`
+	Truncated  bool       `json:"truncated"`
 }
 
 func (l ListIssuesResponseBody) Validate() error {
@@ -4811,11 +4819,15 @@ func (s SearchHit) Validate() error {
 }
 
 type SearchResponseBody struct {
+	Complete       bool        `json:"complete"`
 	Degraded       *bool       `json:"degraded,omitempty"`
 	DegradedReason *string     `json:"degraded_reason,omitempty"`
 	Mode           string      `json:"mode" validate:"required"`
+	NextCursor     *string     `json:"next_cursor,omitempty"`
 	Query          string      `json:"query" validate:"required"`
 	Results        []SearchHit `json:"results" validate:"required"`
+	Total          *int64      `json:"total,omitempty"`
+	Truncated      bool        `json:"truncated"`
 }
 
 func (s SearchResponseBody) Validate() error {

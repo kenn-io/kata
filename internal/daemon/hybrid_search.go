@@ -17,7 +17,8 @@ type hybridParams struct {
 	Status          string
 	ProjectID       int64
 	Query           string
-	Limit           int
+	Limit           int // requested result count
+	ProbeLimit      int // retrieval count, including any one-row pagination lookahead
 	IncludeDeleted  bool
 	Requested       string // raw mode param
 	Labels          []string
@@ -39,8 +40,8 @@ type hybridResult struct {
 const queryEmbedTimeout = 3 * time.Second
 
 // fetchFloor and fetchCap bound the per-leg candidate depth. Each leg fetches
-// max(limit*3, fetchFloor) rows (capped at fetchCap) so RRF has enough overlap
-// to fuse before the final truncation to limit.
+// max(probeLimit*3, fetchFloor) rows (capped at fetchCap) so RRF has enough
+// overlap to fuse before the final truncation to the retrieval limit.
 const (
 	fetchFloor = 50
 	fetchCap   = 200
@@ -92,7 +93,8 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// is 503, not a silent degrade. auto-resolved hybrid is not strict.
 	strict := p.Requested == "hybrid" || p.Requested == "semantic"
 
-	fetch := min(max(p.Limit*3, fetchFloor), fetchCap)
+	probeLimit := p.retrievalLimit()
+	fetch := min(max(probeLimit*3, fetchFloor), fetchCap)
 
 	// Lexical leg (skip for explicit semantic). It runs in a goroutine so the
 	// vector leg's embed round-trip never blocks FTS.
@@ -137,21 +139,24 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		}
 		return hybridResult{
 			Mode: modeLexical, Degraded: true, DegradedReason: vecErr.Error(),
-			Hits: truncate(lexical, p.Limit),
+			Hits: truncate(lexical, probeLimit),
 		}, nil
 	}
-	if vecBounded && strict {
+	// A deep candidate ceiling only makes an explicit mode unavailable when
+	// the vector leg cannot fill the requested page. A one-row retrieval probe
+	// may still fall short while the requested page itself is usable.
+	if vecBounded && strict && len(vector) < p.Limit {
 		return hybridResult{}, &modeError{status: 503, msg: filterCeilingReason}
 	}
 
 	var res hybridResult
 	switch mode {
 	case modeLexical:
-		res = hybridResult{Mode: modeLexical, Hits: truncate(lexical, p.Limit)}
+		res = hybridResult{Mode: modeLexical, Hits: truncate(lexical, probeLimit)}
 	case modeSemantic:
-		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, p.Limit)}
+		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
-		hits, err := mergeRRF(lexical, vector, p.Limit)
+		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
 			return hybridResult{}, err
 		}
@@ -161,14 +166,21 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		res.Degraded = true
 		res.DegradedReason = scopedSemanticUnavailableReason
 	}
-	// Auto mode may return real but potentially incomplete hits when search
-	// filters exhaust the candidate ceiling. Explicit modes were rejected above
-	// because their strict contract does not permit degraded results.
+	// A candidate ceiling marks results as degraded once it falls short of the
+	// retrieval probe. Explicit modes return a page only when the requested
+	// result count was satisfied above.
 	if vecBounded {
 		res.Degraded = true
 		res.DegradedReason = filterCeilingReason
 	}
 	return res, nil
+}
+
+func (p hybridParams) retrievalLimit() int {
+	if p.ProbeLimit > 0 {
+		return p.ProbeLimit
+	}
+	return p.Limit
 }
 
 // runVectorLeg embeds the query, KNN-searches the active generation, rolls
@@ -258,11 +270,11 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		if err != nil {
 			return nil, false, err
 		}
-		// Still short of what the caller asked for, off a deep batch the index
-		// filled completely and its extra probe remained relevant: matching
+		// Still short of the retrieval probe, off a deep batch the index filled
+		// completely and its extra probe remained relevant: matching
 		// issues may sit past knnDeepLimit. A missing or below-floor probe makes
 		// the short result exact instead.
-		if boundedRelevant && len(out) < p.Limit {
+		if boundedRelevant && len(out) < p.retrievalLimit() {
 			return out, true, nil
 		}
 	}

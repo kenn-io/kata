@@ -52,17 +52,25 @@ type GetFederationStatusQuery struct {
 }
 
 type ListAllIssuesQuery struct {
-	ProjectID *int64                    `json:"project_id,omitempty"`
-	Status    *ListAllIssuesQueryStatus `json:"status,omitempty"`
+	// ProjectIds Restrict to these positive project IDs; mutually exclusive with project_id
+	ProjectIds []int64 `json:"project_ids,omitempty"`
 
-	// Priority exact priority filter (0..4); empty = no filter
+	// Cursor Opaque next_cursor from a matching stable-order page
+	Cursor *string `json:"cursor,omitempty"`
+
+	// IncludeTotal Count all matching issues, ignoring cursor and limit
+	IncludeTotal *bool                     `json:"include_total,omitempty"`
+	ProjectID    *int64                    `json:"project_id,omitempty"`
+	Status       *ListAllIssuesQueryStatus `json:"status,omitempty"`
+
+	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
 
-	// MaxPriority include only priority <= this value (0..4); empty = no filter
+	// MaxPriority include only priority <= this value (0..4), excluding unset; empty = no filter
 	MaxPriority *string `json:"max_priority,omitempty"`
 	Limit       *int64  `json:"limit,omitempty"`
 
-	// Sort oldest = created_at ascending, then id ascending; empty preserves the route default
+	// Sort oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
 	Sort         *ListAllIssuesQuerySort `json:"sort,omitempty"`
 	Unowned      *bool                   `json:"unowned,omitempty"`
 	Owner        *string                 `json:"owner,omitempty"`
@@ -158,16 +166,21 @@ type PollFederationProjectEventsQuery struct {
 }
 
 type ListIssuesQuery struct {
-	Status *ListIssuesQueryStatus `json:"status,omitempty"`
+	// Cursor Opaque next_cursor from a matching stable-order page
+	Cursor *string `json:"cursor,omitempty"`
 
-	// Priority exact priority filter (0..4); empty = no filter
+	// IncludeTotal Count all matching issues, ignoring cursor and limit
+	IncludeTotal *bool                  `json:"include_total,omitempty"`
+	Status       *ListIssuesQueryStatus `json:"status,omitempty"`
+
+	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
 
-	// MaxPriority include only priority <= this value (0..4); empty = no filter
+	// MaxPriority include only priority <= this value (0..4), excluding unset; empty = no filter
 	MaxPriority *string `json:"max_priority,omitempty"`
 	Limit       *int64  `json:"limit,omitempty"`
 
-	// Sort oldest = created_at ascending, then id ascending; empty preserves the route default
+	// Sort oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
 	Sort         *ListIssuesQuerySort `json:"sort,omitempty"`
 	Unowned      *bool                `json:"unowned,omitempty"`
 	Owner        *string              `json:"owner,omitempty"`
@@ -253,6 +266,12 @@ func (r RestoreProjectQuery) Validate() error {
 }
 
 type SearchIssuesQuery struct {
+	// Cursor Continuation for explicit lexical search with sort=oldest
+	Cursor *string `json:"cursor,omitempty"`
+
+	// Sort oldest selects exhaustive creation-ordered lexical pages; omit for relevance ranking
+	Sort *SearchIssuesQuerySort `json:"sort,omitempty"`
+
 	// Status Issue status; omit to search open and closed issues
 	Status         *SearchIssuesQueryStatus `json:"status,omitempty"`
 	Q              string                   `json:"q" validate:"required"`
@@ -265,6 +284,13 @@ type SearchIssuesQuery struct {
 
 func (s SearchIssuesQuery) Validate() error {
 	var errors runtime.ValidationErrors
+	if s.Sort != nil {
+		if v, ok := any(s.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
+			}
+		}
+	}
 	if s.Status != nil {
 		if v, ok := any(s.Status).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {

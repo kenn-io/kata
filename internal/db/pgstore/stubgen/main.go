@@ -216,6 +216,8 @@ var alreadyImplemented = map[string]bool{
 	"LabelsByIssues":                       true, // labels.go
 	"LabelsForIssue":                       true, // labels.go
 	"ListAPITokens":                        true, // tokens.go
+	"CountIssues":                          true,
+	"CountAllIssues":                       true,
 	"ListAllIssues":                        true, // issues.go
 	"ListDueIssueSyncBindings":             true, // issue_sync.go
 	"ListDueExternalRootBindings":          true, // external_roots.go

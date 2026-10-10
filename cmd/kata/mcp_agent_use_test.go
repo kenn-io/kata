@@ -78,7 +78,11 @@ func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"issues":[]}`))
+			if r.URL.Path == "/api/v1/health" {
+				_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.27.0"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"issues":[],"complete":true,"truncated":false}`))
 		}))
 		t.Cleanup(func() { close(release) })
 		c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())

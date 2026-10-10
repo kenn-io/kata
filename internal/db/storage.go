@@ -89,6 +89,8 @@ type Storage interface {
 	IssueUIDPrefixMatch(ctx context.Context, prefix string, limit int, include IncludeDeleted) ([]Issue, error)
 	ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error)
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)
+	CountIssues(ctx context.Context, p ListIssuesParams) (int64, error)
+	CountAllIssues(ctx context.Context, p ListAllIssuesParams) (int64, error)
 	ReadyIssues(ctx context.Context, projectID int64, limit int, filter ReadyIssuesFilter) ([]Issue, error)
 	ReadyIssuesGlobal(ctx context.Context, limit int, filter ReadyIssuesFilter) ([]ReadyGlobalIssue, error)
 	ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]Issue, error)
