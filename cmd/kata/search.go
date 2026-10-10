@@ -20,7 +20,7 @@ import (
 // daemon's GET /search endpoint and prints either the JSON envelope (under
 // --json) or one line per hit with short_id, score, status, title, and match fields.
 func newSearchCmd() *cobra.Command {
-	var issueStatus string
+	var issueStatus, cursor string
 	var limit int
 	var includeDeleted bool
 	var lexical, hybrid, semantic bool
@@ -59,6 +59,9 @@ func newSearchCmd() *cobra.Command {
 			case semantic:
 				mode = "semantic"
 			}
+			if cursor != "" && !lexical {
+				return &cliError{Message: "--cursor requires --lexical", Kind: kindValidation, ExitCode: ExitValidation}
+			}
 			// Mirror list / ready / events validation (hammer-test
 			// finding #5): --limit 0/-1 used to be silently treated
 			// as "no limit" because the request only set the param
@@ -84,7 +87,11 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if issueStatus != "" {
+			if lexical {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionDiscoveryPagination, "lexical search pagination"); err != nil {
+					return err
+				}
+			} else if issueStatus != "" {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionSearchStatus, "status-filtered search"); err != nil {
 					return err
 				}
@@ -99,6 +106,12 @@ func newSearchCmd() *cobra.Command {
 				return err
 			}
 			params := &generated.SearchIssuesQuery{Q: query, Limit: new(int64(limit)), Label: labels, ExcludeLabel: noLabels}
+			if lexical {
+				params.Sort = new(generated.SearchIssuesQuerySortOldest)
+			}
+			if cursor != "" {
+				params.Cursor = &cursor
+			}
 			if issueStatus != "" {
 				params.Status = new(generated.SearchIssuesQueryStatus(issueStatus))
 			}
@@ -121,10 +134,11 @@ func newSearchCmd() *cobra.Command {
 			return printSearchResults(cmd, bs)
 		},
 	}
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue --lexical search with the same query and filters")
 	cmd.Flags().StringVar(&issueStatus, "status", "", "issue status: open or closed (default both)")
 	cmd.Flags().IntVar(&limit, "limit", 20, "max rows")
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", false, "include soft-deleted issues")
-	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search only")
+	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search in creation order; supports continuation")
 	cmd.Flags().BoolVar(&hybrid, "hybrid", false, "hybrid lexical+semantic search")
 	cmd.Flags().BoolVar(&semantic, "semantic", false, "semantic (vector) search only")
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
@@ -145,6 +159,8 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	var b struct {
+		Complete       *bool  `json:"complete"`
+		NextCursor     string `json:"next_cursor"`
 		Query          string `json:"query"`
 		Mode           string `json:"mode"`
 		Degraded       bool   `json:"degraded"`
@@ -175,6 +191,12 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()
 		header := fmt.Sprintf("OK search count=%d query=%s mode=%s", len(b.Results), agentValue(b.Query), b.Mode)
+		if b.Complete != nil {
+			header += fmt.Sprintf(" complete=%t", *b.Complete)
+		}
+		if b.NextCursor != "" {
+			header += " next_cursor=" + agentValue(b.NextCursor)
+		}
 		if b.Degraded {
 			header += " degraded=" + agentValue(b.DegradedReason)
 		}
@@ -199,6 +221,15 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			}
 		}
 		return nil
+	}
+	if !flags.Quiet && b.Complete != nil && !*b.Complete {
+		hint := "search results are incomplete"
+		if b.NextCursor != "" {
+			hint += "; next_cursor=" + b.NextCursor
+		}
+		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), hint); err != nil {
+			return err
+		}
 	}
 	// Header rule keyed on whether this is the plain baseline, not the
 	// effective mode alone: print a leading "# mode=<mode>" line whenever the

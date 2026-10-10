@@ -38,6 +38,7 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 	if err := db.ValidateImportBatch(p); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}
+	p.Items = normalizeImportTimes(p.Items)
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -139,6 +140,33 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		return db.ImportBatchResult{}, nil, fmt.Errorf("commit import: %w", err)
 	}
 	return result, events, nil
+}
+
+// normalizeImportTimes gives the SQLite driver UTC values for imported issue
+// timestamps. Its default time.Time encoding includes a numeric offset and a
+// zone abbreviation; keeping imported values in UTC preserves their instant
+// while making the stored form consistent with other SQLite writes.
+func normalizeImportTimes(items []db.ImportItem) []db.ImportItem {
+	if items == nil {
+		return nil
+	}
+	normalized := append([]db.ImportItem(nil), items...)
+	for i := range normalized {
+		item := &normalized[i]
+		item.CreatedAt = item.CreatedAt.UTC()
+		item.UpdatedAt = item.UpdatedAt.UTC()
+		if item.ClosedAt != nil {
+			closedAt := item.ClosedAt.UTC()
+			item.ClosedAt = &closedAt
+		}
+		if len(item.Comments) > 0 {
+			item.Comments = append([]db.ImportComment(nil), item.Comments...)
+			for j := range item.Comments {
+				item.Comments[j].CreatedAt = item.Comments[j].CreatedAt.UTC()
+			}
+		}
+	}
+	return normalized
 }
 
 func validateIssueSyncImportGuardTx(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams) error {

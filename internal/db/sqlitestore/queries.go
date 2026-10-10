@@ -1025,16 +1025,22 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	return out, rows.Err()
 }
 
-// ListIssues returns issues in the given project, excluding soft-deleted rows.
-func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Issue, error) {
+func buildListIssuesQuery(p db.ListIssuesParams, count bool) (string, []any) {
 	var q strings.Builder
-	q.WriteString(issueSelect + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`)
+	selection := issueSelect
+	if count {
+		selection = `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id`
+	}
+	q.WriteString(selection + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`)
 	args := []any{p.ProjectID}
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
+	}
+	if p.PriorityUnset {
+		q.WriteString(` AND i.priority IS NULL`)
 	}
 	if p.Priority != nil {
 		q.WriteString(` AND i.priority = ?`)
@@ -1078,15 +1084,37 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 			args = append(args, mf.Key)
 		}
 	}
+	if count {
+		return q.String(), args
+	}
+	if p.After != nil {
+		op := "<"
+		if p.OldestFirst {
+			op = ">"
+		}
+		key := creationKeySQL("i")
+		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
+		args = append(args, stamp, stamp, p.After.ID)
+	}
+
 	if p.OldestFirst {
-		q.WriteString(` ORDER BY i.created_at ASC, i.id ASC`)
+		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
+	} else if p.CreatedFirst {
+		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")
 	} else {
 		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
 	if p.Limit > 0 {
 		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	return q.String(), args
+}
+
+// ListIssues returns active issues matching the project filters and requested order.
+func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Issue, error) {
+	query, args := buildListIssuesQuery(p, false)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
@@ -1102,16 +1130,40 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 	return out, rows.Err()
 }
 
-// ListAllIssues returns issues across one or every project, excluding
-// soft-deleted rows. Ordering is (created_at DESC, id DESC) per #22 — a
-// stable "newest first" feed across projects, distinct from the per-project
-// endpoint's updated_at-DESC ordering which leads with recent activity.
-func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]db.Issue, error) {
+// CountIssues counts matching project issues independently of the cursor and limit.
+func (d *Store) CountIssues(ctx context.Context, p db.ListIssuesParams) (int64, error) {
+	query, args := buildListIssuesQuery(p, true)
+	var total int64
+	err := d.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+func buildListAllIssuesQuery(p db.ListAllIssuesParams, count bool) (string, []any) {
 	var q strings.Builder
-	q.WriteString(issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`)
+	selection := issueSelect
+	if count {
+		selection = `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id`
+	}
+	q.WriteString(selection + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`)
 	var args []any
 	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
 	appendIssueScopeSQLite(&q, &args, p.IssueScope)
+	if p.AllowedProjectIDs != nil {
+		if len(p.AllowedProjectIDs) == 0 {
+			q.WriteString(` AND 0=1`)
+		} else {
+			q.WriteString(` AND i.project_id IN (`)
+			for i, id := range p.AllowedProjectIDs {
+				if i > 0 {
+					q.WriteString(",")
+				}
+				q.WriteString("?")
+				args = append(args, id)
+			}
+			q.WriteString(")")
+		}
+	}
+
 	if p.ProjectID > 0 {
 		q.WriteString(` AND i.project_id = ?`)
 		args = append(args, p.ProjectID)
@@ -1119,6 +1171,9 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
+	}
+	if p.PriorityUnset {
+		q.WriteString(` AND i.priority IS NULL`)
 	}
 	if p.Priority != nil {
 		q.WriteString(` AND i.priority = ?`)
@@ -1151,15 +1206,37 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 			args = append(args, mf.Key)
 		}
 	}
+	if count {
+		return q.String(), args
+	}
+	if p.After != nil {
+		op := "<"
+		if p.OldestFirst {
+			op = ">"
+		}
+		key := creationKeySQL("i")
+		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
+		args = append(args, stamp, stamp, p.After.ID)
+	}
+
 	if p.OldestFirst {
-		q.WriteString(` ORDER BY i.created_at ASC, i.id ASC`)
+		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
+	} else if p.CreatedFirst || p.After != nil {
+		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")
 	} else {
 		q.WriteString(` ORDER BY i.created_at DESC, i.id DESC`)
 	}
 	if p.Limit > 0 {
 		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	return q.String(), args
+}
+
+// ListAllIssues returns active issues across the permitted projects in creation order.
+func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]db.Issue, error) {
+	query, args := buildListAllIssuesQuery(p, false)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list all issues: %w", err)
 	}
@@ -1173,6 +1250,14 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 		out = append(out, i)
 	}
 	return out, rows.Err()
+}
+
+// CountAllIssues counts permitted matching issues independently of the cursor and limit.
+func (d *Store) CountAllIssues(ctx context.Context, p db.ListAllIssuesParams) (int64, error) {
+	query, args := buildListAllIssuesQuery(p, true)
+	var total int64
+	err := d.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
 }
 
 // readCreatedComment is a package-local test seam for post-commit readback

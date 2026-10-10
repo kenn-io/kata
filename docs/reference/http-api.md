@@ -97,7 +97,9 @@ upgrade when the daemon is too old. `kata mcp serve` performs the same check
 once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
 `event_id`. Status-filtered `kata.search` calls additionally check for
-API `0.20.0` before project fanout.
+API `0.20.0` before project fanout. Paginated `kata.list` and explicit
+single-project lexical `kata.search` require API `0.27.0`. The CLI checks the
+same version before new list options and explicit lexical pagination.
 
 Close requests may explicitly supply `transcript` (HTTP API `0.26.0`):
 
@@ -137,7 +139,7 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-The current contract is API `0.26.0`. Kata 0.18.0 includes the changes from
+The current main-branch contract is API `0.27.0`. Kata 0.18.0 includes the changes from
 `0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
 credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
 oldest-first lists require `0.21.0`.
@@ -151,6 +153,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
 | `0.23.0` | Added transactional move previews with the optional `dry_run` request field. Preview responses omit `new_short_id` until a move allocates the target ID. Generated clients now type `new_short_id` as optional; read `issue.short_id` for the issue's current short ID. |
 | `0.22.0` | Added temporary assignments: claim requests accept `ttl_seconds`, claim responses return ordered `events`, issue projections include `assignment_expires_on`, and assignment renewal and expiry have distinct event types. |
@@ -315,14 +318,47 @@ can continue using numeric IDs.
 ## Listing issues
 
 Both `GET /api/v1/projects/{project_id}/issues` and `GET /api/v1/issues`
-accept the optional `sort` query with the value `oldest`. It orders matching
-issues by `created_at` ascending, then `id` ascending for equal timestamps.
-The daemon applies the order before `limit`.
+accept `sort=oldest` (creation ascending) and `sort=created` (creation descending).
+Both break equal `created_at` timestamps by `id` in the same direction and
+apply the order before `limit`. `sort=oldest` requires API 0.21.0; the following
+pagination contract and `sort=created` require API 0.27.0.
 
-Omitting `sort`, or sending it as an empty value, preserves the route's
-current default. The project route keeps `updated_at` descending and the
-cross-project route keeps `created_at` descending. The query is available in
-API `0.21.0` and newer.
+Responses include `issues`, `complete`, `truncated`, and `next_cursor` when
+another page exists. Pass the opaque `next_cursor` as `cursor` with the same
+explicit sort and filters. `limit=0` returns all remaining matches. Optional
+`include_total=true` adds `total`, a SQL count with the same filters and
+permissions, independent of the cursor and page size.
+
+Use `priority=none` for issues with unset priority. It is mutually exclusive
+with `max_priority`; numeric `priority` accepts 0 through 4. `max_priority`
+excludes unset priorities. The global route also accepts repeated positive
+`project_ids` values for one filtered page across selected projects. An empty
+or invalid selection is rejected. `project_ids` and `project_id` are mutually
+exclusive, and every selected project requires authorization.
+
+Omitting `sort`, or sending an empty value, keeps the project route's
+`updated_at` descending default and the global route's `created_at` descending
+default. The project default cannot continue with a cursor; use an explicit
+creation sort for exhaustive scans.
+
+Ordinary edits preserve creation order. Cursors validate the daemon instance,
+project selection, authorization scope, sort, and filters; changing these
+returns HTTP 400. The page size and count request may change between pages.
+These are live reads rather than snapshots. Restart after changes to filter
+membership, project membership, deletion, or imported creation timestamps.
+
+### Search continuation
+
+`GET /api/v1/projects/{project_id}/search` accepts `cursor` only with explicit
+`mode=lexical&sort=oldest`. It returns oldest-creation pages using the same
+`next_cursor`, `complete`, and `truncated` fields, without the ranked search's
+200-candidate ceiling. Query, filters, daemon, and authorization scope must
+stay the same. Search does not provide `total`.
+
+Other searches retain ranked ordering and bounded candidate retrieval.
+They have no continuation cursor. `complete` is false for truncated or
+degraded results and whenever ranked retrieval cannot establish exhaustion;
+a full candidate window must not be treated as the whole matching set.
 
 ## Compatibility expectations
 

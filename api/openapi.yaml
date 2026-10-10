@@ -3363,12 +3363,23 @@ components:
     ListAllIssuesResponseBody:
       additionalProperties: true
       properties:
+        complete:
+          type: boolean
         issues:
           items:
             $ref: "#/components/schemas/ListGlobalIssueOut"
           type: array
+        next_cursor:
+          type: string
+        total:
+          format: int64
+          type: integer
+        truncated:
+          type: boolean
       required:
         - issues
+        - complete
+        - truncated
       type: object
     ListCronJobsResponseBody:
       additionalProperties: true
@@ -3504,12 +3515,23 @@ components:
     ListIssuesResponseBody:
       additionalProperties: true
       properties:
+        complete:
+          type: boolean
         issues:
           items:
             $ref: "#/components/schemas/IssueOut"
           type: array
+        next_cursor:
+          type: string
+        total:
+          format: int64
+          type: integer
+        truncated:
+          type: boolean
       required:
         - issues
+        - complete
+        - truncated
       type: object
     ListProjectsResponseBody:
       additionalProperties: true
@@ -4927,11 +4949,15 @@ components:
     SearchResponseBody:
       additionalProperties: true
       properties:
+        complete:
+          type: boolean
         degraded:
           type: boolean
         degraded_reason:
           type: string
         mode:
+          type: string
+        next_cursor:
           type: string
         query:
           type: string
@@ -4939,10 +4965,17 @@ components:
           items:
             $ref: "#/components/schemas/SearchHit"
           type: array
+        total:
+          format: int64
+          type: integer
+        truncated:
+          type: boolean
       required:
         - query
         - mode
         - results
+        - complete
+        - truncated
       type: object
     ShowIssueOut:
       additionalProperties: true
@@ -5689,7 +5722,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.26.0
+  version: 0.27.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -6276,6 +6309,30 @@ paths:
     get:
       operationId: listAllIssues
       parameters:
+        - description: Restrict to these positive project IDs; mutually exclusive with project_id
+          explode: true
+          in: query
+          name: project_ids
+          schema:
+            description: Restrict to these positive project IDs; mutually exclusive with project_id
+            items:
+              format: int64
+              type: integer
+            type: array
+        - description: Opaque next_cursor from a matching stable-order page
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque next_cursor from a matching stable-order page
+            type: string
+        - description: Count all matching issues, ignoring cursor and limit
+          explode: false
+          in: query
+          name: include_total
+          schema:
+            description: Count all matching issues, ignoring cursor and limit
+            type: boolean
         - explode: false
           in: query
           name: project_id
@@ -6291,19 +6348,19 @@ paths:
               - closed
               - ""
             type: string
-        - description: exact priority filter (0..4); empty = no filter
+        - description: exact priority filter (0..4 or none for unset); empty = no filter
           explode: false
           in: query
           name: priority
           schema:
-            description: exact priority filter (0..4); empty = no filter
+            description: exact priority filter (0..4 or none for unset); empty = no filter
             type: string
-        - description: include only priority <= this value (0..4); empty = no filter
+        - description: include only priority <= this value (0..4), excluding unset; empty = no filter
           explode: false
           in: query
           name: max_priority
           schema:
-            description: include only priority <= this value (0..4); empty = no filter
+            description: include only priority <= this value (0..4), excluding unset; empty = no filter
             type: string
         - explode: false
           in: query
@@ -6311,14 +6368,15 @@ paths:
           schema:
             format: int64
             type: integer
-        - description: oldest = created_at ascending, then id ascending; empty preserves the route default
+        - description: oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
           explode: false
           in: query
           name: sort
           schema:
-            description: oldest = created_at ascending, then id ascending; empty preserves the route default
+            description: oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
             enum:
               - oldest
+              - created
               - ""
             type: string
         - explode: false
@@ -7701,6 +7759,20 @@ paths:
     get:
       operationId: listIssues
       parameters:
+        - description: Opaque next_cursor from a matching stable-order page
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque next_cursor from a matching stable-order page
+            type: string
+        - description: Count all matching issues, ignoring cursor and limit
+          explode: false
+          in: query
+          name: include_total
+          schema:
+            description: Count all matching issues, ignoring cursor and limit
+            type: boolean
         - in: path
           name: project_id
           required: true
@@ -7716,19 +7788,19 @@ paths:
               - closed
               - ""
             type: string
-        - description: exact priority filter (0..4); empty = no filter
+        - description: exact priority filter (0..4 or none for unset); empty = no filter
           explode: false
           in: query
           name: priority
           schema:
-            description: exact priority filter (0..4); empty = no filter
+            description: exact priority filter (0..4 or none for unset); empty = no filter
             type: string
-        - description: include only priority <= this value (0..4); empty = no filter
+        - description: include only priority <= this value (0..4), excluding unset; empty = no filter
           explode: false
           in: query
           name: max_priority
           schema:
-            description: include only priority <= this value (0..4); empty = no filter
+            description: include only priority <= this value (0..4), excluding unset; empty = no filter
             type: string
         - explode: false
           in: query
@@ -7736,14 +7808,15 @@ paths:
           schema:
             format: int64
             type: integer
-        - description: oldest = created_at ascending, then id ascending; empty preserves the route default
+        - description: oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
           explode: false
           in: query
           name: sort
           schema:
-            description: oldest = created_at ascending, then id ascending; empty preserves the route default
+            description: oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
             enum:
               - oldest
+              - created
               - ""
             type: string
         - explode: false
@@ -9524,6 +9597,23 @@ paths:
       description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
       operationId: searchIssues
       parameters:
+        - description: Continuation for explicit lexical search with sort=oldest
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Continuation for explicit lexical search with sort=oldest
+            type: string
+        - description: oldest selects exhaustive creation-ordered lexical pages; omit for relevance ranking
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: oldest selects exhaustive creation-ordered lexical pages; omit for relevance ranking
+            enum:
+              - oldest
+              - ""
+            type: string
         - description: Issue status; omit to search open and closed issues
           explode: false
           in: query

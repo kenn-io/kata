@@ -353,6 +353,9 @@ func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, 
 	var mu sync.Mutex
 	requests := []string{}
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if discoveryHealth(writer, request) {
+			return
+		}
 		if request.URL.Path != "/api/v1/projects" {
 			mu.Lock()
 			requests = append(requests, request.URL.Path)
@@ -369,16 +372,16 @@ func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, 
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 			}})
 		case "/api/v1/issues", "/api/v1/ready":
-			writeJSON(writer, map[string]any{"issues": []any{
+			writeJSON(writer, map[string]any{"complete": true, "issues": []any{
 				globalIssueJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project", "hbb1"),
 				globalIssueJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project", "spk1"),
 			}})
 		case "/api/v1/projects/1/issues", "/api/v1/projects/1/ready":
-			writeJSON(writer, map[string]any{"issues": []any{issueJSON(1, "spoke-project", "spk1")}})
+			writeJSON(writer, map[string]any{"complete": true, "issues": []any{issueJSON(1, "spoke-project", "spk1")}})
 		case "/api/v1/projects/2/issues", "/api/v1/projects/2/ready":
 			issue := issueJSON(2, "hub-project", "hbb1")
 			issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
-			writeJSON(writer, map[string]any{"issues": []any{issue}})
+			writeJSON(writer, map[string]any{"complete": true, "issues": []any{issue}})
 		case "/api/v1/projects/2/issues/hbb1":
 			writeJSON(writer, map[string]any{"issue": issueJSON(2, "hub-project", "hbb1"), "labels": []any{}, "links": []any{}, "comments": []any{}})
 		default:

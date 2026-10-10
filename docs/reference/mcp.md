@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-02
+last_edited: 2026-10-09
 ---
 
 # Model Context Protocol server
@@ -177,8 +177,38 @@ Teammate-free calls retain their existing compatibility floor.
 it to search both statuses. It combines with labels and the selected search
 mode across every project in scope. Empty and other status values are invalid.
 A status-filtered call checks for API 0.20.0 before searching and returns a
-tool error for an older daemon. Searches without status retain their existing
-compatibility floor.
+tool error for an older daemon. Other searches without status retain their existing
+compatibility floor, except the explicit single-project lexical pagination below.
+
+## Exhaustive issue discovery
+
+`kata.list` returns `issues`, `complete`, `truncated`, and `next_cursor` when
+another page exists. Its default limit is 20 and its maximum is 100. Pass
+`next_cursor` back as `cursor` with the same filters to continue. The default
+`sort: "created"` orders newest creation first; `sort: "oldest"` reverses it.
+Both use the issue ID to break creation-time ties. Ordinary edits do not move
+issues between pages. These calls require daemon API 0.27.0 or newer.
+
+Set `include_total: true` to request `total`, the count of all matching issues
+in the permitted projects, independent of the page limit and cursor. Counts
+use the same filters and authorization scope as the page. `priority_unset: true`
+selects issues with no priority and cannot be combined with `priority` or
+`max_priority`. `priority: null` still means no exact-priority filter.
+`max_priority` excludes issues with no priority.
+
+A single-project `kata.search` with explicit `mode: "lexical"` supports the
+same `cursor`, `next_cursor`, and `complete` fields in oldest-creation order,
+and requires API 0.27.0. Other search modes and multi-project searches use
+ranked, bounded results without continuation. Check `complete` before treating
+those results as exhaustive; truncation or degraded retrieval makes it false.
+On daemons older than API 0.27.0, searches without continuation retain the
+legacy extra-row probe to report truncation.
+
+Cursors are opaque and bound to the daemon, project selection, authorization
+scope, sort, and filters. Changing these rejects a cursor. The page size and
+`include_total` may change. Pages and totals are live reads, not a snapshot:
+restart a scan after changes to filter membership, project membership, deletion,
+or imported creation timestamps. Stop only when `complete` is true.
 
 ## Progressive tool catalog
 

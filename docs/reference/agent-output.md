@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-04
+last_edited: 2026-10-09
 ---
 
 # Agent output format
@@ -135,6 +135,12 @@ OK list count=3
 - issue=def7 status=open labels=architecture title="Control channel" revision=1
 - issue=j9k2 status=closed title="Old task" revision=3
 ```
+
+List and search headers include `complete=true|false` when the daemon returns
+page metadata. A page with continuation adds `next_cursor=...`; a list requested
+with `--include-total` also adds `total=<n>`. Treat the cursor as opaque and
+continue with the same filters. See [CLI reference](cli.md) for the
+CLI flags and [HTTP listing](http-api.md#listing-issues) for the scan contract.
 
 Empty reads emit the header with `count=0` and no rows:
 

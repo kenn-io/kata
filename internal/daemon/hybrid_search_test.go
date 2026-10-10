@@ -1137,6 +1137,100 @@ func TestSearchLabelCeilingHonorsModeStrictness(t *testing.T) {
 	}
 }
 
+func TestSearchEndpointReturnsAvailablePageAtCandidateCeiling(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	seedLabelCeilingCorpus(ctx, t, store, project.ID)
+
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, labelAxisEmbedClient(t))
+	srv := NewServer(ServerConfig{DB: store, VectorIndex: idx, Embedder: fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})})
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		server.Close()
+		_ = srv.Close()
+	})
+	response, err := server.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/search?q=login+race&mode=semantic&limit=%d&label=bug", server.URL, project.ID, ceilingSurvivors))
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	var got struct {
+		Complete       bool   `json:"complete"`
+		Truncated      bool   `json:"truncated"`
+		Degraded       bool   `json:"degraded"`
+		DegradedReason string `json:"degraded_reason"`
+		NextCursor     string `json:"next_cursor"`
+		Results        []struct {
+			Issue db.Issue `json:"issue"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&got))
+	require.False(t, got.Complete, "the response cannot prove exhaustion past the candidate ceiling")
+	require.True(t, got.Truncated, "the reachable page must advertise possible results beyond the ceiling")
+	require.True(t, got.Degraded, "the response must report that semantic results may be incomplete")
+	require.Equal(t, filterCeilingReason, got.DegradedReason)
+	require.Empty(t, got.NextCursor, "only lexical oldest search supports continuation cursors")
+	require.Len(t, got.Results, ceilingSurvivors)
+	for _, result := range got.Results {
+		require.Contains(t, result.Issue.Title, "labeled login race")
+	}
+}
+
+func TestSearchEndpointHybridHonorsRequestedLimitAboveCandidateCap(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+
+	const perLeg = 150
+	for i := range perLeg {
+		_, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: fmt.Sprintf("hybridresultneedle lexical %03d", i), Author: "example-author",
+		})
+		require.NoError(t, err)
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: fmt.Sprintf("semanticcandidate %03d", i), Author: "example-author",
+		})
+		require.NoError(t, err)
+	}
+
+	idx := openTestVectorIndex(t)
+	emb := mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		if text == "hybridresultneedle" {
+			return []float32{1, 0, 0, 0}
+		}
+		if strings.Contains(text, "hybridresultneedle") {
+			return []float32{0, 1, 0, 0}
+		}
+		return []float32{1, 0, 0, 0}
+	})
+	fillGeneration(ctx, t, store, idx, emb)
+
+	srv := NewServer(ServerConfig{DB: store, VectorIndex: idx, Embedder: emb})
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() {
+		server.Close()
+		_ = srv.Close()
+	})
+	response, err := server.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/search?q=hybridresultneedle&mode=hybrid&limit=%d", server.URL, project.ID, perLeg*2))
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	var got struct {
+		Truncated bool `json:"truncated"`
+		Results   []struct {
+			Issue db.Issue `json:"issue"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&got))
+	require.Equal(t, perLeg*2, len(got.Results), "hybrid merge should honor the requested result limit across both candidate legs")
+	require.True(t, got.Truncated, "hybrid search remains conservatively incomplete without a continuation cursor")
+}
+
 func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)

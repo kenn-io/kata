@@ -5,19 +5,31 @@ import type { ListAllIssuesSort } from './listAllIssuesSort.ts'
 import type { ListAllIssuesStatus } from './listAllIssuesStatus.ts'
 
 export type ListAllIssuesParams = {
+  /**
+   * Restrict to these positive project IDs; mutually exclusive with project_id
+   */
+  project_ids?: number[]
+  /**
+   * Opaque next_cursor from a matching stable-order page
+   */
+  cursor?: string
+  /**
+   * Count all matching issues, ignoring cursor and limit
+   */
+  include_total?: boolean
   project_id?: number
   status?: ListAllIssuesStatus
   /**
-   * exact priority filter (0..4); empty = no filter
+   * exact priority filter (0..4 or none for unset); empty = no filter
    */
   priority?: string
   /**
-   * include only priority <= this value (0..4); empty = no filter
+   * include only priority <= this value (0..4), excluding unset; empty = no filter
    */
   max_priority?: string
   limit?: number
   /**
-   * oldest = created_at ascending, then id ascending; empty preserves the route default
+   * oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default
    */
   sort?: ListAllIssuesSort
   unowned?: boolean

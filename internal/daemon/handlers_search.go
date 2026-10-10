@@ -8,6 +8,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/pagination"
 )
 
 // registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
@@ -46,12 +48,42 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				mode = "lexical"
 			}
 		}
-		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{
-			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
-			IncludeDeleted: in.IncludeDeleted, Requested: mode,
-			Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
-			IssueScope: issueScopeFromContext(ctx),
-		})
+
+		stable := in.Sort == "oldest"
+		if (stable && in.Mode != "lexical") || (in.Cursor != "" && !stable) {
+			return nil, api.NewError(400, "validation", "cursor pagination requires mode=lexical and sort=oldest", "", nil)
+		}
+		probeLimit, err := pageProbeLimit(limit)
+		if err != nil {
+			return nil, err
+		}
+		var res hybridResult
+		hash := ""
+		if stable {
+			params := db.SearchFTSParams{ProjectID: in.ProjectID, Query: in.Query, Status: in.Status, IncludeDeleted: in.IncludeDeleted, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, IssueScope: issueScopeFromContext(ctx), StableOrder: true}
+			normalized := params
+			normalized.Labels = normalizePageStrings(in.Labels, true)
+			normalized.ExcludeLabels = normalizePageStrings(in.ExcludeLabels, true)
+			hash = pagination.Fingerprint(struct {
+				Instance string
+				Filters  db.SearchFTSParams
+			}{cfg.DB.InstanceUID(), normalized})
+			params.After, err = pagination.Decode(in.Cursor, hash)
+			if err != nil {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			}
+			params.Limit = probeLimit
+			res.Hits, err = cfg.DB.SearchFTS(ctx, params)
+			res.Mode = modeLexical
+		} else {
+			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{
+				ProjectID: in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
+				IncludeDeleted: in.IncludeDeleted, Requested: mode,
+				Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
+				IssueScope: issueScopeFromContext(ctx),
+			})
+		}
+
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {
 				kind := "validation"
@@ -62,7 +94,22 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
+
+		more := len(res.Hits) > limit
+		page := api.PageMetadata{Complete: !more, Truncated: more}
+		if !stable && (res.Mode != modeLexical || res.Degraded || len(res.Hits) >= 200) {
+			page.Complete = false
+			page.Truncated = true
+		}
+		if more {
+			res.Hits = res.Hits[:limit]
+			if stable {
+				last := res.Hits[len(res.Hits)-1].Issue
+				page.NextCursor = pagination.Encode(pagination.Position{CreatedAt: last.CreatedAt, ID: last.ID}, hash)
+			}
+		}
 		out := &api.SearchResponse{}
+		out.Body.PageMetadata = page
 		out.Body.Query = in.Query
 		out.Body.Mode = string(res.Mode)
 		out.Body.Degraded = res.Degraded

@@ -6,5 +6,6 @@ export type ListAllIssuesSort = (typeof ListAllIssuesSort)[keyof typeof ListAllI
 
 export const ListAllIssuesSort = {
   oldest: 'oldest',
+  created: 'created',
   '': '',
 } as const

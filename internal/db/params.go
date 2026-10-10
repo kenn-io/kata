@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"time"
 
+	"go.kenn.io/kata/internal/pagination"
 	"go.kenn.io/kata/internal/tokenactor"
 	"go.kenn.io/kata/internal/transcript"
 )
@@ -107,6 +108,10 @@ type CloseIssueParams struct {
 
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
+	PriorityUnset bool                 // only issues with no priority
+	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
+	After         *pagination.Position // stable keyset boundary
+
 	ProjectID     int64
 	Status        string       // "open" | "closed" | "" (any)
 	Priority      *int64       // nil = no filter; non-nil = exactly this value
@@ -140,6 +145,12 @@ type MetaFilter struct {
 // "every project"; >0 narrows to a single project. Status="" → all statuses.
 // All other filters use the same semantics as ListIssuesParams.
 type ListAllIssuesParams struct {
+	AllowedProjectIDs []int64 // nil unrestricted; empty matches nothing
+
+	PriorityUnset bool                 // only issues with no priority
+	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
+	After         *pagination.Position // stable keyset boundary
+
 	ProjectID       int64
 	Status          string
 	Priority        *int64
@@ -283,6 +294,9 @@ type ReadyIssuesFilter struct {
 // status and label filters run inside the backend's SQL, before LIMIT, so a narrow
 // filter still fills the requested number of rows.
 type SearchFTSParams struct {
+	StableOrder bool // creation ascending, before candidate LIMIT
+	After       *pagination.Position
+
 	Status          string // "open" | "closed" | "" (any)
 	ProjectID       int64
 	Query           string

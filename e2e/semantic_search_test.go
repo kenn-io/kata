@@ -670,7 +670,7 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	cmd.Stdout = &out
 	cmd.Stderr = &warning
 	require.NoError(t, cmd.Run())
-	require.Empty(t, warning.String())
+	require.Equal(t, "search results are incomplete\n", warning.String())
 	require.Contains(t, out.String(), "# mode=lexical degraded:")
 	require.Contains(t, out.String(), "EXAMPLE_EMBEDDING_KEY")
 	require.Zero(t, requests.Load())

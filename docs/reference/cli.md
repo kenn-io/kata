@@ -613,17 +613,17 @@ ULIDs collided.
 List and inspect:
 
 ```sh
-kata list [--status open|closed|all] [--sort oldest] [--limit N]
+kata list [--status open|closed|all] [--sort oldest|created] [--limit N]
 kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
-kata list [--meta key[=value]]
-kata list --all [--status open|closed|all] [--sort oldest] [--limit N]
-              [--priority N | --max-priority N]
+kata list [--meta key[=value]] [--cursor CURSOR] [--include-total]
+kata list --all [--status open|closed|all] [--sort oldest|created] [--limit N]
+              [--priority N | --max-priority N | --priority-unset]
               [--owner NAME | --unowned]
               [--label LABEL] [--no-label LABEL] [--meta key[=value]]
 kata show <issue-ref> [--render]
 kata status <issue-ref>
 kata search <query> [--limit N] [--include-deleted]
-kata search <query> [--lexical | --hybrid | --semantic]
+kata search <query> [--lexical [--cursor CURSOR] | --hybrid | --semantic]
 kata search <query> [--status open|closed] [--label LABEL] [--no-label LABEL]
 ```
 
@@ -672,6 +672,22 @@ scoped default of `updated_at` descending and the cross-project default of
 `created_at` descending, with the existing human tree grouping. The option
 requires daemon API `0.21.0` or newer.
 
+`--sort created` orders newest creation first, with descending issue IDs for
+ties. With either explicit creation sort, JSON output returns `next_cursor`
+when another page exists. Pass it as `--cursor CURSOR` with the same filters
+and sort. `complete` is true at exhaustion. Agent output includes these fields;
+human output prints the next cursor to stderr. `--include-total` requests the
+matching count in JSON and agent output, independent of the cursor and limit.
+`--priority-unset` selects issues with no priority and cannot be combined with
+`--priority` or `--max-priority`. `--max-priority` excludes unset priorities.
+These new options require API 0.27.0 or newer.
+
+Pages are live reads, not snapshots. Ordinary edits preserve creation order;
+restart after changes to filter membership, project membership, deletion, or
+imported creation timestamps. Cursors reject changed filters or scope, while
+the limit and count request may change. See the
+[HTTP listing contract](http-api.md#listing-issues).
+
 `kata list --all` applies the same filters across every non-archived project.
 Its human and agent rows use qualified refs such as
 `example-project#abc4`, and JSON rows include `project_name`. A scoped list
@@ -689,10 +705,16 @@ By default `kata search` runs lexical (FTS) search. When the daemon has
 automatically fuses lexical and vector results. The mode flags are mutually
 exclusive and force a strategy:
 
-- `--lexical`: FTS only, exactly the default behavior on a daemon without
-  embeddings.
+- `--lexical`: FTS only, in oldest-creation order with continuation (API 0.27.0).
 - `--hybrid`: fuse the lexical and vector legs (reciprocal rank fusion).
 - `--semantic`: vector (embedding) results only.
+
+For an exhaustive lexical scan, use `--lexical --json`, then pass each
+`next_cursor` back with `--cursor` and the same query and filters until
+`complete` is true. Agent output also includes completeness and continuation;
+human output prints an incomplete-results hint to stderr. Other modes keep
+ranked, bounded results without continuation. Their `complete` field is false
+when retrieval is truncated, degraded, or cannot establish exhaustion.
 
 Search includes open and closed issues by default. Use `--status open` or
 `--status closed` to restrict results before the result limit. Status combines

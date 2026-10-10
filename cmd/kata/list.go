@@ -15,7 +15,8 @@ import (
 
 func newListCmd() *cobra.Command {
 	var status string
-	var sortOrder string
+	var sortOrder, cursor string
+	var priorityUnset, includeTotal bool
 	var limit int
 	var priority int
 	var maxPriority int
@@ -29,8 +30,14 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "list issues",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if sortOrder != "" && sortOrder != "oldest" {
-				return &cliError{Message: "--sort must be oldest", Kind: kindValidation, ExitCode: ExitValidation}
+			if sortOrder != "" && sortOrder != "oldest" && sortOrder != "created" {
+				return &cliError{Message: "--sort must be oldest or created", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if priorityUnset && (cmd.Flags().Changed("priority") || cmd.Flags().Changed("max-priority")) {
+				return &cliError{Message: "--priority-unset is mutually exclusive with --priority and --max-priority", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if cursor != "" && sortOrder == "" {
+				return &cliError{Message: "--cursor requires --sort oldest or created", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			if limit < 0 {
 				return &cliError{Message: "--limit must be non-negative", Kind: kindValidation, ExitCode: ExitValidation}
@@ -56,7 +63,11 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if sortOrder != "" {
+			if cursor != "" || includeTotal || priorityUnset || sortOrder == "created" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionDiscoveryPagination, "paginated list"); err != nil {
+					return err
+				}
+			} else if sortOrder != "" {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionListSort, "list --sort"); err != nil {
 					return err
 				}
@@ -82,6 +93,15 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			params := &generated.ListIssuesQuery{Status: new(generated.ListIssuesQueryStatus(apiStatus)), Label: labels, ExcludeLabel: noLabels, Meta: meta}
+			if cursor != "" {
+				params.Cursor = &cursor
+			}
+			if includeTotal {
+				params.IncludeTotal = &includeTotal
+			}
+			if priorityUnset {
+				params.Priority = new("none")
+			}
 			if requestLimit > 0 {
 				params.Limit = new(int64(requestLimit))
 			}
@@ -108,7 +128,7 @@ func newListCmd() *cobra.Command {
 			if all {
 				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
 					Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
-					Limit: params.Limit, Sort: allSort, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
+					Limit: params.Limit, Sort: allSort, Cursor: params.Cursor, IncludeTotal: params.IncludeTotal, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
 				}})
 				if err := externalCLITransportError(response, callErr); err != nil {
 					return err
@@ -147,7 +167,10 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			var b struct {
-				Issues []struct {
+				Complete   *bool  `json:"complete"`
+				NextCursor string `json:"next_cursor"`
+				Total      *int64 `json:"total"`
+				Issues     []struct {
 					ShortID     string   `json:"short_id"`
 					QualifiedID string   `json:"qualified_id"`
 					ProjectName string   `json:"project_name"`
@@ -168,7 +191,17 @@ func newListCmd() *cobra.Command {
 			}
 			if mode == outputAgent {
 				out := cmd.OutOrStdout()
-				if _, err := fmt.Fprintf(out, "OK list count=%d\n", len(b.Issues)); err != nil {
+				header := fmt.Sprintf("OK list count=%d", len(b.Issues))
+				if b.Complete != nil {
+					header += fmt.Sprintf(" complete=%t", *b.Complete)
+				}
+				if b.NextCursor != "" {
+					header += " next_cursor=" + agentValue(b.NextCursor)
+				}
+				if b.Total != nil {
+					header += fmt.Sprintf(" total=%d", *b.Total)
+				}
+				if _, err := fmt.Fprintln(out, header); err != nil {
 					return err
 				}
 				for _, i := range b.Issues {
@@ -230,12 +263,12 @@ func newListCmd() *cobra.Command {
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err
 			}
-			// Truncation heuristic: when we got exactly --limit rows back
-			// the daemon may have more. Has a false positive when the
-			// project has exactly --limit issues, which we accept as a
-			// much smaller harm than silently reporting a total that
-			// isn't one.
+			// Older daemons omit completeness; retain their bounded-list hint.
 			truncated := requestLimit > 0 && len(b.Issues) == requestLimit
+			if b.Complete != nil {
+				truncated = !*b.Complete
+			}
+
 			if !flags.Quiet && len(rows) > 0 {
 				if err := renderer.renderListFooter(cmd.OutOrStdout(), rows, truncated); err != nil {
 					return err
@@ -249,15 +282,23 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 			}
+			if !flags.Quiet && b.NextCursor != "" {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", b.NextCursor); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&cursor, "cursor", "", "continue a creation-sorted list with the same filters")
+	cmd.Flags().BoolVar(&includeTotal, "include-total", false, "include the matching count in JSON and agent output")
+	cmd.Flags().BoolVar(&priorityUnset, "priority-unset", false, "only issues with no priority; excludes --priority and --max-priority")
 	cmd.Flags().StringVar(&status, "status", "open", "filter by status: open|closed|all")
-	cmd.Flags().StringVar(&sortOrder, "sort", "", "sort list output: oldest (created_at ascending; explicit human output is flat)")
+	cmd.Flags().StringVar(&sortOrder, "sort", "", "sort by creation: oldest (ascending) or created (descending); human output is flat")
 	cmd.Flags().IntVar(&limit, "limit", 200, "max rows (0 = no limit; --all defaults to 0)")
 	cmd.Flags().BoolVar(&all, "all", false, "list issues across all non-archived projects")
 	cmd.Flags().IntVar(&priority, "priority", 0, "exact priority filter (0..4); 0 = highest")
-	cmd.Flags().IntVar(&maxPriority, "max-priority", 0, "include only priority <= this value (0..4)")
+	cmd.Flags().IntVar(&maxPriority, "max-priority", 0, "include only priority <= this value (0..4); excludes unset")
 	cmd.Flags().BoolVar(&unowned, "unowned", false, "only issues with no owner")
 	cmd.Flags().StringVar(&owner, "owner", "", "only issues owned by this actor")
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
