@@ -195,6 +195,10 @@ func TestClientMetadataPaginatesObjectsAndFieldsIndependently(t *testing.T) {
 		case strings.Contains(query, "KataTwentyWorkspace"):
 			workspaceResponse(t, w, workspaceID)
 		case strings.Contains(query, "KataTwentyObjects"):
+			// Twenty's metadata API uses a custom cursor scalar and the
+			// boolean comparison operator "is", unlike REST filters.
+			require.Contains(t, query, "$after: ConnectionCursor")
+			require.Contains(t, query, "isActive: { is: true }")
 			objectPages.Add(1)
 			if vars["after"] == nil {
 				writeJSON(t, w, map[string]any{"data": map[string]any{"objects": connection([]map[string]any{{"id": "55555555-5555-4555-8555-555555555551", "nameSingular": "person", "isActive": true}}, true, "object-next")}})
@@ -203,6 +207,7 @@ func TestClientMetadataPaginatesObjectsAndFieldsIndependently(t *testing.T) {
 			require.Equal(t, "object-next", vars["after"])
 			writeJSON(t, w, map[string]any{"data": map[string]any{"objects": connection([]map[string]any{{"id": "55555555-5555-4555-8555-555555555552", "nameSingular": "task", "isActive": true}}, false, "")}})
 		case strings.Contains(query, "KataTwentyFields"):
+			require.Contains(t, query, "$after: ConnectionCursor")
 			fieldPages.Add(1)
 			require.Equal(t, "55555555-5555-4555-8555-555555555552", vars["id"])
 			fields := defaultFields()
