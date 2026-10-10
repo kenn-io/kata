@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,8 +17,9 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 	for _, field := range []string{"args", "if"} {
 		t.Run(field, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
+			arguments := []string{"agent-hook", "contract", "claude", "--source", legacyAgentContractHookSource}
 			planned, err := agenthook.PlanInstall(agenthook.AgentClaude, agenthook.InstallOptions{
-				ConfigPath: path, Executable: os.Args[0], Arguments: []string{"agent-hook", "contract", "claude", "--source", legacyAgentContractHookSource},
+				ConfigPath: path, Executable: os.Args[0], Arguments: arguments,
 				Marker: agentContractMarker, Hooks: []agenthook.Hook{contractRegistrationHook(agenthook.AgentClaude)},
 			})
 			require.NoError(t, err)
@@ -25,7 +27,13 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 			require.NoError(t, json.Unmarshal(planned.Data, &document))
 			groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
 			handler := groups[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+			canonical := maps.Clone(handler)
 			if field == "args" {
+				// Claude on Windows plans exec form; keep the whole command line in
+				// command so the empty args array is the only added field.
+				commands, err := agenthook.BuildCommand(os.Args[0], arguments...)
+				require.NoError(t, err)
+				handler["command"] = commands.Native
 				handler[field] = []any{}
 			} else {
 				handler[field] = "Bash(git *)"
@@ -44,7 +52,7 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 			require.Len(t, groups, 2)
 			require.Equal(t, foreign, groups[0].(map[string]any)["hooks"].([]any)[0])
 			owned := groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-			require.NotContains(t, owned, field)
+			require.Equal(t, canonical, owned)
 		})
 	}
 }

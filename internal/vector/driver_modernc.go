@@ -5,16 +5,20 @@ package vector
 import (
 	"strings"
 
-	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"; kit's sqlitevec registers modernc.org/sqlite/vec extension at init
+	_ "modernc.org/sqlite"     // pure-Go SQLite driver registered as "sqlite"
+	_ "modernc.org/sqlite/vec" // registers the sqlite-vec extension for every modernc connection at init
 )
 
 // sidecarDriver selects the database/sql driver the vector sidecar opens
-// with. The cgo sqlite-vec bindings do not build on Windows, so kit's
-// sqlitevec registers the pure-Go modernc.org/sqlite/vec extension there
-// (via sqlite3_auto_extension at package init) and expects databases opened
-// with modernc's "sqlite" driver; sqlitevec.Register is a no-op in this
-// build. driver_cgo.go substitutes mattn/go-sqlite3 on cgo Unix builds.
+// with. The cgo sqlite-vec bindings do not build on Windows, so Windows and
+// no-cgo builds use modernc's "sqlite" driver with the pure-Go
+// modernc.org/sqlite/vec extension, which registers itself at package init.
+// driver_cgo.go substitutes mattn/go-sqlite3 on cgo Unix builds.
 const sidecarDriver = "sqlite"
+
+// registerSidecarExtension is a no-op here: importing modernc.org/sqlite/vec
+// already loads sqlite-vec into every modernc connection.
+func registerSidecarExtension() {}
 
 // sidecarDSN builds the modernc "sqlite" DSN for the sidecar. Connection-local
 // settings live here so every pooled connection receives them; ConfigureWAL

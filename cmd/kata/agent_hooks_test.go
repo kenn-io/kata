@@ -293,7 +293,10 @@ func TestAgentHookReinstallReplacesPluralCommands(t *testing.T) {
 		return data
 	}
 	fresh := install()
-	require.Contains(t, string(fresh), "agent-hook ")
-	require.NoError(t, os.WriteFile(path, bytes.ReplaceAll(fresh, []byte("agent-hook "), []byte("agent-hooks ")), 0o600))
+	plural := bytes.ReplaceAll(fresh, []byte("agent-hook "), []byte("agent-hooks "))
+	// Claude on Windows stores each argument as a separate JSON string.
+	plural = bytes.ReplaceAll(plural, []byte(`"agent-hook"`), []byte(`"agent-hooks"`))
+	require.NotEqual(t, string(fresh), string(plural))
+	require.NoError(t, os.WriteFile(path, plural, 0o600))
 	assert.Equal(t, string(fresh), string(install()))
 }
