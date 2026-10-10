@@ -4,10 +4,14 @@
 import type { SearchHit } from './searchHit.ts'
 
 export interface SearchResponseBody {
+  complete: boolean
   degraded?: boolean
   degraded_reason?: string
   mode: string
+  next_cursor?: string
   query: string
   results: SearchHit[]
+  total?: number
+  truncated: boolean
   [key: string]: unknown
 }

@@ -63,22 +63,34 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			return nil, SearchOutput{}, fmt.Errorf("status: %w", err)
 		}
 		status = &value
-		health, err := h.options.Client.Health(ctx)
-		if err != nil {
-			return nil, SearchOutput{}, err
-		}
-		reported := ""
-		if health.APISchemaVersion != nil {
-			reported = strings.TrimSpace(*health.APISchemaVersion)
-		}
-		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.20.0") < 0 {
-			return nil, SearchOutput{}, fmt.Errorf("status-filtered search requires daemon API 0.20.0 or newer; this daemon reports %q; upgrade the daemon", reported)
-		}
 	}
+	health, err := h.options.Client.Health(ctx)
+	if err != nil {
+		return nil, SearchOutput{}, err
+	}
+	reported := ""
+	if health.APISchemaVersion != nil {
+		reported = strings.TrimSpace(*health.APISchemaVersion)
+	}
+	validVersion := semver.IsValid("v" + reported)
+	if status != nil && (!validVersion || semver.Compare("v"+reported, "v0.20.0") < 0) {
+		return nil, SearchOutput{}, fmt.Errorf("status-filtered search requires daemon API 0.20.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+	}
+	// Older supported daemons omit complete. Preserve their extra-row probe
+	// contract instead of treating an absent bool as explicit incompleteness.
+	pageMetadata := validVersion && semver.Compare("v"+reported, "v0.27.0") >= 0
 	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, SearchOutput{}, err
 	}
+	stable := len(projects) == 1 && input.Mode == "lexical"
+	if input.Cursor != "" && !stable {
+		return nil, SearchOutput{}, errors.New("cursor requires single-project explicit lexical search")
+	}
+	if stable && !pageMetadata {
+		return nil, SearchOutput{}, errors.New("paginated discovery requires daemon API 0.27.0 or newer")
+	}
+
 	type projectSearch struct {
 		response *generated.SearchIssuesResponse
 		err      error
@@ -89,10 +101,16 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	for index := range projects {
 		group.Go(func() error {
 			limit64 := int64(limit + 1)
+			var sortOrder *generated.SearchIssuesQuerySort
+			if stable {
+				limit64 = int64(limit)
+				sortOrder = new(generated.SearchIssuesQuerySort("oldest"))
+			}
 			response, searchErr := h.options.Client.SearchIssues(groupContext, &generated.SearchIssuesRequestOptions{
 				PathParams: &generated.SearchIssuesPath{ProjectID: projects[index].ID},
 				Query: &generated.SearchIssuesQuery{
-					Q:            query,
+					Q:      query,
+					Cursor: optionalString(input.Cursor), Sort: sortOrder,
 					Status:       status,
 					Limit:        &limit64,
 					Mode:         mode,
@@ -129,7 +147,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			// would misdescribe the merged results.
 			effectiveMode = "mixed"
 		}
-		if len(response.Results) > limit {
+		if len(response.Results) > limit || (pageMetadata && !response.Complete) {
 			truncated = true
 		}
 		for rank, hit := range response.Results {
@@ -179,111 +197,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		DegradedReason: strings.Join(degradedReasons, "; "),
 		Results:        results,
 		Truncated:      truncated,
-	}, nil
-}
-
-func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input ListInput) (*sdkmcp.CallToolResult, IssueListOutput, error) {
-	limit, err := boundedLimit(input.Limit)
-	if err != nil {
-		return nil, IssueListOutput{}, err
-	}
-	if input.Unowned && strings.TrimSpace(input.Owner) != "" {
-		return nil, IssueListOutput{}, errors.New("owner and unowned are mutually exclusive")
-	}
-	var status *generated.ListIssuesQueryStatus
-	var globalStatus *generated.ListAllIssuesQueryStatus
-	if input.Status != "" {
-		value := generated.ListIssuesQueryStatus(input.Status)
-		if err := value.Validate(); err != nil {
-			return nil, IssueListOutput{}, fmt.Errorf("status: %w", err)
-		}
-		status = &value
-		globalValue := generated.ListAllIssuesQueryStatus(input.Status)
-		globalStatus = &globalValue
-	}
-	priority, err := priorityQuery(input.Priority)
-	if err != nil {
-		return nil, IssueListOutput{}, err
-	}
-	maxPriority, err := priorityQuery(input.MaxPriority)
-	if err != nil {
-		return nil, IssueListOutput{}, err
-	}
-	projects, err := h.readProjects(ctx, input.Project)
-	if err != nil {
-		return nil, IssueListOutput{}, err
-	}
-	limit64 := int64(limit + 1)
-	owner := optionalString(input.Owner)
-	unowned := optionalTrue(input.Unowned)
-	issues := make([]IssueSummary, 0)
-	truncated := false
-	if h.options.Scope.Mode() == ScopeAllowlist && strings.TrimSpace(input.Project) == "" {
-		for _, project := range projects {
-			response, listErr := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{
-				PathParams: &generated.ListIssuesPath{ProjectID: project.ID},
-				Query: &generated.ListIssuesQuery{
-					Status: status, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
-					Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
-					ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
-				},
-			})
-			if listErr != nil {
-				return nil, IssueListOutput{}, listErr
+		Complete:       !truncated && !degraded,
+		NextCursor: func() *string {
+			if stable && len(searches) == 1 {
+				return searches[0].response.NextCursor
 			}
-			if len(response.Issues) > limit {
-				truncated = true
-			}
-			for _, issue := range response.Issues {
-				issues = append(issues, h.summaryFromIssueOut(project, issue))
-			}
-		}
-		sortIssueSummaries(issues)
-		truncated = truncated || len(issues) > limit
-	} else if len(projects) == 1 && (h.options.Scope.Mode() == ScopeBound || strings.TrimSpace(input.Project) != "") {
-		response, listErr := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{
-			PathParams: &generated.ListIssuesPath{ProjectID: projects[0].ID},
-			Query: &generated.ListIssuesQuery{
-				Status: status, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
-				Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
-				ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
-			},
-		})
-		if listErr != nil {
-			return nil, IssueListOutput{}, listErr
-		}
-		truncated = len(response.Issues) > limit
-		for _, issue := range response.Issues {
-			issues = append(issues, h.summaryFromIssueOut(projects[0], issue))
-		}
-	} else {
-		response, listErr := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{
-			Query: &generated.ListAllIssuesQuery{
-				Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
-				Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
-				ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
-			},
-		})
-		if listErr != nil {
-			return nil, IssueListOutput{}, listErr
-		}
-		allowed := projectIDSet(projects)
-		for _, issue := range response.Issues {
-			if _, ok := allowed[issue.ProjectID]; ok {
-				issues = append(issues, summaryFromGlobalIssue(issue))
-			}
-		}
-		truncated = len(response.Issues) > limit || len(issues) > limit
-	}
-	if len(issues) > limit {
-		issues = issues[:limit]
-	}
-	project, outputProjects := outputProjectScope(projects)
-	return successResult(), IssueListOutput{
-		Project:   project,
-		Projects:  outputProjects,
-		Issues:    issues,
-		Truncated: truncated,
+			return nil
+		}(),
 	}, nil
 }
 
@@ -365,6 +285,7 @@ func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		Projects:  outputProjects,
 		Issues:    issues,
 		Truncated: truncated,
+		Complete:  !truncated,
 	}, nil
 }
 

@@ -4,6 +4,10 @@
 import type { IssueOut } from './issueOut.ts'
 
 export interface ListIssuesResponseBody {
+  complete: boolean
   issues: IssueOut[]
+  next_cursor?: string
+  total?: number
+  truncated: boolean
   [key: string]: unknown
 }

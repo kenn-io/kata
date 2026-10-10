@@ -507,12 +507,15 @@ type MutationResponse struct {
 // survives Huma's query parsing (which forbids pointer query types). Empty
 // string means no filter; otherwise parsed as 0..4.
 type ListIssuesRequest struct {
+	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
+	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+
 	ProjectID     int64    `path:"project_id" required:"true"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
-	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
-	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
+	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4 or none for unset); empty = no filter"`
+	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4), excluding unset; empty = no filter"`
 	Limit         int      `query:"limit,omitempty"`
-	Sort          string   `query:"sort,omitempty" enum:"oldest," doc:"oldest = created_at ascending, then id ascending; empty preserves the route default"`
+	Sort          string   `query:"sort,omitempty" enum:"oldest,created," doc:"oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
 	Labels        []string `query:"label,explode"`
@@ -529,12 +532,17 @@ type ListIssuesRequest struct {
 // that want one trip through this surface; omit it for the all-projects feed.
 // Priority/MaxPriority are encoded the same way as ListIssuesRequest.
 type ListAllIssuesRequest struct {
+	ProjectIDs []int64 `query:"project_ids,explode" doc:"Restrict to these positive project IDs; mutually exclusive with project_id"`
+
+	Cursor       string `query:"cursor,omitempty" doc:"Opaque next_cursor from a matching stable-order page"`
+	IncludeTotal bool   `query:"include_total,omitempty" doc:"Count all matching issues, ignoring cursor and limit"`
+
 	ProjectID     int64    `query:"project_id,omitempty"`
 	Status        string   `query:"status,omitempty" enum:"open,closed,"`
-	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
-	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
+	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4 or none for unset); empty = no filter"`
+	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4), excluding unset; empty = no filter"`
 	Limit         int      `query:"limit,omitempty"`
-	Sort          string   `query:"sort,omitempty" enum:"oldest," doc:"oldest = created_at ascending, then id ascending; empty preserves the route default"`
+	Sort          string   `query:"sort,omitempty" enum:"oldest,created," doc:"oldest = creation ascending; created = creation descending; both use id as tie-breaker; empty preserves the route default"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
 	Labels        []string `query:"label,explode"`
@@ -589,11 +597,21 @@ type IssueOut struct {
 	Blocked bool `json:"blocked,omitempty,omitzero"`
 }
 
+// PageMetadata distinguishes terminal pages from bounded discovery results.
+type PageMetadata struct {
+	NextCursor string `json:"next_cursor,omitempty"`
+	Complete   bool   `json:"complete"`
+	Truncated  bool   `json:"truncated"`
+	Total      *int64 `json:"total,omitempty"`
+}
+
 // ListIssuesResponse is the list payload. Plan 8 commit 5b: each row
 // is now an IssueOut (db.Issue + Labels) so the TUI list view can
 // render label chips without an extra fetch per row.
 type ListIssuesResponse struct {
 	Body struct {
+		PageMetadata
+
 		Issues []IssueOut `json:"issues"`
 	}
 }
@@ -608,6 +626,8 @@ type ListGlobalIssueOut struct {
 // ListAllIssuesResponse is the cross-project list response.
 type ListAllIssuesResponse struct {
 	Body struct {
+		PageMetadata
+
 		Issues []ListGlobalIssueOut `json:"issues"`
 	}
 }
@@ -1361,6 +1381,9 @@ type DigestResponse struct {
 // returns 400, and a vector-leg failure returns 503 rather than silently
 // degrading.
 type SearchRequest struct {
+	Cursor string `query:"cursor,omitempty" doc:"Continuation for explicit lexical search with sort=oldest"`
+	Sort   string `query:"sort,omitempty" enum:"oldest," doc:"oldest selects exhaustive creation-ordered lexical pages; omit for relevance ranking"`
+
 	Status         string   `query:"status,omitempty" enum:"open,closed" doc:"Issue status; omit to search open and closed issues"`
 	ProjectID      int64    `path:"project_id" required:"true"`
 	Query          string   `query:"q" required:"true"`
@@ -1393,6 +1416,8 @@ type SearchHit struct {
 // always-present mode echo.
 type SearchResponse struct {
 	Body struct {
+		PageMetadata
+
 		Query          string      `json:"query"`
 		Mode           string      `json:"mode"`
 		Degraded       bool        `json:"degraded,omitzero"`

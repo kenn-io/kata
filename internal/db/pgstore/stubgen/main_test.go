@@ -93,6 +93,8 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"CommentBodyByID",
 		"CommentsByIssue",
 		"CountActiveFederationEnrollments",
+		"CountAllIssues",
+		"CountIssues",
 		"CountLiveClaims",
 		"CountOpenIssues",
 		"CountPendingClaims",

@@ -66,7 +66,7 @@ func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
-	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical\n", out)
+	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical complete=true\n", out)
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {

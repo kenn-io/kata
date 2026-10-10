@@ -301,6 +301,9 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setNumberBounds("limit", 1, maximumResultLimit)
 		setEnum("mode", "auto", "lexical", "hybrid", "semantic")
 	case "kata.list":
+		setEnum("sort", "created", "oldest")
+		forbidTrueWith("priority_unset", "priority")
+		forbidTrueWith("priority_unset", "max_priority")
 		setNumberBounds("limit", 1, maximumResultLimit)
 		setNumberBounds("priority", 0, 4)
 		setNumberBounds("max_priority", 0, 4)
@@ -577,6 +580,8 @@ func nonIdempotent(hints *sdkmcp.ToolAnnotations) *sdkmcp.ToolAnnotations {
 
 // SearchInput selects matching issues without returning large issue bodies.
 type SearchInput struct {
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from the preceding page; keep filters and scope unchanged"`
+
 	Status        *string  `json:"status,omitempty" jsonschema:"Issue status: open or closed; omit for both"`
 	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to search every project in scope"`
 	Query         string   `json:"query" jsonschema:"Non-empty text to search for"`
@@ -588,11 +593,17 @@ type SearchInput struct {
 
 // ListInput filters project issues. Empty status means open and closed.
 type ListInput struct {
+	IncludeTotal  bool   `json:"include_total,omitempty" jsonschema:"Count all matching issues; optional extra SQL count"`
+	PriorityUnset bool   `json:"priority_unset,omitempty" jsonschema:"Only unset priority; mutually exclusive with priority and max_priority"`
+	Sort          string `json:"sort,omitempty" jsonschema:"Stable creation order: created (newest first, default) or oldest"`
+
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from the preceding page; keep filters and scope unchanged"`
+
 	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to list every project in scope"`
 	Status        string   `json:"status,omitempty" jsonschema:"Issue status: open, closed, or empty for both"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 through 100; default 20"`
 	Priority      *int64   `json:"priority,omitempty" jsonschema:"Exact priority from 0 through 4"`
-	MaxPriority   *int64   `json:"max_priority,omitempty" jsonschema:"Highest numeric priority from 0 through 4"`
+	MaxPriority   *int64   `json:"max_priority,omitempty" jsonschema:"Highest numeric priority from 0 through 4; excludes unset priority"`
 	Owner         string   `json:"owner,omitempty" jsonschema:"Only issues owned by this actor"`
 	Unowned       bool     `json:"unowned,omitempty" jsonschema:"Only issues with no owner"`
 	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that every issue must have"`
@@ -769,6 +780,11 @@ type IssueSummary struct {
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
 type IssueListOutput struct {
+	Total *int64 `json:"total,omitempty"`
+
+	Complete   bool    `json:"complete"`
+	NextCursor *string `json:"next_cursor,omitempty"`
+
 	Project   *ProjectIdentity  `json:"project,omitempty"`
 	Projects  []ProjectIdentity `json:"projects,omitempty"`
 	Issues    []IssueSummary    `json:"issues"`
@@ -784,6 +800,9 @@ type SearchHit struct {
 
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
+	Complete   bool    `json:"complete"`
+	NextCursor *string `json:"next_cursor,omitempty"`
+
 	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`
 	Query          string            `json:"query"`

@@ -4,6 +4,10 @@
 import type { ListGlobalIssueOut } from './listGlobalIssueOut.ts'
 
 export interface ListAllIssuesResponseBody {
+  complete: boolean
   issues: ListGlobalIssueOut[]
+  next_cursor?: string
+  total?: number
+  truncated: boolean
   [key: string]: unknown
 }
