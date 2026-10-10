@@ -86,7 +86,6 @@ var kataCommandGroups = map[string]string{
 	"delete":              "admin",
 	"restore":             "admin",
 	"purge":               "admin",
-	"teams":               "admin",
 }
 
 func kataGlobalFlags(cmd *cobra.Command) string {
