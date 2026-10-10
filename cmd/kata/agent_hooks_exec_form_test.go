@@ -86,3 +86,18 @@ func TestEffectiveAgentHookDefaultAcceptsClaudeExecForm(t *testing.T) {
 	entry := makeAgentHookEntry(agenthook.AgentClaude, "SessionStart", 0, 0, map[string]any{}, handler)
 	require.True(t, effectiveAgentHookDefault(agenthook.AgentClaude, entry))
 }
+
+// Hermes ignores args when matching markers, so a foreign args value must not
+// be masked; the YAML walker would also rename a matching mapping key.
+func TestAgentHooksHermesForeignArgsMatchingMappingKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	foreign := []byte("hooks:\n  pre_llm_call:\n    - command: example-tool\n      args: [hooks]\n")
+	require.NoError(t, os.WriteFile(path, foreign, 0o600))
+	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "hermes", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	document := nativeHookDocument(t, agenthook.AgentHermes, path)
+	handlers := document["hooks"].(map[string]any)["pre_llm_call"].([]any)
+	require.Contains(t, handlers, map[string]any{"command": "example-tool", "args": []any{"hooks"}})
+}

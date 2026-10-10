@@ -44,12 +44,12 @@ func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) age
 		return ""
 	}
 	var kind agentHookKind
-	argv, execForm, ok := agentHookExecArgv(agent, handler)
+	executable, args, execForm, ok := agentHookExecForm(agent, handler)
 	if !ok {
 		return ""
 	}
 	if execForm {
-		if kind = classifyAgentHookArgv(agent, argv); kind == "" {
+		if kind = classifyAgentHookArgv(agent, append([]string{executable}, args...)); kind == "" {
 			return ""
 		}
 	}
@@ -82,34 +82,34 @@ func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) age
 	return kind
 }
 
-// agentHookExecArgv returns the argv of a Claude exec-form handler, which
-// runs command directly with its args. An empty args array is not exec form.
-// ok is false when args is malformed or not valid for the agent.
-func agentHookExecArgv(agent agenthook.Agent, handler map[string]any) (argv []string, execForm, ok bool) {
+// agentHookExecForm returns the executable and arguments of a Claude
+// exec-form handler, which runs command directly with its args. An empty args
+// array is not exec form. ok is false when args is malformed or not valid for
+// the agent.
+func agentHookExecForm(agent agenthook.Agent, handler map[string]any) (executable string, args []string, execForm, ok bool) {
 	raw, exists := handler["args"]
 	if !exists {
-		return nil, false, true
+		return "", nil, false, true
 	}
 	values, isArray := raw.([]any)
 	if !isArray {
-		return nil, false, false
+		return "", nil, false, false
 	}
 	if len(values) == 0 {
-		return nil, false, true
+		return "", nil, false, true
 	}
-	command, _ := handler["command"].(string)
-	if agent != agenthook.AgentClaude || command == "" {
-		return nil, false, false
+	executable, _ = handler["command"].(string)
+	if agent != agenthook.AgentClaude || executable == "" {
+		return "", nil, false, false
 	}
-	argv = []string{command}
 	for _, value := range values {
 		arg, isString := value.(string)
 		if !isString {
-			return nil, false, false
+			return "", nil, false, false
 		}
-		argv = append(argv, arg)
+		args = append(args, arg)
 	}
-	return argv, true, true
+	return executable, args, true, true
 }
 
 func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agentHookKind {
@@ -307,7 +307,7 @@ func effectiveAgentHookDefault(agent agenthook.Agent, entry agentHookEntry) bool
 		case "type", "command", "commandWindows", "bash", "powershell", "timeout", "timeoutSec", "matcher":
 		case "args":
 			// Contract classification already validated exec-form args.
-			if _, execForm, _ := agentHookExecArgv(agent, entry.Fields); !execForm {
+			if _, _, execForm, _ := agentHookExecForm(agent, entry.Fields); !execForm {
 				args, ok := value.([]any)
 				if !ok || len(args) != 0 {
 					return false
@@ -544,11 +544,14 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 			value, _ := entry.Fields[field].(string)
 			protect(value)
 		}
-		// Kit matches markers against exec-form args joined with the command.
-		args, _ := entry.Fields["args"].([]any)
-		for _, arg := range args {
-			value, _ := arg.(string)
-			protect(value)
+		// Kit matches nested JSON markers against args joined with the command.
+		// Hermes matches command only, and its YAML walk also rewrites keys.
+		if agent != agenthook.AgentHermes {
+			args, _ := entry.Fields["args"].([]any)
+			for _, arg := range args {
+				value, _ := arg.(string)
+				protect(value)
+			}
 		}
 	}
 	if agent == agenthook.AgentHermes {

@@ -116,8 +116,8 @@ func makeAgentHookEntry(agent agenthook.Agent, event string, groupIndex, handler
 		entry.Command, _ = handler["bash"].(string)
 	}
 	// Report an exec-form handler as the command line it runs.
-	if argv, execForm, _ := agentHookExecArgv(agent, handler); execForm {
-		if commands, err := agenthook.BuildCommand(argv[0], argv[1:]...); err == nil {
+	if executable, args, execForm, _ := agentHookExecForm(agent, handler); execForm {
+		if commands, err := agenthook.BuildCommand(executable, args...); err == nil {
 			entry.Command = commands.Native
 		}
 	}
