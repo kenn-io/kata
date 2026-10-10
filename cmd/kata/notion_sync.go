@@ -20,7 +20,25 @@ func newNotionSyncEnableCmd() *cobra.Command {
 	var source, database, status, assignee, interval, since, statusSync, completeGroup, todoGroup, closedStatus, openStatus string
 	var done []string
 	var titlePrefix bool
-	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Notion sync for this project", Args: cobra.NoArgs}
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "enable daemon-side Notion sync for this project",
+		Long: `Bind the Kata project (bound or --project) to one Notion task data source
+and start daemon-side polling. The first enable needs one locator:
+--data-source (UUID), or --database (UUID or URL of a database with exactly
+one data source). The source needs a People property; --assignee-property may
+be omitted only when exactly one exists. --status-property defaults to the
+sole status property. Selectors take exact IDs or case-sensitive names.
+The daemon reads its token from KATA_NOTION_TOKEN, or the variable named by
+[notion_sync] token_env. Omitted --interval, --since, --status-sync, and
+--title-prefix keep their saved values; pass --since= to clear the cutoff.
+--status-sync two-way also sends Kata close and reopen back to the status
+property. It needs a To-do group and rejects --done-status.`,
+		Example: `  kata sync notion enable --data-source <data-source-uuid> --agent
+  kata sync notion enable --database <database-uuid> --assignee-property Responsible --agent
+  kata sync notion enable --status-sync two-way --agent`,
+		Args: cobra.NoArgs,
+	}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		config := map[string]any{}
 		invalid := func(message string) error {
