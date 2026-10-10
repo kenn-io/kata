@@ -98,7 +98,7 @@ func (ix *Index) Close() error {
 }
 
 func openSidecar(ctx context.Context, path string) (*sql.DB, error) {
-	sqlitevec.Register() // no-op on modernc builds; required on cgo builds
+	registerSidecarExtension()
 	fast := sqliteconfig.FastTestMode()
 	db, err := sql.Open(sidecarDriver, sidecarDSN(path, fast))
 	if err != nil {
