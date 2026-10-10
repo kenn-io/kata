@@ -1223,3 +1223,31 @@ func TestRemoteCompletionKeepsLocalCloseDetails(t *testing.T) {
 	require.Equal(t, "wontfix", *got.ClosedReason)
 	require.Equal(t, closed.ClosedAt, got.ClosedAt)
 }
+
+// A task whose first import failed has a checkpoint entry but no mapping. If
+// it completes in TickTick before the retry, it leaves the open-task list; sync
+// must still read and import it.
+func TestFailedFirstImportStillImportsTaskCompletedBeforeRetry(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := sourceData()
+	f.data.Tasks = append(f.data.Tasks, Task{ID: "task-2", ProjectID: "project-1", Title: "Second", Status: new(0)})
+	at := time.Now().UTC().Add(-time.Hour)
+	wrapped := &failingImportStore{Storage: s, fail: true}
+	r := issuesync.NewRunner(issuesync.RunnerConfig{Store: wrapped, Adapter: NewAdapter(wrapped, f), Clock: func() time.Time { return at }, InitialBatchSize: 1})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.ErrorContains(t, err, "second chunk")
+	_, err = s.ImportMappingBySource(ctx, b.ProjectID, b.SourceKey, "issue", "task:task-2")
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	wrapped.fail = false
+	f.data.Tasks = f.data.Tasks[:1]
+	f.missing["task-2"] = Task{ID: "task-2", ProjectID: "project-1", Title: "Second", Status: new(2)}
+	at = at.Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"task-2"}, f.reads)
+	got := mappedIssue(t, s, b, "task-2")
+	require.Equal(t, "Second", got.Title)
+	require.Equal(t, "closed", got.Status)
+}

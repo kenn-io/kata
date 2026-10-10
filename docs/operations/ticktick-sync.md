@@ -1,7 +1,7 @@
 ---
 title: TickTick sync
 description: Import a scoped TickTick task project into Kata and send ordinary task completion back through the public API.
-last_edited: 2026-10-09
+last_edited: 2026-10-10
 ---
 
 # TickTick sync
@@ -125,19 +125,20 @@ The current-project data endpoint is documented as an unpaginated collection of
 open tasks. Kata reads it in full each run. It does not use the capped
 completed-task history endpoint as a complete archive. A mapped task missing
 from the collection is read individually only while its Kata issue is open, at
-most 100 task IDs per run in a durable, sorted rotation. This recovers
-completion without rereading completed history on every run. If the Kata issue
-was closed locally while TickTick still showed the task open, Kata reads the
-task once more to record its completion. After that, Kata stops reading the task
-and forgets its fingerprint. If the task returns, for example after a reopen in
-either tool, Kata starts from the source version saved on its mapping. Unchanged
-content cannot replace newer local edits, and a TickTick reopen still reopens
-the issue. TickTick edits made while the task was untracked import with the next
-TickTick edit. New historical completed tasks are not guaranteed to be
-backfilled. Absence and task `404` responses never delete or close local issues.
-Moved, deleted, abandoned, and inaccessible tasks remain local; a task returned
-under another project is skipped. Explicit auth failures stop preparation.
-Archived/closed projects stop sync and retain local issues.
+most 100 task IDs per run in a durable, sorted rotation. A task whose first
+import failed is read the same way until it is imported or TickTick no longer
+has it. This recovers completion without rereading completed history on every
+run. If the Kata issue was closed locally while TickTick still showed the task
+open, Kata reads the task once more to record its completion. After that, Kata
+stops reading the task and forgets its fingerprint. If the task returns, for
+example after a reopen in either tool, Kata starts from the source version saved
+on its mapping. Unchanged content cannot replace newer local edits, and a
+TickTick reopen still reopens the issue. TickTick edits made while the task was
+untracked import with the next TickTick edit. New historical completed tasks are
+not guaranteed to be backfilled. Absence and task `404` responses never delete
+or close local issues. Moved, deleted, abandoned, and inaccessible tasks remain
+local; a task returned under another project is skipped. Explicit auth failures
+stop preparation. Archived/closed projects stop sync and retain local issues.
 
 Manual and scheduled runs share a durable claim, progress tracker, and one
 request-per-second client. Two-way status reads cost one task request each; the

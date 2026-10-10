@@ -140,8 +140,12 @@ func (a *Adapter) missingTaskWindow(ctx context.Context, b db.IssueSyncBinding, 
 	if err != nil {
 		return nil, nil, err
 	}
+	unimported, err := a.unimportedMissingTasks(ctx, b, visible, *cp)
+	if err != nil {
+		return nil, nil, err
+	}
 	tracked := map[string]bool{}
-	for _, id := range openMissing {
+	for _, id := range slices.Concat(openMissing, unimported) {
 		tracked[id] = true
 	}
 	for id := range closedCandidates {
@@ -254,6 +258,37 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved}
 	}
 	return nil
+}
+
+// unimportedMissingTasks lists checkpointed tasks absent from the current
+// collection that have no issue mapping yet. A failed import leaves such an
+// entry; if the task completed before the retry, only an individual read can
+// still import it.
+func (a *Adapter) unimportedMissingTasks(ctx context.Context, b db.IssueSyncBinding, visible map[string]bool, cp Checkpoint) ([]string, error) {
+	absent := map[string]bool{}
+	for id := range cp.Versions {
+		if !visible[id] {
+			absent[id] = true
+		}
+	}
+	if len(absent) == 0 {
+		return nil, nil
+	}
+	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range mappings {
+		if m.ObjectType != "issue" || m.IssueID == nil {
+			continue
+		}
+		id, err := mappingTaskID(m.ExternalID)
+		if err != nil {
+			return nil, err
+		}
+		delete(absent, id)
+	}
+	return slices.Sorted(maps.Keys(absent)), nil
 }
 
 // openMissingTasks lists mapped tasks absent from the current collection whose
