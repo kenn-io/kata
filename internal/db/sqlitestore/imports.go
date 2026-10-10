@@ -282,7 +282,7 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		if err != nil {
 			return nil, nil, err
 		}
-		if !newStatusObservation {
+		if db.ImportKeepsNativeWorkflow(existing, item, newStatusObservation) {
 			item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
 		}
 	}

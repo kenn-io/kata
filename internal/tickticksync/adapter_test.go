@@ -1200,3 +1200,26 @@ func TestRecoveredTaskIsDatedWhenRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Remote change", mappedIssue(t, s, b, "task-1").Title)
 }
+
+// A TickTick completion of an issue already closed in Kata keeps the local
+// close reason and time.
+func TestRemoteCompletionKeepsLocalCloseDetails(t *testing.T) {
+	ctx := context.Background()
+	s, b := adapterDB(t)
+	f := sourceData()
+	at := time.Now().UTC().Add(-time.Hour)
+	r := NewRunner(RunnerConfig{Store: s, Fetcher: f, Clock: func() time.Time { return at }})
+	_, err := r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	issue := mappedIssue(t, s, b, "task-1")
+	_, _, _, err = s.CloseIssueWithEvents(ctx, issue.ID, "wontfix", "worker", "", nil)
+	require.NoError(t, err)
+	closed := mappedIssue(t, s, b, "task-1")
+	f.data.Tasks[0].Status = new(2)
+	at = time.Now().UTC().Add(time.Minute)
+	_, err = r.RunOnce(ctx, b.ID)
+	require.NoError(t, err)
+	got := mappedIssue(t, s, b, "task-1")
+	require.Equal(t, "wontfix", *got.ClosedReason)
+	require.Equal(t, closed.ClosedAt, got.ClosedAt)
+}

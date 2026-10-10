@@ -294,7 +294,7 @@ func (s *Store) importIssue(
 	}
 	if params.ManageStatusSeparately {
 		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
-	} else if hasStatusObservation && !newStatusObservation {
+	} else if hasStatusObservation && db.ImportKeepsNativeWorkflow(existing, item, newStatusObservation) {
 		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
 	}
 	sourceCurrent := mapping.SourceUpdatedAt != nil &&

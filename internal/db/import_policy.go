@@ -109,6 +109,14 @@ func IsNewImportStatusObservation(current *IssueStatusObservation, incoming Issu
 	return true, nil
 }
 
+// ImportKeepsNativeWorkflow reports whether an import with a status
+// observation keeps the issue's own status, close reason, and close time. A
+// repeated observation never changes them, and a new one changes them only
+// when it flips the issue between open and closed.
+func ImportKeepsNativeWorkflow(existing Issue, item ImportItem, newObservation bool) bool {
+	return !newObservation || item.Status == existing.Status
+}
+
 // ImportedWorkflowStatusDiffers reports whether an imported item changes any
 // native workflow field while leaving content and ownership out of scope.
 func ImportedWorkflowStatusDiffers(existing Issue, item ImportItem) bool {
