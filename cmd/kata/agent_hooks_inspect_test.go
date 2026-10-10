@@ -55,6 +55,20 @@ func nativeContractHandlers(t *testing.T, agent agenthook.Agent, path string) []
 	return handlers
 }
 
+// nativeHandlerCommandLine joins a handler's command with any exec-form args.
+func nativeHandlerCommandLine(handler map[string]any) string {
+	command, _ := handler["command"].(string)
+	if command == "" {
+		command, _ = handler["bash"].(string)
+	}
+	args, _ := handler["args"].([]any)
+	for _, arg := range args {
+		text, _ := arg.(string)
+		command += " " + text
+	}
+	return command
+}
+
 func installHookFixture(t *testing.T, agent agenthook.Agent, path, executable, marker string, hook agenthook.Hook) {
 	t.Helper()
 	arguments := []string{"--source", marker}
@@ -107,6 +121,11 @@ func TestAgentHooksInstallAllProfiles(t *testing.T) {
 			if profile.Agent == agenthook.AgentCopilot {
 				expected = commands.POSIX
 			}
+			// Claude on Windows receives the executable and arguments separately.
+			if profile.Agent == agenthook.AgentClaude && runtime.GOOS == "windows" {
+				expected = executable
+				require.Equal(t, []any{"agent-hook", "contract", "claude", "--source", "kata-agent-contract-hook"}, owned["args"])
+			}
 			require.Equal(t, expected, command)
 			timeoutKey := "timeout"
 			expectedTimeout := float64(10)
@@ -151,11 +170,7 @@ func TestAgentHooksInstallAllProfiles(t *testing.T) {
 			handlers = nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
 			for i, marker := range []string{"example-before", "example-after", "agent-hook contract"} {
-				command, _ := handlers[i]["command"].(string)
-				if command == "" {
-					command, _ = handlers[i]["bash"].(string)
-				}
-				require.Contains(t, command, marker)
+				require.Contains(t, nativeHandlerCommandLine(handlers[i]), marker)
 			}
 		})
 	}

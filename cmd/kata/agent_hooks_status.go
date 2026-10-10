@@ -83,6 +83,9 @@ func readAgentHookStatus(agent agenthook.Agent, path, workspace string) (agentHo
 		goos := runtime.GOOS
 		command, powershell := agentHookCommandForPlatform(agent, entry, goos)
 		executable, parseErr := agentHookCommandExecutable(command, goos, powershell)
+		if argv, execForm, _ := agentHookExecArgv(agent, entry.Fields); execForm {
+			executable, parseErr = argv[0], nil
+		}
 		exists := false
 		if parseErr == nil {
 			path := executable
