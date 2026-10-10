@@ -11,8 +11,8 @@ import (
 )
 
 const workspaceQuery = `query KataTwentyWorkspace { currentWorkspace { id displayName } }`
-const objectsQuery = `query KataTwentyObjects($after: String) { objects(paging: { first: 100, after: $after }, filter: { isActive: { eq: true } }) { edges { node { id nameSingular isActive } } pageInfo { hasNextPage endCursor } } }`
-const fieldsQuery = `query KataTwentyFields($id: UUID!, $after: String) { object(id: $id) { id nameSingular isActive fields(paging: { first: 100, after: $after }) { edges { node { id name type isActive options } } pageInfo { hasNextPage endCursor } } } }`
+const objectsQuery = `query KataTwentyObjects($after: ConnectionCursor) { objects(paging: { first: 100, after: $after }, filter: { isActive: { is: true } }) { edges { node { id nameSingular isActive } } pageInfo { hasNextPage endCursor } } }`
+const fieldsQuery = `query KataTwentyFields($id: UUID!, $after: ConnectionCursor) { object(id: $id) { id nameSingular isActive fields(paging: { first: 100, after: $after }) { edges { node { id name type isActive options } } pageInfo { hasNextPage endCursor } } } }`
 
 func (s *clientSession) Workspace(ctx context.Context, c Config) (Workspace, error) {
 	if err := s.validate(c, false); err != nil {
