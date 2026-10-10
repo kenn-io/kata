@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,7 +82,7 @@ func TestImportForceSafeInstanceIdentity(t *testing.T) {
 }
 
 func TestInstallPreparedSQLiteImportInspectsTargetWithoutUpgrading(t *testing.T) {
-	for _, version := range []string{"30", "32"} {
+	for _, version := range []string{"30", strconv.Itoa(db.CurrentSchemaVersion() + 1)} {
 		t.Run(version, func(t *testing.T) {
 			home := setupKataEnv(t)
 			targetPath := filepath.Join(home, "target.db")

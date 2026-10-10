@@ -15,11 +15,14 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const commentSelect = `SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments`
+const commentSelect = `SELECT id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at FROM comments`
 
 // CreateComment appends a comment and its issue.commented event atomically.
 func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams) (db.Comment, db.Event, error) {
 	if err := teammate.Validate(params.Teammate); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
+	if err := db.ValidateCommentReply("", params.ReplyToUID, params.ReplyKind); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
 	var comment db.Comment
@@ -42,10 +45,10 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		}
 		createdAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
-			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate)
-			 VALUES($1,$2,$3,$4,$5,NULLIF($6, ''))
-			 RETURNING id, uid, issue_id, author, body, created_at, teammate`,
-			commentUID, issue.ID, effectiveActor, params.Body, createdAt, params.Teammate,
+			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind)
+			 VALUES($1,$2,$3,$4,$5,NULLIF($6, ''),NULLIF($7, ''),NULLIF($8, ''))
+			 RETURNING id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at`,
+			commentUID, issue.ID, effectiveActor, params.Body, createdAt, params.Teammate, params.ReplyToUID, params.ReplyKind,
 		))
 		if err != nil {
 			return err
@@ -55,6 +58,8 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			return mapSQLError(err, nil)
 		}
 		payload, err := json.Marshal(struct {
+			ReplyToUID             string `json:"reply_to_uid,omitempty"`
+			ReplyKind              string `json:"reply_kind,omitempty"`
 			CommentUID             string `json:"comment_uid"`
 			Author                 string `json:"author"`
 			Teammate               string `json:"teammate,omitempty"`
@@ -63,6 +68,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			IdempotencyKey         string `json:"idempotency_key,omitempty"`
 			IdempotencyFingerprint string `json:"idempotency_fingerprint,omitempty"`
 		}{
+			ReplyToUID: params.ReplyToUID, ReplyKind: params.ReplyKind,
 			CommentUID:             comment.UID,
 			Author:                 comment.Author,
 			Teammate:               comment.Teammate,
@@ -74,8 +80,19 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return fmt.Errorf("marshal comment payload: %w", err)
 		}
-		event, err = s.insertEventTx(ctx, tx,
-			issueEventInput(issue, project, "issue.commented", effectiveActor, string(payload)))
+		input := issueEventInput(issue, project, "issue.commented", effectiveActor, string(payload))
+		if params.ReplyToUID != "" {
+			var id int64
+			var uid string
+			err := tx.QueryRowContext(ctx, `SELECT i.id,i.uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2`, params.ReplyToUID, project.ID).Scan(&id, &uid)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("lookup reply target issue: %w", err)
+			}
+			if err == nil && id != issue.ID {
+				input.RelatedIssueID, input.RelatedIssueUID = &id, &uid
+			}
+		}
+		event, err = s.insertEventTx(ctx, tx, input)
 		return err
 	})
 	return comment, event, err
@@ -137,8 +154,8 @@ func (s *Store) editComment(
 		}
 		editedAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
-			`UPDATE comments SET body = $1 WHERE id = $2
-			 RETURNING id, uid, issue_id, author, body, created_at, teammate`, params.Body, comment.ID))
+			`UPDATE comments SET body = $1, edited_at = $3 WHERE id = $2
+			 RETURNING id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at`, params.Body, comment.ID, editedAt))
 		if err != nil {
 			return err
 		}
@@ -314,16 +331,24 @@ func sortCommentsByCreatedAt(comments []db.Comment) {
 func scanComment(row rowScanner) (db.Comment, error) {
 	var comment db.Comment
 	var createdAt string
-	var teammate sql.NullString
+	var teammate, replyTo, replyKind, editedAt sql.NullString
 	err := row.Scan(
-		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &createdAt, &teammate,
+		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &createdAt, &teammate, &replyTo, &replyKind, &editedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
 	}
 	comment.Teammate = teammate.String
+	comment.ReplyToUID, comment.ReplyKind = replyTo.String, replyKind.String
 	if err != nil {
 		return db.Comment{}, mapSQLError(err, nil)
+	}
+	if editedAt.Valid {
+		value, parseErr := parseStoredTime(editedAt.String)
+		if parseErr != nil {
+			return db.Comment{}, fmt.Errorf("parse comment edited_at: %w", parseErr)
+		}
+		comment.EditedAt = &value
 	}
 	comment.CreatedAt, err = parseStoredTime(createdAt)
 	if err != nil {

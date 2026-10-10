@@ -48,7 +48,7 @@ func TestNativeCronCutoverPreservesVersion30DueRequest(t *testing.T) {
 	require.False(t, again.Changed)
 	version, err := target.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 31, version)
+	require.Equal(t, 32, version)
 	require.Equal(t, freshShape, sqliteCronPhysicalShape(t, target))
 	rows, err := target.ListCronJobs(ctx, db.CronList{ProjectID: project.ID})
 	require.NoError(t, err)

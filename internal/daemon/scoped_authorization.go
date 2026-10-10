@@ -461,3 +461,24 @@ func scopedClosedReportPayload(rawPayload, safePayload string, allowedUIDs map[s
 	}
 	return string(merged)
 }
+
+// omitScopedCommentReplies hides reply links from issue-scoped callers. A reply
+// target can sit outside the caller's subtree, and authorized reply rendering
+// is not built yet.
+func omitScopedCommentReplies(ctx context.Context, comments []db.Comment) []db.Comment {
+	if issueScopeFromContext(ctx) == nil {
+		return comments
+	}
+	out := make([]db.Comment, len(comments))
+	for index, comment := range comments {
+		out[index] = omitScopedCommentReply(ctx, comment)
+	}
+	return out
+}
+
+func omitScopedCommentReply(ctx context.Context, comment db.Comment) db.Comment {
+	if issueScopeFromContext(ctx) != nil {
+		comment.ReplyToUID, comment.ReplyKind = "", ""
+	}
+	return comment
+}

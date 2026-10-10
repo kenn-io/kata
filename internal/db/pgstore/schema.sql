@@ -166,6 +166,9 @@ CREATE TABLE comments (
   body       TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   teammate TEXT,
+  reply_to_uid TEXT,
+  reply_kind TEXT,
+  edited_at TEXT,
   CHECK (length(uid) = 26),
   CHECK (length(trim(author)) > 0),
   CHECK (length(trim(body))   > 0)

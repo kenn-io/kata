@@ -109,3 +109,26 @@ Rollback requires a pre-upgrade backup and matching older binary; there is no
 down migration. Ordinary JSONL restore preserves shared definitions and run
 evidence. SQLite upgrades through its normal JSONL 30→31 cutover with its
 backup and swap protections.
+
+## Schema 32: comment replies and edit times
+
+The 31→32 migration adds nullable `reply_to_uid`, `reply_kind`, and `edited_at`
+columns to `comments`. Existing comments keep their identities and receive
+NULL in all three columns. The migration adds no constraints or indexes. Kata
+validates reply fields before it writes them: the fields are paired, the target
+is a 26-character comment UID, and the kind is `reply`, `confirm`, `refute`, or
+`supersede`. `reply` is a general response; `confirm` asserts verification or
+reproduction. There is no target foreign key, so a reply can arrive before its
+target and survive target purge.
+
+Upgrade federated hubs before spokes. A schema-31 hub refuses a push that
+contains a reply as schema skew; the spoke keeps it pending, without
+quarantine, and pushes it again after the hub upgrades.
+A spoke that still runs a schema-31 binary can also stall when it pulls a
+cross-issue reply whose target issue it does not have, so upgrade spokes soon
+after their hub. Stop the daemon and run `kata storage postgres migrate` with
+schema-owner credentials before starting the matching binary. Adding the
+columns takes a brief exclusive lock on `comments`. Existing table grants cover
+the new columns. Validation-only runtime credentials cannot migrate. Schema-31
+binaries cannot reopen schema 32; rollback requires the pre-upgrade backup and
+its matching older binary.

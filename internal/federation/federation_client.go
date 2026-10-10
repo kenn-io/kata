@@ -110,11 +110,12 @@ func (c *Client) IngestProjectEventsWithOptions(
 	}
 	// Schema30 accepts every pre-cron envelope supported here. Database
 	// schema versions are not feature negotiation: ordinary traffic remains
-	// compatible, while cron publication requires positive hub support.
+	// compatible, while cron publication requires positive hub support and
+	// reply-bearing comments require a hub that understands replies.
 	schemaVersion := 30
 	requiredFeatures := ""
 	for _, event := range events {
-		version, required, err := db.FederationEventWireVersion(event.Type)
+		version, required, err := db.FederationEventPayloadWireVersion(event.Type, event.Payload)
 		if err != nil {
 			return api.FederationIngestEventsBody{}, err
 		}

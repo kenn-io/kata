@@ -175,3 +175,37 @@ func TestFederationClientPostJSONRejectsNonJSONResponse(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode hub")
 }
+
+func TestFederationClientIngestDeclaresCommentReplyWireVersion(t *testing.T) {
+	const target = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
+	cases := []struct {
+		name      string
+		eventType string
+		payload   string
+		want      int
+	}{
+		{name: "plain comment", eventType: "issue.commented", payload: `{"comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","body":"note"}`, want: 30},
+		{name: "reply comment", eventType: "issue.commented", payload: `{"comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","body":"note","reply_to_uid":"` + target + `","reply_kind":"reply"}`, want: 32},
+		{name: "snapshot without replies", eventType: "issue.snapshot", payload: `{"title":"t","comments":[{"comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","body":"note"}]}`, want: 30},
+		{name: "snapshot with reply", eventType: "issue.snapshot", payload: `{"title":"t","comments":[{"comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","body":"note","reply_to_uid":"` + target + `","reply_kind":"confirm"}]}`, want: 32},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody api.FederationIngestEventsRequestBody
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+				require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{Accepted: 1, PushCursorEventID: 8}))
+			}))
+			t.Cleanup(srv.Close)
+			issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EY"
+			client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+			require.NoError(t, err)
+			_, err = client.IngestProjectEvents(context.Background(), 42, []api.FederationIngestEventEnvelope{{
+				EventID: 8, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", IssueUID: &issueUID,
+				Type: tc.eventType, Actor: "spoke", Payload: jsontext.Value(tc.payload),
+			}})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, gotBody.SchemaVersion)
+		})
+	}
+}

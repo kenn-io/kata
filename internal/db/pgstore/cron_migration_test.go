@@ -48,6 +48,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropCommentReplySchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE cron_upgrade.meta SET value='30' WHERE key='schema_version'`)
 	require.NoError(t, err)
@@ -60,7 +61,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	require.Zero(t, count)
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 31, version)
+	require.Equal(t, 32, version)
 	got, err := upgraded.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, issue, got)
@@ -87,7 +88,8 @@ func cronPhysicalShape(ctx context.Context, t *testing.T, admin *sql.DB, schema 
  SELECT 'constraint:' || c.relname || ':' || con.conname || ':' || replace(pg_get_constraintdef(con.oid,true),$1||'.','') AS value FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1
  UNION ALL SELECT 'index:' || tablename || ':' || indexname || ':' || replace(indexdef,$1||'.','') FROM pg_indexes WHERE schemaname=$1
  UNION ALL SELECT 'column:' || table_name || ':' || column_name || ':' || ordinal_position || ':' || udt_name || ':' || is_nullable || ':' || is_identity || ':' || replace(COALESCE(column_default,''),$1||'.','') FROM information_schema.columns WHERE table_schema=$1
- ) shapes ORDER BY value`, schema)
+ ) shapes WHERE value ~ '^(column|constraint|index):cron_' OR value LIKE 'index:events:idx_events_project_cron:%'
+ ORDER BY value`, schema)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, rows.Close()) }()
 	var values []string

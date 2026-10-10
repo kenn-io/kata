@@ -14,6 +14,7 @@ import (
 
 func dropIssueStatusSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropCommentReplySchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	// Reconstruct the released schema-29 table shape from the current DDL.
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.import_mappings

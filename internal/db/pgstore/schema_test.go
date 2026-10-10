@@ -175,7 +175,7 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		 WHERE table_schema = current_schema()
 		   AND table_name = 'comments'
 		 ORDER BY ordinal_position`)
-	assert.Equal(t, []string{"id", "uid", "issue_id", "author", "body", "created_at", "teammate"}, commentColumns)
+	assert.Equal(t, []string{"id", "uid", "issue_id", "author", "body", "created_at", "teammate", "reply_to_uid", "reply_kind", "edited_at"}, commentColumns)
 	var teammateNullable string
 	require.NoError(t, s.QueryRowContext(ctx, `
 		SELECT is_nullable

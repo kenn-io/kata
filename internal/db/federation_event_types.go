@@ -1,6 +1,8 @@
 package db
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 )
@@ -78,6 +80,48 @@ func FederationEventWireVersion(kind string) (int, string, error) {
 		return 0, "", fmt.Errorf("%w: no wire compatibility declared for %s", ErrUnsupportedEventFeatures, kind)
 	}
 	return declared.version, declared.feature, nil
+}
+
+// commentReplyWireVersion is the first wire version whose hubs accept reply
+// links on comments. Older hubs treat a reply's target issue as a hard
+// reference and would quarantine the push instead of refusing it as skew.
+const commentReplyWireVersion = 32
+
+// FederationEventPayloadWireVersion is FederationEventWireVersion raised to
+// commentReplyWireVersion when a comment or issue document carries a reply
+// link, so hubs that predate replies refuse the push as schema skew.
+func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int, string, error) {
+	version, feature, err := FederationEventWireVersion(kind)
+	if err != nil {
+		return 0, "", err
+	}
+	if payloadCarriesCommentReply(kind, payload) {
+		version = max(version, commentReplyWireVersion)
+	}
+	return version, feature, nil
+}
+
+func payloadCarriesCommentReply(kind string, payload jsontext.Value) bool {
+	var document struct {
+		ReplyToUID string `json:"reply_to_uid"`
+		Comments   []struct {
+			ReplyToUID string `json:"reply_to_uid"`
+		} `json:"comments"`
+	}
+	if json.Unmarshal(payload, &document) != nil {
+		return false
+	}
+	switch kind {
+	case "issue.commented":
+		return document.ReplyToUID != ""
+	case "issue.created", "issue.snapshot":
+		for _, comment := range document.Comments {
+			if comment.ReplyToUID != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // IsFederationSnapshotEvent identifies a baseline document, including dormant

@@ -38,7 +38,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type <> 'issue.links_changed')`, issue.ID,
+          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID,
 		).Scan(&minEventID, &maxEventID); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -47,7 +47,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT COUNT(*) FROM comments WHERE issue_id = $1`,
 			`SELECT COUNT(*) FROM links WHERE from_issue_id = $1 OR to_issue_id = $1`,
 			`SELECT COUNT(*) FROM issue_labels WHERE issue_id = $1`,
-			`SELECT COUNT(*) FROM events WHERE issue_id = $1 OR (related_issue_id = $1 AND type <> 'issue.links_changed')`,
+			`SELECT COUNT(*) FROM events WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`,
 		}
 		for index, query := range queries {
 			if err := tx.QueryRowContext(ctx, query, issue.ID).Scan(&counts[index]); err != nil {
@@ -55,7 +55,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type <> 'issue.links_changed')`, issue.ID); err != nil {
+          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		rows, err := tx.QueryContext(ctx, `UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL
@@ -69,6 +69,12 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		}
 		if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
 			return err
+		}
+		// Retain the source reply's portable envelope/hash for replay and scoping.
+		// Its numeric target FK must be detached before deleting the target issue.
+		if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
+WHERE related_issue_id = $1 AND type = 'issue.commented'`, issue.ID); err != nil {
+			return mapSQLError(err, nil)
 		}
 		for _, statement := range []string{
 			`DELETE FROM comments WHERE issue_id = $1`,
@@ -97,17 +103,17 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			}
 		}
 
-		var resetCursor sql.NullInt64
-		if minEventID.Valid {
-			if err := lockEventSequenceTx(ctx, tx); err != nil {
-				return err
-			}
-			value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
-			if err != nil {
-				return err
-			}
-			resetCursor = sql.NullInt64{Int64: value, Valid: true}
+		// Every successful issue purge changes snapshot-visible state, even when
+		// imported comments have no corresponding event or surviving reply.
+		// Always reserve a reset cursor so conditional snapshots rebuild.
+		if err := lockEventSequenceTx(ctx, tx); err != nil {
+			return err
 		}
+		value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
+		if err != nil {
+			return err
+		}
+		resetCursor := sql.NullInt64{Int64: value, Valid: true}
 		purgeUID, err := katauid.New()
 		if err != nil {
 			return fmt.Errorf("generate purge uid: %w", err)

@@ -967,7 +967,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	out := &api.ShowIssueResponse{}
 	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
-	out.Body.Comments = comments
+	out.Body.Comments = omitScopedCommentReplies(ctx, comments)
 	out.Body.Links = links
 	out.Body.Labels = labels
 	out.Body.Parent = parent

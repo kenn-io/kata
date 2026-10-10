@@ -1002,6 +1002,11 @@ func payloadDeferredLinkIssueUIDs(
 		}
 	}
 	switch ev.Type {
+	case "issue.commented":
+		if target, ok := db.StringValue(payload["reply_to_uid"]); ok && target != "" && ev.RelatedIssueUID != nil {
+			add(*ev.RelatedIssueUID)
+		}
+
 	case "issue.created", "issue.snapshot":
 		links, err := payloadLinks(ev)
 		if err != nil {

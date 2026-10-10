@@ -157,6 +157,8 @@ type ListAllIssuesParams struct {
 
 // CreateCommentParams carries inputs for CreateComment.
 type CreateCommentParams struct {
+	ReplyToUID             string
+	ReplyKind              string
 	IssueID                int64
 	Author                 string
 	Teammate               string

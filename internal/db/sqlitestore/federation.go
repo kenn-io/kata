@@ -1575,7 +1575,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 
 func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT uid, author, body, created_at, teammate
+		SELECT uid, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at
 		  FROM comments
 		 WHERE issue_id = ?
 		 ORDER BY id ASC`, issueID)
@@ -1586,17 +1586,23 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 	var out []issueSnapshotComment
 	for rows.Next() {
 		var (
-			comment   issueSnapshotComment
-			createdAt sql.NullTime
-			teammate  sql.NullString
+			comment            issueSnapshotComment
+			createdAt          sql.NullTime
+			teammate           sql.NullString
+			replyTo, replyKind sql.NullString
+			editedAt           sql.NullTime
 		)
-		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &createdAt, &teammate); err != nil {
+		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &createdAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot comment: %w", err)
 		}
 		if createdAt.Valid {
 			comment.CreatedAt = createdAt.Time.UTC().Format(sqliteCommentTimeFormat)
 		}
 		comment.Teammate = teammate.String
+		comment.ReplyToUID, comment.ReplyKind = replyTo.String, replyKind.String
+		if editedAt.Valid {
+			comment.EditedAt = editedAt.Time.UTC().Format(sqliteCommentTimeFormat)
+		}
 		out = append(out, comment)
 	}
 	return out, rows.Err()
@@ -1958,15 +1964,15 @@ func reconcileFederatedComments(
 				continue
 			}
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, '') WHERE id = ?`,
-				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, row.id); err != nil {
+				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, ''), reply_to_uid=NULLIF(?, ''), reply_kind=NULLIF(?, ''), edited_at=NULLIF(?, '') WHERE id = ?`,
+				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, row.id); err != nil {
 				return fmt.Errorf("update federated comment %s: %w", uid, err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''))`,
-			comment.UID, issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate); err != nil {
+			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+			comment.UID, issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt); err != nil {
 			return fmt.Errorf("insert federated comment %s: %w", uid, err)
 		}
 	}

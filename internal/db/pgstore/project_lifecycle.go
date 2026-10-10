@@ -272,16 +272,14 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 			return err
 		}
 		var resetCursor sql.NullInt64
-		if counts.minEventID.Valid {
-			if err := lockEventSequenceTx(ctx, tx); err != nil {
-				return err
-			}
-			value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
-			if err != nil {
-				return err
-			}
-			resetCursor = sql.NullInt64{Int64: value, Valid: true}
+		if err := lockEventSequenceTx(ctx, tx); err != nil {
+			return err
 		}
+		value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
+		if err != nil {
+			return err
+		}
+		resetCursor = sql.NullInt64{Int64: value, Valid: true}
 		purgeID, err := s.insertProjectPurgeLogTx(ctx, tx, project, counts, resetCursor,
 			params.Actor, params.Reason)
 		if err != nil {
@@ -401,7 +399,8 @@ func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, projectID int64) err
 	var detachedEventIDs []int64
 	for _, statement := range []string{
 		`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
-		`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
+		`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1) AND type = 'issue.commented' RETURNING id`,
+		`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1) AND type <> 'issue.commented' RETURNING id`,
 	} {
 		rows, err := tx.QueryContext(ctx, statement, projectID)
 		if err != nil {
