@@ -83,13 +83,16 @@ type FoldIssue struct {
 
 // FoldComment is the replayed comment state keyed by stable comment UID.
 type FoldComment struct {
-	UID       string
-	IssueUID  string
-	Author    string
-	Teammate  string
-	Body      string
-	CreatedAt string
-	Clock     FoldClock
+	ReplyToUID string
+	ReplyKind  string
+	EditedAt   string
+	UID        string
+	IssueUID   string
+	Author     string
+	Teammate   string
+	Body       string
+	CreatedAt  string
+	Clock      FoldClock
 }
 
 // FoldLabelKey identifies one issue-label edge.

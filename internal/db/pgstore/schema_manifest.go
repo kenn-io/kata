@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "233ddee00697dc597fe7294f01cd8cb5d2d5875a3ee1cfc1836720140bcd6daa"
+	canonicalColumnFingerprint     = "8dc08f3438e15bc97deafcdae28780860afdefcf859f98ef5aa838c222b5eccc"
 	canonicalConstraintFingerprint = "0b7b1eadece1bd5a5b204b408d2ecf6f18c2a888cb04aa0ebc9624d1d8817f80"
 	canonicalIndexFingerprint      = "d9830877a98c98ea6d76e971c6d3d8e58d0c2978298ae597108fa4d941969301"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
@@ -28,7 +28,7 @@ var canonicalTableColumns = map[string]string{
 	"cron_workflows":          "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"cron_jobs":               "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"api_tokens":              "id,token_hash,actor,name,scope_kind,scope_project_uid,scope_root_issue_uid,expires_at,created_at,last_used_at,revoked_at",
-	"comments":                "id,uid,issue_id,author,body,created_at,teammate",
+	"comments":                "id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at",
 	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
 	"external_field_mappings": "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
 	"external_field_states":   "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",

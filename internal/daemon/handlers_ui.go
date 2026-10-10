@@ -242,6 +242,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			if scopedIssueIDs != nil {
 				filterScopedUISnapshot(&data, scopedIssueIDs, intent.ScopeProjectUID)
+				data.Comments = omitScopedCommentReplies(ctx, data.Comments)
 			}
 			if scopedIssueIDs == nil && !data.AuthorityReused {
 				authorityCache.put(authorityKey, data)

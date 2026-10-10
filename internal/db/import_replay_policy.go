@@ -283,6 +283,15 @@ func validateImportRecord(record ImportRecord) error {
 		if err := teammate.Validate(rec.Teammate); err != nil {
 			return fmt.Errorf("kind %q: %w", ImportKindComment, err)
 		}
+		if err := ValidateCommentReply(rec.UID, rec.ReplyToUID, rec.ReplyKind); err != nil {
+			return fmt.Errorf("kind %q: %w", ImportKindComment, err)
+		}
+		if rec.EditedAt != "" {
+			if _, err := time.Parse(time.RFC3339Nano, rec.EditedAt); err != nil {
+				return fmt.Errorf("kind %q edited_at: %w", ImportKindComment, err)
+			}
+		}
+
 		return nil
 	case *IssueLabelExport:
 		return requireImportPayload(rec, ImportKindIssueLabel)

@@ -125,9 +125,10 @@ func countProjectPurge(ctx context.Context, c connExec, projectID int64) (projec
 }
 
 // deleteProjectScoped removes every project-scoped row in FK-safe order. Events
-// physically in the project are deleted; events in OTHER projects that reference
-// purged issues are DETACHED (both id and uid columns nulled) so per-project
-// resume stays valid. federation_bindings is absent (refused upfront).
+// physically in the project are deleted; external events detach the numeric
+// issue FK. Comment events keep their portable related issue UID so a surviving
+// reply keeps its target identity and content hash. federation_bindings is
+// absent (refused upfront).
 // NOTE: purge_log (issue tombstones) is intentionally NOT deleted — it has no FK
 // to projects so it survives, preserving prior-purge audit history (spec Finding 3).
 // recurrences / issue_sync_bindings / issue_sync_status / import_mappings are not
@@ -143,7 +144,8 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 	}{
 		{`DELETE FROM events WHERE project_id = ?`, []any{projectID}},
 		{`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN ` + sub, []any{projectID}},
-		{`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN ` + sub, []any{projectID}},
+		{`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN ` + sub + ` AND type = 'issue.commented'`, []any{projectID}},
+		{`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN ` + sub + ` AND type <> 'issue.commented'`, []any{projectID}},
 		{`DELETE FROM comments WHERE issue_id IN ` + sub, []any{projectID}},
 		{`DELETE FROM links WHERE from_issue_id IN ` + sub + ` OR to_issue_id IN ` + sub, []any{projectID, projectID}},
 		{`DELETE FROM issue_labels WHERE issue_id IN ` + sub, []any{projectID}},
@@ -173,7 +175,7 @@ func purgeProjectCascade(ctx context.Context, c connExec, project db.Project,
 	if err := deleteProjectScoped(ctx, c, project.ID); err != nil {
 		return 0, err
 	}
-	reservedCursor, err := reserveEventSequence(ctx, c, counts.minEventID.Valid)
+	reservedCursor, err := reserveEventSequence(ctx, c, true)
 	if err != nil {
 		return 0, err
 	}

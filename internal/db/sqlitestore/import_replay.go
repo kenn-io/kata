@@ -694,8 +694,8 @@ func importIssueEmbedding(_ context.Context, _ *sql.Tx, _ *db.IssueEmbeddingExpo
 
 func importComment(ctx context.Context, tx *sql.Tx, c *db.CommentExport) error {
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO comments(id, uid, issue_id, author, body, created_at, teammate) VALUES(?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
-		c.ID, c.UID, c.IssueID, c.Author, c.Body, c.CreatedAt, c.Teammate)
+		`INSERT INTO comments(id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at) VALUES(?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+		c.ID, c.UID, c.IssueID, c.Author, c.Body, c.CreatedAt, c.Teammate, c.ReplyToUID, c.ReplyKind, c.EditedAt)
 	return wrapImportErr(db.ImportKindComment, err)
 }
 

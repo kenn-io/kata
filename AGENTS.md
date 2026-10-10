@@ -28,6 +28,11 @@
   product persisted state is exempt. After approval, follow
   `docs/development/postgres-migrations.md` for PostgreSQL migration history
   and verification rules.
+- No CHECK Constraints: Do not add CHECK constraints to the SQLite or
+  PostgreSQL schema or to migrations. Validate values in Go before the store
+  writes them, and share that validation with import and federation ingest.
+  CHECK constraints that already exist stay until a separately approved
+  migration removes them.
 - No Private Project Data: Do not use private project, workspace, customer,
   host, or repository names in tests, docs, examples, planning documents,
   design notes, issue or bug reports, review responses, PR text, or generated

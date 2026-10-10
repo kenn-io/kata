@@ -603,13 +603,16 @@ func (c CloseActionRequestBody) Validate() error {
 }
 
 type Comment struct {
-	Author    string    `json:"author" validate:"required"`
-	Body      string    `json:"body" validate:"required"`
-	CreatedAt time.Time `json:"created_at" validate:"required"`
-	ID        int64     `json:"id"`
-	IssueID   int64     `json:"issue_id"`
-	Teammate  *string   `json:"teammate,omitempty"`
-	UID       string    `json:"uid" validate:"required"`
+	Author     string     `json:"author" validate:"required"`
+	Body       string     `json:"body" validate:"required"`
+	CreatedAt  time.Time  `json:"created_at" validate:"required"`
+	EditedAt   *time.Time `json:"edited_at,omitempty"`
+	ID         int64      `json:"id"`
+	IssueID    int64      `json:"issue_id"`
+	ReplyKind  *string    `json:"reply_kind,omitempty"`
+	ReplyToUID *string    `json:"reply_to_uid,omitempty"`
+	Teammate   *string    `json:"teammate,omitempty"`
+	UID        string     `json:"uid" validate:"required"`
 }
 
 func (c Comment) Validate() error {

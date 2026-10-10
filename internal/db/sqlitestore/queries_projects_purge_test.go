@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -145,6 +146,47 @@ func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 	require.NoError(t, d.QueryRowContext(ctx,
 		`SELECT count(*) FROM pragma_foreign_key_check`).Scan(&violations))
 	assert.Equal(t, 0, violations)
+}
+
+func TestPurgeProject_PreservesMovedReplyTargetLineage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	d := openTestDB(t)
+	sourceProject, err := d.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	targetProject, err := d.CreateProject(ctx, "target-project")
+	require.NoError(t, err)
+	source, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sourceProject.ID, Title: "reply source", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sourceProject.ID, Title: "reply target", Author: "worker"})
+	require.NoError(t, err)
+	targetComment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "reviewer", Body: "Finding"})
+	require.NoError(t, err)
+	reply, replyEvent, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: source.ID, Author: "worker", Body: "Confirmed", ReplyToUID: targetComment.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+
+	currentTarget, err := d.IssueByID(ctx, target.ID)
+	require.NoError(t, err)
+	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: target.ID, FromProjectID: sourceProject.ID, ToProjectID: targetProject.ID,
+		IfMatchRev: currentTarget.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: targetProject.ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	_, err = d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: targetProject.ID, Actor: "worker"})
+	require.NoError(t, err)
+
+	var relatedIssueID, relatedIssueUID, contentHash sql.NullString
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT related_issue_id, related_issue_uid, content_hash
+		FROM events WHERE json_extract(payload, '$.comment_uid') = ?`, reply.UID).
+		Scan(&relatedIssueID, &relatedIssueUID, &contentHash))
+	assert.False(t, relatedIssueID.Valid, "project purge must detach the deleted numeric issue FK")
+	assert.True(t, relatedIssueUID.Valid, "the portable target issue UID must survive for reply lineage")
+	assert.Equal(t, target.UID, relatedIssueUID.String)
+	assert.Equal(t, replyEvent.ContentHash, contentHash.String, "preserving the hashed UID must preserve the event hash")
 }
 
 // TestPurgeProject_ReservesResetCursorForBothStreams checks that the project

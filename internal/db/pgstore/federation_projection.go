@@ -339,7 +339,7 @@ func federationIssueComments(
 	issueID int64,
 ) ([]issueSnapshotComment, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT uid,author,body,created_at,teammate FROM comments WHERE issue_id=$1 ORDER BY id ASC`, issueID)
+		`SELECT uid,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at FROM comments WHERE issue_id=$1 ORDER BY id ASC`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -347,11 +347,12 @@ func federationIssueComments(
 	var output []issueSnapshotComment
 	for rows.Next() {
 		var comment issueSnapshotComment
-		var teammate sql.NullString
-		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &comment.CreatedAt, &teammate); err != nil {
+		var teammate, replyTo, replyKind, editedAt sql.NullString
+		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &comment.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		comment.Teammate = teammate.String
+		comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = replyTo.String, replyKind.String, editedAt.String
 		output = append(output, comment)
 	}
 	return output, mapSQLError(rows.Err(), nil)
@@ -689,7 +690,7 @@ func reconcileFederatedComments(
 			// the ingest transaction holds the event-ordering fence.
 			if row.issueID == issueID && row.author == nonEmptyFederationAuthor(comment.Author) &&
 				row.teammate == comment.Teammate && row.body == comment.Body &&
-				row.createdAt == nonEmptyFederationTime(comment.CreatedAt) {
+				row.createdAt == nonEmptyFederationTime(comment.CreatedAt) && row.replyTo == comment.ReplyToUID && row.replyKind == comment.ReplyKind && row.editedAt == comment.EditedAt {
 				continue
 			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
@@ -702,18 +703,18 @@ func reconcileFederatedComments(
 				}
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE comments SET issue_id=$1,author=$2,body=$3,created_at=$4,teammate=NULLIF($5, '')
+			_, err = tx.ExecContext(ctx, `UPDATE comments SET issue_id=$1,author=$2,body=$3,created_at=$4,teammate=NULLIF($5, ''),reply_to_uid=NULLIF($7, ''),reply_kind=NULLIF($8, ''),edited_at=NULLIF($9, '')
 WHERE id=$6`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
-				nonEmptyFederationTime(comment.CreatedAt), comment.Teammate, row.id)
+				nonEmptyFederationTime(comment.CreatedAt), comment.Teammate, row.id, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt)
 			if err != nil {
 				return mapSQLError(err, nil)
 			}
 			continue
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO comments(uid,issue_id,author,body,created_at,teammate) VALUES($1,$2,$3,$4,$5,NULLIF($6, ''))`,
+			`INSERT INTO comments(uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at) VALUES($1,$2,$3,$4,$5,NULLIF($6, ''),NULLIF($7, ''),NULLIF($8, ''),NULLIF($9, ''))`,
 			comment.UID, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
-			nonEmptyFederationTime(comment.CreatedAt), comment.Teammate)
+			nonEmptyFederationTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -722,12 +723,13 @@ WHERE id=$6`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
 }
 
 type federatedCommentRow struct {
-	id        int64
-	issueID   int64
-	author    string
-	teammate  string
-	body      string
-	createdAt string
+	replyTo, replyKind, editedAt string
+	id                           int64
+	issueID                      int64
+	author                       string
+	teammate                     string
+	body                         string
+	createdAt                    string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -752,7 +754,7 @@ func federatedCommentRowsByUID(
 	tx *sql.Tx,
 	projectID int64,
 ) (map[string]federatedCommentRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate FROM comments c
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at FROM comments c
 JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -762,11 +764,12 @@ JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	for rows.Next() {
 		var commentUID string
 		var row federatedCommentRow
-		var teammate sql.NullString
-		if err := rows.Scan(&commentUID, &row.id, &row.issueID, &row.author, &row.body, &row.createdAt, &teammate); err != nil {
+		var teammate, replyTo, replyKind, editedAt sql.NullString
+		if err := rows.Scan(&commentUID, &row.id, &row.issueID, &row.author, &row.body, &row.createdAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		row.teammate = teammate.String
+		row.replyTo, row.replyKind, row.editedAt = replyTo.String, replyKind.String, editedAt.String
 		output[commentUID] = row
 	}
 	return output, mapSQLError(rows.Err(), nil)

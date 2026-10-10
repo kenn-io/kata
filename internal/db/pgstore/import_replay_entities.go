@@ -201,9 +201,9 @@ $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
 }
 
 func pgReplayComment(ctx context.Context, tx *sql.Tx, comment *db.CommentExport) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO comments(id,uid,issue_id,author,body,created_at,teammate)
-OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,NULLIF($7, ''))`, comment.ID, comment.UID,
-		comment.IssueID, comment.Author, comment.Body, comment.CreatedAt, comment.Teammate)
+	_, err := tx.ExecContext(ctx, `INSERT INTO comments(id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at)
+OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,NULLIF($7, ''),NULLIF($8, ''),NULLIF($9, ''),NULLIF($10, ''))`, comment.ID, comment.UID,
+		comment.IssueID, comment.Author, comment.Body, comment.CreatedAt, comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt)
 	return pgReplayError(db.ImportKindComment, err)
 }
 

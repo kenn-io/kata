@@ -41,6 +41,17 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "close transcript", run: checkCloseTranscript},
+	{name: "comment event export after target deletion", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportComments", "ExportEvents", "ExportExternalFieldMappings", "ExportExternalFieldStates", "ExportExternalRootBindings", "ExportFederationBindings", "ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus", "ExportImportMappings", "ExportIssueClaims", "ExportIssueLabels", "ExportIssueSyncBindings", "ExportIssueSyncStatus", "ExportIssues", "ExportLinks", "ExportMeta", "ExportPendingClaimRequests", "ExportProjectAliases", "ExportProjectPurgeLog", "ExportProjects", "ExportPurgeLog", "ExportRecurrences", "ExportSequences", "ImportReplay", "ProjectByUID", "PurgeIssue", "SoftDeleteIssue"}, runWithBackend: checkCommentEventExportAfterTargetDeletion},
+	{name: "comment reply project purge lineage", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "MoveIssueProject", "PurgeProject", "RemoveProject"}, run: checkCommentReplyProjectPurgeLineage},
+	{name: "comment reply purge", methods: []string{"PurgeIssue", "CommentsByIssue"}, run: checkCommentReplyPurge},
+	{name: "reply-only purge advances snapshot cursor", methods: []string{"CreateComment", "CreateIssue", "ImportReplay", "IssueByUID", "ProjectByUID", "PurgeIssue"}, run: checkReplyOnlyPurgeAdvancesSnapshotCursor},
+	{name: "imported comment purge advances snapshot cursor", methods: []string{"ImportReplay", "IssueByUID", "ProjectByUID", "PurgeIssue"}, run: checkImportedCommentPurgeAdvancesSnapshotCursor},
+	{name: "eventless archived project purge advances snapshot cursor", methods: []string{"ImportReplay", "ProjectByUID", "PurgeProject"}, run: checkEventlessArchivedProjectPurgeAdvancesSnapshotCursor},
+	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
+	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},
+	{name: "comment reply federation", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject"}, run: checkCommentReplyFederation},
+	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
+	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "screen view claims", methods: []string{"ClaimScreenView", "ReleaseScreenView"}, run: checkScreenViewClaims},
 	{name: "remote event batch insert", methods: []string{"InsertRemoteEvents", "AdoptProjectIntoFederation", "MaterializeFederatedProject"}, runWithBackend: checkRemoteEventBatchInsert},
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},

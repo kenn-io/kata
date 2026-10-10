@@ -90,7 +90,7 @@ func TestPostgresMigrationRegistryIncludesIssueStatusColumns(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 6)
+	require.Len(t, migrations, 7)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
@@ -109,6 +109,9 @@ func TestPostgresMigrationRegistryIncludesIssueStatusColumns(t *testing.T) {
 	assert.Equal(t, 30, migrations[5].FromVersion)
 	assert.Equal(t, 31, migrations[5].ToVersion)
 	assert.Equal(t, "000031_native_cron.up.sql", migrations[5].Name)
+	assert.Equal(t, 31, migrations[6].FromVersion)
+	assert.Equal(t, 32, migrations[6].ToVersion)
+	assert.Equal(t, "000032_comment_reply.up.sql", migrations[6].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {

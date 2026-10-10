@@ -380,6 +380,11 @@ func movedEventTouchesProject(payload, projectUID string) bool {
 func projectIssueScopedEvent(
 	event db.Event, allowed map[int64]struct{}, projectUID string,
 ) (db.Event, bool) {
+	if event.Type == "issue.commented" {
+		// A reply's target issue can sit outside the subtree. Scoped readers get
+		// the source comment without the target until reply rendering is authorized.
+		event.RelatedIssueID, event.RelatedIssueUID, event.RelatedIssueShortID = nil, nil, nil
+	}
 	if !issueScopedEventInScope(event, allowed, projectUID) {
 		return db.Event{}, false
 	}

@@ -29,6 +29,9 @@ var issueStatusSyncMigrationSQL string
 //go:embed migrations/000031_native_cron.up.sql
 var nativeCronMigrationSQL string
 
+//go:embed migrations/000032_comment_reply.up.sql
+var commentReplyMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -74,6 +77,7 @@ var migrationAssets = []Migration{
 		SQL:         issueStatusSyncMigrationSQL,
 	},
 	{FromVersion: 30, ToVersion: 31, Name: "000031_native_cron.up.sql", SQL: nativeCronMigrationSQL},
+	{FromVersion: 31, ToVersion: 32, Name: "000032_comment_reply.up.sql", SQL: commentReplyMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

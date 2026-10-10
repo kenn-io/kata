@@ -113,7 +113,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = c
+		out.Body.Comment = omitScopedCommentReply(ctx, c)
 		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
@@ -171,7 +171,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
-		out.Body.Comment = c
+		out.Body.Comment = omitScopedCommentReply(ctx, c)
 		out.Body.Event = evt
 		out.Body.Changed = changed
 		return out, nil
@@ -213,7 +213,7 @@ func replayComment(
 	}
 	out := &api.CommentResponse{}
 	out.Body.Issue = current
-	out.Body.Comment = match.Comment
+	out.Body.Comment = omitScopedCommentReply(ctx, match.Comment)
 	out.Body.Event = nil
 	out.Body.Changed = false
 	return out, nil
