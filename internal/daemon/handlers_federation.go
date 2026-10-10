@@ -518,7 +518,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				if openIssues > 0 {
 					return nil, api.NewError(http.StatusConflict, "project_has_open_issues", "project has open issues",
-						"close the open issues first, or pass force=true",
+						"close the open issues first, or pass --force",
 						map[string]any{"open_issues": openIssues})
 				}
 			}
@@ -587,7 +587,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
 			case errors.As(err, &openErr):
 				return nil, api.NewError(http.StatusConflict, "project_has_open_issues", "project has open issues",
-					"close the open issues first, or pass force=true",
+					"close the open issues first, or pass --force",
 					map[string]any{"open_issues": openErr.OpenIssues})
 			case errors.Is(err, db.ErrProjectAlreadyArchived):
 				// Idempotent resume: a prior archive-leave committed the archive

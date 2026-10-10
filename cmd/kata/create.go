@@ -589,7 +589,7 @@ func buildPathResolveRequest(ctx context.Context, startPath string) (map[string]
 	if resolvesPathFree(ctx) {
 		return nil, nil, &cliError{
 			Message:  "no .kata.toml ancestor and no git ancestor",
-			Hint:     `run "kata init --project <name>" in the repository root, or pass --project <name>`,
+			Hint:     `run "kata init --project <name>" in the workspace root, or pass --project <name>`,
 			Kind:     kindNotFound,
 			Code:     "project_not_initialized",
 			ExitCode: ExitNotFound,

@@ -339,7 +339,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if openErr, ok := errors.AsType[*db.ProjectHasOpenIssuesError](err); ok {
 			return nil, api.NewError(409, "project_has_open_issues",
 				"project has open issues",
-				"close or purge the open issues first, or pass force=true",
+				"close or purge the open issues first, or pass --force",
 				map[string]any{"open_issues": openErr.OpenIssues})
 		}
 		if err != nil {
@@ -461,7 +461,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrAliasIsLast):
 			return nil, api.NewError(409, "alias_is_last",
 				"alias is the only one for its project",
-				"detach with force=true to drop it anyway, or attach a replacement first", nil)
+				"pass --force to drop it anyway, or attach a replacement alias first", nil)
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -610,7 +610,7 @@ func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput
 
 	return nil, api.NewError(404, "project_not_initialized",
 		"no .kata.toml ancestor and no git ancestor",
-		`run "kata init --project <name>" in the repository root, or pass --project <name>`, nil)
+		`run "kata init --project <name>" in the workspace root, or pass --project <name>`, nil)
 }
 
 // resolveByAliasInput handles the alias-aware path-free resolve flow.
@@ -1076,7 +1076,7 @@ func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, 
 	if !reassign {
 		return db.ProjectAlias{}, api.NewError(http.StatusConflict, "project_alias_conflict",
 			"alias already attached to a different project",
-			"pass reassign=true to move it", map[string]any{
+			"pass --reassign to move it", map[string]any{
 				"alias_identity":      info.Identity,
 				"existing_project_id": existing.ProjectID,
 			})
@@ -1119,7 +1119,7 @@ func preflightAliasConflict(ctx context.Context, store db.Storage, info config.A
 	}
 	return api.NewError(http.StatusConflict, "project_alias_conflict",
 		"alias already attached to a different project",
-		"pass reassign=true to move it", map[string]any{
+		"pass --reassign to move it", map[string]any{
 			"alias_identity":      info.Identity,
 			"existing_project_id": existing.ProjectID,
 		})

@@ -201,7 +201,7 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 	for _, s := range raw {
 		before, after, ok := strings.Cut(s, ":")
 		if !ok {
-			return nil, evidenceFlagUsageError("evidence %q: expected <type>:<value>", s)
+			return nil, evidenceValueError("evidence %q: expected <type>:<value>", s)
 		}
 		kind, value := api.EvidenceType(before), after
 		switch kind {
@@ -213,7 +213,8 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 			out = append(out, api.Evidence{Type: kind, Command: value})
 		case api.EvidenceReviewedPaths:
 			if _, dup := seenReviewedPath[value]; dup {
-				return nil, evidenceFlagUsageError("evidence reviewed-paths:%s: duplicate path (provided more than once via canonical and/or sugar)", value)
+				return nil, &cliError{Kind: kindUsage, ExitCode: ExitUsage,
+					Message: fmt.Sprintf("evidence reviewed-paths:%s: duplicate path (provided more than once via canonical and/or sugar)", value)}
 			}
 			seenReviewedPath[value] = struct{}{}
 			reviewedPaths = append(reviewedPaths, value)
@@ -223,16 +224,16 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 			out = append(out, api.Evidence{Type: kind, Rationale: value})
 		case api.EvidenceDuplicateOf:
 			if value == "" {
-				return nil, evidenceFlagUsageError("evidence duplicate-of: expected issue ref, got empty value")
+				return nil, evidenceValueError("evidence duplicate-of: expected issue ref, got empty value")
 			}
 			out = append(out, api.Evidence{Type: kind, IssueRef: value})
 		case api.EvidenceSupersededBy:
 			if value == "" {
-				return nil, evidenceFlagUsageError("evidence superseded-by: expected issue ref, got empty value")
+				return nil, evidenceValueError("evidence superseded-by: expected issue ref, got empty value")
 			}
 			out = append(out, api.Evidence{Type: kind, IssueRef: value})
 		default:
-			return nil, evidenceFlagUsageError("evidence %q: unknown type %q", s, kind)
+			return nil, evidenceValueError("evidence %q: unknown type %q", s, kind)
 		}
 	}
 	if len(reviewedPaths) > 0 {
@@ -241,11 +242,11 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 	return out, nil
 }
 
-func evidenceFlagUsageError(format string, args ...any) *cliError {
+func evidenceValueError(format string, args ...any) *cliError {
 	return &cliError{
 		Message:  fmt.Sprintf(format, args...),
-		Kind:     kindUsage,
-		ExitCode: ExitUsage,
+		Kind:     kindValidation,
+		ExitCode: ExitValidation,
 	}
 }
 

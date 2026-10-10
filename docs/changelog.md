@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-09
+last_edited: 2026-10-10
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,8 +10,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Read the daemon's next-step hint in human, agent, and JSON errors. Agent
-  errors put it on a separate `Hint:` line. Unknown flags point to the
-  command's help; `close` usage mistakes exit 2 instead of 1.
+  errors put it on a separate `Hint:` line. Hints name CLI flags, such as
+  `--force-new` and `--force`, instead of HTTP request fields. Unknown flags
+  point to the command's help. `close` flag mistakes exit 2 and malformed
+  `--evidence` values exit 3, instead of 1.
 
 - Count browser and terminal screen visits with anonymous `screen_viewed` events.
   Fixed `screen` names count once per installation per UTC day across interfaces

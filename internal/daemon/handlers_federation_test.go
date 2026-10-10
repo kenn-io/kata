@@ -3578,6 +3578,7 @@ func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
 		if !strings.Contains(string(raw), "project_has_open_issues") {
 			t.Fatalf("want project_has_open_issues, got %s", raw)
 		}
+		assert.Contains(t, string(raw), `"hint":"close the open issues first, or pass --force"`)
 		if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {
 			t.Fatalf("binding must be untouched by preflight: %v", err)
 		}
@@ -3735,6 +3736,7 @@ func TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach(t *testing.T)
 	if !strings.Contains(string(raw), "project_has_open_issues") {
 		t.Fatalf("want project_has_open_issues code, got %s", raw)
 	}
+	assert.Contains(t, string(raw), `"hint":"close the open issues first, or pass --force"`)
 
 	// The binding must still be present (no detach happened).
 	if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {

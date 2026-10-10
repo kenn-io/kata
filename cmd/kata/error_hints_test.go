@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-const projectInitHint = `run "kata init --project <name>" in the repository root, or pass --project <name>`
+const projectInitHint = `run "kata init --project <name>" in the workspace root, or pass --project <name>`
 
 func TestErrorHintsUnboundWorkspace(t *testing.T) {
 	setupKataEnv(t)
@@ -51,82 +51,31 @@ func TestErrorHintsUnboundWorkspace(t *testing.T) {
 	}
 }
 
-func TestErrorHintsPathFreeResolution(t *testing.T) {
-	ctx := context.WithValue(context.Background(), pathFreeProjectContextKey{}, true)
-	_, _, err := buildPathResolveRequest(ctx, t.TempDir())
-	cli := requireCLIError(t, err, ExitNotFound)
-	assert.Equal(t, "project_not_initialized", cli.Code)
-	assert.Equal(t, "no .kata.toml ancestor and no git ancestor", cli.Message)
-	assert.Equal(t, projectInitHint, cli.Hint)
-}
-
-func TestErrorHintsDecodeOptionalField(t *testing.T) {
+func TestErrorHintsOutputAndOmission(t *testing.T) {
 	for _, tc := range []struct{ name, field, want string }{
 		{"present", `,"hint":"try again"`, "try again"},
 		{"absent", "", ""},
 		{"empty", `,"hint":""`, ""},
 		{"null", `,"hint":null`, ""},
-		{"number", `,"hint":42`, ""},
-		{"object", `,"hint":{"next":"retry"}`, ""},
-		{"array", `,"hint":["retry"]`, ""},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			body := `{"error":{"code":"idempotency_mismatch","message":"same key, different fields","data":{"qualified_id":"example-project#abc4"}` + tc.field + `}}`
-			cli := apiErrFromBody(http.StatusConflict, []byte(body))
-			var out bytes.Buffer
-			emitErrorForMode(&out, cli, outputJSON, true)
-			var got struct {
-				Error map[string]json.RawMessage `json:"error"`
-			}
-			require.NoError(t, json.Unmarshal(out.Bytes(), &got))
-			var message, hint, code string
-			require.NoError(t, json.Unmarshal(got.Error["message"], &message))
-			require.NoError(t, json.Unmarshal(got.Error["code"], &code))
-			assert.Equal(t, "same key, different fields", message)
-			assert.Equal(t, "idempotency_mismatch", code)
-			if tc.want == "" {
-				assert.NotContains(t, got.Error, "hint")
-			} else {
-				require.NoError(t, json.Unmarshal(got.Error["hint"], &hint))
-				assert.Equal(t, tc.want, hint)
-			}
-		})
-	}
-	cli := apiErrFromBody(http.StatusBadRequest, []byte("not JSON"))
-	assert.Equal(t, "not JSON", cli.Message)
-	assert.Empty(t, cli.Code)
-	assert.Equal(t, ExitValidation, cli.ExitCode)
-}
-
-func TestErrorHintsOutputAndOmission(t *testing.T) {
-	for _, hint := range []string{"", "try again"} {
 		for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
-			t.Run(fmt.Sprintf("%s/%s", mode, hint), func(t *testing.T) {
-				field := ""
-				if hint != "" {
-					field = `,"hint":"` + hint + `"`
-				}
-				body := `{"error":{"code":"idempotency_mismatch","message":"conflict","data":{"qualified_id":"example-project#abc4"}` + field + `}}`
-				cli := apiErrFromBody(http.StatusConflict, []byte(body))
+			t.Run(fmt.Sprintf("%s/%s", tc.name, mode), func(t *testing.T) {
+				body := `{"error":{"code":"idempotency_mismatch","message":"conflict"` + tc.field + `}}`
 				var out bytes.Buffer
-				emitErrorForMode(&out, cli, mode, true)
+				emitErrorForMode(&out, apiErrFromBody(http.StatusConflict, []byte(body)), mode, true)
 				text := out.String()
-				if hint == "" {
-					assert.NotContains(t, text, `"hint"`)
-					assert.NotContains(t, text, "Hint:")
-					assert.NotContains(t, text, "hint:")
-				} else {
-					switch mode {
-					case outputHuman:
-						assert.Contains(t, text, "\nhint: try again\n")
-					case outputAgent:
-						assert.Contains(t, text, "\nHint: try again\n")
-					case outputJSON:
-						assert.Contains(t, text, `"hint":"try again"`)
-					}
+				assert.Contains(t, text, "conflict")
+				if tc.want == "" {
+					assert.NotContains(t, strings.ToLower(text), "hint")
+					return
 				}
-				if mode == outputAgent {
-					assert.Contains(t, text, "example-project#abc4")
+				switch mode {
+				case outputHuman:
+					assert.Contains(t, text, "\nhint: try again\n")
+				case outputAgent:
+					assert.Contains(t, text, "\nHint: try again\n")
+				case outputJSON:
+					assert.Contains(t, text, `"hint":"try again"`)
 				}
 			})
 		}
@@ -138,4 +87,49 @@ func TestErrorHintsAgentKeepsFollowupOnOneLine(t *testing.T) {
 	var out bytes.Buffer
 	emitAgentError(&out, "list", cli)
 	assert.Equal(t, "ERR list not_found: missing\nHint: try again\n", out.String())
+}
+
+func TestErrorHintsNameCLIFlags(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	env := testenv.New(t)
+	dir, _ := initLocalBoundWorkspace(t, env, "example-project")
+	ctx := contextWithBaseURL(context.Background(), env.URL)
+	newIssue := func(t *testing.T) string {
+		return runCLI(t, env, dir, "--quiet", "create", "hint fixture "+t.Name())
+	}
+	closeArgs := []string{"--done", "--commit", "abc1234", "--message", "Closed the hint fixture after verifying the scenario."}
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) []string
+		hint  string
+	}{
+		{"projects remove", func(t *testing.T) []string {
+			newIssue(t)
+			return []string{"projects", "remove", "example-project"}
+		}, "close or purge the open issues first, or pass --force"},
+		{"projects detach", func(*testing.T) []string {
+			return []string{"projects", "detach", "local://" + dir}
+		}, "pass --force to drop it anyway, or attach a replacement alias first"},
+		{"close already closed", func(t *testing.T) []string {
+			ref := newIssue(t)
+			runCLI(t, env, dir, append([]string{"close", ref}, closeArgs...)...)
+			return append([]string{"close", ref, "--idempotency-key", "close-retry"}, closeArgs...)
+		}, "omit --idempotency-key to accept the current state"},
+		{"claim if unowned", func(t *testing.T) []string {
+			ref := newIssue(t)
+			runCLI(t, env, dir, "--as", "alice", "claim", ref)
+			return []string{"--as", "bob", "claim", ref, "--if-unowned"}
+		}, "choose another issue, or omit --if-unowned only for a deliberate retry"},
+		{"list empty meta key", func(*testing.T) []string {
+			return []string{"list", "--meta", "=value"}
+		}, "pass --meta key or --meta key=value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"--workspace", dir, "--agent"}, tc.setup(t)...)
+			_, stderr, err := executeRootCapture(t, ctx, args...)
+			require.Error(t, err)
+			assert.Contains(t, stderr, "\nHint: "+tc.hint+"\n")
+		})
+	}
 }

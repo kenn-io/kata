@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-09
+last_edited: 2026-10-10
 ---
 
 # Agent output format
@@ -75,7 +75,7 @@ Ordinary command output does not repeat the version, to keep transcripts small.
 
 ```text
 ERR list not_found: no .kata.toml ancestor and no git ancestor
-Hint: run "kata init --project <name>" in the repository root, or pass --project <name>
+Hint: run "kata init --project <name>" in the workspace root, or pass --project <name>
 ```
 
 - The first line is `ERR <command> <kind>: <message>`.
@@ -86,8 +86,8 @@ Hint: run "kata init --project <name>" in the repository root, or pass --project
   `conflict`, `confirm`, `daemon_unavailable`, `checks_failed`, `internal`.
   `checks_failed` means `kata doctor` completed and found failed checks;
   consult its findings for the setup problems and suggested fixes.
-- Optional follow-up lines use fixed field names such as `Hint:`, `Code:`, and
-  `Exit-Code:`.
+- An optional second line, `Hint: <next step>`, names a command or flag that
+  can resolve the error. It is always a single line.
 - A top-level parse error, before any subcommand runs, uses `kata` as the
   command token: `ERR kata usage: unknown command "cretae"`.
 - In `--format json` errors include daemon-provided details in `error.data`

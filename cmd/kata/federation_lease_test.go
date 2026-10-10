@@ -282,7 +282,10 @@ func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": http.StatusConflict,
-				"error":  map[string]any{"code": "claim_denied", "message": "charlie already holds abcd"},
+				"error": map[string]any{
+					"code": "claim_denied", "message": "charlie already holds abcd",
+					"hint": "run kata federation lease acquire abcd",
+				},
 			})
 		default:
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
@@ -306,6 +309,9 @@ func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout.String()), &body))
 	assert.Equal(t, true, body["partial_success"])
 	assert.Equal(t, "alice", body["released_holder"])
+	claimErr, ok := body["claim_error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "run kata federation lease acquire abcd", claimErr["hint"])
 	released, ok := body["released"].(map[string]any)
 	require.True(t, ok)
 	releasedClaim, ok := released["claim"].(map[string]any)

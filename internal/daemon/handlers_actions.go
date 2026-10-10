@@ -108,7 +108,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if in.IdempotencyKey != "" {
 				return nil, api.NewError(409, "issue_already_closed",
 					"issue was already closed by another request",
-					"omit the idempotency key to accept the current state", nil)
+					"omit --idempotency-key to accept the current state", nil)
 			}
 			out := &api.MutationResponse{}
 			out.Body.Issue = issue
@@ -266,7 +266,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, api.NewError(409, "issue_already_closed",
 				"issue was closed by another request before this close committed",
-				"retry after reopening, or omit the idempotency key to accept the current state", nil)
+				"retry after reopening, or omit --idempotency-key to accept the current state", nil)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {

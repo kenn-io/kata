@@ -50,7 +50,7 @@ func parseMetaFilters(raw []string) ([]db.MetaFilter, error) {
 		if key == "" {
 			return nil, api.NewError(400, "validation",
 				"meta filter key must not be empty",
-				"pass meta=key or meta=key=value", nil)
+				"pass --meta key or --meta key=value", nil)
 		}
 		out = append(out, db.MetaFilter{Key: key, Value: value, HasValue: hasValue})
 	}
@@ -1459,7 +1459,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 		}
 		return "", nil, api.NewError(409, "idempotency_mismatch",
 			"idempotency key matched a prior issue with a different fingerprint",
-			"either use a fresh key, or send the exact same fields as the original",
+			"use a fresh --idempotency-key, or repeat the original create exactly",
 			map[string]any{
 				"uid":          prior.UID,
 				"short_id":     prior.ShortID,
@@ -1530,7 +1530,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	}
 	return api.NewError(409, "duplicate_candidates",
 		formatDuplicateMessage(matched),
-		"comment on an existing issue, or pass force_new=true to create anyway",
+		"comment on an existing issue, or pass --force-new to create anyway",
 		map[string]any{"candidates": matched})
 }
 

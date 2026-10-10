@@ -408,8 +408,10 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 			refs := []string{"example-project#" + created.Issue.ShortID}
 			args := []string{"--workspace", dir, "--as", "test-agent", "create", "fix login crash", "--body", "login crashes on startup"}
 			code := "duplicate_candidates"
+			hint := "comment on an existing issue, or pass --force-new to create anyway"
 			if conflict == "idempotency_mismatch" {
 				code = conflict
+				hint = "use a fresh --idempotency-key, or repeat the original create exactly"
 				args = append(args, "--idempotency-key", "request-1", "--owner", "another-agent")
 			}
 			if conflict == "multiple_candidates" {
@@ -427,8 +429,7 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
 						lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
 						require.Len(t, lines, 2)
-						require.NotEmpty(t, cli.Hint)
-						assert.Equal(t, "Hint: "+cli.Hint, lines[1])
+						assert.Equal(t, "Hint: "+hint, lines[1])
 						for _, ref := range refs {
 							assert.Contains(t, lines[0], ref)
 						}

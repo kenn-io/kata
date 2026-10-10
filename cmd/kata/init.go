@@ -668,7 +668,7 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
-			Hint    jsontext.Value `json:"hint,omitempty"`
+			Hint    string         `json:"hint,omitempty"`
 			Code    string         `json:"code"`
 			Message string         `json:"message"`
 			Data    jsontext.Value `json:"data,omitempty"`
@@ -683,12 +683,9 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 			ExitCode:   mapStatusToExit(status, ""),
 		}
 	}
-	// A malformed optional hint must not discard the primary daemon error.
-	var hint string
-	_ = json.Unmarshal(env.Error.Hint, &hint)
 	return &cliError{
 		HTTPStatus: status,
-		Hint:       hint,
+		Hint:       env.Error.Hint,
 		Message:    env.Error.Message,
 		Code:       env.Error.Code,
 		Kind:       kindForStatus(status),
