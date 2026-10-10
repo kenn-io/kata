@@ -18,7 +18,7 @@ func newHealthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "health",
 		Short:   "report daemon health",
-		Long:    `Read the selected daemon’s health. Use kata doctor to diagnose configuration without starting the daemon.`,
+		Long:    `Read the selected daemon's health. Use kata doctor to diagnose configuration without starting the daemon.`,
 		Example: `  kata health --agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

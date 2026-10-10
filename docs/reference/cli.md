@@ -25,7 +25,7 @@ compactly; `kata --help` has their full descriptions.
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
-| `--agent` | Emit one `OK`/`ERR` line plus `key=value` rows. Use in agent sessions. |
+| `--agent` | Emit concise lines that start with `OK` or `ERR`. Use in agent sessions. |
 | `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |

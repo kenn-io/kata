@@ -7,12 +7,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
-func init() {
-	cobra.AddTemplateFunc("kataGlobalFlags", kataGlobalFlags)
-}
-
 // applyRootHelp keeps the discoverable CLI guide and grouping in one place.
 func applyRootHelp(root *cobra.Command) {
+	cobra.AddTemplateFunc("kataGlobalFlags", kataGlobalFlags)
 	root.Short = "issue tracker for coding agents"
 	root.Long = kataRootHelp
 	for _, group := range []cobra.Group{
@@ -122,16 +119,16 @@ Agent workflow (add --agent to each command):
 Full agent contract: kata quickstart --format contract
 
 Refs: abc4 (short id in the bound project), project#abc4 (any project), or the
-26-character ULID. Numeric refs are rejected.
+26-character ULID. Legacy issue numbers such as 12 are rejected.
 Project: found from .kata.toml at or above --workspace (default: cwd). Create the
 binding with kata init, or pass --project <name>.
-Output: human text by default. --agent prints one OK/ERR line plus key=value
-rows; --json prints the full JSON envelope for scripts. Errors go to stderr.
+Output: human text by default. --agent prints concise lines that start with
+OK or ERR; --json prints the full JSON envelope for scripts. Errors go to stderr.
 Exit codes: 0 ok, 1 internal, 2 usage, 3 validation, 4 not found, 5 conflict,
 6 confirmation required, 7 daemon unavailable, 8 wait timeout.
 Environment: KATA_AUTHOR actor; KATA_TEAMMATE teammate attribution;
 KATA_INBOX_USER inbox address (actor or actor/teammate); KATA_SERVER remote
-daemon URL; KATA_HOME local daemon state; KATA_AUTH_TOKEN remote auth.`
+daemon URL; KATA_HOME local daemon state; KATA_AUTH_TOKEN daemon bearer token.`
 
 // Cobra v1.10.2 default usage template, with compact inherited flags.
 const kataUsageTemplate = `Usage:{{if .Runnable}}

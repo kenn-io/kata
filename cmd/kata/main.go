@@ -86,7 +86,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().Var(outputFormatFlag{values: &flags.Sel.formats},
 		"format", "output mode: human (default), json, or agent; quickstart also accepts contract")
 	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "full JSON envelope for scripts")
-	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "agent output: one OK/ERR line plus key=value rows (use in agent sessions)")
+	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "agent output: concise lines starting with OK or ERR (use in agent sessions)")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
 	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")

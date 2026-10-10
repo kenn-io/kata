@@ -30,10 +30,11 @@ one data source). The source needs a People property; --assignee-property may
 be omitted only when exactly one exists. --status-property defaults to the
 sole status property. Selectors take exact IDs or case-sensitive names.
 The daemon reads its token from KATA_NOTION_TOKEN, or the variable named by
-[notion_sync] token_env. Omitted --interval, --since, --status-sync, and
---title-prefix keep their saved values; pass --since= to clear the cutoff.
---status-sync two-way also sends Kata close and reopen back to the status
-property. It needs a To-do group and rejects --done-status.`,
+[notion_sync] token_env. Re-enable keeps every option you omit; the data
+source and selected properties cannot change. Pass --since= to clear the
+cutoff. --status-sync two-way also sends Kata close and reopen back to the
+status property. It needs a To-do group, rejects --done-status, and drops
+saved done statuses.`,
 		Example: `  kata sync notion enable --data-source <data-source-uuid> --agent
   kata sync notion enable --database <database-uuid> --assignee-property Responsible --agent
   kata sync notion enable --status-sync two-way --agent`,

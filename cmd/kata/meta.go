@@ -27,8 +27,9 @@ func newMetaCmd() *cobra.Command {
   work.attention_msg  one-line reason shown with work.attention
   work.branch         git branch doing the work
   someday             true (with --json-value) parks the issue without a date
-Write only your own work.* keys and never on closed issues. Planning dates
-use kata schedule and kata deadline.`,
+By convention, agents write only their own work.* keys and never on closed
+issues; Kata does not enforce this. Planning dates use kata schedule and
+kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd

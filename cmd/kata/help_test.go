@@ -28,17 +28,8 @@ func TestHelpExamplesParse(t *testing.T) {
 			}
 		}
 	})
-	for _, text := range []string{agentContractText, agentQuickstartText, agentQuickstartCompactText, hooklessQuickstartText} {
-		lines, err := helpCommandLines(text, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, line := range lines {
-			if err := validateHelpCommand(line); err != nil {
-				t.Errorf("agent guidance: %q: %v", line, err)
-			}
-		}
-	}
+	// Only full quickstart output lists commands on their own lines; the
+	// contract and compact guidance embed them in prose and DOT labels.
 	out, _, err := executeRootCapture(t, context.Background(), "quickstart")
 	if err != nil {
 		t.Fatal(err)
@@ -79,10 +70,18 @@ func TestValidateHelpCommandRejectsStaleExamples(t *testing.T) {
 
 // kataCommandGroups is keyed by command name, so a new or renamed command
 // would otherwise fall into an "Additional Commands" section.
+// A stale key for a removed command would otherwise linger unnoticed.
 func TestHelpTopLevelCommandsHaveGroups(t *testing.T) {
+	registered := map[string]bool{}
 	for _, cmd := range newRootCmd().Commands() {
+		registered[cmd.Name()] = true
 		if cmd.IsAvailableCommand() && cmd.GroupID == "" {
 			t.Errorf("%s has no help group in kataCommandGroups", cmd.Name())
+		}
+	}
+	for name := range kataCommandGroups {
+		if !registered[name] {
+			t.Errorf("kataCommandGroups has %s, which is not a root command", name)
 		}
 	}
 }

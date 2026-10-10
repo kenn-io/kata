@@ -29,8 +29,8 @@ KATA_TWENTY_TOKEN; [twenty_sync] in config.toml sets token_env and
 self-hosted origins. Re-enable keeps every option you omit. --since limits
 the import to tasks updated after a date; pass --since= to clear it.
 --status-sync two-way also sends Kata close and reopen back to Twenty.
-Status flags take API option values, not display labels; the defaults are
-DONE for closed and TODO,IN_PROGRESS for open.`,
+Status flags take API option values, not display labels. Defaults:
+--closed-status DONE, --open-status TODO, --open-statuses TODO,IN_PROGRESS.`,
 		Example: `  kata sync twenty enable --agent
   kata sync twenty enable --status-sync two-way --closed-status COMPLETE --open-status READY --open-statuses READY,ACTIVE --agent`,
 		Args: cobra.NoArgs,

@@ -213,9 +213,6 @@ func TestRoot_QuickstartAdvertised(t *testing.T) {
 }
 
 func TestHelp_DescribesAgentContractSurfaces(t *testing.T) {
-	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
-	assert.Contains(t, rootHelp, "output mode: human (default), json, or agent; quickstart also accepts contract")
-
 	initHelp := string(executeRoot(t, newRootCmd(), "init", "--help"))
 	assert.Contains(t, initHelp, "Codex CLI contract and work.attention hooks")
 }

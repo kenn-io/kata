@@ -108,7 +108,7 @@ Use kata as the shared issue ledger for this workspace.
 
    A bare unassign clears the current owner, whoever that is.
    Check kata status <ref> for the current owner and your effective actor;
-   The "[open] by <name>" line in kata show names the author, not the owner.
+   the "[open] by <name>" line in kata show names the author, not the owner.
 
 7. Use native planning dates deliberately:
 
