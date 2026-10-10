@@ -53,7 +53,13 @@ Instead, label and comment:
     kata label add <ref> needs-review --comment "<what remains>"
     kata comment <ref> --body "what was attempted, what remains"
 
-Message floors: done and audit-no-change 40 chars, duplicate and superseded 20, wontfix 60.`,
+The close message has a minimum length that depends on the reason:
+    --done, --audit-no-change           at least 40 characters
+    --duplicate-of, --superseded-by     at least 20 characters
+    --wontfix                           at least 60 characters`,
+		Example: `  kata close abc4 --done -m "Fixed Safari double-submit; go test ./auth passes." --commit <sha> --agent
+  kata close abc4 --done -m "Docs updated and link check passes for the guide." --pr <url> --test "make docs-check" --agent
+  kata close abc4 --duplicate-of d4ex -m "Same Safari race as d4ex." --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {

@@ -149,6 +149,8 @@ get committed.
 --with-agent-hooks <harness>: project contract and available attention hooks (repeatable).
 kata agent-hook install: discover configured agents and install contract plus available attention hooks.
 Name agents for explicit setup; use --local for project scope. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
+		Example: `  kata init --project example-project --agent
+  kata init --with-agents --agent`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("agent-hooks") {
 				for name := range strings.SplitSeq(agentHooksCSV, ",") {

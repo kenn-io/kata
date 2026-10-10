@@ -17,9 +17,11 @@ func newPurgeCmd() *cobra.Command {
 	var confirm string
 	var reason string
 	cmd := &cobra.Command{
-		Use:   "purge <issue-ref>",
-		Short: "irreversibly remove an issue + all its rows",
-		Args:  cobra.ExactArgs(1),
+		Use:     "purge <issue-ref>",
+		Short:   "irreversibly remove an issue + all its rows",
+		Long:    `Permanently remove an issue and all its rows. Cannot be undone. Agents: never run without explicit user authorization for this exact ref.`,
+		Example: `  kata purge example-project#abc4 --force --confirm "PURGE example-project#abc4" --reason "user asked to remove leaked secret"`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !force {
 				return &cliError{

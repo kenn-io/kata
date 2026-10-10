@@ -87,28 +87,6 @@ func TestHelpTopLevelCommandsHaveGroups(t *testing.T) {
 	}
 }
 
-// A mistyped catalog key would silently leave a command undocumented.
-func TestHelpCatalogKeysNameCommands(t *testing.T) {
-	seen := map[string]bool{}
-	walkVisibleHelp(newRootCmd(), func(cmd *cobra.Command) { seen[cmd.CommandPath()] = true })
-	for path := range helpCatalog {
-		if !seen[path] {
-			t.Errorf("helpCatalog entry %q names no visible command", path)
-		}
-	}
-}
-
-func TestHelpCatalogDoesNotOverrideConstructorHelp(t *testing.T) {
-	saved := helpCatalog
-	helpCatalog = map[string]helpDoc{"kata": {Long: "Catalog long.", Example: "  kata catalog"}}
-	t.Cleanup(func() { helpCatalog = saved })
-	root := &cobra.Command{Use: "kata", Long: "Constructor long.", Example: "  kata constructor"}
-	applyHelpCatalog(root)
-	if root.Long != "Constructor long." || root.Example != "  kata constructor" {
-		t.Fatalf("catalog replaced constructor help: Long=%q Example=%q", root.Long, root.Example)
-	}
-}
-
 func TestKataGlobalFlags(t *testing.T) {
 	root := &cobra.Command{Use: "kata"}
 	root.PersistentFlags().Bool("agent", false, "")

@@ -18,6 +18,7 @@ func newLabelCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "label",
 		Short: "add or remove a label on an issue",
+		Long:  `Attach or detach one label. kata labels lists counts.`,
 	}
 	cmd.AddCommand(labelAddCmd(), labelRmCmd())
 	return cmd
@@ -27,7 +28,10 @@ func labelAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <issue-ref> <label>",
 		Short: "attach a label to an issue",
-		Args:  cobra.ExactArgs(2),
+		Long:  `Attach one label to an issue. Use needs-review with --comment to hand off unfinished work.`,
+		Example: `  kata label add abc4 bug --agent
+  kata label add abc4 needs-review --comment "Fix drafted; focused test still fails." --agent`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			label := args[1]
 			if strings.TrimSpace(label) == "" {
@@ -72,6 +76,8 @@ func labelRmCmd() *cobra.Command {
 		Use:     "rm <issue-ref> <label>",
 		Aliases: []string{"remove"},
 		Short:   "detach a label from an issue",
+		Long:    `Detach one label from an issue. kata label remove is an alias.`,
+		Example: `  kata label rm abc4 needs-review --agent`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			label := args[1]
@@ -122,9 +128,11 @@ func labelRmCmd() *cobra.Command {
 
 func newLabelsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "labels",
-		Short: "list label counts in this project",
-		Args:  cobra.NoArgs,
+		Use:     "labels",
+		Short:   "list label counts in this project",
+		Long:    `List label counts in the bound project (or --project). Use kata label add or kata label rm to change a label.`,
+		Example: `  kata labels --agent`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			start, err := resolveStartPath(flags.Workspace)

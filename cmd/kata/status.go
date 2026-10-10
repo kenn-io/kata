@@ -45,7 +45,11 @@ func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <issue-ref>",
 		Short: "show owner, your actor, and holds for one issue",
-		Args:  cobra.ExactArgs(1),
+		Long: `Print the issue's identity, current owner, your effective actor, and any
+hold (schedule, someday, blockers). Use it before claim or unassign; kata
+show's "by <name>" line is the author, not the owner.`,
+		Example: `  kata status abc4 --agent`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueStatus(cmd, args[0])
 		},

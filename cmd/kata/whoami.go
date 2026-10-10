@@ -11,7 +11,11 @@ func newWhoamiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
 		Short: "show resolved actor and source",
-		Args:  cobra.NoArgs,
+		Long: `Print the client-resolved actor and source (--as, KATA_AUTHOR, USER,
+or git). It does not query daemon authentication. For the effective actor
+and current issue owner on an authenticated daemon, use kata status <ref>.`,
+		Example: `  kata whoami --agent`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			actor, source := resolveActor(ctx, flags.As, nil)

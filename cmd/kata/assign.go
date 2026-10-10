@@ -15,9 +15,11 @@ import (
 
 func newAssignCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "assign <issue-ref> <owner>",
-		Short: "set the owner of an issue",
-		Args:  cobra.ExactArgs(2),
+		Use:     "assign <issue-ref> <owner>",
+		Short:   "set the owner of an issue",
+		Long:    `Set another actor as owner. To take an issue yourself, use kata claim.`,
+		Example: `  kata assign abc4 alice --agent`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAssign(cmd, args[0], args[1], false, nil)
 		},
@@ -31,7 +33,10 @@ func newUnassignCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unassign <issue-ref>",
 		Short: "clear the owner of an issue",
-		Args:  cobra.ExactArgs(1),
+		Long: `Clear the owner. A bare unassign clears whoever owns it; pass
+--expect-owner <you> to release only your own claim.`,
+		Example: `  kata unassign abc4 --expect-owner alice --agent`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var expected *string
 			if cmd.Flags().Changed("expect-owner") {

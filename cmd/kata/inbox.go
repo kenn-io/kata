@@ -47,7 +47,16 @@ func newInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "list attention requests for an address (actor or actor/teammate)",
-		Args:  cobra.NoArgs,
+		Long: `List open requests addressed exactly to --for (or KATA_INBOX_USER):
+<actor> or <actor>/<teammate>. "coordinator" does not include
+"coordinator/*". Bound project by default; --all reads every active project
+and prints qualified refs. --context emits bounded context for a harness.
+--context conflicts with --agent, --json, or --format; omit output selectors.
+Reading does not clear a request; clear it with kata notify --clear.`,
+		Example: `  kata inbox --for coordinator/teammate-1 --agent
+  kata inbox --for coordinator --all --agent
+  kata inbox --for coordinator/teammate-1 --context`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if allProjects && (cmd.Root().PersistentFlags().Changed("project") || cmd.Root().PersistentFlags().Changed("workspace")) {
 				return &cliError{Message: "--all conflicts with --project and --workspace", Kind: kindUsage, ExitCode: ExitUsage}

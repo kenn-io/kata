@@ -105,7 +105,14 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "enable",
 		Short: "enable GitHub sync for this project",
-		Args:  cobra.NoArgs,
+		Long: `Bind the Kata project (bound or --project) to one GitHub repository (--repo
+owner/repo; --host for GitHub Enterprise) and start daemon-side polling.
+--since limits the import to issues updated after a date; omit it to keep
+the saved cutoff, or pass --since= to clear it. Re-enable keeps every option
+you omit. --status-sync two-way also sends close and reopen back to GitHub.`,
+		Example: `  kata sync github enable --repo example-org/example-repo --agent
+  kata sync github enable --since 2026-09-01 --status-sync two-way --agent`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var mode *generated.EnableIssueSyncRequestBodyStatusSync
 			if cmd.Flags().Changed("status-sync") {

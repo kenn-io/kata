@@ -20,7 +20,12 @@ func newNextCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "next",
 		Short: "show the highest-priority ready issue",
-		Args:  cobra.NoArgs,
+		Long: `Print the single highest-priority issue from kata ready, with the same
+filters. An empty queue succeeds (exit 0): --agent prints "OK next found=false",
+--json returns a null issue. Claim the selected issue next.`,
+		Example: `  kata next --unowned --agent
+  kata next --label bug --full --json`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options := readyOptions{
 				All: all, Unowned: unowned, Owner: owner,

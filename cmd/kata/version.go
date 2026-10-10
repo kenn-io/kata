@@ -13,9 +13,11 @@ import (
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "version",
-		Short: "print version information",
-		Args:  cobra.NoArgs,
+		Use:     "version",
+		Short:   "print version information",
+		Long:    `Print the CLI build identity. --json and --agent provide structured output; kata --version is the root shortcut.`,
+		Example: `  kata version --json`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return writeVersion(cmd.OutOrStdout(), currentOutputMode())
 		},

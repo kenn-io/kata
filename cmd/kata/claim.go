@@ -20,7 +20,16 @@ func newClaimCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "claim <issue-ref>",
 		Short: "take ownership of an issue (refuses if someone else owns it)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Claim an issue. The daemon's authenticated actor takes precedence over
+the client-selected actor when present. Use kata status <ref> to check the
+effective actor and current owner; kata whoami shows only the client-selected actor.
+Refuses when another actor owns it unless --force.
+--ttl releases the claim after 1m-24h. After claiming, mark the work tracked:
+  kata meta set <ref> work.attention ok
+kata assign sets a different owner; kata unassign --expect-owner releases.`,
+		Example: `  kata claim abc4 --agent
+  kata claim abc4 --if-unowned --ttl 2h --comment "starting on the Safari path" --agent`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ttlSeconds, err := assignmentTTLSeconds(cmd, ttl)
 			if err != nil {

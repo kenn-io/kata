@@ -32,7 +32,18 @@ func newEditCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <issue-ref>",
 		Short: "edit issue title/body/owner/priority and relationships",
-		Args:  cobra.ExactArgs(1),
+		Long: `Change title, body, owner, or priority, and add or remove relationships.
+Relationships read from this issue's point of view:
+  --blocks X      this issue must finish before X (gates X in kata ready)
+  --blocked-by X  X must finish before this issue
+  --parent X      this issue is a sub-task of X (does not gate readiness)
+  --related X     context only
+--remove-parent must name the current parent; other --remove-* flags are
+idempotent. Labels use kata label; metadata uses kata meta.`,
+		Example: `  kata edit abc4 --blocked-by d4ex --agent
+  kata edit abc4 --title "fix login race in Safari" --priority 1 --agent
+  kata edit abc4 --remove-blocks d4ex --related j7m2 --agent`,
+		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")
 	cmd.Flags().StringVar(&body, "body", "", "new body")

@@ -30,7 +30,6 @@ func applyRootHelp(root *cobra.Command) {
 	root.SetHelpCommandGroupID("setup")
 	root.SetCompletionCommandGroupID("setup")
 	root.SetUsageTemplate(kataUsageTemplate)
-	applyHelpCatalog(root)
 }
 
 var kataCommandGroups = map[string]string{

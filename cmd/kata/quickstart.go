@@ -297,6 +297,8 @@ Without hooks, run kata quickstart at session start.
 Setup guides cover federation enrollment and optional embeddings.
 The managed contract format stays static.
 ` + hooklessQuickstartText,
+		Example: `  kata quickstart --format contract
+  kata quickstart --agent`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if currentOutputMode() == outputContract {

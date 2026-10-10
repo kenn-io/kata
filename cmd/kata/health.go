@@ -16,9 +16,11 @@ import (
 
 func newHealthCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "health",
-		Short: "report daemon health",
-		Args:  cobra.NoArgs,
+		Use:     "health",
+		Short:   "report daemon health",
+		Long:    `Read the selected daemon’s health. Use kata doctor to diagnose configuration without starting the daemon.`,
+		Example: `  kata health --agent`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// health is a probe — it must report the daemon's actual
 			// state, not auto-start one and report on the spawned

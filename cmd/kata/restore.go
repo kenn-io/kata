@@ -18,9 +18,11 @@ import (
 // changed=false when the issue isn't deleted.
 func newRestoreCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "restore <issue-ref>",
-		Short: "restore a soft-deleted issue",
-		Args:  cobra.ExactArgs(1),
+		Use:     "restore <issue-ref>",
+		Short:   "restore a soft-deleted issue",
+		Long:    `Restore a soft-deleted issue. Permanently purged issues cannot be restored.`,
+		Example: `  kata restore abc4 --agent`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {

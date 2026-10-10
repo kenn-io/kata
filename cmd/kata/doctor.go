@@ -16,7 +16,9 @@ const doctorRequestTimeout = 5 * time.Second
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "doctor", Short: "diagnose setup problems without starting or changing the daemon",
-		Args: cobra.NoArgs,
+		Long:    `Diagnose configuration and connectivity without starting the daemon or changing state. Use kata health for a running daemon.`,
+		Example: `  kata doctor --json`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			report := collectDoctor(cmd.Context())
 			if err := writeDoctorReport(cmd.OutOrStdout(), report, currentOutputMode(), flags.Quiet); err != nil {

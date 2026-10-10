@@ -22,6 +22,13 @@ func newMetaCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "meta",
 		Short: "read and write issue metadata (work.attention, someday, ...)",
+		Long: `Per-issue key/value metadata. Kata stores it; these keys carry meaning:
+  work.attention      ok | needs-human | stuck  (agent's live signal)
+  work.attention_msg  one-line reason shown with work.attention
+  work.branch         git branch doing the work
+  someday             true (with --json-value) parks the issue without a date
+Write only your own work.* keys and never on closed issues. Planning dates
+use kata schedule and kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())
 	return cmd
@@ -35,7 +42,13 @@ func newMetaSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <ref> <key> <value>",
 		Short: "set one metadata key",
-		Args:  cobra.ExactArgs(3),
+		Long: `Set <key> to <value>. Values are strings unless --json-value. --if-absent,
+--if-value, and --if-match make the write conditional.
+See kata meta --help for the keys agents use.`,
+		Example: `  kata meta set abc4 work.attention stuck --agent
+  kata meta set abc4 work.attention_msg "waiting on schema review" --agent
+  kata meta set abc4 someday true --json-value --agent`,
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := parseMetaSetValue(args[2], jsonValue)
 			if err != nil {
@@ -63,9 +76,11 @@ func newMetaUnsetCmd() *cobra.Command {
 	var ifValue string
 	var jsonValue bool
 	cmd := &cobra.Command{
-		Use:   "unset <ref> <key>",
-		Short: "clear issue metadata",
-		Args:  cobra.ExactArgs(2),
+		Use:     "unset <ref> <key>",
+		Short:   "clear issue metadata",
+		Long:    `Remove one metadata key. Removing someday returns an issue to the ready queue when no other hold applies.`,
+		Example: `  kata meta unset abc4 someday --agent`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
 				return err
@@ -85,9 +100,11 @@ func newMetaUnsetCmd() *cobra.Command {
 
 func newMetaGetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <ref> [key]",
-		Short: "get issue metadata",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "get <ref> [key]",
+		Short:   "get issue metadata",
+		Long:    `Read one metadata key, or omit the key to read all metadata. See kata meta --help for the keys agents use.`,
+		Example: `  kata meta get abc4 work.attention --agent`,
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {
