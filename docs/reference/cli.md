@@ -653,9 +653,12 @@ actor, issue owner, and federation lease. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the
 state `kata claim` produces outside federation. A cached timed
-lease can report `expired` while its hub is unavailable; a successful hub read
-releases the expired lease before returning current state. JSON output is a
-flat projection of the same fields. Use `kata show` for the complete issue.
+lease can report `expired` while its hub is unavailable or before the hub's
+background sweeper persists expiry. Hub issue reads do not release expired
+leases; the lease-status API returns authoritative lease state.
+See [Federation](../operations/federation.md#leases-and-write-gates) for expiry
+behavior. JSON output is a flat projection of the same fields. Use `kata show`
+for the complete issue.
 The revision advances on ownership and open/closed status changes. A dispatcher
 can read `status --json`, then pass that revision to `meta set --if-match` to
 reject a stale attention update after another worker claims or closes the issue.

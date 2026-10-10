@@ -969,12 +969,23 @@ When offline, cached hard leases can still be used as a continuity hint, but
 they are not proof that exclusivity still holds. Timed leases expire by hub
 time and stop blocking edits once expired.
 
-A complete issue read, including `kata show`, makes an optional lease-status
-refresh from the hub. That refresh gets a 500 ms budget; if it times out or the
-hub is unavailable, the read still returns the locally cached lease state.
+A complete issue read on a spoke, including `kata show`, makes an optional
+lease-status refresh from the hub. That refresh gets a 500 ms budget; if it
+times out or the hub is unavailable, the read still returns the locally cached
+lease state.
 This is a budget for the optional hub refresh, not a deadline for the complete
 issue read. Project-local projections such as `kata meta get` do not perform
 the refresh.
+
+On a hub, `kata show` and `kata status` read cached lease state without taking
+the database write lock. A timed lease can remain in the response after its
+expiry time until the hub persists expiry; `kata status` reports it as
+`hold=expired`. The hub's background sweeper checks every 30 seconds and
+publishes expiry events. The lease-status API
+(`GET /api/v1/projects/{project_id}/issues/{ref}/lease`) also persists expiry
+before returning authoritative state. Hub issue reads do not expire leases or
+publish expiry events, and unresolved violations remain visible until expiry
+is persisted.
 
 The hub checks pushed work against live lease state at ingest time. Work that
 conflicts with another holder's live lease is kept, but the hub records
