@@ -121,7 +121,9 @@ is a 26-character comment UID, and the kind is `reply`, `confirm`, `refute`, or
 reproduction. There is no target foreign key, so a reply can arrive before its
 target and survive target purge.
 
-Upgrade federated hubs before spokes: a schema-31 hub rejects schema-32 pushes.
+Upgrade federated hubs before spokes. A schema-31 hub refuses a push that
+contains a reply as schema skew; the spoke keeps it pending, without
+quarantine, and pushes it again after the hub upgrades.
 A spoke that still runs a schema-31 binary can also stall when it pulls a
 cross-issue reply whose target issue it does not have, so upgrade spokes soon
 after their hub. Stop the daemon and run `kata storage postgres migrate` with
