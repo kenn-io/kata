@@ -20,7 +20,22 @@ func newTickTickSyncCmd() *cobra.Command {
 func newTickTickSyncEnableCmd() *cobra.Command {
 	var project, interval, statusSync string
 	var titlePrefix bool
-	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side TickTick sync for this project", Args: cobra.NoArgs}
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "enable daemon-side TickTick sync for this project",
+		Long: `Bind the Kata project (bound or --project) to one TickTick task project and
+start daemon-side polling. The first enable needs --ticktick-project (the
+project ID from the API or the TickTick web link); it is fixed after that.
+The daemon reads its API token from KATA_TICKTICK_TOKEN, or the variable
+named by [ticktick_sync] token_env.
+Re-enable keeps every option you omit. --status-sync two-way also completes
+the TickTick task when you close its Kata issue; reopening is not sent back,
+so reopen the task in TickTick.`,
+		Example: `  kata sync ticktick enable --ticktick-project <project-id> --agent
+  kata sync ticktick enable --status-sync two-way --interval 10m --agent
+  kata sync ticktick enable --title-prefix=false --agent`,
+		Args: cobra.NoArgs,
+	}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		config := map[string]any{}
 		invalid := func(message string) error {
