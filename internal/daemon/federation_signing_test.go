@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,14 +19,17 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Contract: a real prefix-stripping HTTPS proxy reaches only native scoped
@@ -55,13 +59,19 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		t.Setenv("TEST_GLOBAL_KEY", strings.Repeat("g", 64))
 		t.Setenv("TEST_PULL_KEY", strings.Repeat("p", 64))
+		t.Setenv("TEST_PUSH_KEY", strings.Repeat("u", 64))
 		t.Setenv("TEST_REMOVED_KEY", strings.Repeat("r", 64))
 		globalSource := federationsigning.Source{KeyID: "global-key", KeyEnv: "TEST_GLOBAL_KEY"}
 		pullSource := federationsigning.Source{KeyID: "pull-key", KeyEnv: "TEST_PULL_KEY"}
+		pushSource := federationsigning.Source{KeyID: "push-key", KeyEnv: "TEST_PUSH_KEY"}
 		removedSource := federationsigning.Source{KeyID: "removed-key", KeyEnv: "TEST_REMOVED_KEY"}
 		globalEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "global-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Capabilities: "pull", Actor: "global-actor"})
 		require.NoError(t, err)
 		pullEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "pull-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ProjectID: &project.ID, Capabilities: "pull", Actor: "pull-actor"})
+		require.NoError(t, err)
+		pushOriginUID, err := uid.New()
+		require.NoError(t, err)
+		pushEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "push-enrollment", SpokeInstanceUID: pushOriginUID, ProjectID: &project.ID, Capabilities: "push", Actor: "push-actor"})
 		require.NoError(t, err)
 		removedEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "removed-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EZ", ProjectID: &project.ID, Capabilities: "pull", Actor: "removed-actor"})
 		require.NoError(t, err)
@@ -80,7 +90,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		base := "https://hub.example/mount"
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}}, state)
+		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: pushSource, EnrollmentID: pushEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}}, state)
 		t.Cleanup(func() { _ = v.Close() })
 		previous := http.DefaultTransport
 		http.DefaultTransport = public.Client().Transport
@@ -100,6 +110,15 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		metadata, err := client.ProjectFederation(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.Equal(t, project.UID, metadata.ProjectUID)
+		pushClient, err := federation.NewClient(t.Context(), base, pushEnrollment.Token, clientpkg.Opts{FederationSigning: &pushSource, Timeout: 60 * time.Second})
+		require.NoError(t, err)
+		cronEvent, cronJobUID := signedCronPublicationEvent(t, project, pushOriginUID, "push-actor")
+		_, err = pushClient.IngestProjectEvents(t.Context(), project.ID, []api.FederationIngestEventEnvelope{cronEvent})
+		require.NoError(t, err, "signed push-only enrollment must publish cron events")
+		cronJob, err := env.DB.CronJob(t.Context(), project.ID, cronJobUID)
+		require.NoError(t, err)
+		require.Equal(t, "Signed review", cronJob.Name)
+		require.Equal(t, "push-actor", cronJob.Author)
 		mainHandler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://daemon.example"})
 		require.NoError(t, err)
 		headRequest := httptest.NewRequest(http.MethodHead, "https://daemon.example"+projectPath(project.ID)+"/federation/metadata", nil)
@@ -115,6 +134,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		mainRequest, err := http.NewRequest(http.MethodPost, base+mainPath, bytes.NewReader(mainPayload))
 		require.NoError(t, err)
 		mainRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		mainRequest.Header.Set(db.EventFeaturesHeader, db.CronEventFeature)
 		require.NoError(t, federationsigning.Sign(mainRequest, source))
 		mainRequest.URL.Path = mainPath
 		before := len(access.snapshot())
@@ -203,6 +223,45 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		_ = removedResponse.Body.Close()
 		require.Equal(t, http.StatusUnauthorized, removedResponse.StatusCode)
 	})
+}
+
+func signedCronPublicationEvent(t *testing.T, project db.Project, originUID, actor string) (api.FederationIngestEventEnvelope, string) {
+	t.Helper()
+	eventUID, err := uid.New()
+	require.NoError(t, err)
+	jobUID, err := uid.New()
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	definition, err := json.Marshal(cron.JobDefinition{
+		Version: 1,
+		Kind:    "job",
+		Trigger: cron.Trigger{Kind: "manual"},
+		Action:  cron.Action{Kind: "execute", Prompt: "Review"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Review"},
+		Overlap: "forbid",
+		Catchup: "skip",
+	})
+	require.NoError(t, err)
+	payload, err := json.Marshal(db.CronDefinitionEvent{
+		UID: jobUID, ProjectUID: project.UID, Name: "Signed review",
+		Definition: jsontext.Value(definition), Author: actor,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	createdAt := now.Format(db.EventTimestampFormat)
+	physicalMS := now.UnixMilli()
+	contentHash, err := db.EventContentHash(db.EventHashInput{
+		UID: eventUID, OriginInstanceUID: originUID, ProjectUID: project.UID,
+		ProjectName: project.Name, Type: "cron.job.created", Actor: actor,
+		HLCPhysicalMS: physicalMS, Payload: payload, CreatedAt: createdAt,
+	})
+	require.NoError(t, err)
+	return api.FederationIngestEventEnvelope{
+		EventID: 1, EventUID: eventUID, OriginInstanceUID: originUID,
+		ProjectUID: project.UID, ProjectName: project.Name,
+		Type: "cron.job.created", Actor: actor, HLCPhysicalMS: physicalMS,
+		ContentHash: contentHash, Payload: jsontext.Value(payload), CreatedAt: now,
+	}, jobUID
 }
 
 // Contract: the native ingress HTTP server enforces its header budget before

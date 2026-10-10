@@ -63,6 +63,9 @@ func (d *Store) rebindFederationBinding(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	current, err := federationBindingByProject(ctx, tx, p.ProjectID)
 	if err != nil {
 		return db.FederationBinding{}, err
@@ -73,13 +76,16 @@ func (d *Store) rebindFederationBinding(
 	if current.HubProjectID != p.HubProjectID || current.HubProjectUID != p.HubProjectUID {
 		return db.FederationBinding{}, db.ErrFederationRebindConflict
 	}
-	if current.HubURL == p.TargetHubURL && !current.AllowInsecure {
-		return current, nil
-	}
-	if current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure {
+	converged := current.HubURL == p.TargetHubURL && !current.AllowInsecure
+	if !converged && (current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure) {
 		return db.FederationBinding{}, db.ErrFederationRebindConflict
 	}
-
+	if converged {
+		if err := tx.Commit(); err != nil {
+			return db.FederationBinding{}, err
+		}
+		return current, nil
+	}
 	allowInsecure := 0
 	if p.ExpectedAllowInsecure {
 		allowInsecure = 1
@@ -569,6 +575,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64) (db
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return db.LeaveFederationResult{}, err
+	}
 	uid, err := projectUIDTx(ctx, tx, projectID)
 	if err != nil {
 		return db.LeaveFederationResult{}, err
@@ -680,11 +689,23 @@ func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 	})
 }
 
-// InsertRemoteEvent appends a hub event to the local log while preserving every
-// portable field. Only the local events.id is assigned by the spoke database.
+// InsertRemoteEvent appends one hub event to the local log. See InsertRemoteEvents.
 func (d *Store) InsertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
-	return retryWrite1(ctx, d, func() (bool, error) {
-		return d.insertRemoteEvent(ctx, projectID, ev)
+	inserted, err := d.InsertRemoteEvents(ctx, projectID, []db.RemoteEvent{ev})
+	if err != nil {
+		return false, err
+	}
+	return inserted[0], nil
+}
+
+// InsertRemoteEvents appends a page of hub events to the local log in one
+// transaction while preserving every portable field. Only the local events.id
+// is assigned by the spoke database. One cron validator serves the whole page,
+// so run identity history is read once per page rather than once per event.
+// It reports, per event, whether the event was new.
+func (d *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events []db.RemoteEvent) ([]bool, error) {
+	return retryWrite1(ctx, d, func() ([]bool, error) {
+		return d.insertRemoteEvents(ctx, projectID, events)
 	})
 }
 
@@ -703,29 +724,69 @@ func (d *Store) ReconcileLocalFederationEcho(
 	})
 }
 
-func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
-	payload, createdAt, err := validateRemoteEventContentHash(ev)
-	if err != nil {
-		return false, err
-	}
-	if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
-		return false, err
+func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events []db.RemoteEvent) ([]bool, error) {
+	payloads := make([]jsontext.Value, len(events))
+	createdAts := make([]string, len(events))
+	for i, ev := range events {
+		payload, createdAt, err := validateRemoteEventContentHash(ev)
+		if err != nil {
+			return nil, err
+		}
+		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
+			return nil, err
+		}
+		payloads[i], createdAts[i] = payload, createdAt
 	}
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("begin remote event insert: %w", err)
+		return nil, fmt.Errorf("begin remote event insert: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	validator := db.NewCronReplayValidator(tx, false)
+	inserted := make([]bool, len(events))
+	for i, ev := range events {
+		inserted[i], err = d.insertRemoteEventTx(ctx, tx, projectID, ev, payloads[i], createdAts[i], validator)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit remote event insert: %w", err)
+	}
+	return inserted, nil
+}
+
+func (d *Store) insertRemoteEventTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	ev db.RemoteEvent,
+	payload jsontext.Value,
+	createdAt string,
+	validator *db.CronReplayValidator,
+) (bool, error) {
+	if db.EventRequiredFeatures(ev.Type) != "" {
+		if err := db.ValidateAcceptedCronEvent(ev); err != nil {
+			return false, err
+		}
+		var targetUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
+			return false, err
+		}
+		if targetUID != ev.ProjectUID {
+			return false, db.ErrFederationIngestValidation
+		}
+		if err := validator.Validate(ctx, projectID, ev); err != nil {
+			return false, err
+		}
+	}
 	var existingHash string
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT content_hash FROM events WHERE uid = ?`, ev.EventUID).Scan(&existingHash)
 	if err == nil {
 		if existingHash == ev.ContentHash {
-			if err := tx.Commit(); err != nil {
-				return false, fmt.Errorf("commit duplicate remote event no-op: %w", err)
-			}
 			return false, nil
 		}
 		return false, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
@@ -751,9 +812,6 @@ func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.Re
 		ContentHash:       ev.ContentHash,
 	}); err != nil {
 		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit remote event insert: %w", err)
 	}
 	return true, nil
 }
@@ -850,6 +908,9 @@ func (d *Store) enableProjectFederationTx(
 	projectID int64,
 	actor string,
 ) (db.FederationBinding, error) {
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	project, err := scanProject(tx.QueryRowContext(ctx,
 		projectSelect+` WHERE id = ? AND deleted_at IS NULL`, projectID))
 	if err != nil {
@@ -1034,6 +1095,15 @@ func (d *Store) insertFederationBaselineEventsTx(
 			return db.Event{}, err
 		}
 	}
+	cron, err := db.CronDefinitionSnapshots(ctx, tx, project)
+	if err != nil {
+		return db.Event{}, err
+	}
+	for _, event := range cron {
+		if _, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt}); err != nil {
+			return db.Event{}, err
+		}
+	}
 	return enableEvent, nil
 }
 
@@ -1051,8 +1121,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 		return fmt.Errorf("begin federated materialization: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil); err != nil {
+	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1071,7 +1140,11 @@ func (d *Store) materializeFederatedProjectTx(
 	projectID int64,
 	reconcileLinks bool,
 	acceptedEventUIDs []string,
+	validator *db.CronReplayValidator,
 ) error {
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return err
+	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
@@ -1088,6 +1161,14 @@ func (d *Store) materializeFederatedProjectTx(
 		}
 	}
 	projection := db.FoldEvents(events)
+	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
+		if validator == nil {
+			validator = db.NewCronReplayValidator(tx, false)
+		}
+		if err := db.MaterializeCronDefinitions(ctx, tx, projectID, binding.HubProjectUID, projection, validator); err != nil {
+			return err
+		}
+	}
 	issueIDs, err := reconcileFederatedIssues(ctx, tx, projectID, projection)
 	if err != nil {
 		return err
@@ -1616,7 +1697,19 @@ func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, err
 	return uid, nil
 }
 
+// Reset removes replica evidence with its event provenance after ordinary
+// pending-publication and integration guards succeed.
 func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
+		return err
+	}
+	for _, table := range []string{"cron_jobs", "cron_workflows"} {
+		//nolint:gosec // Table comes from the fixed cron table list; project ID is bound.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE project_id=$1", projectID); err != nil {
+			return err
+		}
+	}
+
 	// Links are project-independent edges (storage v16), so the project scope
 	// comes from the endpoints: drop every link touching one of this
 	// project's issues before the issues themselves go.
@@ -2605,6 +2698,10 @@ func (d *Store) adoptProjectIntoFederation(
 		}
 	}
 
+	cron, err := db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.EmptyOnly)
+	if err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
 	issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
@@ -2714,6 +2811,12 @@ func (d *Store) adoptProjectIntoFederation(
 		snapshotCount++
 	}
 
+	for _, event := range cron {
+		if _, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt}); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		snapshotCount++
+	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, project.ID))
 	if err != nil {

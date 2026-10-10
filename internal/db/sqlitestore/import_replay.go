@@ -72,6 +72,12 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			return err
 		}
 	} else {
+		// Reserve SQLite's writer before reading ownership. This also waits for
+		// an already-started writer, then observes its committed evidence. The
+		// zero-row update changes no data and retains the reservation to commit.
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=value WHERE 0`); err != nil {
+			return fmt.Errorf("reserve restore writer: %w", err)
+		}
 		if err := clearReplayTarget(ctx, tx, opts.RequireFreshTarget, d.instanceUID); err != nil {
 			return err
 		}
@@ -80,6 +86,14 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if !opts.MergeProject {
 		if targetIdentity, err = readReplayInstanceIdentity(ctx, tx); err != nil {
 			return err
+		}
+		// Installing an already-prepared replacement has file-replacement
+		// semantics for metadata as well as rows. Ordinary replay keeps its
+		// existing target-metadata policy. Ownership was checked before either.
+		if d.replaceTargetMetadata {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key NOT IN ('instance_uid','instance_created_at')`); err != nil {
+				return fmt.Errorf("clear replacement metadata: %w", err)
+			}
 		}
 		// meta survives the clear; drop the target's creation time so a source
 		// UID never inherits it.
@@ -126,8 +140,10 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		return err
 	}
 	if !opts.MergeProject {
-		if err := restoreReplayInstanceCreatedAt(ctx, tx, targetIdentity); err != nil {
-			return err
+		if !d.replaceTargetMetadata {
+			if err := restoreReplayInstanceCreatedAt(ctx, tx, targetIdentity); err != nil {
+				return err
+			}
 		}
 		if err := replayAPITokenProjection(ctx, tx); err != nil {
 			return err
@@ -182,6 +198,16 @@ func projectMergeOffsets(ctx context.Context, tx *sql.Tx) (db.ProjectMergeOffset
 	if err != nil {
 		return db.ProjectMergeOffsets{}, fmt.Errorf("inspect project merge ID ranges: %w", err)
 	}
+	for _, entry := range []struct {
+		table string
+		value *int64
+	}{
+		{"cron_jobs", &offsets.CronJob}, {"cron_workflows", &offsets.CronWorkflow}, {"cron_runs", &offsets.CronRun},
+	} {
+		if err := tx.QueryRowContext(ctx, "SELECT MAX((SELECT COALESCE(MAX(id),0) FROM "+entry.table+"),COALESCE((SELECT seq FROM sqlite_sequence WHERE name=$1),0))", entry.table).Scan(entry.value); err != nil {
+			return offsets, err
+		}
+	}
 	return offsets, nil
 }
 
@@ -196,6 +222,12 @@ func refuseProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, recs []db.
 			checks = append(checks, uidCheck{"issues", "uid", "issue", rec.UID})
 		case *db.CommentExport:
 			checks = append(checks, uidCheck{"comments", "uid", "comment", rec.UID})
+		case *db.CronJobExport:
+			checks = append(checks, uidCheck{"cron_jobs", "uid", "cron job", rec.UID})
+		case *db.CronWorkflowExport:
+			checks = append(checks, uidCheck{"cron_workflows", "uid", "cron workflow", rec.UID})
+		case *db.CronRunExport:
+			checks = append(checks, uidCheck{"cron_runs", "uid", "cron run", rec.UID})
 		case *db.RecurrenceExport:
 			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", rec.UID})
 		case *db.IssueClaimExport:
@@ -277,6 +309,12 @@ func clearReplayTarget(
 	}
 	// Virtual and shadow FTS tables are excluded by pragma_table_list's type;
 	// deleting issues/comments maintains them through the schema triggers.
+	for _, table := range []string{"cron_runs", "cron_jobs", "cron_workflows"} {
+		//nolint:gosec // Table comes from the fixed cron table list.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			return err
+		}
+	}
 	for _, table := range tables {
 		quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+quoted); err != nil { //nolint:gosec // catalog identifier is quoted above
@@ -399,6 +437,8 @@ const (
 // per-reason aggregate notes.
 func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
 	switch rec := r.(type) {
+	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
+		return linkSkipNone, db.ReplayCronRecord(ctx, tx, rec, false)
 	case *db.MetaKV:
 		return linkSkipNone, importMeta(ctx, tx, rec, opts)
 	case *db.ProjectExport:

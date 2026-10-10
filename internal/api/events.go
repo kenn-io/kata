@@ -103,5 +103,7 @@ type PollEventsBody struct {
 // signals a purge-invalidated cursor; when true, Events is empty and the
 // client should refetch state and resume from ResetAfterID.
 type PollEventsResponse struct {
-	Body PollEventsBody
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  PollEventsBody
 }

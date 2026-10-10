@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-03
+last_edited: 2026-10-09
 ---
 
 # Federation
@@ -79,6 +79,12 @@ default/spoke daemon only to detect whether the named project already exists
 on the spoke and should print `--adopt-existing`. The generated token printed
 in the `kata federation join ...` command is a separate spoke transport
 credential.
+
+Without a project argument or `--project`, `enroll` finds the project from the
+client's `.kata.toml` or Git alias and sends only that name or alias to the
+hub. An unbound directory fails with `project_not_initialized`, and a missing
+`--workspace` path fails with a validation error. The hub is never asked to
+search client directories, even when `--hub-url` is a loopback address.
 
 On hubs configured with `[auth].require_token_identity = true`, authenticate
 `kata federation enroll` with the hub's DB-backed personal token for the actor
@@ -361,11 +367,19 @@ kata federation rebind --all --hub primary-hub
 
 `--daemon` selects the spoke daemon that owns the binding and credential;
 `--hub` selects a catalog entry in that daemon's config. The request carries
-only the catalog name. The spoke daemon requires the entry to be remote HTTPS,
+only the catalog name. The daemon captures the existing binding and credential
+state and compares them internally before updating the endpoint.
+The spoke daemon requires the entry to be remote HTTPS,
 then deliberately sends the existing enrollment token to that configured
 origin and fetches the same hub project's federation metadata. It updates
 local state only if both the numeric project ID and stable project UID match.
 The catalog administration token and `token_env` are not used.
+
+Rebind keeps the old binding and credential expectations through the update;
+a changed principal, catalog target, binding revision, or project identity
+refuses the replacement. Shared cron definitions and run observations use the
+ordinary federation binding and stable project identity, so rebind needs no
+cron-specific step.
 
 For a config-managed spoke, reconciliation reports `binding_conflict` and
 changes nothing between the catalog edit and successful rebind, including

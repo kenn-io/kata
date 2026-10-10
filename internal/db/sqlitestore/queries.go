@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/transcript"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -545,6 +546,22 @@ func (d *Store) CreateIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 }
 
 func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64, db.Event, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, db.Event{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	id, event, err := d.createIssueTx(ctx, tx, p)
+	if err != nil {
+		return 0, db.Event{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, db.Event{}, err
+	}
+	return id, event, nil
+}
+
+func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (int64, db.Event, error) {
 	// Normalize: a non-nil pointer to "" is treated as no owner. The payload
 	// already drops empty owner via omitempty; making the DB column NULL keeps
 	// the two views consistent and matches the unassigned semantic.
@@ -587,12 +604,6 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 	if err != nil {
 		return 0, db.Event{}, err
 	}
-
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return 0, db.Event{}, fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var (
 		projectName string
@@ -745,9 +756,6 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 		return 0, db.Event{}, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return 0, db.Event{}, fmt.Errorf("commit: %w", err)
-	}
 	return issueID, evt, nil
 }
 
@@ -1569,19 +1577,21 @@ func (d *Store) closeIssueGuarded(
 		*parentSIDForPayload = parentSID
 	}
 	payloadBytes, err := json.Marshal(struct {
-		Reason                 string        `json:"reason"`
-		ClosedAt               string        `json:"closed_at"`
-		Message                string        `json:"message,omitempty"`
-		Evidence               []db.Evidence `json:"evidence,omitempty"`
-		ParentUID              *string       `json:"parent_uid,omitzero"`
-		ParentShortID          *string       `json:"parent_short_id,omitzero"`
-		IdempotencyKey         string        `json:"idempotency_key,omitempty"`
-		IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
+		Reason                 string                 `json:"reason"`
+		ClosedAt               string                 `json:"closed_at"`
+		Message                string                 `json:"message,omitempty"`
+		Evidence               []db.Evidence          `json:"evidence,omitempty"`
+		Transcript             *transcript.Transcript `json:"transcript,omitempty"`
+		ParentUID              *string                `json:"parent_uid,omitzero"`
+		ParentShortID          *string                `json:"parent_short_id,omitzero"`
+		IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
+		IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 	}{
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
 		Evidence:               p.Evidence,
+		Transcript:             p.Transcript,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,
 		IdempotencyKey:         p.IdempotencyKey,
@@ -2570,14 +2580,16 @@ func eventIssueUIDTx(ctx context.Context, tx *sql.Tx, issueID *int64, issueUID *
 // LEFT JOINed from the live `issues` table so mutation responses (which
 // scan their inserted event through this query) carry the same wire shape
 // as events streamed via poll/SSE.
-const eventSelectByID = `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
+const eventSelectByID = eventSelect + `
+ WHERE e.id = ?`
+
+const eventSelect = `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
        e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
        e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
   FROM events e
   JOIN projects p ON p.id = e.project_id
   LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
-  LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
- WHERE e.id = ?`
+  LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)`
 
 func stringPtrValue(s *string) any {
 	if s == nil {

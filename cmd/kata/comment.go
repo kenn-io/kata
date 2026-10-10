@@ -15,6 +15,7 @@ import (
 
 func newCommentCmd() *cobra.Command {
 	var src BodySources
+	var idempotencyKey string
 	var unsupportedRelationships commentRelationshipFlags
 	cmd := &cobra.Command{
 		Use:   "comment <issue-ref>",
@@ -28,6 +29,7 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
 	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
 	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "send Idempotency-Key header for safe retry")
 	cmd.Flags().SetNormalizeFunc(normalizeCommentMessageFlag)
 	cmd.Flags().StringVar(&unsupportedRelationships.Parent, "parent", "", "unsupported on comment; use edit")
 	cmd.Flags().StringVar(&unsupportedRelationships.Blocks, "blocks", "", "unsupported on comment; use edit")
@@ -70,9 +72,11 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 		if err != nil {
 			return err
 		}
-		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, &generated.CreateCommentRequestOptions{
-			PathParams: &generated.CreateCommentPath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: payload,
-		})
+		options := &generated.CreateCommentRequestOptions{PathParams: &generated.CreateCommentPath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: payload}
+		if idempotencyKey != "" {
+			options.Header = &generated.CreateCommentHeaders{IdempotencyKey: &idempotencyKey}
+		}
+		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, options)
 		if err := externalCLITransportError(response, callErr); err != nil {
 			return err
 		}

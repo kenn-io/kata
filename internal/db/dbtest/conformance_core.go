@@ -947,6 +947,19 @@ func checkEventQueries(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, byUID, 1)
 	assert.Equal(t, event.ID, byUID[0].ID)
+	projectCreated, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1})
+	if err != nil {
+		return fmt.Errorf("read first project event: %w", err)
+	}
+	require.Len(t, projectCreated, 1)
+	byUID, err = store.EventsByUIDs(ctx, project.ID, []string{event.UID, projectCreated[0].UID})
+	if err != nil {
+		return fmt.Errorf("events by uids: %w", err)
+	}
+	require.Len(t, byUID, 2)
+	assert.Equal(t, []int64{event.ID, projectCreated[0].ID}, []int64{byUID[0].ID, byUID[1].ID}, "events keep requested order")
+	_, err = store.EventsByUIDs(ctx, project.ID, []string{event.UID, "01ARZ3NDEKTSV4RRFFQ69G5FAV"})
+	require.ErrorIs(t, err, db.ErrNotFound, "one missing UID fails the whole read")
 	window, err := store.EventsInWindow(ctx, db.EventsInWindowParams{
 		ProjectID: project.ID, Since: since.UTC().Format(time.RFC3339Nano),
 		Until: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),

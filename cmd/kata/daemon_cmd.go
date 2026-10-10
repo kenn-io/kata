@@ -39,6 +39,7 @@ import (
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
+	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
@@ -105,6 +106,9 @@ var newLinearSyncDaemonRunner = func(cfg linearsync.RunnerConfig) issueSyncDaemo
 
 var newLinearSyncClient = linearsync.NewClient
 
+var newTodoistSyncDaemonRunner = func(cfg todoistsync.RunnerConfig) issueSyncDaemonRunner { return todoistsync.NewRunner(cfg) }
+var newTodoistSyncClient = todoistsync.NewClient
+
 var newGitHubSyncHTTPFetcher = githubsync.NewHTTPFetcher
 
 var openEmbeddingVectorIndex = func(
@@ -135,6 +139,9 @@ func newConfiguredLinearSyncFetcher(cfg config.LinearSyncConfig) linearsync.Fetc
 }
 func newConfiguredTwentySyncFetcher(cfg config.TwentySyncConfig) twentysync.Fetcher {
 	return newTwentySyncClient(twentysync.ClientConfig{Daemon: cfg})
+}
+func newConfiguredTodoistSyncFetcher(cfg config.TodoistSyncConfig) todoistsync.Fetcher {
+	return newTodoistSyncClient(todoistsync.ClientConfig{Daemon: cfg})
 }
 
 type daemonStartOutput struct {
@@ -1293,6 +1300,11 @@ func runDaemonProcess(
 	twentySyncWake := startTwentySyncRunner(
 		ctx, workers, waitableDrainAdmission, store, twentySyncFetcher, publisher, daemonLog, twentySyncProgress,
 	)
+	todoistSyncFetcher := newConfiguredTodoistSyncFetcher(dcfg.TodoistSync)
+	todoistSyncProgress := issuesync.NewProgressTracker()
+	todoistSyncWake := startTodoistSyncRunner(
+		ctx, workers, waitableDrainAdmission, store, todoistSyncFetcher, publisher, daemonLog, todoistSyncProgress,
+	)
 
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
 	if err != nil {
@@ -1388,6 +1400,10 @@ func runDaemonProcess(
 		TwentySyncConfig:          dcfg.TwentySync,
 		TwentySyncWake:            twentySyncWake,
 		TwentySyncProgress:        twentySyncProgress,
+		TodoistSyncFetcher:        todoistSyncFetcher,
+		TodoistSyncConfig:         dcfg.TodoistSync,
+		TodoistSyncWake:           todoistSyncWake,
+		TodoistSyncProgress:       todoistSyncProgress,
 		ExternalRootRegistry:      externalRootRegistry,
 		ExternalRootService:       externalRootService,
 		ExternalRootReconciler:    externalRootReconciler,
@@ -2071,6 +2087,36 @@ func startLinearSyncRunner(
 	}
 	return startIssueSyncRunner(ctx, workers, daemonLog, "linear", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
 		return newLinearSyncDaemonRunner(linearsync.RunnerConfig{
+			Store:          store,
+			Fetcher:        fetcher,
+			Progress:       progress,
+			Logger:         logger,
+			Interval:       30 * time.Second,
+			Wake:           wake,
+			DrainAdmission: drainAdmission,
+			EventSinkFrom: func(_ context.Context, projectID int64, events []db.Event, fork activity.Admission) error {
+				publisher.EventsFrom(projectID, events, fork)
+				return nil
+			},
+		})
+	})
+}
+
+func startTodoistSyncRunner(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	store db.Storage,
+	fetcher todoistsync.Fetcher,
+	publisher daemon.EventPublisher,
+	daemonLog *log.Logger,
+	progress *issuesync.ProgressTracker,
+) func() {
+	if fetcher == nil {
+		fetcher = newConfiguredTodoistSyncFetcher(config.TodoistSyncConfig{})
+	}
+	return startIssueSyncRunner(ctx, workers, daemonLog, "todoist", func(wake <-chan struct{}, logger *slog.Logger) issueSyncDaemonRunner {
+		return newTodoistSyncDaemonRunner(todoistsync.RunnerConfig{
 			Store:          store,
 			Fetcher:        fetcher,
 			Progress:       progress,

@@ -74,6 +74,7 @@ type RetryFederationQuarantineRequest struct {
 // FederationProjectMetadataRequest reads federation metadata through the
 // enrollment-authenticated transport surface.
 type FederationProjectMetadataRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 }
@@ -90,7 +91,9 @@ type ProjectFederationBody struct {
 
 // ProjectFederationResponse wraps ProjectFederationBody.
 type ProjectFederationResponse struct {
-	Body ProjectFederationBody
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  ProjectFederationBody
 }
 
 // RewriteAuthorIdentityResponse returns per-field rewrite counts.
@@ -332,7 +335,9 @@ type RebindFederationReplicaRequest struct {
 	Body      RebindFederationReplicaRequestBody
 }
 
-// RebindFederationReplicaRequestBody deliberately carries only a catalog name.
+// RebindFederationReplicaRequestBody selects only a daemon-owned catalog entry.
+// The daemon captures and compares the ordinary binding and credential state
+// internally before updating the endpoint.
 // The daemon resolves the target URL itself so callers cannot redirect an
 // enrollment credential to an arbitrary origin.
 type RebindFederationReplicaRequestBody struct {
@@ -365,6 +370,7 @@ type RebindFederationReplicaResponse struct {
 // transport poll route. It mirrors PollEventsRequest but carries its own bearer
 // header because the route bypasses daemon admin bearer auth.
 type FederationPollEventsRequest struct {
+	EventFeatures string      `header:"X-Kata-Event-Features"`
 	ProjectID     int64       `path:"project_id"`
 	Authorization string      `header:"Authorization"`
 	AfterID       int64       `query:"after_id,omitempty"`
@@ -374,6 +380,7 @@ type FederationPollEventsRequest struct {
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
 // route.
 type FederationIngestEventsRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 	Body          FederationIngestEventsRequestBody
@@ -426,7 +433,9 @@ type FederationIngestEventsBody struct {
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.
 type FederationIngestEventsResponse struct {
-	Body FederationIngestEventsBody
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	Body                  FederationIngestEventsBody
 }
 
 // ClaimActionRequest carries the shared path/header/body shape for

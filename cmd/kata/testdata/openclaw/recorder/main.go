@@ -55,6 +55,9 @@ func openClawRecordNative(args []string) int {
 		if exists("fail-contract") {
 			return 1
 		}
+		if exists("slow-contract") {
+			time.Sleep(750 * time.Millisecond)
+		}
 		if exists("no-contract-context") {
 			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart"}}); err != nil {
 				return 1

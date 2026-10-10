@@ -148,6 +148,13 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if merge {
 		return runSQLiteJSONLMerge(cmd, input, target)
 	}
+	// Remember whether the main file existed before opening the input. Force
+	// authorizes replacement of that target, not a concurrently created one.
+	_, mainErr := os.Stat(target)
+	mainExists := mainErr == nil
+	if mainErr != nil && !errors.Is(mainErr, os.ErrNotExist) {
+		return fmt.Errorf("stat import target: %w", mainErr)
+	}
 	targetExists, err := sqliteFileSetExists(target)
 	if err != nil {
 		return fmt.Errorf("stat import target: %w", err)
@@ -161,6 +168,9 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
+	}
+	if force && targetExists && !mainExists {
+		return fmt.Errorf("target appeared or has orphan SQLite sidecars; recover that file set or choose a fresh destination")
 	}
 	in, err := os.Open(input) //nolint:gosec // import path is user-provided CLI input
 	if err != nil {
@@ -192,7 +202,7 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("close import target: %w", err)
 	}
-	if err := installImportedTarget(tmpTarget, target, force); err != nil {
+	if err := installPreparedSQLiteImport(cmd.Context(), tmpTarget, target, force && mainExists); err != nil {
 		return err
 	}
 	installed = true
@@ -375,73 +385,16 @@ func prepareImportTempTarget(target string) (string, func(), error) {
 	return tmpTarget, func() { _ = removeSQLiteFileSetMain(tmpTarget) }, nil
 }
 
-func installImportedTarget(tmpTarget, target string, force bool) error {
-	if !force {
-		targetExists, err := sqliteFileSetExists(target)
-		if err != nil {
-			return fmt.Errorf("stat import target before install: %w", err)
-		}
-		if targetExists {
-			return fmt.Errorf("target already exists; pass --force to replace it")
-		}
-		if _, err := moveSQLiteFileSet(tmpTarget, target); err != nil {
-			return fmt.Errorf("install import target: %w", err)
-		}
-		return nil
-	}
-
-	backupTarget, err := prepareImportBackupTarget(target)
+func installImportedTarget(tmpTarget, target string) error {
+	targetExists, err := sqliteFileSetExists(target)
 	if err != nil {
-		return err
+		return fmt.Errorf("stat import target before install: %w", err)
 	}
-	backupMade, err := moveSQLiteFileSet(target, backupTarget)
-	if err != nil {
-		return errors.Join(
-			fmt.Errorf("backup import target: %w", err),
-			restoreImportedTargetBackup(backupTarget, target, backupMade),
-		)
+	if targetExists {
+		return fmt.Errorf("target already exists; refusing to overwrite a destination that appeared during import")
 	}
 	if _, err := moveSQLiteFileSet(tmpTarget, target); err != nil {
-		return errors.Join(
-			fmt.Errorf("install import target: %w", err),
-			restoreImportedTargetBackup(backupTarget, target, backupMade),
-		)
-	}
-	if err := removeSQLiteFileSetMain(backupTarget); err != nil {
-		return fmt.Errorf("remove import target backup: %w", err)
-	}
-	return nil
-}
-
-func prepareImportBackupTarget(target string) (string, error) {
-	dir := filepath.Dir(target)
-	base := filepath.Base(target)
-	f, err := os.CreateTemp(dir, "."+base+".replace-*")
-	if err != nil {
-		return "", fmt.Errorf("create import target backup: %w", err)
-	}
-	backupTarget := f.Name()
-	if err := f.Close(); err != nil {
-		_ = os.Remove(backupTarget) //nolint:gosec // backupTarget comes from os.CreateTemp above.
-		return "", fmt.Errorf("close import target backup placeholder: %w", err)
-	}
-	if err := os.Remove(backupTarget); err != nil { //nolint:gosec // backupTarget comes from os.CreateTemp above.
-		return "", fmt.Errorf("remove import target backup placeholder: %w", err)
-	}
-	if exists, err := sqliteFileSetExists(backupTarget); err != nil {
-		return "", fmt.Errorf("stat import target backup: %w", err)
-	} else if exists {
-		return "", fmt.Errorf("import target backup already exists: %s", backupTarget)
-	}
-	return backupTarget, nil
-}
-
-func restoreImportedTargetBackup(backupTarget, target string, backupMade bool) error {
-	if !backupMade {
-		return nil
-	}
-	if _, err := moveSQLiteFileSet(backupTarget, target); err != nil {
-		return fmt.Errorf("restore import target backup: %w", err)
+		return fmt.Errorf("install import target: %w", err)
 	}
 	return nil
 }

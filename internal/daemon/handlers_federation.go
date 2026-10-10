@@ -148,16 +148,17 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/federation/metadata",
 	}, func(ctx context.Context, in *api.FederationProjectMetadataRequest) (*api.ProjectFederationResponse, error) {
 		var err error
-		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+		ctx, _, err = authorizeFederationRequestForCapabilities(ctx, cfg, in.Authorization, in.ProjectID, []string{"pull", "push"},
 			federationTransportOperation("getFederationProjectMetadata"))
 		if err != nil {
 			return nil, err
 		}
-		body, err := enabledHubFederationBody(ctx, cfg.DB, in.ProjectID)
+		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {
-			return nil, err
+			return nil, federationFeatureError(err)
 		}
-		return &api.ProjectFederationResponse{Body: body}, nil
+		body := api.ProjectFederationBody{ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
+		return &api.ProjectFederationResponse{Body: body, EventFeatures: db.CronEventFeature, RequiredEventFeatures: result.RequiredFeatures}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -680,7 +681,18 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
+		if in.AfterID < 0 {
+			return nil, api.NewError(400, "validation", "after_id must be non-negative", "", nil)
+		}
+		limit, err := resolveLimit(in.Limit)
+		if err != nil {
+			return nil, err
+		}
+		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, Limit: limit})
+		if err != nil {
+			return nil, federationFeatureError(err)
+		}
+		return &api.PollEventsResponse{EventFeatures: db.CronEventFeature, RequiredEventFeatures: result.RequiredFeatures, Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID}}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -700,6 +712,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
+		for _, event := range in.Body.Events {
+			if err := db.RequireEventFeatures(in.EventFeatures, db.EventRequiredFeatures(event.Type)); err != nil {
+				return nil, federationFeatureError(err)
+			}
+		}
 		if err := validateFederationIngestSchemaVersion(in.Body.SchemaVersion); err != nil {
 			return nil, err
 		}
@@ -707,6 +724,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+			EventFeatures:                    in.EventFeatures,
 			ProjectID:                        in.ProjectID,
 			FederationEnrollmentID:           principal.EnrollmentID,
 			SpokeInstanceUID:                 principal.SpokeInstanceUID,
@@ -722,12 +740,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := federationFailpoint("after_federation_ingest_commit_before_broadcast"); err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
 		}
-		inserted, err := cfg.DB.EventsByUIDs(ctx, in.ProjectID, result.InsertedEventUIDs)
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		cfg.Publish().Events(in.ProjectID, inserted)
-		return &api.FederationIngestEventsResponse{Body: api.FederationIngestEventsBody{
+		cfg.Publish().EventsByProject(result.Events)
+		return &api.FederationIngestEventsResponse{EventFeatures: db.CronEventFeature, RequiredEventFeatures: result.RequiredEventFeatures, Body: api.FederationIngestEventsBody{
 			Accepted:          result.Accepted,
 			Duplicates:        result.Duplicates,
 			PushCursorEventID: result.PushCursorEventID,
@@ -794,6 +808,9 @@ func federationIngestEventsToDB(events []api.FederationIngestEventEnvelope) []db
 }
 
 func federationIngestError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return federationFeatureError(err)
+	}
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
@@ -1288,6 +1305,9 @@ func federationError(err error) error {
 	if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 		return issueSyncFederationConflict()
 	}
+	if errors.Is(err, db.ErrFederationNotEnabled) {
+		return api.NewError(http.StatusConflict, "federation_not_enabled", err.Error(), "", nil)
+	}
 	return internalAPIError(err)
 }
 
@@ -1296,4 +1316,11 @@ func federationError(err error) error {
 func issueSyncFederationConflict() error {
 	return api.NewError(409, "issue_sync_federation_conflict",
 		"project has issue sync enabled; run GitHub sync on the federation hub, or disable issue sync before joining this project as a spoke", "", nil)
+}
+
+func federationFeatureError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Upgrade the peer to support cron_v1", nil)
+	}
+	return federationError(err)
 }

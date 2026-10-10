@@ -15,11 +15,13 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/markdownrender"
 )
 
 func newShowCmd() *cobra.Command {
-	var render bool
+	var render, planningDates bool
 	cmd := &cobra.Command{
 		Use:   "show <issue-ref>",
 		Short: "show issue + comments",
@@ -31,18 +33,23 @@ Redirects and pipelines, including "| less -R", keep plain output.`,
   kata show example-project#abc4 --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShow(cmd, args[0], "show", showRunOptions{Render: render})
+			return runShow(cmd, args[0], "show", showRunOptions{Render: render, PlanningDates: planningDates})
 		},
 	}
+	cmd.Flags().BoolVar(&planningDates, "planning-dates", false, "read native planning date values and resolved instants (requires --json)")
 	cmd.Flags().BoolVar(&render, "render", false, "render description and comment Markdown on a terminal")
 	return cmd
 }
 
 type showRunOptions struct {
-	Render bool
+	Render        bool
+	PlanningDates bool
 }
 
 func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOptions) error {
+	if opts.PlanningDates && (currentOutputMode() != outputJSON || opts.Render) {
+		return &cliError{Message: "--planning-dates requires --json and cannot be combined with --render", Kind: kindUsage, ExitCode: ExitUsage}
+	}
 	if opts.Render && currentOutputMode() != outputHuman {
 		return &cliError{
 			Message:  "kata show --render requires human output",
@@ -57,6 +64,21 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
+	}
+	if opts.PlanningDates {
+		c, err := kataclient.NewWithHTTPClient(baseURL, client)
+		if err != nil {
+			return err
+		}
+		response, err := c.IssuePlanningDatesWithResponse(ctx, &generated.IssuePlanningDatesRequestOptions{PathParams: &generated.IssuePlanningDatesPath{ProjectID: pid, Ref: ref.RefForAPI}})
+		if response == nil {
+			return externalCLITransportError(response, err)
+		}
+		raw, err := cronCLIResponse(response.StatusCode, response.Body, err)
+		if err != nil {
+			return err
+		}
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
 	if err != nil {

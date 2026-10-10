@@ -33,10 +33,10 @@ func (d *Store) PendingFederationPushEvents(
 	if err != nil {
 		return nil, err
 	}
-	if len(out) == limit && len(out) > 0 && out[len(out)-1].Type == "issue.snapshot" {
+	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
 		runStartAfterID := afterID
 		for _, o := range slices.Backward(out) {
-			if o.Type != "issue.snapshot" {
+			if !db.IsFederationSnapshotEvent(o.Type) {
 				runStartAfterID = o.ID
 				break
 			}
@@ -45,7 +45,7 @@ func (d *Store) PendingFederationPushEvents(
 			WHERE e.project_id = ?
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
-			  AND e.type = 'issue.snapshot'
+			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  AND NOT EXISTS (
 			    SELECT 1
 			      FROM events barrier
@@ -54,7 +54,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND barrier.id > ?
 			       AND barrier.id < e.id
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
-			       AND barrier.type <> 'issue.snapshot'
+			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  )
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, runStartAfterID)
 		if err != nil {
@@ -63,11 +63,11 @@ func (d *Store) PendingFederationPushEvents(
 		out = append(out, extra...)
 	}
 	for i, ev := range out {
-		if ev.Type != "issue.snapshot" {
+		if !db.IsFederationSnapshotEvent(ev.Type) {
 			continue
 		}
 		for j := i + 1; j < len(out); j++ {
-			if out[j].Type != "issue.snapshot" {
+			if !db.IsFederationSnapshotEvent(out[j].Type) {
 				return out[:j], nil
 			}
 		}
@@ -127,19 +127,7 @@ func (d *Store) PendingFederationPushStats(
 }
 
 func federationPushEventTypeCondition(column string) string {
-	return column + ` IN (
-		'project.metadata_updated',
-		'issue.created', 'issue.snapshot', 'issue.updated', 'issue.closed', 'issue.reopened',
-		'issue.soft_deleted', 'issue.restored', 'issue.commented', 'issue.comment_edited',
-		'issue.assigned', 'issue.unassigned', 'issue.assignment_renewed', 'issue.assignment_expired',
-		'issue.priority_set', 'issue.priority_cleared',
-		'issue.labeled', 'issue.unlabeled',
-		'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated',
-		'issue.external_root_bound', 'issue.external_root_paused',
-		'issue.external_root_resumed', 'issue.external_root_unbound',
-		'issue.external_comment_resolved', 'issue.external_field_conflicted',
-		'issue.external_field_resolved'
-	)`
+	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
 // AdvanceFederationPushCursor records the highest local events.id accepted by
@@ -185,24 +173,19 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var existing sql.NullInt64
-	var actor string
-	err = tx.QueryRowContext(ctx,
-		`SELECT push_cursor_event_id, bound_actor FROM federation_bindings WHERE project_id = ?`,
-		projectID).Scan(&existing, &actor)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.FederationBinding{}, db.ErrNotFound
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
 	}
+	existing, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
 	if err != nil {
-		return db.FederationBinding{}, fmt.Errorf("lookup federation push cursor: %w", err)
+		return db.FederationBinding{}, err
 	}
-	if strings.TrimSpace(actor) == "" {
+	if strings.TrimSpace(existing.Actor) == "" {
 		return db.FederationBinding{}, fmt.Errorf("enable federation push: bound actor is required")
 	}
-	nextCursor := cursor
-	if existing.Valid && existing.Int64 > nextCursor {
-		nextCursor = existing.Int64
-	}
+	next := existing
+	next.PushEnabled = true
+	nextCursor := max(cursor, existing.PushCursorEventID)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
 		   SET push_enabled = 1,
@@ -273,19 +256,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		        WHERE project_id = ?
 		          AND origin_instance_uid = ?
 		          AND id > ?
-		          AND type IN (
-		            'project.metadata_updated',
-		            'issue.created', 'issue.snapshot', 'issue.updated', 'issue.closed', 'issue.reopened',
-		            'issue.soft_deleted', 'issue.restored', 'issue.commented', 'issue.comment_edited',
-		            'issue.assigned', 'issue.unassigned', 'issue.assignment_renewed', 'issue.assignment_expired',
-		            'issue.priority_set', 'issue.priority_cleared',
-		            'issue.labeled', 'issue.unlabeled',
-		            'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated',
-		            'issue.external_root_bound', 'issue.external_root_paused',
-		            'issue.external_root_resumed', 'issue.external_root_unbound',
-		            'issue.external_comment_resolved', 'issue.external_field_conflicted',
-		            'issue.external_field_resolved'
-		          )
+		          AND `+federationPushEventTypeCondition("type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1

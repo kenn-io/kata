@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/tokenactor"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 // IncludeDeleted controls whether a lookup is allowed to return soft-deleted
@@ -95,6 +96,7 @@ type CloseIssueParams struct {
 	Actor                  string
 	Message                string
 	Evidence               []Evidence
+	Transcript             *transcript.Transcript
 	IfMatchRev             *int64
 	IdempotencyKey         string
 	IdempotencyFingerprint string
@@ -782,6 +784,7 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	EventFeatures                    string
 	ProjectID                        int64
 	FederationEnrollmentID           int64
 	SpokeInstanceUID                 string
@@ -805,10 +808,13 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
-	Accepted          int
-	Duplicates        int
-	PushCursorEventID int64
-	InsertedEventUIDs []string
+	// Events retains every committed event in transaction insertion order.
+	Events                []Event
+	RequiredEventFeatures string
+	Accepted              int
+	Duplicates            int
+	PushCursorEventID     int64
+	InsertedEventUIDs     []string
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation

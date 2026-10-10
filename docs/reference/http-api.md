@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-07
+last_edited: 2026-10-09
 ---
 
 # HTTP API schema
@@ -13,7 +13,7 @@ generate typed clients instead of hand-copying wire structs.
 Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
-discovery.
+discovery. [Native cron](cron.md) documents job and workflow resources.
 
 ## Getting the schema
 
@@ -99,6 +99,30 @@ always send the pinned-target fields and its close-audit paging relies on
 `event_id`. Status-filtered `kata.search` calls additionally check for
 API `0.20.0` before project fanout.
 
+Close requests may explicitly supply `transcript` (HTTP API `0.26.0`):
+
+```json
+{
+  "actor": "agent-one",
+  "reason": "done",
+  "message": "Implemented the requested behavior and ran the focused tests.",
+  "evidence": [{"type": "test", "command": "go test ./internal/example"}],
+  "transcript": {
+    "agent": "codex",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "url": "https://agentsview.example/sessions/codex/00000000-0000-4000-8000-000000000001"
+  }
+}
+```
+
+The agent is `codex` or `claude`, `session_id` is its native UUID, and `url` is
+optional absolute HTTP(S) without credentials, query, or fragment. Supply a
+verified locator for namespaced imported archives. The daemon stores this
+separately from evidence in the close event; it does not fetch or verify the
+chat. Its `agent` and `session_id` participate in retry identity; `url` does
+not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
+not daemon-side session discovery.
+
 Guarded close requests use a request-local compatibility check instead of a
 separate health probe. A request that sends `Idempotency-Key` or `If-Match`
 also sends `retry_protocol: "close-v1"`. Current daemons require the marker;
@@ -113,7 +137,7 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-The current contract is API `0.23.0`. Kata 0.18.0 includes the changes from
+The current contract is API `0.26.0`. Kata 0.18.0 includes the changes from
 `0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
 credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
 oldest-first lists require `0.21.0`.
@@ -127,6 +151,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
 | `0.23.0` | Added transactional move previews with the optional `dry_run` request field. Preview responses omit `new_short_id` until a move allocates the target ID. Generated clients now type `new_short_id` as optional; read `issue.short_id` for the issue's current short ID. |
 | `0.22.0` | Added temporary assignments: claim requests accept `ttl_seconds`, claim responses return ordered `events`, issue projections include `assignment_expires_on`, and assignment renewal and expiry have distinct event types. |
 | `0.21.0` | Added optional `sort=oldest` to both issue-list routes. Matching rows are ordered by `created_at` ascending and `id` ascending before `limit`; omission preserves each route's default. |
@@ -764,3 +789,12 @@ and workspace IDs are rejected as request config. Status classification is
 validated against live metadata before a guarded upsert. Empty or
 whitespace-only `closed_status` and `open_status` values are rejected; omit a
 key to preserve its saved value. See [Twenty sync](../operations/twenty-sync.md).
+
+Todoist uses the issue-sync routes with provider `todoist`. Initial enable config
+requires opaque string `project_id`. Optional string `history_since` selects a
+UTC date or whole-second RFC3339 completion floor; omission initially chooses
+thirty days ago. Boolean `title_prefix`, top-level `status_sync`, and interval
+preserve omission on re-enable. The daemon resolves `account_id`. Account,
+origin, project and history floor are immutable. Requests cannot supply tokens
+or origins. Two-way delivery uses completion/reopen endpoints after fresh
+safety checks. See [Todoist sync](../operations/todoist-sync.md).

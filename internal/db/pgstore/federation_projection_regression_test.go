@@ -50,7 +50,9 @@ func TestMaterializeFederatedProjectPrunesLinkedIssueMissingFromProjection(t *te
 	inserted, err = store.InsertRemoteEvent(ctx, project.ID, first)
 	require.NoError(t, err)
 	assert.True(t, inserted)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	firstIssue, err := store.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	secondIssue, err := store.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
@@ -60,7 +62,9 @@ func TestMaterializeFederatedProjectPrunesLinkedIssueMissingFromProjection(t *te
 
 	_, err = store.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, second.EventUID)
 	require.NoError(t, err)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	_, err = store.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	_, err = store.LinkByEndpoints(ctx, firstIssue.ID, secondIssue.ID, "blocks")
@@ -97,11 +101,15 @@ func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.
 		jsontext.Value(`{"uid":"`+issueUID+`","title":"original issue","author":"remote","status":"open","comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
 	_, err = store.InsertRemoteEvent(ctx, project.ID, snapshot)
 	require.NoError(t, err)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	var before, after string
 	require.NoError(t, store.QueryRowContext(ctx,
 		`SELECT xmin::text FROM comments WHERE uid=$1`, commentUID).Scan(&before))
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	require.NoError(t, store.QueryRowContext(ctx,
 		`SELECT xmin::text FROM comments WHERE uid=$1`, commentUID).Scan(&after))
 	assert.Equal(t, before, after, "rebuilding unchanged state must not rewrite the comment row")
@@ -121,7 +129,9 @@ func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.
 	require.NoError(t, err)
 	_, err = store.InsertRemoteEvent(ctx, project.ID, edit)
 	require.NoError(t, err)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	var body string
 	require.NoError(t, store.QueryRowContext(ctx,
 		`SELECT body FROM comments WHERE uid=$1`, commentUID).Scan(&body))

@@ -847,7 +847,7 @@ func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
 			requests++
 			var body api.FederationIngestEventsRequestBody
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			assert.Equal(t, db.CurrentSchemaVersion(), body.SchemaVersion)
+			assert.Equal(t, 30, body.SchemaVersion)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{

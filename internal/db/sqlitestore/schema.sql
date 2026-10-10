@@ -746,3 +746,64 @@ CREATE TABLE external_field_states (
   updated_at        DATETIME NOT NULL,
   PRIMARY KEY(binding_id, mapping_id)
 );
+
+-- Dormant native cron definitions and attributed run history.
+CREATE TABLE cron_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE CHECK (length(uid) = 26 AND substr(uid,1,1) BETWEEN '0' AND '7' AND uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 256),
+  definition_json TEXT NOT NULL CHECK (COALESCE((length(CAST(definition_json AS BLOB)) <= 262144 AND json_valid(definition_json) AND json_type(definition_json) = 'object' AND json_extract(definition_json, '$.version') = 1 AND json_type(definition_json, '$.version') = 'integer'), 0)),
+  definition_event_uid TEXT NOT NULL CHECK (length(definition_event_uid) = 26 AND substr(definition_event_uid,1,1) BETWEEN '0' AND '7' AND definition_event_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+  definition_hlc_json TEXT NOT NULL CHECK (COALESCE((length(CAST(definition_hlc_json AS BLOB)) <= 16384 AND json_valid(definition_hlc_json) AND json_type(definition_hlc_json) = 'object' AND json_extract(definition_hlc_json, '$.version') = 1 AND json_type(definition_hlc_json, '$.version') = 'integer' AND (json_type(definition_hlc_json, '$.physical_ms') = 'integer' AND json_extract(definition_hlc_json, '$.physical_ms') >= 0) AND (json_type(definition_hlc_json, '$.counter') = 'integer' AND json_extract(definition_hlc_json, '$.counter') >= 0)), 0)),
+  author TEXT NOT NULL CHECK (length(trim(author)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  deleted_at DATETIME
+);
+CREATE INDEX idx_cron_jobs_project_name ON cron_jobs(project_id,name) WHERE deleted_at IS NULL;
+
+CREATE TABLE cron_workflows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE CHECK (length(uid) = 26 AND substr(uid,1,1) BETWEEN '0' AND '7' AND uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 256),
+  definition_json TEXT NOT NULL CHECK (COALESCE((length(CAST(definition_json AS BLOB)) <= 262144 AND json_valid(definition_json) AND json_type(definition_json) = 'object' AND json_extract(definition_json, '$.version') = 1 AND json_type(definition_json, '$.version') = 'integer'), 0)),
+  definition_event_uid TEXT NOT NULL CHECK (length(definition_event_uid) = 26 AND substr(definition_event_uid,1,1) BETWEEN '0' AND '7' AND definition_event_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+  definition_hlc_json TEXT NOT NULL CHECK (COALESCE((length(CAST(definition_hlc_json AS BLOB)) <= 16384 AND json_valid(definition_hlc_json) AND json_type(definition_hlc_json) = 'object' AND json_extract(definition_hlc_json, '$.version') = 1 AND json_type(definition_hlc_json, '$.version') = 'integer' AND (json_type(definition_hlc_json, '$.physical_ms') = 'integer' AND json_extract(definition_hlc_json, '$.physical_ms') >= 0) AND (json_type(definition_hlc_json, '$.counter') = 'integer' AND json_extract(definition_hlc_json, '$.counter') >= 0)), 0)),
+  author TEXT NOT NULL CHECK (length(trim(author)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  deleted_at DATETIME
+);
+CREATE INDEX idx_cron_workflows_project_name ON cron_workflows(project_id,name) WHERE deleted_at IS NULL;
+
+CREATE TABLE cron_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE CHECK (length(uid) = 26 AND substr(uid,1,1) BETWEEN '0' AND '7' AND uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*'),
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  job_uid TEXT CHECK (job_uid IS NULL OR (length(job_uid) = 26 AND substr(job_uid,1,1) BETWEEN '0' AND '7' AND job_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
+  definition_event_uid TEXT CHECK (definition_event_uid IS NULL OR (length(definition_event_uid) = 26 AND substr(definition_event_uid,1,1) BETWEEN '0' AND '7' AND definition_event_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
+  workflow_uid TEXT CHECK (workflow_uid IS NULL OR (length(workflow_uid) = 26 AND substr(workflow_uid,1,1) BETWEEN '0' AND '7' AND workflow_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
+  workflow_definition_event_uid TEXT CHECK (workflow_definition_event_uid IS NULL OR (length(workflow_definition_event_uid) = 26 AND substr(workflow_definition_event_uid,1,1) BETWEEN '0' AND '7' AND workflow_definition_event_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
+  occurrence_key TEXT CHECK (occurrence_key IS NULL OR length(occurrence_key) BETWEEN 1 AND 1024),
+  issue_uid TEXT CHECK (issue_uid IS NULL OR (length(issue_uid) = 26 AND substr(issue_uid,1,1) BETWEEN '0' AND '7' AND issue_uid NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
+  actor TEXT NOT NULL CHECK (length(trim(actor)) > 0 AND length(CAST(actor AS BLOB)) <= 256),
+  teammate TEXT CHECK (teammate IS NULL OR (length(trim(teammate)) > 0 AND length(CAST(teammate AS BLOB)) <= 256)),
+  executor_label TEXT CHECK (executor_label IS NULL OR (length(trim(executor_label)) > 0 AND length(CAST(executor_label AS BLOB)) <= 256)),
+  status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','cancelled','unknown')),
+  summary_json TEXT NOT NULL DEFAULT '{"version":1}' CHECK (COALESCE((length(CAST(summary_json AS BLOB)) <= 65536 AND json_valid(summary_json) AND json_type(summary_json) = 'object' AND json_extract(summary_json, '$.version') = 1 AND json_type(summary_json, '$.version') = 'integer' AND (json_type(summary_json, '$.input_tokens') IS NULL OR (json_type(summary_json, '$.input_tokens') = 'integer' AND json_extract(summary_json, '$.input_tokens') >= 0)) AND (json_type(summary_json, '$.output_tokens') IS NULL OR (json_type(summary_json, '$.output_tokens') = 'integer' AND json_extract(summary_json, '$.output_tokens') >= 0))), 0)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now') || '000000Z') CHECK (length(created_at) = 30 AND created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+  started_at DATETIME,
+  ended_at DATETIME,
+  updated_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK ((job_uid IS NULL) = (definition_event_uid IS NULL)),
+  CHECK ((workflow_uid IS NULL) = (workflow_definition_event_uid IS NULL)),
+  CHECK (job_uid IS NOT NULL OR workflow_uid IS NOT NULL)
+);
+CREATE INDEX idx_cron_runs_project_time ON cron_runs(project_id,created_at,uid);
+CREATE INDEX idx_cron_runs_job_time ON cron_runs(project_id,job_uid,created_at,uid);
+CREATE INDEX idx_events_project_cron ON events(project_id) WHERE type LIKE 'cron.%';

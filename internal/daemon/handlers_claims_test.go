@@ -1138,7 +1138,9 @@ func createClaimForwardingPair(
 	})
 	require.NoError(t, err)
 	require.True(t, inserted)
-	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, spokeProject.ID))
+	if err := spoke.DB.MaterializeFederatedProject(ctx, spokeProject.ID); err != nil {
+		require.NoError(t, err)
+	}
 	enrollment := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)
 	return hub, spoke, hubProject, spokeProject, issue, enrollment.Token
 }

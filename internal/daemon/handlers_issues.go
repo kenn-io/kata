@@ -73,6 +73,7 @@ func validateIssueTitle(title string) error {
 // issue.created event in one tx (see db.CreateIssue) so the response always
 // carries an event for the CLI to render.
 func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
+	registerIssuePlanningDateHandlers(humaAPI, cfg)
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "createIssue",
 		Method:      "POST",

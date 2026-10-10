@@ -316,6 +316,15 @@ func TestOpenAPIDocumentOrdinarySlicesAreNonNullable(t *testing.T) {
 	}
 }
 
+func TestOpenAPICronRunObservationTeammateIsNullable(t *testing.T) {
+	doc := OpenAPIDocument()
+	schema := doc.Components.Schemas.Map()["ObserveCronRunBody"]
+	require.NotNil(t, schema, "missing ObserveCronRunBody")
+	teammate := schema.Properties["teammate"]
+	require.NotNil(t, teammate, "missing ObserveCronRunBody.teammate")
+	require.True(t, teammate.Nullable, "explicit null freezes an absent teammate attribution")
+}
+
 func TestOpenAPIDocumentDefinesIdleShutdownHealthStates(t *testing.T) {
 	doc := OpenAPIDocument()
 	health := doc.Components.Schemas.Map()["HealthResponseBody"]
@@ -659,6 +668,9 @@ func TestSchemaSharedByRequestAndResponseStaysStrict(t *testing.T) {
 
 	require.Equal(t, false, shared.AdditionalProperties, "shared request/response schema must stay strict")
 	require.Equal(t, true, responseOnly.AdditionalProperties, "response-only schema must be relaxed")
+	response := doc.Paths["/echo"].Get.Responses["200"].Content["application/json"].Schema
+	require.NotSame(t, shared, response)
+	require.Equal(t, true, response.AdditionalProperties, "shared response use must permit additive fields")
 }
 
 // TestClientDocumentLeavesResponseAdditionalPropertiesUnset pins the client

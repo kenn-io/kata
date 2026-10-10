@@ -11,6 +11,9 @@ import (
 // replay projection.
 func FoldEvents(events []FoldEvent) FoldProjection {
 	p := FoldProjection{
+		CronRuns:        map[string]FoldCronRun{},
+		CronJobs:        map[string]FoldCronJob{},
+		CronWorkflows:   map[string]FoldCronWorkflow{},
 		Issues:          map[string]FoldIssue{},
 		Comments:        map[string]FoldComment{},
 		Labels:          map[FoldLabelKey]FoldElementState{},
@@ -29,6 +32,14 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 }
 
 func (p *FoldProjection) apply(e FoldEvent) {
+	if e.Type == "cron.run.observed" || e.Type == "cron.run.snapshot" {
+		p.applyCronRun(e)
+		return
+	}
+	if isCronDefinitionEvent(e.Type) {
+		p.applyCronDefinition(e)
+		return
+	}
 	payload := PayloadMap(e.Payload)
 	switch e.Type {
 	case "issue.created", "issue.snapshot":

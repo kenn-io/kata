@@ -21,6 +21,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
+	if err := cleanupExternalFixtures(); err != nil {
+		fmt.Fprintf(os.Stderr, "remove external test fixtures: %v\n", err)
+		code = 1
+	}
 	if err := os.RemoveAll(home); err != nil {
 		fmt.Fprintf(os.Stderr, "remove test Codex home: %v\n", err)
 		code = 1

@@ -270,40 +270,50 @@ func syncFederationOnceWithFence(
 			return err
 		}
 		shouldDeliverPage := len(body.Events) > 0 && body.NextAfterID > currentBinding.PullCursorEventID
-		deliverUIDs := make([]string, 0, len(body.Events))
 		localInstanceUID := store.InstanceUID()
-		for _, ev := range body.Events {
+		// Local echoes are reconciled one at a time. Every other event in the
+		// page is inserted in one batch so cron run history is validated once
+		// per page rather than once per event.
+		deliver := make([]bool, len(body.Events))
+		duplicate := make([]bool, len(body.Events))
+		pending := make([]int, 0, len(body.Events))
+		for i, ev := range body.Events {
 			if ev.OriginInstanceUID == localInstanceUID {
 				exists, err := store.ReconcileLocalFederationEcho(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
 				if err != nil {
 					return err
 				}
 				if exists {
-					deliverDuplicate := false
-					if shouldDeliverPage {
-						deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
-						if err != nil {
-							return err
-						}
-					}
-					if deliverDuplicate {
-						deliverUIDs = append(deliverUIDs, ev.EventUID)
-					}
+					duplicate[i] = true
 					continue
 				}
 			}
-			inserted, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
+			pending = append(pending, i)
+		}
+		if len(pending) > 0 {
+			batch := make([]db.RemoteEvent, len(pending))
+			for j, i := range pending {
+				batch[j] = remoteEventFromEnvelope(body.Events[i])
+			}
+			inserted, err := store.InsertRemoteEvents(ctx, binding.ProjectID, batch)
 			if err != nil {
 				return err
 			}
-			deliverDuplicate := false
-			if !inserted && shouldDeliverPage {
-				deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
+			for j, i := range pending {
+				deliver[i] = inserted[j]
+				duplicate[i] = !inserted[j]
+			}
+		}
+		deliverUIDs := make([]string, 0, len(body.Events))
+		for i, ev := range body.Events {
+			if duplicate[i] && shouldDeliverPage {
+				var err error
+				deliver[i], err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
 				if err != nil {
 					return err
 				}
 			}
-			if inserted || deliverDuplicate {
+			if deliver[i] {
 				deliverUIDs = append(deliverUIDs, ev.EventUID)
 			}
 		}
@@ -497,7 +507,7 @@ func federationPushAdoptionBaselineShape(events []db.Event) federationPushBaseli
 				shape.valid = false
 				return shape
 			}
-		case "issue.snapshot":
+		case "issue.snapshot", "cron.job.snapshot", "cron.workflow.snapshot", "cron.run.snapshot":
 			shape.hasSnapshot = true
 		default:
 			shape.valid = false

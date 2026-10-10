@@ -626,6 +626,10 @@ func (c *Client) PollEventsWithResponse(ctx context.Context, options *PollEvents
 				}
 			}
 		}
+		out.Headers200 = &PollEventsResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
+		}
 		return out, nil
 	case 500:
 		if len(resp.Content) > 0 {
@@ -2168,6 +2172,1042 @@ func (c *Client) DetachProjectAliasWithResponse(ctx context.Context, options *De
 	}
 }
 
+func (c *Client) GetCronCapabilitiesWithResponse(ctx context.Context, options *GetCronCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetCronCapabilitiesResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/capabilities",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/capabilities")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &GetCronCapabilitiesResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(GetCronCapabilitiesResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "GetCronCapabilitiesResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &GetCronCapabilitiesResp200Headers{
+			XKataEventFeatures: resp.Headers.Get("X-Kata-Event-Features"),
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(GetCronCapabilitiesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(GetCronCapabilitiesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ListCronJobsWithResponse(ctx context.Context, options *ListCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronJobsResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ListCronJobsResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ListCronJobsResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ListCronJobsResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronJobsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronJobsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) CreateCronJobWithResponse(ctx context.Context, options *CreateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronJobResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &CreateCronJobResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 201:
+		out.JSON201 = new(CreateCronJobResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON201); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "CreateCronJobResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(CreateCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(CreateCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ArchiveCronJobWithResponse(ctx context.Context, options *ArchiveCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronJobResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}",
+		Method:      "DELETE",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ArchiveCronJobResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ArchiveCronJobResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ArchiveCronJobResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ArchiveCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ArchiveCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ShowCronJobWithResponse(ctx context.Context, options *ShowCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronJobResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ShowCronJobResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ShowCronJobResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ShowCronJobResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ReplaceCronJobWithResponse(ctx context.Context, options *ReplaceCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReplaceCronJobResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}",
+		Method:      "PUT",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ReplaceCronJobResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ReplaceCronJobResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ReplaceCronJobResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ReplaceCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ReplaceCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) RestoreCronJobWithResponse(ctx context.Context, options *RestoreCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RestoreCronJobResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &RestoreCronJobResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(RestoreCronJobResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "RestoreCronJobResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(RestoreCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(RestoreCronJobErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ListCronRunsWithResponse(ctx context.Context, options *ListCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRunsResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ListCronRunsResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ListCronRunsResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ListCronRunsResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronRunsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronRunsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ShowCronRunWithResponse(ctx context.Context, options *ShowCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronRunResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs/{run_uid}",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs/{run_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ShowCronRunResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ShowCronRunResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ShowCronRunResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronRunErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronRunErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ObserveCronRunWithResponse(ctx context.Context, options *ObserveCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ObserveCronRunResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs/{run_uid}",
+		Method:      "PUT",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs/{run_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ObserveCronRunResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ObserveCronRunResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ObserveCronRunResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ObserveCronRunErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ObserveCronRunErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ListCronWorkflowsWithResponse(ctx context.Context, options *ListCronWorkflowsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronWorkflowsResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ListCronWorkflowsResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ListCronWorkflowsResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ListCronWorkflowsResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronWorkflowsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ListCronWorkflowsErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) CreateCronWorkflowWithResponse(ctx context.Context, options *CreateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronWorkflowResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &CreateCronWorkflowResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 201:
+		out.JSON201 = new(CreateCronWorkflowResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON201); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "CreateCronWorkflowResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(CreateCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(CreateCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ArchiveCronWorkflowWithResponse(ctx context.Context, options *ArchiveCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronWorkflowResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}",
+		Method:      "DELETE",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ArchiveCronWorkflowResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ArchiveCronWorkflowResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ArchiveCronWorkflowResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ArchiveCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ArchiveCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ShowCronWorkflowWithResponse(ctx context.Context, options *ShowCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronWorkflowResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ShowCronWorkflowResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ShowCronWorkflowResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ShowCronWorkflowResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ShowCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) ReplaceCronWorkflowWithResponse(ctx context.Context, options *ReplaceCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReplaceCronWorkflowResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}",
+		Method:      "PUT",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ReplaceCronWorkflowResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ReplaceCronWorkflowResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ReplaceCronWorkflowResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(ReplaceCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(ReplaceCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) RestoreCronWorkflowWithResponse(ctx context.Context, options *RestoreCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RestoreCronWorkflowResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &RestoreCronWorkflowResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(RestoreCronWorkflowResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "RestoreCronWorkflowResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(RestoreCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(RestoreCronWorkflowErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) DigestProjectWithResponse(ctx context.Context, options *DigestProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestProjectResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -2272,6 +3312,10 @@ func (c *Client) PollProjectEventsWithResponse(ctx context.Context, options *Pol
 				}
 			}
 		}
+		out.Headers200 = &PollProjectEventsResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
+		}
 		return out, nil
 	case 500:
 		if len(resp.Content) > 0 {
@@ -2335,6 +3379,10 @@ func (c *Client) GetProjectFederationWithResponse(ctx context.Context, options *
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &GetProjectFederationResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
 	case 500:
@@ -2401,6 +3449,10 @@ func (c *Client) EnableProjectFederationWithResponse(ctx context.Context, option
 				}
 			}
 		}
+		out.Headers200 = &EnableProjectFederationResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
+		}
 		return out, nil
 	case 500:
 		if len(resp.Content) > 0 {
@@ -2464,6 +3516,10 @@ func (c *Client) PollFederationProjectEventsWithResponse(ctx context.Context, op
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &PollFederationProjectEventsResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
 	case 500:
@@ -2530,6 +3586,10 @@ func (c *Client) IngestFederationProjectEventsWithResponse(ctx context.Context, 
 				}
 			}
 		}
+		out.Headers200 = &IngestFederationProjectEventsResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
+		}
 		return out, nil
 	case 500:
 		if len(resp.Content) > 0 {
@@ -2593,6 +3653,10 @@ func (c *Client) GetFederationProjectMetadataWithResponse(ctx context.Context, o
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &GetFederationProjectMetadataResp200Headers{
+			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
 	case 500:
@@ -5505,6 +6569,70 @@ func (c *Client) PatchIssueMetadataWithResponse(ctx context.Context, options *Pa
 	default:
 		if len(resp.Content) > 0 {
 			envelope := new(PatchIssueMetadataErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) IssuePlanningDatesWithResponse(ctx context.Context, options *IssuePlanningDatesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*IssuePlanningDatesResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/planning-dates",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/planning-dates")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &IssuePlanningDatesResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(IssuePlanningDatesResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "IssuePlanningDatesResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		if len(resp.Content) > 0 {
+			envelope := new(IssuePlanningDatesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(IssuePlanningDatesErrorResponse)
 			if json.Unmarshal(resp.Content, envelope) == nil {
 				if errTarget, ok := any(*envelope).(error); ok {
 					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))

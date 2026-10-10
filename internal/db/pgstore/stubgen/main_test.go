@@ -38,7 +38,7 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-	require.Len(t, methods, 260)
+	require.Len(t, methods, 275)
 
 	var implemented []string
 	var stubbed []string
@@ -111,6 +111,9 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"CreateProjectWithUIDAndEvent",
 		"CreateRecurrence",
 		"CreateRecurrenceForIssue",
+		"CronJob",
+		"CronRun",
+		"CronWorkflow",
 		"DeleteLinkAndEvent",
 		"DeleteLinkByID",
 		"DesignateInboxProject",
@@ -131,6 +134,9 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"ExpireTimedClaims",
 		"ExpireTimedClaimsForProject",
 		"ExportComments",
+		"ExportCronJobs",
+		"ExportCronRuns",
+		"ExportCronWorkflows",
 		"ExportEvents",
 		"ExportExternalFieldMappings",
 		"ExportExternalFieldStates",
@@ -175,12 +181,14 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"IngestFederationEvents",
 		"InsertCloseThrottledEvent",
 		"InsertRemoteEvent",
+		"InsertRemoteEvents",
 		"InstanceCreatedAt",
 		"InstanceUID",
 		"IssueByID",
 		"IssueByShortID",
 		"IssueByUID",
 		"IssueInScope",
+		"IssuePlanningDates",
 		"IssueQualifiersByUIDs",
 		"IssueScopedMembers",
 		"IssueScopedTokenTransactionFence",
@@ -200,6 +208,9 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"LinksByIssue",
 		"ListAPITokens",
 		"ListAllIssues",
+		"ListCronJobs",
+		"ListCronRuns",
+		"ListCronWorkflows",
 		"ListDueExternalRootBindings",
 		"ListDueIssueSyncBindings",
 		"ListDueNotificationIssueIDs",
@@ -226,6 +237,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"MaxLocalOriginEventID",
 		"MergeProjects",
 		"MoveIssueProject",
+		"ObserveCronRun",
 		"OpenChildrenOf",
 		"ParentOf",
 		"ParentShortIDsByIssues",
@@ -244,6 +256,9 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"PurgeIssue",
 		"PurgeProject",
 		"PurgeResetCheck",
+		"PutCronJob",
+		"PutCronWorkflow",
+		"ReadFederation",
 		"ReadyIssues",
 		"ReadyIssuesGlobal",
 		"ReassignAlias",

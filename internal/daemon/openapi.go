@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -15,7 +16,7 @@ import (
 // (info.version). It tracks the HTTP API contract, not the build version, so
 // the committed schema artifact stays stable across builds and is bumped
 // deliberately when the wire contract changes.
-const APISchemaVersion = "0.25.0"
+const APISchemaVersion = "0.26.0"
 
 // OpenAPIDocument builds the daemon's complete OpenAPI model by wiring every
 // route through NewServer with a zero ServerConfig. It binds no listener and
@@ -182,40 +183,97 @@ func clearResponseAdditionalProperties(doc *huma.OpenAPI) {
 	replaceStrictResponseAdditionalProperties(doc, nil)
 }
 
-// replaceStrictResponseAdditionalProperties rewrites the
-// additionalProperties:false default on every response-reachable schema to
-// replacement. Schemas reachable from a request body are skipped so request
-// validation never loosens; map-typed schemas (additionalProperties holding a
-// value schema) are untouched.
+// replaceStrictResponseAdditionalProperties separates shared request schemas
+// before relaxing response graphs, preserving strict request validation.
 func replaceStrictResponseAdditionalProperties(doc *huma.OpenAPI, replacement any) {
 	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
 		return
 	}
 	reg := doc.Components.Schemas
 	ops := documentOperations(doc)
-	requestStrict := requestReachableSchemas(ops, reg)
-
-	seen := map[*huma.Schema]struct{}{}
+	strict := requestReachableSchemas(ops, reg)
+	copies := map[*huma.Schema]*huma.Schema{}
+	refs := map[string]string{}
+	var responseSchema func(*huma.Schema) *huma.Schema
+	responseSchema = func(source *huma.Schema) *huma.Schema {
+		if source == nil {
+			return nil
+		}
+		if found, ok := copies[source]; ok {
+			return found
+		}
+		target := source
+		if source.Ref != "" {
+			resolved := reg.SchemaFromRef(source.Ref)
+			if _, shared := strict[resolved]; shared {
+				ref, exists := refs[source.Ref]
+				if !exists {
+					name := strings.TrimPrefix(source.Ref, "#/components/schemas/") + "Response"
+					base := name
+					for suffix := 2; reg.Map()[name] != nil; suffix++ {
+						name = base + strconv.Itoa(suffix)
+					}
+					ref = "#/components/schemas/" + name
+					refs[source.Ref] = ref
+					// Reserve the component before walking recursive references.
+					reg.Map()[name] = &huma.Schema{}
+					reg.Map()[name] = responseSchema(resolved)
+				}
+				cloned := *source
+				cloned.Ref = ref
+				target = &cloned
+			} else {
+				responseSchema(resolved)
+			}
+			copies[source] = target
+			return target
+		}
+		if _, shared := strict[source]; shared {
+			cloned := *source
+			target = &cloned
+		}
+		copies[source] = target
+		if ap, ok := target.AdditionalProperties.(bool); ok && !ap {
+			target.AdditionalProperties = replacement
+		}
+		properties := make(map[string]*huma.Schema, len(source.Properties))
+		for key, child := range source.Properties {
+			properties[key] = responseSchema(child)
+		}
+		if source.Properties != nil {
+			target.Properties = properties
+		}
+		target.Items = responseSchema(source.Items)
+		target.Not = responseSchema(source.Not)
+		if child, ok := source.AdditionalProperties.(*huma.Schema); ok {
+			target.AdditionalProperties = responseSchema(child)
+		}
+		children := func(input []*huma.Schema) []*huma.Schema {
+			if input == nil {
+				return nil
+			}
+			output := make([]*huma.Schema, len(input))
+			for i, child := range input {
+				output[i] = responseSchema(child)
+			}
+			return output
+		}
+		target.OneOf = children(source.OneOf)
+		target.AnyOf = children(source.AnyOf)
+		target.AllOf = children(source.AllOf)
+		return target
+	}
 	for _, op := range ops {
 		for _, resp := range op.Responses {
 			for _, mt := range resp.Content {
-				walkSchemaTree(mt.Schema, reg, seen, func(schema *huma.Schema) {
-					if _, ok := requestStrict[schema]; ok {
-						return
-					}
-					if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
-						schema.AdditionalProperties = replacement
-					}
-				})
+				mt.Schema = responseSchema(mt.Schema)
 			}
 		}
 	}
 }
 
 // requestReachableSchemas returns every schema reachable from a request body.
-// These are excluded from relaxation so a schema shared between a request and a
-// response is never silently loosened; today the graphs are disjoint, but this
-// keeps the relaxation pass sound if they ever cross.
+// Response uses of these schemas receive separate component definitions.
 func requestReachableSchemas(ops []*huma.Operation, reg huma.Registry) map[*huma.Schema]struct{} {
 	strict := map[*huma.Schema]struct{}{}
 	seen := map[*huma.Schema]struct{}{}

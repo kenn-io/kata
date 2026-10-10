@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -21,66 +17,9 @@ import (
 	"go.kenn.io/kit/tui/markdownrender"
 )
 
-func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
-	if os.Getenv("GO_WANT_SHOW_MARKDOWN_HELPER") != "1" {
-		return
-	}
-	marker := slices.Index(os.Args, "--")
-	if marker < 0 || marker+1 >= len(os.Args) {
-		os.Exit(20)
-	}
-	mode := os.Args[marker+1]
-	switch mode {
-	case "echo", "echo-newline":
-		payload, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			os.Exit(21)
-		}
-		fmt.Printf("arg=%s env=%s input=%s", os.Args[marker+2], os.Getenv("SHOW_RENDER_ENV"), payload)
-		if mode == "echo-newline" {
-			fmt.Println()
-		}
-	case "fail":
-		payload, _ := io.ReadAll(os.Stdin)
-		_, _ = fmt.Fprintf(os.Stderr, "renderer rejected %s", payload)
-		os.Exit(9)
-	case "wait":
-		// Keep a timer registered so the runtime does not mistake this helper
-		// process for a deadlock and exit before the renderer cancels it.
-		time.Sleep(24 * time.Hour)
-	case "spawn-descendant":
-		readyPath := os.Args[marker+2]
-		//nolint:gosec // G204: this test starts its own fixed test binary helper with fixed arguments.
-		child := exec.Command(
-			os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", "wait",
-		)
-		child.Env = os.Environ()
-		configureShowMarkdownHelperChild(child)
-		child.Stdout = os.Stdout
-		if err := child.Start(); err != nil {
-			os.Exit(23)
-		}
-		// Publish readiness by rename so the parent cannot observe a partial PID.
-		readyTempPath := readyPath + ".tmp"
-		//nolint:gosec // G703: readyTempPath is a test-owned path created under t.TempDir.
-		if err := os.WriteFile(readyTempPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
-			os.Exit(24)
-		}
-		//nolint:gosec // G703: both paths are test-owned paths created under t.TempDir.
-		if err := os.Rename(readyTempPath, readyPath); err != nil {
-			os.Exit(25)
-		}
-		// Keep a timer registered for the same reason as the wait helper. The
-		// renderer cancellation path is responsible for ending this process.
-		time.Sleep(24 * time.Hour)
-	default:
-		os.Exit(22)
-	}
-	os.Exit(0)
-}
-
-func helperRenderer(mode string, extra ...string) *externalShowMarkdownRenderer {
-	argv := []string{os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", mode}
+func helperRenderer(t *testing.T, mode string, extra ...string) *externalShowMarkdownRenderer {
+	t.Helper()
+	argv := []string{externalFixtureBinary(t, "show-markdown-renderer"), "--", mode}
 	argv = append(argv, extra...)
 	// The default timeout only guards against hangs; it must leave the
 	// spawn-descendant helper room to signal readiness under parallel test
@@ -93,7 +32,7 @@ func helperRenderer(mode string, extra ...string) *externalShowMarkdownRenderer 
 func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	t.Setenv("SHOW_RENDER_ENV", "inherited")
-	renderer := helperRenderer("echo", "argument with spaces")
+	renderer := helperRenderer(t, "echo", "argument with spaces")
 
 	got, err := renderer.Render(context.Background(), markdownComment, "**hello**", 80)
 	require.NoError(t, err)
@@ -102,7 +41,7 @@ func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
 
 func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
-	renderer := helperRenderer("echo", "argument")
+	renderer := helperRenderer(t, "echo", "argument")
 
 	got, err := renderer.Render(
 		context.Background(), markdownComment,
@@ -116,7 +55,7 @@ func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *test
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	var got [][]string
 	for _, mode := range []string{"echo", "echo-newline"} {
-		renderer := helperRenderer(mode, "argument")
+		renderer := helperRenderer(t, mode, "argument")
 		rendered, err := renderer.Render(context.Background(), markdownComment, "body", 80)
 		require.NoError(t, err)
 		got = append(got, markdownrender.ANSIWrappedLines(rendered, 80))
@@ -126,7 +65,7 @@ func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *test
 
 func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
-	renderer := helperRenderer("fail")
+	renderer := helperRenderer(t, "fail")
 
 	_, err := renderer.Render(context.Background(), markdownComment, "private body", 80)
 	require.Error(t, err)
@@ -149,7 +88,7 @@ func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
 
 func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
-	renderer := helperRenderer("wait")
+	renderer := helperRenderer(t, "wait")
 	renderer.timeout = 50 * time.Millisecond
 
 	started := time.Now()
@@ -161,7 +100,7 @@ func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 
 func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
-	renderer := helperRenderer("wait")
+	renderer := helperRenderer(t, "wait")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

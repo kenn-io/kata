@@ -272,6 +272,7 @@ ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, strconv.Itoa(db.CurrentSch
 }
 
 var replayIdentityTables = []string{
+	"cron_jobs", "cron_workflows", "cron_runs",
 	"projects",
 	"project_aliases",
 	"recurrences",

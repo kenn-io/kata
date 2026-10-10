@@ -103,7 +103,9 @@ func checkIssueStatusFederationIntent(t *testing.T, store db.Storage) error {
 	latest := event("issue.closed", "closed", 80)
 	ingest(latest, event("issue.reopened", "open", 70))
 	require.Equal(t, latest.EventUID, read().State.PendingEventUID)
-	require.NoError(t, store.MaterializeFederatedProject(ctx, fixture.Project.ID))
+	if err := store.MaterializeFederatedProject(ctx, fixture.Project.ID); err != nil {
+		require.NoError(t, err)
+	}
 	require.Equal(t, latest.EventUID, read().State.PendingEventUID, "manual rebuild cannot manufacture or replace intent")
 	return nil
 }

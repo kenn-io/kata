@@ -69,6 +69,51 @@ func ScheduleFieldDue(
 	return *value, true, due, nil
 }
 
+// ScheduleFieldInstant resolves a planning field with the same civil-time
+// policy as readiness. A skipped midnight (including a skipped civil day)
+// opens at the first valid instant after the gap; an overlap uses the first
+// occurrence. UTC input has UTC identity regardless of configured timezones.
+func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone string, at time.Time, present bool, err error) {
+	if field != "scheduled_on" && field != "deadline_on" {
+		err = fmt.Errorf("unsupported planning field %q", field)
+		return
+	}
+	if raw == "" {
+		return
+	}
+	values, err := decodeScheduleMetadata(raw)
+	if err != nil {
+		return
+	}
+	input := values.ScheduledOn
+	if field == "deadline_on" {
+		input = values.DeadlineOn
+	}
+	if input == nil {
+		return
+	}
+	value, present = *input, true
+	kind, layout, instant, err := classifyScheduledOn(value)
+	if err != nil {
+		return
+	}
+	if kind == scheduledOnInstant {
+		return value, "UTC", instant.UTC(), true, nil
+	}
+	location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+	if err != nil {
+		return
+	}
+	timezone = location.String()
+	wall := value
+	if kind == scheduledOnDate {
+		wall, layout = value+"T00:00", localMinuteLayout
+	}
+	at, err = resolveLocalSchedule(wall, layout, location)
+	at = at.UTC()
+	return
+}
+
 func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezone string) (bool, error) {
 	kind, layout, instant, err := classifyScheduledOn(value)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/stretchr/testify/assert"
@@ -200,4 +201,23 @@ func federationRebindTestBearerClient(
 	require.NoError(t, err)
 	httpClient.Transport = (config.BearerPolicy{}).Transport(httpClient.Transport, token, origin)
 	return httpClient
+}
+
+func TestFederationRebindPreflightAdvertisesNativeProtocol(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := db.RequireEventFeatures(r.Header.Get(db.EventFeaturesHeader), db.CronEventFeature); err != nil {
+			http.Error(w, "native protocol support required", http.StatusConflict)
+			return
+		}
+		_, _ = w.Write([]byte(`{"project_id":41,"project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"}`))
+	}))
+	t.Cleanup(server.Close)
+	original := newFederationRebindHTTPClient
+	newFederationRebindHTTPClient = func(_ context.Context, _ string, token string) (*http.Client, error) {
+		return federationRebindTestBearerClient(t, server.Client(), server.URL, token), nil
+	}
+	t.Cleanup(func() { newFederationRebindHTTPClient = original })
+	metadata, err := fetchFederationRebindMetadata(t.Context(), server.URL, "enrollment-secret", 41, nil)
+	require.NoError(t, err, "a native-aware rebind client must pass the project's protocol gate")
+	require.EqualValues(t, 41, metadata.ProjectID)
 }

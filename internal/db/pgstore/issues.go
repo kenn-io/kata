@@ -76,6 +76,17 @@ type issueSnapshotComment struct {
 // CreateIssue persists the initial issue projection and its creation event in
 // one serializable transaction.
 func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (db.Issue, db.Event, error) {
+	var issue db.Issue
+	var event db.Event
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		issue, event, err = s.createIssueTx(ctx, tx, params)
+		return err
+	})
+	return issue, event, err
+}
+
+func (s *Store) createIssueTx(ctx context.Context, tx *sql.Tx, params db.CreateIssueParams) (db.Issue, db.Event, error) {
 	metadataBlob, err := composeCreateMetadata(params.Metadata)
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
@@ -95,7 +106,7 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 
 	var issue db.Issue
 	var event db.Event
-	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err = func() error {
 		var project db.Project
 		project, err = scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR SHARE`, params.ProjectID))
@@ -215,7 +226,7 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		}
 		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, issueID))
 		return err
-	})
+	}()
 	return issue, event, err
 }
 

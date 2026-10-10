@@ -133,6 +133,9 @@ func countProjectPurge(ctx context.Context, c connExec, projectID int64) (projec
 // recurrences / issue_sync_bindings / issue_sync_status / import_mappings are not
 // listed here: they ON DELETE CASCADE off the final `DELETE FROM projects`.
 func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error {
+	if err := db.DeleteCronProject(ctx, c, projectID); err != nil {
+		return err
+	}
 	const sub = `(SELECT id FROM issues WHERE project_id = ?)`
 	stmts := []struct {
 		q    string

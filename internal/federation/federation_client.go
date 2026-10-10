@@ -108,8 +108,32 @@ func (c *Client) IngestProjectEventsWithOptions(
 	if err != nil {
 		return api.FederationIngestEventsBody{}, err
 	}
+	// Schema30 accepts every pre-cron envelope supported here. Database
+	// schema versions are not feature negotiation: ordinary traffic remains
+	// compatible, while cron publication requires positive hub support.
+	schemaVersion := 30
+	requiredFeatures := ""
+	for _, event := range events {
+		version, required, err := db.FederationEventWireVersion(event.Type)
+		if err != nil {
+			return api.FederationIngestEventsBody{}, err
+		}
+		schemaVersion = max(schemaVersion, version)
+		if required != "" {
+			requiredFeatures = required
+		}
+	}
+	if requiredFeatures != "" {
+		_, supported, err := c.projectFederationFeatures(ctx, hubProjectID)
+		if err != nil {
+			return api.FederationIngestEventsBody{}, err
+		}
+		if err := db.RequireEventFeatures(supported, requiredFeatures); err != nil {
+			return api.FederationIngestEventsBody{}, err
+		}
+	}
 	data, err := json.Marshal(api.FederationIngestEventsRequestBody{
-		SchemaVersion: db.CurrentSchemaVersion(), AdoptionBaseline: opts.AdoptionBaseline,
+		SchemaVersion: schemaVersion, AdoptionBaseline: opts.AdoptionBaseline,
 		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events,
 	})
 	if err != nil {
@@ -130,23 +154,28 @@ func (c *Client) IngestProjectEventsWithOptions(
 
 // ProjectFederation fetches the hub metadata needed to bind a spoke replica.
 func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api.ProjectFederationBody, error) {
+	body, _, err := c.projectFederationFeatures(ctx, hubProjectID)
+	return body, err
+}
+func (c *Client) projectFederationFeatures(ctx context.Context, hubProjectID int64) (api.ProjectFederationBody, string, error) {
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
-		return api.ProjectFederationBody{}, err
+		return api.ProjectFederationBody{}, "", err
 	}
 	response, callErr := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}})
 	var body api.ProjectFederationBody
 	if response == nil {
-		return body, callErr
+		return body, "", callErr
 	}
 	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
-	return body, err
+	return body, response.HTTPResponse.Header.Get(db.EventFeaturesHeader), err
 }
 
 // Keep the replication error body bounded before the generated runtime reads it.
 type replicationDoer struct{ client *http.Client }
 
 func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req.Header.Set(db.EventFeaturesHeader, db.CronEventFeature)
 	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated replication routes use the explicitly configured trusted federation hub.
 	if err != nil {
 		return nil, err
@@ -155,6 +184,10 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	if err := db.RequireEventFeatures(db.CronEventFeature, resp.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
+		_ = resp.Body.Close()
+		return nil, err
 	}
 	return resp, nil
 }

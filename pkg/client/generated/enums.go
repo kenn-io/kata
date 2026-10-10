@@ -281,6 +281,26 @@ func (m MetadataPatchGuardOneOf1IfAbsent) Validate() error {
 	}
 }
 
+type ObserveCronRunBodyStatus string
+
+const (
+	Cancelled ObserveCronRunBodyStatus = "cancelled"
+	Failed    ObserveCronRunBodyStatus = "failed"
+	Running   ObserveCronRunBodyStatus = "running"
+	Succeeded ObserveCronRunBodyStatus = "succeeded"
+	Unknown   ObserveCronRunBodyStatus = "unknown"
+)
+
+// Validate checks if the ObserveCronRunBodyStatus value is valid
+func (o ObserveCronRunBodyStatus) Validate() error {
+	switch o {
+	case Cancelled, Failed, Running, Succeeded, Unknown:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ObserveCronRunBodyStatus value, got: %v", o))
+	}
+}
+
 type ReachableGraphEdgeKind string
 
 const (
@@ -381,6 +401,23 @@ func (t TokenScopeOutKind) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TokenScopeOutKind value, got: %v", t))
+	}
+}
+
+type TranscriptAgent string
+
+const (
+	Claude TranscriptAgent = "claude"
+	Codex  TranscriptAgent = "codex"
+)
+
+// Validate checks if the TranscriptAgent value is valid
+func (t TranscriptAgent) Validate() error {
+	switch t {
+	case Claude, Codex:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TranscriptAgent value, got: %v", t))
 	}
 }
 

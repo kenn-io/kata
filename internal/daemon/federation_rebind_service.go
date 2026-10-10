@@ -539,7 +539,8 @@ func fetchFederationRebindMetadata(
 	if err != nil {
 		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaInvalidInput, "build replacement hub metadata request", "")
 	}
-	result, _ := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}})
+	features := db.CronEventFeature
+	result, _ := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}, Header: &generated.GetFederationProjectMetadataHeaders{XKataEventFeatures: &features}})
 	if result == nil {
 		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "replacement hub metadata request failed", "check the HTTPS catalog endpoint and retry")
 	}

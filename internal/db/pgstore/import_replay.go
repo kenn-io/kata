@@ -186,6 +186,7 @@ func (s *Store) pgReplayClearTarget(
 		`LOCK TABLE `+strings.Join(quotedAll, ", ")+` IN ACCESS EXCLUSIVE MODE`); err != nil {
 		return "", "", fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
 	}
+	// Access-exclusive table locks serialize this check with every grant.
 	if opts.RequireFreshTarget {
 		if err := validateFreshSchema(ctx, tx, allTables, s.instanceUID); err != nil {
 			return "", "", fmt.Errorf("import requires a fresh target: %w", err)
@@ -217,6 +218,8 @@ func (s *Store) importReplayRecord(
 	sequenceFloors map[string]int64,
 ) (replayLinkSkip, error) {
 	switch rec := record.(type) {
+	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
+		return replayLinkInserted, db.ReplayCronRecord(ctx, tx, rec, true)
 	case *db.MetaKV:
 		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
 	case *db.ProjectExport:

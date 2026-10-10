@@ -31,6 +31,7 @@ import (
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
 	"golang.org/x/net/netutil"
@@ -86,6 +87,10 @@ type ServerConfig struct {
 	TwentySyncFetcher        twentysync.Fetcher
 	TwentySyncProgress       *issuesync.ProgressTracker
 	TwentySyncWake           func()
+	TodoistSyncConfig        config.TodoistSyncConfig
+	TodoistSyncFetcher       todoistsync.Fetcher
+	TodoistSyncProgress      *issuesync.ProgressTracker
+	TodoistSyncWake          func()
 	Hooks                    hooks.Sink
 	ExternalRootRegistry     *rootbridge.Registry
 	ExternalRootService      *rootbridge.Service
@@ -260,6 +265,12 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	if cfg.TwentySyncFetcher == nil {
 		cfg.TwentySyncFetcher = twentySyncFetcher(cfg)
+	}
+	if cfg.TodoistSyncProgress == nil {
+		cfg.TodoistSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.TodoistSyncFetcher == nil {
+		cfg.TodoistSyncFetcher = todoistSyncFetcher(cfg)
 	}
 	if cfg.PlaneSyncProgress == nil {
 		cfg.PlaneSyncProgress = issuesync.NewProgressTracker()
@@ -756,6 +767,8 @@ func registerDestructive(humaAPI huma.API, cfg ServerConfig) {
 // registerRecurrences registers the recurrence CRUD routes.
 func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 	registerRecurrencesHandlers(humaAPI, cfg)
+	registerCronDefinitionHandlers(humaAPI, cfg)
+	registerCronRunHandlers(humaAPI, cfg)
 }
 
 // registerMetadata registers metadata patch routes.
