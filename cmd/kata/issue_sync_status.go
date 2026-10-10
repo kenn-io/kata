@@ -75,6 +75,9 @@ func issueSyncPrintStatus(w io.Writer, provider, action string, status generated
 		if provider == "twenty" {
 			fields = []struct{ key, label string }{{"api_origin", "API origin"}, {"web_origin", "Web origin"}, {"workspace_id", "Workspace"}, {"closed_status", "Closed target"}, {"open_status", "Open target"}, {"open_statuses", "Open statuses"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
 		}
+		if provider == "todoist" {
+			fields = []struct{ key, label string }{{"api_origin", "API origin"}, {"account_id", "Todoist account"}, {"project_id", "Todoist project"}, {"history_since", "History since"}, {"title_prefix", "Title prefix"}}
+		}
 		for _, field := range fields {
 			value := issueSyncConfigValue(binding.Config, field.key)
 			defaultGroupKey := ""

@@ -18,6 +18,8 @@ func issueSyncLabel(provider string) string {
 		return "Notion"
 	case "twenty":
 		return "Twenty"
+	case "todoist":
+		return "Todoist"
 	case "plane":
 		return "Plane"
 	case "linear":

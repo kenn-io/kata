@@ -1241,6 +1241,26 @@ or closed; null is open. New bindings use one-way status, `DONE` for closed, and
 with `TODO` as the default reopen target. See [Twenty sync](../operations/twenty-sync.md)
 for self-hosting, schema compatibility, local edit ownership, and recovery.
 
+### Todoist
+
+```sh
+kata sync todoist enable --todoist-project project123 [--history-since 2026-09-01]
+kata sync todoist enable [--status-sync two-way] [--interval 5m] [--title-prefix=false]
+kata sync todoist status
+kata sync todoist once
+kata sync todoist disable
+```
+
+Initial enable requires a Todoist project ID. The daemon resolves and pins the
+credential account; account, project and completion-history floor are immutable.
+The floor defaults to thirty days before enable and accepts a UTC date or
+whole-second RFC3339 instant. Active tasks import regardless of the floor.
+Re-enable preserves omitted options. Tokens belong to the daemon environment.
+Two-way mode sends explicit close/reopen changes only when fresh reads prove
+that the operation is safe. Recurring completion and cascade operations are
+blocked. Other fields remain incoming-only. See
+[Todoist sync](../operations/todoist-sync.md) for ownership, setup and recovery.
+
 ### GitHub
 
 ```sh

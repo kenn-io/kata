@@ -65,11 +65,12 @@ type DaemonConfig struct {
 	Search SearchConfig `toml:"search"`
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
-	GitHubSync GitHubSyncConfig `toml:"github_sync"`
-	NotionSync NotionSyncConfig `toml:"notion_sync"`
-	PlaneSync  PlaneSyncConfig  `toml:"plane_sync"`
-	LinearSync LinearSyncConfig `toml:"linear_sync"`
-	TwentySync TwentySyncConfig `toml:"twenty_sync"`
+	GitHubSync  GitHubSyncConfig  `toml:"github_sync"`
+	NotionSync  NotionSyncConfig  `toml:"notion_sync"`
+	PlaneSync   PlaneSyncConfig   `toml:"plane_sync"`
+	LinearSync  LinearSyncConfig  `toml:"linear_sync"`
+	TwentySync  TwentySyncConfig  `toml:"twenty_sync"`
+	TodoistSync TodoistSyncConfig `toml:"todoist_sync"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
 }
@@ -521,6 +522,11 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	cfg.TwentySync = twentySync
+	todoistSync, err := NormalizeTodoistSyncConfig(cfg.TodoistSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TodoistSync = todoistSync
 	connectors, err := NormalizeConnectorConfigs(cfg.Connectors)
 	if err != nil {
 		return nil, err

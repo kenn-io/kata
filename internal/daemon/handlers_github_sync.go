@@ -49,6 +49,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		switch provider {
 		case issueSyncProviderNotion:
 			wake = cfg.NotionSyncWake
+		case issueSyncProviderTodoist:
+			wake = cfg.TodoistSyncWake
 		case issueSyncProviderPlane:
 			wake = cfg.PlaneSyncWake
 		case issueSyncProviderLinear:
@@ -149,6 +151,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			switch provider {
 			case issueSyncProviderNotion:
 				tracker = cfg.NotionSyncProgress
+			case issueSyncProviderTodoist:
+				tracker = cfg.TodoistSyncProgress
 			case issueSyncProviderPlane:
 				tracker = cfg.PlaneSyncProgress
 			case issueSyncProviderLinear:
@@ -195,6 +199,8 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		switch provider {
 		case issueSyncProviderNotion:
 			runner = notionSyncRunner(cfg)
+		case issueSyncProviderTodoist:
+			runner = todoistSyncRunner(cfg)
 		case issueSyncProviderPlane:
 			runner = planeSyncRunner(cfg)
 		case issueSyncProviderLinear:
@@ -230,7 +236,7 @@ func validateIssueSyncProvider(provider string) (string, error) {
 	if provider == "" {
 		return "", api.NewError(http.StatusBadRequest, "validation", "issue sync provider is required", "", nil)
 	}
-	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion && provider != issueSyncProviderPlane && provider != issueSyncProviderLinear && provider != issueSyncProviderTwenty {
+	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion && provider != issueSyncProviderPlane && provider != issueSyncProviderLinear && provider != issueSyncProviderTwenty && provider != issueSyncProviderTodoist {
 		return "", api.NewError(http.StatusBadRequest, "validation", fmt.Sprintf("issue sync provider %q is not supported", provider), "", nil)
 	}
 	return provider, nil
@@ -242,6 +248,8 @@ func issueSyncEnableParams(ctx context.Context, cfg ServerConfig, provider strin
 		return githubSyncEnableParams(ctx, cfg, in)
 	case issueSyncProviderNotion:
 		return notionSyncEnableParams(ctx, cfg, in)
+	case issueSyncProviderTodoist:
+		return todoistSyncEnableParams(ctx, cfg, in)
 	case issueSyncProviderPlane:
 		return planeSyncEnableParams(ctx, cfg, in)
 	case issueSyncProviderLinear:
@@ -469,6 +477,8 @@ func issueSyncStorageError(err error, provider string) error {
 		switch provider {
 		case issueSyncProviderNotion:
 			name = "Notion"
+		case issueSyncProviderTodoist:
+			name = "Todoist"
 		case issueSyncProviderPlane:
 			name = "Plane"
 		case issueSyncProviderLinear:

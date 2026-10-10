@@ -1,0 +1,19 @@
+package: todoistapi
+output:
+  use-single-file: false
+  directory: ..
+generate:
+  client: true
+  client-with-response: true
+  models: true
+filter:
+  include:
+    operation-ids:
+      - user_info_api_v1_user_get
+      - get_project_api_v1_projects__project_id__get
+      - get_section_api_v1_sections__section_id__get
+      - get_tasks_api_v1_tasks_get
+      - get_task_api_v1_tasks__task_id__get
+      - tasks_completed_by_completion_date_api_v1_tasks_completed_by_completion_date_get
+      - close_task_api_v1_tasks__task_id__close_post
+      - reopen_task_api_v1_tasks__task_id__reopen_post

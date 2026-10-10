@@ -137,6 +137,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
 | `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
+| `KATA_TODOIST_TOKEN` | Todoist daemon API token; `[todoist_sync].token_env` selects another variable. |
 | `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
 | `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
@@ -1167,3 +1168,12 @@ supported; an omitted web origin follows a custom API origin. Keys are captured
 once per run and used as bearer credentials only at the configured API origin;
 redirects are rejected. Enable discovers the key's workspace UUID. Bindings
 cannot choose origins, keys, or another workspace. See [Twenty sync](../operations/twenty-sync.md).
+
+## Todoist credentials
+
+`[todoist_sync]` selects daemon-owned `token_env` (default `KATA_TODOIST_TOKEN`).
+Requests use `https://api.todoist.com`; the only alternative `api_origin` is
+literal loopback HTTP for isolated fixture APIs. Tokens are captured once per
+run, redirects are rejected, and binding requests cannot select credentials or
+origins. Configure the selected project and history floor with
+`kata sync todoist enable`. See [Todoist sync](../operations/todoist-sync.md).

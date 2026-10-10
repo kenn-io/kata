@@ -789,3 +789,12 @@ and workspace IDs are rejected as request config. Status classification is
 validated against live metadata before a guarded upsert. Empty or
 whitespace-only `closed_status` and `open_status` values are rejected; omit a
 key to preserve its saved value. See [Twenty sync](../operations/twenty-sync.md).
+
+Todoist uses the issue-sync routes with provider `todoist`. Initial enable config
+requires opaque string `project_id`. Optional string `history_since` selects a
+UTC date or whole-second RFC3339 completion floor; omission initially chooses
+thirty days ago. Boolean `title_prefix`, top-level `status_sync`, and interval
+preserve omission on re-enable. The daemon resolves `account_id`. Account,
+origin, project and history floor are immutable. Requests cannot supply tokens
+or origins. Two-way delivery uses completion/reopen endpoints after fresh
+safety checks. See [Todoist sync](../operations/todoist-sync.md).

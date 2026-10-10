@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
+	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 )
 
@@ -103,6 +104,9 @@ type LinearSyncConfig struct{ TokenEnv, AuthType string }
 // The API key is resolved from the environment and never stored in bindings.
 type TwentySyncConfig struct{ APIOrigin, WebOrigin, TokenEnv string }
 
+// TodoistSyncConfig selects the daemon-owned API token environment variable.
+type TodoistSyncConfig struct{ APIOrigin, TokenEnv string }
+
 // NotionSyncConfig selects the daemon-owned Notion token environment variable.
 // Empty TokenEnv uses KATA_NOTION_TOKEN; credentials are resolved only for runs.
 type NotionSyncConfig struct {
@@ -121,14 +125,15 @@ type GitHubAppConfig struct {
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
-	DSN        string
-	Postgres   PostgresConfig
-	Auth       AuthConfig
-	GitHubSync GitHubSyncConfig
-	NotionSync NotionSyncConfig
-	PlaneSync  PlaneSyncConfig
-	LinearSync LinearSyncConfig
-	TwentySync TwentySyncConfig
+	DSN         string
+	Postgres    PostgresConfig
+	Auth        AuthConfig
+	GitHubSync  GitHubSyncConfig
+	NotionSync  NotionSyncConfig
+	PlaneSync   PlaneSyncConfig
+	LinearSync  LinearSyncConfig
+	TwentySync  TwentySyncConfig
+	TodoistSync TodoistSyncConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -158,16 +163,18 @@ type Config struct {
 }
 
 type serviceDeps struct {
-	notionSyncFetcher        notionsync.Fetcher
-	notionSyncFetcherFactory func(config.NotionSyncConfig) notionsync.Fetcher
-	planeSyncFetcher         planesync.Fetcher
-	twentySyncFetcher        twentysync.Fetcher
-	planeSyncFetcherFactory  func(config.PlaneSyncConfig) planesync.Fetcher
-	linearSyncFetcher        linearsync.Fetcher
-	linearSyncFetcherFactory func(config.LinearSyncConfig) linearsync.Fetcher
-	twentySyncFetcherFactory func(config.TwentySyncConfig) twentysync.Fetcher
-	gitHubSyncFetcher        githubsync.Fetcher
-	gitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
+	notionSyncFetcher         notionsync.Fetcher
+	notionSyncFetcherFactory  func(config.NotionSyncConfig) notionsync.Fetcher
+	planeSyncFetcher          planesync.Fetcher
+	twentySyncFetcher         twentysync.Fetcher
+	planeSyncFetcherFactory   func(config.PlaneSyncConfig) planesync.Fetcher
+	linearSyncFetcher         linearsync.Fetcher
+	linearSyncFetcherFactory  func(config.LinearSyncConfig) linearsync.Fetcher
+	twentySyncFetcherFactory  func(config.TwentySyncConfig) twentysync.Fetcher
+	gitHubSyncFetcher         githubsync.Fetcher
+	gitHubSyncFetcherFactory  func(config.GitHubSyncConfig) githubsync.Fetcher
+	todoistSyncFetcher        todoistsync.Fetcher
+	todoistSyncFetcherFactory func(config.TodoistSyncConfig) todoistsync.Fetcher
 }
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
@@ -192,6 +199,9 @@ type Service struct {
 	linearSyncFetcher      linearsync.Fetcher
 	linearSyncProgress     *issuesync.ProgressTracker
 	twentySyncProgress     *issuesync.ProgressTracker
+	todoistSyncWake        chan struct{}
+	todoistSyncFetcher     todoistsync.Fetcher
+	todoistSyncProgress    *issuesync.ProgressTracker
 	federationCredentials  config.FederationCredentialStore
 	logger                 *slog.Logger
 	defaultTimezone        string
@@ -257,6 +267,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	twentySyncConfig, err := config.NormalizeTwentySyncConfig(config.TwentySyncConfig{APIOrigin: cfg.TwentySync.APIOrigin, WebOrigin: cfg.TwentySync.WebOrigin, TokenEnv: cfg.TwentySync.TokenEnv})
 	if err != nil {
 		return nil, fmt.Errorf("kata: Twenty sync config: %w", err)
+	}
+	todoistSyncConfig, err := config.NormalizeTodoistSyncConfig(config.TodoistSyncConfig{APIOrigin: cfg.TodoistSync.APIOrigin, TokenEnv: cfg.TodoistSync.TokenEnv})
+	if err != nil {
+		return nil, fmt.Errorf("kata: Todoist sync config: %w", err)
 	}
 	publicFederationCredentials := cfg.FederationCredentials
 	if publicFederationCredentials == nil {
@@ -368,6 +382,19 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		twentySyncFetcher = factory(twentySyncConfig)
 	}
 	twentySyncProgress := issuesync.NewProgressTracker()
+	todoistSyncWake := make(chan struct{}, 1)
+	wakeTodoistSync := func() { signalWake(todoistSyncWake) }
+	todoistSyncFetcher := deps.todoistSyncFetcher
+	if todoistSyncFetcher == nil {
+		factory := deps.todoistSyncFetcherFactory
+		if factory == nil {
+			factory = func(cfg config.TodoistSyncConfig) todoistsync.Fetcher {
+				return todoistsync.NewClient(todoistsync.ClientConfig{Daemon: cfg})
+			}
+		}
+		todoistSyncFetcher = factory(todoistSyncConfig)
+	}
+	todoistSyncProgress := issuesync.NewProgressTracker()
 	var hostAccess daemon.HostAccessController
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
@@ -407,6 +434,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		LinearSyncConfig:        linearSyncConfig,
 		LinearSyncWake:          wakeLinearSync,
 		TwentySyncWake:          wakeTwentySync,
+		TodoistSyncConfig:       todoistSyncConfig,
+		TodoistSyncFetcher:      todoistSyncFetcher,
+		TodoistSyncWake:         wakeTodoistSync,
+		TodoistSyncProgress:     todoistSyncProgress,
 		Hooks:                   hookSink,
 		Auth:                    config.AuthConfig{Token: cfg.Auth.Token},
 		HostAccess:              hostAccess,
@@ -436,6 +467,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		linearSyncFetcher:      linearSyncFetcher,
 		linearSyncProgress:     linearSyncProgress,
 		twentySyncProgress:     twentySyncProgress,
+		todoistSyncWake:        todoistSyncWake,
+		todoistSyncFetcher:     todoistSyncFetcher,
+		todoistSyncProgress:    todoistSyncProgress,
 		federationCredentials:  federationCredentials,
 		logger:                 logger,
 		defaultTimezone:        cfg.DefaultTimezone,
@@ -784,6 +818,18 @@ func (s *Service) Run(ctx context.Context) error {
 			return nil
 		},
 	})
+	todoistSyncRunner := todoistsync.NewRunner(todoistsync.RunnerConfig{
+		Progress: s.todoistSyncProgress,
+		Store:    s.store,
+		Fetcher:  s.todoistSyncFetcher,
+		Logger:   s.logger,
+		Interval: 30 * time.Second,
+		Wake:     s.todoistSyncWake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			s.publishWorkerEvents(projectID, events)
+			return nil
+		},
+	})
 	sweeper := daemon.NewTimedClaimSweeper(s.store, s.publish)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
@@ -803,6 +849,7 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "plane-sync", run: planeSyncRunner.Run},
 		{name: "linear-sync", run: linearSyncRunner.Run},
 		{name: "twenty-sync", run: twentySyncRunner.Run},
+		{name: "todoist-sync", run: todoistSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
