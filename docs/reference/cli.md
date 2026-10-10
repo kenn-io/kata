@@ -17,7 +17,7 @@ current flag list in your installed binary.
 | `--project <name>` | Select a project explicitly for project-scoped commands. |
 | `--daemon <name>` | Target a named daemon catalog entry for this command. |
 | `--as <actor>` | Override the actor for this command. |
-| `--teammate <handle>` | Attribute supported comments and new issues to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
+| `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
 | `--agent` | Emit concise agent-readable text. |
 | `--json` | Emit machine-readable JSON. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
@@ -791,13 +791,18 @@ cross-project ref syntax and rendering rules.
 Comment:
 
 ```sh
-kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
+kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin] \
+  [--idempotency-key KEY]
 kata comment edit <ref> <comment-uid> \
   [--body TEXT | --body-file PATH | --body-stdin]
 ```
 
 `-m` and `--message` are aliases of `--body` on both comment commands, so
 the text flag from `kata close` works here too.
+
+For comment creation, retain the same `--idempotency-key` when retrying a lost
+response. It uses the existing comment API replay contract, including request
+fingerprint checks; it does not change comment editing.
 
 `KATA_TEAMMATE` supplies an optional default for comment creation;
 `--teammate` overrides it and `--teammate=''` suppresses it for one
@@ -1698,6 +1703,10 @@ database; run it on the daemon host with the intended storage configuration.
 Without `--merge`, the kata-format `import` creates a fresh SQLite database at a
 target path or a fresh Postgres `kata` schema at a Postgres DSN. An initialized
 target requires `--force`, which atomically replaces kata-owned state.
+Existing SQLite targets must already use the current schema; targets with an
+older or unknown schema version, and orphan sidecars, are refused without
+upgrade. Use a fresh destination or explicitly upgrade the existing target
+before retrying. A destination that appears during import is not overwritten.
 
 Development feature: `--as-standalone` creates an independent copy with a new
 instance identity and no source federation or API-token authority. It keeps
@@ -1757,6 +1766,33 @@ host. Provisioning returns the absolute output path and redacted metadata. The
 file is issuance output, not a worker authentication input. Follow the
 [worker provisioning example](../operations/remote-daemon.md#identity-tokens)
 to inject its value into the consuming process. Revoke the token during teardown.
+
+## Native cron
+
+`kata cron` stores shared jobs, workflows and independent attributed run evidence.
+Commands return JSON; external adapters schedule and launch their own work.
+See [Native cron](cron.md) for bounded documents and retry semantics.
+
+```sh
+kata cron job create --uid <job-uid> --file job.json --json
+kata cron job list [--include-deleted] --json
+kata cron job show <job-uid> --json
+kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
+kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
+kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
+kata cron capabilities --json
+kata cron run observe <run-uid> --json-input observation.json --json
+kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
+kata cron run show <run-uid> --json
+kata show <issue-ref> --planning-dates --json
+```
+
+Workflow commands use the same definition actions and flags. Retain a generated or
+explicit definition UID after a lost create response; inspect it rather than
+assuming a create conflict is successful. Mutable definitions require the
+current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
+same-write retry idempotency, and ordinary revision CAS for changed evidence.
+The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation
 

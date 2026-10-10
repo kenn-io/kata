@@ -369,6 +369,24 @@ func CollectImportRecords(
 			return nil, fmt.Errorf("export issue sync status for replay: %w", err)
 		}
 	}
+	for value, err := range store.ExportCronJobs(ctx, filter) {
+		v := value
+		if err := appendRecord(&v, err); err != nil {
+			return nil, err
+		}
+	}
+	for value, err := range store.ExportCronWorkflows(ctx, filter) {
+		v := value
+		if err := appendRecord(&v, err); err != nil {
+			return nil, err
+		}
+	}
+	for value, err := range store.ExportCronRuns(ctx, filter) {
+		v := value
+		if err := appendRecord(&v, err); err != nil {
+			return nil, err
+		}
+	}
 	for value, err := range store.ExportRecurrences(ctx, filter) {
 		v := value
 		if err := appendRecord(&v, err); err != nil {

@@ -73,6 +73,10 @@ func (s *Store) AdoptProjectIntoFederation(
 			}
 		}
 
+		cron, err := db.PrepareCronAdoption(ctx, tx, project, params.HubProjectUID, params.EmptyOnly)
+		if err != nil {
+			return err
+		}
 		issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 		if err != nil {
 			return err
@@ -167,6 +171,12 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			output.AdoptionSnapshotCount++
 		}
 
+		for _, event := range cron {
+			if _, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt}); err != nil {
+				return err
+			}
+			output.AdoptionSnapshotCount++
+		}
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		if err != nil {

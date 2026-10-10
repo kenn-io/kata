@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -115,28 +115,57 @@ func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, 
 // used by federation ingest to broadcast only fresh rows after an all-or-
 // nothing insert commits.
 func (d *Store) EventsByUIDs(ctx context.Context, projectID int64, uids []string) ([]db.Event, error) {
+	return eventsByUIDs(ctx, d, projectID, uids)
+}
+
+func eventsByUIDs(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectID int64, uids []string) ([]db.Event, error) {
 	if len(uids) == 0 {
 		return nil, nil
 	}
+	found := make(map[string]db.Event, len(uids))
+	for chunk := range slices.Chunk(uids, eventsByUIDsChunk) {
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, projectID)
+		for _, uid := range chunk {
+			args = append(args, uid)
+		}
+		query := eventSelect + ` WHERE e.project_id = ? AND e.uid IN (?` + strings.Repeat(",?", len(chunk)-1) + `)`
+		if err := scanEventsByUID(ctx, q, query, args, found); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]db.Event, 0, len(uids))
 	for _, uid := range uids {
-		var id int64
-		err := d.QueryRowContext(ctx,
-			`SELECT id FROM events WHERE project_id = ? AND uid = ?`,
-			projectID, uid).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
+		event, ok := found[uid]
+		if !ok {
 			return nil, db.ErrNotFound
 		}
-		if err != nil {
-			return nil, fmt.Errorf("lookup event uid %s: %w", uid, err)
-		}
-		e, err := scanEvent(d.QueryRowContext(ctx, eventSelectByID, id))
-		if err != nil {
-			return nil, fmt.Errorf("read event uid %s: %w", uid, err)
-		}
-		out = append(out, e)
+		out = append(out, event)
 	}
 	return out, nil
+}
+
+// eventsByUIDsChunk keeps each IN list well below SQLite's bound-parameter limit.
+const eventsByUIDsChunk = 500
+
+func scanEventsByUID(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query string, args []any, found map[string]db.Event) error {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("read events by uid: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return fmt.Errorf("read events by uid: %w", err)
+		}
+		found[event.UID] = event
+	}
+	return rows.Err()
 }
 
 // EventsInWindow returns every event in the requested window. There is no row
@@ -318,7 +347,7 @@ func (d *Store) MaxLocalOriginEventID(ctx context.Context, projectID int64) (int
 }
 
 // MaxFederationBaselineEventID returns the largest events.id row of type
-// 'issue.snapshot' whose id is at least sinceEventID, scoped to projectID.
+// federation snapshot whose id is at least sinceEventID, scoped to projectID.
 // Federation's status report uses this to declare "baseline materialized
 // through" the highest snapshot at or above the replay horizon. Returns 0 when
 // no matching snapshot exists.
@@ -328,7 +357,7 @@ func (d *Store) MaxFederationBaselineEventID(ctx context.Context, projectID, sin
 		SELECT MAX(id)
 		  FROM events
 		 WHERE project_id = ?
-		   AND type = 'issue.snapshot'
+		   AND type IN (`+db.FederationSnapshotEventTypesSQL()+`)
 		   AND id >= ?`,
 		projectID, sinceEventID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("max federation baseline event id: %w", err)

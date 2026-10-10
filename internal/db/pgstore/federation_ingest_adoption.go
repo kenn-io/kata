@@ -280,7 +280,7 @@ func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) fe
 				shape.valid = false
 				return shape
 			}
-		case "issue.snapshot":
+		case "issue.snapshot", "cron.job.snapshot", "cron.workflow.snapshot", "cron.run.snapshot":
 			shape.hasSnapshot = true
 		default:
 			shape.valid = false
@@ -300,7 +300,7 @@ func validateFederationIngestAdoptionBaselineBoundary(
 	var physicalMS, counter int64
 	err := tx.QueryRowContext(ctx, `SELECT hlc_physical_ms,hlc_counter FROM events
 WHERE project_id=$1 AND origin_instance_uid=$2
-  AND type IN ('project.metadata_updated','issue.snapshot')
+  AND type IN ('project.metadata_updated',`+db.FederationSnapshotEventTypesSQL()+`)
 ORDER BY id ASC LIMIT 1`, projectID, spokeInstanceUID).Scan(&physicalMS, &counter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: adoption baseline continuation has no recorded baseline boundary",

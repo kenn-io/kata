@@ -1631,7 +1631,9 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		inserted, err := store.InsertRemoteEvent(ctx, spokeProject.ID, remoteEventFromStored(baseline[0]))
 		require.NoError(t, err)
 		require.True(t, inserted)
-		require.NoError(t, store.MaterializeFederatedProject(ctx, spokeProject.ID))
+		if err := store.MaterializeFederatedProject(ctx, spokeProject.ID); err != nil {
+			require.NoError(t, err)
+		}
 
 		observedAt := time.Date(2026, 8, 20, 12, 0, 0, 123456789, time.UTC)
 		binding, bindingEvent, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{

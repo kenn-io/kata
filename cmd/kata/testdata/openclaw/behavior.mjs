@@ -25,7 +25,9 @@ assert.equal(start.cwd,workspace);assert.equal(start.recipient,'actor/worker');
 assert.deepEqual(calls().find(c=>c.args[0]==='agent-contract-hook').args,['agent-contract-hook','--source','prompt with spaces;literal.txt']);
 assert.deepEqual(calls().find(c=>c.args[0]==='inbox').args,['inbox','--for','actor/worker','--context']);
 process.env.KATA_REF='changed';fs.writeFileSync(path.join(root,'contract'),'second');fs.writeFileSync(path.join(root,'inbox'),'');
+if(process.env.OPENCLAW_TEST_PLATFORM==='native')fs.writeFileSync(path.join(root,'slow-contract'),'');
 let second=await registrations.get('before_prompt_build')({prompt:'next',messages:[]},ctx);assert.equal(second.prependSystemContext,'contract:second');assert.equal(second.prependContext,'');
+try{fs.rmSync(path.join(root,'slow-contract'))}catch{}
 assert.equal(calls().filter(c=>c.args[3]==='start').length,1);
 const unavailable='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hook status openclaw.';
 fs.writeFileSync(path.join(root,'inbox'),'request-fallback');fs.writeFileSync(path.join(root,'fail-contract'),'');

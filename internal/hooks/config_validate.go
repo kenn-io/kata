@@ -34,6 +34,11 @@ var knownEventTypes = map[string]struct{}{
 	"project.author_rewritten": {}, "project.federation_enabled": {},
 	"recurrence.created": {}, "recurrence.updated": {}, "recurrence.deleted": {},
 	"recurrence.materialized": {}, "recurrence.materialization_skipped": {},
+	// Definition mutations and run observations are hook-visible product events.
+	// Cron snapshots are federation bootstrap records and remain transport-only.
+	"cron.job.created": {}, "cron.job.updated": {}, "cron.job.deleted": {}, "cron.job.restored": {},
+	"cron.workflow.created": {}, "cron.workflow.updated": {}, "cron.workflow.deleted": {}, "cron.workflow.restored": {},
+	"cron.run.observed": {},
 	// close.throttled lives outside the issue.* namespace because the
 	// audit signal is about a refused mutation, not the issue itself.
 	// Wildcard `*` hooks see it; `issue.*` does not.

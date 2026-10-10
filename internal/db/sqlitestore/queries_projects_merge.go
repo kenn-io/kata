@@ -51,6 +51,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if target.DeletedAt != nil {
 		return db.ProjectMergeResult{}, db.ErrProjectMergeArchivedTarget
 	}
+	if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}

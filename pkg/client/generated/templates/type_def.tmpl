@@ -108,6 +108,18 @@
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type {{$td.Name}} {{if $td.IsAlias}}={{end}} {{$td.Schema.TypeDecl}}
 
+    {{/* Native cron JSON is frozen execution intent. Keep opaque map
+         numbers exact in every response decoder, while retaining legacy map
+         decoding for unrelated API types. Alias avoids recursive self decode. */}}
+    {{ if or (eq $td.Name "CronJobDefinition") (eq $td.Name "CronWorkflowDefinition") (eq $td.Name "CronWorkflowStep") (eq $td.Name "CronJobDefinitionResponse") (eq $td.Name "CronWorkflowDefinitionResponse") (eq $td.Name "CronWorkflowStepResponse") }}
+    func (value *{{$td.Name}}) UnmarshalJSON(data []byte) error {
+        type plain {{$td.Name}}
+        decoder := json.NewDecoder(bytes.NewReader(data))
+        decoder.UseNumber()
+        return decoder.Decode((*plain)(value))
+    }
+    {{ end }}
+
     {{ if $shouldValidate }}
     {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
     func ({{$alias}} {{$td.Name}}) Validate() error {

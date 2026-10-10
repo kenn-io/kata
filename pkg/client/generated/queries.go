@@ -119,6 +119,24 @@ func (d DetachProjectAliasQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type ListCronJobsQuery struct {
+	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+}
+
+type ListCronRunsQuery struct {
+	JobUID    *string `json:"job_uid,omitempty"`
+	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeUID *string `json:"before_uid,omitempty"`
+}
+
+func (l ListCronRunsQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type ListCronWorkflowsQuery struct {
+	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+}
+
 type DigestProjectQuery struct {
 	Since string   `json:"since" validate:"required"`
 	Until *string  `json:"until,omitempty"`
@@ -208,6 +226,10 @@ type DeleteLinkQuery struct {
 
 func (d DeleteLinkQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type IssuePlanningDatesQuery struct {
+	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
 type ReadyIssuesQuery struct {

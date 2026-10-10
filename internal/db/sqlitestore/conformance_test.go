@@ -24,6 +24,12 @@ func TestStorageConformance(t *testing.T) {
 			require.NoError(t, err)
 			return store
 		},
+		OpenSame: func(t *testing.T, existing db.Storage) db.Storage {
+			other, err := sqlitestore.Open(t.Context(), existing.(*sqlitestore.Store).Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = other.Close() })
+			return other
+		},
 		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
 			return sqlitestore.InstallExternalRootClockForTest(store.(*sqlitestore.Store), now)
 		},

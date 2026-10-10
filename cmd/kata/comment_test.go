@@ -144,3 +144,14 @@ func TestComment_EditAcceptsMessageAlias(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, out, "must pass exactly one of")
 }
+
+func TestComment_IdempotencyKeyRetainsOneComment(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	issue := createIssue(t, env, pid, "Review task")
+	for range 2 {
+		runCLI(t, env, dir, "comment", issue, "--body", "Confirmed result", "--idempotency-key", "cron-result:example-run:complete")
+	}
+	loaded := fetchIssueViaHTTPWithComments(t, env, pid, issue)
+	require.Len(t, loaded.Comments, 1)
+	require.Equal(t, "Confirmed result", loaded.Comments[0].Body)
+}

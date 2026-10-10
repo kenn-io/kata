@@ -392,6 +392,9 @@ func countProjectPurgeTx(ctx context.Context, tx *sql.Tx, projectID int64) (proj
 }
 
 func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := db.DeleteCronProject(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, projectID); err != nil {
 		return mapSQLError(err, nil)
 	}

@@ -428,6 +428,24 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		return &rec, nil
+	case KindCronJob:
+		var rec db.CronJobExport
+		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case KindCronWorkflow:
+		var rec db.CronWorkflowExport
+		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case KindCronRun:
+		var rec db.CronRunExport
+		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
+			return nil, err
+		}
+		return &rec, nil
 	case KindEvent:
 		var rec eventImport
 		if err := decodeData(env, &rec); err != nil {

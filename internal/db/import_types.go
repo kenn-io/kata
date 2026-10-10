@@ -6,6 +6,7 @@ import (
 
 // ImportOptions controls optional ImportReplay behaviors.
 type ImportOptions struct {
+
 	// RequireFreshTarget rejects replay unless the target still contains only
 	// its bootstrap metadata and hidden system project. CLI restores use this
 	// after observing an uninitialized target so a concurrent writer cannot be
@@ -66,7 +67,11 @@ type ImportRecord interface {
 // so the contract is the shared NDJSON kind string, asserted by the roundtrip
 // tests.
 const (
-	ImportKindMeta                 = "meta"
+	ImportKindMeta         = "meta"
+	ImportKindCronJob      = "cron_job"
+	ImportKindCronWorkflow = "cron_workflow"
+	ImportKindCronRun      = "cron_run"
+
 	ImportKindProject              = "project"
 	ImportKindProjectAlias         = "project_alias"
 	ImportKindIssueSyncBinding     = "issue_sync_binding"

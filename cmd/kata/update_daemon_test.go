@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,24 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
 )
+
+func copyTestExecutable(t *testing.T, srcPath, dstPath string) {
+	t.Helper()
+	src, err := os.Open(srcPath) //nolint:gosec // G304: srcPath is a test-built binary in a temporary directory.
+	require.NoError(t, err)
+	defer func() {
+		if err := src.Close(); err != nil {
+			t.Errorf("close source binary: %v", err)
+		}
+	}()
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755) //nolint:gosec // G304: dstPath is a test-owned temporary executable.
+	require.NoError(t, err)
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	require.NoError(t, copyErr)
+	require.NoError(t, closeErr)
+}
 
 func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 	if testing.Short() {
@@ -67,7 +86,10 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			home, err := config.KataHome()
 			require.NoError(t, err)
 			binary := filepath.Join(t.TempDir(), filepath.Base(binaries["v0.1.0"]))
-			require.NoError(t, selfupdate.InstallBinary(binaries["v0.1.0"], binary))
+			// This is a fresh test path, so a direct copy is enough. Keep the
+			// staged replacement exercised by fake.install below, where the
+			// existing daemon binary really must be replaced.
+			copyTestExecutable(t, binaries["v0.1.0"], binary)
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
 			// The daemon restarts from its own environment. A hosted PORT in the
 			// updater's shell must not move a Unix-socket daemon onto wildcard TCP.

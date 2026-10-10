@@ -143,6 +143,21 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 			return err
 		}
 	}
+	if sourceSchemaVersion >= 31 {
+		f := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
+		if opts.ProjectID > 0 {
+			f.ProjectID = &opts.ProjectID
+		}
+		if err := streamExport(enc, KindCronJob, db.ExportCronJobsSQL(ctx, d.QueryContext, f)); err != nil {
+			return err
+		}
+		if err := streamExport(enc, KindCronWorkflow, db.ExportCronWorkflowsSQL(ctx, d.QueryContext, f)); err != nil {
+			return err
+		}
+		if err := streamExport(enc, KindCronRun, db.ExportCronRunsSQL(ctx, d.QueryContext, f)); err != nil {
+			return err
+		}
+	}
 	if err := exportEvents(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
 		return err
 	}

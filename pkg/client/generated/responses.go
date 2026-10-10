@@ -139,6 +139,70 @@ type DetachProjectAliasResponse = DetachProjectAliasResponseBody
 
 type DetachProjectAliasErrorResponse = ErrorEnvelope
 
+type GetCronCapabilitiesResponse = CronCapabilitiesResponseBody
+
+type GetCronCapabilitiesErrorResponse = ErrorEnvelope
+
+type ListCronJobsResponse = ListCronJobsResponseBody
+
+type ListCronJobsErrorResponse = ErrorEnvelope
+
+type CreateCronJobResponse = CronJobResponseBody
+
+type CreateCronJobErrorResponse = ErrorEnvelope
+
+type ArchiveCronJobResponse = CronJobResponseBody
+
+type ArchiveCronJobErrorResponse = ErrorEnvelope
+
+type ShowCronJobResponse = CronJobResponseBody
+
+type ShowCronJobErrorResponse = ErrorEnvelope
+
+type ReplaceCronJobResponse = CronJobResponseBody
+
+type ReplaceCronJobErrorResponse = ErrorEnvelope
+
+type RestoreCronJobResponse = CronJobResponseBody
+
+type RestoreCronJobErrorResponse = ErrorEnvelope
+
+type ListCronRunsResponse = CronRunsResponseBody
+
+type ListCronRunsErrorResponse = ErrorEnvelope
+
+type ShowCronRunResponse = CronRunResponseBody
+
+type ShowCronRunErrorResponse = ErrorEnvelope
+
+type ObserveCronRunResponse = ObserveCronRunResponseBody
+
+type ObserveCronRunErrorResponse = ErrorEnvelope
+
+type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
+
+type ListCronWorkflowsErrorResponse = ErrorEnvelope
+
+type CreateCronWorkflowResponse = CronWorkflowResponseBody
+
+type CreateCronWorkflowErrorResponse = ErrorEnvelope
+
+type ArchiveCronWorkflowResponse = CronWorkflowResponseBody
+
+type ArchiveCronWorkflowErrorResponse = ErrorEnvelope
+
+type ShowCronWorkflowResponse = CronWorkflowResponseBody
+
+type ShowCronWorkflowErrorResponse = ErrorEnvelope
+
+type ReplaceCronWorkflowResponse = CronWorkflowResponseBody
+
+type ReplaceCronWorkflowErrorResponse = ErrorEnvelope
+
+type RestoreCronWorkflowResponse = CronWorkflowResponseBody
+
+type RestoreCronWorkflowErrorResponse = ErrorEnvelope
+
 type DigestProjectResponse = DigestResponseBody
 
 type DigestProjectErrorResponse = ErrorEnvelope
@@ -343,6 +407,10 @@ type PatchIssueMetadataResponse = PatchIssueMetadataResponseBody
 
 type PatchIssueMetadataErrorResponse = ErrorEnvelope
 
+type IssuePlanningDatesResponse = IssuePlanningDates
+
+type IssuePlanningDatesErrorResponse = ErrorEnvelope
+
 type ListLabelsResponse = LabelsListResponseBody
 
 type ListLabelsErrorResponse = ErrorEnvelope
@@ -492,11 +560,17 @@ type DoctorResp struct {
 	JSON200      *DoctorResponse
 }
 
+type PollEventsResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+}
+
 type PollEventsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *PollEventsResponse
+	Headers200   *PollEventsResp200Headers
 }
 
 type StreamEventsResp struct {
@@ -665,6 +739,123 @@ type DetachProjectAliasResp struct {
 	JSON200      *DetachProjectAliasResponse
 }
 
+type GetCronCapabilitiesResp200Headers struct {
+	XKataEventFeatures string `header:"X-Kata-Event-Features"`
+}
+
+type GetCronCapabilitiesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronCapabilitiesResponse
+	Headers200   *GetCronCapabilitiesResp200Headers
+}
+
+type ListCronJobsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronJobsResponse
+}
+
+type CreateCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON201      *CreateCronJobResponse
+}
+
+type ArchiveCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ArchiveCronJobResponse
+}
+
+type ShowCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShowCronJobResponse
+}
+
+type ReplaceCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReplaceCronJobResponse
+}
+
+type RestoreCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RestoreCronJobResponse
+}
+
+type ListCronRunsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronRunsResponse
+}
+
+type ShowCronRunResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShowCronRunResponse
+}
+
+type ObserveCronRunResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ObserveCronRunResponse
+}
+
+type ListCronWorkflowsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronWorkflowsResponse
+}
+
+type CreateCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON201      *CreateCronWorkflowResponse
+}
+
+type ArchiveCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ArchiveCronWorkflowResponse
+}
+
+type ShowCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShowCronWorkflowResponse
+}
+
+type ReplaceCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReplaceCronWorkflowResponse
+}
+
+type RestoreCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RestoreCronWorkflowResponse
+}
+
 type DigestProjectResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -672,11 +863,22 @@ type DigestProjectResp struct {
 	JSON200      *DigestProjectResponse
 }
 
+type PollProjectEventsResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+}
+
 type PollProjectEventsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *PollProjectEventsResponse
+	Headers200   *PollProjectEventsResp200Headers
+}
+
+type GetProjectFederationResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type GetProjectFederationResp struct {
@@ -684,6 +886,12 @@ type GetProjectFederationResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetProjectFederationResponse
+	Headers200   *GetProjectFederationResp200Headers
+}
+
+type EnableProjectFederationResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type EnableProjectFederationResp struct {
@@ -691,6 +899,12 @@ type EnableProjectFederationResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *EnableProjectFederationResponse
+	Headers200   *EnableProjectFederationResp200Headers
+}
+
+type PollFederationProjectEventsResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type PollFederationProjectEventsResp struct {
@@ -698,6 +912,12 @@ type PollFederationProjectEventsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PollFederationProjectEventsResponse
+	Headers200   *PollFederationProjectEventsResp200Headers
+}
+
+type IngestFederationProjectEventsResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type IngestFederationProjectEventsResp struct {
@@ -705,6 +925,12 @@ type IngestFederationProjectEventsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *IngestFederationProjectEventsResponse
+	Headers200   *IngestFederationProjectEventsResp200Headers
+}
+
+type GetFederationProjectMetadataResp200Headers struct {
+	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
 type GetFederationProjectMetadataResp struct {
@@ -712,6 +938,7 @@ type GetFederationProjectMetadataResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetFederationProjectMetadataResponse
+	Headers200   *GetFederationProjectMetadataResp200Headers
 }
 
 type RetryFederationQuarantineResp struct {
@@ -1100,6 +1327,13 @@ type PatchIssueMetadataResp struct {
 	StatusCode   int
 	JSON200      *PatchIssueMetadataResponse
 	Headers200   *PatchIssueMetadataResp200Headers
+}
+
+type IssuePlanningDatesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *IssuePlanningDatesResponse
 }
 
 type ListLabelsResp struct {

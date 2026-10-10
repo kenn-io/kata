@@ -2453,7 +2453,9 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 			// Old snapshots have no link date. Keep their insertion-time behavior,
 			// and do not replace that date on a subsequent rebuild.
 			assert.False(t, link.CreatedAt.IsZero())
-			require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+			if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {
+				require.NoError(t, err)
+			}
 			rebuilt, err := store.LinkByID(ctx, link.ID)
 			require.NoError(t, err)
 			assert.True(t, link.CreatedAt.Equal(rebuilt.CreatedAt))

@@ -79,11 +79,15 @@ func TestMaterializeFederatedProjectLeavesSiblingUntouched(t *testing.T) {
 	firstUID := fixture.seedIssue(t, fixture.first, 1)
 	secondUID := fixture.seedIssue(t, fixture.second, 2)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.second.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.second.ID); err != nil {
+		require.NoError(t, err)
+	}
 	sibling, err := fixture.store.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	afterSibling, err := fixture.store.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -109,13 +113,17 @@ func TestMaterializeFederatedProjectTwiceBumpsNoRevisions(t *testing.T) {
 	ctx := context.Background()
 	issueUID := fixture.seedIssue(t, fixture.first, 1)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 	before, err := fixture.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	beforeProject, err := fixture.store.ProjectByID(ctx, fixture.first.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 	after, err := fixture.store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	afterProject, err := fixture.store.ProjectByID(ctx, fixture.first.ID)
@@ -139,7 +147,9 @@ func TestMaterializeFederatedProjectReadsEachEventLogOnce(t *testing.T) {
 	fixture.store.federationFoldObserver = func(projectID int64) { reads[projectID]++ }
 	t.Cleanup(func() { fixture.store.federationFoldObserver = nil })
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	assert.Equal(t, 1, reads[fixture.first.ID],
 		"the materialized project's event log must be read once, not twice")
@@ -156,14 +166,18 @@ func TestMaterializeFederatedProjectDoesNotPruneJustInsertedIssues(t *testing.T)
 	ctx := context.Background()
 	firstUID := fixture.seedIssue(t, fixture.first, 1)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 	_, err := fixture.store.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
 	require.NoError(t, err, "an issue created by this very pass must survive prune")
 
 	// A second issue arriving on a later pass must also survive, and the
 	// first must not be pruned now that it is in the snapshot.
 	secondUID := fixture.seedIssue(t, fixture.first, 3)
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 	_, err = fixture.store.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	_, err = fixture.store.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
@@ -178,7 +192,9 @@ func TestMaterializeFederatedProjectPrunesOnlyUnreferencedOrphans(t *testing.T) 
 	ctx := context.Background()
 	keptUID := fixture.seedIssue(t, fixture.first, 1)
 	droppedUID := fixture.seedIssue(t, fixture.first, 2)
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	kept, err := fixture.store.IssueByUID(ctx, keptUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -200,7 +216,9 @@ func TestMaterializeFederatedProjectPrunesOnlyUnreferencedOrphans(t *testing.T) 
 		"2026-05-23T12:00:00.000Z")
 	require.NoError(t, err)
 
-	require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	_, err = fixture.store.IssueByUID(ctx, keptUID, db.IncludeDeletedYes)
 	assert.NoError(t, err, "an issue still referenced by an event must survive prune")
@@ -236,7 +254,9 @@ func TestMaterializeFederatedProjectPersistsCanonicalAssignmentExpiryText(t *tes
 		inserted, err := fixture.store.InsertRemoteEvent(ctx, fixture.first.ID, event)
 		require.NoError(t, err)
 		require.True(t, inserted)
-		require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+		if err := fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID); err != nil {
+			require.NoError(t, err)
+		}
 	}
 	scanRaw := func() (owner sql.NullString, expiresOn sql.NullString) {
 		require.NoError(t, fixture.store.QueryRowContext(ctx,

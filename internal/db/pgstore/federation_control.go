@@ -59,6 +59,9 @@ func (s *Store) RebindFederationBinding(
 	var output db.FederationBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationBinding{}
+		if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
+			return err
+		}
 		current, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, p.ProjectID))
 		if err != nil {
@@ -70,14 +73,14 @@ func (s *Store) RebindFederationBinding(
 		if current.HubProjectID != p.HubProjectID || current.HubProjectUID != p.HubProjectUID {
 			return db.ErrFederationRebindConflict
 		}
-		if current.HubURL == p.TargetHubURL && !current.AllowInsecure {
+		converged := current.HubURL == p.TargetHubURL && !current.AllowInsecure
+		if !converged && (current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure) {
+			return db.ErrFederationRebindConflict
+		}
+		if converged {
 			output = current
 			return nil
 		}
-		if current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure {
-			return db.ErrFederationRebindConflict
-		}
-
 		result, err := tx.ExecContext(ctx, `UPDATE federation_bindings
 SET hub_url=$1, allow_insecure=0,
     updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -210,6 +213,9 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 	var output db.FederationBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationBinding{}
+		if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+			return err
+		}
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 		if err != nil {
@@ -218,6 +224,8 @@ func (s *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 		if strings.TrimSpace(binding.Actor) == "" {
 			return fmt.Errorf("enable federation push: bound actor is required")
 		}
+		next := binding
+		next.PushEnabled = true
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=1,
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')

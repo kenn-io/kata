@@ -13,7 +13,7 @@ generate typed clients instead of hand-copying wire structs.
 Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
-discovery.
+discovery. [Native cron](cron.md) documents job and workflow resources.
 
 ## Getting the schema
 

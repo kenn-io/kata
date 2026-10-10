@@ -53,6 +53,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
+			return err
+		}
 		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
 			return err
 		}
