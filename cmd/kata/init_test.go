@@ -624,6 +624,7 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	require.NoError(t, err)
 	got := string(content)
 	require.Contains(t, got, agentsManagedBlock(), "managed guidance must embed the canonical contract verbatim")
+	assertAgentWorkflowContract(t, got)
 	assert.Contains(t, got, "Never `kata delete` or `kata purge` without explicit user authorization.")
 	assert.Contains(t, got, "kata meta set <ref> work.attention stuck|needs-human|ok")
 	assert.Contains(t, got, "kata close <ref> --done")

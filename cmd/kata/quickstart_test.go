@@ -9,6 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func assertNoUnimplementedCommentOptions(t *testing.T, guidance string) {
+	t.Helper()
+	tokens := strings.Fields(guidance)
+	for i, token := range tokens {
+		for _, option := range []string{"--answer", "--ask", "--reply", "--confirm", "--refute", "--supersede", "--re", "--broadcast"} {
+			assert.NotEqualf(t, option, token, "active guidance advertises unavailable option %q", option)
+		}
+		if token == "--until" && i+1 < len(tokens) {
+			assert.NotEqual(t, "reply", tokens[i+1], "active guidance advertises unavailable wait mode reply")
+		}
+	}
+}
+
 func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
 	for _, format := range []string{"human", "agent", "json"} {
 		t.Run(format, func(t *testing.T) {
@@ -76,6 +89,11 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata inbox --for coordinator/teammate-1")
 	assert.Contains(t, out, "kata inbox --for coordinator/teammate-1 --all")
 	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1 --clear")
+	assert.Contains(t, out, "<project>#<id>")
+	assert.Contains(t, out, "--force-new")
+	assert.Contains(t, out, "40+ characters")
+	assert.Contains(t, out, "20+ characters")
+	assert.Contains(t, out, "60+ characters")
 }
 
 func TestQuickstart_GuardsOwnershipRelease(t *testing.T) {
@@ -189,6 +207,14 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "KATA_TEAMMATE=teammate-1")
 	assert.Contains(t, out, "KATA_INBOX_USER=coordinator/teammate-1")
 	assert.Contains(t, out, "metadata.teammate")
+	for _, text := range []string{
+		"<project>#<id>", "--force-new", "kata claim <ref>",
+		`kata comment <ref> -m "<what changed>"`,
+		"--evidence", "40+ characters", "20+ characters", "60+ characters",
+		"--duplicate-of", "--superseded-by", "--wontfix",
+	} {
+		assert.Contains(t, out, text)
+	}
 }
 
 func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
@@ -207,7 +233,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Contains(t, out, "kata wait <refs> --until attention --any")
 	assert.Contains(t, out, ".issue.short_id")
 	assert.Contains(t, out, "kata close <ref> --done")
-	assert.Contains(t, out, "kata label add <ref> needs-review")
+	assertAgentWorkflowContract(t, out)
 	assert.Contains(t, out, "kata schedule <ref> <date-or-time>")
 	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
 	assert.Contains(t, out, "kata meta unset <ref> someday")
@@ -218,7 +244,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Contains(t, out, "--parent <ref>")
 	assert.Equal(t, 1, strings.Count(out, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>"),
 		"session injection should teach attention requests once")
-	assert.LessOrEqual(t, len(out), 4000, "keep the per-session briefing compact")
+	assert.LessOrEqual(t, len(out), 4500, "keep the per-session briefing compact with actionable close and routing guidance")
 	assert.Contains(t, out, "Read requests: kata inbox --for <actor>[/<teammate>].")
 	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>] --all")
 	assert.Contains(t, out, "kata notify <ref> --to <actor>[/<teammate>] --clear")
@@ -281,12 +307,46 @@ func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
 }
 
 func TestQuickstart_UsesValidNeedsReviewCommand(t *testing.T) {
-	resetFlags(t)
-	out := string(executeRoot(t, newQuickstartCmd()))
-	// kata edit has no --label flag; the needs-review hint must use the real
-	// kata label add command so agents do not copy an invalid command.
-	assert.Contains(t, out, "kata label add <ref> needs-review")
-	assert.NotContains(t, out, "--label needs-review")
+	// Product contract: every quickstart format gives agents an executable
+	// label-and-comment command for work that is not complete.
+	for _, format := range []string{"human", "agent", "json"} {
+		t.Run(format, func(t *testing.T) {
+			resetFlags(t)
+			out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", format))
+			if format == "json" {
+				var payload struct {
+					Quickstart string `json:"quickstart"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &payload))
+				out = payload.Quickstart
+			}
+			assert.Contains(t, out, `kata label add <ref> needs-review --comment "<what remains>"`)
+			assert.NotContains(t, out, "edit <ref> --label")
+		})
+	}
+}
+
+// The reviewed agent workflow must tell consumers how to route, claim,
+// record, and close work without discovering missing flags by rejection.
+func assertAgentWorkflowContract(t *testing.T, out string) {
+	t.Helper()
+	for _, text := range []string{
+		"<project>#<id>",
+		"or pass --project <project>",
+		"--force-new only if the work truly differs",
+		"kata claim <ref>",
+		`kata comment <ref> -m \"<what changed>\"`,
+		"--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>",
+		"(or --commit, --pr, --test, --reviewed)",
+		"40+ chars",
+		"--duplicate-of <ref> | --superseded-by <ref> (20+ chars)",
+		"--wontfix (60+ chars)",
+		`done -> retire   [label="duplicate, superseded or dropped"]`,
+		`kata label add <ref> needs-review --comment \"<what remains>\"`,
+	} {
+		assert.Contains(t, out, text)
+	}
+	assert.NotContains(t, out, "edit <ref> --label")
 }
 
 func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
@@ -298,5 +358,32 @@ func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
 		assert.Contains(t, out, "kata daemon diagnose")
 		assert.Contains(t, out, "kata daemon recover")
 		assert.Contains(t, out, "Never remove a workspace override to repair a stopped daemon")
+	}
+}
+
+func TestQuickstart_ActiveContractOmitsUnimplementedCommentOptions(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
+	assertNoUnimplementedCommentOptions(t, out)
+	assert.Contains(t, out, "kata wait <refs> --until attention --any")
+	assert.Contains(t, out, "kata notify <ref> --to <actor>")
+}
+
+func TestQuickstart_ActiveOutputOmitsUnimplementedCommentOptions(t *testing.T) {
+	for _, format := range []string{"human", "agent", "json"} {
+		t.Run(format, func(t *testing.T) {
+			resetFlags(t)
+			out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
+			instructions := string(out)
+			if format == "json" {
+				var payload struct {
+					Quickstart string `json:"quickstart"`
+				}
+				require.NoError(t, json.Unmarshal(out, &payload))
+				instructions = payload.Quickstart
+			}
+			assertNoUnimplementedCommentOptions(t, instructions)
+			assert.Contains(t, instructions, "kata notify")
+		})
 	}
 }

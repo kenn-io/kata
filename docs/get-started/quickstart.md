@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-02
+last_edited: 2026-10-07
 ---
 
 # Quickstart
@@ -380,8 +380,7 @@ canonical managed briefing without mutating the workspace; see
 Closing asserts completion. If work is incomplete, add context instead:
 
 ```sh
-kata label add abc4 needs-review
-kata comment abc4 --body "Attempted the schema change; migration test still fails."
+kata label add abc4 needs-review --comment "Attempted the schema change; migration test still fails."
 ```
 
 When work is done, close with a reason, a substantive message, and evidence:

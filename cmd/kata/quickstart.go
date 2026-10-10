@@ -22,7 +22,7 @@ Use kata as the shared issue ledger for this workspace.
 
 1. Run from the workspace (--workspace overrides; --project picks
    another). Author = $KATA_AUTHOR > $USER > git user.name.
-   If uninitialized, report that kata init is needed.
+   No bound workspace: use <project>#<id> refs or --project <project>.
    Issue refs are short_ids derived from each issue's ULID (e.g. abc4).
    Cross-project: kata#abc4. Full 26-char ULIDs also resolve. Legacy
    numeric refs (12, kata#12) no longer work.
@@ -30,14 +30,17 @@ Use kata as the shared issue ledger for this workspace.
 2. Closing an issue asserts that the work is complete. If the work is
    not done, DO NOT close. Instead:
 
-      kata label add <ref> needs-review
-      kata comment <ref> --body "what was attempted, what remains"
+      kata label add <ref> needs-review --comment "<what remains>"
 
-   When done, close with substantive prose and typed --evidence:
+   When done, use a message of 40+ characters and typed --evidence:
 
       kata close abc4 --done \
         --message "Fixed Safari callback double-submit; verified tests pass." \
         --commit <sha>
+
+   Typed --evidence accepts commit:<sha>, pr:<url>, test:<cmd>,
+   reviewed-paths:<path>, or external:<account>. Shortcuts are --commit,
+   --pr, --test, and --reviewed.
 
    Close each issue as soon as its work is verified, not in a batch or a
    single "close everything" pass at the end. By default the daemon permits
@@ -45,7 +48,8 @@ Use kata as the shared issue ledger for this workspace.
    message. Operators can enable stricter burst/prose throttling via
    [close.throttle] enabled = true in <KATA_HOME>/config.toml.
 
-   Other close forms:
+   Other close forms (duplicate/superseded: 20+ characters;
+   wontfix: 60+ characters):
 
       kata close abc4 --duplicate-of d4ex  --message "Same Safari race condition."
       kata close abc4 --superseded-by d4ex --message "Replaced by broader scope."
@@ -71,6 +75,9 @@ Use kata as the shared issue ledger for this workspace.
 
    kata search "login race" --agent
    kata search --project foo "login race" --agent
+
+   If create refuses a look-alike, reuse the match. Pass --force-new only
+   if the work truly differs.
 
 4. If no existing issue fits, create with an idempotency key:
 
@@ -189,6 +196,10 @@ Use kata as the shared issue ledger for this workspace.
    coordinator/*. Shared MCP processes use the per-call teammate on
    kata.comment and kata.create when siblings cannot have separate environments.
 
+   If a comment-sized task needs ownership or tracked completion, make it a
+   child issue: kata create "fix retry handling" --parent <ref>, then
+   kata claim <child>. Comments record findings; child issues track owned work.
+
 10. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
@@ -249,19 +260,26 @@ a local daemon.
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
 Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
+If create refuses a look-alike, reuse it; --force-new only if the work truly differs.
+No bound workspace: use <project>#<id> refs or --project <project>.
 Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
+Claim it with kata claim <ref>.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
+Record progress: kata comment <ref> -m "<what changed>".
+When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.
 Use kata inbox --for <actor>[/<teammate>] --all for the selected daemon's active projects; refs are qualified.
 An external harness polls idle inboxes and wakes the exact mapped runtime; quickstart does not install that integration.
-If work is incomplete, label needs-review and comment with what remains.
-Close only verified work with substantive prose and typed evidence.
+If work is incomplete, use kata label add <ref> needs-review --comment "<what remains>".
+Close verified work: kata close <ref> --done --message "<scope and verification, 40+ characters>" --evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>.
+Evidence shortcuts: --commit, --pr, --test, --reviewed.
+Retire duplicate or superseded work with --duplicate-of <ref> or --superseded-by <ref> (20+ characters); dropped work with --wontfix (60+ characters).
 Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.
 Do not run delete or purge unless explicitly asked for that exact action and issue ref.
 Poll kata events with a saved cursor; reset cached state on reset_required.

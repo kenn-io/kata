@@ -353,17 +353,27 @@ func TestCloseCmd_HelpBannerNamesObligation(t *testing.T) {
 	out := string(executeRoot(t, newRootCmd(), "close", "--help"))
 	assert.Contains(t, out, "asserts that the work it describes is complete")
 	assert.Contains(t, out, "do not close it")
-	assert.Contains(t, out, "needs-review")
+	assert.Contains(t, out, `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.NotContains(t, out, "edit <ref> --label")
 }
 
 func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
-	_, stderr, err := runCLIWithErr(t, env, dir,
-		"close", ref, "--done",
-		"--message", "Fixed Safari callback double-submit and ran tests.")
-	require.Error(t, err)
-	assert.Contains(t, stderr, "evidence required")
-	assert.Contains(t, stderr, "needs-review")
+	for _, tc := range []struct {
+		name, message, errorText string
+	}{
+		{"missing evidence", "Fixed Safari callback double-submit and ran tests.", "evidence required"},
+		{"trivial message", "done", "trivial"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := runCLIWithErr(t, env, dir,
+				"close", ref, "--done", "--message", tc.message)
+			require.Error(t, err)
+			assert.Contains(t, stderr, tc.errorText)
+			assert.Contains(t, stderr, `kata label add <ref> needs-review --comment "<what remains>"`)
+			assert.NotContains(t, stderr, "edit <ref> --label")
+		})
+	}
 }
 
 // TestCloseAPI_TUISourceBypassesSubstanceAndEvidence pins that an
