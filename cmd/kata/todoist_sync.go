@@ -20,7 +20,23 @@ func newTodoistSyncCmd() *cobra.Command {
 func newTodoistSyncEnableCmd() *cobra.Command {
 	var project, interval, since, statusSync string
 	var titlePrefix bool
-	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Todoist sync for this project", Args: cobra.NoArgs}
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "enable daemon-side Todoist sync for this project",
+		Long: `Bind the Kata project (bound or --project) to one Todoist project and start
+daemon-side polling. The first enable needs --todoist-project (the opaque
+project ID). The daemon reads its API token from KATA_TODOIST_TOKEN, or the
+variable named by [todoist_sync] token_env.
+Every active task is imported; --history-since limits completed-task history
+(default: 30 days before the first enable). The Todoist project and history
+floor are fixed after the first enable. Re-enable keeps every option you omit.
+--status-sync two-way also sends Kata close and reopen back to standalone,
+non-recurring Todoist tasks.`,
+		Example: `  kata sync todoist enable --todoist-project <project-id> --agent
+  kata sync todoist enable --todoist-project <project-id> --history-since 2026-09-01 --agent
+  kata sync todoist enable --status-sync two-way --interval 10m --agent`,
+		Args: cobra.NoArgs,
+	}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		config := map[string]any{}
 		invalid := func(message string) error {
