@@ -49,7 +49,7 @@ func loadIssueStatusMappingTx(ctx context.Context, tx *sql.Tx, binding db.IssueS
 		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, *mapping.IssueID).Scan(&issueUID); err != nil {
 			return db.IssueStatusMapping{}, err
 		}
-		if event.ProjectID != binding.ProjectID || event.IssueUID == nil || *event.IssueUID != issueUID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
+		if event.ProjectID != binding.ProjectID || db.FederationEventIssueUID(event.IssueUID, event.Payload) != issueUID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return db.IssueStatusMapping{}, fmt.Errorf("%w: pending status event belongs to a different identity or mutation", db.ErrImportValidation)
 		}
 		result.PendingEvent = &event
@@ -180,7 +180,10 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 		}
 		switch event.Type {
 		case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
-			accepted[event.IssueUID] = append(accepted[event.IssueUID], event)
+			issueUID := db.FederationEventIssueUID(&event.IssueUID, string(event.Payload))
+			if issueUID != "" {
+				accepted[issueUID] = append(accepted[issueUID], event)
+			}
 		}
 	}
 	if len(accepted) == 0 {

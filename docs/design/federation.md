@@ -325,6 +325,24 @@ belongs to the bound spoke origin, verifies the spoke's declared schema version,
 deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
+SQLite hubs prepare the event fold and projection differences in the read phase
+of a deferred transaction, before the project lock takes the writer lock.
+The write phase inserts accepted events and updates only changed issues,
+comments, labels, links and status-intent pointers. A concurrent commit during
+preparation invalidates the snapshot; SQLite reports busy contention and the
+hub retries the whole batch against a fresh snapshot. Validation failures still
+roll back the entire batch.
+
+For issue-only batches, this keeps writer time independent of unrelated event
+history and untouched projection rows. Batches with cron events also materialize
+cron definitions and run observations in the write phase. Total preparation
+still reads and folds project history, plus link-bearing group history when
+links can change. Existing full-text search triggers can aggregate comments on
+a changed issue, and claim auditing can expire claims. Custom transaction fences
+that write may acquire the lock before
+preparation; native enrollment fences only read. Explicit full materialization
+remains available for recovery.
+
 If the response is lost after the hub commits, retrying the same batch is safe:
 the hub treats fully duplicated same-hash batches as successful and returns an
 advanced cursor. Permanent validation failures or hash conflicts record a

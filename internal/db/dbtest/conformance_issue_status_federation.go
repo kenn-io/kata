@@ -107,5 +107,23 @@ func checkIssueStatusFederationIntent(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 	}
 	require.Equal(t, latest.EventUID, read().State.PendingEventUID, "manual rebuild cannot manufacture or replace intent")
+
+	issueUID := fixture.Issue.UID
+	reopenedWithoutEnvelope := newRemoteEvent(t, fixture.Project, nil, "issue.reopened", "worker", spoke, base+90,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","reopened_at":"2026-09-29T12:00:00Z"}`))
+	ingest(reopenedWithoutEnvelope)
+	updatedIssue, err := store.IssueByID(ctx, fixture.Issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "open", updatedIssue.Status, "payload issue UID must identify the materialized issue")
+	require.Equal(t, reopenedWithoutEnvelope.EventUID, read().State.PendingEventUID,
+		"an effective status event with only a payload issue UID must enqueue and load intent")
+	closedWithoutEnvelope := newRemoteEvent(t, fixture.Project, nil, "issue.closed", "worker", spoke, base+100,
+		jsontext.Value(`{"uid":"`+issueUID+`","reason":"done","closed_at":"2026-09-29T12:00:00Z"}`))
+	ingest(closedWithoutEnvelope)
+	updatedIssue, err = store.IssueByID(ctx, fixture.Issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", updatedIssue.Status, "payload uid must identify the materialized issue")
+	require.Equal(t, closedWithoutEnvelope.EventUID, read().State.PendingEventUID,
+		"an effective status event with only a payload uid must enqueue and load intent")
 	return nil
 }
