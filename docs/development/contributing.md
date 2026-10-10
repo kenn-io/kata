@@ -204,8 +204,8 @@ Keep `docs/llms.txt` links aligned with those public routes.
 When changing behavior:
 
 - update CLI help when flags or contracts change;
-  `go test ./cmd/kata -run 'TestHelpLint|TestHelpExamplesParse'` checks help
-  coverage and parses advertised commands without running them;
+  `go test ./cmd/kata -run 'TestHelp'` parses every
+  advertised command without running it;
 - update `README.md` if the project overview or quickstart changes;
 - update `docs/` for public user/operator behavior;
 - record durable design rationale in `docs/design/` when the "why" is not

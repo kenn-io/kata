@@ -3,7 +3,7 @@ package main
 import "github.com/spf13/cobra"
 
 // helpDoc supplements constructor help while nearby command work lands.
-// A Long description has one owner: the constructor or this catalog.
+// It fills only Long and Example fields the constructor leaves empty.
 type helpDoc struct{ Long, Example string }
 
 var helpCatalog = map[string]helpDoc{
@@ -299,7 +299,7 @@ func applyHelpCatalog(cmd *cobra.Command) {
 		if cmd.Long == "" {
 			cmd.Long = doc.Long
 		}
-		if doc.Example != "" {
+		if cmd.Example == "" {
 			cmd.Example = doc.Example
 		}
 	}
