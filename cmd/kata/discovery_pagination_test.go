@@ -17,6 +17,10 @@ func TestCLIDiscoveryPagination(t *testing.T) {
 		_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectID, Title: "matching needle", Author: "example-agent"})
 		require.NoError(t, err)
 	}
+	_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "prioritized task", Author: "example-agent", Priority: new(int64(1)),
+	})
+	require.NoError(t, err)
 	run := func(args ...string) (string, string, error) {
 		return executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL), append([]string{"--workspace", dir}, args...)...)
 	}
@@ -51,7 +55,7 @@ func TestCLIDiscoveryPagination(t *testing.T) {
 		require.True(t, last.Complete)
 		require.Empty(t, last.Next)
 	}
-	_, stderr, err := run("list", "--limit", "2")
+	_, stderr, err := run("list", "--priority-unset", "--limit", "2")
 	require.NoError(t, err)
 	require.NotContains(t, stderr, "showing 2")
 	_, _, err = run("list", "--priority-unset", "--priority", "0")

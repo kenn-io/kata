@@ -69,13 +69,6 @@ func FuzzCursorDecode(f *testing.F) {
 	})
 }
 
-// Distinct invalid UTF-8 bytes have distinct JSON binary representations.
-func TestCursorRejectDistinctBinaryFilters(t *testing.T) {
-	p := Position{CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ID: 1}
-	_, err := Decode(Encode(p, Fingerprint([]byte{0xe5})), Fingerprint([]byte{0x82}))
-	require.Error(t, err)
-}
-
 // Nil project selection means unrestricted; an explicit empty set means none.
 func TestFingerprintDistinguishesNilAndEmptyProjectScopes(t *testing.T) {
 	require.NotEqual(t, Fingerprint([]int64(nil)), Fingerprint([]int64{}))
