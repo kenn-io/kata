@@ -4535,3 +4535,70 @@ func TestClientOptsWithDefaultKeepsExplicitTimeout(t *testing.T) {
 
 	assert.Equal(t, 7*time.Second, opts.Timeout)
 }
+
+// A hub that predates comment replies must refuse a reply-bearing push by wire
+// version, which the spoke retries after the hub upgrades, instead of
+// validating the reply target and quarantining the push.
+func TestSyncFederationOnceReplyPushToOlderHubDoesNotQuarantine(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:1",
+		HubProjectID: 42, HubProjectUID: project.UID, ReplayHorizonEventID: 50, PullCursorEventID: 49,
+		PushEnabled: true, Actor: "tester", Enabled: true,
+	})
+	require.NoError(t, err)
+	source, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "source", Author: "tester"})
+	require.NoError(t, err)
+	target, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "target", Author: "tester"})
+	require.NoError(t, err)
+	finding, _, err := spoke.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "tester", Body: "Finding"})
+	require.NoError(t, err)
+	_, _, err = spoke.DB.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: source.ID, Author: "tester", Body: "Confirmed", ReplyToUID: finding.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	const olderHubSchema = 31
+	requests := 0
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/projects/42/federation/events:ingest" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		var body api.FederationIngestEventsRequestBody
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		w.Header().Set("Content-Type", "application/json")
+		if body.SchemaVersion <= olderHubSchema {
+			w.WriteHeader(http.StatusOK)
+			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+				Accepted: len(body.Events), PushCursorEventID: body.Events[len(body.Events)-1].EventID,
+			}))
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{
+			Status: http.StatusBadRequest,
+			Error: api.ErrorBody{
+				Code: "unsupported_federation_schema",
+				Message: fmt.Sprintf("federation ingest schema_version %d is newer than hub schema_version %d",
+					body.SchemaVersion, olderHubSchema),
+			},
+		}))
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: 42, Token: "token",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, requests)
+	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), binding.PushCursorEventID, "the reply stays pending until the hub upgrades")
+}
