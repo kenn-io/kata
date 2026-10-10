@@ -369,6 +369,15 @@ func (r *Runner) importChunks(
 		end := min(start+chunkSize, len(batch.Items))
 		chunk := batch
 		chunk.Items = append([]db.ImportItem(nil), batch.Items[start:end]...)
+		if batch.ImportStatusObservations != nil {
+			// Keep acknowledgement keys aligned with this chunk's items.
+			chunk.ImportStatusObservations = make(map[string]db.IssueStatusObservation)
+			for _, item := range chunk.Items {
+				if observation, ok := batch.ImportStatusObservations[item.ExternalID]; ok {
+					chunk.ImportStatusObservations[item.ExternalID] = observation
+				}
+			}
+		}
 		res, events, err := r.config.Store.ImportBatch(ctx, chunk)
 		if err != nil {
 			return aggregate, err

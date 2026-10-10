@@ -10,6 +10,184 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// checkImportStatusCloseClearsAssignmentExpiry models the status-only update
+// produced when TickTick changes from two-way to one-way status sync. Closing
+// keeps the local owner permanently and removes the deadline from both the row
+// and the replayable issue.updated event.
+func checkImportStatusCloseClearsAssignmentExpiry(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "import-status-expiry")
+	require.NoError(t, err)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	externalID := "task:example"
+	batch := db.ImportBatchParams{
+		ProjectID: project.ID, Source: "ticktick:example", Actor: "ticktick-sync",
+		Items: []db.ImportItem{{
+			ExternalID: externalID, Title: "Source task", Body: "Source body", Author: "ticktick-unknown",
+			Status: "open", CreatedAt: base.Add(-time.Hour), UpdatedAt: base,
+		}},
+	}
+	created, _, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, created.Created)
+	mapping, err := store.ImportMappingBySource(ctx, project.ID, batch.Source, "issue", externalID)
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: *mapping.IssueID, Actor: "worker", TTL: time.Minute, Now: base})
+	require.NoError(t, err)
+	require.NotNil(t, claim.Issue.AssignmentExpiresOn)
+	deadline := *claim.Issue.AssignmentExpiresOn
+
+	// The source reports completion without a new content version.
+	rawStatus := "2"
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{externalID: {Raw: &rawStatus, Version: base.Add(time.Minute)}}
+	batch.Items[0].Status, batch.Items[0].ClosedReason = "closed", new("done")
+	batch.Items[0].ClosedAt = new(base)
+	result, events, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Updated)
+	require.Len(t, events, 1)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
+	require.Equal(t, "closed", payload["status"])
+	value, present := payload["assignment_expires_on"]
+	require.True(t, present, "the status event must carry the assignment deadline clear")
+	require.Nil(t, value)
+
+	closed, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", closed.Status)
+	require.Equal(t, new("worker"), closed.Owner)
+	require.Nil(t, closed.AssignmentExpiresOn)
+	folded, err := foldProjectIssues(ctx, store, project.ID)
+	require.NoError(t, err)
+	replayed := folded.Issues[closed.UID]
+	require.Equal(t, closed.Status, replayed.Status)
+	require.Equal(t, closed.Owner, replayed.Owner)
+	require.Nil(t, replayed.AssignmentExpiresOn, "the event log must replay the cleared deadline")
+
+	sweep, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{
+		ProjectID: project.ID, Now: deadline.Add(time.Minute),
+	})
+	require.NoError(t, err)
+	require.Empty(t, sweep, "a later sweep must not expire the retained owner")
+	afterSweep, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, new("worker"), afterSweep.Owner)
+	require.Nil(t, afterSweep.AssignmentExpiresOn)
+	return nil
+}
+
+// checkImportStatusObservationAcknowledgement verifies a committed workflow
+// observation cannot be replayed over a later local reopen.
+func checkImportStatusObservationAcknowledgement(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "import-status-ack")
+	require.NoError(t, err)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	externalID := "task:example"
+	batch := db.ImportBatchParams{
+		ProjectID: project.ID, Source: "ticktick:example", Actor: "ticktick-sync",
+		Items: []db.ImportItem{{
+			ExternalID: externalID, Title: "Source task", Body: "Source body", Author: "ticktick-unknown",
+			Status: "open", CreatedAt: base.Add(-time.Hour), UpdatedAt: base,
+		}},
+	}
+	created, _, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, created.Created)
+	mapping, err := store.ImportMappingBySource(ctx, project.ID, batch.Source, "issue", externalID)
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+
+	observedAt := base.Add(10 * time.Minute)
+	rawStatus := "2"
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{
+		externalID: {Raw: &rawStatus, Version: observedAt},
+	}
+	batch.Items[0].Status = "closed"
+	batch.Items[0].ClosedReason = new("done")
+	batch.Items[0].ClosedAt = &observedAt
+	closed, events, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, closed.Updated)
+	require.Len(t, events, 1)
+
+	_, _, changed, err := store.ReopenIssue(ctx, *mapping.IssueID, "worker")
+	require.NoError(t, err)
+	require.True(t, changed)
+	opened, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "open", opened.Status)
+
+	// Retrying the same checkpoint after a failed binding finalizer must not
+	// re-close the issue after the owner has reopened it locally.
+	batch.ImportStatusObservations[externalID] = db.IssueStatusObservation{Raw: &rawStatus, Version: observedAt.Add(time.Hour)}
+	retried, events, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, retried.Unchanged)
+	require.Empty(t, events)
+	stillOpen, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "open", stillOpen.Status)
+	return nil
+}
+
+// checkImportStatusKeepsLocalClosure verifies that a provider completion of an
+// issue already closed locally keeps the local close reason and time, while a
+// later provider reopen still applies.
+func checkImportStatusKeepsLocalClosure(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "import-status-local-closure")
+	require.NoError(t, err)
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	externalID := "task:example"
+	open := "0"
+	batch := db.ImportBatchParams{
+		ProjectID: project.ID, Source: "ticktick:example", Actor: "ticktick-sync",
+		ImportStatusObservations: map[string]db.IssueStatusObservation{externalID: {Raw: &open, Version: base}},
+		Items: []db.ImportItem{{
+			ExternalID: externalID, Title: "Source task", Body: "Source body", Author: "ticktick-unknown",
+			Status: "open", CreatedAt: base.Add(-time.Hour), UpdatedAt: base,
+		}},
+	}
+	_, _, err = store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	mapping, err := store.ImportMappingBySource(ctx, project.ID, batch.Source, "issue", externalID)
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssueWithEvents(ctx, *mapping.IssueID, "wontfix", "worker", "", nil)
+	require.NoError(t, err)
+	local, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+
+	completed := "2"
+	completedAt := base.Add(time.Hour)
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{externalID: {Raw: &completed, Version: completedAt}}
+	batch.Items[0].Status, batch.Items[0].ClosedReason, batch.Items[0].ClosedAt = "closed", new("done"), &completedAt
+	result, events, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Unchanged)
+	require.Empty(t, events)
+	got, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", got.Status)
+	require.Equal(t, local.ClosedReason, got.ClosedReason)
+	require.Equal(t, local.ClosedAt, got.ClosedAt)
+
+	reopenedAt := base.Add(2 * time.Hour)
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{externalID: {Raw: &open, Version: reopenedAt}}
+	batch.Items[0].Status, batch.Items[0].ClosedReason, batch.Items[0].ClosedAt = "open", nil, nil
+	_, _, err = store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	reopened, err := store.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "open", reopened.Status, "the completion was acknowledged, so a provider reopen is a real change")
+	return nil
+}
+
 // Plane state-group edits leave work-item timestamps unchanged. Derived status
 // may refresh only while the source still owns the stored scalar version.
 func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
@@ -101,5 +279,18 @@ func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
 	got, err = store.IssueByID(ctx, initial.ID)
 	require.NoError(t, err)
 	require.Equal(t, local, got)
+	rawStatus := "0"
+	batch.ImportStatusObservations = map[string]db.IssueStatusObservation{batch.Items[0].ExternalID: {Raw: &rawStatus, Version: at.Add(time.Hour)}}
+	batch.Items[0].Status, batch.Items[0].ClosedReason, batch.Items[0].ClosedAt = "open", nil, nil
+	r, events, err = store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, r.Updated)
+	require.Len(t, events, 1)
+	got, err = store.IssueByID(ctx, initial.ID)
+	require.NoError(t, err)
+	require.Equal(t, "open", got.Status)
+	require.Equal(t, local.Title, got.Title)
+	require.Equal(t, local.Body, got.Body)
+	require.Equal(t, local.UpdatedAt, got.UpdatedAt)
 	return nil
 }

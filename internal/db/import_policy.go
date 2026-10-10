@@ -76,7 +76,53 @@ func ValidateImportBatch(params ImportBatchParams) error {
 			}
 		}
 	}
+	for externalID, observation := range params.ImportStatusObservations {
+		if _, ok := seenItems[externalID]; !ok || observation.Version.IsZero() {
+			return fmt.Errorf("%w: status observation acknowledgement requires a matching import item", ErrImportValidation)
+		}
+		if params.ManageStatusSeparately {
+			return fmt.Errorf("%w: separately managed status cannot be acknowledged by an import", ErrImportValidation)
+		}
+	}
 	return nil
+}
+
+// IsNewImportStatusObservation reports whether incoming advances the durable
+// provider observation. Replaying the same raw value is idempotent even when
+// a retry has a later local observation timestamp.
+func IsNewImportStatusObservation(current *IssueStatusObservation, incoming IssueStatusObservation) (bool, error) {
+	if incoming.Version.IsZero() {
+		return false, fmt.Errorf("%w: status observation timestamp is required", ErrImportValidation)
+	}
+	if current == nil {
+		return true, nil
+	}
+	if equalImportOptionalString(current.Raw, incoming.Raw) {
+		return false, nil
+	}
+	if incoming.Version.Before(current.Version) {
+		return false, nil
+	}
+	if incoming.Version.Equal(current.Version) {
+		return false, fmt.Errorf("%w: status observation changed at the same timestamp", ErrImportValidation)
+	}
+	return true, nil
+}
+
+// ImportKeepsNativeWorkflow reports whether an import with a status
+// observation keeps the issue's own status, close reason, and close time. A
+// repeated observation never changes them, and a new one changes them only
+// when it flips the issue between open and closed.
+func ImportKeepsNativeWorkflow(existing Issue, item ImportItem, newObservation bool) bool {
+	return !newObservation || item.Status == existing.Status
+}
+
+// ImportedWorkflowStatusDiffers reports whether an imported item changes any
+// native workflow field while leaving content and ownership out of scope.
+func ImportedWorkflowStatusDiffers(existing Issue, item ImportItem) bool {
+	return item.Status != existing.Status ||
+		!equalImportOptionalString(item.ClosedReason, existing.ClosedReason) ||
+		!equalImportOptionalTime(item.ClosedAt, existing.ClosedAt)
 }
 
 // ImportOwnsSameSourceVersionTitle reports whether an importer may correct a
@@ -164,6 +210,9 @@ func ImportedIssueUpdatedPayload(source, externalID string, existing Issue, item
 	}
 	if !equalImportOptionalTime(existing.ClosedAt, item.ClosedAt) {
 		payload["closed_at"] = optionalFormattedTime(item.ClosedAt)
+	}
+	if item.Status == "closed" && existing.AssignmentExpiresOn != nil {
+		payload["assignment_expires_on"] = nil
 	}
 	if item.CreatedAt.Before(existing.CreatedAt) {
 		payload["created_at"] = item.CreatedAt.UTC().Format(EventTimestampFormat)

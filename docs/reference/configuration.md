@@ -136,6 +136,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
+| `KATA_TICKTICK_TOKEN` | Default daemon-side TickTick access token; `[ticktick_sync].token_env` can select another environment variable. |
 | `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
 | `KATA_TODOIST_TOKEN` | Todoist daemon API token; `[todoist_sync].token_env` selects another variable. |
 | `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
@@ -361,6 +362,9 @@ api_origin = "https://api.twenty.com"
 web_origin = "https://app.twenty.com"
 token_env = "KATA_TWENTY_TOKEN"
 
+[ticktick_sync]
+token_env = "KATA_TICKTICK_TOKEN"
+
 [plane_sync]
 api_origin = "https://api.plane.so"
 web_origin = "https://app.plane.so"
@@ -424,7 +428,7 @@ configured interval. Ordinary health probes do not renew the timeout. A running
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
 checks in both stdio and streamable-HTTP modes so the bridge remains usable for
 its full lifetime. Use an explicit daemon service when
-GitHub/Notion/Plane/Linear/Twenty sync, federation, or timed-claim maintenance must remain continuously
+GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
@@ -1177,3 +1181,9 @@ literal loopback HTTP for isolated fixture APIs. Tokens are captured once per
 run, redirects are rejected, and binding requests cannot select credentials or
 origins. Configure the selected project and history floor with
 `kata sync todoist enable`. See [Todoist sync](../operations/todoist-sync.md).
+
+`[ticktick_sync]` selects the daemon-owned token environment variable through
+`token_env`, initially `KATA_TICKTICK_TOKEN`. The API origin is fixed to
+`https://api.ticktick.com`. Project scope and status direction are selected with
+`kata sync ticktick enable`. See [TickTick sync](../operations/ticktick-sync.md)
+for access tokens, field ownership, completion writeback, and recovery limits.

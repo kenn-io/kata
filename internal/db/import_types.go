@@ -123,6 +123,10 @@ type ImportBatchParams struct {
 	// to refresh only when observation, mapping, and issue timestamps match.
 	// Newer local edits remain authoritative. The public import API omits it.
 	ReconcileStatusForUnchanged bool
+	// ImportStatusObservations atomically acknowledges source status observations
+	// with their issue import so retries cannot replay them over a later local
+	// status change.
+	ImportStatusObservations map[string]IssueStatusObservation
 	// PreserveLocalParentConflicts leaves an existing local parent in place when
 	// a source-managed parent insert would create a second parent. Generic
 	// imports report ErrParentAlreadySet by default.

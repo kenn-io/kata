@@ -53,6 +53,7 @@ nav = [
     {"Linear sync" = "operations/linear-sync.md"},
     {"Twenty sync" = "operations/twenty-sync.md"},
     {"Todoist sync" = "operations/todoist-sync.md"},
+    {"TickTick sync" = "operations/ticktick-sync.md"},
     {"Federation" = "operations/federation.md"},
     {"Federation request signing" = "operations/federation-signing.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},

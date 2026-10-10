@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"time"
 )
 
@@ -93,10 +94,13 @@ func PublicIssueSyncConfig(config jsontext.Value) (jsontext.Value, error) {
 	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
 		return nil, invalidIssueStatusState()
 	}
-	if _, present := fields[issueStatusScanKey]; !present {
+	_, statusPresent := fields[issueStatusScanKey]
+	_, checkpointPresent := fields[IssueSyncProviderCheckpointKey]
+	if !statusPresent && !checkpointPresent {
 		return config, nil
 	}
 	delete(fields, issueStatusScanKey)
+	delete(fields, IssueSyncProviderCheckpointKey)
 	return json.Marshal(fields, json.Deterministic(true))
 }
 
@@ -149,21 +153,21 @@ func PreserveIssueStatusScanConfig(previous, next jsontext.Value) (jsontext.Valu
 	if err := json.Unmarshal(previous, &old); err != nil || old == nil {
 		return nil, invalidIssueStatusState()
 	}
-	if raw, present := old[issueStatusScanKey]; present {
-		if _, err := DecodeIssueStatusScan(previous); err != nil {
-			return nil, err
-		}
-		var fields map[string]jsontext.Value
-		if err := json.Unmarshal(clean, &fields); err != nil {
-			return nil, err
-		}
-		if fields == nil {
-			return nil, invalidIssueStatusState()
-		}
-		fields[issueStatusScanKey] = raw
-		return json.Marshal(fields, json.Deterministic(true))
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(clean, &fields); err != nil || fields == nil {
+		return nil, invalidIssueStatusState()
 	}
-	return clean, nil
+	for _, key := range []string{issueStatusScanKey, IssueSyncProviderCheckpointKey} {
+		if raw, present := old[key]; present {
+			if key == issueStatusScanKey {
+				if _, err := DecodeIssueStatusScan(previous); err != nil {
+					return nil, err
+				}
+			}
+			fields[key] = raw
+		}
+	}
+	return json.Marshal(fields, json.Deterministic(true))
 }
 
 // IssueStatusMode returns the configured mode, defaulting to one-way sync.
@@ -179,4 +183,33 @@ func IssueStatusMode(config jsontext.Value) (string, error) {
 		}
 	}
 	return mode, nil
+}
+
+// IssueSyncProviderCheckpointKey holds an adapter's private checkpoint inside
+// binding config. Exports and operator edits never supply or expose it.
+const IssueSyncProviderCheckpointKey = "_provider_checkpoint"
+
+// RefreshIssueSyncConfig stages a provider checkpoint only under a worker claim.
+// Normal metadata refresh and enable preserve private state rather than accept it.
+func RefreshIssueSyncConfig(previous IssueSyncBinding, p IssueSyncBindingUpdateParams) (jsontext.Value, error) {
+	merged, err := PreserveIssueStatusScanConfig(previous.Config, p.Config)
+	if err != nil || !p.ReplaceProviderCheckpoint {
+		return merged, err
+	}
+	if p.StartedAt == nil || p.BindingUpdatedAt == nil {
+		return nil, fmt.Errorf("%w: provider checkpoint requires a fenced worker claim", ErrImportValidation)
+	}
+	var next, fields map[string]jsontext.Value
+	if err = json.Unmarshal(p.Config, &next); err != nil {
+		return nil, err
+	}
+	raw, ok := next[IssueSyncProviderCheckpointKey]
+	if !ok || len(raw) > 2<<20 || len(raw) == 0 || raw[0] != '{' {
+		return nil, fmt.Errorf("%w: invalid provider checkpoint", ErrImportValidation)
+	}
+	if err = json.Unmarshal(merged, &fields); err != nil || fields == nil {
+		return nil, invalidIssueStatusState()
+	}
+	fields[IssueSyncProviderCheckpointKey] = raw
+	return json.Marshal(fields, json.Deterministic(true))
 }

@@ -91,6 +91,8 @@ type IssueSyncErrorParams struct {
 // IssueSyncBindingUpdateParams refreshes mutable provider-owned display/config
 // fields while preserving the source key and stable remote id.
 type IssueSyncBindingUpdateParams struct {
+	// ReplaceProviderCheckpoint permits a claimed worker to stage its provider checkpoint.
+	ReplaceProviderCheckpoint bool
 	// StartedAt fences runner-owned updates to an active claim when set.
 	StartedAt        *time.Time
 	BindingUpdatedAt *time.Time

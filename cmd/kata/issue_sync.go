@@ -24,6 +24,8 @@ func issueSyncLabel(provider string) string {
 		return "Plane"
 	case "linear":
 		return "Linear"
+	case "ticktick":
+		return "TickTick"
 	default:
 		return provider
 	}

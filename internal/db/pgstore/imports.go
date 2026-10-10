@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -218,6 +219,31 @@ WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
 	return params, nil
 }
 
+func acknowledgeImportStatusObservationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	mappingID int64,
+	incoming db.IssueStatusObservation,
+) (bool, error) {
+	var raw, observedAt *string
+	if err := tx.QueryRowContext(ctx, `SELECT observed_status,CAST(observed_status_at AS TEXT) FROM import_mappings WHERE id=$1 FOR UPDATE`, mappingID).Scan(&raw, &observedAt); err != nil {
+		return false, mapSQLError(err, nil)
+	}
+	state, err := db.DecodeIssueStatusColumns(raw, observedAt, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	newer, err := db.IsNewImportStatusObservation(state.Observed, incoming)
+	if err != nil || !newer {
+		return false, err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE import_mappings SET observed_status=$1,observed_status_at=$2 WHERE id=$3`, incoming.Raw, incoming.Version.UTC().Format(time.RFC3339Nano), mappingID)
+	if err != nil {
+		return false, mapSQLError(err, nil)
+	}
+	return true, nil
+}
+
 func (s *Store) importIssue(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -236,16 +262,30 @@ func (s *Store) importIssue(
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
+		createdMapping, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
 			Source: params.Source, ExternalID: item.ExternalID, ObjectType: "issue",
 			ProjectID: params.ProjectID, IssueID: &issue.ID, SourceUpdatedAt: &item.UpdatedAt,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, nil, err
+		}
+		if observation, ok := params.ImportStatusObservations[item.ExternalID]; ok {
+			if _, err := acknowledgeImportStatusObservationTx(ctx, tx, createdMapping.ID, observation); err != nil {
+				return nil, nil, err
+			}
 		}
 		return &importIssueState{item: item, issue: issue, created: true, sourceNewer: true}, &event, nil
 	}
 	if mapping.IssueID == nil {
 		return nil, nil, fmt.Errorf("%w: issue mapping missing issue_id", db.ErrNotFound)
+	}
+	newStatusObservation := false
+	observation, hasStatusObservation := params.ImportStatusObservations[item.ExternalID]
+	if hasStatusObservation {
+		newStatusObservation, err = acknowledgeImportStatusObservationTx(ctx, tx, mapping.ID, observation)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	existing, err := scanIssue(tx.QueryRowContext(ctx,
 		issueSelect+` WHERE i.id=$1 AND i.deleted_at IS NULL FOR UPDATE OF i`, *mapping.IssueID))
@@ -253,6 +293,8 @@ func (s *Store) importIssue(
 		return nil, nil, err
 	}
 	if params.ManageStatusSeparately {
+		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
+	} else if hasStatusObservation && db.ImportKeepsNativeWorkflow(existing, item, newStatusObservation) {
 		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
 	}
 	sourceCurrent := mapping.SourceUpdatedAt != nil &&
@@ -264,6 +306,13 @@ func (s *Store) importIssue(
 	if (params.ReconcileLabelsForUnchanged != nil || params.ReconcileStatusForUnchanged) && mapping.SourceUpdatedAt != nil &&
 		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || (params.ReconcileLabelsForUnchanged != nil && !observedPresentation)) {
 		sourceUpdatedAt = *mapping.SourceUpdatedAt
+	}
+	if newStatusObservation && !item.UpdatedAt.After(existing.UpdatedAt) && db.ImportedWorkflowStatusDiffers(existing, item) {
+		updated, event, err := s.updateImportedIssue(ctx, tx, params, db.ImportedStatusOnlyItem(existing, item), existing, project)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
 	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, event, err := s.updateImportedIssue(ctx, tx, params, item, existing, project)
@@ -396,21 +445,19 @@ func (s *Store) updateImportedIssue(
 		bump = `,content_revision=content_revision+1`
 	}
 	owner := db.NormalizeImportOwner(item.Owner)
-	if item.Status != existing.Status || !equalStringPointers(owner, existing.Owner) {
+	if item.Status != existing.Status || !equalStringPointers(owner, existing.Owner) || (item.Status == "closed" && existing.AssignmentExpiresOn != nil) {
 		bump += `,revision=revision+1`
 	}
 	var closedAt any
 	if item.ClosedAt != nil {
 		closedAt = formatStoredTime(*item.ClosedAt)
 	}
-	// The NULL-safe owner comparison mirrors ImportedIssueUpdatedPayload: the
-	// issue.updated event folds a deadline clear exactly when the normalized
-	// owner changes, so the persisted row must drop assignment_expires_on on
-	// the same condition and never leave an expiry behind a replaced (or NULL)
-	// owner. `owner` in the CASE reads the pre-update value.
+	// Preserve a timed owner while it is open, but make ownership permanent
+	// when the source closes the issue. `owner` in the CASE reads the
+	// pre-update value.
 	_, err := tx.ExecContext(ctx, `UPDATE issues SET
 title=$1,body=$2,status=$3,closed_reason=$4,owner=$5,
-assignment_expires_on=CASE WHEN owner IS DISTINCT FROM $5 THEN NULL ELSE assignment_expires_on END,
+assignment_expires_on=CASE WHEN owner IS DISTINCT FROM $5 OR $3='closed' THEN NULL ELSE assignment_expires_on END,
 created_at=$6,
 updated_at=$7,closed_at=$8,priority=$9`+bump+` WHERE id=$10`,
 		item.Title, item.Body, item.Status, item.ClosedReason, owner,
