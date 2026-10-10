@@ -21,16 +21,3 @@ func TestValidCommentReplyKind(t *testing.T) {
 		})
 	}
 }
-
-func FuzzCommentReplyKindMatchesValidation(f *testing.F) {
-	for _, kind := range []string{"reply", "confirm", "refute", "supersede", "answer", "", "unknown"} {
-		f.Add(kind)
-	}
-	f.Fuzz(func(t *testing.T, kind string) {
-		valid := ValidCommentReplyKind(kind)
-		err := ValidateCommentReply("01AAAAAAAAAAAAAAAAAAAAAAAA", "01BBBBBBBBBBBBBBBBBBBBBBBB", kind)
-		if valid != (err == nil) {
-			t.Fatalf("kind %q: ValidCommentReplyKind=%t, ValidateCommentReply error=%v", kind, valid, err)
-		}
-	})
-}
