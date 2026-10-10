@@ -54,7 +54,7 @@ func loadIssueStatusMappingTx(ctx context.Context, tx *sql.Tx, binding db.IssueS
 		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, *mapping.IssueID).Scan(&issueUID); err != nil {
 			return db.IssueStatusMapping{}, err
 		}
-		if event.ProjectID != binding.ProjectID || event.IssueUID == nil || *event.IssueUID != issueUID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
+		if event.ProjectID != binding.ProjectID || db.FederationEventIssueUID(event.IssueUID, event.Payload) != issueUID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return db.IssueStatusMapping{}, fmt.Errorf("%w: pending status event belongs to a different identity or mutation", db.ErrImportValidation)
 		}
 		result.PendingEvent = &event
@@ -169,24 +169,37 @@ WHERE issue_id=$2 AND project_id=$3 AND object_type='issue'
 // Prior status clocks come from the already loaded event slice, not a second
 // persisted clock or another database read of the project's history.
 func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, acceptedUIDs []string, current db.FoldProjection) error {
+	updates, err := prepareFederatedStatusIntentTx(ctx, tx, projectID, events, acceptedUIDs, current)
+	if err != nil {
+		return err
+	}
+	return applyFederatedStatusIntentTx(ctx, tx, updates)
+}
+
+type federatedStatusIntentUpdate struct {
+	id       int64
+	eventUID string
+}
+
+func prepareFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, acceptedUIDs []string, current db.FoldProjection) ([]federatedStatusIntentUpdate, error) {
 	if len(acceptedUIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	binding, err := issueSyncBindingByProject(ctx, tx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var config struct {
 		Mode string `json:"status_sync"`
 	}
 	if err := json.Unmarshal(binding.Config, &config); err != nil {
-		return err
+		return nil, err
 	}
 	if config.Mode != "two-way" {
-		return nil
+		return nil, nil
 	}
 	acceptedSet := make(map[string]bool, len(acceptedUIDs))
 	for _, uid := range acceptedUIDs {
@@ -201,12 +214,16 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 		}
 		switch event.Type {
 		case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
-			accepted[event.IssueUID] = append(accepted[event.IssueUID], event)
+			issueUID := db.FederationEventIssueUID(&event.IssueUID, string(event.Payload))
+			if issueUID != "" {
+				accepted[issueUID] = append(accepted[issueUID], event)
+			}
 		}
 	}
 	if len(accepted) == 0 {
-		return nil
+		return nil, nil
 	}
+	var updates []federatedStatusIntentUpdate
 	previous := db.FoldEvents(history)
 	for _, issue := range current.SortedIssues() {
 		incoming := accepted[issue.UID]
@@ -216,7 +233,7 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 		rows, err := tx.QueryContext(ctx, `SELECT m.id,m.pending_event_uid FROM import_mappings m JOIN issues i ON i.id=m.issue_id
  WHERE m.project_id=$1 AND m.source=$2 AND m.object_type='issue' AND i.uid=$3 ORDER BY m.id`, projectID, binding.SourceKey, issue.UID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		type checkpoint struct {
 			id      int64
@@ -227,25 +244,32 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 			var value checkpoint
 			if err := rows.Scan(&value.id, &value.pending); err != nil {
 				_ = rows.Close()
-				return err
+				return nil, err
 			}
 			mappings = append(mappings, value)
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
+			return nil, err
 		}
 		for _, mapping := range mappings {
 			next := db.ReconcileFoldStatusIntent(previous.Issues[issue.UID], issue, mapping.pending.String, incoming)
 			if next == mapping.pending.String {
 				continue
 			}
-			var value any
-			if next != "" {
-				value = next
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=$1 WHERE id=$2`, value, mapping.id); err != nil {
-				return err
-			}
+			updates = append(updates, federatedStatusIntentUpdate{id: mapping.id, eventUID: next})
+		}
+	}
+	return updates, nil
+}
+
+func applyFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, updates []federatedStatusIntentUpdate) error {
+	for _, update := range updates {
+		var value any
+		if update.eventUID != "" {
+			value = update.eventUID
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=$1 WHERE id=$2`, value, update.id); err != nil {
+			return err
 		}
 	}
 	return nil

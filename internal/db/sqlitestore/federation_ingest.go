@@ -60,9 +60,6 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 	result := db.FederationIngestResult{RequiredEventFeatures: required}
-	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
-		return db.FederationIngestResult{}, err
-	}
 	for _, input := range p.Events {
 		if err := db.RequireEventFeatures(p.EventFeatures, db.EventRequiredFeatures(input.Event.Type)); err != nil {
 			return db.FederationIngestResult{}, err
@@ -191,7 +188,16 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 
-	linksAffected := false
+	materialization, err := prepareFederationMaterializationTx(ctx, tx, p.ProjectID, prepared)
+	if err != nil {
+		return db.FederationIngestResult{}, err
+	}
+	if materialization != nil && d.federationIngestPrepared != nil {
+		d.federationIngestPrepared()
+	}
+	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
+		return db.FederationIngestResult{}, err
+	}
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -213,9 +219,6 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		result.Accepted++
-		if db.FederationEventAffectsLinks(ev.Type) {
-			linksAffected = true
-		}
 		result.InsertedEventUIDs = append(result.InsertedEventUIDs, ev.EventUID)
 		result.Events = append(result.Events, auditEvents...)
 		for _, auditEvent := range auditEvents {
@@ -223,10 +226,7 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if result.Accepted > 0 {
-		// The generated claim audit events are never link-bearing, so the
-		// accepted batch alone decides whether the binding-group link fold has
-		// any work to do.
-		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, linksAffected, result.InsertedEventUIDs, cronValidator); err != nil {
+		if err := materialization.apply(ctx, tx, p.ProjectID, cronValidator); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {

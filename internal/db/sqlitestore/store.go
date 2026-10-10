@@ -41,17 +41,18 @@ var ErrSchemaCutoverRequired = errors.New("schema cutover required")
 // consistent snapshot even if other writers commit mid-export.
 type Store struct {
 	*sql.DB
-	path                  string
-	instanceUID           string
-	replaceTargetMetadata bool
-	readOnly              bool
-	readQ                 readQuerier
-	idempotencyLocks      *idempotencyLockSet
-	rotationStage         func(context.Context) error
-	uiReadStage           func(context.Context) error
-	uiProjectStatsRead    func()
-	uiLinkDetailRead      func()
-	externalRootNow       func() time.Time
+	path                     string
+	instanceUID              string
+	replaceTargetMetadata    bool
+	readOnly                 bool
+	readQ                    readQuerier
+	idempotencyLocks         *idempotencyLockSet
+	rotationStage            func(context.Context) error
+	uiReadStage              func(context.Context) error
+	uiProjectStatsRead       func()
+	uiLinkDetailRead         func()
+	externalRootNow          func() time.Time
+	federationIngestPrepared func()
 }
 
 // readQuerier is the read-only query surface shared between *sql.DB and *sql.Tx.

@@ -1741,6 +1741,10 @@ func reconcileFederatedIssues(
 	if err != nil {
 		return nil, err
 	}
+	return reconcileFederatedIssuesFromRows(ctx, tx, projectID, projection, existing)
+}
+
+func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection, existing map[string]federatedIssueRow) (map[string]int64, error) {
 	out := map[string]int64{}
 	for _, issue := range projection.SortedIssues() {
 		uid := issue.UID
@@ -1887,6 +1891,7 @@ func resolveFederatedIssueShortID(
 }
 
 type federatedIssueRow struct {
+	values  []any
 	id      int64
 	shortID string
 	title   string
@@ -1896,7 +1901,10 @@ type federatedIssueRow struct {
 
 func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]federatedIssueRow, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT uid, id, short_id, title, body, deleted_at IS NOT NULL FROM issues WHERE project_id = ?`, projectID)
+		`SELECT uid, id, short_id, title, body, status, closed_reason, owner,
+ CAST(assignment_expires_on AS TEXT), priority, author, CAST(created_at AS TEXT),
+ CAST(updated_at AS TEXT), CAST(closed_at AS TEXT), CAST(deleted_at AS TEXT), metadata
+ FROM issues WHERE project_id = ?`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list federated issue rows: %w", err)
 	}
@@ -1905,9 +1913,18 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (
 	for rows.Next() {
 		var uid string
 		var row federatedIssueRow
-		if err := rows.Scan(&uid, &row.id, &row.shortID, &row.title, &row.body, &row.deleted); err != nil {
+		row.values = make([]any, 14)
+		targets := []any{&uid, &row.id}
+		for i := range row.values {
+			targets = append(targets, &row.values[i])
+		}
+		if err := rows.Scan(targets...); err != nil {
 			return nil, fmt.Errorf("scan federated issue row: %w", err)
 		}
+		row.shortID = row.values[0].(string)
+		row.title = row.values[1].(string)
+		row.body = row.values[2].(string)
+		row.deleted = row.values[12] != nil
 		out[uid] = row
 	}
 	return out, rows.Err()
@@ -1920,6 +1937,10 @@ func reconcileFederatedComments(
 	if err != nil {
 		return err
 	}
+	return reconcileFederatedCommentsFromRows(ctx, tx, issueIDs, projection, existing)
+}
+
+func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueIDs map[string]int64, projection db.FoldProjection, existing map[string]federatedCommentRow) error {
 	sorted := projection.SortedComments()
 	desired := make(map[string]struct{}, len(sorted))
 	for _, comment := range sorted {
@@ -1957,6 +1978,11 @@ func reconcileFederatedComments(
 				}
 				continue
 			}
+			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
+				row.body == comment.Body && row.teammate == comment.Teammate &&
+				row.createdAt == nonEmptyTime(comment.CreatedAt) {
+				continue
+			}
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, '') WHERE id = ?`,
 				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, row.id); err != nil {
@@ -1974,9 +2000,12 @@ func reconcileFederatedComments(
 }
 
 type federatedCommentRow struct {
-	id       int64
-	body     string
-	teammate string
+	id        int64
+	issueID   int64
+	author    string
+	createdAt string
+	body      string
+	teammate  string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -1998,7 +2027,7 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 
 func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]federatedCommentRow, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT c.uid, c.id, c.body, c.teammate
+		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`, projectID)
@@ -2011,7 +2040,7 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64)
 		var uid string
 		var row federatedCommentRow
 		var teammate sql.NullString
-		if err := rows.Scan(&uid, &row.id, &row.body, &teammate); err != nil {
+		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
 		row.teammate = teammate.String
@@ -2032,6 +2061,10 @@ func reconcileFederatedLabels(
 	if err != nil {
 		return err
 	}
+	return reconcileFederatedLabelsFromRows(ctx, tx, issueIDs, projection, existing)
+}
+
+func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs map[string]int64, projection db.FoldProjection, existing map[federatedLabelKey]struct{}) error {
 	desired := map[federatedLabelKey]struct{}{}
 	for _, key := range projection.PresentLabels() {
 		issueID, ok := issueIDs[key.IssueUID]
@@ -2124,6 +2157,13 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
+	return reconcileFederatedLinkProjection(ctx, tx, projection, desiredProjectIDs, ownedProjectIDs, currentProjectID, currentIssueIDs)
+}
+
+func reconcileFederatedLinkProjection(
+	ctx context.Context, tx *sql.Tx, projection db.FoldProjection,
+	desiredProjectIDs, ownedProjectIDs []int64, currentProjectID int64, currentIssueIDs map[string]int64,
+) error {
 	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs)
 	if err != nil {
 		return err
@@ -2132,6 +2172,10 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
+	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
+}
+
+func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
