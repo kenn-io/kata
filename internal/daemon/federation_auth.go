@@ -21,6 +21,7 @@ type federationPrincipal struct {
 }
 
 type federationAuthorization struct {
+	capability       string
 	principal        federationPrincipal
 	transactionFence db.TransactionFence
 }
@@ -43,13 +44,29 @@ func authorizeFederationRequest(
 	capability string,
 	operation HostFederationOperation,
 ) (context.Context, federationPrincipal, error) {
+	return authorizeFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{capability}, operation)
+}
+
+// authorizeFederationRequestForCapabilities accepts one of the route's explicit
+// federation directions. Metadata is shared by push and pull clients for wire
+// feature negotiation; the successful direction still controls its transaction
+// fence and host access decision.
+func authorizeFederationRequestForCapabilities(
+	ctx context.Context,
+	cfg ServerConfig,
+	authHeader string,
+	projectID int64,
+	capabilities []string,
+	operation HostFederationOperation,
+) (context.Context, federationPrincipal, error) {
+	capabilityKey := strings.Join(capabilities, ",")
 	authorization, ok := federationAuthorizationFromContext(
-		ctx, authHeader, projectID, capability, operation,
+		ctx, authHeader, projectID, capabilityKey, operation,
 	)
 	if !ok {
 		var err error
-		authorization, err = evaluateFederationRequest(
-			ctx, cfg, authHeader, projectID, capability, operation,
+		authorization, err = evaluateFederationRequestForCapabilities(
+			ctx, cfg, authHeader, projectID, capabilities, operation,
 		)
 		if err != nil {
 			return ctx, federationPrincipal{}, err
@@ -99,6 +116,17 @@ func evaluateFederationRequest(
 	capability string,
 	operation HostFederationOperation,
 ) (federationAuthorization, error) {
+	return evaluateFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{capability}, operation)
+}
+
+func evaluateFederationRequestForCapabilities(
+	ctx context.Context,
+	cfg ServerConfig,
+	authHeader string,
+	projectID int64,
+	capabilities []string,
+	operation HostFederationOperation,
+) (federationAuthorization, error) {
 	if !strings.HasPrefix(authHeader, authBearerPrefix) {
 		return federationAuthorization{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"Authorization bearer required", "", nil)
@@ -109,13 +137,22 @@ func evaluateFederationRequest(
 			"Authorization bearer required", "", nil)
 	}
 
-	enrollment, err := cfg.DB.AuthorizeFederationToken(ctx, token, projectID, capability)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return federationAuthorization{}, api.NewError(http.StatusForbidden, "auth_invalid",
-				"federation token is invalid for this project or capability", "", nil)
+	var enrollment db.FederationEnrollment
+	capability := ""
+	for _, candidate := range capabilities {
+		var err error
+		enrollment, err = cfg.DB.AuthorizeFederationToken(ctx, token, projectID, candidate)
+		if err == nil {
+			capability = candidate
+			break
 		}
-		return federationAuthorization{}, internalAPIError(err)
+		if !errors.Is(err, db.ErrNotFound) {
+			return federationAuthorization{}, internalAPIError(err)
+		}
+	}
+	if capability == "" {
+		return federationAuthorization{}, api.NewError(http.StatusForbidden, "auth_invalid",
+			"federation token is invalid for this project or capability", "", nil)
 	}
 	project, err := activeProjectByID(ctx, cfg.DB, projectID)
 	if err != nil {
@@ -162,6 +199,7 @@ func evaluateFederationRequest(
 		scopedProjectID = *enrollment.ProjectID
 	}
 	return federationAuthorization{
+		capability: capability,
 		principal: federationPrincipal{
 			EnrollmentID:                 enrollment.ID,
 			ScopedProjectID:              scopedProjectID,

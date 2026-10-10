@@ -1040,7 +1040,9 @@ func TestAdoptProjectIntoFederationReconcilesDeferredGroupLinks(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, inserted)
 	}
-	require.NoError(t, d.MaterializeFederatedProject(ctx, firstProject.ID))
+	if err := d.MaterializeFederatedProject(ctx, firstProject.ID); err != nil {
+		require.NoError(t, err)
+	}
 	assertRowCount(ctx, t, d, 0, "link waits for adopted peer project",
 		`SELECT count(*) FROM links
 		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
@@ -4621,7 +4623,9 @@ func TestMaterializeFederatedProject(t *testing.T) {
 		require.True(t, inserted)
 	}
 
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -4639,7 +4643,9 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"area":"federation"}`, string(project.Metadata))
 	projectRevision := project.Revision
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 	unchangedProject, err := d.ProjectByID(ctx, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, projectRevision, unchangedProject.Revision, "duplicate materialization must not bump project revision")
@@ -4671,7 +4677,9 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	inserted, err := d.InsertRemoteEvent(ctx, p.ID, expired)
 	require.NoError(t, err)
 	require.True(t, inserted)
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 	issue, err = d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Nil(t, issue.Owner)
@@ -4739,8 +4747,12 @@ func TestMaterializeFederatedProjectGroupsCrossProjectLinksByHubOrigin(t *testin
 			require.NoError(t, err)
 			require.True(t, inserted)
 
-			require.NoError(t, d.MaterializeFederatedProject(ctx, firstProject.ID))
-			require.NoError(t, d.MaterializeFederatedProject(ctx, secondProject.ID))
+			if err := d.MaterializeFederatedProject(ctx, firstProject.ID); err != nil {
+				require.NoError(t, err)
+			}
+			if err := d.MaterializeFederatedProject(ctx, secondProject.ID); err != nil {
+				require.NoError(t, err)
+			}
 
 			assertRowCount(ctx, t, d, tc.wantLinks, "cross-project link count",
 				`SELECT count(*) FROM links
@@ -4804,7 +4816,9 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	require.NoError(t, err)
 	require.True(t, inserted)
 
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 	reconciled, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, issue.ID, reconciled.ID)
@@ -4816,7 +4830,9 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 		"federated title/body update must mark embeddings stale")
 	reconciledRevision := reconciled.Revision
 
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 	unchanged, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, reconciledRevision, unchanged.Revision, "duplicate materialization must not bump issue revision")
@@ -4860,7 +4876,9 @@ func TestMaterializeFederatedProjectExtendsCollidingIncomingShortIDs(t *testing.
 		require.True(t, inserted)
 	}
 
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	if err := d.MaterializeFederatedProject(ctx, p.ID); err != nil {
+		require.NoError(t, err)
+	}
 
 	a, err := d.IssueByUID(ctx, uidA, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -5659,8 +5677,12 @@ func TestLeaveFederationReplicaPreservesDetachedProjectState(t *testing.T) {
 	inserted, err = d.InsertRemoteEvent(ctx, secondProject.ID, thirdSnapshot)
 	require.NoError(t, err)
 	require.True(t, inserted)
-	require.NoError(t, d.MaterializeFederatedProject(ctx, firstProject.ID))
-	require.NoError(t, d.MaterializeFederatedProject(ctx, secondProject.ID))
+	if err := d.MaterializeFederatedProject(ctx, firstProject.ID); err != nil {
+		require.NoError(t, err)
+	}
+	if err := d.MaterializeFederatedProject(ctx, secondProject.ID); err != nil {
+		require.NoError(t, err)
+	}
 	assertRowCount(ctx, t, d, 1, "link exists before leaving group",
 		`SELECT count(*) FROM links
 		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,

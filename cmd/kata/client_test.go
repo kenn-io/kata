@@ -535,7 +535,12 @@ func newUnixGeneratedTestClient(t *testing.T, handler http.Handler, timeout time
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_HTTP_TIMEOUT", timeout.String())
-	socketPath := filepath.Join(t.TempDir(), "daemon.sock")
+	// Unix socket names include the full path; subtest names can exceed the
+	// platform limit even with a short TMPDIR. Keep this owned fixture short.
+	socketDir, err := os.MkdirTemp("", "kata-uds-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+	socketPath := filepath.Join(socketDir, "daemon.sock")
 	listener, err := net.Listen("unix", socketPath)
 	require.NoError(t, err)
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}

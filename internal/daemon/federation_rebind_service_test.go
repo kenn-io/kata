@@ -54,9 +54,7 @@ func (s rebindBlockingClaimCommitStore) ApplyClaimStatus(
 	return s.Storage.ApplyClaimStatus(ctx, projectID, issueUID, status)
 }
 
-func (s rebindFailingStore) RebindFederationBinding(
-	context.Context, db.RebindFederationBindingParams,
-) (db.FederationBinding, error) {
+func (s rebindFailingStore) RebindFederationBinding(context.Context, db.RebindFederationBindingParams) (db.FederationBinding, error) {
 	return db.FederationBinding{}, s.err
 }
 

@@ -756,6 +756,8 @@ func registerDestructive(humaAPI huma.API, cfg ServerConfig) {
 // registerRecurrences registers the recurrence CRUD routes.
 func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 	registerRecurrencesHandlers(humaAPI, cfg)
+	registerCronDefinitionHandlers(humaAPI, cfg)
+	registerCronRunHandlers(humaAPI, cfg)
 }
 
 // registerMetadata registers metadata patch routes.

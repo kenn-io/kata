@@ -28,6 +28,22 @@ type PurgeProjectBody = ProjectPurgeRequestBody
 
 type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
 
+type CreateCronJobBody = PutCronJobBody
+
+type ArchiveCronJobBody = CronDefinitionActionBody
+
+type ReplaceCronJobBody = PutCronJobBody
+
+type RestoreCronJobBody = CronDefinitionActionBody
+
+type CreateCronWorkflowBody = PutCronWorkflowBody
+
+type ArchiveCronWorkflowBody = CronDefinitionActionBody
+
+type ReplaceCronWorkflowBody = PutCronWorkflowBody
+
+type RestoreCronWorkflowBody = CronDefinitionActionBody
+
 type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody

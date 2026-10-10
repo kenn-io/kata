@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-08
+last_edited: 2026-10-09
 ---
 
 # Backup and restore
@@ -93,8 +93,20 @@ The target must not exist unless `--force` is set. To use the restored
 database, stop the daemon, point `KATA_DSN` or `KATA_DB` at the restored file,
 or move it into `KATA_HOME` as `kata.db`, then restart.
 
-Without `--merge`, `kata import` creates a target database from the input
+Without `--merge`, `kata import` replaces the target contents with the input
 snapshot. It does not add records to an existing database.
+
+For SQLite, `--force` replaces an existing current-schema database in one
+transaction while keeping its file identity. It refuses an existing target with
+an older or unknown schema version without upgrading or modifying it. Restore to a fresh path
+with the command above, or explicitly upgrade the existing target separately
+before retrying. Orphan `-wal` or `-shm` files also cause refusal: recover or
+remove that file set explicitly, or choose a fresh destination. A destination
+that appears after import starts is never overwritten, even with `--force`.
+
+Shared cron definitions and independent run observations are portable backup
+data. A run with `running` or `unknown` status does not prevent an explicitly
+requested replacement.
 
 For Postgres, pass a DSN as the target:
 

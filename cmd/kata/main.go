@@ -146,6 +146,7 @@ func newRootCmd() *cobra.Command {
 		newWaitCmd(),
 		newSyncCmd(),
 		newFederationCmd(),
+		newCronCmd(),
 		newEventsCmd(),
 		newExportCmd(),
 		newImportCmd(),

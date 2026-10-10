@@ -90,7 +90,8 @@ func (s *Store) ExportSequences(ctx context.Context) iter.Seq2[db.SequenceExport
 ('comments'),('links'),('import_mappings'),('events'),('purge_log'),
 ('project_purge_log'),('api_tokens'),('federation_quarantine'),
 ('federation_enrollments'),('issue_claims'),('pending_claim_requests'),
-('external_root_bindings'),('external_field_mappings')
+('external_root_bindings'),('external_field_mappings'),
+('cron_jobs'),('cron_workflows'),('cron_runs')
 )
 SELECT t.name, COALESCE(s.last_value,0)
 FROM identity_tables t

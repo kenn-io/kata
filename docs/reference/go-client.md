@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-09-28
+last_edited: 2026-10-09
 ---
 
 # Go client
@@ -124,3 +124,45 @@ As with any daemon that has no identity tokens, write requests must name an
 
 To exercise `client.Discover`, set `KATA_SERVER` to `server.Endpoint` and
 `KATA_AUTH_TOKEN` to the token.
+
+## Native cron identities
+
+Use `client.NewCronUID()` once for a definition or independent run and
+retain that normalized ULID with its intended request. The helper makes no
+network request. Generated clients never substitute a new UID after an error.
+
+```go
+runUID, err := client.NewCronUID()
+if err != nil {
+    return err
+}
+// Persist runUID and body before submission; reuse both after a timeout.
+result, err := api.ObserveCronRunWithResponse(ctx,
+    &generated.ObserveCronRunRequestOptions{
+        PathParams: &generated.ObserveCronRunPath{
+            ProjectID: projectID, RunUID: runUID,
+        },
+        Body: &body,
+    })
+```
+
+New evidence uses `ExpectedRevision: 0`; changed mutable evidence needs the
+current revision. Exact same-write retries return replayed without another
+event or revision, even with a stale expected revision. Immutable identity
+changes conflict. Distinct run UIDs may share an occurrence key and issue.
+Statuses are evidence and never authorize a process.
+
+For stable job/workflow creation, retain a UID and use `ReplaceCronJob` or
+`ReplaceCronWorkflow` with that path UID and absent `ExpectedEventUID`. A 409
+requires inspecting that same UID and comparing the complete live definition;
+later edits and tombstones are not successful creation retries.
+
+Typed definition options retain exact JSON numbers as `json.Number`, including
+nested objects and arrays. Preserve those values when re-submitting a definition;
+converting them to float64 can round large integers and decimals. Both plain
+and `WithResponse` methods preserve them. Published response schemas accept
+additive fields while request schemas remain strict; where the generated
+response type differs from the request type, marshal and decode the definition
+into its request DTO before submitting it. Native planning dates are available
+through `IssuePlanningDatesWithResponse` using ordinary project and issue read
+policy. See [Native cron](cron.md) for the full contract.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -59,6 +60,12 @@ func ValidateImportRecords(records []ImportRecord) error {
 			return fmt.Errorf("import record %d: %w", i, err)
 		}
 	}
+	if err := validateCronImportEvents(records); err != nil {
+		return err
+	}
+	if err := validateCronImportReferences(records); err != nil {
+		return err
+	}
 	if err := validateReplayExternalFieldMappingIdentities(records); err != nil {
 		return err
 	}
@@ -66,6 +73,36 @@ func ValidateImportRecords(records []ImportRecord) error {
 		return err
 	}
 	return validateReplayBindingScopedMappings(records)
+}
+
+// Validate complete portable cron documents before either backend clears
+// a replacement target. Cron event payloads must decode strictly against the
+// current event shape and reference an imported project.
+func validateCronImportEvents(records []ImportRecord) error {
+	projects := make(map[int64]string)
+	for _, record := range records {
+		if project, ok := record.(*ProjectExport); ok {
+			projects[project.ID] = project.UID
+		}
+	}
+	for _, record := range records {
+		event, ok := record.(*EventExport)
+		if !ok || !strings.HasPrefix(event.Type, "cron.") {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339Nano, event.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("cron import event timestamp: %w", err)
+		}
+		if err := ValidateAcceptedCronEvent(RemoteEvent{
+			EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: projects[event.ProjectID],
+			Actor: event.Actor, Type: event.Type, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+			Payload: event.Payload, CreatedAt: created,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateReplayStatusIntent(records []ImportRecord) error {
@@ -219,6 +256,8 @@ func validateReplayBindingScopedMappings(records []ImportRecord) error {
 
 func validateImportRecord(record ImportRecord) error {
 	switch rec := record.(type) {
+	case *CronJobExport, *CronWorkflowExport, *CronRunExport:
+		return ValidateCronRecord(record)
 	case nil:
 		return errors.New("nil record")
 	case *MetaKV:
@@ -277,6 +316,11 @@ func validateImportRecord(record ImportRecord) error {
 		if err := requireImportPayload(rec, ImportKindEvent); err != nil {
 			return err
 		}
+		if strings.HasPrefix(rec.Type, "cron.") {
+			if _, _, err := FederationEventWireVersion(rec.Type); err != nil {
+				return err
+			}
+		}
 		return ValidateFederationEntries(rec.Type, rec.UID, rec.Payload)
 	case *PurgeLogExport:
 		return requireImportPayload(rec, ImportKindPurgeLog)
@@ -312,6 +356,8 @@ func OrderImportRecords(records []ImportRecord) []ImportRecord {
 
 func importReplayRank(kind string) int {
 	switch kind {
+	case ImportKindCronJob, ImportKindCronWorkflow, ImportKindCronRun:
+		return 2
 	case ImportKindMeta:
 		return 0
 	case ImportKindProject:

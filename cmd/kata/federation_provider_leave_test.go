@@ -23,34 +23,6 @@ import (
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
-// The helper is an external executable. It accepts release only for the exact
-// saved request, after the daemon has durably marked the connection as leaving.
-func TestLeaveProviderProcess(_ *testing.T) {
-	if os.Getenv("KATA_TEST_LEAVE_PROVIDER") != "1" {
-		return
-	}
-	r, err := federationprovider.DecodeRequest(os.Stdin)
-	if err != nil || r.Operation != "release" {
-		os.Exit(2)
-	}
-	entries, err := config.ReadFederationCredentials()
-	if err != nil {
-		os.Exit(2)
-	}
-	for _, c := range entries.Projects {
-		if c.Provider != nil && c.Provider.RequestID == r.RequestID && c.LeavePending {
-			err := federationprovider.WriteResponse(os.Stdout, r, federationprovider.Response{
-				Version: 1, Operation: r.Operation, RequestID: r.RequestID,
-				Status: federationprovider.Status(os.Getenv("KATA_TEST_LEAVE_DECISION")),
-			})
-			if err == nil {
-				os.Exit(0)
-			}
-		}
-	}
-	os.Exit(2)
-}
-
 func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
@@ -75,8 +47,7 @@ func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) {
 	env := testenv.New(t)
 	t.Setenv("KATA_TEST_LEAVE_PROVIDER", "1")
 	t.Setenv("KATA_TEST_LEAVE_DECISION", "unavailable")
-	executable, err := os.Executable()
-	require.NoError(t, err)
+	executable := externalFixtureBinary(t, "leave-provider")
 	var hubCalls atomic.Int32
 	hub := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hubCalls.Add(1)
@@ -93,7 +64,7 @@ func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) {
 	require.True(t, found)
 	c.ManagedByConfig, c.HubCatalog, c.HubProjectName, c.SpokeProjectName = true, "team-hub", "hub-project", project.Name
 	c.Provider = &config.FederationProviderCredential{
-		RequestID: uuid.New(), Command: []string{executable, "-test.run=^TestLeaveProviderProcess$"},
+		RequestID: uuid.New(), Command: []string{executable},
 		Intent: "collaborate", Status: "ready", SpokeInstanceUID: env.DB.InstanceUID(),
 		LocalProjectUID: project.UID, HubProjectUID: project.UID, EnrollmentID: 7,
 		ExpiresAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),

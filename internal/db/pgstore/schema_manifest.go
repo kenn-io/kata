@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "296b297d7f2e06a90d7d93e89fc851903eba4a8d7d41316aca0a4db6dca8e103"
-	canonicalConstraintFingerprint = "184a76b16fd874ccbf2a59d0e100f9958ea3dc799ddddbcda86d800363a0e92f"
-	canonicalIndexFingerprint      = "a827a2c2fa61f2ac0782385bec439033625c9869c656d2190dc80e30a33ab543"
+	canonicalColumnFingerprint     = "233ddee00697dc597fe7294f01cd8cb5d2d5875a3ee1cfc1836720140bcd6daa"
+	canonicalConstraintFingerprint = "0b7b1eadece1bd5a5b204b408d2ecf6f18c2a888cb04aa0ebc9624d1d8817f80"
+	canonicalIndexFingerprint      = "d9830877a98c98ea6d76e971c6d3d8e58d0c2978298ae597108fa4d941969301"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -22,7 +22,11 @@ const (
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
-var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
+//nolint:gosec // Catalog column names only, never credential values.
+var canonicalTableColumns = map[string]string{
+	"cron_runs":               "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
+	"cron_workflows":          "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
+	"cron_jobs":               "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"api_tokens":              "id,token_hash,actor,name,scope_kind,scope_project_uid,scope_root_issue_uid,expires_at,created_at,last_used_at,revoked_at",
 	"comments":                "id,uid,issue_id,author,body,created_at,teammate",
 	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
@@ -50,7 +54,7 @@ var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column 
 	"recurrences":             "id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,template_priority,template_labels,template_metadata,next_occurrence_key,last_materialized_uid,author,revision,created_at,updated_at,deleted_at",
 }
 
-var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
+var optionalVectorTableColumns = map[string]string{
 	"issue_vector_chunks":      "gen_key,issue_uid,chunk_index,embedding",
 	"issue_vector_generations": "ordinal,gen_key,model,dimensions,state",
 	"issue_vector_mirror":      "issue_uid,project_uid,content,content_revision,embed_gen",
@@ -58,6 +62,7 @@ var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog co
 }
 
 var canonicalIndexes = strings.Fields(`
+idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron
 idx_projects_active idx_project_aliases_project recurrences_project
 idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner idx_issues_assignment_expires_on
 uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue

@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/db"
 )
 
 func TestFederationClientPollProjectEvents(t *testing.T) {
@@ -83,7 +82,7 @@ func TestFederationClientIngestProjectEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer hub-token", gotAuth)
-	assert.Equal(t, db.CurrentSchemaVersion(), gotBody.SchemaVersion)
+	assert.Equal(t, 30, gotBody.SchemaVersion, "legacy event contents retain schema30 wire compatibility")
 	assert.Equal(t, api.FederationAdoptionBaselineOpen, gotBody.AdoptionBaseline)
 	assert.Equal(t, int64(8), gotBody.AdoptionBaselineEndEventID)
 	require.Len(t, gotBody.Events, 1)
@@ -107,7 +106,7 @@ func TestFederationClientIngestProjectEventsError(t *testing.T) {
 	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
 	_, err = client.IngestProjectEvents(context.Background(), 42, []api.FederationIngestEventEnvelope{{
-		EventID: 1,
+		EventID: 1, Type: "issue.created",
 	}})
 
 	require.Error(t, err)

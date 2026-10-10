@@ -544,6 +544,81 @@ state. A spoke whose pull cursor is below that boundary receives
 push-enabled spoke refuses to reset while it has unaccepted local-origin events
 or an active quarantine. `kata federation status` reports these reset blockers.
 
+## Native Cron Replay And Compatibility
+
+Native jobs and workflows replicate as complete documents, including deletion and
+restoration. The existing total HLC order chooses one whole document; concurrent
+edits never combine fields from different versions. Baseline snapshots retain
+the original winning definition event UID and HLC. Enabling federation,
+adopting a project, joining a second peer, and rebuilding after a purge all carry
+pre-existing cron definitions and portable run history.
+
+Upgrade hubs before publishing cron. Federation clients advertise
+`X-Kata-Event-Features: cron_v1`. Successful metadata, event-poll, and
+ingest responses advertise server support in that same header. A project's
+`X-Kata-Required-Event-Features: cron_v1` header instead means that its
+history requires the feature. This requirement latches after the first native
+cron and survives deletion of its definitions. Missing support causes
+HTTP 409 `unsupported_event_features` before returning events or a reset cursor,
+or accepting a push. An unknown required response feature stops the new client
+before it accepts any response cursor. An empty requirement from an unused old
+hub does not prove support: cron publication first fetches metadata and
+requires the server's positive support advertisement.
+
+Wire envelope compatibility is independent of database schema upgrades.
+`db.FederationEventWireVersion` explicitly maps the supported legacy publication
+events to envelope version 30 and cron events to version 31 plus
+`cron_v1`. Future event types require a new mapping before publication;
+a future storage version does not automatically change existing wire contents.
+This keeps ordinary traffic compatible with actual schema30 daemons, whose
+ingest handler refuses newer envelope versions before inspecting their events.
+
+`Storage.ReadFederation(ctx, db.FederationReadParams)` captures the project,
+binding, required feature latch, purge boundary, baseline and event cursor in one
+backend transaction. It also checks the features of the actual event page.
+The result is a consistent read. Scheduling and execution remain local to the
+plugin.
+
+Run observations contain bounded evidence: the run UID, job and workflow definition
+references, occurrence, issue binding, actor and teammate, timestamps, reported
+status and summary. Event HLC and event UID order observations, while baseline
+envelopes preserve their original observation clocks. Separate executions of
+one occurrence have distinct run UIDs and are accepted independently. Retries
+of the same observation use the existing run identity and idempotency behavior.
+Raw logs, secrets, filesystem paths and process or session handles stay local.
+
+Ordinary spoke pushes publish definitions and run observations. Adoption,
+replica reset and backup/restore preserve portable definitions and history
+through the existing federation and snapshot mechanisms. Run history does not
+reserve an issue or create local process state.
+Definition authorship comes only from the create event or an approved
+adoption snapshot; folds ignore the author carried by later edits. A pushed
+create, or a snapshot outside an approved adoption baseline, is refused for a
+definition the hub already holds. An edit that introduces a definition the hub
+has not seen must carry the bound actor.
+
+A run's actor is its immutable identity: whoever first observed it. Each
+observation event is attributed to the writer's effective actor, which on a
+push spoke is the bound actor. A later observation continues the run when the
+requested actor, or the bound actor substituted for it, equals the run's
+stored actor. So a run started before push enablement or adoption is continued
+by requests that name its original actor; a request that names another actor,
+including the bound actor itself, is an identity conflict. The exception is a
+run whose original actor is the bound actor: every request on the push spoke
+is substituted with that actor, so any request continues it. An approved adoption baseline preserves run actors with or without
+the author grant. Outside a baseline, a pushed observation either starts a run
+as the bound actor or continues a run the hub already holds under the same
+actor.
+
+Pages may contain a job before its workflow or a run before its definition. These
+records remain visible. `db.CheckCronDependencies(ctx, query, projectID,
+jobDefinition)` returns descriptive errors for missing, tombstoned or
+cross-project workflow/issue dependencies and preserves database errors. Local
+definition writes use the same helper. The plugin owns activation, overlap,
+catchup, retries, recovery and process/session management, using ordinary Kata
+notify for exact-recipient inbox delivery. This replay layer introduces no
+scheduler or process launcher.
+
 ## Recurrences, Merge, And Other Boundaries
 
 Recurrences remain hub-owned for federated projects. Spoke recurrence mutation

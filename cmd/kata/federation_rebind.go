@@ -175,7 +175,8 @@ func executeFederationRebind(
 	if err != nil {
 		return federationRebindCLIResult{}, err
 	}
-	callResp, callErr := apiClient.RebindFederationReplicaWithResponse(a.ctx, &generated.RebindFederationReplicaRequestOptions{PathParams: &generated.RebindFederationReplicaPath{ProjectID: target.ProjectID}, Body: &generated.RebindFederationReplicaBody{HubCatalog: strings.TrimSpace(hubCatalog)}})
+	body := &generated.RebindFederationReplicaBody{HubCatalog: strings.TrimSpace(hubCatalog)}
+	callResp, callErr := apiClient.RebindFederationReplicaWithResponse(a.ctx, &generated.RebindFederationReplicaRequestOptions{PathParams: &generated.RebindFederationReplicaPath{ProjectID: target.ProjectID}, Body: body})
 	if callResp == nil {
 		return federationRebindCLIResult{}, externalCLITransportError(callResp, callErr)
 	}

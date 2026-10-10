@@ -77,3 +77,35 @@ exclusive lock on `import_mappings`; schedule the operation while imports are
 stopped. Existing table grants cover the new columns. Validation-only runtime
 credentials cannot perform this upgrade. Schema 29 binaries cannot reopen
 schema 30; rollback requires the pre-upgrade backup and matching older binary.
+
+## Schema 31: shared cron definitions and run evidence
+
+The 30→31 migration adds the `cron_jobs`, `cron_workflows`, and `cron_runs`
+tables, each with an identity primary key, and four indexes on them:
+`idx_cron_jobs_project_name`, `idx_cron_workflows_project_name`,
+`idx_cron_runs_project_time`, and `idx_cron_runs_job_time`. It also adds the
+partial index `idx_events_project_cron` on `events`, which lets federation
+check for a project's cron history without scanning its whole event log.
+Building that index reads every `events` row and blocks event writes while it
+runs; the stopped-daemon requirement below covers this.
+
+Run `created_at` values are UTC text with exactly nine fractional digits,
+enforced by a CHECK constraint, so run history pages read the project and job
+time indexes in order. Definitions and attributed run evidence have bounded
+versioned JSON. Distinct run UIDs may share an occurrence key or issue. An
+upgraded database starts with all three tables empty. Existing native issue
+due notifications remain unchanged.
+
+Stop serving daemons and imports, back up the database, and run the migration
+with schema-owner credentials. New tables and the version stamp are committed
+atomically under the existing migration lock. Reapply the runtime role grants
+in [PostgreSQL operations](../operations/postgres.md) for the new tables and
+sequences. Validation-only credentials cannot migrate. Fresh installations and
+30→31 upgrades must have the same physical schema; startup validates it.
+Versions 25–30 use the existing immutable chain followed by migration 31.
+
+Use the matching schema 31 binary. Older binaries cannot open schema 31.
+Rollback requires a pre-upgrade backup and matching older binary; there is no
+down migration. Ordinary JSONL restore preserves shared definitions and run
+evidence. SQLite upgrades through its normal JSONL 30→31 cutover with its
+backup and swap protections.

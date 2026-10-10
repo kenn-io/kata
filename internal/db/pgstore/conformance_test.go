@@ -46,6 +46,14 @@ func TestStorageConformance(t *testing.T) {
 			require.NoError(t, err)
 			return store
 		},
+		OpenSame: func(t *testing.T, existing db.Storage) db.Storage {
+			var schema string
+			require.NoError(t, existing.(*pgstore.Store).QueryRowContext(t.Context(), `SELECT current_schema()`).Scan(&schema))
+			other, err := pgstore.OpenWithConfig(t.Context(), dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = other.Close() })
+			return other
+		},
 		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
 			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
 		},

@@ -19,6 +19,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	wanted := []string{
+		"cron_jobs", "cron_workflows", "cron_runs",
 		"projects", "project_aliases", "issues", "comments",
 		"links", "issue_labels", "events", "purge_log", "project_purge_log",
 		"api_tokens", "federation_bindings", "federation_sync_status",

@@ -114,12 +114,36 @@ func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, 
 
 // EventsByUIDs resolves the requested event identities in caller order.
 func (s *Store) EventsByUIDs(ctx context.Context, projectID int64, uids []string) ([]db.Event, error) {
+	return eventsByUIDs(ctx, s, projectID, uids)
+}
+
+func eventsByUIDs(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectID int64, uids []string) ([]db.Event, error) {
 	events := make([]db.Event, 0, len(uids))
-	for _, uid := range uids {
-		event, err := scanEvent(s.QueryRowContext(ctx,
-			eventSelect+` WHERE e.project_id = $1 AND e.uid = $2`, projectID, uid))
+	if len(uids) == 0 {
+		return events, nil
+	}
+	rows, err := q.QueryContext(ctx, eventSelect+` WHERE e.project_id = $1 AND e.uid = ANY($2::text[])`, projectID, uids)
+	if err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	defer func() { _ = rows.Close() }()
+	found := make(map[string]db.Event, len(uids))
+	for rows.Next() {
+		event, err := scanEvent(rows)
 		if err != nil {
 			return nil, err
+		}
+		found[event.UID] = event
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	for _, uid := range uids {
+		event, ok := found[uid]
+		if !ok {
+			return nil, db.ErrNotFound
 		}
 		events = append(events, event)
 	}
@@ -174,7 +198,7 @@ func (s *Store) MaxLocalOriginEventID(ctx context.Context, projectID int64) (int
 func (s *Store) MaxFederationBaselineEventID(ctx context.Context, projectID, sinceEventID int64) (int64, error) {
 	var value sql.NullInt64
 	if err := s.QueryRowContext(ctx, `SELECT MAX(id) FROM events
-      WHERE project_id = $1 AND type = 'issue.snapshot' AND id >= $2`, projectID, sinceEventID).Scan(&value); err != nil {
+      WHERE project_id = $1 AND type IN (`+db.FederationSnapshotEventTypesSQL()+`) AND id >= $2`, projectID, sinceEventID).Scan(&value); err != nil {
 		return 0, mapSQLError(err, nil)
 	}
 	return value.Int64, nil

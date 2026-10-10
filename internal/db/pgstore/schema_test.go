@@ -67,6 +67,7 @@ func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
 // Full constraint/index name parity with sqlitestore belongs in the later
 // conformance suite; this test pins the baseline acceptance subset.
 var expectedTables = []string{
+	"cron_jobs", "cron_workflows", "cron_runs",
 	"api_tokens",
 	"comments",
 	"events",

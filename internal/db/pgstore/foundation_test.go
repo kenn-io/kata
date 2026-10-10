@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
@@ -89,7 +90,7 @@ func TestPostgresMigrationRegistryIncludesIssueStatusColumns(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 5)
+	require.Len(t, migrations, 6)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
@@ -105,6 +106,9 @@ func TestPostgresMigrationRegistryIncludesIssueStatusColumns(t *testing.T) {
 	assert.Equal(t, 29, migrations[4].FromVersion)
 	assert.Equal(t, 30, migrations[4].ToVersion)
 	assert.Equal(t, "000030_issue_status_sync.up.sql", migrations[4].Name)
+	assert.Equal(t, 30, migrations[5].FromVersion)
+	assert.Equal(t, 31, migrations[5].ToVersion)
+	assert.Equal(t, "000031_native_cron.up.sql", migrations[5].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -710,6 +714,16 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = runtime.Close() })
+	nativeProject, err := runtime.CreateProject(ctx, "runtime-cron")
+	require.NoError(t, err)
+	nativeDefinition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	nativeJob, event, err := runtime.PutCronJob(ctx, db.PutCronJob{ProjectID: nativeProject.ID, Name: "Review", Definition: nativeDefinition, Actor: "worker"})
+	require.NoError(t, err)
+	require.Equal(t, event[0].UID, nativeJob.DefinitionEventUID)
+	nativeRead, err := runtime.CronJob(ctx, nativeProject.ID, nativeJob.UID)
+	require.NoError(t, err)
+	require.Equal(t, nativeJob, nativeRead)
 	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
 		GRANT USAGE, CREATE ON SCHEMA adoption_store TO %s;
 		SET ROLE %s;

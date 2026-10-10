@@ -584,3 +584,42 @@ func TestMatch_CloseThrottledRecognized(t *testing.T) {
 		t.Fatal("issue.* must not match close.throttled (out of namespace)")
 	}
 }
+
+func TestMatch_CronEventsRecognized(t *testing.T) {
+	events := []string{
+		"cron.job.created",
+		"cron.job.updated",
+		"cron.job.deleted",
+		"cron.job.restored",
+		"cron.workflow.created",
+		"cron.workflow.updated",
+		"cron.workflow.deleted",
+		"cron.workflow.restored",
+		"cron.run.observed",
+	}
+	_, allStar, err := compileEventMatcher("*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, issueStar, err := compileEventMatcher("issue.*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range events {
+		t.Run(eventType, func(t *testing.T) {
+			_, exact, err := compileEventMatcher(eventType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !exact(eventType) {
+				t.Fatalf("exact matcher did not match %q", eventType)
+			}
+			if !allStar(eventType) {
+				t.Fatalf("wildcard matcher did not match %q", eventType)
+			}
+			if issueStar(eventType) {
+				t.Fatalf("issue wildcard unexpectedly matched %q", eventType)
+			}
+		})
+	}
+}

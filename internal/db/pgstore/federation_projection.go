@@ -219,6 +219,15 @@ func (s *Store) insertFederationBaselineEventsTx(
 			return db.Event{}, err
 		}
 	}
+	cron, err := db.CronDefinitionSnapshots(ctx, tx, project)
+	if err != nil {
+		return db.Event{}, err
+	}
+	for _, event := range cron {
+		if _, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: createdAt}); err != nil {
+			return db.Event{}, err
+		}
+	}
 	return enableEvent, nil
 }
 
@@ -363,7 +372,7 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 // MaterializeFederatedProject rebuilds one project's read model from portable events.
 func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil)
+		return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
 	})
 }
 
@@ -417,7 +426,11 @@ func (s *Store) materializeFederatedProjectTx(
 	projectID int64,
 	reconcileLinks bool,
 	acceptedEventUIDs []string,
+	validator *db.CronReplayValidator,
 ) error {
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return err
+	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if err != nil {
@@ -439,6 +452,14 @@ func (s *Store) materializeFederatedProjectTx(
 		}
 	}
 	projection := db.FoldEvents(events)
+	if validator == nil {
+		validator = db.NewCronReplayValidator(tx, true)
+	}
+	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
+		if err := db.MaterializeCronDefinitions(ctx, tx, projectID, binding.HubProjectUID, projection, validator); err != nil {
+			return err
+		}
+	}
 	m.existingIssues, err = federatedIssueRowsByUID(ctx, tx, projectID)
 	if err != nil {
 		return err
