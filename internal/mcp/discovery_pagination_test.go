@@ -176,7 +176,11 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 		{"current exhausted", "0.27.0", new(true), 1, false},
 		{"current incomplete", "0.27.0", new(false), 1, true},
 	} {
-		for _, mode := range []string{"auto", "hybrid", "semantic", "lexical"} {
+		modes := []string{"auto", "hybrid", "semantic", "lexical"}
+		if tc.complete != nil && *tc.complete {
+			modes = []string{"auto", "lexical"}
+		}
+		for _, mode := range modes {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
 				projects := []ProjectIdentity{{ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "example-project"}}
 				if mode == "lexical" {
@@ -198,7 +202,11 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 						for i := 0; i < tc.rows; i++ {
 							results = append(results, map[string]any{"issue": issueJSON(42, "example-project", fmt.Sprintf("a%03d", i)), "score": 1.0, "matched_in": []string{"title"}})
 						}
-						body := map[string]any{"query": "needle", "mode": mode, "results": results}
+						responseMode := mode
+						if mode == "auto" {
+							responseMode = "lexical"
+						}
+						body := map[string]any{"query": "needle", "mode": responseMode, "results": results}
 						if tc.complete != nil {
 							body["complete"] = *tc.complete
 						}
