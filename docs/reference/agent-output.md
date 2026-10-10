@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-04
+last_edited: 2026-10-09
 ---
 
 # Agent output format
@@ -74,8 +74,8 @@ Ordinary command output does not repeat the version, to keep transcripts small.
 ## Errors
 
 ```text
-ERR comment validation: comment body is required
-Hint: pass --body, --body-file, or --body-stdin
+ERR list not_found: no .kata.toml ancestor and no git ancestor
+Hint: run "kata init --project <name>" in the repository root, or pass --project <name>
 ```
 
 - The first line is `ERR <command> <kind>: <message>`.
@@ -91,8 +91,9 @@ Hint: pass --body, --body-file, or --body-stdin
 - A top-level parse error, before any subcommand runs, uses `kata` as the
   command token: `ERR kata usage: unknown command "cretae"`.
 - In `--format json` errors include daemon-provided details in `error.data`
-  when present; in `--format human`
-  they remain the existing human text.
+  and next-step guidance in `error.hint` when present. An absent or empty hint
+  is omitted. Human errors print that guidance on a second `hint:` line;
+  agent errors use a separate `Hint:` line.
 
 ## Success shapes
 
