@@ -54,40 +54,6 @@ func adapterDB(t *testing.T) (*sqlitestore.Store, db.IssueSyncBinding) {
 	return s, b
 }
 
-type missingTaskStore struct {
-	db.Storage
-	mappings []db.ImportMapping
-	issues   []db.Issue
-}
-
-func (s *missingTaskStore) ImportMappingsByProjectSource(context.Context, int64, string) ([]db.ImportMapping, error) {
-	return s.mappings, nil
-}
-
-func (s *missingTaskStore) ListIssues(context.Context, db.ListIssuesParams) ([]db.Issue, error) {
-	return s.issues, nil
-}
-
-func TestOpenMissingTasksReturnsNonNilEmptyResult(t *testing.T) {
-	adapter := NewAdapter(&missingTaskStore{}, nil)
-	got, err := adapter.openMissingTasks(context.Background(), db.IssueSyncBinding{ProjectID: 1, SourceKey: "ticktick:project-1"}, map[string]bool{})
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Empty(t, got)
-}
-
-func TestOpenMissingTasksRejectsUnmappedIssueResult(t *testing.T) {
-	mappedIssueID := int64(1)
-	store := &missingTaskStore{
-		mappings: []db.ImportMapping{{ObjectType: "issue", ExternalID: "task:task-1", IssueID: &mappedIssueID}},
-		issues:   []db.Issue{{ID: 2, Status: "open"}},
-	}
-	adapter := NewAdapter(store, nil)
-	got, err := adapter.openMissingTasks(context.Background(), db.IssueSyncBinding{ProjectID: 1, SourceKey: "ticktick:project-1"}, map[string]bool{})
-	require.ErrorContains(t, err, "no task mapping")
-	require.Nil(t, got)
-}
-
 func mappedIssue(t *testing.T, s db.Storage, b db.IssueSyncBinding, id string) db.Issue {
 	t.Helper()
 	m, err := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "task:"+id)

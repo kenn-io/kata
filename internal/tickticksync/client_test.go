@@ -102,7 +102,9 @@ func TestClientRetryCooldownAuthAndBounds(t *testing.T) {
 		require.NotContains(t, err.Error(), "secret")
 		require.Equal(t, 1, calls)
 	}
-	c, _ = testClient(t, func(*http.Request) (*http.Response, error) { return reply(200, strings.Repeat("x", (8<<20)+1)), nil })
+	// Valid JSON padded past the limit: only the size check can reject it.
+	oversized := `{"id":"project-1","kind":"TASK"}` + strings.Repeat(" ", 8<<20)
+	c, _ = testClient(t, func(*http.Request) (*http.Response, error) { return reply(200, oversized), nil })
 	s, err = c.ForRun(context.Background(), clientConfig())
 	require.NoError(t, err)
 	_, err = s.Project(context.Background())
