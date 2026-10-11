@@ -23,13 +23,14 @@ documented.
 ## Building
 
 Release binaries are pure Go (`CGO_ENABLED=0`): `modernc.org/sqlite` provides
-both the database driver and the sqlite-vec extension. Development builds on
-machines with a C toolchain default to `CGO_ENABLED=1`, where kit's sqlitevec
-selects its cgo sqlite-vec bindings by build constraint; those need C sqlite
-symbols at link time, so `internal/vector/driver_cgo.go` links
-`mattn/go-sqlite3` purely to keep ambient `go build`/`go test` working. Both
-driver shims live in `internal/vector/driver_*.go`; nothing to configure,
-but don't remove the mattn dependency because release builds don't use it.
+the database driver and `modernc.org/sqlite/vec` provides the sqlite-vec
+extension. Development builds on machines with a C toolchain default to
+`CGO_ENABLED=1`. On Unix those builds open the vector sidecar with
+`mattn/go-sqlite3` and load the cgo sqlite-vec binding before the first
+connection. kit's sqlitevec does not pick a driver or register the extension;
+Kata does both in `internal/vector/driver_*.go`, and there is nothing to
+configure. Keep the mattn dependency: the cgo sqlite-vec binding links against
+its C SQLite, even though release builds don't use it.
 
 ## Local checks
 

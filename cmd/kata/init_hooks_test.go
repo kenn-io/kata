@@ -20,7 +20,15 @@ func readSettings(t *testing.T, dir string) map[string]any {
 	return settings
 }
 
+// Claude on Windows receives the executable and arguments separately.
 func expectedHookHandler(mode string) map[string]any {
+	if runtime.GOOS == "windows" {
+		return map[string]any{
+			"type":    "command",
+			"command": "kata",
+			"args":    []any{"attention-hook", mode},
+		}
+	}
 	return map[string]any{
 		"type":    "command",
 		"command": "kata attention-hook " + mode,

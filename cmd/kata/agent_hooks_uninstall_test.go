@@ -38,11 +38,7 @@ func TestAgentHooksUninstallAllProfiles(t *testing.T) {
 			handlers := nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
 			for i, marker := range []string{"example-before", legacyAttentionHookSource + "start", "example-after"} {
-				command, _ := handlers[i]["command"].(string)
-				if command == "" {
-					command, _ = handlers[i]["bash"].(string)
-				}
-				require.Contains(t, command, marker)
+				require.Contains(t, nativeHandlerCommandLine(handlers[i]), marker)
 			}
 			before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook config fixture under TempDir.
 			require.NoError(t, err)

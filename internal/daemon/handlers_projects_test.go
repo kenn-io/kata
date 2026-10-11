@@ -759,6 +759,7 @@ func TestInit_ByName_AliasConflictWithoutReassign(t *testing.T) {
 	})
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), "project_alias_conflict")
+	assert.Contains(t, string(bs), `"hint":"pass --reassign to move it"`)
 }
 
 // TestInit_ByName_ReassignMovesAlias asserts that reassign +

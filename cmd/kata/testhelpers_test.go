@@ -519,6 +519,7 @@ type errorEnvelopeForTest struct {
 		Kind     string `json:"kind"`
 		Code     string `json:"code"`
 		Message  string `json:"message"`
+		Hint     string `json:"hint"`
 		ExitCode int    `json:"exit_code"`
 	} `json:"error"`
 }

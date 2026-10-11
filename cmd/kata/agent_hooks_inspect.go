@@ -115,6 +115,12 @@ func makeAgentHookEntry(agent agenthook.Agent, event string, groupIndex, handler
 	if entry.Command == "" {
 		entry.Command, _ = handler["bash"].(string)
 	}
+	// Report an exec-form handler as the command line it runs.
+	if executable, args, execForm, _ := agentHookExecForm(agent, handler); execForm {
+		if commands, err := agenthook.BuildCommand(executable, args...); err == nil {
+			entry.Command = commands.Native
+		}
+	}
 	entry.AlternateCommand, _ = handler["commandWindows"].(string)
 	if entry.AlternateCommand == "" {
 		entry.AlternateCommand, _ = handler["powershell"].(string)
