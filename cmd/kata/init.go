@@ -62,6 +62,7 @@ type callInitOpts struct {
 // Message is the human-readable text. ExitCode is what main() exits with.
 type cliError struct {
 	HTTPStatus int
+	Hint       string
 	Message    string
 	Kind       errKind
 	Code       string
@@ -667,6 +668,7 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
+			Hint    string         `json:"hint,omitempty"`
 			Code    string         `json:"code"`
 			Message string         `json:"message"`
 			Data    jsontext.Value `json:"data,omitempty"`
@@ -683,6 +685,7 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 	}
 	return &cliError{
 		HTTPStatus: status,
+		Hint:       env.Error.Hint,
 		Message:    env.Error.Message,
 		Code:       env.Error.Code,
 		Kind:       kindForStatus(status),

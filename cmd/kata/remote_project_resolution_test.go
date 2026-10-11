@@ -25,11 +25,11 @@ import (
 	"go.kenn.io/kata/internal/testfix"
 )
 
-const unboundRemoteProjectMessage = `no .kata.toml ancestor and no git ancestor — run "kata init" or pass --project`
+const unboundRemoteProjectMessage = `no .kata.toml ancestor and no git ancestor`
 
 func unboundRemoteProjectError() *cliError {
 	return &cliError{
-		Message: unboundRemoteProjectMessage, Kind: kindNotFound,
+		Message: unboundRemoteProjectMessage, Hint: projectInitHint, Kind: kindNotFound,
 		Code: "project_not_initialized", ExitCode: ExitNotFound,
 	}
 }
@@ -47,6 +47,7 @@ func assertCLIErrorMatches(t *testing.T, err error, want *cliError) {
 	assert.Equal(t, want.Kind, ce.Kind)
 	assert.Equal(t, want.Code, ce.Code)
 	assert.Equal(t, want.Message, ce.Message)
+	assert.Equal(t, want.Hint, ce.Hint)
 }
 
 type projectResolutionRequest struct {
@@ -180,17 +181,18 @@ func TestRemoteProjectResolutionWithoutBinding(t *testing.T) {
 									if missing {
 										want = missingWorkspaceError(filepath.Join(workspace, "missing-client-directory"))
 									}
-									ce := requireCLIError(t, err, want.ExitCode)
-									assert.Equal(t, want.Kind, ce.Kind)
-									assert.Equal(t, want.Code, ce.Code)
-									assert.Equal(t, want.Message, ce.Message)
+									assertCLIErrorMatches(t, err, want)
 									if mode == "--json" {
 										envelope := parseErrorEnvelope(t, []byte(stderr))
 										assert.Equal(t, want.Code, envelope.Error.Code)
 										assert.Equal(t, want.ExitCode, envelope.Error.ExitCode)
 										assert.Equal(t, want.Message, envelope.Error.Message)
+										assert.Equal(t, want.Hint, envelope.Error.Hint)
 									} else {
 										assert.Contains(t, stderr, "ERR "+command[0]+" "+string(want.Kind)+": "+want.Message)
+										if want.Hint != "" {
+											assert.Contains(t, stderr, "Hint: "+want.Hint+"\n")
+										}
 									}
 								})
 							}

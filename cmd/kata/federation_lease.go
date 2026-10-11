@@ -553,10 +553,12 @@ func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, re
 		errorPayload := struct {
 			Code    string `json:"code,omitempty"`
 			Message string `json:"message"`
+			Hint    string `json:"hint,omitempty"`
 		}{Message: cause.Error()}
 		if cli, ok := errors.AsType[*cliError](cause); ok {
 			errorPayload.Code = cli.Code
 			errorPayload.Message = cli.Message
+			errorPayload.Hint = cli.Hint
 		}
 		var buf bytes.Buffer
 		payload := claimStealJSON{

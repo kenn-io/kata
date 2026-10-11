@@ -176,7 +176,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			hint := "use --force to reassign"
 			if in.Body.IfUnowned {
-				hint = "choose another issue, or omit if_unowned only for a deliberate retry"
+				hint = "choose another issue, or omit --if-unowned only for a deliberate retry"
 			}
 			details := map[string]any{"current_owner": currentOwner}
 			if result.Issue.AssignmentExpiresOn != nil {

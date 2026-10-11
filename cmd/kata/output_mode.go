@@ -393,6 +393,9 @@ func emitAgentError(w io.Writer, command string, err error) {
 		}
 	}
 	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	if cli.Hint != "" {
+		_, _ = fmt.Fprintln(w, "Hint:", firstLine(cli.Hint))
+	}
 }
 
 func agentValue(s string) string {
