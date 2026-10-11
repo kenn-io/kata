@@ -70,7 +70,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
 			return err
 		}
-		// Retain the source reply's portable envelope/hash for replay and scoping.
+		// Retain the source reply's portable target UID for replay and its content hash.
 		// Its numeric target FK must be detached before deleting the target issue.
 		if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
 WHERE related_issue_id = $1 AND type = 'issue.commented'`, issue.ID); err != nil {

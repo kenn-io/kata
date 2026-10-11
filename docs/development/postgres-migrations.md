@@ -124,10 +124,9 @@ target and survive target purge.
 Upgrade federated hubs before spokes. A schema-31 hub refuses a push that
 contains a reply as schema skew; the spoke keeps it pending, without
 quarantine, and pushes it again after the hub upgrades.
-A spoke that still runs a schema-31 binary can also stall when it pulls a
-cross-issue reply whose target issue it does not have, so upgrade spokes soon
-after their hub. Stop the daemon and run `kata storage postgres migrate` with
-schema-owner credentials before starting the matching binary. Adding the
+A spoke that still runs a schema-31 binary stores pulled replies but shows
+them as plain comments. Stop the daemon and run `kata storage postgres migrate`
+with schema-owner credentials before starting the matching binary. Adding the
 columns takes a brief exclusive lock on `comments`. Existing table grants cover
 the new columns. Validation-only runtime credentials cannot migrate. Schema-31
 binaries cannot reopen schema 32; rollback requires the pre-upgrade backup and
