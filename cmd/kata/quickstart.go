@@ -104,11 +104,11 @@ Use kata as the shared issue ledger for this workspace.
    kata claim <ref>
 
    # Release ownership only if you still own it
-   kata unassign <ref> --expect-owner <your actor>
+   kata unassign <ref> --expect-owner <your-actor>
 
    A bare unassign clears the current owner, whoever that is.
    Check kata status <ref> for the current owner and your effective actor;
-   kata show's [open] by <name> line names the author, not the owner.
+   the "[open] by <name>" line in kata show names the author, not the owner.
 
 7. Use native planning dates deliberately:
 
@@ -214,8 +214,8 @@ when a consumer expects newline-delimited JSON.
 
 # Selected daemon recovery
 
-Never remove a workspace override to repair a stopped daemon. Run
-kata daemon diagnose --json first. A registered local profile uses
+Never remove a workspace override to repair a stopped daemon. Start
+with kata daemon diagnose --json. A registered local profile uses
 [server].daemon in .kata.local.toml and pins an existing home/instance_uid.
 For stopped_local_profile, run kata daemon recover; optionally add
 --expect-project-uid <uid>. Recovery never initializes storage or projects.
@@ -297,6 +297,8 @@ Without hooks, run kata quickstart at session start.
 Setup guides cover federation enrollment and optional embeddings.
 The managed contract format stays static.
 ` + hooklessQuickstartText,
+		Example: `  kata quickstart --format contract
+  kata quickstart --agent`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if currentOutputMode() == outputContract {

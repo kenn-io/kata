@@ -29,6 +29,8 @@ func newShowCmd() *cobra.Command {
 
 --render renders only description and comment Markdown when stdout is a terminal.
 Redirects and pipelines, including "| less -R", keep plain output.`,
+		Example: `  kata show abc4 --agent
+  kata show example-project#abc4 --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runShow(cmd, args[0], "show", showRunOptions{Render: render, PlanningDates: planningDates})

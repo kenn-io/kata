@@ -27,7 +27,15 @@ func newListCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "list issues",
+		Short: "list issues with filters (default: open, this project)",
+		Long: `List issues in the bound project (or --project). Defaults to open issues,
+most recently updated first, at most 200 rows. --all lists every active
+project, newest created first, with no default row limit.
+--meta key or key=value filters metadata, for example work.attention=stuck.
+For what to work on next, use kata ready or kata next instead.`,
+		Example: `  kata list --agent
+  kata list --status all --label bug --owner alice --agent
+  kata list --meta work.attention=stuck --all --agent`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if sortOrder != "" && sortOrder != "oldest" {
 				return &cliError{Message: "--sort must be oldest", Kind: kindValidation, ExitCode: ExitValidation}

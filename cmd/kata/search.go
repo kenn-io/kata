@@ -28,7 +28,16 @@ func newSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Find issues whose title, body, or comments match the words. Run this before
+kata create and reuse an open match.
+Searches the bound project (or --project), open and closed unless --status.
+Mode is auto by default: hybrid when embeddings are configured, else
+lexical. --agent prints "OK search count=N" then one "- issue=<ref> ..." row
+per match.`,
+		Example: `  kata search "login race" --agent
+  kata search login safari --status open --label bug --agent
+  kata search --project example-project "token refresh" --limit 5 --json`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Join unquoted args with spaces so `kata search login Safari`
 			// behaves the same as `kata search "login Safari"` — the BM25

@@ -23,8 +23,14 @@ func newNotifyCmd() *cobra.Command {
 	var clearRequest bool
 	cmd := &cobra.Command{
 		Use:   "notify <issue-ref>",
-		Short: "request a teammate's attention on an issue",
-		Args:  cobra.ExactArgs(1),
+		Short: "ask an actor or teammate to look at an issue (or --clear)",
+		Long: `Put a request in the recipient's inbox. --to takes an address: <actor> or
+<actor>/<teammate>. --message is required unless --clear. One request per
+issue and recipient; a new one replaces the old. Clear it after handling.`,
+		Example: `  kata notify abc4 --to coordinator --message "Need a decision on the schema" --agent
+  kata notify abc4 --to coordinator/teammate-1 --message "Please re-run the tests" --agent
+  kata notify abc4 --to coordinator/teammate-1 --clear --agent`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, recipientErr := normalizeNotificationRecipient(recipient)
 			if recipientErr != nil {

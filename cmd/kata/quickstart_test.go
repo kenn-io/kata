@@ -92,7 +92,7 @@ func TestQuickstart_GuardsOwnershipRelease(t *testing.T) {
 		require.Len(t, step, 2)
 		step6 := strings.SplitN(step[1], "7. Use native planning dates", 2)
 		require.Len(t, step6, 2)
-		assert.Contains(t, step6[0], "kata unassign <ref> --expect-owner <your actor>")
+		assert.Contains(t, step6[0], "kata unassign <ref> --expect-owner <your-actor>")
 		assert.NotContains(t, step6[0], "\n   kata unassign <ref>\n")
 		assert.Contains(t, step6[0], "A bare unassign clears the current owner")
 		assert.Contains(t, step6[0], "kata status <ref>")

@@ -27,7 +27,11 @@ func newDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <issue-ref>",
 		Short: "soft-delete an issue (reversible via kata restore)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Soft-delete an issue; kata restore undoes it. Requires --force and, for
+non-interactive calls, --confirm "DELETE <qualified-id>". Agents: only when
+the user asked for this exact issue.`,
+		Example: `  kata delete example-project#abc4 --force --confirm "DELETE example-project#abc4" --agent`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !force {
 				return &cliError{

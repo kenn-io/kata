@@ -48,7 +48,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 	var home, actor string
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use: verb + " muse", Short: verb + " consumer Muse's hookless instruction bundle",
+		Use: verb + " muse", Short: verb + " a hookless instruction bundle (e.g. Muse)",
 		Args: cobra.ExactArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 && strings.HasPrefix("muse", prefix) {

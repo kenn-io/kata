@@ -26,7 +26,8 @@ The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
 by a move and may span projects afterward. A fresh short_id is
 assigned in the target project.`,
-		Args: cobra.ExactArgs(2),
+		Example: `  kata move abc4 example-project --dry --agent`,
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMove(cmd, args[0], args[1], dryRun)
 		},

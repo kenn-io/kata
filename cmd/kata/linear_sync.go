@@ -20,7 +20,15 @@ func newLinearSyncCmd() *cobra.Command {
 func newLinearSyncEnableCmd() *cobra.Command {
 	var workspace, team, project, interval, since, statusSync, closedState, openState string
 	var titlePrefix bool
-	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Linear sync for this project", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Linear sync for this project",
+		Long: `Bind the Kata project (bound or --project) to one Linear team and start
+daemon-side polling. The first enable needs --linear-workspace and
+--linear-team (UUIDs); --linear-project narrows it to one Linear project.
+Re-enable keeps every option you omit. --status-sync two-way also writes
+open and closed states back; --open-state and --closed-state pick the target
+states.`,
+		Example: `  kata sync linear enable --linear-workspace <workspace-uuid> --linear-team <team-uuid> --agent
+  kata sync linear enable --status-sync two-way --interval 10m --agent`, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		config := map[string]any{}
 		invalid := func(message string) error {

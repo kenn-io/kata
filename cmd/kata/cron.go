@@ -19,7 +19,23 @@ import (
 // Native cron commands are finite API clients. Scheduling, process
 // execution and durable executor journals belong to the external adapter.
 func newCronCmd() *cobra.Command {
-	command := &cobra.Command{Use: "cron", Short: "manage shared jobs, workflows and run evidence", Long: "Manage dormant shared cron definitions and attributed run evidence. Results are JSON. These commands do not schedule work or launch processes."}
+	command := &cobra.Command{
+		Use:   "cron",
+		Short: "manage shared jobs, workflows and run evidence",
+		Long: `Store a project's shared job and workflow definitions and record run evidence.
+Kata does not schedule or run anything: an external adapter reads the
+definitions, decides when to run, and reports each run with kata cron run
+observe. A recorded run status never controls whether anything runs.
+Results are JSON.
+A job is configured work: its trigger, action, and execution settings.
+A workflow is reusable command or prompt steps with dependencies.
+A run is one execution and its reported status and results.
+The request-file formats are in the Native cron reference (docs/reference/cron.md).`,
+		Example: `  kata cron capabilities --json
+  kata cron job create --file job.json --json
+  kata cron job list --json
+  kata cron run observe <run-uid> --json-input observation.json --json`,
+	}
 	for _, resource := range []string{"job", "workflow"} {
 		group := &cobra.Command{Use: resource, Short: "manage native " + resource + " definitions"}
 		for _, action := range []string{"list", "show", "create", "update", "delete", "restore"} {
@@ -52,6 +68,7 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
 	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
 	command := &cobra.Command{Use: action, Short: action + " native " + resource, Args: cobra.NoArgs}
+	command.Long, command.Example = cronOperationHelp(resource, action)
 	if takesUID {
 		command.Use += " <uid>"
 		command.Args = cobra.ExactArgs(1)
@@ -86,6 +103,64 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	}
 	return command
 }
+
+// cronOperationHelp returns Long and Example text for one generated command.
+func cronOperationHelp(resource, action string) (string, string) {
+	cmd := "kata cron " + resource + " " + action
+	switch resource + " " + action {
+	case "capabilities show":
+		return `Show whether the daemon supports native cron for this project (the cron_v1
+event feature). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+	case "run list":
+		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
+For the next page, pass the response's next_before_uid as --before-uid.`,
+			"  " + cmd + " --limit 20 --json\n  " + cmd + " --job-uid <job-uid> --before-uid <run-uid> --json"
+	case "run show":
+		return "Show one recorded run.", "  " + cmd + " <run-uid> --json"
+	case "run observe":
+		return `Record or update the observation for one run from a JSON file (--json-input,
+or - for stdin). The adapter creates the run UID once and reuses it across
+retries; an identical retry returns replayed: true and changes nothing. A new
+run uses expected_revision 0; a changed one needs its current revision.
+An omitted JSON teammate inherits --teammate or KATA_TEAMMATE. Recording a run
+never changes an issue's owner, dates, lease, or status.`,
+			"  " + cmd + " <run-uid> --json-input observation.json --json"
+	}
+	switch action {
+	case "list":
+		return "List the project's " + resource + ` definitions. --include-deleted also lists
+deleted (tombstoned) ones.`, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
+	case "show":
+		return "Show one " + resource + ` definition. Its definition_event_uid is the value
+update, delete, and restore require as --expected-event-uid.`, "  " + cmd + " <" + resource + "-uid> --json"
+	case "create":
+		long := "Create a " + resource + ` definition from a JSON request file (--file, or -
+for stdin) holding a name and a definition. Pass --uid to choose its ULID;
+otherwise one is generated and printed to stderr. Reuse that --uid when
+retrying: a repeated create never becomes an update.`
+		if resource == "job" {
+			long += "\nCreating or enabling a job starts no timer or process."
+		}
+		return long, "  " + cmd + " --uid <" + resource + "-uid> --file " + resource + ".json --json"
+	case "update":
+		return "Replace a " + resource + ` definition from a JSON request file. Pass the current
+definition_event_uid from kata cron ` + resource + ` show as --expected-event-uid
+(or as expected_event_uid in the file); a stale value fails with a conflict.`,
+			"  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --file " + resource + ".json --json"
+	case "delete":
+		long := "Delete a " + resource + ` definition. Requires the current --expected-event-uid.
+The definition stays readable and kata cron ` + resource + ` restore brings it back.`
+		if resource == "workflow" {
+			long += "\nRefused while a live job in the project uses the workflow."
+		}
+		return long, "  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --json"
+	case "restore":
+		return "Restore a deleted " + resource + ` definition. Requires the current
+--expected-event-uid.`, "  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --json"
+	}
+	return "", ""
+}
+
 func cronCLIValidation(message string) error {
 	return &cliError{Message: message, Kind: kindValidation, ExitCode: ExitValidation}
 }

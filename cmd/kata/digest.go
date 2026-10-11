@@ -26,7 +26,7 @@ func newDigestCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "digest",
-		Short: "summarize recent activity by actor (created / closed / commented / unblocked / ...)",
+		Short: "summarize recent activity by actor",
 		Long: `kata digest reads the event stream over a time window and prints a
 human-readable changelog grouped by actor. Use --since with a duration
 (e.g. 24h, 7d) or an RFC3339 timestamp; --until defaults to now.

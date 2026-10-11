@@ -44,8 +44,13 @@ type instanceStatusForCLI struct {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <issue-ref>",
-		Short: "show compact issue identity and hold status",
-		Args:  cobra.ExactArgs(1),
+		Short: "show owner, your actor, and claim hold for one issue",
+		Long: `Print the issue's identity, current owner, your effective actor, and its
+ownership hold: closed, active, expired, pending, assigned, or unassigned.
+Use it before claim or unassign; kata show's "by <name>" line is the author,
+not the owner. Schedules, someday, and blockers appear in kata show.`,
+		Example: `  kata status abc4 --agent`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueStatus(cmd, args[0])
 		},

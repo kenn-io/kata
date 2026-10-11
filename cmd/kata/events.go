@@ -39,6 +39,8 @@ Without --tail, prints up to --limit events ordered by id ASC and exits.
 With --tail, opens an SSE connection and emits one NDJSON envelope per
 line. The stream reconnects with exponential backoff on disconnect and
 runs until SIGINT/SIGTERM.`,
+		Example: `  kata events --after 0 --limit 100 --agent
+  kata events --tail --agent`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if allProjects && strings.TrimSpace(flags.Workspace) != "" {
 				return &cliError{Message: "--all and --workspace are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}

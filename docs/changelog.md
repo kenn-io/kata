@@ -1,13 +1,17 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-06
+last_edited: 2026-10-09
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Walk `kata --help` to find the agent workflow, issue conventions, and command
+  examples. Related commands are grouped, and subcommands list global flags
+  compactly. `kata label remove` aliases `kata label rm`.
 
 - Count browser and terminal screen visits with anonymous `screen_viewed` events.
   Fixed `screen` names count once per installation per UTC day across interfaces

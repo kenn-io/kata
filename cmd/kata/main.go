@@ -46,7 +46,6 @@ func newRootCmd() *cobra.Command {
 	cliUseTarget.Store(nil)
 	cmd := &cobra.Command{
 		Use:           "kata",
-		Short:         "kata — lightweight issue tracker for agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// The root is runnable only to serve the conventional `--version`
@@ -85,15 +84,15 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().Var(outputFormatFlag{values: &flags.Sel.formats},
-		"format", "output format: human|json|agent; contract for quickstart")
-	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "emit machine-readable JSON")
-	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "emit concise agent-readable text")
+		"format", "output mode: human (default), json, or agent; quickstart also accepts contract")
+	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "full JSON envelope for scripts")
+	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "agent output: concise lines starting with OK or ERR (use in agent sessions)")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
 	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
-	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name for project-scoped commands")
-	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry to target for this command")
+	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (default: from .kata.toml at or above --workspace)")
+	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry (default: KATA_SERVER, workspace, active_daemon, local)")
 	// Root-local, not persistent: `kata --version` is the conventional
 	// spelling, while `kata list --version` should stay an unknown flag.
 	// No `-v` shorthand: that spelling conventionally means verbose, and
@@ -166,6 +165,7 @@ func newRootCmd() *cobra.Command {
 		newWebAssetsCheckCmd(),
 	}
 	cmd.AddCommand(subs...)
+	applyRootHelp(cmd)
 	return cmd
 }
 

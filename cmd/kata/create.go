@@ -37,8 +37,20 @@ func newCreateCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "create <title>",
-		Short: "create a new issue",
-		Args:  cobra.ExactArgs(1),
+		Short: "create an issue (search first; use --idempotency-key)",
+		Long: `Create an issue in the bound project (or --project). Search first.
+--idempotency-key makes retries safe for seven days: the same key returns
+the original issue; the same key with different fields fails with conflict (exit 5). Use a
+key that is stable for this piece of work, such as "<task>-<date>".
+A title and body that look like an open or closed issue may be refused with
+the matching refs (conflict, exit 5); pass --force-new only after reading them.
+Relationship flags take refs. --parent groups work and does not gate
+readiness; --blocked-by does. --meta key=value stores a string.
+--agent prints "OK create <ref>"; --json has .issue.short_id.`,
+		Example: `  kata create "fix login race" --body "Safari double-submits the callback." --idempotency-key login-race-2026-10-09 --agent
+  kata create "write retry test" --parent abc4 --blocked-by d4ex --idempotency-key retry-test-abc4 --agent
+  kata create "audit tokens" --label security --priority 1 --meta work.branch=audit-tokens --agent`,
+		Args: cobra.ExactArgs(1),
 	}
 	var idempotencyKey string
 	var forceNew bool
