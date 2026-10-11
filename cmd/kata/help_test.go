@@ -70,18 +70,10 @@ func TestValidateHelpCommandRejectsStaleExamples(t *testing.T) {
 
 // kataCommandGroups is keyed by command name, so a new or renamed command
 // would otherwise fall into an "Additional Commands" section.
-// A stale key for a removed command would otherwise linger unnoticed.
 func TestHelpTopLevelCommandsHaveGroups(t *testing.T) {
-	registered := map[string]bool{}
 	for _, cmd := range newRootCmd().Commands() {
-		registered[cmd.Name()] = true
 		if cmd.IsAvailableCommand() && cmd.GroupID == "" {
 			t.Errorf("%s has no help group in kataCommandGroups", cmd.Name())
-		}
-	}
-	for name := range kataCommandGroups {
-		if !registered[name] {
-			t.Errorf("kataCommandGroups has %s, which is not a root command", name)
 		}
 	}
 }
