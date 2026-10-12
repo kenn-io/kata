@@ -258,7 +258,10 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return projectRef{}, nil, err
 	}
-	if err := json.Unmarshal(fields["definition"], &definition); err != nil {
+	if fields == nil {
+		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	}
+	if err := json.Unmarshal(fields["definition"], &definition); err != nil || definition == nil {
 		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
 	}
 	if err := json.Unmarshal(definition["issue"], &issue); err != nil || issue == nil {
