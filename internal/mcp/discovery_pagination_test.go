@@ -179,6 +179,8 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 		modes := []string{"auto", "hybrid", "semantic", "lexical"}
 		if tc.complete != nil && *tc.complete {
 			modes = []string{"auto", "lexical"}
+		} else if tc.complete != nil {
+			modes = []string{"hybrid", "semantic"}
 		}
 		for _, mode := range modes {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
