@@ -47,14 +47,6 @@ func incrementalRemoteEvent(t testing.TB, p db.Project, issueUID, typ, payload s
 	return ev
 }
 
-func TestFederationMaterializationApplyRejectsNilReceiver(t *testing.T) {
-	var materialization *federationMaterialization
-
-	err := materialization.apply(context.Background(), nil, 1, nil)
-
-	require.ErrorContains(t, err, "nil federation materialization")
-}
-
 // A competing commit after preparation must succeed before ingestion acquires
 // the writer lock, then force ingestion to retry its entire stale snapshot.
 func TestFederationIngestRetriesPreparedSnapshot(t *testing.T) {

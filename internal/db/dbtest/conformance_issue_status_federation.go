@@ -125,5 +125,29 @@ func checkIssueStatusFederationIntent(t *testing.T, store db.Storage) error {
 	require.Equal(t, "closed", updatedIssue.Status, "payload uid must identify the materialized issue")
 	require.Equal(t, closedWithoutEnvelope.EventUID, read().State.PendingEventUID,
 		"an effective status event with only a payload uid must enqueue and load intent")
+
+	records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	for _, restore := range []struct {
+		name     string
+		preserve bool
+	}{
+		{"trusted restore retains pending intent", true},
+		{"ordinary restore clears pending intent", false},
+	} {
+		t.Run(restore.name, func(t *testing.T) {
+			require.NoError(t, store.ImportReplay(ctx, records, db.ImportOptions{PreserveIssueSyncBindingEnabled: restore.preserve}))
+			restoredIssue, err := store.IssueByID(ctx, fixture.Issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, "closed", restoredIssue.Status)
+			var pending sql.NullString
+			require.NoError(t, sqlStore.QueryRowContext(ctx, `SELECT pending_event_uid FROM import_mappings WHERE id=$1`, mapping.ID).Scan(&pending))
+			if restore.preserve {
+				require.Equal(t, closedWithoutEnvelope.EventUID, pending.String)
+			} else {
+				require.False(t, pending.Valid)
+			}
+		})
+	}
 	return nil
 }

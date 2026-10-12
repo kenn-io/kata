@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -108,9 +107,6 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 }
 
 func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, projectID int64, validator *db.CronReplayValidator) error {
-	if m == nil {
-		return errors.New("nil federation materialization")
-	}
 	if m.cronAffected {
 		if err := db.MaterializeCronDefinitions(ctx, tx, projectID, m.binding.HubProjectUID, m.projection, validator); err != nil {
 			return err

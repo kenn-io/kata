@@ -133,7 +133,10 @@ func validateReplayStatusIntent(records []ImportRecord) error {
 		}
 		issue := issues[*mapping.IssueID]
 		event := events[*normalized.PendingEventUID]
-		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID || event.IssueID == nil || *event.IssueID != issue.ID || event.IssueUID == nil || *event.IssueUID != issue.UID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
+		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID ||
+			(event.IssueID != nil && *event.IssueID != issue.ID) ||
+			FederationEventIssueUID(event.IssueUID, string(event.Payload)) != issue.UID ||
+			(event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return invalidIssueStatusState()
 		}
 	}
