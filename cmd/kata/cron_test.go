@@ -637,7 +637,7 @@ func TestCronCLIParentValidation(t *testing.T) {
 				if r.Method != http.MethodGet && strings.Contains(r.URL.Path, "/cron/") {
 					writes.Add(1)
 				}
-				request, err := http.NewRequestWithContext(r.Context(), r.Method, env.URL+r.URL.RequestURI(), r.Body)
+				request, err := http.NewRequestWithContext(r.Context(), r.Method, env.URL+r.URL.RequestURI(), r.Body) //nolint:gosec // Only the relative path varies; the origin is the owned test daemon.
 				if err != nil {
 					t.Error(err)
 					w.WriteHeader(500)
