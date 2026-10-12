@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -158,14 +159,31 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return fmt.Errorf("rehome external root bindings: %w", mapSQLError(err, nil))
 		}
 
-		payload, err := json.Marshal(map[string]string{
+		payloadFields := map[string]any{
 			"issue_uid": current.UID, "from_project_uid": source.UID,
 			"from_short_id": current.ShortID, "to_project_uid": target.UID,
 			"to_short_id": newShortID, "updated_at": updatedAt,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal issue move event: %w", err)
 		}
+		var federated bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, source.ID).Scan(&federated); err != nil {
+			return err
+		}
+		if federated {
+			movedIssue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, current.ID))
+			if err != nil {
+				return err
+			}
+			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue)
+			if err != nil {
+				return err
+			}
+			payloadFields["snapshot"] = jsontext.Value(snapshot)
+		}
+		payload, err := json.Marshal(payloadFields)
+		if err != nil {
+			return err
+		}
+
 		event, err := s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: target.ID, ProjectUID: target.UID, ProjectName: target.Name,
 			IssueID: &current.ID, IssueUID: &current.UID,

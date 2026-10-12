@@ -86,6 +86,18 @@ func (s *Store) IngestFederationEvents(
 			if len(event.Payload) == 0 {
 				event.Payload = jsontext.Value(`{}`)
 			}
+			if event.Type == "issue.moved" {
+				from, _, err := db.FederationMoveProjects(ctx, tx, params.ProjectID, event)
+				if err != nil {
+					return err
+				}
+				var issueID int64
+				if err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1 AND project_id IN ($2,$3)`, *event.IssueUID, from, params.ProjectID).Scan(&issueID); err != nil {
+					return fmt.Errorf("%w: unknown moved issue", db.ErrFederationIngestValidation)
+				}
+				knownIssueUIDs[*event.IssueUID] = struct{}{}
+			}
+
 			if err := validateFederationProjectEvent(
 				projectUID, params.SpokeInstanceUID, event, knownIssueUIDs,
 			); err != nil {
@@ -359,7 +371,7 @@ func validateFederationProjectEvent(
 		return fmt.Errorf("%w: event %s has invalid envelope",
 			db.ErrFederationIngestValidation, event.EventUID)
 	}
-	if strings.HasPrefix(event.Type, "recurrence.") || event.Type == "issue.moved" {
+	if strings.HasPrefix(event.Type, "recurrence.") {
 		return fmt.Errorf("%w: event type %s unsupported in phase 2",
 			db.ErrFederationIngestValidation, event.Type)
 	}
@@ -395,7 +407,7 @@ func validateFederationProjectEvent(
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, event.Type)
 		}
-	case "issue.updated", "issue.assigned", "issue.unassigned",
+	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned",
 		"issue.assignment_renewed", "issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared", "issue.closed", "issue.reopened",
 		"issue.soft_deleted", "issue.restored", "issue.commented", "issue.comment_edited",
