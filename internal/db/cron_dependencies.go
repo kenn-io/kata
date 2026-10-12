@@ -40,6 +40,9 @@ func CheckCronDependencies(ctx context.Context, q interface {
 	if err := check("cron_workflows", "workflow", definition.Action.WorkflowUID); err != nil {
 		return err
 	}
+	if cron.IsRecurringIssueJob(definition) {
+		return check("issues", "parent issue", definition.Issue.ParentUID)
+	}
 	issueUID := definition.Trigger.IssueUID
 	if definition.Issue != nil && definition.Issue.Kind == "existing" {
 		if issueUID != "" && issueUID != definition.Issue.UID && definition.Action.Kind != "notify" {

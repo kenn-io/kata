@@ -46,11 +46,18 @@ func (s *Store) IngestFederationEvents(
 			return err
 		}
 		for _, input := range params.Events {
-			if err := db.RequireEventFeatures(params.EventFeatures, db.EventRequiredFeatures(input.Event.Type)); err != nil {
+			feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
+			if err != nil {
 				return err
 			}
-			if feature := db.EventRequiredFeatures(input.Event.Type); feature != "" {
-				result.RequiredEventFeatures = feature
+			if err := db.CheckRecurringSpokeEvent(ctx, tx, input.Event); err != nil {
+				return err
+			}
+			if err := db.RequireEventFeatures(params.EventFeatures, feature); err != nil {
+				return err
+			}
+			if feature != "" {
+				result.RequiredEventFeatures = db.MergeEventFeatures(result.RequiredEventFeatures, feature)
 			}
 		}
 		knownIssueUIDs, err := currentFederatedIssueUIDSet(ctx, tx, params.ProjectID)

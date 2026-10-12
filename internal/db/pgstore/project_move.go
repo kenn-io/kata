@@ -41,6 +41,9 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if current.RecurrenceID != nil {
 			return &db.RecurrencePinnedError{}
 		}
+		if err := db.CheckNativeRecurringParentMove(ctx, tx, true, input.FromProjectID, current.UID); err != nil {
+			return err
+		}
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(
 			ctx, tx, current.ID, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter),
 		); err != nil {

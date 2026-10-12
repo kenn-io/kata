@@ -176,7 +176,7 @@ func (c *Client) projectFederationFeatures(ctx context.Context, hubProjectID int
 type replicationDoer struct{ client *http.Client }
 
 func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	req.Header.Set(db.EventFeaturesHeader, db.CronEventFeature)
+	req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated replication routes use the explicitly configured trusted federation hub.
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	if err := db.RequireEventFeatures(db.CronEventFeature, resp.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
+	if err := db.RequireEventFeatures(db.SupportedEventFeatures, resp.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
 		_ = resp.Body.Close()
 		return nil, err
 	}

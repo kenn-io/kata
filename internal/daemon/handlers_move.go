@@ -90,6 +90,10 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, api.NewError(409, "recurrence_pinned",
 				rpErr.Error(), "unpin the issue from its recurrence before moving", nil)
 		}
+		if parentErr, ok := errors.AsType[*db.NativeRecurringParentPinnedError](err); ok {
+			return nil, api.NewError(409, "recurring_parent_pinned",
+				parentErr.Error(), "the job and parent must stay in the same project", nil)
+		}
 		if collision, ok := errors.AsType[*db.ProjectMergeImportMappingCollisionError](err); ok {
 			return nil, api.NewError(409, "issue_move_import_mapping_collision",
 				"issue has import mappings that already exist in the target project",

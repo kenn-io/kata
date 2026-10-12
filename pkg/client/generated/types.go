@@ -2910,6 +2910,7 @@ type IssuePolicy struct {
 	Body                   *string `json:"body,omitempty"`
 	DeadlineOffsetSeconds  *int64  `json:"deadline_offset_seconds,omitempty"`
 	Kind                   string  `json:"kind" validate:"required"`
+	ParentUID              *string `json:"parent_uid,omitempty"`
 	ScheduledOffsetSeconds *int64  `json:"scheduled_offset_seconds,omitempty"`
 	Title                  *string `json:"title,omitempty"`
 	UID                    *string `json:"uid,omitempty"`
@@ -2923,6 +2924,7 @@ type IssuePolicyResponse struct {
 	Body                   *string `json:"body,omitempty"`
 	DeadlineOffsetSeconds  *int64  `json:"deadline_offset_seconds,omitempty"`
 	Kind                   string  `json:"kind" validate:"required"`
+	ParentUID              *string `json:"parent_uid,omitempty"`
 	ScheduledOffsetSeconds *int64  `json:"scheduled_offset_seconds,omitempty"`
 	Title                  *string `json:"title,omitempty"`
 	UID                    *string `json:"uid,omitempty"`

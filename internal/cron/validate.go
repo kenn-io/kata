@@ -99,16 +99,23 @@ func (j JobDefinition) Validate() error {
 		if len(j.Action.Message) > notification.MessageMaxBytes {
 			return invalid("notify message exceeds the inbox limit")
 		}
-		if strings.TrimSpace(j.Action.Message) == "" && j.Action.Recipient != "current-owner-or-author" {
+		if strings.TrimSpace(j.Action.Message) == "" && j.Action.Recipient != "current-owner-or-author" && !IsRecurringIssueJob(j) {
 			return invalid("custom notifications require a message")
 		}
 		if j.Trigger.Kind != "issue-scheduled" && j.Trigger.Kind != "issue-deadline" && j.Issue == nil {
 			return invalid("notify requires an issue target")
 		}
-		if j.Issue != nil && (j.Issue.Kind != "existing" || !validUID(j.Issue.UID) || j.Issue.Title != "" || j.Issue.Body != "" || j.Issue.ScheduledOffsetSeconds != nil || j.Issue.DeadlineOffsetSeconds != nil) {
+		if IsRecurringIssueJob(j) {
+			if err := validateRecurring(j); err != nil {
+				return err
+			}
+		} else if j.Issue != nil && (j.Issue.ParentUID != "" || j.Issue.Kind != "existing" || !validUID(j.Issue.UID) || j.Issue.Title != "" || j.Issue.Body != "" || j.Issue.ScheduledOffsetSeconds != nil || j.Issue.DeadlineOffsetSeconds != nil) {
 			return invalid("notify requires an existing issue target")
 		}
 	case "execute":
+		if j.Issue != nil && j.Issue.ParentUID != "" {
+			return invalid("parent binding is only supported for native recurring issues")
+		}
 		if j.Trigger.Kind == "issue-deadline" {
 			return invalid("deadline actions are notification-only")
 		}

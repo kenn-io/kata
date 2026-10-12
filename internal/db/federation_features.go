@@ -3,13 +3,98 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 )
 
 // CronEventFeature identifies support for portable definitions and run observations.
 const CronEventFeature = "cron_v1"
+
+// RecurringCronEventFeature fences peers that cannot retain native delivery state.
+const RecurringCronEventFeature = "cron_notify_children_v1"
+
+// SupportedEventFeatures is the complete event format advertisement.
+const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+
+// Native cron job projections are immutable and retained as tombstones, so a
+// positive job result remains valid for that project UID's lifetime.
+var nativeProjectFeatureCache sync.Map
+
+// MergeEventFeatures retains every format encountered across a page or transaction.
+func MergeEventFeatures(values ...string) string {
+	set := map[string]bool{}
+	for _, value := range values {
+		for part := range strings.SplitSeq(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				set[part] = true
+			}
+		}
+	}
+	parts := make([]string, 0, len(set))
+	for part := range set {
+		parts = append(parts, part)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+// PayloadRequiredFeatures supplements type classification with native delivery state.
+func PayloadRequiredFeatures(kind, payload string) (string, error) {
+	required := EventRequiredFeatures(kind)
+	if payload == "" {
+		payload = "{}"
+	}
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	native, err := nativeDeliveryPayload(body)
+	if err != nil {
+		return "", err
+	}
+	if native {
+		required = MergeEventFeatures(required, SupportedEventFeatures)
+	}
+	return required, nil
+}
+func nativeDeliveryPayload(body map[string]jsontext.Value) (bool, error) {
+	for _, field := range []string{"metadata", "diff"} {
+		var keys map[string]jsontext.Value
+		if raw := body[field]; len(raw) > 0 && string(raw) != "null" {
+			if err := json.Unmarshal(raw, &keys); err != nil {
+				return false, err
+			}
+			for key := range keys {
+				if recurringMetadataKey(key) {
+					return true, nil
+				}
+			}
+		}
+	}
+	if raw := body["definition"]; len(raw) > 0 {
+		var definition struct {
+			Action struct {
+				Kind string `json:"kind"`
+			} `json:"action"`
+			Issue *struct {
+				Kind string `json:"kind"`
+			} `json:"issue"`
+		}
+		if err := json.Unmarshal(raw, &definition); err != nil {
+			return false, err
+		}
+		if definition.Action.Kind == "notify" && definition.Issue != nil && definition.Issue.Kind == "per-run" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // EventFeaturesHeader advertises supported federation event formats.
 const EventFeaturesHeader = "X-Kata-Event-Features"
@@ -47,23 +132,113 @@ func EventRequiredFeatures(kind string) string {
 	return ""
 }
 
-// ProjectRequiredEventFeatures inspects current and historical project cron data.
+// ProjectRequiredEventFeatures inspects current cron data and native issue state.
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string) (string, error) {
-	var present bool
+	var cronPresent, issueMoved bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_workflows WHERE project_id=p.id) OR
  EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
- EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%')))`, projectUID).Scan(&present)
+	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
+ EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
+  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
 	if err != nil {
 		return "", err
 	}
-	if present {
-		return CronEventFeature, nil
+	required := ""
+	if cronPresent {
+		required = CronEventFeature
+		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
+			return MergeEventFeatures(required, SupportedEventFeatures), nil
+		}
 	}
-	return "", nil
+	if !cronPresent && !issueMoved {
+		return required, nil
+	}
+	// Native jobs cannot convert to adapter ownership, and cron projections
+	// (including tombstones) cannot be hard-deleted while their project lives.
+	// A moved issue event is the only path that can place native child metadata
+	// in a project without its job projection. Probe those moved issues directly.
+	// An explicit escape keeps backslash literal on both SQLite and PostgreSQL.
+	if cronPresent {
+		native, err := nativeProjectionRequired(ctx, q, `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`, projectUID)
+		if err != nil {
+			return "", err
+		}
+		if native {
+			nativeProjectFeatureCache.Store(projectUID, struct{}{})
+			return MergeEventFeatures(required, SupportedEventFeatures), nil
+		}
+	}
+	if issueMoved {
+		native, err := nativeProjectionRequired(ctx, q, `SELECT DISTINCT 'projection.issue',i.metadata FROM events e JOIN projects p ON p.id=e.project_id JOIN issues i ON i.uid=e.issue_uid AND i.project_id=e.project_id WHERE p.uid=$1 AND e.type='issue.moved' AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"cron.progress.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
+		if err != nil {
+			return "", err
+		}
+		if native {
+			return MergeEventFeatures(required, SupportedEventFeatures), nil
+		}
+	}
+	return required, nil
+}
+
+// projectRequiredEventFeaturesForAdoption also checks current issue metadata,
+// because adoption replaces local event history before establishing the spoke.
+func projectRequiredEventFeaturesForAdoption(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) (string, error) {
+	features, err := ProjectRequiredEventFeatures(ctx, q, projectUID)
+	if err != nil {
+		return "", err
+	}
+	if errors.Is(RequireEventFeatures(CronEventFeature, features), ErrUnsupportedEventFeatures) {
+		return features, nil
+	}
+	// Adoption is infrequent; inspect candidate issue documents here instead of
+	// adding an issue-table scan to every federation poll.
+	const query = `SELECT 'projection.issue',i.metadata FROM issues i JOIN projects p ON p.id=i.project_id
+WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"cron.progress.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`
+	native, err := nativeProjectionRequired(ctx, q, query, projectUID)
+	if err != nil {
+		return "", err
+	}
+	if native {
+		features = MergeEventFeatures(features, SupportedEventFeatures)
+	}
+	return features, nil
+}
+
+func nativeProjectionRequired(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, query, projectUID string) (bool, error) {
+	rows, err := q.QueryContext(ctx, query, projectUID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var kind, payload string
+		if err := rows.Scan(&kind, &payload); err != nil {
+			return false, err
+		}
+		if kind == "projection.job" {
+			payload = `{"definition":` + payload + `}`
+		} else {
+			payload = `{"metadata":` + payload + `}`
+		}
+		feature, err := PayloadRequiredFeatures(kind, payload)
+		if err != nil {
+			return false, err
+		}
+		if RequireEventFeatures(CronEventFeature, feature) != nil {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // FederationReadParams captures metadata, required features, purge boundary and event
@@ -138,12 +313,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.
 	for _, event := range out.Events {
-		required := EventRequiredFeatures(event.Type)
+		required, err := PayloadRequiredFeatures(event.Type, event.Payload)
+		if err != nil {
+			return out, err
+		}
 		if err := RequireEventFeatures(in.Features, required); err != nil {
 			return out, err
 		}
 		if required != "" {
-			out.RequiredFeatures = required
+			out.RequiredFeatures = MergeEventFeatures(out.RequiredFeatures, required)
 		}
 		out.NextAfterID = event.ID
 	}

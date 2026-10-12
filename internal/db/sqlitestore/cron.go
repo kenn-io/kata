@@ -8,7 +8,14 @@ import (
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{InstanceUID: d.InstanceUID(), Query: d, Transact: func(ctx context.Context, run func(*sql.Tx) error) error {
+	return db.CronSQL{CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+		id, event, err := d.createIssueTx(ctx, tx, p)
+		if err != nil {
+			return db.Issue{}, db.Event{}, err
+		}
+		issue, err := issueByIDTx(ctx, tx, id)
+		return issue, event, err
+	}, PatchIssueMetadataTx: d.patchIssueMetadataTx, InstanceUID: d.InstanceUID(), Query: d, Transact: func(ctx context.Context, run func(*sql.Tx) error) error {
 		return d.RetryTransient(ctx, func() error {
 			tx, err := d.BeginTx(ctx, nil)
 			if err != nil {
@@ -55,4 +62,14 @@ func (d *Store) ListCronJobs(ctx context.Context, in db.CronList) ([]db.CronJob,
 // ListCronWorkflows lists workflow definitions under the requested project filter.
 func (d *Store) ListCronWorkflows(ctx context.Context, in db.CronList) ([]db.CronWorkflow, error) {
 	return d.cronSQL().Workflows(ctx, in)
+}
+
+// ListRecurringCronJobs returns lightweight native scheduling candidates.
+func (d *Store) ListRecurringCronJobs(ctx context.Context, after string, limit int) ([]db.RecurringCronCandidate, error) {
+	return d.cronSQL().RecurringJobs(ctx, after, limit)
+}
+
+// DispatchRecurringCron commits a bounded set of children and its progress together.
+func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
+	return d.cronSQL().DispatchRecurring(ctx, in)
 }

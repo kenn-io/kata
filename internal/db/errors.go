@@ -357,6 +357,14 @@ func (e *RecurrencePinnedError) Error() string {
 	return "cannot move: issue is part of a recurrence series"
 }
 
+// NativeRecurringParentPinnedError is returned when an issue move would
+// separate a native recurring job from its bound parent.
+type NativeRecurringParentPinnedError struct{}
+
+func (e *NativeRecurringParentPinnedError) Error() string {
+	return "cannot move: issue is the parent of a native recurring job"
+}
+
 // RevisionConflictError reports that a caller's IfMatchRev does not match the
 // current revision of the guarded record.
 type RevisionConflictError struct {

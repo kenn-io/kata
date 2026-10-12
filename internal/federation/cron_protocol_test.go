@@ -119,7 +119,7 @@ func TestCronFederationFeatureGate(t *testing.T) {
 			resp, data = nativeRequest(t, path+"/metadata", grant.Token, "cron_v1", http.MethodGet, nil)
 			require.Equal(t, 200, resp.StatusCode, string(data))
 			require.Equal(t, "cron_v1", resp.Header.Get("X-Kata-Required-Event-Features"))
-			require.Equal(t, "cron_v1", resp.Header.Get("X-Kata-Event-Features"))
+			require.Equal(t, db.SupportedEventFeatures, resp.Header.Get("X-Kata-Event-Features"))
 		})
 	}
 }
@@ -199,7 +199,7 @@ func TestCronReturnedPageRequiresFeaturesEvenWithoutLatch(t *testing.T) {
 
 func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "cron_v1", r.Header.Get("X-Kata-Event-Features"))
+		require.Equal(t, db.SupportedEventFeatures, r.Header.Get("X-Kata-Event-Features"))
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Kata-Required-Event-Features", "future_v2")
 		_, _ = w.Write([]byte(`{"reset_required":true,"reset_after_id":90,"next_after_id":90,"events":[]}`))

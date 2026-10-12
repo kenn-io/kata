@@ -11,15 +11,16 @@ import (
 
 const defaultDueNotificationSweepInterval = 30 * time.Second
 
-// DueNotificationSweeper surfaces reached scheduled and deadline dates in the
-// same notify.* inbox slots written by kata notify.
+// DueNotificationSweeper surfaces reached planning dates and native recurring
+// child issues through the same notify.* inbox slots written by kata notify.
 type DueNotificationSweeper struct {
-	DB              db.Storage
-	Publish         EventPublisher
-	DefaultTimezone string
-	Interval        time.Duration
-	OnError         func(error)
-	IdleAdmission   activity.WaitableAdmission
+	DB                db.Storage
+	Publish           EventPublisher
+	DefaultTimezone   string
+	Interval          time.Duration
+	OnError           func(error)
+	IdleAdmission     activity.WaitableAdmission
+	recurringAfterUID string
 }
 
 // NewDueNotificationSweeper constructs a sweeper for the provided store and event publisher.
@@ -49,11 +50,11 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 	if idleLease != nil {
 		fork = idleLease.Fork
 	}
+	var errs []error
 	ids, err := s.DB.ListDueNotificationIssueIDs(ctx)
 	if err != nil {
-		return nil, false, err
+		errs = append(errs, err)
 	}
-	var errs []error
 	for _, issueID := range ids {
 		result, err := s.DB.ReconcileDueNotification(ctx, db.ReconcileDueNotificationIn{
 			IssueID: issueID, Now: now, DefaultTimezone: s.DefaultTimezone,
@@ -64,6 +65,25 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 		}
 		if result.Changed && result.Event != nil {
 			s.Publish.EventFrom(result.Event.ProjectID, *result.Event, fork)
+		}
+	}
+	candidates, err := s.DB.ListRecurringCronJobs(ctx, s.recurringAfterUID, 100)
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		for _, candidate := range candidates {
+			s.recurringAfterUID = candidate.JobUID
+			out, err := s.DB.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: candidate.ProjectID, JobUID: candidate.JobUID, ExpectedEventUID: candidate.ExpectedEventUID, Now: now})
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			for _, event := range out.Events {
+				s.Publish.EventFrom(event.ProjectID, event, fork)
+			}
+		}
+		if len(candidates) < 100 {
+			s.recurringAfterUID = ""
 		}
 	}
 	return nil, false, errors.Join(errs...)

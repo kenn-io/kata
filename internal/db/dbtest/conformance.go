@@ -40,6 +40,19 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
+	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},
+	{name: "recurring template protection", run: checkRecurringTemplateProtection},
+	{name: "recurring feature probe candidates", run: checkRecurringFeatureProbeCandidates},
+	{name: "recurring recovery", runWithBackend: checkRecurringRecovery},
+	{name: "recurring parent project move", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "CronJob", "MaxEventID", "MoveIssueProject"}, run: checkRecurringParentProjectMove},
+	{name: "recurring metadata attachment", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "DispatchRecurringCron", "CreateRecurrenceForIssue"}, runWithBackend: checkRecurringMetadataAttachment},
+	{name: "recurring owner race and fence", runWithBackend: checkRecurringOwnerRaceAndFence},
+	{name: "recurring federation", runWithBackend: checkRecurringFederation},
+	{name: "recurring atomic rollback", runWithBackend: checkRecurringAtomicRollback},
+	{name: "recurring lifecycle", run: checkRecurringLifecycle},
+	{name: "recurring metadata protection", run: checkRecurringMetadataProtection},
+	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "comment event export after target deletion", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportComments", "ExportEvents", "ExportExternalFieldMappings", "ExportExternalFieldStates", "ExportExternalRootBindings", "ExportFederationBindings", "ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus", "ExportImportMappings", "ExportIssueClaims", "ExportIssueLabels", "ExportIssueSyncBindings", "ExportIssueSyncStatus", "ExportIssues", "ExportLinks", "ExportMeta", "ExportPendingClaimRequests", "ExportProjectAliases", "ExportProjectPurgeLog", "ExportProjects", "ExportPurgeLog", "ExportRecurrences", "ExportSequences", "ImportReplay", "ProjectByUID", "PurgeIssue", "SoftDeleteIssue"}, runWithBackend: checkCommentEventExportAfterTargetDeletion},
 	{name: "comment reply project purge lineage", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "MoveIssueProject", "PurgeProject", "RemoveProject"}, run: checkCommentReplyProjectPurgeLineage},

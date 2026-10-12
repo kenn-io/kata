@@ -16,16 +16,17 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// Native cron commands are finite API clients. Scheduling, process
-// execution and durable executor journals belong to the external adapter.
+// Native cron commands are finite API clients. The daemon schedules recurring
+// issue jobs; external adapters schedule execution and launch processes.
 func newCronCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "cron",
-		Short: "manage shared jobs, workflows and run evidence",
+		Short: "manage recurring issues, shared jobs, workflows and run evidence",
 		Long: `Store a project's shared job and workflow definitions and record run evidence.
-Kata does not schedule or run anything: an external adapter reads the
-definitions, decides when to run, and reports each run with kata cron run
-observe. A recorded run status never controls whether anything runs.
+The daemon schedules recurring issue jobs to create child issues and inbox
+requests. External adapters schedule other jobs, launch processes, and report
+each run with kata cron run observe. A recorded run status never controls
+whether anything runs.
 Results are JSON.
 A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
@@ -38,6 +39,10 @@ The request-file formats are in the Native cron reference (docs/reference/cron.m
 	}
 	for _, resource := range []string{"job", "workflow"} {
 		group := &cobra.Command{Use: resource, Short: "manage native " + resource + " definitions"}
+		if resource == "job" {
+			group.Short = "manage recurring issue and adapter job definitions"
+			group.Long = "Manage shared jobs. Enabled notify jobs with a per-run parent issue are delivered by the owning daemon; other jobs require an external adapter."
+		}
 		for _, action := range []string{"list", "show", "create", "update", "delete", "restore"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
@@ -69,6 +74,9 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
 	command := &cobra.Command{Use: action, Short: action + " native " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
+	if resource == "job" {
+		command.Long += "\nEnabled recurring issue jobs create independent children and inbox requests on the owning hub. Other jobs use external adapters."
+	}
 	if takesUID {
 		command.Use += " <uid>"
 		command.Args = cobra.ExactArgs(1)
@@ -109,8 +117,8 @@ func cronOperationHelp(resource, action string) (string, string) {
 	cmd := "kata cron " + resource + " " + action
 	switch resource + " " + action {
 	case "capabilities show":
-		return `Show whether the daemon supports native cron for this project (the cron_v1
-event feature). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+		return `Show whether the daemon supports shared cron and recurring child issues for
+this project (cron_v1 and cron_notify_children_v1). Reads only; creates no cron state.`, "  kata cron capabilities --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
@@ -139,7 +147,7 @@ for stdin) holding a name and a definition. Pass --uid to choose its ULID;
 otherwise one is generated and printed to stderr. Reuse that --uid when
 retrying: a repeated create never becomes an update.`
 		if resource == "job" {
-			long += "\nCreating or enabling a job starts no timer or process."
+			long += "\nCreating or enabling a native recurring issue job activates daemon delivery. Kata never launches a process."
 		}
 		return long, "  " + cmd + " --uid <" + resource + "-uid> --file " + resource + ".json --json"
 	case "update":

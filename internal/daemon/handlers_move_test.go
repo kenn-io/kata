@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -298,6 +299,47 @@ func TestMoveIssue_RecurrencePinned_409(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env409))
 	assert.Equal(t, "recurrence_pinned", env409.Error.Code)
+}
+
+func TestMoveIssue_RecurringParentPinned_409(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, tgt, parent := seedMovePair(t, env)
+	definition := cron.JobDefinition{
+		Version: 1, Kind: "job", Enabled: true,
+		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 3600},
+		Action:  cron.Action{Kind: "notify", Recipient: "current-owner-or-author"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Recurring child"},
+		Overlap: "allow", Catchup: "latest",
+	}
+	_, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{
+		ProjectID: src.ID, Name: "Recurring job", Actor: "tester", Definition: definition,
+	})
+	require.NoError(t, err)
+	parent, err = env.DB.IssueByID(t.Context(), parent.ID)
+	require.NoError(t, err)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
+	ifMatch := fmt.Sprintf(`"rev-%d"`, parent.Revision)
+	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, parent.ShortID), body, ifMatch)
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "body: %s", raw)
+
+	var env409 struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env409))
+	assert.Equal(t, "recurring_parent_pinned", env409.Error.Code)
+	current, err := env.DB.IssueByID(t.Context(), parent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, src.ID, current.ProjectID)
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
 }
 
 func TestMoveIssue_StorageConflicts_409(t *testing.T) {

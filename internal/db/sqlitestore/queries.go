@@ -562,6 +562,9 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 }
 
 func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (int64, db.Event, error) {
+	if err := db.CheckRecurringMetadataWrite(ctx, p.Metadata); err != nil {
+		return 0, db.Event{}, err
+	}
 	// Normalize: a non-nil pointer to "" is treated as no owner. The payload
 	// already drops empty owner via omitempty; making the DB column NULL keeps
 	// the two views consistent and matches the unassigned semantic.

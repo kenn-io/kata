@@ -1,12 +1,16 @@
 ---
 title: Native cron
-description: Shared job and workflow definitions and attributed run evidence.
-last_edited: 2026-10-09
+description: Recurring child issues, shared job definitions, and attributed run evidence.
+last_edited: 2026-10-12
 ---
 
-Kata stores portable job and workflow definitions and independent run observations.
-External adapters decide when to run, resolve checkout and provider configuration,
-create or update ordinary issues, deliver notifications, and launch processes.
+Kata creates recurring child issues and inbox requests from enabled native
+notification jobs. The owning hub daemon handles delivery; consumers read the
+ordinary inbox and decide what to do.
+
+Kata also stores portable job and workflow definitions and independent run
+observations. External adapters schedule other jobs, resolve checkout and provider
+configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
 ## Vocabulary
@@ -17,7 +21,7 @@ An observation records evidence; its status does not control whether anything ru
 | Workflow | Reusable command or prompt steps and their dependencies. |
 | Run | One execution and its reported status and results. |
 
-A job can invoke a workflow or supply a single prompt. Each execution has its
+An execution job can invoke a workflow or supply a single prompt. Each execution has its
 own run UID. A workflow can also be referenced directly by a run.
 
 Issue responsibility uses Kata's existing `claim`, `assign`, `unassign`, and
@@ -48,7 +52,9 @@ readable, and `list --include-deleted` includes them. Deleting a workflow is
 refused while a live job in the project uses it; update or delete that job
 first.
 
-Enabling a job changes shared configuration; it creates no timer or process.
+Enabling a native recurring issue job activates delivery by the owning daemon.
+Other jobs require an adapter installation to schedule them. No job launches a
+process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
@@ -92,7 +98,7 @@ digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 | `enabled` | Boolean; defaults to `false`. |
 | `trigger` | Required; see [triggers](#triggers). |
 | `action` | Required; see [actions](#actions). |
-| `issue` | Issue policy; see [issue policies](#issue-policies). Required for `execute`. |
+| `issue` | Issue policy; see [issue policies](#issue-policies). Required for `execute` and native recurring issues. |
 | `overlap` | Required; `forbid` or `allow`. |
 | `catchup` | Required; `skip`, `latest`, or `all`. |
 | `checkout_key` | Optional portable name. Not allowed with `notify`. |
@@ -123,11 +129,11 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `kind` | Fields and rules |
 | --- | --- |
 | `execute` | Exactly one of `prompt` (not blank) or `workflow_uid` (a workflow ULID). Requires an `issue` policy. Cannot use an `issue-deadline` trigger. Cannot carry `recipient` or `message`. |
-| `notify` | `recipient`: an exact inbox address of at most 128 bytes, such as `worker` or `worker/adapter`, or `current-owner-or-author`. `message`: at most 1024 bytes; required unless `recipient` is `current-owner-or-author`. Cannot carry `prompt` or `workflow_uid`, and the job cannot set `checkout_key`. |
+| `notify` | `recipient`: an exact inbox address of at most 128 bytes, such as `worker` or `worker/adapter`, or `current-owner-or-author`. `message`: at most 1024 bytes; required unless `recipient` is `current-owner-or-author` or this is a native recurring issue job. Cannot carry `prompt` or `workflow_uid`, and the job cannot set `checkout_key`. |
 
 A `notify` job with an `issue-scheduled` or `issue-deadline` trigger targets
 that issue and may omit `issue`. Any other `notify` job requires an `issue`
-policy of kind `existing`.
+policy of kind `existing` or the native recurring `per-run` policy below.
 
 ### Issue policies
 
@@ -136,7 +142,100 @@ policy of kind `existing`.
 | `existing` | `uid`: the ULID of an existing issue. No other fields. |
 | `per-run` | `title` (not blank) and optional `body`. Optional `scheduled_offset_seconds` and `deadline_offset_seconds` are relative date offsets, in seconds, for the issue the adapter creates. No `uid`. |
 
-`per-run` is valid only with `execute`.
+For `notify`, `per-run` instead requires `parent_uid` and a nonblank `title`.
+It accepts an optional `body`, but no `uid` or date offsets. This selects native
+recurring child delivery. `parent_uid` is not accepted on execution jobs.
+
+### Recurring child issues
+
+Keep an ordinary parent issue open for the continuing commitment, then create a
+job that names its full UID. For example, save this request as `job.json`, replace
+`parent_uid` with the parent UID from `kata show <parent-ref> --json`, and run
+`kata cron job create --file job.json --json`:
+
+```json
+{
+  "name": "Monthly service review",
+  "definition": {
+    "version": 1,
+    "kind": "job",
+    "enabled": true,
+    "trigger": {"kind": "cron", "cron": "0 9 1 * *", "timezone": "UTC"},
+    "action": {"kind": "notify", "recipient": "current-owner-or-author"},
+    "issue": {
+      "kind": "per-run",
+      "parent_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      "title": "Review service",
+      "body": "Check health and record any follow-up work."
+    },
+    "overlap": "allow",
+    "catchup": "all"
+  }
+}
+```
+
+Each due occurrence creates one ordinary child with a parent link and an inbox
+request. Earlier children may remain unfinished. The child copies the parent's
+current owner at delivery; an unowned child remains unowned. Routing follows that
+owner, or the parent author when unowned. Set an exact recipient such as
+`worker/consumer` to keep routing fixed. An omitted message uses Kata's default
+recurring notification message. Read with `kata inbox --for worker/consumer`,
+then clear the request with `kata notify <child-ref> --to worker/consumer --clear`
+after handling it. Reading does not acknowledge it.
+
+The title gains a UTC occurrence timestamp. The configured title must leave
+room within the 1024-character issue title limit. Children carry
+`cron.occurrence` provenance and no `scheduled_on`, so the ordinary date sweeper
+does not request the same occurrence again. Clearing a request, closing a child,
+or restarting the daemon never rewinds delivery. Native delivery creates no run
+observation; a consumer may record its own execution evidence separately.
+
+Native jobs accept only `cron` and `interval` triggers and require
+`overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
+UTC as the default. They follow that timezone's daylight-saving transitions.
+An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
+`{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence;
+`@every` is not supported for native delivery. Intervals start at the first
+binding time plus one interval. Calendar schedules start strictly after that
+binding time, without historical backfill.
+
+| `catchup` | After downtime or a pause |
+| --- | --- |
+| `all` | Create every missed child, at most 50 per job per sweep. Later sweeps continue from durable progress. |
+| `latest` | Create only the newest missed occurrence. Calendar scans examine at most 1000 occurrences per sweep, retain a fixed scan horizon, and deliver when that scan finishes. Intervals find the newest occurrence directly. |
+| `skip` | Require positive `grace_seconds`; discard older occurrences and deliver those within the grace window, with the same bounded sweep limits. |
+
+The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
+for unattended delivery. Local projects deliver locally; federated projects
+deliver only on their enabled owning hub. Spokes never deliver, even with push
+writes enabled, and cannot create or edit native recurring definitions. An old
+peer that lacks `cron_notify_children_v1` cannot receive a project containing
+native recurring state. Capability refusal happens before a baseline or cursor
+change. Projects with native recurring delivery history cannot be adopted into
+a different hub through spoke snapshots; the refusal preserves their existing
+local authority and history.
+
+Create, update, delete, and restore retain ordinary authorization and expected
+revision checks. Once bound, a job's parent cannot change and the job cannot
+become an adapter job. Edits preserve committed progress and the original
+interval anchor; an unfinished latest scan restarts against the new definition.
+Disable the job or close its parent to pause delivery. An archived project or a
+deleted parent also pauses it. Re-enabling, reopening, or restoring resumes the
+configured catch-up policy. Deleting the job stops delivery until restoration.
+Keep the parent in the job's project. Kata rejects moving the parent alone
+while its native job exists, including when the job is disabled or deleted;
+restoring the job can resume its binding. Merge projects to move the job and
+parent together.
+
+Child creation, its initial notification, and the parent's
+`cron.progress.<job-uid>` checkpoint commit together. Backup, restore, federation,
+and project merge preserve this metadata. Delivery fails closed if progress is
+missing or malformed; ordinary issue writes and spoke ingest cannot change or
+delete progress or occurrence provenance. Recurrence templates also reject these
+system keys, including when older templates are materialized. Inspect that state before recovery;
+there is no implicit reset that could recreate already delivered children.
+Native jobs reject execution timeouts, secrets, adapter options, checkout keys,
+and issue date offsets.
 
 ### Workflow definitions
 
@@ -171,7 +270,8 @@ options). Each step has these fields:
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises `cron_v1`. Missing, unknown, or
+`X-Kata-Event-Features` header advertises `cron_v1` and
+`cron_notify_children_v1`. Missing, unknown, or
 failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -257,6 +357,10 @@ readiness or persisted state. Normal project and issue-subtree read policy appli
 
 ## Adapter responsibilities
 
+Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
+schedulers; those jobs belong to the native hub. Existing strict decoders reject
+the new `parent_uid` shape instead of scheduling it.
+
 Shared `enabled` configuration does not activate an adapter installation. Each
 adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
@@ -296,7 +400,9 @@ is one adapter that implements this contract; its documentation covers setup.
 
 SQLite and PostgreSQL schema 31 store native cron data in `cron_jobs`,
 `cron_workflows`, and `cron_runs`. JSONL export and import retain shared
-definitions, including tombstones, and bounded run evidence. Runs with
+definitions, including tombstones, and bounded run evidence. Native recurring
+delivery reuses ordinary issue metadata and parent links; it adds no tables or
+schema version. Keep parent checkpoints and child provenance in the same backup. Runs with
 `running` or `unknown` status do not prevent an explicitly requested restore,
 federation reset, adoption, or project merge; those operations keep their
 ordinary identity, revision and credential guards. See

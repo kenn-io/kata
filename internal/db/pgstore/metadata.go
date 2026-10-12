@@ -30,6 +30,9 @@ func (s *Store) patchIssueMetadata(
 	run metadataTxRunner,
 ) (db.PatchIssueMetadataOut, error) {
 	var output db.PatchIssueMetadataOut
+	if err := db.CheckRecurringMetadataWrite(ctx, input.Patch); err != nil {
+		return output, err
+	}
 	for key, raw := range input.Patch {
 		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 			return output, fmt.Errorf("validate %q: %w", key, err)

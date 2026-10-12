@@ -17,9 +17,11 @@ import (
 // Each backend supplies its own retry/isolation, authorization fence, and event
 // writer. SQL uses numbered placeholders supported by SQLite and PostgreSQL.
 type CronSQL struct {
-	InstanceUID string
-	Postgres    bool
-	Query       interface {
+	CreateIssueTx        func(context.Context, *sql.Tx, CreateIssueParams) (Issue, Event, error)
+	PatchIssueMetadataTx func(context.Context, *sql.Tx, PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
+	InstanceUID          string
+	Postgres             bool
+	Query                interface {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	}
@@ -263,18 +265,23 @@ func (a CronSQL) put(ctx context.Context, req cronPutRequest) (cronRow, []Event,
 	}
 	var result cronRow
 	var event Event
+	var extra []Event
 	err = a.transactProject(ctx, req.projectID, func(tx *sql.Tx) error {
 		var err error
-		result, event, err = a.putTx(ctx, tx, req)
+		extra = nil
+		result, event, err = a.putTx(ctx, tx, req, &extra)
+		if err != nil {
+			return err
+		}
 		return err
 	})
 	if err != nil {
 		return cronRow{}, nil, err
 	}
-	return result, []Event{event}, nil
+	return result, append([]Event{event}, extra...), nil
 }
 
-func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest) (cronRow, Event, error) {
+func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, extra *[]Event) (cronRow, Event, error) {
 	project, err := a.openCronProject(ctx, tx, req.projectID)
 	if err != nil {
 		return cronRow{}, Event{}, err
@@ -308,6 +315,12 @@ func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest) (cro
 	}
 	if err := writeCronDefinitionRow(ctx, tx, req, next, event, fresh); err != nil {
 		return cronRow{}, Event{}, err
+	}
+	if req.job {
+		*extra, err = a.initializeRecurringTx(ctx, tx, req, current, event)
+		if err != nil {
+			return cronRow{}, Event{}, err
+		}
 	}
 	row, err := scanCron(tx.QueryRowContext(ctx, "SELECT "+cronDefinitionColumns+" FROM "+cronTable(req.job)+" WHERE uid=$1", req.id))
 	return row, event, err
@@ -346,6 +359,11 @@ func checkCronPutState(req cronPutRequest, current cronRow, fresh bool) error {
 }
 
 func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
+	if req.job {
+		if err := a.checkRecurringPutTx(ctx, tx, req, current); err != nil {
+			return err
+		}
+	}
 	if req.job && !req.deleted {
 		return CheckCronDependencies(ctx, tx, req.projectID, req.definition.(cron.JobDefinition))
 	}

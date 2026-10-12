@@ -2998,6 +2998,8 @@ components:
           type: integer
         kind:
           type: string
+        parent_uid:
+          type: string
         scheduled_offset_seconds:
           format: int64
           type: integer
@@ -3017,6 +3019,8 @@ components:
           format: int64
           type: integer
         kind:
+          type: string
+        parent_uid:
           type: string
         scheduled_offset_seconds:
           format: int64

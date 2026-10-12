@@ -6,6 +6,7 @@ export interface IssuePolicy {
   body?: string
   deadline_offset_seconds?: number
   kind: string
+  parent_uid?: string
   scheduled_offset_seconds?: number
   title?: string
   uid?: string

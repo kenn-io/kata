@@ -16,7 +16,7 @@ import (
 // Production entry points hold a db.Storage; backend selection happens
 // through the storeopen DSN dispatcher.
 type Storage interface {
-	// Dormant shared definitions and independently attributed execution evidence.
+	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)
 	ListCronRuns(context.Context, CronRunList) ([]CronRun, error)
@@ -25,6 +25,8 @@ type Storage interface {
 	CronJob(context.Context, int64, string) (CronJob, error)
 	CronWorkflow(context.Context, int64, string) (CronWorkflow, error)
 	ListCronJobs(context.Context, CronList) ([]CronJob, error)
+	ListRecurringCronJobs(context.Context, string, int) ([]RecurringCronCandidate, error)
+	DispatchRecurringCron(context.Context, DispatchRecurringCronIn) (DispatchRecurringCronOut, error)
 	ListCronWorkflows(context.Context, CronList) ([]CronWorkflow, error)
 	ExportCronJobs(context.Context, ExportFilter) iter.Seq2[CronJobExport, error]
 	ExportCronWorkflows(context.Context, ExportFilter) iter.Seq2[CronWorkflowExport, error]

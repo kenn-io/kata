@@ -54,7 +54,26 @@ func ComposeRecurrenceIssueMetadata(
 	occurrenceKey string,
 	timezone string,
 ) (jsontext.Value, error) {
-	object, err := decodeRecurrenceTemplateMetadata(templateMetadata)
+	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, true)
+}
+
+// ComposeExistingRecurrenceIssueMetadata updates recurrence fields on an
+// existing issue while preserving its native recurring delivery metadata.
+func ComposeExistingRecurrenceIssueMetadata(
+	issueMetadata jsontext.Value,
+	occurrenceKey string,
+	timezone string,
+) (jsontext.Value, error) {
+	return composeRecurrenceIssueMetadata(issueMetadata, occurrenceKey, timezone, false)
+}
+
+func composeRecurrenceIssueMetadata(
+	metadataValue jsontext.Value,
+	occurrenceKey string,
+	timezone string,
+	template bool,
+) (jsontext.Value, error) {
+	object, err := decodeRecurrenceTemplateMetadata(metadataValue)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +87,11 @@ func ComposeRecurrenceIssueMetadata(
 	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
-	if err := validateRecurrenceTemplateMetadataObject(object); err != nil {
+	validate := validateRecurrenceIssueMetadataObject
+	if template {
+		validate = validateRecurrenceTemplateMetadataObject
+	}
+	if err := validate(object); err != nil {
 		return nil, err
 	}
 	value, err := json.Marshal(object)
@@ -110,6 +133,23 @@ func validateRecurrenceTemplateMetadataObject(object map[string]jsontext.Value) 
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
+		if recurringMetadataKey(key) {
+			return fmt.Errorf("%w: template_metadata %q is system delivery state", ErrInvalidRecurrence, key)
+		}
+	}
+	return validateRecurrenceIssueMetadataObject(object)
+}
+
+func validateRecurrenceIssueMetadataObject(object map[string]jsontext.Value) error {
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if recurringMetadataKey(key) {
+			continue
+		}
 		if _, reserved := metadata.IssueRegistry[key]; !reserved {
 			continue
 		}

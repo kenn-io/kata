@@ -91,7 +91,8 @@ func checkIssueStatusFederationIntent(t *testing.T, store db.Storage) error {
 	// Historical opposite intent loses to the previously effective restatement.
 	ingest(event("issue.reopened", "open", 15))
 	require.Equal(t, closed.EventUID, read().State.PendingEventUID)
-	reopened := event("issue.reopened", "open", 30)
+	reopened := newRemoteEvent(t, fixture.Project, &fixture.Issue.UID, "issue.reopened", "worker", spoke,
+		base+30, nil)
 	ingest(reopened)
 	require.Equal(t, reopened.EventUID, read().State.PendingEventUID)
 	ingest(event("issue.updated", "open", 40))

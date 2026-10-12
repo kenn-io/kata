@@ -27,9 +27,9 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		out := &api.CronCapabilitiesResponse{EventFeatures: db.CronEventFeature}
+		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
-		out.Body.EventFeatures = []string{db.CronEventFeature}
+		out.Body.EventFeatures = []string{db.CronEventFeature, db.RecurringCronEventFeature}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {

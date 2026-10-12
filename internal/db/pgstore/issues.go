@@ -90,6 +90,9 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 }
 
 func (s *Store) createIssueTx(ctx context.Context, tx *sql.Tx, params db.CreateIssueParams) (db.Issue, db.Event, error) {
+	if err := db.CheckRecurringMetadataWrite(ctx, params.Metadata); err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 	metadataBlob, err := composeCreateMetadata(params.Metadata)
 	if err != nil {
 		return db.Issue{}, db.Event{}, err

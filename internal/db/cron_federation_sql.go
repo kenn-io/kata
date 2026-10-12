@@ -119,6 +119,16 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 // PrepareCronAdoption captures portable history before rebinding its
 // project envelope; ordinary federation guards remain with the caller.
 func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targetUID string, emptyOnly bool) ([]CronEvent, error) {
+	// Adoption replaces history with new spoke-originated snapshots. Native
+	// delivery state cannot enter through that path; refuse before rebinding or
+	// deleting local history so the current authority can keep delivering.
+	features, err := projectRequiredEventFeaturesForAdoption(ctx, tx, project.UID)
+	if err != nil {
+		return nil, err
+	}
+	if RequireEventFeatures(CronEventFeature, features) != nil {
+		return nil, fmt.Errorf("%w: native recurring delivery history must remain on its owning hub", ErrFederatedSpokeUnsupported)
+	}
 	events, err := CronDefinitionSnapshots(ctx, tx, project)
 	if err != nil {
 		return nil, err

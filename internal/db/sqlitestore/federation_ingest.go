@@ -64,11 +64,18 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 	for _, input := range p.Events {
-		if err := db.RequireEventFeatures(p.EventFeatures, db.EventRequiredFeatures(input.Event.Type)); err != nil {
+		feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
+		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if feature := db.EventRequiredFeatures(input.Event.Type); feature != "" {
-			result.RequiredEventFeatures = feature
+		if err := db.CheckRecurringSpokeEvent(ctx, tx, input.Event); err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if err := db.RequireEventFeatures(p.EventFeatures, feature); err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if feature != "" {
+			result.RequiredEventFeatures = db.MergeEventFeatures(result.RequiredEventFeatures, feature)
 		}
 	}
 	knownIssueUIDs, err := currentFederatedIssueUIDSet(ctx, tx, p.ProjectID)

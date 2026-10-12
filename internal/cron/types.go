@@ -33,6 +33,7 @@ type Action struct {
 // IssuePolicy selects an existing issue or a separately created issue per run.
 type IssuePolicy struct {
 	Kind                   string `json:"kind"`
+	ParentUID              string `json:"parent_uid,omitempty"`
 	UID                    string `json:"uid,omitempty"`
 	Title                  string `json:"title,omitempty"`
 	Body                   string `json:"body,omitempty"`

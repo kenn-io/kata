@@ -51,6 +51,9 @@ func (d *Store) PatchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 
 func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 	var out db.PatchIssueMetadataOut
+	if err := db.CheckRecurringMetadataWrite(ctx, in.Patch); err != nil {
+		return out, err
+	}
 
 	// Validate all patch keys before opening a tx. A bad key/value never starts a tx.
 	for key, raw := range in.Patch {
@@ -65,13 +68,26 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	out, err = d.patchIssueMetadataTx(ctx, tx, in)
+	if err != nil {
+		return out, err
+	}
+	if err = tx.Commit(); err != nil {
+		return db.PatchIssueMetadataOut{}, err
+	}
+	return out, nil
+}
+
+func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	var out db.PatchIssueMetadataOut
+
 	var (
 		curMetadata string
 		curRevision int64
 		projectID   int64
 		projectName string
 	)
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT i.metadata, i.revision, i.project_id, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.deleted_at IS NULL`,
@@ -114,9 +130,6 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		if err != nil {
 			return out, err
 		}
-		if err := tx.Commit(); err != nil {
-			return out, err
-		}
 		out.Issue = issue
 		out.Changed = false
 		out.NewRevision = curRevision
@@ -155,9 +168,6 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 
 	issue, err := issueByIDTx(ctx, tx, in.IssueID)
 	if err != nil {
-		return out, err
-	}
-	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Issue = issue
