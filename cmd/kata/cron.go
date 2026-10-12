@@ -62,6 +62,7 @@ The request-file formats are in the Native cron reference (docs/reference/cron.m
 type cronCLIOptions struct {
 	resource, action                 string
 	file, identity, expectedEventUID string
+	parent                           string
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
@@ -99,6 +100,9 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 			} else {
 				command.Flags().StringVar(&options.expectedEventUID, "expected-event-uid", "", "current definition event UID; must match the request body if present")
 			}
+		}
+		if resource == "job" && (action == "create" || action == "update") {
+			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
 		}
 	}
 	if action == "list" && options.definition() {
@@ -148,13 +152,17 @@ otherwise one is generated and printed to stderr. Reuse that --uid when
 retrying: a repeated create never becomes an update.`
 		if resource == "job" {
 			long += "\nCreating or enabling a native recurring issue job activates daemon delivery. Kata never launches a process."
+			long += "\nUse --parent <ref> to set definition.issue.parent_uid from an issue ref."
 		}
 		return long, "  " + cmd + " --uid <" + resource + "-uid> --file " + resource + ".json --json"
 	case "update":
-		return "Replace a " + resource + ` definition from a JSON request file. Pass the current
+		long := "Replace a " + resource + ` definition from a JSON request file. Pass the current
 definition_event_uid from kata cron ` + resource + ` show as --expected-event-uid
-(or as expected_event_uid in the file); a stale value fails with a conflict.`,
-			"  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --file " + resource + ".json --json"
+(or as expected_event_uid in the file); a stale value fails with a conflict.`
+		if resource == "job" {
+			long += "\nUse --parent <ref> to set definition.issue.parent_uid; an existing native parent binding cannot change."
+		}
+		return long, "  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --file " + resource + ".json --json"
 	case "delete":
 		long := "Delete a " + resource + ` definition. Requires the current --expected-event-uid.
 The definition stays readable and kata cron ` + resource + ` restore brings it back.`
@@ -180,6 +188,9 @@ func normalizedCronCLIUID(value string) (string, error) {
 	return value, nil
 }
 func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
+	if cmd.Flags().Changed("parent") && strings.TrimSpace(o.parent) == "" {
+		return cronCLIValidation("--parent must not be empty")
+	}
 	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID} {
 		if *value != "" {
 			normalized, err := normalizedCronCLIUID(*value)
@@ -216,7 +227,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return err
 	}
 	var project projectRef
-	if strings.TrimSpace(flags.Project) != "" {
+	if o.parent != "" {
+		project, body, err = o.applyParent(cmd, daemon, body)
+	} else if strings.TrimSpace(flags.Project) != "" {
 		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
 	} else {
 		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
@@ -236,6 +249,87 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return nil
 	}
 	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+}
+
+// applyParent resolves the CLI ref while leaving the API and stored definition
+// UID-only. Raw JSON objects preserve opaque fields and numbers when patched.
+func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw []byte) (projectRef, []byte, error) {
+	var fields, definition, issue map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return projectRef{}, nil, err
+	}
+	if err := json.Unmarshal(fields["definition"], &definition); err != nil {
+		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	}
+	if err := json.Unmarshal(definition["issue"], &issue); err != nil || issue == nil {
+		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	}
+	kind, err := cronStringField(issue, "kind")
+	if err != nil || kind != "per-run" {
+		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	}
+	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, o.parent)
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	project := projectRef{ID: pid, Name: ref.ProjectName}
+	start, err := resolveStartPath(flags.Workspace)
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	if strings.TrimSpace(flags.Project) != "" || workspaceProjectName(start) != "" {
+		var selected projectRef
+		if strings.TrimSpace(flags.Project) != "" {
+			selected, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+		} else {
+			selected, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		}
+		if err != nil {
+			return projectRef{}, nil, err
+		}
+		if selected.ID != project.ID {
+			return projectRef{}, nil, cronCLIValidation(fmt.Sprintf("job project %q and parent project %q must match", selected.Name, project.Name))
+		}
+	}
+	client, err := kataclient.NewWithHTTPClient(baseURL, daemon.client)
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	response, callErr := client.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref.RefForAPI}})
+	if response == nil {
+		return projectRef{}, nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return projectRef{}, nil, err
+	}
+	var parent struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	if err := json.Unmarshal(response.Body, &parent); err != nil {
+		return projectRef{}, nil, err
+	}
+	bodyUID, err := cronStringField(issue, "parent_uid")
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	if _, supplied := issue["parent_uid"]; supplied && bodyUID != parent.Issue.UID {
+		return projectRef{}, nil, cronCLIValidation(fmt.Sprintf("definition.issue.parent_uid %q and --parent UID %q must match", bodyUID, parent.Issue.UID))
+	}
+	if err := setCronStringField(issue, "parent_uid", parent.Issue.UID); err != nil {
+		return projectRef{}, nil, err
+	}
+	definition["issue"], err = json.Marshal(issue)
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	fields["definition"], err = json.Marshal(definition)
+	if err != nil {
+		return projectRef{}, nil, err
+	}
+	patched, err := json.Marshal(fields)
+	return project, patched, err
 }
 
 // cronDefinitionRequestLimit bounds a job or workflow request read by the CLI.

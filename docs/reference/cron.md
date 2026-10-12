@@ -149,9 +149,7 @@ recurring child delivery. `parent_uid` is not accepted on execution jobs.
 ### Recurring child issues
 
 Keep an ordinary parent issue open for the continuing commitment, then create a
-job that names its full UID. For example, save this request as `job.json`, replace
-`parent_uid` with the parent UID from `kata show <parent-ref> --json`, and run
-`kata cron job create --file job.json --json`:
+job with `--parent <ref>`. For example, save this request as `job.json`:
 
 ```json
 {
@@ -164,7 +162,6 @@ job that names its full UID. For example, save this request as `job.json`, repla
     "action": {"kind": "notify", "recipient": "current-owner-or-author"},
     "issue": {
       "kind": "per-run",
-      "parent_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
       "title": "Review service",
       "body": "Check health and record any follow-up work."
     },
@@ -173,6 +170,24 @@ job that names its full UID. For example, save this request as `job.json`, repla
   }
 }
 ```
+
+Create the job with the parent's bare short ID, qualified ref, or full UID:
+
+```sh
+kata cron job create --parent example-project#abc4 --file job.json --json
+```
+
+The CLI resolves the ref and stores its full UID in `definition.issue.parent_uid`.
+The stored definition stays UID-only, so short ID growth and project renaming do
+not change its parent identity. API clients can still supply `parent_uid` in the
+request. If the file supplies it alongside `--parent`, both must name the same
+UID. `--parent` requires `issue.kind: "per-run"`; execution jobs cannot carry a
+parent binding.
+
+The job uses the parent's project when no project is otherwise selected. An
+explicit `--project` or workspace binding must match that project. Job updates
+also accept `--parent`, together with the current `--expected-event-uid`; a
+native job's existing parent binding remains immutable.
 
 Each due occurrence creates one ordinary child with a parent link and an inbox
 request. Earlier children may remain unfinished. The child copies the parent's

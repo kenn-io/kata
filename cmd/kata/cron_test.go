@@ -547,3 +547,209 @@ func TestCronCLIRequestValidationLeavesStateUnchanged(t *testing.T) {
 		})
 	}
 }
+
+// The parent-ref contract is a CLI convenience; stored definitions remain UID-only.
+func cronCLIRecurringJob(t *testing.T) api.PutCronJobBody {
+	t.Helper()
+	input := cronCLIJob(t)
+	input.Definition.Trigger = cron.Trigger{Kind: "interval", IntervalSeconds: 7200}
+	input.Definition.Action = cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
+	input.Definition.Overlap = "allow"
+	input.Definition.Options = nil
+	return input
+}
+
+func executeCronParentCLI(t *testing.T, base, workspace, project string, input any, args ...string) (string, error) {
+	t.Helper()
+	resetFlags(t)
+	root := newRootCmd()
+	var out, diagnostics bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&diagnostics)
+	root.SetContext(contextWithBaseURL(t.Context(), base))
+	global := []string{"--workspace", workspace, "--json"}
+	if project != "" {
+		global = append(global, "--project", project)
+	}
+	args = append(args, "--file", cronCLIFile(t, input))
+	root.SetArgs(append(append(global, "cron", "job"), args...))
+	err := root.Execute()
+	return out.String(), err
+}
+
+func TestCronCLIParentRefs(t *testing.T) {
+	for _, tc := range []struct {
+		name, form, project, body string
+		binding                   bool
+	}{
+		{name: "bare short", form: "short", project: "spoke-project"},
+		{name: "qualified", form: "qualified", project: "spoke-project"},
+		{name: "full UID", form: "uid", project: "spoke-project"},
+		{name: "matching body", form: "short", project: "spoke-project", body: "same"},
+		{name: "unbound workspace", form: "qualified"},
+		{name: "workspace binding", form: "short", binding: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_AUTHOR", "worker")
+			env := testenv.New(t)
+			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Ongoing review", Author: "worker"})
+			require.NoError(t, err)
+			workspace := t.TempDir()
+			if tc.binding {
+				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte("version = 1\n[project]\nname = \"spoke-project\"\n"), 0o600))
+			}
+			ref := parent.ShortID
+			if tc.form == "qualified" {
+				ref = "spoke-project#" + ref
+			}
+			if tc.form == "uid" {
+				ref = parent.UID
+			}
+			input := cronCLIRecurringJob(t)
+			if tc.body == "same" {
+				input.Definition.Issue.ParentUID = parent.UID
+			}
+			jobUID := cronCLIUID(t)
+			_, err = executeCronParentCLI(t, env.URL, workspace, tc.project, input, "create", "--uid", jobUID, "--parent", ref)
+			require.NoError(t, err)
+			stored, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
+			require.NoError(t, err)
+			require.Equal(t, parent.UID, stored.Definition.Issue.ParentUID)
+		})
+	}
+}
+
+func TestCronCLIParentValidation(t *testing.T) {
+	for _, tc := range []string{"conflicting UID", "empty body UID", "missing issue", "existing issue", "execute job", "unknown ref", "project mismatch", "workspace mismatch", "empty ref"} {
+		t.Run(tc, func(t *testing.T) {
+			t.Setenv("KATA_AUTHOR", "worker")
+			env := testenv.New(t)
+			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			_, err = env.DB.CreateProject(t.Context(), "hub-project")
+			require.NoError(t, err)
+			parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Ongoing review", Author: "worker"})
+			require.NoError(t, err)
+			var writes atomic.Int64
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet && strings.Contains(r.URL.Path, "/cron/") {
+					writes.Add(1)
+				}
+				request, err := http.NewRequestWithContext(r.Context(), r.Method, env.URL+r.URL.RequestURI(), r.Body)
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(500)
+					return
+				}
+				request.Header = r.Header.Clone()
+				response, err := env.HTTP.Do(request) //nolint:gosec // Requests only reach the owned test daemon.
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(500)
+					return
+				}
+				defer func() { _ = response.Body.Close() }()
+				maps.Copy(w.Header(), response.Header)
+				w.WriteHeader(response.StatusCode)
+				_, _ = io.Copy(w, response.Body)
+			}))
+			defer proxy.Close()
+			input := cronCLIRecurringJob(t)
+			ref, selected, workspace := parent.ShortID, "spoke-project", t.TempDir()
+			want := []string{}
+			switch tc {
+			case "conflicting UID":
+				input.Definition.Issue.ParentUID = cronCLIUID(t)
+				want = []string{input.Definition.Issue.ParentUID, parent.UID}
+			case "empty body UID":
+				want = []string{"parent_uid", parent.UID}
+			case "missing issue":
+				input.Definition.Issue = nil
+				want = []string{"--parent", "definition.issue", "per-run"}
+			case "existing issue":
+				input.Definition.Issue.Kind = "existing"
+				want = []string{"--parent", "definition.issue", "per-run"}
+			case "execute job":
+				input.Definition.Action = cron.Action{Kind: "execute", Prompt: "Inspect"}
+				want = []string{"parent binding", "native recurring issues"}
+			case "unknown ref":
+				ref = cronCLIUID(t)
+			case "project mismatch":
+				selected = "hub-project"
+				ref = "spoke-project#" + ref
+				want = []string{"hub-project", "spoke-project"}
+			case "workspace mismatch":
+				selected = ""
+				ref = "spoke-project#" + ref
+				want = []string{"hub-project", "spoke-project"}
+				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte("version = 1\n[project]\nname = \"hub-project\"\n"), 0o600))
+			case "empty ref":
+				ref = ""
+				want = []string{"--parent", "empty"}
+			}
+			var request any = input
+			if tc == "empty body UID" {
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(mustCronJSON(t, input), &fields))
+				fields["definition"].(map[string]any)["issue"].(map[string]any)["parent_uid"] = ""
+				request = fields
+			}
+			_, err = executeCronParentCLI(t, proxy.URL, workspace, selected, request, "create", "--parent", ref)
+			require.Error(t, err)
+			var cliErr *cliError
+			require.ErrorAs(t, err, &cliErr)
+			if tc == "unknown ref" {
+				require.Equal(t, kindNotFound, cliErr.Kind)
+			} else {
+				require.Equal(t, kindValidation, cliErr.Kind)
+			}
+			for _, message := range want {
+				require.Contains(t, err.Error(), message)
+			}
+			if tc == "execute job" {
+				require.EqualValues(t, 1, writes.Load(), "the hub owns action validation")
+			} else {
+				require.Zero(t, writes.Load(), "invalid parent must not send a mutation")
+			}
+		})
+	}
+}
+
+func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	parents := []db.Issue{}
+	for range 2 {
+		parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Ongoing review", Author: "worker"})
+		require.NoError(t, err)
+		parents = append(parents, parent)
+	}
+	input := cronCLIRecurringJob(t)
+	jobUID, workspace := cronCLIUID(t), t.TempDir()
+	_, err = executeCronParentCLI(t, env.URL, workspace, "spoke-project", input, "create", "--uid", jobUID, "--parent", parents[0].ShortID)
+	require.NoError(t, err)
+	job, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
+	require.NoError(t, err)
+	input.Name = "Updated review"
+	_, err = executeCronParentCLI(t, env.URL, workspace, "spoke-project", input, "update", jobUID, "--expected-event-uid", job.DefinitionEventUID, "--parent", parents[0].UID)
+	require.NoError(t, err)
+	job, err = env.DB.CronJob(t.Context(), project.ID, jobUID)
+	require.NoError(t, err)
+	_, err = executeCronParentCLI(t, env.URL, workspace, "spoke-project", input, "update", jobUID, "--expected-event-uid", job.DefinitionEventUID, "--parent", parents[1].ShortID)
+	require.ErrorContains(t, err, "immutable")
+	_, _, err = executeCronCLI(t, env.URL, nil, "job", "delete", jobUID, "--expected-event-uid", job.DefinitionEventUID)
+	require.NoError(t, err)
+	deleted, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
+	require.NoError(t, err)
+	_, err = executeCronParentCLI(t, env.URL, workspace, "spoke-project", input, "update", jobUID, "--expected-event-uid", deleted.DefinitionEventUID, "--parent", parents[1].ShortID)
+	require.ErrorContains(t, err, "immutable")
+	_, _, err = executeCronCLI(t, env.URL, nil, "job", "restore", jobUID, "--expected-event-uid", deleted.DefinitionEventUID)
+	require.NoError(t, err)
+	stored, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
+	require.NoError(t, err)
+	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
+}

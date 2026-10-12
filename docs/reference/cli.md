@@ -1848,8 +1848,10 @@ kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
 
-Workflow commands use the same definition actions and flags. Retain a generated or
-explicit definition UID after a lost create response; inspect it rather than
+Recurring job create/update also accept `--parent <issue-ref>`; see
+[recurring child issues](cron.md#recurring-child-issues) for the request format.
+Workflow commands use the same definition actions and revision flags. Retain a
+generated or explicit definition UID after a lost create response; inspect it rather than
 assuming a create conflict is successful. Mutable definitions require the
 current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
