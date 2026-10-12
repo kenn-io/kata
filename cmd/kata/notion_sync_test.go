@@ -311,6 +311,8 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 	closed, err := env.DB.IssueByID(context.Background(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", closed.Status)
+	// The short timeout above only tests the sync commands' long-running client.
+	t.Setenv("KATA_HTTP_TIMEOUT", "")
 	before := requests.Load()
 	runCLI(t, env, dir, "reopen", issue.ShortID)
 	reopened, err := env.DB.IssueByID(context.Background(), issue.ID)
