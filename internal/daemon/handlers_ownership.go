@@ -44,7 +44,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -100,7 +100,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -192,7 +192,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		if result.Changed {
-			cfg.Publish().Events(in.ProjectID, result.Events)
+			cfg.Publish().EventsByProject(result.Events)
 		}
 		var replayEvents []db.Event
 		if principal.Enrollment && result.Event != nil && result.Event.Type == "issue.assignment_renewed" {

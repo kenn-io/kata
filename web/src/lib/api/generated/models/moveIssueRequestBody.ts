@@ -6,5 +6,7 @@ export interface MoveIssueRequestBody {
   actor?: string
   /** Validate without moving; If-Match may be omitted for a preview. */
   dry_run?: boolean
+  /** Move only this issue instead of its subtree. */
+  single?: boolean
   to_project_uid: string
 }

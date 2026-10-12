@@ -195,7 +195,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			evt = nil
 			events = nil
 			updated, events, changed, err = cfg.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{
-				IssueID: issue.ID, ExpectedProjectID: in.ProjectID,
+				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
 				Transcript:     in.Body.Transcript,
@@ -208,7 +208,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return err
 		})
 		if err == nil && changed {
-			cfg.Publish().Events(in.ProjectID, events)
+			cfg.Publish().EventsByProject(events)
 		}
 		if err != nil {
 			// A connection can fail after the database commits. The keyed
@@ -223,7 +223,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				if match != nil {
 					if len(events) > 0 && events[0].UID == match.Event.UID {
-						cfg.Publish().Events(in.ProjectID, events)
+						cfg.Publish().EventsByProject(events)
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
@@ -323,7 +323,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {

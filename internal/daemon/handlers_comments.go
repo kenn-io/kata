@@ -156,7 +156,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -224,7 +224,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {

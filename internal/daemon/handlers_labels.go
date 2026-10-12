@@ -77,7 +77,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			return nil, internalAPIError(err)
 		}
 
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -130,7 +130,7 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 			return nil, internalAPIError(err)
 		}
 
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)

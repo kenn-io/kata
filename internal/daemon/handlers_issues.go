@@ -218,7 +218,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case err != nil:
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if err != nil {
 			return nil, err
@@ -576,7 +576,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		// Broadcast all events post-commit. Order matches DB.EditIssueAtomic's
 		// emission order: issue.updated → priority → links_changed.
-		cfg.Publish().Events(in.ProjectID, result.Events)
+		cfg.Publish().EventsByProject(result.Events)
 
 		out := &api.EditIssueResponse{}
 		out.Body.Issue = result.Issue

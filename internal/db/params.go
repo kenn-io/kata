@@ -542,8 +542,12 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// AuthorizeProjects checks every source project discovered in the transaction.
+	AuthorizeProjects func([]int64) error
 	// DryRun validates inside the move transaction, then rolls back without moving.
-	DryRun        bool
+	DryRun bool
+	// Single moves only the selected issue; the default includes descendants.
+	Single        bool
 	IssueID       int64
 	FromProjectID int64
 	ToProjectID   int64
@@ -553,6 +557,8 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
+	Issues      []Issue
+	Events      []Event
 	Issue       Issue
 	Event       *Event `json:"-"`
 	EventID     int64
