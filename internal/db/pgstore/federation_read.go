@@ -31,7 +31,8 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			return scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		}
 		readEvents := func() ([]db.Event, error) {
-			rows, err := tx.QueryContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.id>$2 ORDER BY e.id LIMIT $3`, project.ID, in.AfterID, in.Limit)
+			rows, err := tx.QueryContext(ctx, eventSelect+` WHERE (e.project_id=$1 OR e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ OR (e.type='issue.moved' AND e.payload::jsonb->>'from_project_uid'=(SELECT uid FROM projects WHERE id=$1))) AND e.id>$2 ORDER BY e.id LIMIT $3`, project.ID, in.AfterID, in.Limit)
 			if err != nil {
 				return nil, err
 			}

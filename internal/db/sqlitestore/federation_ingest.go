@@ -118,6 +118,18 @@ func (d *Store) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = jsontext.Value(`{}`)
 		}
+		if ev.Type == "issue.moved" {
+			from, _, err := db.FederationMoveProjects(ctx, tx, p.ProjectID, ev)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			var issueID int64
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1 AND project_id IN ($2,$3)`, *ev.IssueUID, from, p.ProjectID).Scan(&issueID); err != nil {
+				return db.FederationIngestResult{}, fmt.Errorf("%w: unknown moved issue", db.ErrFederationIngestValidation)
+			}
+			knownIssueUIDs[*ev.IssueUID] = struct{}{}
+		}
+
 		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -895,7 +907,7 @@ func validateFederationProjectEvent(
 	if ev.EventUID == "" || ev.HLCPhysicalMS <= 0 || ev.HLCCounter < 0 || strings.TrimSpace(ev.Actor) == "" {
 		return fmt.Errorf("%w: event %s has invalid envelope", db.ErrFederationIngestValidation, ev.EventUID)
 	}
-	if strings.HasPrefix(ev.Type, "recurrence.") || ev.Type == "issue.moved" {
+	if strings.HasPrefix(ev.Type, "recurrence.") {
 		return fmt.Errorf("%w: event type %s unsupported in phase 2", db.ErrFederationIngestValidation, ev.Type)
 	}
 	if strings.HasPrefix(ev.Type, "cron.") {
@@ -929,7 +941,7 @@ func validateFederationProjectEvent(
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)
 		}
-	case "issue.updated", "issue.assigned", "issue.unassigned",
+	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned",
 		"issue.assignment_renewed", "issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",

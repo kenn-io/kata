@@ -63,15 +63,28 @@ Roles apply to a project, not to an entire daemon.
 
 ## Moving issues between projects
 
-Cross-project issue moves involving a federated project are unsupported on hubs
-and spokes. Federation replay cannot apply the move event. Disabling sync retains
-the federation binding and replica state, so it does not enable moves.
+Move an issue and its active descendants between projects on the same hub:
 
-`kata move <issue-ref> <project> --dry` validates this restriction through the
-daemon and returns the same `federated_move_unsupported` conflict as a real move.
-The preview does not change issues or refresh claims. It validates the current
-state without reserving a future move. See the [CLI reference](../reference/cli.md)
-for the other move restrictions.
+```sh
+kata move intake-project#abc4 repository-project --dry
+kata move intake-project#abc4 repository-project
+```
+
+Both projects must have active federation bindings. On a spoke, both must use
+that hub's HTTP(S) origin and have push enabled for a local move. A preview
+checks the whole tree without changing issues, claims, or cursors. Use `--single`
+to move only the selected issue. The [CLI reference](../reference/cli.md) owns
+the per-issue restrictions.
+
+Spokes must join both projects before applying a move. Sync refuses the batch
+without partial writes when a project is missing; join it and retry sync. Upgrade
+both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+move history instead of applying a payload they cannot understand. Moves preserve
+stable UIDs, nesting, state, comments, and links. Old references still resolve.
+
+Moves between different hubs, mixed local/federated projects, and paused bindings
+return `federated_move_unsupported`. Create an issue in the target project and link
+it to the original issue instead. Disabling sync retains the binding.
 
 ## Connect a project through the daemon catalog
 

@@ -498,6 +498,30 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
+		return resolveFederatedIssueShortID(ctx, tx, pid, issue, federatedIssueRow{}, false)
+	}, func(id int64) error {
+		return lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
+
+	})
+	if err != nil {
+		return err
+	}
+	if !db.FollowingMovedProjects(ctx) {
+		for _, pid := range destinations {
+			if pid != projectID {
+				if err := s.materializeFederatedProjectTx(db.WithMovedProjectPass(ctx), tx, pid, true, acceptedEventUIDs, validator); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+		return err
+	}
+	db.RestrictFoldProject(&projection, projectUID)
+
 	if validator == nil {
 		validator = db.NewCronReplayValidator(tx, true)
 	}

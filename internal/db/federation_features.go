@@ -19,7 +19,9 @@ const CronEventFeature = "cron_v1"
 const RecurringCronEventFeature = "cron_notify_children_v1"
 
 // SupportedEventFeatures is the complete event format advertisement.
-const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+const IssueMoveEventFeature = "issue_move_v1"
+
+const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -72,7 +74,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 		return "", err
 	}
 	if native {
-		required = MergeEventFeatures(required, SupportedEventFeatures)
+		required = MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature)
 	}
 	return required, nil
 }
@@ -142,6 +144,9 @@ func RequireEventFeatures(supported, required string) error {
 
 // EventRequiredFeatures returns the wire feature needed for an event type.
 func EventRequiredFeatures(kind string) string {
+	if kind == "issue.moved" {
+		return IssueMoveEventFeature
+	}
 	if strings.HasPrefix(kind, "cron.") {
 		return CronEventFeature
 	}
@@ -165,10 +170,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
+	if issueMoved {
+		required = MergeEventFeatures(required, IssueMoveEventFeature)
+	}
 	if cronPresent {
-		required = CronEventFeature
+		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	if !cronPresent && !issueMoved {
@@ -186,7 +194,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if native {
 			nativeProjectFeatureCache.Store(projectUID, struct{}{})
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	if issueMoved {
@@ -195,7 +203,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 			return "", err
 		}
 		if native {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	return required, nil

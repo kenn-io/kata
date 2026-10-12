@@ -568,6 +568,16 @@ func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]jsontext.Val
 	if uid == "" {
 		return
 	}
+	if _, known := p.Issues[uid]; !known {
+		if raw := payload["snapshot"]; len(raw) > 0 {
+			snapshot := e
+			snapshot.Type = "issue.snapshot"
+			snapshot.Payload = raw
+			snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
+			p.applyIssueCreated(snapshot)
+		}
+	}
+
 	issue := p.ensureIssue(uid)
 	if v, ok := stringValue(payload["to_project_uid"]); ok {
 		issue.ProjectUID = v
