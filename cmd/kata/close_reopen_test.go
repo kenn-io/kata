@@ -353,7 +353,8 @@ func TestCloseCmd_HelpBannerNamesObligation(t *testing.T) {
 	out := string(executeRoot(t, newRootCmd(), "close", "--help"))
 	assert.Contains(t, out, "asserts that the work it describes is complete")
 	assert.Contains(t, out, "do not close it")
-	assert.Contains(t, out, "needs-review")
+	assert.Contains(t, out, `kata label add <ref> needs-review --comment "<what remains>"`)
+	assert.NotContains(t, out, "edit <ref> --label")
 }
 
 func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {

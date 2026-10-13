@@ -196,6 +196,10 @@ Use kata as the shared issue ledger for this workspace.
    coordinator/*. Shared MCP processes use the per-call teammate on
    kata.comment and kata.create when siblings cannot have separate environments.
 
+   If a comment-sized task needs ownership or tracked completion, make it a
+   child issue: kata create "fix retry handling" --parent <ref>, then
+   kata claim <child>. Comments record findings; child issues track owned work.
+
 10. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
@@ -266,6 +270,7 @@ Use --json only when your script needs complete structured data.
 Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
 Record progress: kata comment <ref> -m "<what changed>".
+When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.

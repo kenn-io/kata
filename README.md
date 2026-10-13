@@ -138,6 +138,29 @@ kata close abc4 --done \
   --commit <sha>
 ```
 
+Comment relations and their notification commands are unreleased. These
+examples describe planned behavior; the current released CLI does not accept
+the options yet. Use ordinary comments and supported targeted notifications
+until the feature ships:
+
+```sh
+kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
+kata wait abc4 --until reply --timeout 5m
+```
+
+The TUI and Web UI show nonzero counts for authorized direct relations on
+original comments. Open a count to inspect chronological evidence with its
+author, time, handle, and body, then jump to it and return focus. The TUI uses a
+keyboard picker; Web controls are accessible. Replies show their outgoing
+relation. Partial counts stay explicit. Conflicting assertions stay visible
+together without scores, automatic resolution, or hiding. Pending, removed,
+moved, and edited targets remain visible.
+
+Use `--confirm`, `--refute`, or `--supersede` when the response has that meaning.
+See [planned reply and coordinator workflows](docs/workflows/agents.md#reply-to-a-finding)
+for handles, inbox behavior, and rate-limited broadcasts. For work that needs
+ownership or tracked completion, a comment-sized task becomes a child issue.
+
 For agent-heavy workspaces, `kata init --with-agents` also writes a managed kata
 briefing into agent guidance files. It refreshes existing real `AGENTS.md` and
 `CLAUDE.md` files, or creates `AGENTS.md` when neither exists, without

@@ -41,6 +41,23 @@ func TestAgentContractHookBare(t *testing.T) {
 	assertCodexPrompt(t, stdout, agentContractText)
 }
 
+func TestAgentContractHookOmitsUnimplementedCommentOptions(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	var envelope struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
+	assertNoUnimplementedCommentOptions(t, envelope.HookSpecificOutput.AdditionalContext)
+	assert.Contains(t, envelope.HookSpecificOutput.AdditionalContext, "kata wait <refs> --until attention --any")
+	assert.Contains(t, envelope.HookSpecificOutput.AdditionalContext, "kata notify <ref> --to <actor>")
+}
+
 func TestAgentContractHookCustomSource(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, tc := range []struct {
@@ -227,5 +244,22 @@ func TestAgentContractHookPromptRoundTrip(t *testing.T) {
 		if response.Output.Text != prompt {
 			rt.Fatalf("prompt did not round-trip: want %q, got %q", prompt, response.Output.Text)
 		}
+	})
+}
+
+// Native context must preserve the managed contract's DOT escaping alongside
+// arbitrary valid UTF-8 prompt text through each distinct JSON envelope.
+func FuzzNativeContractRoundTrip(f *testing.F) {
+	for i := range byte(4) {
+		f.Add(i, "")
+		f.Add(i, "\n\"quotes\" \\ Unicode 世界 <tag> &\n")
+	}
+	f.Fuzz(func(t *testing.T, envelope byte, suffix string) {
+		agents := []agenthook.Agent{agenthook.AgentCodex, agenthook.AgentCopilot, agenthook.AgentCursor, agenthook.AgentHermes}
+		agent := agents[int(envelope)%len(agents)]
+		text := agentContractText + strings.ToValidUTF8(suffix, "�")
+		var out bytes.Buffer
+		require.NoError(t, writeNativeAgentContract(t.Context(), agent, strings.NewReader(contractHookPayload(agent)), &out, text))
+		assertNativePrompt(t, agent, out.String(), text)
 	})
 }
