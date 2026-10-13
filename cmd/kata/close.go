@@ -51,7 +51,6 @@ claim and that the message and evidence should be specific to the issue.
 If you have not completed and tested this work, do not close it.
 Instead, label and comment:
     kata label add <ref> needs-review --comment "<what remains>"
-    kata comment <ref> --body "what was attempted, what remains"
 
 The close message has a minimum length that depends on the reason:
     --done, --audit-no-change           at least 40 characters

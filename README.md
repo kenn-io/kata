@@ -82,14 +82,14 @@ downloads, and build-from-source steps.
 
 ```mermaid
 flowchart TB
-  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Reuse an open issue or create one."]
+  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Reuse an open issue, else create one.<br/>If create refuses a look-alike, reuse it;<br/>--force-new only if the work truly differs.<br/>No bound workspace: refs are #60;project#62;##60;id#62;,<br/>or pass --project #60;project#62;."]
   search --> route{"Work it, or delegate it?"}
 
   subgraph workside[" "]
     direction TB
-    claim["On claim or start, mark it tracked:<br/>kata meta set #60;ref#62; work.attention ok"]
+    claim["Claim and mark it tracked:<br/>kata claim #60;ref#62;<br/>kata meta set #60;ref#62; work.attention ok"]
     branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
-    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
+    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
     claim --> branch --> live
   end
 
@@ -108,11 +108,12 @@ flowchart TB
   coord --> done
 
   done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done<br/>with a message and evidence"]
+  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;scope and verification, 40+ chars#62;#34;<br/>--evidence commit:#60;sha#62; #124; pr:#60;url#62; #124; test:#60;cmd#62; #124; reviewed-paths:#60;path#62;<br/>(or --commit, --pr, --test, --reviewed)"]
+  done -->|duplicate, superseded or dropped| retire["kata close #60;ref#62; --message #34;#60;why#62;#34;<br/>--duplicate-of #60;ref#62; #124; --superseded-by #60;ref#62; (20+ chars)<br/>#124; --wontfix (60+ chars)"]
   done -->|no| park{"Park it?"}
   park -->|start date known| schedule["kata schedule #60;ref#62; #60;date-or-time#62;<br/>sets scheduled_on; clear with -"]
   park -->|start date unknown| someday["kata meta set #60;ref#62; someday true --json-value<br/>clear with kata meta unset #60;ref#62; someday"]
-  park -->|needs review| review["kata label add #60;ref#62; needs-review<br/>plus a comment on what remains"]
+  park -->|needs review| review["kata label add #60;ref#62; needs-review --comment #34;#60;what remains#62;#34;"]
 ```
 
 ## Quickstart

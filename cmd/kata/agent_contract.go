@@ -17,14 +17,14 @@ digraph kata {
   rankdir=TB; node [shape=box];
 
   arrive   [shape=diamond label="Work arrives"];
-  search   [label="Search first:\nkata search \"<terms>\" --agent\nReuse an open issue or create one."];
+  search   [label="Search first:\nkata search \"<terms>\" --agent\nReuse an open issue, else create one.\nIf create refuses a look-alike, reuse it;\n--force-new only if the work truly differs.\nNo bound workspace: refs are <project>#<id>,\nor pass --project <project>."];
   route    [shape=diamond label="Work it, or delegate it?"];
 
   subgraph cluster_work {
     label="";
-    claim  [label="On claim or start, mark it tracked:\nkata meta set <ref> work.attention ok"];
+    claim  [label="Claim and mark it tracked:\nkata claim <ref>\nkata meta set <ref> work.attention ok"];
     branch [label="If the work happens on a dedicated branch, stamp it once:\nkata meta set <ref> work.branch <branch>\nor bind at creation:\nkata create ... --meta work.branch=<branch> --idempotency-key <key>"];
-    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
+    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
     claim -> branch -> live;
   }
 
@@ -37,8 +37,9 @@ digraph kata {
   }
 
   done     [shape=diamond label="Verified complete?"];
-  close    [label="kata close <ref> --done\nwith a message and evidence"];
-  review   [label="kata label add <ref> needs-review\nplus a comment on what remains"];
+  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)"];
+  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars)"];
+  review   [label="kata label add <ref> needs-review --comment \"<what remains>\""];
   park     [shape=diamond label="Park it?"];
   schedule [label="kata schedule <ref> <date-or-time>\nsets scheduled_on; clear with -"];
   someday  [label="kata meta set <ref> someday true --json-value\nclear with kata meta unset <ref> someday"];
@@ -50,6 +51,7 @@ digraph kata {
   live  -> done;
   coord -> done;
   done -> close    [label="yes"];
+  done -> retire   [label="duplicate, superseded or dropped"];
   done -> park     [label="no"];
   park -> schedule [label="start date known"];
   park -> someday  [label="start date unknown"];

@@ -134,7 +134,7 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 	if _, isTrivial := TrivialMessages[norm]; isTrivial {
 		return fmt.Errorf("message rejected as trivial (%q). "+
 			"If the work is not actually complete, do not close — use "+
-			"`kata edit <ref> --label needs-review` and comment what remains", norm)
+			"`kata label add <ref> needs-review --comment \"<what remains>\"`", norm)
 	}
 	if len(norm) < messageFloor(reason) {
 		return fmt.Errorf("message too short for reason=%s (need >=%d chars after normalization, got %d)",
@@ -178,7 +178,7 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>, " +
 				"external:<account>. " +
 				"If the work is not actually complete, do not close — use " +
-				"`kata edit <ref> --label needs-review` and comment what remains")
+				"`kata label add <ref> needs-review --comment \"<what remains>\"`")
 		}
 	case "wontfix":
 		if len(evidence) > 0 {
