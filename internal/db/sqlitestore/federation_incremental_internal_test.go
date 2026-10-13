@@ -86,9 +86,14 @@ func TestFederationPreparationExcludesUntouchedRows(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained"})
 	require.NoError(t, err)
-	_, err = d.AddLabel(ctx, other.ID, "retained", "tester")
+	_, _, err = d.AddLabelAndEvent(ctx, other.ID, db.LabelEventParams{
+		EventType: "issue.labeled", Label: "retained", Actor: "tester",
+	})
 	require.NoError(t, err)
 	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	present, err := d.HasLabel(ctx, other.ID, "retained")
+	require.NoError(t, err)
+	require.True(t, present, "the unchanged label must survive fixture materialization")
 	ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_000_000_000)
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)

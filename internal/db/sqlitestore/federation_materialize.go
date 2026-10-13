@@ -30,7 +30,7 @@ type federationMaterialization struct {
 	linkRows     map[db.FoldLinkKey]federatedLinkRow
 }
 
-func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent) (*federationMaterialization, error) {
+func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
@@ -53,38 +53,38 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		linksAffected = linksAffected || db.FederationEventAffectsLinks(ev.Type)
 	}
 	if len(fresh) == 0 {
-		return nil, nil
+		return federationMaterialization{}, nil
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
-		return nil, err
+		return federationMaterialization{}, err
 	}
 	events, err := federationFoldEvents(ctx, tx, projectID)
 	if err != nil {
-		return nil, err
+		return federationMaterialization{}, err
 	}
 	events = append(events, fresh...)
 	for _, event := range events {
 		if err := db.ValidateFederationEntries(event.Type, event.UID, event.Payload); err != nil {
-			return nil, err
+			return federationMaterialization{}, err
 		}
 	}
-	m := &federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
 	m.cronAffected = db.CronMaterializationNeeded(events, accepted)
 	m.status, err = prepareFederatedStatusIntentTx(ctx, tx, projectID, events, accepted, m.projection)
 	if err != nil {
-		return nil, err
+		return federationMaterialization{}, err
 	}
 	if linksAffected {
 		m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, binding)
 		if err != nil {
-			return nil, err
+			return federationMaterialization{}, err
 		}
 		var linkEvents []db.FoldEvent
 		for _, id := range m.linkProjects {
 			history, err := federationFoldEventsOfTypes(ctx, tx, id, db.FederationLinkAffectingEventTypes())
 			if err != nil {
-				return nil, err
+				return federationMaterialization{}, err
 			}
 			linkEvents = append(linkEvents, history...)
 		}
@@ -96,11 +96,11 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		m.links = db.FoldEvents(linkEvents)
 	}
 	if err := m.prepareRows(ctx, tx, projectID); err != nil {
-		return nil, err
+		return federationMaterialization{}, err
 	}
 	if m.linkProjects != nil {
 		if err := m.prepareLinks(ctx, tx, projectID); err != nil {
-			return nil, err
+			return federationMaterialization{}, err
 		}
 	}
 	return m, nil

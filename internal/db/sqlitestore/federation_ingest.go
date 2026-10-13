@@ -192,7 +192,7 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
-	if materialization != nil && d.federationIngestPrepared != nil {
+	if len(cronTargets) > 0 && d.federationIngestPrepared != nil {
 		d.federationIngestPrepared()
 	}
 	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
