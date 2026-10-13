@@ -172,3 +172,9 @@ func TestKilledStateUpdateProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFieldValueEquivalentCanonicalizesSets(t *testing.T) {
+	assert.True(t, fieldValueEquivalent(connector.FieldValue{Kind: "string_set", Values: []string{"b", "a", "a"}}, connector.FieldValue{Kind: "string_set", Values: []string{"a", "b"}}))
+	assert.False(t, fieldValueEquivalent(connector.FieldValue{Kind: "string", Value: " padded "}, connector.FieldValue{Kind: "string", Value: "padded"}))
+	assert.False(t, fieldValueEquivalent(connector.FieldValue{Kind: "string_set"}, connector.FieldValue{Kind: "null"}))
+}

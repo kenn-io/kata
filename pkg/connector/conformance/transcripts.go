@@ -480,6 +480,13 @@ func (runtime *transcriptRuntime) performStep(ctx context.Context, step protocol
 		}
 		stepDocument["comment_id"] = commentID
 		return nil
+	case step.Observe == "field_samples":
+		samples, err := runtime.fieldSamples()
+		if err != nil {
+			return err
+		}
+		stepDocument["samples"] = samples
+		return nil
 	case step.Observe != "":
 		if step.Observe != "provider_state" {
 			return fmt.Errorf("unsupported observation %q", step.Observe)
@@ -509,6 +516,103 @@ func (runtime *transcriptRuntime) performStep(ctx context.Context, step protocol
 	default:
 		return errors.New("step has no action")
 	}
+}
+
+func (runtime *transcriptRuntime) fieldSamples() (any, error) {
+	defaults := runtime.root["contract"].(map[string]any)["field_samples"]
+	fixture, ok := runtime.fixture.(FieldSampleFixture)
+	if !ok {
+		return defaults, nil
+	}
+	descriptor, err := runtime.resolve(transcriptValue{Path: "/vars/descriptor"})
+	if err != nil {
+		return nil, err
+	}
+	object, ok := descriptor.(map[string]any)
+	if !ok {
+		return nil, errors.New("field samples require a descriptor")
+	}
+	id, ok := object["id"].(string)
+	if !ok {
+		return nil, errors.New("field samples require a field ID")
+	}
+	samples := fixture.FieldSamples(id)
+	if samples == nil {
+		return defaults, nil
+	}
+	kinds, ok := object["accepted_kinds"].([]any)
+	if !ok {
+		return nil, errors.New("field samples require accepted kinds")
+	}
+	capabilities, _ := runtime.resolve(transcriptValue{Path: "/captures/description/capabilities"})
+	conditional := false
+	if advertised, ok := capabilities.([]any); ok {
+		for _, capability := range advertised {
+			if capability == string(connector.CapabilityConditionalFields) {
+				conditional = true
+				break
+			}
+		}
+	}
+	writable, _ := object["writable"].(bool)
+	var advancementFixture FieldAdvancementFixture
+	if conditional && writable {
+		advancementFixture, ok = runtime.fixture.(FieldAdvancementFixture)
+		if !ok {
+			return nil, errors.New("conditional field samples require provider-valid advancement values")
+		}
+	}
+	covered := make(map[string]bool, len(samples))
+	transcriptSamples := make([]any, 0, len(samples))
+	for _, sample := range samples {
+		if err := connector.ValidateFieldValue(sample); err != nil {
+			return nil, fmt.Errorf("invalid fixture field sample: %w", err)
+		}
+		if sample.Kind == "null" {
+			return nil, errors.New("fixture field samples must use accepted kinds; nullable clears are exercised separately")
+		}
+		covered[sample.Kind] = true
+		encodedSample, err := normalizeTranscriptJSON(sample)
+		if err != nil {
+			return nil, fmt.Errorf("encode fixture field sample: %w", err)
+		}
+		transcriptSample := map[string]any{"value": encodedSample}
+		if advancementFixture != nil {
+			advancement, supplied := advancementFixture.FieldAdvancement(id, sample)
+			if !supplied {
+				return nil, fmt.Errorf("fixture field %q has no provider-valid advancement for kind %q", id, sample.Kind)
+			}
+			if err := connector.ValidateFieldValue(advancement); err != nil {
+				return nil, fmt.Errorf("invalid fixture field advancement: %w", err)
+			}
+			if advancement.Kind != sample.Kind {
+				return nil, fmt.Errorf("fixture field %q advancement kind %q does not match sample kind %q", id, advancement.Kind, sample.Kind)
+			}
+			canonicalSample, err := connector.CanonicalizeFieldValue(sample)
+			if err != nil {
+				return nil, fmt.Errorf("canonicalize fixture field sample: %w", err)
+			}
+			canonicalAdvancement, err := connector.CanonicalizeFieldValue(advancement)
+			if err != nil {
+				return nil, fmt.Errorf("canonicalize fixture field advancement: %w", err)
+			}
+			if reflect.DeepEqual(canonicalSample, canonicalAdvancement) {
+				return nil, fmt.Errorf("fixture field %q advancement for kind %q must differ from its sample", id, sample.Kind)
+			}
+			encodedAdvancement, err := normalizeTranscriptJSON(canonicalAdvancement)
+			if err != nil {
+				return nil, fmt.Errorf("encode fixture field advancement: %w", err)
+			}
+			transcriptSample["advance"] = encodedAdvancement
+		}
+		transcriptSamples = append(transcriptSamples, transcriptSample)
+	}
+	for _, kind := range kinds {
+		if text, ok := kind.(string); !ok || !covered[text] {
+			return nil, errors.New("fixture field samples omit an accepted kind")
+		}
+	}
+	return transcriptSamples, nil
 }
 
 func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protocolTranscriptStep, stepDocument map[string]any) error {

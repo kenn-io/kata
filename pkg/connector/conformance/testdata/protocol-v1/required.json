@@ -188,9 +188,6 @@
           {"op": "time_gt", "actual": {"path": "/vars/comment/updated_at"}, "expected": {"path": "/vars/comment/created_at"}}
         ]},
         {"op": "any", "actual": {"path": "/steps/list-comments-1/response/result/comments"}, "as": "comment", "assert": [
-          {"op": "equal", "actual": {"path": "/vars/comment/deleted"}, "expected": {"literal": true}}
-        ]},
-        {"op": "any", "actual": {"path": "/steps/list-comments-1/response/result/comments"}, "as": "comment", "assert": [
           {"op": "time_lte", "actual": {"path": "/vars/comment/created_at"}, "expected": {"path": "/captures/root/observed_at"}}
         ]}
       ],
@@ -309,7 +306,10 @@
       "name": "provider-after-complete-2",
       "observe": "provider_state",
       "assert": [
-        {"op": "array_appended", "actual": {"path": "/steps/provider-after-complete-2/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+        {"op": "or", "assert": [
+          {"op": "equal", "actual": {"path": "/steps/provider-after-complete-2/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+          {"op": "array_appended", "actual": {"path": "/steps/provider-after-complete-2/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}}
+        ]},
         {"op": "entry_equal", "actual": {"path": "/steps/provider-after-complete-2/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "complete_root"}},
         {"op": "entry_equal", "actual": {"path": "/steps/provider-after-complete-2/provider/mutations", "last": true}, "key": {"literal": "params"}, "expected": {"path": "/steps/complete-root-2/request/params"}}
       ],

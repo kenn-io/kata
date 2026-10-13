@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ProtocolVersion is the exact connector wire-protocol version.
@@ -155,15 +157,32 @@ type Comment struct {
 
 // FieldValue is a provider-neutral canonical field value.
 type FieldValue struct {
-	Kind     string `json:"kind"`
-	Value    string `json:"value,omitempty"`
-	Timezone string `json:"timezone,omitempty"`
+	Kind     string   `json:"kind"`
+	Values   []string `json:"values,omitempty"`
+	Value    string   `json:"value,omitempty"`
+	Timezone string   `json:"timezone,omitempty"`
 }
 
 // ValidateFieldValue rejects values outside the canonical portable field
 // representation used by ProtocolVersion.
 func ValidateFieldValue(value FieldValue) error {
+	if value.Kind != "string_set" && value.Values != nil {
+		return errors.New("scalar field value contains set values")
+	}
 	switch value.Kind {
+	case "string":
+		if value.Timezone != "" || !validFieldText(value.Value) {
+			return errors.New("string field value is invalid")
+		}
+	case "string_set":
+		if value.Value != "" || value.Timezone != "" {
+			return errors.New("string set field value contains scalar data")
+		}
+		for i, text := range value.Values {
+			if !validFieldText(text) || (i > 0 && value.Values[i-1] >= text) {
+				return errors.New("string set field value is not canonical")
+			}
+		}
 	case "null":
 		if value.Value != "" || value.Timezone != "" {
 			return errors.New("null field value contains a value")
@@ -196,6 +215,24 @@ func ValidateFieldValue(value FieldValue) error {
 		return errors.New("field value has unsupported kind")
 	}
 	return nil
+}
+
+// CanonicalizeFieldValue returns a validated value with copied, sorted and
+// deduplicated set elements. Scalar text is preserved exactly.
+func CanonicalizeFieldValue(value FieldValue) (FieldValue, error) {
+	value.Values = slices.Clone(value.Values)
+	if value.Kind == "string_set" {
+		slices.Sort(value.Values)
+		value.Values = slices.Compact(value.Values)
+	}
+	if err := ValidateFieldValue(value); err != nil {
+		return FieldValue{}, err
+	}
+	return value, nil
+}
+
+func validFieldText(text string) bool {
+	return utf8.ValidString(text) && !strings.ContainsRune(text, '\x00')
 }
 
 // DescribeParams carries the empty describe request.

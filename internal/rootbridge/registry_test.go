@@ -216,6 +216,31 @@ func TestRegistryFieldsRequiresAcceptedCapabilityBeforeDiscovery(t *testing.T) {
 	assert.Zero(t, client.listFieldsCalls)
 }
 
+func TestRegistryFieldsDiscoveryRequiresOnlyFieldsCapability(t *testing.T) {
+	description := testDescription("account-1")
+	description.Capabilities = []connector.Capability{connector.CapabilityFields}
+	client := &fakeConnectorClient{
+		description: description,
+		fields: []connector.FieldDescriptor{{
+			ID: "due-date", DisplayName: "Due date", AcceptedKinds: []string{"date"},
+			Writable: true, SchemaRevision: "schema-1",
+		}},
+	}
+	registry, err := NewRegistry(t.Context(), []config.ConnectorConfig{{
+		ID: "notes", Command: filepath.Join(t.TempDir(), "connector"),
+	}}, func(config.ConnectorConfig) connectorclient.Client { return client })
+	require.NoError(t, err)
+
+	fields, err := registry.Fields(t.Context(), "notes")
+
+	require.NoError(t, err)
+	assert.Equal(t, []connector.FieldDescriptor{{
+		ID: "due-date", DisplayName: "Due date", AcceptedKinds: []string{"date"},
+		Writable: true, SchemaRevision: "schema-1",
+	}}, fields)
+	assert.Equal(t, 1, client.listFieldsCalls)
+}
+
 func TestRegistryFieldsSuccessDoesNotClearIdentityDriftHealth(t *testing.T) {
 	client := &fakeConnectorClient{description: testDescription("account-1")}
 	registry, err := NewRegistry(t.Context(), []config.ConnectorConfig{{

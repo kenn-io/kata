@@ -87,6 +87,8 @@ func (f *conformanceFixture) Reset(context.Context) error {
 					"field-local":   {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
 					"field-instant": {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
 					"field-null":    {Kind: "null"},
+					"field-string":  {Kind: "string", Value: "initial text"},
+					"field-set":     {Kind: "string_set", Values: []string{"initial set"}},
 				},
 			},
 			Comments: []connector.Comment{
@@ -100,6 +102,8 @@ func (f *conformanceFixture) Reset(context.Context) error {
 				"field-local":   {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
 				"field-instant": {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
 				"field-null":    {Kind: "null"},
+				"field-string":  {Kind: "string", Value: "initial text"},
+				"field-set":     {Kind: "string_set", Values: []string{"initial set"}},
 			},
 		}},
 		Fields: []connector.FieldDescriptor{
@@ -107,6 +111,8 @@ func (f *conformanceFixture) Reset(context.Context) error {
 			{ID: "field-local", DisplayName: "Local", AcceptedKinds: []string{"local_datetime"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 			{ID: "field-instant", DisplayName: "Instant", AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 			{ID: "field-null", DisplayName: "Nullable", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
+			{ID: "field-string", DisplayName: "Text", AcceptedKinds: []string{"string"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
+			{ID: "field-set", DisplayName: "Set", AcceptedKinds: []string{"string_set"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 		},
 		Behavior: Behavior{CrashBeforeReply: map[string]int{}, CrashAfterMutation: map[string]int{}, Errors: map[string]connector.Error{}},
 	})

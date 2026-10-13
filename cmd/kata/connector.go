@@ -24,6 +24,7 @@ func newConnectorCmd() *cobra.Command {
 		newConnectorListCmd(),
 		newConnectorStatusCmd(),
 		newConnectorFieldCmd(),
+		newConnectorServeCmd(),
 	)
 	return cmd
 }

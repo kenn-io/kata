@@ -188,7 +188,9 @@ func (p *processClient) WriteFields(ctx context.Context, params protocol.WriteFi
 				return err
 			}
 		}
-		if !maps.Equal(result.Fields, params.Fields) {
+		if !maps.EqualFunc(result.Fields, params.Fields, func(a, b protocol.FieldValue) bool {
+			return a.Kind == b.Kind && a.Value == b.Value && a.Timezone == b.Timezone && slices.Equal(a.Values, b.Values)
+		}) {
 			return errors.New("write_fields result does not match requested values")
 		}
 		return nil
@@ -585,7 +587,7 @@ func validFieldDescriptor(value protocol.FieldDescriptor) bool {
 		return false
 	}
 	for _, kind := range value.AcceptedKinds {
-		if kind != "date" && kind != "local_datetime" && kind != "instant" {
+		if kind != "date" && kind != "local_datetime" && kind != "instant" && kind != "string" && kind != "string_set" {
 			return false
 		}
 	}
@@ -622,37 +624,7 @@ func validFieldValues(values map[string]protocol.FieldValue) bool {
 }
 
 func validFieldValue(value protocol.FieldValue) bool {
-	switch value.Kind {
-	case "null":
-		return value.Value == "" && value.Timezone == ""
-	case "date":
-		if value.Timezone != "" {
-			return false
-		}
-		parsed, err := time.Parse(time.DateOnly, value.Value)
-		return err == nil && parsed.Format(time.DateOnly) == value.Value
-	case "local_datetime":
-		if !canonicalConnectorValue(value.Timezone) {
-			return false
-		}
-		if _, err := time.LoadLocation(value.Timezone); err != nil {
-			return false
-		}
-		for _, layout := range []string{"2006-01-02T15:04", "2006-01-02T15:04:05"} {
-			if parsed, err := time.Parse(layout, value.Value); err == nil && parsed.Format(layout) == value.Value {
-				return true
-			}
-		}
-		return false
-	case "instant":
-		if value.Timezone != "" || !strings.HasSuffix(value.Value, "Z") {
-			return false
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, value.Value)
-		return err == nil && parsed.UTC().Format(time.RFC3339Nano) == value.Value
-	default:
-		return false
-	}
+	return protocol.ValidateFieldValue(value) == nil
 }
 
 func canonicalConnectorValue(value string) bool {

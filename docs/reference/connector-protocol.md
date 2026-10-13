@@ -1,7 +1,7 @@
 ---
 title: Connector author contract
 description: Implement external-root connectors with the versioned JSON protocol, Go SDK, and conformance kit.
-last_edited: 2026-09-15
+last_edited: 2026-10-13
 ---
 
 # Connector author contract
@@ -91,8 +91,8 @@ Root and comment revisions are opaque change tokens. A revision advances when
 the canonical root or comment changes and remains stable while that observation
 is unchanged; clients compare revisions for equality rather than ordering.
 Timestamps use RFC 3339.
-Field values use the portable `date`, `local_datetime`, `instant`, and `null`
-kinds accepted by the conformance transcripts; a descriptor lists
+Field values use the portable `date`, `local_datetime`, `instant`, `string`,
+`string_set`, and `null` kinds accepted by the conformance transcripts; a descriptor lists
 the exact kinds it accepts and whether it is nullable and writable.
 
 Protocol v1 `write_fields` requests always contain `fields`. Connectors that
@@ -101,6 +101,40 @@ two objects have identical field-ID keysets. The connector writes only when
 every current value equals its canonical `expected` value. Otherwise it changes
 nothing and returns a `field_conflict` error. A request without `expected` is
 an unconditional write.
+
+## Text and set values
+
+`string` uses the existing scalar `value` member and preserves its exact text,
+including an empty string. `string_set` uses `values`, an array of unique strings
+sorted in byte order. Set elements may be empty strings. Strings and set elements
+must be valid UTF-8 without NUL. Neither text kind carries a timezone; sets
+cannot carry a scalar value. Date/time/null values cannot carry `values`.
+
+```json
+{"kind": "string", "value": "123"}
+{"kind": "string_set", "values": ["12", "45"]}
+{"kind": "string_set"}
+{"kind": "null"}
+```
+
+An omitted or empty `values` array represents an empty set, which is distinct
+from null. Wire validation rejects duplicate or unsorted elements. Go authors
+can call `connector.CanonicalizeFieldValue` before sending a value; it returns
+a validated copy with sorted, deduplicated set elements without changing the
+caller's slice. `connector.ValidateFieldValue` checks already canonical values.
+
+These wire kinds extend protocol v1 without changing existing date requests.
+They let adapters expose tags, assignees, or provider selections, but do not
+register new native Kata mapping fields. Kata still maps only `scheduled_on`
+and `deadline_on`. Each future mapping needs its own native ownership and
+validation contract.
+
+The [built-in Forgejo connector](../operations/forgejo-connector.md) exposes
+text/set fields but does not advertise `conditional_fields`: its provider API
+has no atomic compare-and-set field operation. A read followed by a write does
+not meet the conditional-write contract. Kata therefore refuses automatic
+mappings for it. Unconditional batches may require several provider calls and
+partially apply before failure; callers must read current values before recovery.
 
 ## Go SDK
 
@@ -136,6 +170,15 @@ func TestConnectorConformance(t *testing.T) {
 `Invocation` returns the configured instance ID and raw JSON settings used for
 every transcript request. This lets a fixture exercise settings required by its
 declared configuration schema through the real protocol boundary.
+
+A fixture with provider-specific value restrictions may additionally implement
+`conformance.FieldSampleFixture`, whose `FieldSamples(fieldID string)` returns
+canonical `[]connector.FieldValue` samples. Returning nil uses the portable
+transcript defaults. An override must include a sample for every accepted kind;
+nullable clears are checked separately. This lets a milestone field use real
+numeric provider IDs while the generic fixture still exercises arbitrary and
+empty text values. Conditional-write cases run only for connectors advertising
+`conditional_fields`.
 
 The committed transcripts under
 `pkg/connector/conformance/testdata/protocol-v1/` are language-neutral. Other

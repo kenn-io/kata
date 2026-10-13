@@ -9,7 +9,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -265,7 +264,7 @@ func (h *handler) ReadFields(_ context.Context, params connector.ReadFieldsParam
 		if !exists {
 			return connector.ReadFieldsResult{}, notFound("field")
 		}
-		fields[id] = value
+		fields[id] = cloneFieldValue(value)
 	}
 	return connector.ReadFieldsResult{Fields: fields}, nil
 }
@@ -281,12 +280,16 @@ func fieldValueEquivalent(a, b connector.FieldValue) bool {
 		return true
 	case "date", "local_datetime":
 		return a.Value == b.Value && a.Timezone == b.Timezone
+	case "string_set":
+		left, leftErr := connector.CanonicalizeFieldValue(a)
+		right, rightErr := connector.CanonicalizeFieldValue(b)
+		return leftErr == nil && rightErr == nil && slices.Equal(left.Values, right.Values)
 	case "instant":
 		left, leftErr := time.Parse(time.RFC3339Nano, a.Value)
 		right, rightErr := time.Parse(time.RFC3339Nano, b.Value)
 		return leftErr == nil && rightErr == nil && left.Equal(right)
 	default:
-		return a == b
+		return a.Kind == b.Kind && a.Value == b.Value && a.Timezone == b.Timezone && slices.Equal(a.Values, b.Values)
 	}
 }
 
@@ -320,8 +323,8 @@ func (h *handler) WriteFields(_ context.Context, params connector.WriteFieldsPar
 			root.Fields = make(map[string]connector.FieldValue)
 		}
 		for id, value := range params.Fields {
-			root.Fields[id] = value
-			result.Fields[id] = value
+			root.Fields[id] = cloneFieldValue(value)
+			result.Fields[id] = cloneFieldValue(value)
 		}
 		current.record(h.recordedMutation("write_fields", params))
 		return nil
@@ -412,10 +415,13 @@ func findField(fields []connector.FieldDescriptor, id string) (connector.FieldDe
 }
 
 func acceptedValue(descriptor connector.FieldDescriptor, value connector.FieldValue) bool {
-	if value.Kind == "null" {
-		return descriptor.Nullable && value.Value == "" && value.Timezone == ""
+	if connector.ValidateFieldValue(value) != nil {
+		return false
 	}
-	return slices.Contains(descriptor.AcceptedKinds, value.Kind) && value.Value != ""
+	if value.Kind == "null" {
+		return descriptor.Nullable
+	}
+	return slices.Contains(descriptor.AcceptedKinds, value.Kind)
 }
 
 func advanceRoot(root *connector.Root, sequence int, stamp time.Time) {
@@ -452,8 +458,15 @@ func cloneFields(fields map[string]connector.FieldValue) map[string]connector.Fi
 		return nil
 	}
 	cloned := make(map[string]connector.FieldValue, len(fields))
-	maps.Copy(cloned, fields)
+	for id, value := range fields {
+		cloned[id] = cloneFieldValue(value)
+	}
 	return cloned
+}
+
+func cloneFieldValue(value connector.FieldValue) connector.FieldValue {
+	value.Values = slices.Clone(value.Values)
+	return value
 }
 
 func notFound(kind string) *connector.Error {

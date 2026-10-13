@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,61 @@ import (
 
 func TestRun(t *testing.T) {
 	Run(t, newFixture())
+}
+
+func TestRunAcceptsProviderWithoutTombstones(t *testing.T) {
+	fixture := newFixture()
+	fixture.providerWithoutTombstones = true
+	Run(t, fixture)
+}
+
+func TestRunUsesProviderFieldSamples(t *testing.T) {
+	fixture := newFixture()
+	fixture.rejectEmptyKind = "string"
+	fixture.fieldSampleOverrides = map[string][]connector.FieldValue{"field-string": {{Kind: "string", Value: "provider-value"}}}
+	fixture.fieldAdvancementOverrides = map[string]connector.FieldValue{"field-string": {Kind: "string", Value: "provider-next"}}
+	fixture.fieldAllowedValues = map[string][]connector.FieldValue{"field-string": {
+		{Kind: "string", Value: "provider-value"}, {Kind: "string", Value: "provider-next"}, {Kind: "null"},
+	}}
+	Run(t, fixture)
+}
+
+func TestRunAdvancesProviderSamplesThatMatchPortableValues(t *testing.T) {
+	fixture := newFixture()
+	fixture.fieldSampleOverrides = map[string][]connector.FieldValue{
+		"field-string": {{Kind: "string", Value: "advanced text"}},
+		"field-set":    {{Kind: "string_set", Values: []string{"advanced set"}}},
+	}
+	fixture.fieldAdvancementOverrides = map[string]connector.FieldValue{
+		"field-string": {Kind: "string", Value: "provider-next"},
+		"field-set":    {Kind: "string_set", Values: []string{"provider-next"}},
+	}
+	fixture.fieldAllowedValues = map[string][]connector.FieldValue{
+		"field-string": {
+			{Kind: "string", Value: "advanced text"}, {Kind: "string", Value: "provider-next"}, {Kind: "null"},
+		},
+		"field-set": {
+			{Kind: "string_set", Values: []string{"advanced set"}},
+			{Kind: "string_set", Values: []string{"provider-next"}},
+			{Kind: "null"},
+		},
+	}
+	Run(t, fixture)
+}
+
+func TestRunAcceptsReadOnlyCompleteRetry(t *testing.T) {
+	fixture := newFixture()
+	fixture.readOnlyCompleteRetry = true
+	Run(t, fixture)
+}
+
+func (f *memoryFixture) FieldSamples(fieldID string) []connector.FieldValue {
+	return f.fieldSampleOverrides[fieldID]
+}
+
+func (f *memoryFixture) FieldAdvancement(fieldID string, _ connector.FieldValue) (connector.FieldValue, bool) {
+	value, ok := f.fieldAdvancementOverrides[fieldID]
+	return value, ok
 }
 
 func TestRunAcceptsFieldBaselineEqualToSamples(t *testing.T) {
@@ -101,6 +157,7 @@ type memoryFixture struct {
 	publications                map[string]connector.Comment
 	noEditedComment             bool
 	noDeletedComment            bool
+	providerWithoutTombstones   bool
 	missingCommentTime          bool
 	missingCommentRevision      bool
 	constantCommentRevision     bool
@@ -108,6 +165,11 @@ type memoryFixture struct {
 	nonIdempotentComplete       bool
 	unchangedCompletionRev      bool
 	rejectFieldKind             string
+	rejectEmptyKind             string
+	fieldSampleOverrides        map[string][]connector.FieldValue
+	fieldAdvancementOverrides   map[string]connector.FieldValue
+	fieldAllowedValues          map[string][]connector.FieldValue
+	readOnlyCompleteRetry       bool
 	noActionableField           bool
 	paddedFieldID               bool
 	paddedSchemaRevision        bool
@@ -412,6 +474,10 @@ func TestProtocolV1TranscriptsRejectEveryRunBehavior(t *testing.T) {
 		"broken-read-only-field",
 		"reject-local-datetime",
 		"reject-null",
+		"reject-string",
+		"reject-set",
+		"reject-empty-string",
+		"reject-empty-set",
 		"no-actionable-field",
 		"padded-field-id",
 		"padded-schema-revision",
@@ -461,6 +527,14 @@ func TestBrokenDeclarativeContractProbe(t *testing.T) {
 		fixture.brokenReadOnlyField = true
 	case "reject-local-datetime":
 		fixture.rejectFieldKind = "local_datetime"
+	case "reject-string":
+		fixture.rejectFieldKind = "string"
+	case "reject-set":
+		fixture.rejectFieldKind = "string_set"
+	case "reject-empty-string":
+		fixture.rejectEmptyKind = "string"
+	case "reject-empty-set":
+		fixture.rejectEmptyKind = "string_set"
 	case "reject-null":
 		fixture.rejectFieldKind = "null"
 	case "no-actionable-field":
@@ -744,6 +818,8 @@ func (f *memoryFixture) Reset(context.Context) error {
 			"field-local":     {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
 			"field-instant":   {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
 			"field-null":      {Kind: "null"},
+			"field-string":    {Kind: "string", Value: "initial text"},
+			"field-set":       {Kind: "string_set", Values: []string{"initial set"}},
 		},
 	}
 	if f.unstableResetIdentity {
@@ -770,10 +846,14 @@ func (f *memoryFixture) Reset(context.Context) error {
 			f.comments[index].UpdatedAt = f.comments[index].CreatedAt
 		}
 	}
-	if f.noDeletedComment {
-		for index := range f.comments {
-			f.comments[index].Deleted = false
+	if f.providerWithoutTombstones {
+		present := f.comments[:0]
+		for _, comment := range f.comments {
+			if !comment.Deleted {
+				present = append(present, comment)
+			}
 		}
+		f.comments = present
 	}
 	if f.missingCommentTime {
 		f.comments[0].CreatedAt = time.Time{}
@@ -813,6 +893,8 @@ func (f *memoryFixture) Reset(context.Context) error {
 		{ID: "field-local", DisplayName: "Local", AcceptedKinds: []string{"local_datetime"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 		{ID: "field-instant", DisplayName: "Instant", AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 		{ID: "field-null", DisplayName: "Nullable", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
+		{ID: "field-string", DisplayName: "Text", AcceptedKinds: []string{"string"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
+		{ID: "field-set", DisplayName: "Set", AcceptedKinds: []string{"string_set"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 	}
 	if f.noActionableField {
 		f.descriptors = []connector.FieldDescriptor{{
@@ -891,6 +973,11 @@ func (f *memoryFixture) ListComments(_ context.Context, params connector.ListCom
 		return connector.ListCommentsResult{}, f.fixtureError("list_comments")
 	}
 	comments := append([]connector.Comment(nil), f.comments...)
+	if f.noDeletedComment {
+		for i := range comments {
+			comments[i].Deleted = false
+		}
+	}
 	sort.SliceStable(comments, func(i, j int) bool {
 		if comments[i].CreatedAt.Equal(comments[j].CreatedAt) {
 			return comments[i].ID < comments[j].ID
@@ -913,6 +1000,9 @@ func (f *memoryFixture) CompleteRoot(_ context.Context, params connector.Complet
 		return connector.Root{}, f.fixtureError("complete_root")
 	}
 	f.fabricatedRootRead = false
+	if f.readOnlyCompleteRetry && f.root.State == "complete" {
+		return f.root, nil
+	}
 	if f.root.State != "complete" {
 		f.root.State = "complete"
 		if !f.unchangedCompletionRev {
@@ -1020,8 +1110,24 @@ func (f *memoryFixture) WriteFields(_ context.Context, params connector.WriteFie
 		return connector.WriteFieldsResult{}, f.fixtureError("write_fields")
 	}
 	for _, value := range params.Fields {
-		if value.Kind == f.rejectFieldKind {
+		if value.Kind == f.rejectFieldKind || (value.Kind == f.rejectEmptyKind && value.Value == "" && len(value.Values) == 0) {
 			return connector.WriteFieldsResult{}, &connector.Error{Code: "unsupported_field", Message: "field kind is unsupported"}
+		}
+	}
+	for fieldID, value := range params.Fields {
+		allowed, constrained := f.fieldAllowedValues[fieldID]
+		if !constrained {
+			continue
+		}
+		valid := false
+		for _, candidate := range allowed {
+			if reflect.DeepEqual(value, candidate) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return connector.WriteFieldsResult{}, &connector.Error{Code: "invalid_field_value", Message: "field value is not an allowed provider option"}
 		}
 	}
 	if len(params.Expected) != len(params.Fields) {
@@ -1029,7 +1135,7 @@ func (f *memoryFixture) WriteFields(_ context.Context, params connector.WriteFie
 	}
 	for id := range params.Fields {
 		expected, ok := params.Expected[id]
-		if !ok || f.root.Fields[id] != expected {
+		if !ok || !reflect.DeepEqual(f.root.Fields[id], expected) {
 			return connector.WriteFieldsResult{}, &connector.Error{Code: "field_conflict", Message: "field changed before write"}
 		}
 	}

@@ -154,7 +154,7 @@ func (r *Registry) Fields(ctx context.Context, id string) ([]connector.FieldDesc
 		}
 		instance, _ = r.instance(id)
 	}
-	if !descriptionSupportsFields(instance.Description) {
+	if !descriptionHasCapability(instance.Description, connector.CapabilityFields) {
 		return nil, ErrFieldSynchronizationUnavailable
 	}
 	listed, err := instance.Client.ListFields(ctx)

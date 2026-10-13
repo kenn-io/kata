@@ -34,6 +34,22 @@ type Fixture interface {
 	InjectFault(context.Context, Fault) error
 }
 
+// FieldSampleFixture optionally supplies provider-valid samples for fields
+// constrained to existing IDs or other provider-specific selections. Returning
+// nil uses the kit's portable defaults. Overrides must include a canonical
+// sample for every accepted kind; nullable clears are exercised separately.
+// Generic string and empty-value coverage remains in the SDK and fake fixture.
+type FieldSampleFixture interface {
+	FieldSamples(fieldID string) []connector.FieldValue
+}
+
+// FieldAdvancementFixture optionally supplies a provider-valid distinct value
+// for conditional-write transcript coverage. It is used only for writable
+// fields when the connector advertises conditional_fields.
+type FieldAdvancementFixture interface {
+	FieldAdvancement(fieldID string, sample connector.FieldValue) (connector.FieldValue, bool)
+}
+
 // Fault names a provider-side failure window exercised by the conformance kit.
 type Fault string
 

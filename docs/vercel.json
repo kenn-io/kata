@@ -256,6 +256,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/forgejo-connector/",
+      "destination": "/docs/operations/forgejo-connector/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/forgejo-connector.md",
+      "destination": "/docs/operations/forgejo-connector.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/github-sync/",
       "destination": "/docs/operations/github-sync/",
       "permanent": true

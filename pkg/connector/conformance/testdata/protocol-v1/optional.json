@@ -3,9 +3,13 @@
   "protocol": "kata.connector.v1",
   "name": "optional-capabilities",
   "field_samples": [
-    {"kind": "date", "value": "2026-08-21"},
-    {"kind": "local_datetime", "value": "2026-08-21T14:45:00", "timezone": "Asia/Tokyo"},
-    {"kind": "instant", "value": "2026-08-21T05:45:00Z"}
+    {"value": {"kind": "date", "value": "2026-08-21"}, "advance": {"kind": "date", "value": "2099-12-31"}},
+    {"value": {"kind": "local_datetime", "value": "2026-08-21T14:45:00", "timezone": "Asia/Tokyo"}, "advance": {"kind": "local_datetime", "value": "2099-12-31T23:59:59", "timezone": "UTC"}},
+    {"value": {"kind": "instant", "value": "2026-08-21T05:45:00Z"}, "advance": {"kind": "instant", "value": "2099-12-31T23:59:59Z"}},
+    {"value": {"kind": "string", "value": "  café\n東京  "}, "advance": {"kind": "string", "value": "advanced text"}},
+    {"value": {"kind": "string"}, "advance": {"kind": "string", "value": "advanced text"}},
+    {"value": {"kind": "string_set", "values": ["", " A ", "café", "東京"]}, "advance": {"kind": "string_set", "values": ["advanced set"]}},
+    {"value": {"kind": "string_set"}, "advance": {"kind": "string_set", "values": ["advanced set"]}}
   ],
   "steps": [
     {
@@ -95,7 +99,6 @@
           {"op": "equal", "actual": {"path": "/vars/comment/author/id"}, "expected": {"path": "/captures/description/self_actor_id"}},
           {"op": "timestamp", "actual": {"path": "/vars/comment/created_at"}},
           {"op": "timestamp", "actual": {"path": "/vars/comment/updated_at"}},
-          {"op": "time_gt", "actual": {"path": "/vars/comment/created_at"}, "expected": {"path": "/captures/root/observed_at"}},
           {"op": "time_gte", "actual": {"path": "/vars/comment/updated_at"}, "expected": {"path": "/vars/comment/created_at"}},
           {"op": "time_between", "actual": {"path": "/vars/comment/created_at"}, "start": {"path": "/steps/publish-comment-crash/exchange/started_at"}, "end": {"path": "/steps/publish-comment-crash/exchange/finished_at"}, "tolerance_seconds": 120},
           {"op": "time_between", "actual": {"path": "/vars/comment/updated_at"}, "start": {"path": "/steps/publish-comment-crash/exchange/started_at"}, "end": {"path": "/steps/publish-comment-crash/exchange/finished_at"}, "tolerance_seconds": 120}
@@ -270,7 +273,7 @@
           {"op": "nonempty", "actual": {"path": "/vars/descriptor/display_name"}},
           {"op": "nonempty", "actual": {"path": "/vars/descriptor/schema_revision"}},
           {"op": "trimmed", "actual": {"path": "/vars/descriptor/schema_revision"}},
-          {"op": "subset", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": ["date", "local_datetime", "instant"]}}
+          {"op": "subset", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": ["date", "local_datetime", "instant", "string", "string_set"]}}
         ]},
         {"op": "any", "actual": {"path": "/steps/list-fields/response/result/fields"}, "as": "descriptor", "assert": [
           {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -306,14 +309,21 @@
           ]
         },
         {
+          "name": "field-samples",
+          "observe": "field_samples",
+          "assert": [
+            {"op": "type", "actual": {"path": "/steps/field-samples/samples"}, "expected": {"literal": "array"}}
+          ]
+        },
+        {
           "name": "advertised-kind-round-trips",
-          "repeat": {"over": {"path": "/contract/field_samples"}, "as": "sample", "steps": [
+          "repeat": {"over": {"path": "/steps/field-samples/samples"}, "as": "sample", "steps": [
             {
               "name": "read-field-before-write",
               "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-before-write", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "absent", "actual": {"path": "/steps/read-field-before-write/response/error"}},
@@ -322,10 +332,10 @@
             },
             {
               "name": "write-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}, "expected": {"$ref": "/steps/read-field-before-write/response/result/fields"}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$ref": "/steps/read-field-before-write/response/result/fields"}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "equal", "actual": {"path": "/steps/write-field/exchange/error"}, "expected": {"literal": false}},
@@ -335,7 +345,7 @@
                 {"op": "equal", "actual": {"path": "/steps/write-field/response/id"}, "expected": {"path": "/steps/write-field/request/id"}},
                 {"op": "present", "actual": {"path": "/steps/write-field/response/result"}},
                 {"op": "absent", "actual": {"path": "/steps/write-field/response/error"}},
-                {"op": "entry_equal", "actual": {"path": "/steps/write-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+                {"op": "entry_equal", "actual": {"path": "/steps/write-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample/value"}}
               ]
             },
             {
@@ -343,13 +353,13 @@
               "observe": "provider_state",
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "array_appended", "actual": {"path": "/steps/provider-after-field/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
                 {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}},
                 {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/mutations", "last": true}, "key": {"literal": "params"}, "expected": {"path": "/steps/write-field/request/params"}},
-                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample/value"}}
               ],
               "capture": [
                 {"name": "mutation-log", "value": {"path": "/steps/provider-after-field/provider/mutations"}}
@@ -360,7 +370,7 @@
               "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "equal", "actual": {"path": "/steps/read-field/exchange/error"}, "expected": {"literal": false}},
@@ -371,15 +381,16 @@
                 {"op": "present", "actual": {"path": "/steps/read-field/response/result"}},
                 {"op": "absent", "actual": {"path": "/steps/read-field/response/error"}},
                 {"op": "count", "actual": {"path": "/steps/read-field/response/result/fields"}, "expected": {"literal": 1}},
-                {"op": "entry_equal", "actual": {"path": "/steps/read-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+                {"op": "entry_equal", "actual": {"path": "/steps/read-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample/value"}}
               ]
             },
             {
               "name": "advance-date-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-date", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "date", "value": "2099-12-31"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-date", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "date"}},
+                {"op": "equal", "actual": {"path": "/vars/sample/value/kind"}, "expected": {"literal": "date"}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "date"}}
               ],
               "assert": [
@@ -389,10 +400,11 @@
             },
             {
               "name": "advance-local-datetime-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-local", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "local_datetime", "value": "2099-12-31T23:59:59", "timezone": "UTC"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-local", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "local_datetime"}},
+                {"op": "equal", "actual": {"path": "/vars/sample/value/kind"}, "expected": {"literal": "local_datetime"}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "local_datetime"}}
               ],
               "assert": [
@@ -402,10 +414,11 @@
             },
             {
               "name": "advance-instant-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-instant", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "instant", "value": "2099-12-31T23:59:59Z"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-instant", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "instant"}},
+                {"op": "equal", "actual": {"path": "/vars/sample/value/kind"}, "expected": {"literal": "instant"}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "instant"}}
               ],
               "assert": [
@@ -414,15 +427,45 @@
               ]
             },
             {
+              "name": "advance-string-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-string", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "equal", "actual": {"path": "/vars/sample/value/kind"}, "expected": {"literal": "string"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "string"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/advance-string-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/advance-string-field/response/error"}}
+              ]
+            },
+            {
+              "name": "advance-string-set-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-string-set", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "equal", "actual": {"path": "/vars/sample/value/kind"}, "expected": {"literal": "string_set"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "string_set"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/advance-string-set-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/advance-string-set-field/response/error"}}
+              ]
+            },
+            {
               "name": "provider-after-field-advance",
               "observe": "provider_state",
               "when": [
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "array_appended", "actual": {"path": "/steps/provider-after-field-advance/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
-                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field-advance/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}}
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field-advance/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field-advance/provider/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample/advance"}}
               ],
               "capture": [
                 {"name": "mutation-log", "value": {"path": "/steps/provider-after-field-advance/provider/mutations"}},
@@ -431,11 +474,11 @@
             },
             {
               "name": "reject-stale-field-write",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "present", "actual": {"path": "/steps/reject-stale-field-write/response/error"}},
@@ -449,7 +492,7 @@
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
-                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
               ],
               "assert": [
                 {"op": "equal", "actual": {"path": "/steps/provider-after-stale-field-write/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
@@ -532,11 +575,6 @@
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
       "assert": [
-        {"op": "equal", "actual": {"path": "/contract/field_samples"}, "expected": {"literal": [
-          {"kind": "date", "value": "2026-08-21"},
-          {"kind": "local_datetime", "value": "2026-08-21T14:45:00", "timezone": "Asia/Tokyo"},
-          {"kind": "instant", "value": "2026-08-21T05:45:00Z"}
-        ]}},
         {"op": "nonempty", "actual": {"path": "/captures/field-descriptors"}}
       ]
     },

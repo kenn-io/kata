@@ -1433,6 +1433,11 @@ configured connector process. The daemon reads connector instances from
 [configuration reference](configuration.md)); connector authors implement the
 [connector protocol](connector-protocol.md).
 
+The built-in [Forgejo connector](../operations/forgejo-connector.md) runs with
+`kata connector serve forgejo`. This RPC entry point consumes one protocol
+request from standard input and responds on standard output without contacting
+a Kata daemon.
+
 ```sh
 kata connector list
 kata connector status <instance>
@@ -1457,7 +1462,8 @@ kata bridge resolve-comment <issue> --adopt <external-comment-id> | --retry | --
 kata bridge unbind <issue>
 ```
 
-Every command in this section requires daemon-wide connector administration.
+The administration commands in this section require daemon-wide connector
+administration.
 In token identity mode, DB-backed tokens have this authority only when
 `allow_identity_connector_administration` is enabled; see the
 [configuration reference](configuration.md#token-identity-mode).

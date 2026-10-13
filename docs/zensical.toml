@@ -49,6 +49,7 @@ nav = [
     {"Remote daemon" = "operations/remote-daemon.md"},
     {"Local daemon profiles" = "operations/local-daemon-profiles.md"},
     {"GitHub sync" = "operations/github-sync.md"},
+    {"Forgejo connector" = "operations/forgejo-connector.md"},
     {"Notion sync" = "operations/notion-sync.md"},
     {"Plane sync" = "operations/plane-sync.md"},
     {"Linear sync" = "operations/linear-sync.md"},

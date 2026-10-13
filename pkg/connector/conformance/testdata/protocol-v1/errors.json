@@ -203,6 +203,213 @@
         {"op": "empty", "actual": {"path": "/steps/malformed-json/exchange/output"}},
         {"op": "equal", "actual": {"path": "/steps/malformed-json/exchange/response_count"}, "expected": {"literal": 0}}
       ]
+    },
+    {
+      "name": "provider-before-malformed-fields",
+      "observe": "provider_state",
+      "assert": [
+        {"op": "empty", "actual": {"path": "/steps/provider-before-malformed-fields/provider/mutations"}}
+      ],
+      "capture": [
+        {"name": "field-baseline", "value": {"path": "/steps/provider-before-malformed-fields/provider/fields"}}
+      ]
+    },
+    {
+      "name": "malformed-set-unsorted-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-unsorted-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-unsorted-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-unsorted-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-unsorted-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-unsorted-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-unsorted-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-unsorted-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-unsorted-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-unsorted-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-duplicate-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-duplicate-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-duplicate-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-duplicate-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-duplicate-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-duplicate-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-duplicate-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-duplicate-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-duplicate-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-duplicate-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-scalar-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-scalar-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "value": "a"}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-scalar-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-scalar-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-scalar-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-scalar-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-scalar-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "value": "a"}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-scalar-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-scalar-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-scalar-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-set-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "values": ["a"]}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-set-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-set-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-set-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-set-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "values": ["a"]}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-set-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-set-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-set-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-timezone-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-timezone-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-timezone-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-timezone-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-timezone-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-timezone-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-timezone-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-timezone-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-timezone-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-timezone-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-nul-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "value": "\u0000"}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-nul-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-nul-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-nul-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-text-nul-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "value": "\u0000"}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-nul-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-text-nul-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-text-nul-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-nul-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-nul-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-nul-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-nul-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-set-nul-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-nul-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-set-nul-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-set-nul-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-unknown-kind-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-unknown-kind-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "unknown"}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-unknown-kind-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-unknown-kind-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-unknown-kind-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-unknown-kind-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-unknown-kind-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "unknown"}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-unknown-kind-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-unknown-kind-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-unknown-kind-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-date-set-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-date-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-date-set-fields/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-date-set-fields/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-date-set-fields/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-date-set-expected",
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-date-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-date-set-expected/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-date-set-expected/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-date-set-expected/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "provider-after-malformed-fields",
+      "observe": "provider_state",
+      "assert": [
+        {"op": "empty", "actual": {"path": "/steps/provider-after-malformed-fields/provider/mutations"}},
+        {"op": "equal", "actual": {"path": "/steps/provider-after-malformed-fields/provider/fields"}, "expected": {"path": "/captures/field-baseline"}}
+      ]
     }
   ]
 }

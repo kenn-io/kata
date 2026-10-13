@@ -49,6 +49,8 @@ for machine readers.
   operator reference for replication, account credentials, team access and recovery
 - [HTTP API](https://katatracker.com/docs/reference/http-api.md):
   request contracts, project access, concurrent changes and relay enrollment
+- [Forgejo connector](https://katatracker.com/docs/operations/forgejo-connector.md):
+  Bind Forgejo issues through the built-in Go connector.
 - [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
   mirror upstream issues into kata
 - [Notion sync](https://katatracker.com/docs/operations/notion-sync.md):
