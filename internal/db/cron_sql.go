@@ -270,9 +270,6 @@ func (a CronSQL) put(ctx context.Context, req cronPutRequest) (cronRow, []Event,
 		var err error
 		extra = nil
 		result, event, err = a.putTx(ctx, tx, req, &extra)
-		if err != nil {
-			return err
-		}
 		return err
 	})
 	if err != nil {
