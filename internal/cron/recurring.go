@@ -31,6 +31,11 @@ func validateRecurring(j JobDefinition) error {
 	if j.Trigger.Kind != "cron" && j.Trigger.Kind != "interval" {
 		return invalid("native recurring issues require cron or interval")
 	}
+	// The daemon sweeps every 30 seconds; shorter intervals cannot arrive on
+	// time and only create bursts of issues.
+	if j.Trigger.Kind == "interval" && j.Trigger.IntervalSeconds < 60 {
+		return invalid("native recurring intervals must be at least 60 seconds")
+	}
 	_, err := recurringSchedule(j.Trigger)
 	return err
 }

@@ -209,7 +209,7 @@ Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
 UTC as the default. They follow that timezone's daylight-saving transitions.
 An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
-`{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence;
+`{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence; intervals must be at least 60 seconds;
 `@every` is not supported for native delivery. Intervals start at the first
 binding time plus one interval. Calendar schedules start strictly after that
 binding time, without historical backfill.

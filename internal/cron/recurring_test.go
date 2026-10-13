@@ -39,6 +39,7 @@ func TestRecurringDefinition(t *testing.T) {
 			j.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 9 * * *", Timezone: "UTC"}
 		},
 		"title length": func(j *JobDefinition) { j.Issue.Title = strings.Repeat("x", 1024) },
+		"sub-minute interval": func(j *JobDefinition) { j.Trigger.IntervalSeconds = 59 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var j JobDefinition
@@ -47,6 +48,8 @@ func TestRecurringDefinition(t *testing.T) {
 			require.ErrorIs(t, j.Validate(), ErrInvalid)
 		})
 	}
+	job.Trigger.IntervalSeconds = 60
+	require.NoError(t, job.Validate(), "one minute is the shortest native interval")
 	job.Enabled = false
 	require.NoError(t, job.Validate())
 	job.Catchup = "skip"
@@ -145,7 +148,7 @@ func TestCalendarAndCatchup(t *testing.T) {
 func TestRecurringIntervalPrefixProperty(t *testing.T) {
 	base := nativeJob(t)
 	rapid.Check(t, func(t *rapid.T) {
-		seconds := rapid.Int64Range(1, maxDurationSeconds).Draw(t, "seconds")
+		seconds := rapid.Int64Range(60, maxDurationSeconds).Draw(t, "seconds")
 		count := rapid.Uint64().Draw(t, "count")
 		// Materialize a bounded timeline; generation still spans the duration domain.
 		n := int(count%200) + 1
