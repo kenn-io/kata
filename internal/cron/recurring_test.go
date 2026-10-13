@@ -38,7 +38,7 @@ func TestRecurringDefinition(t *testing.T) {
 		"conflicting timezone": func(j *JobDefinition) {
 			j.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 9 * * *", Timezone: "UTC"}
 		},
-		"title length": func(j *JobDefinition) { j.Issue.Title = strings.Repeat("x", 1024) },
+		"title length":        func(j *JobDefinition) { j.Issue.Title = strings.Repeat("x", 1024) },
 		"sub-minute interval": func(j *JobDefinition) { j.Trigger.IntervalSeconds = 59 },
 	} {
 		t.Run(name, func(t *testing.T) {
