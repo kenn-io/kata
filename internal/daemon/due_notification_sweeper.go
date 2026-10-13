@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
@@ -95,7 +96,7 @@ func (s *DueNotificationSweeper) dispatchRecurring(ctx context.Context, candidat
 	for range maxRecurringBatchesPerSweep {
 		out, err := s.DB.DispatchRecurringCron(ctx, in)
 		if err != nil {
-			return err
+			return fmt.Errorf("dispatch recurring job %s in project %d: %w", candidate.JobUID, candidate.ProjectID, err)
 		}
 		for _, event := range out.Events {
 			s.Publish.EventFrom(event.ProjectID, event, fork)

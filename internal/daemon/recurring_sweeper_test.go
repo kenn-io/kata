@@ -50,7 +50,7 @@ func TestSweepLifecycle(t *testing.T) {
 	sink := &captureHookSink{}
 	s := daemon.NewDueNotificationSweeper(env.DB, daemon.NewEventPublisher(publisher, sink), "UTC")
 	now := time.Now().UTC().Add(3 * time.Hour)
-	require.Error(t, s.RunOnce(ctx, now))
+	require.ErrorContains(t, s.RunOnce(ctx, now), bad.UID, "operators can find the failing job")
 	children, e := env.DB.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
 	require.NoError(t, e)
 	require.Len(t, children, 100, "one malformed and 99 healthy candidates on first page")
