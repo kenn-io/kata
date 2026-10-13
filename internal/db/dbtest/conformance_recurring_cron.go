@@ -320,8 +320,11 @@ func checkRecurringMetadataAttachment(t *testing.T, s db.Storage, _ Backend) err
 	require.NoError(t, err, "child occurrence metadata is not template metadata")
 	child, err = s.IssueByID(ctx, child.ID)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(child.Metadata), &childMetadata))
-	require.Contains(t, childMetadata, "cron.occurrence")
+	var attachedChildMetadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(child.Metadata), &attachedChildMetadata))
+	require.Contains(t, attachedChildMetadata, "cron.occurrence")
+	require.JSONEq(t, string(childMetadata["cron.occurrence"]), string(attachedChildMetadata["cron.occurrence"]),
+		"recurrence attachment preserves occurrence provenance")
 
 	parent, err = s.IssueByID(ctx, parent.ID)
 	require.NoError(t, err)
@@ -334,9 +337,11 @@ func checkRecurringMetadataAttachment(t *testing.T, s db.Storage, _ Backend) err
 	require.NoError(t, err, "bound parent progress is not template metadata")
 	parent, err = s.IssueByID(ctx, parent.ID)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(parent.Metadata), &parentMetadata))
+	var attachedParentMetadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(parent.Metadata), &attachedParentMetadata))
+	require.Contains(t, attachedParentMetadata, progressKey)
 	var after cron.RecurringProgress
-	require.NoError(t, json.Unmarshal(parentMetadata[progressKey], &after))
+	require.NoError(t, json.Unmarshal(attachedParentMetadata[progressKey], &after))
 	require.Equal(t, before, after, "recurrence attachment preserves the native job checkpoint")
 	return nil
 }
