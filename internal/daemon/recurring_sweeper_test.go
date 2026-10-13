@@ -93,3 +93,21 @@ func TestSweepNativeListingFailureKeepsDateNotifications(t *testing.T) {
 	require.Len(t, sink.events, 1)
 	require.Equal(t, "issue.metadata_updated", sink.events[0].Type)
 }
+
+// One sweep drains an all-catch-up backlog larger than a single dispatch batch.
+func TestSweepDrainsRecurringBacklog(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	p, e := env.DB.CreateProject(ctx, "recurring-project")
+	require.NoError(t, e)
+	parent, _, e := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Continuing commitment", Author: "operator"})
+	require.NoError(t, e)
+	j := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
+	_, _, e = env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "operator", Definition: j})
+	require.NoError(t, e)
+	s := daemon.NewDueNotificationSweeper(env.DB, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), &captureHookSink{}), "UTC")
+	require.NoError(t, s.RunOnce(ctx, time.Now().UTC().Add(10*24*time.Hour+time.Minute)))
+	children, e := env.DB.ChildrenOfIssue(ctx, parent.ID)
+	require.NoError(t, e)
+	require.Equal(t, 120, len(children), "ten days of two-hour occurrences arrive in one sweep")
+}

@@ -216,8 +216,8 @@ binding time, without historical backfill.
 
 | `catchup` | After downtime or a pause |
 | --- | --- |
-| `all` | Create every missed child, at most 50 per job per sweep. Later sweeps continue from durable progress. |
-| `latest` | Create only the newest missed occurrence. Calendar scans examine at most 1000 occurrences per sweep, retain a fixed scan horizon, and deliver when that scan finishes. Intervals find the newest occurrence directly. |
+| `all` | Create every missed child, at most 1000 per job per sweep. Later sweeps continue from durable progress. |
+| `latest` | Create only the newest missed occurrence. Calendar scans examine at most 20,000 occurrences per sweep, retain a fixed scan horizon, and deliver when that scan finishes. Intervals find the newest occurrence directly. |
 | `skip` | Require positive `grace_seconds`; discard older occurrences and deliver those within the grace window, with the same bounded sweep limits. |
 
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
