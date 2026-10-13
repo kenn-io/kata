@@ -236,14 +236,20 @@ become an adapter job. Edits preserve committed progress and the original
 interval anchor; an unfinished latest scan restarts against the new definition.
 Disable the job or close its parent to pause delivery. An archived project or a
 deleted parent also pauses it. Re-enabling, reopening, or restoring resumes the
-configured catch-up policy. Deleting the job stops delivery until restoration.
+configured catch-up policy. A pause does not skip occurrences: with
+`catchup: "all"`, resuming creates every child missed while paused. This
+includes the time since creation for a job created disabled. Use `latest` or
+`skip` when a pause must not backfill. Deleting the job stops delivery until
+restoration.
 Keep the parent in the job's project. Kata rejects moving the parent alone
 while its native job exists, including when the job is disabled or deleted;
 restoring the job can resume its binding. Merge projects to move the job and
 parent together.
 
 Child creation, its initial notification, and the parent's
-`cron.progress.<job-uid>` checkpoint commit together. Backup, restore, federation,
+`cron.progress.<job-uid>` checkpoint commit together. Each delivery therefore
+changes the parent's revision and update time; re-read the parent before a
+conditional edit. Backup, restore, federation,
 and project merge preserve this metadata. Delivery fails closed if progress is
 missing or malformed; ordinary issue writes and spoke ingest cannot change or
 delete progress or occurrence provenance. Recurrence templates also reject these
