@@ -677,3 +677,33 @@ func checkRecurringTemplateProtection(t *testing.T, s db.Storage) error {
 	}
 	return nil
 }
+
+// Project metadata never holds native delivery state, so keys that resemble it
+// stay ordinary project metadata for old peers and spoke pushes alike.
+func checkRecurringProjectMetadataKeys(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	p, e := s.CreateProject(ctx, "hub-project")
+	require.NoError(t, e)
+	binding, e := s.EnableProjectFederation(ctx, p.ID, "operator")
+	require.NoError(t, e)
+	_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{"cron.progress.custom": []byte(`"local"`)}})
+	require.NoError(t, e)
+	page, e := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: db.CronEventFeature, Limit: 100})
+	require.NoError(t, e, "a peer without native recurring support can read ordinary project metadata")
+	require.NotEmpty(t, page.Events)
+
+	spokeUID, e := uid.New()
+	require.NoError(t, e)
+	enrollment, e := s.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spokeUID, ProjectID: &p.ID, Capabilities: "push", Actor: "operator"})
+	require.NoError(t, e)
+	pushed := newRemoteEvent(t, p, nil, "project.metadata_updated", "operator", spokeUID, 500,
+		jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"cron.occurrence":{"from":null,"to":"spoke"}},"revision_new":3}`))
+	result, e := s.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: p.ID, FederationEnrollmentID: enrollment.Enrollment.ID, SpokeInstanceUID: spokeUID,
+		BoundActor: "operator", EventFeatures: db.SupportedEventFeatures,
+		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: pushed}},
+	})
+	require.NoError(t, e, "a spoke can push ordinary project metadata")
+	require.Equal(t, 1, result.Accepted)
+	return nil
+}

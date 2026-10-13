@@ -26,6 +26,7 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		{"cron.job.deleted", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run"}}}`, true},
 		{"cron.job.created", `{"definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`, false},
 		{"issue.created", `{"metadata":{"description":"cron.occurrence"}}`, false},
+		{"project.metadata_updated", `{"diff":{"cron.progress.custom":{"to":"value"}}}`, false},
 	} {
 		features, e := db.PayloadRequiredFeatures(tc.kind, tc.payload)
 		require.NoError(t, e)

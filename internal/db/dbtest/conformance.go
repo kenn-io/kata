@@ -52,6 +52,7 @@ var storageScenarios = []scenario{
 	{name: "recurring atomic rollback", runWithBackend: checkRecurringAtomicRollback},
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},
 	{name: "recurring metadata protection", run: checkRecurringMetadataProtection},
+	{name: "recurring project metadata keys", run: checkRecurringProjectMetadataKeys},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "comment event export after target deletion", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportComments", "ExportEvents", "ExportExternalFieldMappings", "ExportExternalFieldStates", "ExportExternalRootBindings", "ExportFederationBindings", "ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus", "ExportImportMappings", "ExportIssueClaims", "ExportIssueLabels", "ExportIssueSyncBindings", "ExportIssueSyncStatus", "ExportIssues", "ExportLinks", "ExportMeta", "ExportPendingClaimRequests", "ExportProjectAliases", "ExportProjectPurgeLog", "ExportProjects", "ExportPurgeLog", "ExportRecurrences", "ExportSequences", "ImportReplay", "ProjectByUID", "PurgeIssue", "SoftDeleteIssue"}, runWithBackend: checkCommentEventExportAfterTargetDeletion},

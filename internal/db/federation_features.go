@@ -47,6 +47,13 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	issueState := kind == "projection.issue" || strings.HasPrefix(kind, "issue.")
+	jobDefinition := kind == "projection.job" || strings.HasPrefix(kind, "cron.job.")
+	// Delivery state lives only in issue metadata and native job definitions;
+	// other payloads, such as project metadata, may reuse those key names freely.
+	if !issueState && !jobDefinition {
+		return required, nil
+	}
 	if payload == "" {
 		payload = "{}"
 	}
@@ -54,7 +61,13 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if err := json.Unmarshal([]byte(payload), &body); err != nil {
 		return "", err
 	}
-	native, err := nativeDeliveryPayload(body)
+	var native bool
+	var err error
+	if issueState {
+		native, err = nativeIssueMetadata(body)
+	} else {
+		native, err = nativeJobDefinition(body["definition"])
+	}
 	if err != nil {
 		return "", err
 	}
@@ -63,7 +76,8 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	}
 	return required, nil
 }
-func nativeDeliveryPayload(body map[string]jsontext.Value) (bool, error) {
+
+func nativeIssueMetadata(body map[string]jsontext.Value) (bool, error) {
 	for _, field := range []string{"metadata", "diff"} {
 		var keys map[string]jsontext.Value
 		if raw := body[field]; len(raw) > 0 && string(raw) != "null" {
@@ -77,23 +91,25 @@ func nativeDeliveryPayload(body map[string]jsontext.Value) (bool, error) {
 			}
 		}
 	}
-	if raw := body["definition"]; len(raw) > 0 {
-		var definition struct {
-			Action struct {
-				Kind string `json:"kind"`
-			} `json:"action"`
-			Issue *struct {
-				Kind string `json:"kind"`
-			} `json:"issue"`
-		}
-		if err := json.Unmarshal(raw, &definition); err != nil {
-			return false, err
-		}
-		if definition.Action.Kind == "notify" && definition.Issue != nil && definition.Issue.Kind == "per-run" {
-			return true, nil
-		}
-	}
 	return false, nil
+}
+
+func nativeJobDefinition(raw jsontext.Value) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var definition struct {
+		Action struct {
+			Kind string `json:"kind"`
+		} `json:"action"`
+		Issue *struct {
+			Kind string `json:"kind"`
+		} `json:"issue"`
+	}
+	if err := json.Unmarshal(raw, &definition); err != nil {
+		return false, err
+	}
+	return definition.Action.Kind == "notify" && definition.Issue != nil && definition.Issue.Kind == "per-run", nil
 }
 
 // EventFeaturesHeader advertises supported federation event formats.
