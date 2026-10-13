@@ -4,6 +4,7 @@ import (
 	"encoding/json/v2"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // IsRecurringIssueJob recognizes native ownership even for disabled definitions.
@@ -11,9 +12,12 @@ func IsRecurringIssueJob(j JobDefinition) bool {
 	return j.Action.Kind == "notify" && j.Issue != nil && j.Issue.Kind == "per-run"
 }
 
+// recurringTitleSuffix is the longest occurrence suffix a child title gains.
+const recurringTitleSuffix = " — 2006-01-02T15:04:05.999999999Z"
+
 func validateRecurring(j JobDefinition) error {
 	p := j.Issue
-	if !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || len([]rune(p.Title))+len(" — 2006-01-02T15:04:05.999999999Z") > 1024 {
+	if !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || utf8.RuneCountInString(p.Title+recurringTitleSuffix) > 1024 {
 		return invalid("native recurring issues require a parent UID and a bounded title")
 	}
 	if p.ScheduledOffsetSeconds != nil || p.DeadlineOffsetSeconds != nil || j.Overlap != "allow" || j.TimeoutSeconds != 0 || len(j.SecretRefs) != 0 {

@@ -198,8 +198,8 @@ recurring notification message. Read with `kata inbox --for worker/consumer`,
 then clear the request with `kata notify <child-ref> --to worker/consumer --clear`
 after handling it. Reading does not acknowledge it.
 
-The title gains a UTC occurrence timestamp. The configured title must leave
-room within the 1024-character issue title limit. Children carry
+The title gains a UTC occurrence timestamp. The configured title can be at
+most 991 characters, so the child title stays within 1024 characters. Children carry
 `cron.occurrence` provenance and no `scheduled_on`, so the ordinary date sweeper
 does not request the same occurrence again. Clearing a request, closing a child,
 or restarting the daemon never rewinds delivery. Native delivery creates no run

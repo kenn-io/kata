@@ -48,6 +48,11 @@ func TestRecurringDefinition(t *testing.T) {
 			require.ErrorIs(t, j.Validate(), ErrInvalid)
 		})
 	}
+	job.Issue.Title = strings.Repeat("é", 991)
+	require.NoError(t, job.Validate(), "991 characters plus the 33-character timestamp suffix fit in 1024")
+	job.Issue.Title = strings.Repeat("é", 992)
+	require.ErrorIs(t, job.Validate(), ErrInvalid)
+	job.Issue.Title = "Review service"
 	job.Trigger.IntervalSeconds = 60
 	require.NoError(t, job.Validate(), "one minute is the shortest native interval")
 	job.Enabled = false
