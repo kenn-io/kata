@@ -158,12 +158,10 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	}
 	if j.Catchup == "skip" {
 		cutoff := now.Add(-time.Duration(j.GraceSeconds) * time.Second)
-		if cutoff.After(p.Through) {
-			// Retain an occurrence exactly on grace, without walking discarded history.
+		// Fast-forward only past an occurrence being discarded; an idle sweep
+		// must not rewrite progress. Retain an occurrence exactly on grace.
+		if first := next(p.Through); !first.IsZero() && first.Before(cutoff) {
 			p.Through = cutoff.Add(-time.Nanosecond)
-			if p.Through.Before(p.Anchor) {
-				p.Through = p.Anchor
-			}
 		}
 	}
 	cursor := p.Through

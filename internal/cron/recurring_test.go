@@ -199,3 +199,32 @@ func TestRecurringCalendarSkipFastForward(t *testing.T) {
 	require.Empty(t, replay.Due)
 	require.Equal(t, next.Progress, replay.Progress)
 }
+
+// Skip leaves progress untouched while no occurrence has passed, however often it sweeps.
+func TestRecurringSkipIdleSweepsKeepProgress(t *testing.T) {
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "cron", Cron: "0 9 * * *"}
+	j.Catchup = "skip"
+	j.GraceSeconds = 60
+	anchor := at(t, "2026-10-01T10:00:00Z")
+	idle := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	for _, now := range []time.Time{
+		anchor.Add(90 * time.Second),
+		anchor.Add(time.Hour),
+		at(t, "2026-10-02T08:59:59Z"),
+	} {
+		batch, e := PlanRecurring(j, definitionUID, idle, now)
+		require.NoError(t, e)
+		require.Empty(t, batch.Due)
+		require.Equal(t, idle, batch.Progress, "no occurrence passed by %s", now)
+	}
+	due, e := PlanRecurring(j, definitionUID, idle, at(t, "2026-10-02T09:00:30Z"))
+	require.NoError(t, e)
+	require.Equal(t, []time.Time{at(t, "2026-10-02T09:00:00Z")}, due.Due)
+	require.Equal(t, at(t, "2026-10-02T09:00:30Z"), due.Progress.Through)
+	missed, e := PlanRecurring(j, definitionUID, idle, at(t, "2026-10-02T09:05:00Z"))
+	require.NoError(t, e)
+	require.Empty(t, missed.Due, "an occurrence older than grace is discarded")
+	require.Equal(t, at(t, "2026-10-02T09:05:00Z"), missed.Progress.Through,
+		"discarding an occurrence records progress past it")
+}
