@@ -123,6 +123,8 @@ is a local ledger for the work itself. They coexist. See
 -   [__Model Context Protocol__](reference/mcp.md). Connect an MCP client over
     stdio or Streamable HTTP to the workspace project, a fixed allowlist, or
     the whole daemon.
+-   [__Share projects between hubs__](guide/project-relays.md). Connect a selected
+    project to your hub and devices (available on `main`).
 -   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
     with opt-in embeddings.
 -   [__Local daemon profiles__](operations/local-daemon-profiles.md). Keep personal

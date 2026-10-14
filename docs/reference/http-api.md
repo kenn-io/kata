@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-12
+last_edited: 2026-10-14
 ---
 
 # HTTP API schema
@@ -59,7 +59,7 @@ daemon will accept the same calls.
 
 The schema carries a version in its `info.version` field
 (`APISchemaVersion`). The same value is reported at runtime by
-[`GET /api/v1/health`](#) as `api_schema_version`:
+[`GET /api/v1/health`](#health-diagnostics) as `api_schema_version`:
 
 ```json
 {
@@ -247,6 +247,11 @@ key that does not match the pin returns `409 root_signing_key_mismatch`. An
 
 ## Project access
 
+Team visibility and credential-bound relay enrollment are available on `main`,
+after 0.18.0.
+
+### Project visibility
+
 Ordinary identity credentials can read, write and administer a project when
 its visibility is `all`, or when their authenticated actor belongs to any team
 assigned to a project with visibility `teams`. This includes archived projects:
@@ -262,14 +267,20 @@ counts, graphs, relationships, audit events and browser snapshots. Unauthorized
 references return a generic `404`, including references supplied in request
 bodies. Project access intersects issue-subtree and hosted grants. Writes,
 including purge and merge, recheck the issue's or projects' current state
-inside their transaction. Before any response leaves the daemon, the same
-rule applies to reads and writes alike: the response is withheld with `404`
+inside their transaction.
+
+### Requests during access changes
+
+Before releasing a read or write response, the daemon rechecks project access.
+It withholds the response with `404`
 when the caller lost one of the projects admitted for the request, or when an
 issue the request read, whether for a list, a preview, a reload after a
 commit or a plain show, now sits in a project the caller does not hold. An
 event page, digest or issue history counts every issue its events name: the
 subject, the related issue and the issues in the payload. A
-write that committed stays committed even when its response is withheld.
+write that committed stays committed even when its response is withheld. Check
+current state before retrying: a `404` after an access change does not prove
+the write failed.
 Unrelated changes, such as a new team, a new project, an issue move elsewhere,
 the deletion of an issue the request read, or a project the request itself
 merged or purged away, do not affect a request in flight. Archiving a project
@@ -287,6 +298,8 @@ hold, the stream sends `sync.reset_required` at that event's ID in place of
 the frame and closes, whatever the credential's issue scope. Browser cache
 validators include the principal and policy revision.
 
+### Administration
+
 Project administration follows project access. A credential that can access a
 project can rename it, archive it (`DELETE /api/v1/projects/{project_id}`),
 restore it, purge it, detach its aliases, purge its issues, rewrite its author
@@ -300,6 +313,9 @@ administration; diagnostics; federation status, replica creation, bridges and
 the enrollment catalog; and root signing key configuration. Token
 administration stays with the owner because a credential that could mint a
 token for another actor would inherit that actor's team access.
+
+### Relay enrollment
+
 Ordinary user credentials may create a credential-bound relay enrollment
 (`relay` in the request) for an authorized project. `relay.rebind_parent`
 re-attaches an existing relay grant to a live same-account credential and
@@ -313,8 +329,9 @@ a root key that was replaced before the grant committed returns
 `409 relay_root_changed`; the peer enrolls again and receives the current key.
 A relay enrollment for a project whose signed reset checkpoint would exceed
 the 64 MiB relay checkpoint capacity returns `409 relay_project_too_large`
-with the measured size in the message and no grant. The hint names the only
-remedy, purging issues the project no longer needs; see
+with the measured size in the message and no grant. Purging unused issues can
+reduce the checkpoint, but permanent receipts set a floor that purge cannot
+remove; see
 [Relay checkpoint capacity](../operations/federation.md#relay-checkpoint-capacity).
 Enrollment transport checks the actor bound to its authenticated credential
 against current project access. It cannot claim team authority from an event's

@@ -37,11 +37,14 @@ Choose federation when each participant keeps a local daemon and database, but
 selected projects should converge through a hub.
 
 Federation is opt-in per project. It favors local availability and offline
-queues over immediate single-copy reads. Operators must understand stale reads,
-lease behavior, quarantine, reset, and the difference between daemon API tokens
-and federation enrollment tokens.
+queues over immediate single-copy reads. Reads use the local copy, so changes
+can be delayed while a connection is offline.
+Leases provide optional coordination; sync and recovery have explicit limits.
 
-Read [Federation](../operations/federation.md) before enabling it.
+For selected projects shared through a personal or intermediate hub, use the
+[project relay guide](../guide/project-relays.md), available on `main`. It covers
+connection, downstream devices and recovery. The [operator reference](../operations/federation.md)
+also covers older direct-spoke enrollment.
 
 ## Hosted mode
 
@@ -59,6 +62,7 @@ Render, Fly.io, Railway, App Engine, or similar platforms.
 | One developer, several worktrees or agents | Local shared project |
 | Trusted team needs immediate central reads/writes | Remote daemon |
 | Multiple local-first replicas with offline tolerance | Federation |
+| Receive selected projects and relay them to other devices | [Project relays](../guide/project-relays.md) (`main`) |
 | PaaS process management with `$PORT` | Hosted mode |
 | Public multi-tenant SaaS authorization | Not implemented yet |
 

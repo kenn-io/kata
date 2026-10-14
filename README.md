@@ -15,8 +15,8 @@ Go applications can instead mount kata's listener-free HTTP service in-process;
 see [Embedding kata in Go](docs/development/embedding.md).
 MCP clients can start Kata's native server over stdio or Streamable HTTP with
 `kata mcp serve`. It binds the current workspace's project by default, and can
-serve a fixed allowlist or the complete daemon catalog on request. Sixteen
-section loaders progressively expose Kata's typed issue, administration,
+serve a fixed allowlist or the complete daemon catalog on request. Section
+loaders progressively expose Kata's typed issue, administration,
 automation, and event workflows. See the [MCP reference](docs/reference/mcp.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
@@ -24,6 +24,10 @@ Zensical at <https://katatracker.com/>.
 
 > **Stable:** Since v0.14.0, kata releases preserve backward compatibility
 > across upgrades.
+
+Project relays are available on `main`: share selected projects through your
+own hub and devices. See [Share projects between hubs](docs/guide/project-relays.md)
+for setup and recovery limits.
 
 The latest release is [0.18.0](docs/changelog.md#0180). It adds teammate
 attention requests, issue-scoped worker credentials, and more ways to find

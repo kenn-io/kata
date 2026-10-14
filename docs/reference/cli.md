@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-12
+last_edited: 2026-10-14
 ---
 
 # CLI reference
@@ -579,7 +579,7 @@ by default. `--workspace` or `--project` selects one explicit project.
 `--projects` fixes an allowlist of project names, pinned by immutable project
 UID. `--all` follows every project in the selected daemon catalog.
 The startup scope and actor apply to every tool call. The initial catalog
-contains 16 section loaders that progressively expose the detailed typed
+contains section loaders that progressively expose the detailed typed
 tools. Optional `--storage-root` and repeatable `--storage-target
 alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
 [MCP reference](mcp.md) for transport configuration, the complete catalog,
@@ -1825,6 +1825,8 @@ Beads](../guide/migrating-from-beads.md).
 
 ## Teams and project visibility
 
+Available on `main`; not included in 0.18.0.
+
 ```sh
 kata teams create <name>
 kata teams list
@@ -1884,9 +1886,9 @@ means the coordinator must select the authoritative hub daemon and resolve the
 issue there. A daemon without the `issue_subtree_tokens` capability returns
 `issue_subtree_tokens_unsupported` before minting.
 
-Plaintext is written once to `--token-file` and is never printed. The destination
-must be new and its parent directory owner-only; the path belongs to the CLI
-host. Provisioning returns the absolute output path and redacted metadata. The
+For an issue-scoped credential, plaintext is written once to `--token-file`
+and is never printed. The destination must be new and its parent directory
+owner-only; the path belongs to the CLI host. Provisioning returns the absolute output path and redacted metadata. The
 file is issuance output, not a worker authentication input. Follow the
 [worker provisioning example](../operations/remote-daemon.md#identity-tokens)
 to inject its value into the consuming process. Revoke the token during teardown.
@@ -1921,6 +1923,10 @@ same-write retry idempotency, and ordinary revision CAS for changed evidence.
 The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation
+
+Account-token bridges and root-key recovery are available on `main`, after
+0.18.0. Existing direct-spoke enrollment is a separate workflow. Start with
+[Share projects between hubs](../guide/project-relays.md) for relay setup.
 
 ```sh
 kata federation identity
@@ -1959,10 +1965,16 @@ with the existing root metadata API to
 [select a project producer](../operations/federation.md#select-an-embedding-producer).
 A remote server selection does not select a different local recipe.
 
-`kata federation bridge connect` asks the local daemon to use the selected
-catalog hub account for one bidirectional project enrollment. The CLI sends the
-catalog name, project names and local actor; the hub credential stays in the
-daemon. `--preflight` previews the accounts, identity and project without issuing
+Run bridge commands with owner authority on the daemon receiving the replica.
+Its catalog entry must hold an ordinary, unscoped hub account token with write
+access to the existing project. `--daemon` selects the receiving daemon;
+`--hub-daemon` selects an entry in that daemon's catalog. The hub URL must be a
+root HTTP(S) origin without a path. Environment-variable and signing-file
+sources are resolved on the receiving daemon.
+
+`kata federation bridge connect` connects one project bidirectionally.
+The CLI sends the catalog name, project names and local actor; the hub
+credential stays in the daemon. `--preflight` previews the accounts, identity and project without issuing
 a grant. Add `--serve-downstream` only when this daemon will also relay the
 project to its own spokes; without it the bridge is a leaf. A hub that requires
 request signing needs `--signing-key-id` with `--signing-key-env` or an absolute

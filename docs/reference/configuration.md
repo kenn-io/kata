@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-09
+last_edited: 2026-10-14
 ---
 
 # Configuration
@@ -587,7 +587,11 @@ provider. It cannot mix them.
 
 #### Catalog administration credentials
 
-This form creates projects and enrolls or adopts replicas automatically at startup:
+This form creates projects and enrolls or adopts direct-spoke replicas at
+startup. It requires the hub owner's administration credential outside identity
+mode. To connect with an ordinary account token, configure a catalog entry and use
+[`kata federation bridge connect`](../guide/project-relays.md); do not add a
+`[[federation.project]]` mapping for that bridge.
 
 ```toml
 [[daemon]]
@@ -614,8 +618,8 @@ then creates the local `spoke_project` if it is missing or adopts the existing
 standalone project. Enrollment credentials are generated automatically and
 stored in the spoke's owner-only federation credential store. A generated
 credential is durably reserved once under the resolved hub project UID before
-enrollment. When the hub authenticates the catalog bearer as a DB-backed
-identity token, that token's actor overrides the mapping's requested `actor`.
+enrollment. A database-backed account token is refused on this legacy
+enrollment path with `federation_enrollment_requires_relay`.
 Credential-file updates use a same-directory, failure-atomic replacement so a
 failed write cannot truncate the last readable credential set.
 
@@ -745,7 +749,7 @@ the bootstrap token:
 
 ```sh
 export KATA_AUTH_TOKEN=bootstrap-admin-token
-kata tokens create --actor wesm --name laptop
+kata tokens create --actor member --name laptop
 kata tokens list
 kata tokens revoke 1
 ```

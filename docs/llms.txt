@@ -43,8 +43,12 @@ for machine readers.
   opt-in embeddings
 - [Sharing models](https://katatracker.com/docs/workflows/sharing.md): local,
   private network, federation, hosted
+- [Share projects between hubs](https://katatracker.com/docs/guide/project-relays.md):
+  relay setup on main, daemon selection, credentials, sync status and recovery
 - [Federation](https://katatracker.com/docs/operations/federation.md):
-  hub-and-spoke replication between daemons
+  operator reference for replication, account credentials, team access and recovery
+- [HTTP API](https://katatracker.com/docs/reference/http-api.md):
+  request contracts, project access, concurrent changes and relay enrollment
 - [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
   mirror upstream issues into kata
 - [Notion sync](https://katatracker.com/docs/operations/notion-sync.md):

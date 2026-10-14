@@ -1,11 +1,31 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-10-14
 ---
 
 # Agent workflows
 
 kata is designed to survive the parts of agent work that chat does not: context
 compaction, multiple workers, incomplete attempts, and close discipline.
+
+## Choose the daemon and project
+
+Select the daemon and project before reading or changing work. `--daemon <name>`
+sends commands to a configured daemon; it does not copy a project. A federation
+bridge keeps a selected project in the receiving daemon's database, where agents
+use the usual issue commands. Follow [Share projects between hubs](../guide/project-relays.md)
+for the operator setup, then verify the replica before taking work.
+
+On an identity-enabled daemon, access follows the authenticated account and its
+project teams. `--as`, `KATA_AUTHOR` and `--teammate` do not grant team access.
+Issue-scoped credentials remain limited to their issue and descendants.
+
+An operator with daemon-owner authority can inspect recorded connection state
+with `kata federation bridge status --project <project> --json` and sync
+diagnostics with `kata federation status --json`. Ordinary workers should ask
+the operator to diagnose transport failures rather than change enrollment.
+A connected bridge may still have pending work. Reads use the local copy;
+`pending` creation attribution waits for root acceptance. See the guide's
+[sync explanation](../guide/project-relays.md#what-sync-means-for-your-work).
 
 ## Hookless harnesses
 
@@ -717,7 +737,7 @@ kata mcp serve \
   --http-token-env KATA_MCP_HTTP_TOKEN
 ```
 
-The server starts with 16 section loaders. An agent loads only the detailed
+The server starts with section loaders. An agent loads only the detailed
 issue, project, administration, automation, or event tools needed for its task.
 Pass `--workspace` or `--project` for an explicit project, `--projects` for a
 fixed allowlist, or `--all` to use every project visible to the

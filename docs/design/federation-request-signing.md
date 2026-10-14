@@ -6,6 +6,11 @@ whether they are mandatory on ordinary listeners. Native project,
 actor, capability and transaction checks remain authoritative. This design
 adds no database migration and no gateway service.
 
+Request signing and root signatures serve different purposes. HMAC request
+signatures authenticate one HTTP request to the next hop. The root's Ed25519
+signatures authenticate event receipts and recovery checkpoints across relay
+hops. Their keys and rotation procedures are separate.
+
 ## Protocol choice
 
 [RFC 9421](https://www.rfc-editor.org/rfc/rfc9421.html) defines the signature
