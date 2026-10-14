@@ -97,6 +97,10 @@ func (s *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
+	if count, highWater, negotiated, err := s.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
+		return count, highWater, err
+	}
+
 	var count int64
 	var highWater sql.NullInt64
 	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
@@ -122,6 +126,9 @@ func (s *Store) InsertRemoteEvent(ctx context.Context, projectID int64, remote d
 // whole page, so run identity history is read once per page rather than once
 // per event. It reports, per event, whether the event was new.
 func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events []db.RemoteEvent) ([]bool, error) {
+	// Serialize source/proof arrival before event-sequence locks. Serializable
+	// retries resolve overlapping snapshots without leaving creation unattached.
+	ctx = db.WithAdditionalTransactionFence(ctx, lockProjectAccess)
 	payloads := make([]jsontext.Value, len(events))
 	createdAts := make([]string, len(events))
 	for i, remote := range events {

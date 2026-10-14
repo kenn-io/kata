@@ -62,7 +62,7 @@ func TestPurgeProjectHandler_PurgesArchived(t *testing.T) {
 		second := postWithHeader(t, ts, purgeProjectPath(pid),
 			map[string]string{"X-Kata-Confirm": "PURGE kata"},
 			map[string]any{"actor": "tester"})
-		assertAPIError(t, second.status, second.body, 404, "project_not_found")
+		assertAPIError(t, second.status, second.body, 404, "not_found")
 	})
 
 	t.Run("active project with correct confirm returns 409", func(t *testing.T) {

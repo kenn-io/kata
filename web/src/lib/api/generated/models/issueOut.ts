@@ -3,11 +3,14 @@
  */
 import type { ChildCounts } from './childCounts.ts'
 import type { IssueOutMetadata } from './issueOutMetadata.ts'
+import type { IssueOutVerification } from './issueOutVerification.ts'
 import type { LinkPeer } from './linkPeer.ts'
 
 export interface IssueOut {
+  accountable_actor?: string
   assignment_expires_on?: string
   author: string
+  authority_uid?: string
   blocked?: boolean
   blocked_by?: LinkPeer[]
   blocks?: LinkPeer[]
@@ -31,10 +34,13 @@ export interface IssueOut {
   related?: LinkPeer[]
   revision: number
   short_id: string
+  source_actor?: string
   status: string
+  teammate?: string
   title: string
   uid: string
   updated_at: string
+  verification?: IssueOutVerification
   /** Browser URL for this issue in the owning daemon. */
   web_url?: string
   [key: string]: unknown

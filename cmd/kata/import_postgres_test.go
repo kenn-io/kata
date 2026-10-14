@@ -149,6 +149,12 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 		`CREATE ROLE %s LOGIN PASSWORD 'runtime-password'`, runtimeRole,
 	)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
+		)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
+	})
 	runtimeDSN := postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password")
 	t.Setenv("KATA_DSN", runtimeDSN)
 	// Production daemons use validation-only startup. Import receives the

@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-04
+last_edited: 2026-10-12
 ---
 
 # Federation request signing
@@ -92,6 +92,27 @@ environment sources must be available in the running daemon's environment.
 Expired keys do not require a source at startup. Key IDs are public selectors,
 not credentials.
 
+## Bridges
+
+A bridge created with `kata federation bridge connect` signs its relay
+requests when its credential selects a signing source. A hub with
+`required = true` advertises `federation_signing_required`, and bridge connect
+refuses it with `hub_signing_required` until the bridge has a source.
+
+1. On the daemon that will hold the bridge, provision the secret as above and
+   connect with `--signing-key-id <key-id>` plus `--signing-key-env <var>` or
+   `--signing-key-file <absolute-path>`. For a bridge credential that already
+   exists, select the source instead with
+   `kata federation signing configure --project-uid <hub-project-uid> --key-id <key-id> --key-env <var>`.
+2. On the hub, read the bridge's enrollment ID with
+   `kata federation enrollments list`, add a `[[federation.signing.key]]` entry
+   for that ID, and restart the hub.
+
+Until the hub registers the key, relay sync fails and
+`kata federation bridge status` reports `signing_rejected`. The grant stays
+live, so the bridge resumes without reconnecting once both sides agree.
+`bridge disconnect` signs its revocation with the same source.
+
 ## Route only federation
 
 Use an existing HTTPS reverse proxy with a fixed prefix-stripping route to the
@@ -175,7 +196,7 @@ implementation does not provide a shared replay service.
 | Maximum lifetime / future clock skew | 90 seconds / 5 seconds |
 | Nonce | 24 random bytes, unpadded base64url |
 | Replay capacity | 8,192 live nonces; full cache rejects new admissions |
-| Ingest body / other request body / header budget | 64 MiB / 64 KiB / 16 KiB |
+| Ingest body / signed relay envelope / other request body / header budget | 64 MiB / 128 MiB / 64 KiB / 16 KiB |
 | Concurrent admissions across daemon listeners | 2 ingests plus 16 metadata, poll and lease requests |
 | Ingress connections / request duration | 16 / 60 seconds |
 
@@ -186,12 +207,15 @@ provide RFC canonicalization; Kata restricts their general features to this
 profile. MAC and digest comparisons use constant time comparisons. Native
 retries generate fresh signatures rather than replaying a saved signature.
 
-Verification checks the MAC before reading the body, hashes at most 64 MiB,
+Verification checks the MAC before reading the body, hashes at most 128 MiB,
 and rechecks freshness, key validity and cancellation after hashing before
-atomic nonce admission. The 90-second signature lifetime leaves 30 seconds
-for signing and transit around the 60-second request budget. A full 64 MiB
-snapshot still needs enough bandwidth to upload and finish processing within
-that request budget; retries cannot make a consistently slower upload finish.
+atomic nonce admission. The project-event ingest route remains capped at 64
+MiB; the larger signed relay envelope budget covers JSON and base64 encoding
+around the existing 64 MiB raw relay batch limit. The 90-second signature
+lifetime leaves 30 seconds for signing and transit around the 60-second request
+budget. A full 64 MiB snapshot still needs enough bandwidth to upload and
+finish processing within that request budget; retries cannot make a
+consistently slower upload finish.
 
 Two ingests may run at once, retaining the native adoption snapshot limit.
 Metadata, event polls and leases use a separate pool so slow uploads do not

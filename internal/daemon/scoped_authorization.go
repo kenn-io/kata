@@ -14,10 +14,12 @@ import (
 
 func revalidateIssueScopedPrincipal(ctx context.Context, store db.Storage) error {
 	principal, ok := PrincipalFromContext(ctx)
-	if !ok || principal.Scope == nil {
+	if !ok || principal.Kind != PrincipalDBToken {
 		return nil
 	}
-	if principal.ExpiresAt == nil || !time.Now().UTC().Before(*principal.ExpiresAt) || principal.TokenID == 0 {
+	now := time.Now().UTC()
+	if principal.TokenID == 0 || (principal.ExpiresAt != nil && !now.Before(*principal.ExpiresAt)) ||
+		(principal.Scope != nil && principal.ExpiresAt == nil) {
 		return api.NewError(401, "unauthorized", "authentication required", "", nil)
 	}
 	current, err := store.APITokenByID(ctx, principal.TokenID)
@@ -25,8 +27,11 @@ func revalidateIssueScopedPrincipal(ctx context.Context, store db.Storage) error
 		return internalAPIError(err)
 	}
 	admitted := db.APIToken{ID: principal.TokenID, Actor: principal.Actor, Scope: principal.Scope, ExpiresAt: principal.ExpiresAt}
-	if err != nil || !db.ActiveAPITokenGrantMatches(current, admitted, time.Now()) {
+	if err != nil || !db.ActiveAPITokenGrantMatches(current, admitted, now) {
 		return api.NewError(401, "unauthorized", "authentication required", "", nil)
+	}
+	if principal.Scope == nil {
+		return nil
 	}
 	return revalidateIssueScopedDomain(ctx, store, principal.Scope)
 }
@@ -104,7 +109,12 @@ func withScopedPrincipalRevalidation(store db.Storage, next http.Handler) http.H
 			return
 		}
 		response := newBufferedScopedResponse(w)
+		defer func() { _ = response.close() }()
 		next.ServeHTTP(response, r)
+		if err := response.prepare(); err != nil {
+			api.WriteEnvelope(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
 		if err := validateScopedResponse(r.Context(), store, *principal.Scope); err != nil {
 			if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 				api.WriteEnvelope(w, apiErr.Status, apiErr.Code, apiErr.Message)
@@ -139,6 +149,9 @@ func issueScopeFromContext(ctx context.Context) *db.APITokenScope {
 }
 
 func authorizeIssueScopedProject(ctx context.Context, project db.Project) error {
+	if err := authorizeProjectTarget(ctx, project.UID); err != nil {
+		return err
+	}
 	scope := issueScopeFromContext(ctx)
 	if scope == nil {
 		return nil
@@ -152,6 +165,13 @@ func authorizeIssueScopedProject(ctx context.Context, project db.Project) error 
 // authorizeIssueScopedIssue checks active parent containment and records the
 // target for revalidation by the native write transaction.
 func authorizeIssueScopedIssue(ctx context.Context, store db.Storage, issue db.Issue) error {
+	project, err := store.ProjectByID(ctx, issue.ProjectID)
+	if err != nil {
+		return projectAccessDenied()
+	}
+	if err := authorizeProjectTarget(ctx, project.UID); err != nil {
+		return err
+	}
 	scope := issueScopeFromContext(ctx)
 	if scope == nil {
 		return nil

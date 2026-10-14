@@ -49,6 +49,18 @@ type StreamEventsResponse = []byte
 
 type StreamEventsErrorResponse = ErrorEnvelope
 
+type ConnectFederationBridgeResponse = FederationBridgeBody
+
+type ConnectFederationBridgeErrorResponse = ErrorEnvelope
+
+type GetFederationBridgeStatusResponse = FederationBridgeStatusBody
+
+type GetFederationBridgeStatusErrorResponse = ErrorEnvelope
+
+type DisconnectFederationBridgeResponse = FederationBridgeDisconnectResult
+
+type DisconnectFederationBridgeErrorResponse = ErrorEnvelope
+
 type ListFederationEnrollmentsResponse = ListFederationEnrollmentsBody
 
 type ListFederationEnrollmentsErrorResponse = ErrorEnvelope
@@ -78,6 +90,10 @@ type RebindFederationReplicaResponse = RebindFederationReplicaResponseBody
 type RebindFederationReplicaErrorResponse = ErrorEnvelope
 
 type ConfigureFederationSigningErrorResponse = ErrorEnvelope
+
+type RepinFederationRootKeyResponse = FederationRootKeyRepinResult
+
+type RepinFederationRootKeyErrorResponse = ErrorEnvelope
 
 type GetFederationStatusResponse = FederationStatusBody
 
@@ -126,6 +142,14 @@ type ShowProjectErrorResponse = ErrorEnvelope
 type RenameProjectResponse = ShowProjectResponseBody
 
 type RenameProjectErrorResponse = ErrorEnvelope
+
+type GetProjectAccessResponse = ProjectAccessResponseBody
+
+type GetProjectAccessErrorResponse = ErrorEnvelope
+
+type SetProjectAccessResponse = ProjectAccessResponseBody
+
+type SetProjectAccessErrorResponse = ErrorEnvelope
 
 type PurgeProjectResponse = ProjectPurgeResponseBody
 
@@ -238,6 +262,26 @@ type RetryFederationQuarantineErrorResponse = ErrorEnvelope
 type SkipFederationQuarantineResponse = FederationQuarantineSummary
 
 type SkipFederationQuarantineErrorResponse = ErrorEnvelope
+
+type OfferRelayDeliveriesResponse = RelayBatchResponse
+
+type OfferRelayDeliveriesErrorResponse = ErrorEnvelope
+
+type GetRelayResetResponse = RelayResetCheckpoint
+
+type GetRelayResetErrorResponse = ErrorEnvelope
+
+type AcceptRelayDeliveriesResponse = RelayAcceptance
+
+type AcceptRelayDeliveriesErrorResponse = ErrorEnvelope
+
+type AckRelayDeliveriesResponse = RelayAckResponseBody
+
+type AckRelayDeliveriesErrorResponse = ErrorEnvelope
+
+type DisconnectRelayEnrollmentResponse = DisconnectRelayResponseBody
+
+type DisconnectRelayEnrollmentErrorResponse = ErrorEnvelope
 
 type GetProjectFederationStatusResponse = FederationStatusBody
 
@@ -469,6 +513,30 @@ type ReadyIssuesGlobalResponse = ReadyGlobalResponseBody
 
 type ReadyIssuesGlobalErrorResponse = ErrorEnvelope
 
+type ListTeamsResponse = ListTeamsResponseBody
+
+type ListTeamsErrorResponse = ErrorEnvelope
+
+type CreateTeamResponse = TeamResponseBody
+
+type CreateTeamErrorResponse = ErrorEnvelope
+
+type DeleteTeamResponse = AccessAdministrationResponseBody
+
+type DeleteTeamErrorResponse = ErrorEnvelope
+
+type ShowTeamResponse = ShowTeamResponseBody
+
+type ShowTeamErrorResponse = ErrorEnvelope
+
+type RemoveTeamMemberResponse = AccessAdministrationResponseBody
+
+type RemoveTeamMemberErrorResponse = ErrorEnvelope
+
+type AddTeamMemberResponse = AccessAdministrationResponseBody
+
+type AddTeamMemberErrorResponse = ErrorEnvelope
+
 type ListTokensResponse = ListTokensResponseBody
 
 type ListTokensErrorResponse = ErrorEnvelope
@@ -579,6 +647,27 @@ type StreamEventsResp struct {
 	StatusCode   int
 }
 
+type ConnectFederationBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ConnectFederationBridgeResponse
+}
+
+type GetFederationBridgeStatusResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetFederationBridgeStatusResponse
+}
+
+type DisconnectFederationBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DisconnectFederationBridgeResponse
+}
+
 type ListFederationEnrollmentsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -632,6 +721,13 @@ type ConfigureFederationSigningResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
+}
+
+type RepinFederationRootKeyResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RepinFederationRootKeyResponse
 }
 
 type GetFederationStatusResp struct {
@@ -716,6 +812,20 @@ type RenameProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RenameProjectResponse
+}
+
+type GetProjectAccessResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetProjectAccessResponse
+}
+
+type SetProjectAccessResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *SetProjectAccessResponse
 }
 
 type PurgeProjectResp struct {
@@ -953,6 +1063,41 @@ type SkipFederationQuarantineResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SkipFederationQuarantineResponse
+}
+
+type OfferRelayDeliveriesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *OfferRelayDeliveriesResponse
+}
+
+type GetRelayResetResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetRelayResetResponse
+}
+
+type AcceptRelayDeliveriesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AcceptRelayDeliveriesResponse
+}
+
+type AckRelayDeliveriesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AckRelayDeliveriesResponse
+}
+
+type DisconnectRelayEnrollmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DisconnectRelayEnrollmentResponse
 }
 
 type GetProjectFederationStatusResp struct {
@@ -1434,6 +1579,48 @@ type ReadyIssuesGlobalResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReadyIssuesGlobalResponse
+}
+
+type ListTeamsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListTeamsResponse
+}
+
+type CreateTeamResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *CreateTeamResponse
+}
+
+type DeleteTeamResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DeleteTeamResponse
+}
+
+type ShowTeamResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShowTeamResponse
+}
+
+type RemoveTeamMemberResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RemoveTeamMemberResponse
+}
+
+type AddTeamMemberResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AddTeamMemberResponse
 }
 
 type ListTokensResp struct {

@@ -41,25 +41,41 @@ func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
 // ValidateRemoteEventContentHash canonicalizes an incoming payload and verifies
 // the portable event hash before a backend persists it.
 func ValidateRemoteEventContentHash(event RemoteEvent) (jsontext.Value, string, error) {
-	payload := event.Payload
-	if len(payload) == 0 {
-		payload = jsontext.Value(`{}`)
-	}
-	createdAt := event.CreatedAt.UTC().Format(EventTimestampFormat)
-	expectedHash, err := EventContentHash(EventHashInput{
-		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
-		ProjectUID: event.ProjectUID, ProjectName: event.ProjectName,
-		IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID,
-		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
-		HLCCounter: event.HLCCounter, CreatedAt: createdAt, Payload: payload,
-	})
+	expectedHash, err := RemoteEventContentHash(event)
 	if err != nil {
-		return nil, "", fmt.Errorf("remote event content hash: %w", err)
+		return nil, "", err
 	}
 	if !strings.EqualFold(expectedHash, event.ContentHash) {
 		return nil, "", fmt.Errorf("%w: event %s", ErrRemoteEventHashMismatch, event.EventUID)
 	}
-	return payload, createdAt, nil
+	return remoteEventPayload(event), remoteEventCreatedAt(event), nil
+}
+
+// RemoteEventContentHash computes the content hash the portable event fields
+// commit to, ignoring the hash the event advertises.
+func RemoteEventContentHash(event RemoteEvent) (string, error) {
+	hash, err := EventContentHash(EventHashInput{
+		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
+		ProjectUID: event.ProjectUID, ProjectName: event.ProjectName,
+		IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID,
+		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+		HLCCounter: event.HLCCounter, CreatedAt: remoteEventCreatedAt(event), Payload: remoteEventPayload(event),
+	})
+	if err != nil {
+		return "", fmt.Errorf("remote event content hash: %w", err)
+	}
+	return hash, nil
+}
+
+func remoteEventPayload(event RemoteEvent) jsontext.Value {
+	if len(event.Payload) == 0 {
+		return jsontext.Value(`{}`)
+	}
+	return event.Payload
+}
+
+func remoteEventCreatedAt(event RemoteEvent) string {
+	return event.CreatedAt.UTC().Format(EventTimestampFormat)
 }
 
 // ValidateFederationEntries checks comment teammate attribution and requires

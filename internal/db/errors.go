@@ -139,6 +139,10 @@ var (
 	// ErrProjectMergeIssueSyncBinding is returned when either side of a
 	// project merge has an issue sync binding.
 	ErrProjectMergeIssueSyncBinding = errors.New("project merge issue sync binding")
+
+	// ErrProjectMergeAccessPolicy is returned when a source project restricted
+	// to teams would merge into a target with a different access policy.
+	ErrProjectMergeAccessPolicy = errors.New("project merge access policy")
 )
 
 // Issue sync sentinels.
@@ -212,6 +216,9 @@ var (
 	// ErrFederationEnrollmentTokenConflict reports replay of an enrollment token
 	// whose persisted grant differs from the requested grant or is revoked.
 	ErrFederationEnrollmentTokenConflict = errors.New("federation enrollment token conflict")
+	// ErrRelayRootChanged reports that the project's active root key changed
+	// after the relay handshake was prepared; the peer must enroll again.
+	ErrRelayRootChanged = errors.New("relay root key changed since the handshake")
 
 	// ErrRemoteEventHashMismatch reports a remote event whose advertised content
 	// hash does not match the portable event fields.
@@ -235,22 +242,35 @@ var (
 
 	// ErrFederationResetBlockedByPendingPush is returned when a federation reset
 	// is blocked because there are pending push events.
+	ErrFederationCrossProjectBoundary = errors.New("cross-project links involving a relayed project are unsupported")
+
+	ErrFederationResetBlockedByDownstream = errors.New("federation change blocked by active downstream enrollments")
+
 	ErrFederationResetBlockedByPendingPush = errors.New("federation reset blocked by pending push")
 
 	// ErrFederationPushQuarantined reports that the federation push channel is
 	// quarantined.
 	ErrFederationPushQuarantined = errors.New("federation push quarantined")
 
+	ErrFederationPullQuarantined = errors.New("federation pull quarantined")
+
+	// Relay delivery cannot be discarded by advancing the legacy push cursor.
+	ErrRelayQuarantineSkipUnsupported = errors.New("relay quarantine requires retry after compatible recovery; skip is unsupported")
+
 	// ErrFederationResetBlockedByQuarantine is returned when a federation reset
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")
+
+	// ErrRelayResetRequiresRootProof refuses legacy cursor-only reset of a
+	// negotiated replica; only a verified root checkpoint may replace it.
+	ErrRelayResetRequiresRootProof = errors.New("relay reset requires a verified root checkpoint")
 
 	// ErrFederationResetBlockedByExternalRoot is returned when reset would destroy external-root binding history.
 	ErrFederationResetBlockedByExternalRoot = errors.New("federation reset blocked by external root history")
 
 	// ErrFederationQuarantineRetryUnsupportedDirection is returned when retry is
-	// requested for a non-push quarantine. Retry replays local outbound events
-	// and is only defined for push quarantines.
+	// requested for a legacy non-push quarantine. Negotiated relay quarantine
+	// retries preserve the exact retained hop identities in either direction.
 	ErrFederationQuarantineRetryUnsupportedDirection = errors.New("federation quarantine retry unsupported direction")
 
 	// ErrFederationIngestValidation is returned by IngestFederationEvents when a

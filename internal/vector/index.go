@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"go.kenn.io/kata/internal/sqliteconfig"
 	kitvec "go.kenn.io/kit/vector"
@@ -35,6 +36,9 @@ type Index struct {
 	store     *sqlitevec.Store[string, string]
 	flowStore kitvec.Store[string, string]
 	pg        *postgresIndex
+
+	rejectedMu sync.Mutex
+	rejected   map[string]bool
 }
 
 // Open opens (or creates) the sidecar at path. A mirror schema version
@@ -163,4 +167,10 @@ ON CONFLICT(key) DO NOTHING;`)
 		return fmt.Errorf("vector: ensure mirror schema: %w", err)
 	}
 	return nil
+}
+
+// ArtifactDimensionsSupported separates portable limits from PostgreSQL's
+// halfvec limit. It does not create generations or spend on embeddings.
+func (ix *Index) ArtifactDimensionsSupported(dimensions int) bool {
+	return ix != nil && dimensions > 0 && (ix.pg == nil || dimensions <= maxPostgresHalfvecDimensions)
 }

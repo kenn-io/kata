@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-10
+last_edited: 2026-10-12
 ---
 
 # Agent output format
@@ -217,6 +217,34 @@ List rows append revision after title. Existing fields keep their names,
 positions, and meanings, so `agent_format` stays `1`.
 A daemon without `[search.embeddings]` reports `mode=lexical` and omits
 `degraded=`. It includes the same added issue context.
+
+#### Teams, project access, bridges and root keys
+
+The team and project-access commands follow the mutation and read shapes.
+`teams list` is a read with one row per team; `teams show` reports its
+members as a comma-separated list and omits `members=` when the team is
+empty, as `projects access` omits `teams=` for `visibility=all`:
+
+```text
+OK teams count=1
+- team=reviewers uid=01HZNQ7VFPK1XGD8R5MABCD4EA revision=2
+OK teams-create team=reviewers uid=01HZNQ7VFPK1XGD8R5MABCD4EA
+OK teams-show team=reviewers uid=01HZNQ7VFPK1XGD8R5MABCD4EA revision=2 members=alice,bob
+OK teams-members-add team=01HZNQ7VFPK1XGD8R5MABCD4EA actor=alice
+OK teams-members-remove team=01HZNQ7VFPK1XGD8R5MABCD4EA actor=alice
+OK projects-access project=spoke-project visibility=teams revision=3 teams=01HZNQ7VFPK1XGD8R5MABCD4EA
+```
+
+The bridge and root-key commands emit one line each. `warning=` appears only
+when the daemon reported one, and `key_file=` only when the daemon has a key
+file path:
+
+```text
+OK federation-bridge-connect project=spoke-project status=ready direction=bidirectional hub=example-hub upstream_account=member local_account=local-member
+OK federation-bridge-status project=spoke-project state=connected direction=bidirectional credential_status=active hub=example-hub upstream_account=member local_account=local-member
+OK federation-bridge-disconnect project=spoke-project status=disconnected warning="the hub grant was not revoked"
+OK federation-root-key-repin project=hub-project status=ready method=unsigned_repin key_id=01HZ... previous_key_id=01HY... creates_key_file=true active_relay_enrollments=2 key_file=/srv/kata/federation-root.key
+```
 
 #### Single-result `next`
 

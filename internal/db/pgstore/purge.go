@@ -20,7 +20,7 @@ const purgeLogSelect = `SELECT id, uid, origin_instance_uid, project_id, purged_
 func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, reason *string) (db.PurgeLog, error) {
 	var result db.PurgeLog
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1 FOR UPDATE OF i`, issueID))
+		issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1 FOR UPDATE OF i`, issueID))
 		if err != nil {
 			return err
 		}
@@ -29,11 +29,25 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT name FROM projects WHERE id = $1`, issue.ProjectID).Scan(&projectName); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		// The issue may have moved since the request resolved it; its current
+		// project decides whether the caller may purge it.
+		if err := db.CheckProjectAccessTransaction(ctx, tx, issue.ProjectUID); err != nil {
+			return err
+		}
+		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, issue.ProjectID); err != nil {
 			return err
 		}
 		if err := rejectActiveExternalRootIssuePurge(ctx, tx, issue.ID); err != nil {
 			return err
+		}
+		// Keep manifests downloadable until the current live peer namespace
+		// drains. Retired epochs and revoked enrollments remain history.
+		var pendingRelay bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o JOIN federation_enrollments e ON e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch WHERE o.project_uid=$1 AND o.acknowledged=0 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_enrollments e JOIN meta m ON m.key=$2 || e.relay_binding_uid WHERE e.project_id=$3 AND e.revoked_at IS NULL AND (m.value::jsonb->'translation'->'authority'->>'epoch')::bigint>e.relay_reset_epoch)`, issue.ProjectUID, db.RelayResetMetadataPrefix+issue.ProjectUID+".", issue.ProjectID).Scan(&pendingRelay); err != nil {
+			return err
+		}
+		if pendingRelay {
+			return db.ErrFederationResetBlockedByPendingPush
 		}
 
 		var minEventID, maxEventID sql.NullInt64
@@ -58,23 +72,27 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
           WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		rows, err := tx.QueryContext(ctx, `UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL
-		  WHERE related_issue_id = $1 AND type = 'issue.links_changed' RETURNING id`, issue.ID)
+		_, err = tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
+		  WHERE related_issue_id = $1 AND type = 'issue.links_changed'`, issue.ID)
 		if err != nil {
 			return mapSQLError(err, nil)
-		}
-		detachedEventIDs, err := collectEventIDs(rows)
-		if err != nil {
-			return err
-		}
-		if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
-			return err
 		}
 		// Retain the source reply's portable target UID for replay and its content hash.
 		// Its numeric target FK must be detached before deleting the target issue.
 		if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
 WHERE related_issue_id = $1 AND type = 'issue.commented'`, issue.ID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		// Signed receipts stay: their per-project sequence is a relay cursor, and
+		// removing one would let the next receipt reuse a delivered sequence.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_entity_provenance
+WHERE project_uid = $1 AND ((kind = 'issue' AND entity_uid = $2)
+   OR (kind = 'comment' AND entity_uid IN (SELECT uid FROM comments WHERE issue_id = $3)))`,
+			issue.ProjectUID, issue.UID, issue.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if err := deleteIssuePendingCreationTx(ctx, tx, issue); err != nil {
+			return fmt.Errorf("delete pending creation intent: %w", err)
 		}
 		for _, statement := range []string{
 			`DELETE FROM comments WHERE issue_id = $1`,
@@ -131,6 +149,10 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			minEventID, maxEventID, resetCursor, actor, reason,
 		).Scan(&purgeID)
 		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		// Portable vectors are issue data even when their input is stale.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM federation_embedding_artifacts WHERE issue_uid=$1`, issue.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = $1`, issue.ID); err != nil {
@@ -192,7 +214,11 @@ func (s *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 	if err := s.QueryRowContext(ctx, query, args...).Scan(&value); err != nil {
 		return 0, mapSQLError(err, nil)
 	}
-	return value.Int64, nil
+	attributionReset, err := s.attributionUIResetAfter(ctx, afterID, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return max(value.Int64, attributionReset), nil
 }
 
 func scanPurgeLog(row rowScanner) (db.PurgeLog, error) {

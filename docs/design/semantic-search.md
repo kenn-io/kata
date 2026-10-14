@@ -376,7 +376,12 @@ rollup and the visibility join, then applies `cosineFloor = 0.3` so weak
 hits do not pad results. When the first batch comes back full but filters
 down to fewer in-project hits than wanted (another project's higher-scoring
 chunks crowded the batch), the leg retries once at `knnDeepLimit` (1000)
-before giving up: one bounded retry, not a loop.
+before giving up: one bounded retry, not a loop. The vector leg also narrows
+the candidate boundary to the searched project before the KNN. On SQLite that
+pre-filters the vec0 KNN with the project's current chunk rowids, so the index
+ranks only those vectors and another project's closer chunks cannot starve the
+searched project out of the window; PostgreSQL applies the same boundary as a
+predicate on its KNN query.
 
 ### PostgreSQL vector execution: pgvector exact cosine
 

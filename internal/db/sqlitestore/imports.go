@@ -296,7 +296,7 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 	if mapping.IssueID == nil {
 		return nil, nil, fmt.Errorf("%w: issue mapping missing issue_id", db.ErrNotFound)
 	}
-	existing, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, *mapping.IssueID))
+	existing, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, *mapping.IssueID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -435,7 +435,7 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, issueID))
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, issueID))
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -484,7 +484,7 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
+	updated, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -507,7 +507,7 @@ func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
+	updated, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -531,7 +531,7 @@ func (d *Store) healImportedCreatedAt(ctx context.Context, tx *sql.Tx, p db.Impo
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	healed, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
+	healed, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -744,6 +744,9 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 				if !db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
+				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+					return nil, 0, err
+				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
 					return nil, 0, fmt.Errorf("delete source link: %w", err)
 				}
@@ -769,6 +772,9 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		}
 		fromID, toID, err := importLinkEndpoints(ctx, tx, p, issue, importLink, states)
 		if err != nil {
+			return nil, 0, err
+		}
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, fromID, toID); err != nil {
 			return nil, 0, err
 		}
 		if _, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE from_issue_id = ? AND to_issue_id = ? AND type = ?`, fromID, toID, importLink.Type)); err == nil {
@@ -898,7 +904,7 @@ func resolveImportLinkTarget(ctx context.Context, tx *sql.Tx, p db.ImportBatchPa
 	if mapping.IssueID == nil {
 		return db.Issue{}, fmt.Errorf("%w: import link target %q", db.ErrNotFound, externalID)
 	}
-	issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, *mapping.IssueID))
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, *mapping.IssueID))
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return db.Issue{}, fmt.Errorf("%w: import link target %q", db.ErrNotFound, externalID)

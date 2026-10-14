@@ -33,7 +33,7 @@ const (
 	ClockSkew = 5 * time.Second
 	// Quarantine includes one second for integer timestamps at the boundary.
 	Quarantine     = Lifetime + ClockSkew + time.Second
-	MaxBodyBytes   = 64 << 20
+	MaxBodyBytes   = 128 << 20
 	MaxHeaderBytes = 16 << 10
 )
 
@@ -45,6 +45,10 @@ var (
 	ErrWarming     = errors.New("federation signing replay protection warming up")
 	ErrState       = errors.New("federation replay state unavailable")
 	ErrCapacity    = errors.New("federation signing replay capacity exhausted")
+	// ErrHubRejected is a hub's answer to this daemon's own request signature.
+	// It is a signing configuration problem on one of the two daemons, never a
+	// revoked grant, so callers keep the binding and report it as such.
+	ErrHubRejected = errors.New("hub rejected the request signature; configure request signing for this enrollment")
 	components     = []string{"@method", "@target-uri", "content-digest", "content-type", "authorization"}
 )
 

@@ -12,6 +12,10 @@ type OpenConfig struct {
 	// daemons, not short-lived CLI handles, so offline restore can quiesce every
 	// host before replacing state.
 	Serving bool
+	// RelayCheckpointCapacity overrides RelayCheckpointCapacityBytes for this
+	// handle. Zero keeps the default. Tests lower it to grow a project past the
+	// capacity cheaply; it is not an operator setting.
+	RelayCheckpointCapacity int64
 }
 
 // OpenOption mutates an OpenConfig. The functional-options style keeps the
@@ -27,6 +31,12 @@ func ReadOnly() OpenOption {
 // Serving marks a long-running daemon storage handle.
 func Serving() OpenOption {
 	return func(c *OpenConfig) { c.Serving = true }
+}
+
+// WithRelayCheckpointCapacity lowers the relay checkpoint capacity for one
+// storage handle. Tests use it; production opens keep the default.
+func WithRelayCheckpointCapacity(bytes int64) OpenOption {
+	return func(c *OpenConfig) { c.RelayCheckpointCapacity = bytes }
 }
 
 // ApplyOpenOptions folds the variadic options into a fresh OpenConfig. Backends

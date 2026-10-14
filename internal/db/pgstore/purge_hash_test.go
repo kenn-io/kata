@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestPurgeRehashesRetainedEvents(t *testing.T) {
+func TestPurgePreservesRetainedEventReferencesAndHash(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -49,7 +49,8 @@ func TestPurgeRehashesRetainedEvents(t *testing.T) {
 		_, err = store.PurgeIssue(ctx, peer.ID, "tester", nil)
 		require.NoError(t, err)
 		stored := eventByUID(ctx, t, store, project.ID, linkEvent.UID)
-		require.Nil(t, stored.RelatedIssueUID)
+		require.NotNil(t, stored.RelatedIssueUID)
+		require.Equal(t, peer.UID, *stored.RelatedIssueUID)
 		requireEventHashValid(t, stored)
 	})
 
@@ -81,7 +82,8 @@ func TestPurgeRehashesRetainedEvents(t *testing.T) {
 		require.NoError(t, err)
 
 		stored := eventByUID(ctx, t, store, origin.ID, created.UID)
-		require.Nil(t, stored.IssueUID)
+		require.NotNil(t, stored.IssueUID)
+		require.Equal(t, issue.UID, *stored.IssueUID)
 		requireEventHashValid(t, stored)
 	})
 }

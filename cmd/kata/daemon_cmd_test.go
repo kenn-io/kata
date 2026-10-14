@@ -1633,10 +1633,27 @@ func TestDaemonWiresNamedCatalogToFederationRebindRoute(t *testing.T) {
 name = "primary-hub"
 url = "https://hub.example"
 `)
+	// Project authorization rejects unknown IDs before catalog resolution.
+	// Use a real local project so this test reaches the configured catalog.
+	createRequest, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		baseURL+"/api/v1/projects", strings.NewReader(`{"name":"spoke-project","actor":"operator"}`))
+	require.NoError(t, err)
+	createRequest.Header.Set("Content-Type", "application/json")
+	created, err := http.DefaultClient.Do(createRequest)
+	require.NoError(t, err)
+	defer func() { _ = created.Body.Close() }()
+	require.Equal(t, http.StatusOK, created.StatusCode)
+	var project struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}
+	require.NoError(t, json.NewDecoder(created.Body).Decode(&project))
+	require.Positive(t, project.Project.ID)
 	requestBody := strings.NewReader(`{"hub_catalog":"primary-hub"}`)
 	request, err := http.NewRequestWithContext(
 		context.Background(), http.MethodPost,
-		baseURL+"/api/v1/federation/replicas/999/actions/rebind", requestBody,
+		fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/rebind", baseURL, project.Project.ID), requestBody,
 	)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
@@ -1646,14 +1663,14 @@ url = "https://hub.example"
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 
-	assert.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+	assert.Equal(t, http.StatusConflict, response.StatusCode, string(body))
 	var envelope struct {
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(body, &envelope))
-	assert.Equal(t, "federation_project_not_found", envelope.Error.Code, string(body))
+	assert.Equal(t, "federation_binding_conflict", envelope.Error.Code, string(body))
 }
 
 type daemonFederationHealth struct {
@@ -3371,7 +3388,7 @@ func TestDaemonNotionScheduledProgress(t *testing.T) {
 	waitRuntimeNotion(t, fetcher.sourceStarted)
 	waitRuntimeNotion(t, githubFetcher.blockRepository)
 	githubResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(githubResponse, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", gitHubProject.ID), nil))
+	server.Handler().ServeHTTP(githubResponse, newRuntimeNotionRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", gitHubProject.ID), nil))
 	require.Equal(t, http.StatusOK, githubResponse.Code)
 	var githubStatus runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(githubResponse.Body.Bytes(), &githubStatus))
@@ -3519,7 +3536,7 @@ type runtimeNotionStatus struct {
 func readRuntimeNotionStatus(t *testing.T, handler http.Handler, projectID int64) runtimeNotionStatus {
 	t.Helper()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
+	handler.ServeHTTP(response, newRuntimeNotionRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var status runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
@@ -3636,8 +3653,15 @@ func (s *runtimeNotionForkSink) EnqueueFrom(_ db.Event, acquire hooks.AcquireAct
 	}
 }
 
+// Direct handler fixtures model a request accepted on the owner-local listener.
+func newRuntimeNotionRequest(method, path string, body io.Reader) *http.Request {
+	request := httptest.NewRequest(method, path, body)
+	request.RemoteAddr = "127.0.0.1:12345"
+	return request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777}))
+}
+
 func newRuntimeNotionPost(path string, body io.Reader) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, path, body)
+	request := newRuntimeNotionRequest(http.MethodPost, path, body)
 	request.Header.Set("Content-Type", "application/json")
 	return request
 }
@@ -3762,14 +3786,24 @@ func newRuntimeNotionRecordingStore(store db.Storage, recorded chan db.IssueSync
 func (s *runtimeNotionRecordingStore) RecordIssueSyncSuccess(ctx context.Context, params db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {
 	status, err := s.Storage.RecordIssueSyncSuccess(ctx, params)
 	if err == nil {
-		s.recorded <- status
+		// The observer records completion without blocking worker shutdown when
+		// another provider also completes during cancellation.
+		select {
+		case s.recorded <- status:
+		default:
+		}
 	}
 	return status, err
 }
 func (s *runtimeNotionRecordingStore) RecordIssueSyncError(ctx context.Context, params db.IssueSyncErrorParams) (db.IssueSyncStatus, error) {
 	status, err := s.Storage.RecordIssueSyncError(ctx, params)
 	if err == nil {
-		s.recorded <- status
+		// The observer records completion without blocking worker shutdown when
+		// another provider also completes during cancellation.
+		select {
+		case s.recorded <- status:
+		default:
+		}
 	}
 	return status, err
 }

@@ -66,8 +66,12 @@ func readRuntimeTodoistStatus(t *testing.T, h http.Handler, id int64) runtimeNot
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
+
+// Sync mutations need a writable principal; an anonymous request from outside
+// the private network is denied by project policy. The owner-local loopback
+// request is the smallest credential that can run them.
 func todoistRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/todoist/%s", id, action), body)
+	r := newRuntimeNotionRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/todoist/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }

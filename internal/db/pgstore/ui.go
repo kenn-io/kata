@@ -163,6 +163,7 @@ func readUIGraphIssues(
 	args := []any{db.SystemProjectName}
 	statement := issueSelect + `
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if allow := uiPostgresIssueAllowlist(&args, `i.id`, query.AllowedIssueIDs); allow != "" {
 		statement += ` AND ` + allow // #nosec G202 -- the predicate contains only a fixed column name and a generated $N placeholder; values stay bound.
 	}
@@ -173,7 +174,7 @@ func readUIGraphIssues(
 	}
 	issues := []db.UIIssue{}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -282,21 +283,22 @@ func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		return db.UIReferencesData{}, err
 	}
 	ownerStatement := `
-		SELECT DISTINCT i.owner
+		SELECT i.owner, MIN(i.id)
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1
 		  AND i.owner IS NOT NULL AND i.owner <> ''
 	`
 	ownerArgs := []any{db.SystemProjectName}
 	ownerStatement, ownerArgs = appendUIReferenceIssueScopePostgres(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+	ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
 	ownerArgs = append(ownerArgs, limit)
-	ownerStatement += fmt.Sprintf(` ORDER BY i.owner LIMIT $%d`, len(ownerArgs))
-	data.Owners, err = readUIReferenceStrings(ctx, tx, ownerStatement, ownerArgs...)
+	ownerStatement += fmt.Sprintf(` GROUP BY i.owner ORDER BY i.owner LIMIT $%d`, len(ownerArgs))
+	data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
 	labelStatement := `
-		SELECT DISTINCT il.label
+		SELECT il.label, MIN(i.id)
 		FROM issue_labels il
 		JOIN issues i ON i.id = il.issue_id
 		JOIN projects p ON p.id = i.project_id
@@ -304,9 +306,10 @@ func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	`
 	labelArgs := []any{db.SystemProjectName}
 	labelStatement, labelArgs = appendUIReferenceIssueScopePostgres(labelStatement, labelArgs, query.AllowedIssueIDs)
+	labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
 	labelArgs = append(labelArgs, limit)
-	labelStatement += fmt.Sprintf(` ORDER BY il.label LIMIT $%d`, len(labelArgs))
-	data.Labels, err = readUIReferenceStrings(ctx, tx, labelStatement, labelArgs...)
+	labelStatement += fmt.Sprintf(` GROUP BY il.label ORDER BY il.label LIMIT $%d`, len(labelArgs))
+	data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
@@ -344,6 +347,8 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 			SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM purge_log
 			UNION ALL
 			SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM project_purge_log
+			UNION ALL
+			SELECT COALESCE(MAX(CAST(value AS BIGINT)), 0) FROM meta WHERE substr(key,1,length('attribution_ui_reset.'))='attribution_ui_reset.'
 		) AS cursors`).Scan(&cursor); err != nil {
 		return 0, fmt.Errorf("read UI event cursor: %w", mapSQLError(err, nil))
 	}
@@ -353,8 +358,11 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 func readUIProjects(
 	ctx context.Context, tx *sql.Tx, onStatsRead func(),
 ) ([]db.UIProject, map[int64]string, error) {
-	rows, err := tx.QueryContext(ctx, projectSelect+
-		` WHERE deleted_at IS NULL AND name <> $1 ORDER BY name ASC`, db.SystemProjectName)
+	args := []any{db.SystemProjectName}
+	statement := projectSelect + ` WHERE deleted_at IS NULL AND name <> $1`
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement += " AND " + authorizedProjectPredicate(ctx, "uid", &args) + ` ORDER BY name ASC`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read UI projects: %w", mapSQLError(err, nil))
 	}
@@ -390,9 +398,10 @@ func readUIProjects(
 }
 
 func readUIProjectNames(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id, name FROM projects WHERE deleted_at IS NULL AND name <> $1 ORDER BY name`,
-		db.SystemProjectName)
+	args := []any{db.SystemProjectName}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement := `SELECT id, name FROM projects WHERE deleted_at IS NULL AND name <> $1 AND ` + authorizedProjectPredicate(ctx, "uid", &args) + ` ORDER BY name`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI project names: %w", mapSQLError(err, nil))
 	}
@@ -413,6 +422,8 @@ func readUIProjectNames(ctx context.Context, tx *sql.Tx) (map[int64]string, erro
 }
 
 func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectStats, error) {
+	args := []any{db.SystemProjectName}
+	predicate := authorizedProjectPredicate(ctx, "p.uid", &args)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT p.id,
 			COUNT(i.id) FILTER (WHERE i.status = 'open'),
@@ -420,8 +431,8 @@ func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectSt
 			(SELECT e.created_at FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1)
 		FROM projects p
 		LEFT JOIN issues i ON i.project_id = p.id AND i.deleted_at IS NULL
-		WHERE p.deleted_at IS NULL AND p.name <> $1
-		GROUP BY p.id`, db.SystemProjectName)
+		WHERE p.deleted_at IS NULL AND p.name <> $1 AND `+predicate+`
+		GROUP BY p.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI project stats: %w", mapSQLError(err, nil))
 	}
@@ -459,6 +470,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 ) ([]db.UIIssue, error) {
 	statement := scheduledIssueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if query.ProjectUID != "" {
 		args = append(args, query.ProjectUID)
 		statement += fmt.Sprintf(` AND p.uid = $%d`, len(args))
@@ -498,6 +510,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 						JOIN issues blocker ON blocker.id = ready_link.from_issue_id
 						JOIN projects blocker_project ON blocker_project.id = blocker.project_id
 						WHERE ready_link.type = 'blocks' AND ready_link.to_issue_id = i.id
+						AND `+authorizedLinkPredicate(ctx, "ready_link.", &args)+`
 						AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 						AND blocker_project.deleted_at IS NULL
 					)
@@ -553,7 +566,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			len(args)-2, len(args)-1, len(args))
 	}
 	if len(query.Relationships) > 0 {
-		predicates := uiPostgresRelationshipPredicates(query.Relationships)
+		predicates := uiPostgresRelationshipPredicates(ctx, query.Relationships, &args)
 		statement += ` AND (` + strings.Join(predicates, " OR ") + `)`
 	}
 	limit := min(query.Limit, 1000)
@@ -568,7 +581,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	issues := []db.UIIssue{}
 	for rows.Next() {
-		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
+		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -668,21 +681,28 @@ func uiFilterValues(values []string, single string) []string {
 	return nil
 }
 
-func uiPostgresRelationshipPredicates(relationships []string) []string {
+// uiPostgresRelationshipPredicates renders each requested relationship filter
+// as an EXISTS over the `relation` links alias. Every predicate carries the
+// caller's endpoint authorization, appending its bindings to args.
+func uiPostgresRelationshipPredicates(ctx context.Context, relationships []string, args *[]any) []string {
 	predicates := make([]string, 0, len(relationships))
 	for _, relationship := range relationships {
+		var predicate string
 		switch relationship {
 		case "parent":
-			predicates = append(predicates, `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.to_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'parent' AND relation.from_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL)`)
+			predicate = `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.to_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'parent' AND relation.from_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL AND `
 		case "child":
-			predicates = append(predicates, `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.from_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'parent' AND relation.to_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL)`)
+			predicate = `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.from_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'parent' AND relation.to_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL AND `
 		case "blocks":
-			predicates = append(predicates, `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.to_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'blocks' AND relation.from_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL)`)
+			predicate = `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.to_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'blocks' AND relation.from_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL AND `
 		case "blocked_by":
-			predicates = append(predicates, `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.from_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'blocks' AND relation.to_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL)`)
+			predicate = `EXISTS (SELECT 1 FROM links relation JOIN issues peer ON peer.id = relation.from_issue_id JOIN projects peer_project ON peer_project.id = peer.project_id WHERE relation.type = 'blocks' AND relation.to_issue_id = i.id AND peer.deleted_at IS NULL AND peer_project.deleted_at IS NULL AND `
 		case "related":
-			predicates = append(predicates, `EXISTS (SELECT 1 FROM links relation JOIN issues source ON source.id = relation.from_issue_id JOIN projects source_project ON source_project.id = source.project_id JOIN issues target ON target.id = relation.to_issue_id JOIN projects target_project ON target_project.id = target.project_id WHERE relation.type = 'related' AND (relation.from_issue_id = i.id OR relation.to_issue_id = i.id) AND source.deleted_at IS NULL AND target.deleted_at IS NULL AND source_project.deleted_at IS NULL AND target_project.deleted_at IS NULL)`)
+			predicate = `EXISTS (SELECT 1 FROM links relation JOIN issues source ON source.id = relation.from_issue_id JOIN projects source_project ON source_project.id = source.project_id JOIN issues target ON target.id = relation.to_issue_id JOIN projects target_project ON target_project.id = target.project_id WHERE relation.type = 'related' AND (relation.from_issue_id = i.id OR relation.to_issue_id = i.id) AND source.deleted_at IS NULL AND target.deleted_at IS NULL AND source_project.deleted_at IS NULL AND target_project.deleted_at IS NULL AND `
+		default:
+			continue
 		}
+		predicates = append(predicates, predicate+authorizedLinkPredicate(ctx, "relation.", args)+`)`)
 	}
 	return predicates
 }
@@ -701,7 +721,8 @@ func readUIIssueByUID(ctx context.Context, tx *sql.Tx, issueUID string,
 ) (db.UIIssue, error) {
 	statement := issueSelect + ` WHERE i.uid = $1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $2`
 	statement, args := appendUIReferenceIssueScopePostgres(statement, []any{issueUID, db.SystemProjectName}, allowedIssueIDs)
-	issue, err := scanIssue(tx.QueryRowContext(ctx, statement, args...))
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, statement, args...))
 	if err != nil {
 		return db.UIIssue{}, err
 	}
@@ -713,11 +734,13 @@ func readUIIssueByUID(ctx context.Context, tx *sql.Tx, issueUID string,
 }
 
 func readUISelectedState(ctx context.Context, tx *sql.Tx, issueUID string) (string, error) {
+	args := []any{issueUID}
+	predicate := authorizedProjectPredicate(ctx, "p.uid", &args)
 	var archived bool
 	err := tx.QueryRowContext(ctx, `
 		SELECT i.deleted_at IS NOT NULL OR p.deleted_at IS NOT NULL
 		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.uid = $1`, issueUID).Scan(&archived)
+		WHERE i.uid = $1 AND `+predicate, args...).Scan(&archived)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "missing", nil
 	}
@@ -793,6 +816,8 @@ func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64, allowed
 	if allow := uiPostgresIssueAllowlist(&args, `to_issue_id`, allowedIssueIDs); allow != "" {
 		statement += ` AND ` + allow // #nosec G202 -- the predicate contains only a fixed column name and a generated $N placeholder; values stay bound.
 	}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement += " AND " + authorizedLinkPredicate(ctx, "", &args)
 	statement += ` ORDER BY id`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
@@ -841,6 +866,7 @@ func enrichUILinks(ctx context.Context, tx *sql.Tx, links []db.Link) ([]db.UILin
 			ToQualifiedID: toProject + "#" + toShort, ToStatus: toStatus,
 		})
 	}
+	db.RecordExposedUILinks(ctx, enriched)
 	return enriched, nil
 }
 
@@ -848,6 +874,7 @@ func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db
 	statement := recurrenceSelect + ` JOIN projects p ON p.id = r.project_id
 		WHERE r.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if projectUID != "" {
 		args = append(args, projectUID)
 		statement += fmt.Sprintf(` AND p.uid = $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
@@ -870,12 +897,13 @@ func readUIRecurrences(ctx context.Context, tx *sql.Tx, projectUID string) ([]db
 }
 
 func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event, error) {
-	rows, err := tx.QueryContext(ctx, eventSelect+
-		` WHERE e.issue_uid = $1 OR e.related_issue_uid = $1 ORDER BY e.id DESC LIMIT 500`, issueUID)
+	args := []any{issueUID}
+	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
+	statement := eventSelect + ` WHERE (e.issue_uid = $1 OR e.related_issue_uid = $1) AND ` + authorizedEventPredicate(ctx, &args) + ` ORDER BY e.id DESC LIMIT 500`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI history: %w", mapSQLError(err, nil))
 	}
-	defer func() { _ = rows.Close() }()
 	history := []db.Event{}
 	for rows.Next() {
 		event, err := scanEvent(rows)
@@ -884,7 +912,26 @@ func readUIHistory(ctx context.Context, tx *sql.Tx, issueUID string) ([]db.Event
 		}
 		history = append(history, event)
 	}
-	return history, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	filtered := make([]db.Event, 0, len(history))
+	lookup := eventIssueLookup(ctx, tx)
+	for _, event := range history {
+		reset, err := lookup.RequiresProjectScopeReset(ctx, event)
+		if err != nil {
+			return nil, mapSQLError(err, nil)
+		}
+		if reset {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered, nil
 }
 
 func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]db.UILink, error) {
@@ -918,7 +965,10 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 func readUIGraphUnresolved(
 	ctx context.Context, tx *sql.Tx, issues []db.UIIssue,
 ) ([]db.UIGraphEdge, []db.UIGraphUnresolvedRef, error) {
-	if len(issues) == 0 {
+	// A missing endpoint has no current project to authorize. Only owner
+	// diagnostics may expose its retained UID.
+	_, restricted := db.AuthorizedProjects(ctx)
+	if len(issues) == 0 || restricted {
 		return []db.UIGraphEdge{}, []db.UIGraphUnresolvedRef{}, nil
 	}
 	visible := make(map[int64]struct{}, len(issues))
@@ -1007,6 +1057,7 @@ func readUICollectionLinks(
 	if allow := uiPostgresIssueAllowlist(&args, `l.to_issue_id`, allowedIssueIDs); allow != "" {
 		statement += ` AND ` + allow
 	}
+	statement += " AND " + authorizedLinkPredicate(ctx, "l.", &args)
 	statement += ` ORDER BY l.id`
 	if onDetailRead != nil {
 		onDetailRead()
@@ -1015,7 +1066,12 @@ func readUICollectionLinks(
 	if err != nil {
 		return nil, fmt.Errorf("read UI collection links: %w", mapSQLError(err, nil))
 	}
-	return collectUIDetailedLinks(rows)
+	links, err := collectUIDetailedLinks(rows)
+	if err != nil {
+		return nil, err
+	}
+	db.RecordExposedUILinks(ctx, links)
+	return links, nil
 }
 
 // uiPostgresIssueAllowlist renders the scoped authorization candidate set as
@@ -1079,6 +1135,7 @@ func readUIReferenceScope(
 		return []string{}, []int64{}, nil
 	}
 	args := []any{db.SystemProjectName}
+	predicate := authorizedProjectPredicate(ctx, "p.uid", &args)
 	placeholders := make([]string, 0, len(issueUIDs))
 	for _, issueUID := range issueUIDs {
 		args = append(args, issueUID)
@@ -1087,7 +1144,7 @@ func readUIReferenceScope(
 	statement := `SELECT i.uid, i.project_id
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1
-		AND i.uid IN (` + strings.Join(placeholders, ",") + `)
+		AND i.uid IN (` + strings.Join(placeholders, ",") + `) AND ` + predicate + `
 		ORDER BY i.uid` // #nosec G202 -- only SQL placeholders are constructed.
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
@@ -1117,10 +1174,11 @@ func readUIReferenceScope(
 func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery,
 	limit int,
 ) ([]db.UIIssueReference, error) {
-	statement := `SELECT i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
+	statement := `SELECT i.id, i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
+	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
 	if query.ProjectUID != "" {
 		args = append(args, query.ProjectUID)
 		statement += fmt.Sprintf(` AND p.uid = $%d`, len(args))
@@ -1157,15 +1215,44 @@ func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReference
 	issues := []db.UIIssueReference{}
 	for rows.Next() {
 		var issue db.UIIssueReference
-		var projectID int64
-		if err := rows.Scan(&projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
+		var issueID, projectID int64
+		if err := rows.Scan(&issueID, &projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
 			&issue.ShortID, &issue.Title, &issue.Status); err != nil {
 			return nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
 		}
 		issue.QualifiedID = issue.ProjectName + "#" + issue.ShortID
+		db.RecordExposedIssue(ctx, issueID)
 		issues = append(issues, issue)
 	}
 	return issues, mapSQLError(rows.Err(), nil)
+}
+
+// readUIReferenceSuggestions reads aggregate owner or label choices. Each row
+// carries one representative contributing issue, MIN(i.id), which is recorded
+// for the project access release. Recording every contributor would be
+// unbounded; one per choice is bounded by the limit and fails closed: if the
+// representative moves out of the caller's projects mid-request the response
+// is withheld, even when another visible issue still contributes the choice.
+// That rare over-withholding is the accepted cost.
+func readUIReferenceSuggestions(ctx context.Context, tx *sql.Tx, statement string,
+	args ...any,
+) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read UI reference choices: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = rows.Close() }()
+	values := []string{}
+	for rows.Next() {
+		var value string
+		var representativeID int64
+		if err := rows.Scan(&value, &representativeID); err != nil {
+			return nil, fmt.Errorf("scan UI reference choice: %w", mapSQLError(err, nil))
+		}
+		db.RecordExposedIssue(ctx, representativeID)
+		values = append(values, value)
+	}
+	return values, mapSQLError(rows.Err(), nil)
 }
 
 func readUIReferenceStrings(ctx context.Context, tx *sql.Tx, statement string,

@@ -19,16 +19,20 @@ func pgReplayFederationBinding(
 	if binding.Role == string(db.FederationRoleSpoke) && pushEnabled && actor == "" {
 		pushEnabled = false
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO federation_bindings(
+	raw, err := db.EncodeRelayBindingConfig(binding.RelayConfig)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
 project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,
 pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,
-enabled,created_at,updated_at,last_sync_at
-) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+enabled,created_at,updated_at,last_sync_at,relay_config
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		binding.ProjectID, binding.Role, binding.HubURL, binding.HubProjectID,
 		binding.HubProjectUID, binding.ReplayHorizonEventID, binding.PullCursorEventID,
 		pgReplayBoolInt(pushEnabled), binding.PushCursorEventID, actor,
 		pgReplayBoolInt(binding.AllowInsecure), pgReplayBoolInt(binding.Enabled),
-		binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt)
+		binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt, raw)
 	return pgReplayError(db.ImportKindFederationBinding, err)
 }
 
@@ -80,14 +84,14 @@ func pgReplayFederationEnrollment(
 id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,
 allow_adoption_snapshot_authors,adoption_baseline_open,
 adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,
-created_at,updated_at,revoked_at
-) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+created_at,updated_at,revoked_at,relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream
+) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
 		enrollment.ID, enrollment.TokenHash, enrollment.SpokeInstanceUID, enrollment.ProjectID,
 		capabilities, actor, pgReplayBoolInt(enrollment.AllowAdoptionSnapshotAuthors),
 		pgReplayBoolInt(enrollment.AdoptionBaselineOpen),
 		enrollment.AdoptionBaselineNextSourceEventID,
 		enrollment.AdoptionBaselineEndSourceEventID, enrollment.CreatedAt,
-		enrollment.UpdatedAt, enrollment.RevokedAt)
+		enrollment.UpdatedAt, enrollment.RevokedAt, enrollment.RelayBindingUID, enrollment.RelayProtocolVersion, enrollment.ParentTokenID, relayExportEpoch(enrollment.RelayResetEpoch), pgReplayBoolInt(enrollment.RelayServeDownstream))
 	return pgReplayError(db.ImportKindFederationEnrollment, err)
 }
 
@@ -96,4 +100,11 @@ func pgReplayBoolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func relayExportEpoch(epoch int64) int64 {
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }

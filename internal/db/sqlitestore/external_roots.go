@@ -1650,7 +1650,7 @@ func externalRootIssueForCleanupEvent(
 	tx *sql.Tx,
 	issueID int64,
 ) (db.Issue, string, error) {
-	issue, err := scanIssue(tx.QueryRowContext(ctx,
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx,
 		issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, issueID))
 	if err != nil {
 		return db.Issue{}, "", err

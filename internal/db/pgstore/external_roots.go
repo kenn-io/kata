@@ -909,7 +909,7 @@ func (d *Store) ApplyExternalRootProjection(
 		if err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issue.ID))
+		updated, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issue.ID))
 		if err != nil {
 			return db.Issue{}, nil, false, err
 		}
@@ -1046,7 +1046,7 @@ func (d *Store) UpsertExternalCommentProjection(
 			}
 			mutationAt := nowStoredTimestamp()
 			comment, err = scanComment(tx.QueryRowContext(ctx, `UPDATE comments SET body=$1, edited_at=$2 WHERE id=$3
- RETURNING id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at`, desiredBody, mutationAt, comment.ID))
+ RETURNING `+commentColumns, desiredBody, mutationAt, comment.ID))
 			if err != nil {
 				return db.Comment{}, nil, false, err
 			}
@@ -1073,7 +1073,7 @@ func (d *Store) UpsertExternalCommentProjection(
 			return db.Comment{}, nil, false, fmt.Errorf("generate external comment projection uid: %w", err)
 		}
 		comment, err := scanComment(tx.QueryRowContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at)
- VALUES($1,$2,$3,$4,$5) RETURNING id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at`,
+ VALUES($1,$2,$3,$4,$5) RETURNING `+commentColumns,
 			commentUID, issue.ID, integrationActor, desiredBody, formatExternalObservationTime(params.ExternalCreatedAt)))
 		if err != nil {
 			return db.Comment{}, nil, false, fmt.Errorf("insert external comment projection: %w", err)
@@ -1225,7 +1225,7 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 			return db.Comment{}, nil, false, fmt.Errorf("generate external lifecycle comment uid: %w", err)
 		}
 		comment, err := scanComment(tx.QueryRowContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at)
- VALUES($1,$2,$3,$4,$5) RETURNING id,uid,issue_id,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at`,
+ VALUES($1,$2,$3,$4,$5) RETURNING `+commentColumns,
 			commentUID, issue.ID, integrationActor, params.Body, formatExternalObservationTime(params.ExternalCreatedAt)))
 		if err != nil {
 			return db.Comment{}, nil, false, fmt.Errorf("insert external lifecycle comment: %w", err)
@@ -1772,7 +1772,7 @@ func externalRootIssueForCleanupEvent(
 	tx *sql.Tx,
 	issueID int64,
 ) (db.Issue, string, error) {
-	issue, err := scanIssue(tx.QueryRowContext(ctx,
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx,
 		issueSelect+` WHERE i.id = $1 AND i.deleted_at IS NULL FOR UPDATE OF i`, issueID))
 	if err != nil {
 		return db.Issue{}, "", err
@@ -1925,7 +1925,7 @@ func (d *Store) ApplyExternalFieldProjection(
 		if err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		projected, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issue.ID))
+		projected, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issue.ID))
 		if err != nil {
 			return db.Issue{}, nil, false, err
 		}

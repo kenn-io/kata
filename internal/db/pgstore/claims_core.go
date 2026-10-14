@@ -364,7 +364,7 @@ func resolveClaimIssueTx(
 	if lock {
 		query += ` FOR UPDATE OF i`
 	}
-	issue, err := scanIssue(queryer.QueryRowContext(ctx, query, projectID, issueRef))
+	issue, err := scanIssue(ctx, queryer.QueryRowContext(ctx, query, projectID, issueRef))
 	if err != nil {
 		return db.Issue{}, db.Project{}, err
 	}
@@ -532,7 +532,7 @@ func (s *Store) expireTimedClaimsTx(
 		if err != nil {
 			return nil, err
 		}
-		issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, claim.IssueID))
+		issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, claim.IssueID))
 		if err != nil {
 			return nil, err
 		}

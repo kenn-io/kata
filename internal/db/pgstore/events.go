@@ -38,6 +38,7 @@ type eventInsert struct {
 	HLC               *db.EventHLCTimestamp
 	CreatedAt         string
 	ContentHash       string
+	SkipRelay         bool
 }
 
 // MaxEventID returns the current event high-water mark.
@@ -53,9 +54,13 @@ func (s *Store) MaxEventID(ctx context.Context) (int64, error) {
 func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([]db.Event, error) {
 	conditions := []string{"e.id > $1", "p.name <> $2"}
 	args := []any{params.AfterID, db.SystemProjectName}
+	conditions = append(conditions, authorizedEventStreamPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
-		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
+		projectPosition := len(args)
+		args = append(args, params.ProjectID)
+		conditions = append(conditions, fmt.Sprintf(`(e.project_id = $%d OR (e.type='issue.moved' AND
+            e.payload::jsonb->>'from_project_uid' = (SELECT uid FROM projects WHERE id = $%d)))`, projectPosition, len(args)))
 	}
 	if params.ThroughID != 0 {
 		args = append(args, params.ThroughID)
@@ -80,19 +85,46 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
-	defer func() { _ = rows.Close() }()
 	events := make([]db.Event, 0)
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return nil, mapSQLError(err, nil)
 	}
-	return events, nil
+	if err := rows.Close(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	projected := make([]db.Event, 0, len(events))
+	lookup := eventIssueLookup(ctx, s)
+	for _, event := range events {
+		reset, err := lookup.RequiresProjectScopeReset(ctx, event)
+		if err != nil {
+			return nil, mapSQLError(err, nil)
+		}
+		if reset {
+			if sourceUID := db.EventDepartureProjectUID(ctx, event); sourceUID != "" {
+				project, projectErr := s.ProjectByUID(ctx, sourceUID)
+				if errors.Is(projectErr, db.ErrNotFound) {
+					event = db.ProjectScopeResetCursor(event)
+				} else if projectErr != nil {
+					return nil, mapSQLError(projectErr, nil)
+				} else {
+					event = db.ProjectScopeResetEventInProject(event, project)
+				}
+			} else {
+				event = db.ProjectScopeResetEvent(event)
+			}
+		}
+		projected = append(projected, event)
+	}
+	return projected, nil
 }
 
 func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, error) {
@@ -154,6 +186,7 @@ func eventsByUIDs(ctx context.Context, q interface {
 func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowParams) ([]db.Event, error) {
 	conditions := []string{"e.created_at >= $1", "e.created_at <= $2", "p.name <> $3"}
 	args := []any{params.Since, params.Until, db.SystemProjectName}
+	conditions = append(conditions, authorizedEventPredicate(ctx, &args))
 	if params.ProjectID != 0 {
 		args = append(args, params.ProjectID)
 		conditions = append(conditions, fmt.Sprintf("e.project_id = $%d", len(args)))
@@ -171,7 +204,6 @@ func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowPara
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
-	defer func() { _ = rows.Close() }()
 	var events []db.Event
 	for rows.Next() {
 		event, err := scanEvent(rows)
@@ -180,7 +212,26 @@ func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowPara
 		}
 		events = append(events, event)
 	}
-	return events, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	filtered := make([]db.Event, 0, len(events))
+	lookup := eventIssueLookup(ctx, s)
+	for _, event := range events {
+		reset, err := lookup.RequiresProjectScopeReset(ctx, event)
+		if err != nil {
+			return nil, mapSQLError(err, nil)
+		}
+		if reset {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered, nil
 }
 
 // MaxLocalOriginEventID returns the newest locally-originated project event.
@@ -366,7 +417,23 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	if err != nil {
 		return db.Event{}, mapSQLError(err, nil)
 	}
-	return scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id = $1`, eventID))
+	event, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id = $1`, eventID))
+	if err != nil {
+		return db.Event{}, err
+	}
+	if input.ContentHash == "" {
+		if err := s.recordNativeRootAttributionTx(ctx, tx, event); err != nil {
+			return db.Event{}, err
+		}
+	} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
+		return db.Event{}, err
+	}
+	if !input.SkipRelay {
+		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.Event{}, err
+		}
+	}
+	return event, nil
 }
 
 func effectiveLocalEventActorTx(
@@ -386,7 +453,7 @@ func effectiveLocalMutationActorTx(
 ) (string, error) {
 	var actor string
 	err := tx.QueryRowContext(ctx, `SELECT bound_actor FROM federation_bindings
-WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
+WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1 AND relay_config IS NULL`,
 		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return requestedActor, nil
@@ -400,7 +467,7 @@ WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
 	return requestedActor, nil
 }
 
-func lockEventSequenceTx(ctx context.Context, tx *sql.Tx) error {
+func lockEventSequenceTx(ctx context.Context, tx db.Transaction) error {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashtext('events_sequence'))`); err != nil {
 		return mapSQLError(err, nil)

@@ -13,11 +13,14 @@ func (s *Store) ParentShortIDsByIssues(ctx context.Context, issueIDs []int64) (m
 	if len(issueIDs) == 0 {
 		return parents, nil
 	}
-	rows, err := s.QueryContext(ctx, `SELECT l.from_issue_id, parent.short_id
+	args := []any{issueIDs}
+	query := `SELECT l.from_issue_id, parent.short_id
 		FROM links l
 		JOIN issues parent ON parent.id = l.to_issue_id
 		WHERE l.type = 'parent' AND l.from_issue_id = ANY($1::bigint[])
-		ORDER BY l.from_issue_id ASC`, issueIDs)
+		  AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
+		ORDER BY l.from_issue_id ASC`
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -43,10 +46,15 @@ func (s *Store) RelationshipsByIssues(
 	if len(issueIDs) == 0 {
 		return out, nil
 	}
+	// Every statement binds the same requested ids as $1 and the same
+	// endpoint authorization after it, so one argument list serves them all.
+	args := []any{issueIDs}
+	endpoints := authorizedLinkPredicate(ctx, "l.", &args)
 	if err := s.scanRelationshipPairs(ctx, `SELECT l.from_issue_id, l.to_issue_id
 		FROM links l
 		WHERE l.type = 'parent' AND l.from_issue_id = ANY($1::bigint[])
-		ORDER BY l.from_issue_id ASC`, issueIDs, out,
+		  AND `+endpoints+`
+		ORDER BY l.from_issue_id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			value := peer
 			rel.ParentIssueID = &value
@@ -59,7 +67,8 @@ func (s *Store) RelationshipsByIssues(
 		WHERE l.type = 'blocks'
 		  AND blocked.deleted_at IS NULL
 		  AND l.from_issue_id = ANY($1::bigint[])
-		ORDER BY l.from_issue_id ASC, blocked.id ASC`, issueIDs, out,
+		  AND `+endpoints+`
+		ORDER BY l.from_issue_id ASC, blocked.id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			rel.Blocks = append(rel.Blocks, peer)
 		}); err != nil {
@@ -71,7 +80,8 @@ func (s *Store) RelationshipsByIssues(
 		WHERE l.type = 'blocks'
 		  AND blocker.deleted_at IS NULL
 		  AND l.to_issue_id = ANY($1::bigint[])
-		ORDER BY l.to_issue_id ASC, blocker.id ASC`, issueIDs, out,
+		  AND `+endpoints+`
+		ORDER BY l.to_issue_id ASC, blocker.id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			rel.BlockedBy = append(rel.BlockedBy, peer)
 		}); err != nil {
@@ -84,6 +94,7 @@ func (s *Store) RelationshipsByIssues(
 		 WHERE l.type = 'related'
 		   AND peer.deleted_at IS NULL
 		   AND l.from_issue_id = ANY($1::bigint[])
+		   AND `+endpoints+`
 		UNION ALL
 		SELECT l.to_issue_id AS viewer_id, peer.id AS peer_id
 		  FROM links l
@@ -91,8 +102,9 @@ func (s *Store) RelationshipsByIssues(
 		 WHERE l.type = 'related'
 		   AND peer.deleted_at IS NULL
 		   AND l.to_issue_id = ANY($1::bigint[])
+		   AND `+endpoints+`
 	) relationships
-	ORDER BY viewer_id ASC, peer_id ASC`, issueIDs, out,
+	ORDER BY viewer_id ASC, peer_id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			rel.Related = append(rel.Related, peer)
 		}); err != nil {
@@ -107,11 +119,11 @@ func (s *Store) RelationshipsByIssues(
 func (s *Store) scanRelationshipPairs(
 	ctx context.Context,
 	query string,
-	issueIDs []int64,
+	args []any,
 	out map[int64]db.IssueRelationships,
 	assign func(rel *db.IssueRelationships, peer int64),
 ) error {
-	rows, err := s.QueryContext(ctx, query, issueIDs)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -131,7 +143,8 @@ func (s *Store) scanRelationshipPairs(
 func (s *Store) appendChildCountsToRelationships(
 	ctx context.Context, issueIDs []int64, out map[int64]db.IssueRelationships,
 ) error {
-	rows, err := s.QueryContext(ctx, `SELECT l.to_issue_id,
+	args := []any{issueIDs}
+	query := `SELECT l.to_issue_id,
 		COUNT(*) FILTER (WHERE child.status = 'open'), COUNT(*)
 		FROM links l
 		JOIN issues child ON child.id = l.from_issue_id
@@ -140,8 +153,10 @@ func (s *Store) appendChildCountsToRelationships(
 		  AND child.deleted_at IS NULL
 		  AND child_project.deleted_at IS NULL
 		  AND l.to_issue_id = ANY($1::bigint[])
+		  AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
 		GROUP BY l.to_issue_id
-		ORDER BY l.to_issue_id ASC`, issueIDs)
+		ORDER BY l.to_issue_id ASC`
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -162,7 +177,8 @@ func (s *Store) appendChildCountsToRelationships(
 func (s *Store) appendActivelyBlockedToRelationships(
 	ctx context.Context, issueIDs []int64, out map[int64]db.IssueRelationships,
 ) error {
-	rows, err := s.QueryContext(ctx, `SELECT DISTINCT l.to_issue_id
+	args := []any{issueIDs}
+	query := `SELECT DISTINCT l.to_issue_id
 		FROM links l
 		JOIN issues blocked ON blocked.id = l.to_issue_id
 		JOIN issues blocker ON blocker.id = l.from_issue_id
@@ -173,7 +189,9 @@ func (s *Store) appendActivelyBlockedToRelationships(
 		  AND blocker.status = 'open'
 		  AND blocker.deleted_at IS NULL
 		  AND blocker_project.deleted_at IS NULL
-		  AND l.to_issue_id = ANY($1::bigint[])`, issueIDs)
+		  AND l.to_issue_id = ANY($1::bigint[])
+		  AND ` + authorizedLinkPredicate(ctx, "l.", &args)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -192,20 +210,23 @@ func (s *Store) appendActivelyBlockedToRelationships(
 
 // ChildrenOfIssue returns visible direct children in list order.
 func (s *Store) ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]db.Issue, error) {
-	rows, err := s.QueryContext(ctx, issueSelect+`
+	args := []any{parentIssueID}
+	query := issueSelect + `
 		JOIN links l ON l.from_issue_id = i.id
 		WHERE l.type = 'parent'
 		  AND l.to_issue_id = $1
+		  AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
 		  AND i.deleted_at IS NULL
 		  AND p.deleted_at IS NULL
-		ORDER BY i.updated_at DESC, i.id DESC`, parentIssueID)
+		ORDER BY i.updated_at DESC, i.id DESC`
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
 	var children []db.Issue
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -250,7 +271,7 @@ func (s *Store) OpenChildrenOf(
 	defer func() { _ = rows.Close() }()
 	var children []db.Issue
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			return nil, 0, err
 		}

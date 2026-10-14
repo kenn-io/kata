@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json/v2"
 	"slices"
 	"sync"
@@ -15,9 +16,13 @@ const (
 )
 
 type uiSnapshotAuthorityCacheEntry struct {
-	data      db.UISnapshotData
-	expiresAt time.Time
-	sequence  uint64
+	data db.UISnapshotData
+	// dependencies are the issues the snapshot's build registered as exposed,
+	// event payload references included. A cache hit registers them again
+	// instead of rediscovering them from the response fields.
+	dependencies []int64
+	expiresAt    time.Time
+	sequence     uint64
 }
 
 type uiSnapshotCache struct {
@@ -44,21 +49,21 @@ func newUISnapshotCache(clone func(db.UISnapshotData) db.UISnapshotData) *uiSnap
 	}
 }
 
-func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, bool) {
+func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, []int64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
 	if !ok {
-		return db.UISnapshotData{}, false
+		return db.UISnapshotData{}, nil, false
 	}
 	if !c.clock().Before(entry.expiresAt) {
 		delete(c.entries, key)
-		return db.UISnapshotData{}, false
+		return db.UISnapshotData{}, nil, false
 	}
-	return c.clone(entry.data), true
+	return c.clone(entry.data), slices.Clone(entry.dependencies), true
 }
 
-func (c *uiSnapshotCache) put(key string, data db.UISnapshotData) {
+func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies []int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.clock()
@@ -80,9 +85,10 @@ func (c *uiSnapshotCache) put(key string, data db.UISnapshotData) {
 	}
 	c.sequence++
 	c.entries[key] = uiSnapshotAuthorityCacheEntry{
-		data:      c.clone(data),
-		expiresAt: now.Add(uiSnapshotAuthorityCacheTTL),
-		sequence:  c.sequence,
+		data:         c.clone(data),
+		dependencies: slices.Clone(dependencies),
+		expiresAt:    now.Add(uiSnapshotAuthorityCacheTTL),
+		sequence:     c.sequence,
 	}
 }
 
@@ -175,4 +181,13 @@ func mergeUISnapshotAuthority(data *db.UISnapshotData, authority db.UISnapshotDa
 	data.Issues = authority.Issues
 	data.CollectionLinks = authority.CollectionLinks
 	data.AuthorityReused = false
+}
+
+// recordUISnapshotDependencies registers the issues a snapshot's build
+// recorded, so the project access release rechecks them for a cached part
+// exactly as it does for the read that produced it.
+func recordUISnapshotDependencies(ctx context.Context, issueIDs []int64) {
+	for _, issueID := range issueIDs {
+		db.RecordExposedIssue(ctx, issueID)
+	}
 }

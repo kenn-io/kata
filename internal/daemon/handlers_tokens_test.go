@@ -57,7 +57,10 @@ func TestCreateTokenEndpoint_DBTokenForbidden(t *testing.T) {
 	resp, bs := envDoRaw(t, env, http.MethodPost, "/api/v1/tokens",
 		map[string]string{"actor": "wesm"},
 		map[string]string{"Authorization": "Bearer user-token"})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusForbidden, "token_admin_forbidden")
+	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "not_found")
+	tokens, err := env.DB.ListAPITokens(t.Context())
+	require.NoError(t, err)
+	require.Len(t, tokens, 1, "rejected ordinary principal must mint no additional token")
 }
 
 func TestListTokenEndpoint_RedactsPlaintextAndHash(t *testing.T) {

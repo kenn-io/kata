@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-09
+last_edited: 2026-10-12
 ---
 
 # Model Context Protocol server
@@ -212,10 +212,10 @@ or imported creation timestamps. Stop only when `complete` is true.
 
 ## Progressive tool catalog
 
-The initial catalog contains 16 read-only section loaders. Call the applicable
+The initial catalog exposes read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 74 tools in the
+typed tools needed for the current task instead of placing every detailed tool in the
 model context at startup.
 
 | Loader | Detailed tools |
@@ -226,9 +226,10 @@ model context at startup.
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
+| `kata.load_teams` | `kata.teams`, `kata.team_create`, `kata.team_show`, `kata.team_delete`, `kata.team_member_set`, `kata.project_access_show`, `kata.project_access_set` with the same explicit daemon-wide administration capability |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
+| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -326,6 +327,35 @@ Set the key to JSON `null` to remove it. Do not write `someday=false`. The same
 null-removal rule applies to `kata.set_metadata` and other generic metadata
 patches.
 
+## Team and project access administration
+
+Start with `--all --enable-token-admin`, then load `kata.load_teams`.
+The startup capability allows the tools to appear; the daemon still checks the
+credential's owner authority on every call. An ordinary account does not gain
+administrative access through an MCP actor label.
+
+Use `kata.team_create` with `name`, and select teams by `team_uid` for
+`kata.team_show` or `kata.team_delete`. Set membership through
+`kata.team_member_set` with `team_uid`, `member_actor`, and `present`.
+The member actor is the account being enrolled, separate from the authenticated
+actor making the change. Deleting a team keeps its projects restricted.
+
+`kata.project_access_show` reads policy by project name.
+`kata.project_access_set` accepts `project`, `visibility` (`all` or `teams`),
+and `team_uids`. An optional `revision` guards against a stale edit; omitting
+it captures the current revision before the write. A concurrent change returns
+a conflict. See [team visibility](../operations/federation.md#team-visibility)
+for the authorization rules.
+
+## Read relay attribution
+
+Issue and comment results retain `author` and `teammate`, alongside
+`accountable_actor`, `source_actor`, `authority_uid`, and `verification` when
+available. The accountable actor identifies the credential-bound human;
+source fields retain original attribution across relay hops. Keep `pending`,
+`verified`, and `legacy` verification states distinct. Source labels do not
+grant access, and an omitted verification field makes no verified claim.
+
 ## Events, tokens, and federation
 
 `kata.events` supports immediate `poll` and bounded `wait` modes. It returns a
@@ -341,6 +371,10 @@ the explicit `--enable-token-admin` startup capability. A default workspace
 server, a one-project server, and a fixed-allowlist server cannot read, create,
 or revoke global daemon tokens.
 
+`kata.token_create` accepts `team_uids` to commit initial account membership
+with token issuance. This works for ordinary and scoped credentials; invalid
+teams leave neither a new token nor partial membership.
+
 In daemon-wide token-admin mode, `kata.token_create` also accepts `issue`,
 `expires_in_seconds`, and `token_file` together. This creates an
 `issue_subtree` credential and writes its plaintext once to a new owner-only
@@ -352,11 +386,33 @@ with an accessible parent. The file belongs to the MCP host. See the
 for consuming it and the [scope guide](../design/issue-scoped-credentials.md)
 for membership and revocation rules.
 
-Federation topology changes stay CLI/operator workflows: MCP has no tool to
-create an enrollment, read its token, or join a hub as a spoke.
+MCP can connect one project through a configured hub catalog account, but it
+never handles enrollment secrets. It has no tool to issue an enrollment from
+this daemon, accept an enrollment token, or run a full `kata federation join`;
+the bridge's enrollment token stays in the daemon's credential store.
+`kata.federation_bridge_connect` selects `project`, `hub_catalog` and
+`hub_project`; the local daemon uses that catalog account to enroll the narrow
+bridge. `preflight=true` previews without enrollment. Set `serve_downstream=true`
+only when this daemon will also relay the project to its own spokes; it defaults
+to false. `signing_key_id` with `signing_key_env` or an absolute
+`signing_key_file` selects the daemon-side signing source that a
+required-signing hub needs. The local actor comes from MCP startup state.
+`kata.federation_bridge_status` reads one selected project's recorded bridge
+state, including a pending enrollment. `kata.federation_bridge_disconnect`
+accepts `project` and optional `preflight`, preserving local data during detach
+and retaining retry state after interrupted cleanup. `local_only=true` detaches
+from a hub that is gone for good without revoking its grant; the result's
+`warning` says the hub operator must revoke it. These tools require
+`--all` and daemon-owner authority at the API. They return no token values or
+credential inventory and accept no caller-supplied actor or token override.
+
+`kata.federation_root_key_repin` accepts `project`, optional `preflight`,
+optional `previous_key_file`, and optional `strand_relays`, and calls the
+[root key repin endpoint](../operations/federation.md#root-signing-key). It
+requires `--all` and daemon-owner authority at the API.
+
 `kata.federation_status` lists secret-free enrollment records, and
-`kata.federation_enrollment_revoke` can revoke one, but no MCP tool creates,
-accepts, or returns enrollment secrets.
+`kata.federation_enrollment_revoke` can revoke one.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with

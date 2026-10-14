@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/transcript"
 )
 
@@ -399,7 +400,8 @@ func closeIdempotencyResponse(
 }
 
 func scopedCloseRefusal(ctx context.Context, unrestricted, scoped string) string {
-	if issueScopeFromContext(ctx) != nil {
+	_, restricted := db.AuthorizedProjects(ctx)
+	if restricted || issueScopeFromContext(ctx) != nil {
 		return scoped
 	}
 	return unrestricted
@@ -409,8 +411,14 @@ func scopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
 	scope := issueScopeFromContext(ctx)
-	if event == nil || scope == nil {
+	if event == nil {
 		return event, nil
+	}
+	if scope == nil {
+		if _, restricted := db.AuthorizedProjects(ctx); !restricted {
+			return event, nil
+		}
+		return projectScopedMutationEvent(ctx, store, event)
 	}
 	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
 	if err != nil {
@@ -421,6 +429,47 @@ func scopedMutationEvent(
 		return nil, nil
 	}
 	return &projected, nil
+}
+
+// projectScopedMutationEvent applies the event-read reference boundary to
+// mutation receipts. A receipt may refer to issues that are no longer inside
+// the caller's authorized project scope, even when its subject issue remains
+// accessible.
+func projectScopedMutationEvent(
+	ctx context.Context, store db.Storage, event *db.Event,
+) (*db.Event, error) {
+	reset, err := db.EventRequiresProjectScopeReset(ctx, *event,
+		func(uid string) (db.Issue, error) {
+			return store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
+		},
+		func(projectUID, ref string) (db.Issue, error) {
+			parsed, err := shortid.Parse(ref)
+			if err != nil {
+				return db.Issue{}, db.ErrNotFound
+			}
+			if parsed.ULID != "" {
+				return store.IssueByUID(ctx, parsed.ULID, db.IncludeDeletedYes)
+			}
+
+			var project db.Project
+			if parsed.Project != "" {
+				project, err = store.ProjectByNameIncludingArchived(ctx, parsed.Project)
+			} else {
+				project, err = store.ProjectByUID(ctx, projectUID)
+			}
+			if err != nil {
+				return db.Issue{}, err
+			}
+			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if reset {
+		return nil, nil
+	}
+	return event, nil
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for

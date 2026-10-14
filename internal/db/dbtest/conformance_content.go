@@ -634,6 +634,19 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 		primary.Issue.ID: other.Issue.ShortID,
 		closedChild.ID:   other.Issue.ShortID,
 	}, parentShortIDs)
+	// Scoped clients must not learn relationship endpoints in projects outside
+	// their admitted project set. Legacy close auditing uses this lookup to
+	// render the current parent, so both backends must hide this cross-project
+	// parent for a caller admitted only to the child's project.
+	scopedParentShortIDs, err := store.ParentShortIDsByIssues(
+		db.WithAuthorizedProjects(ctx, []string{primary.Project.UID}),
+		[]int64{primary.Issue.ID, closedChild.ID},
+	)
+	if err != nil {
+		return fmt.Errorf("scoped parent short IDs: %w", err)
+	}
+	assert.Empty(t, scopedParentShortIDs,
+		"scoped parent lookup must not expose short IDs in an inaccessible project")
 
 	_, _, _, err = store.CloseIssue(ctx, closedChild.ID, "done", "link-author", "", nil)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,14 +20,33 @@ import (
 
 var postgresDatabaseCounter atomic.Uint64
 
+// sharedPostgresServers holds one automatic container per image for the
+// test process. Testcontainers' reaper removes them when the process exits.
+var sharedPostgresServers = struct {
+	sync.Mutex
+	byImage map[string]sharedPostgresServer
+}{byImage: map[string]sharedPostgresServer{}}
+
+type sharedPostgresServer struct {
+	dsn string
+	err error
+}
+
 const postgresAutoContainerEnv = "KATA_TEST_POSTGRES_AUTO_CONTAINER"
 const plainPostgresDSNEnv = "KATA_TEST_PLAIN_POSTGRES_DSN"
 
-// NewPostgresContainer starts a pgvector-enabled PostgreSQL 17 container, waits for it to
-// become ready, and returns the DSN string plus a cleanup function. Callers
-// must register the cleanup via t.Cleanup themselves so test ordering stays
-// predictable. The container lives for the test's lifetime; cleanup tears it
-// down. Used by pgstore tests and the shared storage conformance suite.
+// NewPostgresContainer returns a DSN for an isolated database on a
+// pgvector-enabled PostgreSQL 17 server, plus a cleanup function that drops
+// that database. Callers must register the cleanup via t.Cleanup themselves
+// so test ordering stays predictable. Used by pgstore tests and the shared
+// storage conformance suite.
+//
+// With KATA_TEST_POSTGRES_DSN set, the databases live on that server.
+// Otherwise the first call in a test process starts a container that every
+// later call in the process reuses; testcontainers' reaper removes it when
+// the process exits. Starting a container takes far longer than creating a
+// database, so sharing the server keeps PostgreSQL suites within the default
+// go test timeout.
 //
 // Skips with t.Skip when docker/podman is not reachable, so the suite runs
 // cleanly in environments without a container runtime. -short callers should
@@ -80,6 +100,27 @@ func newPostgresContainer(
 	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN, os.Getenv(postgresAutoContainerEnv)) {
 		t.Skip("automatic PostgreSQL testcontainers are disabled; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
 	}
+	server := sharedPostgresContainer(ctx, image)
+	if server.err != nil {
+		t.Skipf("postgres testcontainer unavailable (docker/podman not reachable?): %v", server.err)
+	}
+	return newIsolatedPostgresDatabase(ctx, t, server.dsn)
+}
+
+// sharedPostgresContainer starts the image's container on first use and
+// returns the cached server, or the cached startup failure, afterwards.
+func sharedPostgresContainer(ctx context.Context, image string) sharedPostgresServer {
+	sharedPostgresServers.Lock()
+	defer sharedPostgresServers.Unlock()
+	if server, ok := sharedPostgresServers.byImage[image]; ok {
+		return server
+	}
+	server := startPostgresContainer(context.WithoutCancel(ctx), image)
+	sharedPostgresServers.byImage[image] = server
+	return server
+}
+
+func startPostgresContainer(ctx context.Context, image string) sharedPostgresServer {
 	container, err := postgres.Run(ctx,
 		image,
 		postgres.WithDatabase("kata_test"),
@@ -92,17 +133,14 @@ func newPostgresContainer(
 		),
 	)
 	if err != nil {
-		t.Skipf("postgres testcontainer unavailable (docker/podman not reachable?): %v", err)
+		return sharedPostgresServer{err: err}
 	}
 	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		_ = container.Terminate(ctx)
-		t.Fatalf("get postgres connection string: %v", err)
+		return sharedPostgresServer{err: fmt.Errorf("get postgres connection string: %w", err)}
 	}
-	cleanup := func() {
-		_ = container.Terminate(context.Background())
-	}
-	return dsn, cleanup
+	return sharedPostgresServer{dsn: dsn}
 }
 
 func installTestPgvector(ctx context.Context, dsn string) error {
@@ -121,24 +159,24 @@ func skipAutomaticPostgresContainer(goos, explicitDSN, autostart string) bool {
 	return explicitDSN == "" && (goos == "windows" || autostart == "0")
 }
 
-// newIsolatedPostgresDatabase turns the explicit CI service DSN into one
-// database per test. Unlike the best-effort local testcontainer path, an
-// invalid explicit service is fatal: CI must never report success by skipping
-// the Postgres suite.
+// newIsolatedPostgresDatabase turns a server DSN, from the explicit CI service
+// or the shared container, into one database per test. Unlike a container
+// that fails to start, an unusable server is fatal: CI must never report
+// success by skipping the Postgres suite.
 func newIsolatedPostgresDatabase(ctx context.Context, t *testing.T, baseDSN string) (string, func()) {
 	t.Helper()
 	u, err := url.Parse(baseDSN)
 	if err != nil {
-		t.Fatalf("parse KATA_TEST_POSTGRES_DSN: %v", err)
+		t.Fatalf("parse PostgreSQL test server DSN: %v", err)
 	}
-	databaseName := fmt.Sprintf("kata_ci_%d_%d", os.Getpid(), postgresDatabaseCounter.Add(1))
+	databaseName := fmt.Sprintf("kata_test_%d_%d", os.Getpid(), postgresDatabaseCounter.Add(1))
 	admin, err := sql.Open("pgx", baseDSN)
 	if err != nil {
-		t.Fatalf("open KATA_TEST_POSTGRES_DSN: %v", err)
+		t.Fatalf("open PostgreSQL test server: %v", err)
 	}
 	if err := admin.PingContext(ctx); err != nil {
 		_ = admin.Close()
-		t.Fatalf("connect KATA_TEST_POSTGRES_DSN: %v", err)
+		t.Fatalf("connect PostgreSQL test server: %v", err)
 	}
 	if _, err := admin.ExecContext(ctx, `CREATE DATABASE "`+databaseName+`"`); err != nil {
 		_ = admin.Close()

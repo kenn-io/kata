@@ -834,22 +834,17 @@ func TestIssueScopedPollResetsWhenScopedProjectRenamed(t *testing.T) {
 		ExpiresAt: &expiresAt,
 	})
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
-		PlaintextToken: "coordinator-token", Actor: "coordinator", AdminActor: db.BootstrapActor,
-	})
-	require.NoError(t, err)
 	afterID, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
 	// Renaming the scoped project changes the project name and qualified IDs
 	// the scoped client renders, so its stream must invalidate projections.
-	resp, body := envDoRaw(t, env, http.MethodPatch,
-		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10),
-		map[string]any{"actor": "coordinator", "name": "renamed-project"},
-		map[string]string{"Authorization": "Bearer coordinator-token"})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	// Owner catalog administration happens outside the scoped browser principal.
+	_, _, changed, err := env.DB.RenameProjectAndEvent(t.Context(), project.ID, "renamed-project", "local-owner")
+	require.NoError(t, err)
+	require.True(t, changed)
 
-	resp, body = envDoRaw(t, env, http.MethodGet,
+	resp, body := envDoRaw(t, env, http.MethodGet,
 		"/api/v1/events?after_id="+strconv.FormatInt(afterID, 10), nil,
 		map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
@@ -873,11 +868,9 @@ func TestIssueScopedPollResetsWhenScopedProjectRenamed(t *testing.T) {
 	// A rename confined to another project cannot change any projection the
 	// scoped client renders, so it must not force another reset.
 	afterID = polled.NextAfterID
-	resp, body = envDoRaw(t, env, http.MethodPatch,
-		"/api/v1/projects/"+strconv.FormatInt(otherProject.ID, 10),
-		map[string]any{"actor": "coordinator", "name": "other-project-renamed"},
-		map[string]string{"Authorization": "Bearer coordinator-token"})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	_, _, changed, err = env.DB.RenameProjectAndEvent(t.Context(), otherProject.ID, "other-project-renamed", "local-owner")
+	require.NoError(t, err)
+	require.True(t, changed)
 
 	resp, body = envDoRaw(t, env, http.MethodGet,
 		"/api/v1/events?after_id="+strconv.FormatInt(afterID, 10), nil,

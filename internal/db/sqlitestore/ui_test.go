@@ -43,6 +43,13 @@ func TestUISnapshotScopedAuthorityContract(t *testing.T) {
 	})
 }
 
+func TestUISnapshotProjectAuthorityRelationshipsContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotProjectAuthorityRelationshipsContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

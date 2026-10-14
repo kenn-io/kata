@@ -111,6 +111,18 @@ func (d *Store) rotateFederationEnrollment(
 		}
 	}
 
+	// Legacy rotation cannot revoke or downgrade a negotiated relay.
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	var relay bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_enrollments WHERE spoke_instance_uid=? AND project_id=? AND revoked_at IS NULL AND relay_protocol_version<>0)`, p.SpokeInstanceUID, *p.ProjectID).Scan(&relay); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if relay {
+		return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE federation_enrollments
 		   SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
@@ -284,7 +296,7 @@ func (d *Store) FindActiveFederationEnrollment(
 		   AND capabilities = ?
 		   AND bound_actor = ?
 		   AND allow_adoption_snapshot_authors = ?
-		   AND revoked_at IS NULL
+		   AND revoked_at IS NULL AND relay_protocol_version=0
 		 ORDER BY id DESC
 		 LIMIT 1`,
 		p.ProjectID, p.SpokeInstanceUID, p.Capabilities, p.Actor,
@@ -292,25 +304,27 @@ func (d *Store) FindActiveFederationEnrollment(
 }
 
 // RevokeFederationEnrollment marks an enrollment inactive. Revocation is
-// one-way; repeated calls leave the original revoked_at intact.
+// one-way; repeated calls leave the original revoked_at intact. A relay
+// grant's delivery rows go with its authority in the same transaction.
 func (d *Store) RevokeFederationEnrollment(ctx context.Context, id int64) error {
-	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		var bindingUID sql.NullString
+		err := tx.QueryRowContext(ctx, `
 			UPDATE federation_enrollments
 			   SET revoked_at = COALESCE(revoked_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ?`, id)
+			 WHERE id = ?
+			 RETURNING relay_binding_uid`, id).Scan(&bindingUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
 		if err != nil {
 			return fmt.Errorf("revoke federation enrollment: %w", err)
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("revoke federation enrollment rows affected: %w", err)
+		if !bindingUID.Valid || bindingUID.String == "" {
+			return nil
 		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return deleteRelayBindingStateTx(ctx, tx, bindingUID.String)
 	})
 }
 
@@ -340,12 +354,18 @@ func (d *Store) AuthorizeFederationToken(
 		       JOIN projects ON projects.id = federation_bindings.project_id
 		      WHERE project_id = ?
 		        AND projects.deleted_at IS NULL
-		        AND role = 'hub'
+		        AND (role = 'hub' OR federation_enrollments.relay_protocol_version=1)
 		        AND enabled = 1
 		   )`,
 		db.FederationTokenHash(token), capability, projectID, projectID))
 	if err != nil {
 		return db.FederationEnrollment{}, err
+	}
+	if enrollment.RelayProtocolVersion != 0 {
+		err = d.relayReadAuthority(ctx, enrollment, projectID)
+		if err != nil {
+			return db.FederationEnrollment{}, err
+		}
 	}
 	if enrollment.ProjectID == nil {
 		enrollment.AllowAdoptionSnapshotAuthors = false
@@ -365,21 +385,14 @@ func (d *Store) FederationEnrollmentTransactionFence(
 	capability string,
 ) db.TransactionFence {
 	return func(ctx context.Context, transaction db.Transaction) error {
-		var active int
-		err := transaction.QueryRowContext(ctx, `
-			SELECT binding.enabled
-			FROM federation_bindings AS binding
-			JOIN projects AS project ON project.id = binding.project_id
-			WHERE binding.project_id = ? AND binding.role = 'hub'
-			  AND binding.enabled = 1 AND project.deleted_at IS NULL`, projectID).Scan(&active)
-		if errors.Is(err, sql.ErrNoRows) {
-			return db.ErrNotFound
+		if admitted.RelayProtocolVersion != 0 {
+			if err := lockProjectAccess(ctx, transaction); err != nil {
+				return err
+			}
 		}
+		_, _, err := d.relayServingBindingTx(ctx, transaction, projectID, admitted.RelayProtocolVersion)
 		if err != nil {
 			return err
-		}
-		if active != 1 {
-			return db.ErrNotFound
 		}
 		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
 			federationEnrollmentSelect+` WHERE id = ?`, admitted.ID))
@@ -389,7 +402,7 @@ func (d *Store) FederationEnrollmentTransactionFence(
 		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
 			return db.ErrNotFound
 		}
-		return nil
+		return d.checkRelayParentTx(ctx, transaction, current, projectID)
 	}
 }
 
@@ -402,22 +415,30 @@ const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid, p
        capabilities, bound_actor, allow_adoption_snapshot_authors,
        adoption_baseline_open, adoption_baseline_next_source_event_id,
        adoption_baseline_end_source_event_id,
-       created_at, updated_at, revoked_at
+       created_at, updated_at, revoked_at, relay_binding_uid, relay_protocol_version, parent_token_id, relay_reset_epoch, relay_serve_downstream
   FROM federation_enrollments`
 
 func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 	var (
-		e         db.FederationEnrollment
-		projectID sql.NullInt64
-		allow     int
-		open      int
-		revokedAt sql.NullTime
+		e          db.FederationEnrollment
+		projectID  sql.NullInt64
+		parentID   sql.NullInt64
+		bindingUID sql.NullString
+		serve      int
+		allow      int
+		open       int
+		revokedAt  sql.NullTime
 	)
 	err := r.Scan(&e.ID, &e.TokenHash, &e.SpokeInstanceUID, &projectID,
 		&e.Capabilities, &e.Actor, &allow, &open,
 		&e.AdoptionBaselineNextSourceEventID, &e.AdoptionBaselineEndSourceEventID,
-		&e.CreatedAt, &e.UpdatedAt, &revokedAt)
+		&e.CreatedAt, &e.UpdatedAt, &revokedAt, &bindingUID, &e.RelayProtocolVersion, &parentID, &e.RelayResetEpoch, &serve)
 	if err == nil {
+		e.RelayBindingUID = bindingUID.String
+		e.RelayServeDownstream = serve != 0
+		if parentID.Valid {
+			e.ParentTokenID = &parentID.Int64
+		}
 		if projectID.Valid {
 			v := projectID.Int64
 			e.ProjectID = &v

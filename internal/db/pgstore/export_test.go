@@ -32,3 +32,9 @@ func InstallExternalRootClockForTest(store *Store, now func() time.Time) func() 
 	store.externalRootNow = now
 	return func() { store.externalRootNow = previous }
 }
+
+func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) func() {
+	previous := store.relayHistoryFullScanObserver
+	store.relayHistoryFullScanObserver = observe
+	return func() { store.relayHistoryFullScanObserver = previous }
+}

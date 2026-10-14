@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -20,6 +21,7 @@ import (
 // the human-facing "<project>#<short_id>" form populated on list rows
 // (api.IssueOut.QualifiedID).
 type Issue struct {
+	db.AttributionView
 	ID                  int64        `json:"id"`
 	UID                 string       `json:"uid,omitempty"`
 	ProjectID           int64        `json:"project_id"`
@@ -277,6 +279,7 @@ type ProjectSummaryWithStats struct {
 
 // CommentEntry is the per-comment projection rendered in the comments tab.
 type CommentEntry struct {
+	db.AttributionView
 	ID        int64     `json:"id"`
 	Author    string    `json:"author"`
 	Teammate  string    `json:"teammate,omitempty"`

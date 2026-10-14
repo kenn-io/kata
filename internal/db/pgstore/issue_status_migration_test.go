@@ -16,6 +16,7 @@ func dropIssueStatusSchema(ctx context.Context, t *testing.T, admin *sql.DB, sch
 	t.Helper()
 	dropCommentReplySchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
+	dropProjectAccessSchema(ctx, t, admin, schema)
 	// Reconstruct the released schema-29 table shape from the current DDL.
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.import_mappings
 		DROP COLUMN IF EXISTS observed_status,
@@ -76,4 +77,28 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 	require.NoError(t, reopened.QueryRowContext(ctx, `SELECT observed_status, observed_status_at FROM import_mappings WHERE id=$1`, mappingID).Scan(&status, &observedAt))
 	require.False(t, status.Valid)
 	require.Equal(t, sql.NullString{String: "2026-09-29T12:00:00Z", Valid: true}, observedAt)
+}
+
+func dropProjectAccessSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	dropRelaySchema(ctx, t, admin, schema)
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s.federation_entity_provenance,%s.federation_event_provenance,%s.federation_root_keys`, schema, schema, schema)) // #nosec G201 -- fixed test schema identifiers.
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s.project_access_teams,%s.project_access_policies,%s.team_memberships,%s.teams; DELETE FROM %s.meta WHERE key='project_access_revision'`, schema, schema, schema, schema, schema)) // #nosec G201 -- fixed test schema identifiers.
+	require.NoError(t, err)
+}
+
+func dropRelaySchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+ DROP TABLE %[1]s.federation_embedding_artifacts;
+ DROP TABLE %[1]s.federation_relay_outbox,%[1]s.federation_relay_inbox,%[1]s.federation_relay_cursors;
+ ALTER TABLE %[1]s.federation_bindings DROP COLUMN relay_config;
+ ALTER TABLE %[1]s.federation_enrollments DROP COLUMN relay_binding_uid,DROP COLUMN relay_protocol_version,DROP COLUMN parent_token_id,DROP COLUMN relay_reset_epoch,DROP COLUMN relay_serve_downstream;
+ ALTER TABLE %[1]s.api_tokens DROP CONSTRAINT api_tokens_scope_shape;
+ ALTER TABLE %[1]s.api_tokens ADD CONSTRAINT api_tokens_scope_shape CHECK (
+ (scope_kind IS NULL AND scope_project_uid IS NULL AND scope_root_issue_uid IS NULL AND expires_at IS NULL)
+ OR (scope_kind='issue_subtree' AND length(scope_project_uid)=26 AND length(scope_root_issue_uid)=26 AND expires_at IS NOT NULL)
+ );`, schema)) // #nosec G201 -- fixed synthetic test schema, never external input.
+	require.NoError(t, err)
 }

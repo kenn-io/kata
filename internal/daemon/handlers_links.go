@@ -113,6 +113,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if from.ID == to.ID {
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
 		}
+		if err := checkLinkBoundaryBeforeMutation(ctx, cfg.DB, from.ID, to.ID); err != nil {
+			return nil, err
+		}
 
 		// Storage endpoints: canonical (from < to) for related; otherwise as-is.
 		// canonicalFrom/canonicalTo match the Link row's actual columns
@@ -141,17 +144,23 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err := requireFederatedIssueClaim(ctx, cfg, to.ProjectID, to, actor); err != nil {
 			return nil, err
 		}
+		linkEv := db.LinkEventParams{
+			EventType:    "issue.linked",
+			EventIssueID: from.ID,
+			FromShortID:  from.ShortID,
+			FromUID:      from.UID,
+			ToShortID:    to.ShortID,
+			ToUID:        to.UID,
+			Actor:        actor,
+		}
 
-		// Parent --replace path: delete the existing parent link in its own TX
-		// (emitting issue.unlinked) before inserting the new parent link. Parent
-		// links are never canonicalized, so storageFromID == from.ID here.
+		// Parent --replace path: swap the existing parent and new parent in
+		// one transaction. Parent links are never canonicalized, so
+		// storageFromID == from.ID here.
 		if in.Body.Type == "parent" && in.Body.Replace {
-			// Pre-flight cycle check before any mutation: walk the prospective
-			// parent's ancestor chain and reject if `from` is already an
-			// ancestor. Without it the delete-then-insert sequence would unlink
-			// the old parent (and emit issue.unlinked) before the in-tx guard
-			// fires, leaving `from` parentless. The in-tx guard stays as the
-			// race backstop; this closes the practical gap.
+			// Preflight cycles for a direct validation response. The replacement
+			// transaction checks the cycle again against current state and keeps
+			// the old parent if the new relationship cannot be committed.
 			cycle, cerr := parentReplaceWouldCycle(ctx, cfg.DB, from.ID, to.ID)
 			if cerr != nil {
 				return nil, internalAPIError(cerr)
@@ -185,14 +194,69 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					ToUID:        oldParentIssue.UID,
 					Actor:        actor,
 				}
-				unlinkEvt, err := cfg.DB.DeleteLinkAndEvent(ctx, existing, unlinkEv)
+				replacer, ok := cfg.DB.(db.ParentLinkReplacementStorage)
+				if !ok {
+					return nil, api.NewError(http.StatusInternalServerError, "internal",
+						"atomic parent replacement is unavailable", "", nil)
+				}
+				replaced, err := replacer.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
+					ExpectedParentLinkID:  existing.ID,
+					ExpectedParentIssueID: existing.ToIssueID,
+					Link: db.CreateLinkParams{
+						FromIssueID: storageFromID,
+						ToIssueID:   storageToID,
+						Type:        in.Body.Type,
+						Author:      actor,
+					},
+					UnlinkEvent: unlinkEv,
+					LinkEvent:   linkEv,
+				})
 				if err != nil {
+					if errors.Is(err, db.ErrLinkExists) {
+						current, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type)
+						if lookupErr != nil {
+							return nil, internalAPIError(lookupErr)
+						}
+						return mutationLinkResponse(from, current, canonicalFromPeer, canonicalToPeer, nil, false), nil
+					}
 					if apiErr := federationReadOnlyError(err); apiErr != nil {
 						return nil, apiErr
 					}
+					if errors.Is(err, db.ErrParentMismatch) {
+						return nil, api.NewError(http.StatusConflict, "parent_mismatch",
+							"the current parent changed during replacement", "retry the parent replacement", nil)
+					}
+					if errors.Is(err, db.ErrParentAlreadySet) {
+						return nil, api.NewError(http.StatusConflict, "parent_already_set",
+							"this issue already has a parent", "pass replace=true to swap", nil)
+					}
+					if errors.Is(err, db.ErrParentCycle) {
+						return nil, api.NewError(http.StatusBadRequest, "validation",
+							fmt.Sprintf("set_parent on #%s would create a parent cycle", from.ShortID),
+							"the requested parent is a descendant of this issue", nil)
+					}
+					if errors.Is(err, db.ErrSelfLink) {
+						return nil, api.NewError(http.StatusBadRequest, "validation", "cannot link an issue to itself", "", nil)
+					}
+					if archived, ok := errors.AsType[*db.LinkTargetArchivedError](err); ok {
+						return nil, linkTargetArchivedError(archived)
+					}
+					if errors.Is(err, db.ErrNotFound) {
+						return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+					}
 					return nil, internalAPIError(err)
 				}
-				cfg.Publish().Event(in.ProjectID, unlinkEvt)
+				cfg.Publish().Event(in.ProjectID, replaced.UnlinkedEvent)
+				cfg.Publish().Event(in.ProjectID, replaced.LinkedEvent)
+				updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				projected, err := scopedMutationEvent(ctx, cfg.DB, &replaced.LinkedEvent)
+				if err != nil {
+					return nil, err
+				}
+				return mutationLinkResponse(updatedIssue, replaced.Link, canonicalFromPeer, canonicalToPeer, projected, true), nil
 			} else if !errors.Is(perr, db.ErrNotFound) {
 				return nil, internalAPIError(perr)
 			}
@@ -200,15 +264,6 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 
 		// Default path: insert link + emit issue.linked + touch updated_at, all
 		// in one TX. Distinct error types map to specific responses.
-		linkEv := db.LinkEventParams{
-			EventType:    "issue.linked",
-			EventIssueID: from.ID,
-			FromShortID:  from.ShortID,
-			FromUID:      from.UID,
-			ToShortID:    to.ShortID,
-			ToUID:        to.UID,
-			Actor:        actor,
-		}
 		link, evt, err := cfg.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
 			FromIssueID: storageFromID,
 			ToIssueID:   storageToID,
@@ -244,17 +299,39 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return nil, internalAPIError(err)
 		}
 
+		cfg.Publish().Event(in.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
 		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if err != nil {
 			return nil, err
 		}
 		return mutationLinkResponse(updatedIssue, link, canonicalFromPeer, canonicalToPeer, projected, true), nil
 	}
+}
+
+func checkLinkBoundaryBeforeMutation(ctx context.Context, store db.Storage, fromIssueID, toIssueID int64) error {
+	checker, ok := store.(interface {
+		CheckLinkBoundary(context.Context, int64, int64) error
+	})
+	if !ok {
+		return nil
+	}
+	if err := checker.CheckLinkBoundary(ctx, fromIssueID, toIssueID); err != nil {
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return federationReadOnlyError(err)
+		}
+		if errors.Is(err, db.ErrNotFound) {
+			return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+		if _, ok := errors.AsType[*api.APIError](err); ok {
+			return err
+		}
+		return internalAPIError(err)
+	}
+	return nil
 }
 
 // parentReplaceWouldCycle reports whether making prospectiveParentID the parent
@@ -372,11 +449,11 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		cfg.Publish().Event(in.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
 		projected, perr := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if perr != nil {
 			return nil, perr

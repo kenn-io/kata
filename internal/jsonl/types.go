@@ -11,6 +11,16 @@ type Kind string
 
 // JSONL record kinds. Order matches the export sequence enforced by kindOrder.
 const (
+	KindEmbeddingArtifact    Kind = "federation_embedding_artifact"
+	KindRelayOutbox          Kind = "federation_relay_outbox"
+	KindRelayInbox           Kind = "federation_relay_inbox"
+	KindRelayCursors         Kind = "federation_relay_cursors"
+	KindRootKey              Kind = "federation_root_key"
+	KindEventProvenance      Kind = "federation_event_provenance"
+	KindEntityProvenance     Kind = "federation_entity_provenance"
+	KindTeam                 Kind = "team"
+	KindTeamMembership       Kind = "team_membership"
+	KindProjectAccessPolicy  Kind = "project_access_policy"
 	KindMeta                 Kind = "meta"
 	KindProject              Kind = "project"
 	KindProjectAlias         Kind = "project_alias"
@@ -51,6 +61,10 @@ var (
 )
 
 var kindOrder = map[Kind]int{
+	KindTeam: 28, KindTeamMembership: 29, KindProjectAccessPolicy: 30,
+	KindRootKey: 31, KindEventProvenance: 32, KindEntityProvenance: 33,
+	KindRelayOutbox: 34, KindRelayInbox: 35, KindRelayCursors: 36,
+	KindEmbeddingArtifact:    37,
 	KindMeta:                 0,
 	KindProject:              1,
 	KindProjectAlias:         2,

@@ -1,6 +1,9 @@
 package daemon
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // federationReplicaTransitionState is the leave lifecycle of one spoke
 // mapping. It replaces a (leaveIntent, suppressed) boolean pair whose four
@@ -141,6 +144,25 @@ func (r *federationReplicaRegistry) drainSignal(key string) (<-chan struct{}, bo
 		return nil, false
 	}
 	return transition.drained, true
+}
+
+// waitFederationReplicaOperations waits for hub requests already registered
+// for key. Callers must first mark the mapping leave-pending so no new request
+// can register while this loop drains the existing ones.
+func waitFederationReplicaOperations(ctx context.Context, key string) error {
+	for {
+		ensureFederationReplicaMu.Lock()
+		drained, waiting := federationReplicaTransitions.drainSignal(key)
+		ensureFederationReplicaMu.Unlock()
+		if !waiting {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-drained:
+		}
+	}
 }
 
 // markLeavePending records that an explicit leave was durably prepared.

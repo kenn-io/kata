@@ -26,23 +26,26 @@ const (
 )
 
 type normalizedUISnapshotIntent struct {
-	View              string   `json:"view"`
-	ProjectUID        string   `json:"project_uid,omitempty"`
-	Statuses          []string `json:"statuses,omitempty"`
-	Owners            []string `json:"owners,omitempty"`
-	Labels            []string `json:"labels,omitempty"`
-	Relationships     []string `json:"relationships,omitempty"`
-	Text              string   `json:"text,omitempty"`
-	SelectedIssueUID  string   `json:"selected_issue_uid,omitempty"`
-	IncludeGraph      bool     `json:"include_graph"`
-	IncludeHistory    bool     `json:"include_history"`
-	LocalDate         string   `json:"local_date,omitempty"`
-	TimeZone          string   `json:"time_zone,omitempty"`
-	ReadyAt           string   `json:"ready_at,omitempty"`
-	DefaultTimezone   string   `json:"default_timezone,omitempty"`
-	Limit             int      `json:"limit"`
-	ScopeProjectUID   string   `json:"scope_project_uid,omitempty"`
-	ScopeRootIssueUID string   `json:"scope_root_issue_uid,omitempty"`
+	View               string   `json:"view"`
+	ProjectUID         string   `json:"project_uid,omitempty"`
+	Statuses           []string `json:"statuses,omitempty"`
+	Owners             []string `json:"owners,omitempty"`
+	Labels             []string `json:"labels,omitempty"`
+	Relationships      []string `json:"relationships,omitempty"`
+	Text               string   `json:"text,omitempty"`
+	SelectedIssueUID   string   `json:"selected_issue_uid,omitempty"`
+	IncludeGraph       bool     `json:"include_graph"`
+	IncludeHistory     bool     `json:"include_history"`
+	LocalDate          string   `json:"local_date,omitempty"`
+	TimeZone           string   `json:"time_zone,omitempty"`
+	ReadyAt            string   `json:"ready_at,omitempty"`
+	DefaultTimezone    string   `json:"default_timezone,omitempty"`
+	Limit              int      `json:"limit"`
+	ProjectAccessActor string   `json:"project_access_actor,omitempty"`
+	ProjectAccessEpoch int64    `json:"project_access_epoch,omitempty"`
+	ProjectAccessUIDs  []string `json:"project_access_uids,omitempty"`
+	ScopeProjectUID    string   `json:"scope_project_uid,omitempty"`
+	ScopeRootIssueUID  string   `json:"scope_root_issue_uid,omitempty"`
 }
 
 func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
@@ -77,9 +80,11 @@ type normalizedUIReferencesIntent struct {
 }
 
 type uiPolicy struct {
-	Capabilities api.UICapabilities `json:"capabilities"`
-	Origin       string             `json:"origin"`
-	OriginStable bool               `json:"origin_stable"`
+	Capabilities       api.UICapabilities `json:"capabilities"`
+	Origin             string             `json:"origin"`
+	OriginStable       bool               `json:"origin_stable"`
+	ProjectAccessActor string             `json:"project_access_actor,omitempty"`
+	ProjectAccessEpoch int64              `json:"project_access_epoch,omitempty"`
 }
 
 type uiETagBasis struct {
@@ -138,12 +143,21 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+				intent.ProjectAccessActor = decision.Actor
+				intent.ProjectAccessEpoch = decision.PolicyRevision
+				intent.ProjectAccessUIDs = slices.Clone(decision.ProjectUIDs)
+			}
 			intent.ReadyAt = effectiveUIReadyAt(intent.Statuses, cfg.UIClock)
 			intent.DefaultTimezone = cfg.DefaultTimezone
 			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
 				return nil, err
 			}
 			policy := effectiveUIPolicy(ctx, cfg)
+			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+				policy.ProjectAccessActor = decision.Actor
+				policy.ProjectAccessEpoch = decision.PolicyRevision
+			}
 			var observedCursor *int64
 			if in.IfNoneMatch != "" {
 				cursor, err := cfg.UIStore.UIEventCursor(ctx)
@@ -169,13 +183,14 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			cachedAuthority := db.UISnapshotData{}
+			var authorityDependencies, enrichmentDependencies []int64
 			authorityCached := false
 			// Scoped snapshots intentionally bypass shared response caches. The
 			// query candidate set is the authority boundary; keeping its result
 			// request-local prevents a future cache-key cleanup from widening or
 			// narrowing one subtree with another principal's materialized data.
 			if scopedIssueIDs == nil {
-				cachedAuthority, authorityCached = authorityCache.get(authorityKey)
+				cachedAuthority, authorityDependencies, authorityCached = authorityCache.get(authorityKey)
 			}
 			if scopedIssueIDs == nil && !authorityCached && intent.ProjectUID != "" && intent.Limit == 0 {
 				globalIntent := intent
@@ -184,10 +199,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if keyErr != nil {
 					return nil, internalAPIError(keyErr)
 				}
-				if globalAuthority, ok := authorityCache.get(globalKey); ok {
+				// The project view keeps the global build's dependencies: a
+				// superset only withholds more, never less.
+				if globalAuthority, dependencies, ok := authorityCache.get(globalKey); ok {
 					cachedAuthority = projectUISnapshotAuthority(globalAuthority, intent.ProjectUID)
+					authorityDependencies = dependencies
 					authorityCached = true
-					authorityCache.put(authorityKey, cachedAuthority)
+					authorityCache.put(authorityKey, cachedAuthority, authorityDependencies)
 				}
 			}
 			enrichmentKey, err := uiSnapshotKey(intent)
@@ -197,17 +215,20 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			cachedEnrichment := db.UISnapshotData{}
 			enrichmentCached := false
 			if scopedIssueIDs == nil {
-				cachedEnrichment, enrichmentCached = enrichmentCache.get(enrichmentKey)
+				cachedEnrichment, enrichmentDependencies, enrichmentCached = enrichmentCache.get(enrichmentKey)
 			}
 			cachedResponse := db.UISnapshotData{}
+			var cachedDependencies []int64
 			responseCached := false
 			if authorityCached && !uiSnapshotHasEnrichment(intent) {
 				cachedResponse = cachedAuthority
+				cachedDependencies = authorityDependencies
 				responseCached = true
 			} else if authorityCached && enrichmentCached &&
 				cachedAuthority.Cursor == cachedEnrichment.Cursor {
 				cachedResponse = cachedEnrichment
 				mergeUISnapshotAuthority(&cachedResponse, cachedAuthority)
+				cachedDependencies = slices.Concat(authorityDependencies, enrichmentDependencies)
 				responseCached = true
 			}
 			if responseCached {
@@ -223,6 +244,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					if err != nil {
 						return nil, internalAPIError(err)
 					}
+					recordUISnapshotDependencies(ctx, cachedDependencies)
 					return snapshotResponse(cachedResponse, intent, policy, validator), nil
 				}
 			}
@@ -233,27 +255,33 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				cursor := cachedAuthority.Cursor
 				query.ReuseAuthorityCursor = &cursor
 			}
-			data, err := cfg.UIStore.ReadUISnapshot(ctx, query)
+			// The build records into its own registry so the cache can keep the
+			// exact dependency set beside the parts it stores.
+			buildCtx := db.WithExposedIssues(ctx)
+			data, err := cfg.UIStore.ReadUISnapshot(buildCtx, query)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			dependencies := db.ExposedIssues(buildCtx)
 			if data.AuthorityReused {
 				mergeUISnapshotAuthority(&data, cachedAuthority)
+				dependencies = slices.Concat(dependencies, authorityDependencies)
 			}
 			if scopedIssueIDs != nil {
 				filterScopedUISnapshot(&data, scopedIssueIDs, intent.ScopeProjectUID)
 				data.Comments = omitScopedCommentReplies(ctx, data.Comments)
 			}
 			if scopedIssueIDs == nil && !data.AuthorityReused {
-				authorityCache.put(authorityKey, data)
+				authorityCache.put(authorityKey, data, dependencies)
 			}
 			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
-				enrichmentCache.put(enrichmentKey, data)
+				enrichmentCache.put(enrichmentKey, data, dependencies)
 			}
 			validator, err := makeUIETag(intent, data.Cursor, policy)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			recordUISnapshotDependencies(ctx, dependencies)
 			return snapshotResponse(data, intent, policy, validator), nil
 		})
 
@@ -303,6 +331,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, err
 				}
 				policy := effectiveUIPolicy(ctx, cfg)
+				if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+					policy.ProjectAccessActor = decision.Actor
+					policy.ProjectAccessEpoch = decision.PolicyRevision
+				}
 				validator, err := makeUIETag(intent, capture.References.Cursor, policy)
 				if err != nil {
 					return nil, internalAPIError(err)
@@ -318,6 +350,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			policy := effectiveUIPolicy(ctx, cfg)
+			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+				policy.ProjectAccessActor = decision.Actor
+				policy.ProjectAccessEpoch = decision.PolicyRevision
+			}
 			if in.IfNoneMatch != "" {
 				cursor, err := cfg.UIStore.UIEventCursor(ctx)
 				if err != nil {
@@ -696,12 +732,19 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	if principal, ok := PrincipalFromContext(ctx); ok && principal.Actor != "" {
 		policy.Capabilities.ActorPolicy = "identity"
 	}
+	policy.Capabilities.AuthKind = requestAuthKind(ctx)
 	policy.Capabilities.CloseRequiresEvidence = closeRequiresEvidence(ctx)
 	policy.Capabilities.TokenAuditRead = tokenAuditReadAllowed(ctx)
+	policy.Capabilities.AccessAdmin = !cfg.InsecureReadonly && tokenAuditReadAllowed(ctx)
+	if cfg.WebSessions != nil {
+		principal, _ := PrincipalFromContext(ctx)
+		policy.Capabilities.AccessAdmin = policy.Capabilities.AccessAdmin && cfg.WebSessions.CanAdministerAccess(principal)
+	}
 	if principal, ok := PrincipalFromContext(ctx); ok {
+		policy.Capabilities.Account = principal.Actor
+		policy.Capabilities.ExpiresAt = principal.ExpiresAt
 		if principal.Scope != nil {
 			policy.Capabilities.Scope = tokenScopeOut(principal.Scope)
-			policy.Capabilities.ExpiresAt = principal.ExpiresAt
 			policy.Capabilities.AllowedActions = issueScopedAllowedActions(policy.Capabilities.Writable)
 		}
 	}

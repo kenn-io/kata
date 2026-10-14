@@ -2,6 +2,7 @@ package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-ty
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -82,11 +83,12 @@ type FederationProjectMetadataRequest struct {
 // ProjectFederationBody is the hub metadata a trusted spoke needs before it
 // begins project-scoped event polling.
 type ProjectFederationBody struct {
-	ProjectID              int64  `json:"project_id"`
-	ProjectUID             string `json:"project_uid"`
-	ProjectName            string `json:"project_name"`
-	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
+	Relay                  *RelayHandshake `json:"relay,omitempty"`
+	ProjectID              int64           `json:"project_id"`
+	ProjectUID             string          `json:"project_uid"`
+	ProjectName            string          `json:"project_name"`
+	ReplayHorizonEventID   int64           `json:"replay_horizon_event_id"`
+	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
 }
 
 // ProjectFederationResponse wraps ProjectFederationBody.
@@ -114,6 +116,7 @@ type FederationStatusBody struct {
 
 // FederationProjectStatus summarizes one local project's federation health.
 type FederationProjectStatus struct {
+	Embedding                   *FederationEmbeddingStatus    `json:"embedding,omitempty"`
 	ProjectID                   int64                         `json:"project_id"`
 	ProjectUID                  string                        `json:"project_uid"`
 	ProjectName                 string                        `json:"project_name"`
@@ -139,6 +142,10 @@ type FederationProjectStatus struct {
 	ActiveQuarantineCount       int64                         `json:"active_quarantine_count"`
 	ActiveQuarantines           []FederationQuarantineSummary `json:"active_quarantines"`
 	ResetBlocker                string                        `json:"reset_blocker,omitempty"`
+	RootSigningKey              string                        `json:"root_signing_key,omitempty" enum:"available,unavailable"`
+	RelayCheckpointBytes        int64                         `json:"relay_checkpoint_bytes,omitempty,omitzero" doc:"Measured size in bytes of the signed relay reset checkpoint this root would build for the project now. Present only for hub projects rooted on this daemon."`
+	RelayCheckpointCapacity     int64                         `json:"relay_checkpoint_capacity_bytes,omitempty,omitzero" doc:"Largest relay reset checkpoint this root builds. New relay enrollments are refused with 409 relay_project_too_large once relay_checkpoint_bytes exceeds it. Present only for hub projects rooted on this daemon."`
+	RelayCheckpointError        string                        `json:"relay_checkpoint_error,omitempty" doc:"Why the relay checkpoint could not be measured for this status read. The size fields are omitted while it is set."`
 	UnresolvedViolationCount    int64                         `json:"unresolved_violation_count"`
 	RecentViolationCount        int64                         `json:"recent_violation_count"`
 	RecentViolations            []FederationViolationSummary  `json:"recent_violations"`
@@ -194,14 +201,92 @@ type FederationViolationSummary struct {
 // credential for one spoke.
 type CreateFederationEnrollmentRequest struct {
 	Body struct {
-		HubURL                       string `json:"hub_url,omitempty"`
-		AllowInsecure                bool   `json:"allow_insecure,omitempty,omitzero"`
-		SpokeInstanceUID             string `json:"spoke_instance_uid"`
-		ProjectID                    *int64 `json:"project_id"`
-		Capabilities                 string `json:"capabilities"`
-		Token                        string `json:"token,omitempty"`
-		Actor                        string `json:"actor,omitempty"`
-		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty,omitzero"`
+		HubURL                       string                  `json:"hub_url,omitempty"`
+		AllowInsecure                bool                    `json:"allow_insecure,omitempty,omitzero"`
+		SpokeInstanceUID             string                  `json:"spoke_instance_uid"`
+		ProjectID                    *int64                  `json:"project_id"`
+		Capabilities                 string                  `json:"capabilities"`
+		Token                        string                  `json:"token,omitempty"`
+		Actor                        string                  `json:"actor,omitempty"`
+		AllowAdoptionSnapshotAuthors bool                    `json:"allow_adoption_snapshot_authors,omitempty,omitzero"`
+		Relay                        *RelayEnrollmentOptions `json:"relay,omitempty"`
+	}
+}
+
+// RelayEnrollmentOptions opts into credential-bound, project-only relay mode.
+type RelayEnrollmentOptions struct {
+	ProtocolVersion int  `json:"protocol_version"`
+	ServeDownstream bool `json:"serve_downstream,omitempty"`
+	RebindParent    bool `json:"rebind_parent,omitempty" doc:"Explicitly rebind the retained relay token to this live same-account API credential, preserving its binding and cursors."`
+}
+
+// RelayHandshake pins the root and hop identity through the already trusted
+// enrollment connection. It carries no source-label authority or private keys.
+type RelayHandshake struct {
+	EmbeddingProducer   *db.ProjectEmbeddingProducer `json:"embedding_producer,omitempty"`
+	ProtocolVersion     int                          `json:"protocol_version"`
+	BindingUID          string                       `json:"binding_uid"`
+	UpstreamInstanceUID string                       `json:"upstream_instance_uid"`
+	ResetEpoch          int64                        `json:"reset_epoch"`
+	ResetRequired       bool                         `json:"reset_required"`
+	HubPath             []string                     `json:"hub_path"`
+	Root                db.RootKeyPin                `json:"root"`
+	EnrollmentRoot      *db.RootKeyPin               `json:"enrollment_root,omitempty"`
+	RootKeyTransitions  []db.RootKeyTransition       `json:"root_key_transitions,omitempty"`
+	// PendingArtifactOffers tells a relay that this hub still holds artifact
+	// offers for its enrollment, so its local embedding producer waits for
+	// the federation runner instead of generating duplicates.
+	PendingArtifactOffers bool `json:"pending_artifact_offers,omitempty,omitzero" doc:"Whether this hub holds artifact offers the presenting enrollment has not accepted yet. Set only on metadata reads by an enrolled relay."`
+}
+
+// RelayOfferRequest selects an authenticated stream prefix or exact offered artifact misses.
+type RelayOfferRequest struct {
+	ProjectID       int64    `path:"project_id"`
+	Authorization   string   `header:"Authorization"`
+	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
+	Limit           int      `query:"limit" default:"100" minimum:"1" maximum:"1024"`
+	ArtifactDigests []string `query:"artifact_digest,explode" maxItems:"32"`
+	Epoch           int64    `query:"epoch" minimum:"0"`
+}
+
+// RelayResetRequest requests a checkpoint for the presented project transport grant.
+type RelayResetRequest struct {
+	ProjectID     int64  `path:"project_id"`
+	Authorization string `header:"Authorization"`
+}
+
+// RelayResetResponse returns the retained signed checkpoint and its hop translation.
+type RelayResetResponse struct{ Body db.RelayResetCheckpoint }
+
+// RelayOfferResponse returns the emitted prefix retained for retry.
+type RelayOfferResponse struct{ Body db.RelayBatch }
+
+// RelayAcceptRequest submits an authenticated batch for durable prefix acceptance.
+type RelayAcceptRequest struct {
+	ProjectID     int64  `path:"project_id"`
+	Authorization string `header:"Authorization"`
+	Body          db.RelayBatch
+}
+
+// RelayAcceptResponse reports the exact durably accepted prefix.
+type RelayAcceptResponse struct{ Body db.RelayAcceptance }
+
+// RelayAckRequest acknowledges an emitted prefix in one stream and reset epoch.
+type RelayAckRequest struct {
+	ProjectID     int64  `path:"project_id"`
+	Authorization string `header:"Authorization"`
+	Body          struct {
+		Stream  string `json:"stream" enum:"events,receipts,artifacts"`
+		Epoch   int64  `json:"epoch" minimum:"1"`
+		Through int64  `json:"through" minimum:"1"`
+		Digest  string `json:"digest"`
+	}
+}
+
+// RelayAckResponse reports whether the prefix acknowledgement committed.
+type RelayAckResponse struct {
+	Body struct {
+		Acknowledged bool `json:"acknowledged"`
 	}
 }
 
@@ -218,6 +303,7 @@ type FederationEnrollmentOut struct {
 	RevokedAt        *time.Time                  `json:"revoked_at,omitempty"`
 	Token            string                      `json:"token,omitempty"`
 	Join             *FederationJoinInstructions `json:"join,omitempty"`
+	Relay            *RelayHandshake             `json:"relay,omitempty"`
 }
 
 // FederationJoinInstructions describes the exact project and transport authority
@@ -596,4 +682,60 @@ type PendingFederationEnrollmentCleanup struct {
 // LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.
 type LeaveFederationReplicaResponse struct {
 	Body LeaveFederationReplicaResultBody
+}
+
+// FederationEmbeddingStatus describes a bounded portable-artifact inventory.
+// States describe local reuse eligibility; no vectors or credentials are exposed.
+type FederationEmbeddingStatus struct {
+	Producer      *db.ProjectEmbeddingProducer        `json:"producer,omitempty"`
+	State         string                              `json:"state"`
+	Reason        string                              `json:"reason,omitempty" doc:"Why this daemon cannot generate for the project. producer_recipe_changed: this daemon is the selected producer, but its configured recipe differs from the selected recipe; select the producer again at the root. producer_unavailable: this daemon's last check as the selected producer failed; see last_error."`
+	LastError     string                              `json:"last_error,omitempty" doc:"Last failed producer check on this daemon, such as an unreachable upstream hub or a missing federation credential."`
+	ArtifactLimit int                                 `json:"artifact_limit"`
+	Limited       bool                                `json:"limited"`
+	Artifacts     []FederationEmbeddingArtifactStatus `json:"artifacts"`
+}
+
+// ArtifactCounts summarizes only the bounded retained inventory, not provider
+// requests or billing. Limited inventories can omit older artifacts.
+func (s *FederationEmbeddingStatus) ArtifactCounts() map[string]int {
+	counts := make(map[string]int)
+	for _, artifact := range s.Artifacts {
+		counts[artifact.State]++
+	}
+	return counts
+}
+
+// DisplayFields supplies the common CLI/TUI labels. Each surface sanitizes
+// these fields and applies its own terminal wrapping.
+func (s *FederationEmbeddingStatus) DisplayFields() []string {
+	fields := []string{"embedding: " + s.State}
+	if s.Reason != "" {
+		fields = append(fields, "embedding reason: "+s.Reason)
+	}
+	if s.LastError != "" {
+		fields = append(fields, "embedding last error: "+s.LastError)
+	}
+	if s.Producer != nil {
+		fields = append(fields, "embedding producer: "+s.Producer.ProducerInstanceUID,
+			fmt.Sprintf("embedding recipe: %s / %d dimensions", s.Producer.Recipe.Model, s.Producer.Recipe.Dimensions))
+	} else {
+		fields = append(fields, "embedding producer: none")
+	}
+	counts := s.ArtifactCounts()
+	fields = append(fields, fmt.Sprintf("embedding artifacts: generated=%d reused=%d incompatible=%d stored_unindexed=%d",
+		counts["generated"], counts["reused"], counts["incompatible"], counts["stored_unindexed"]))
+	inventory := fmt.Sprintf("embedding inventory: %d retained / %d limit", len(s.Artifacts), s.ArtifactLimit)
+	if s.Limited {
+		inventory += " (limited)"
+	}
+	return append(fields, inventory)
+}
+
+// FederationEmbeddingArtifactStatus describes retained artifact reuse or indexing state without vector bytes.
+type FederationEmbeddingArtifactStatus struct {
+	IssueUID string `json:"issue_uid"`
+	Digest   string `json:"digest"`
+	State    string `json:"state"`
+	Reason   string `json:"reason,omitempty"`
 }

@@ -39,6 +39,8 @@ func newFederationCmd() *cobra.Command {
 	cmd.AddCommand(
 		federationIdentityCmd(),
 		federationSigningCmd(),
+		federationEmbeddingRecipeCmd(),
+		federationBridgeCmd(),
 		federationEnableCmd(),
 		federationEnrollCmd(),
 		federationEnrollmentsCmd(),
@@ -46,6 +48,7 @@ func newFederationCmd() *cobra.Command {
 		federationLeaveCmd(),
 		federationRebindCmd(),
 		federationRevokeCmd(),
+		federationRootKeyCmd(),
 		federationStatusCmd(),
 		federationQuarantineCmd(),
 		newFederationLeaseCmd(),
@@ -2078,6 +2081,18 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			}
 			lines = append(lines, "provider: "+provider)
 		}
+		if status.RootSigningKey != "" {
+			lines = append(lines, "root signing key: "+formatRootSigningKeyStatus(status))
+		}
+		if status.RelayCheckpointError != "" {
+			lines = append(lines, "relay checkpoint: not measured; "+textsafe.Line(status.RelayCheckpointError))
+		}
+		if status.RelayCheckpointCapacity > 0 {
+			lines = append(lines, federationRelayCapacityLines(status)...)
+		}
+		if status.Embedding != nil {
+			lines = append(lines, federationEmbeddingLines(status.Embedding)...)
+		}
 		if status.CredentialExpiresAt != nil {
 			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
 		}
@@ -2144,6 +2159,30 @@ func formatFederationStatusError(at *time.Time, msg *string) string {
 	return at.UTC().Format(time.RFC3339) + " " + textsafe.Line(*msg)
 }
 
+func formatRootSigningKeyStatus(status api.FederationProjectStatus) string {
+	if status.RootSigningKey != "unavailable" {
+		return textsafe.Line(status.RootSigningKey)
+	}
+	return "unavailable; restore federation-root.key and restart the daemon, or run kata federation root-key repin --project " + textsafe.Line(status.ProjectName)
+}
+
+// federationRelayCapacityLines reports how close a root hub project is to the
+// relay checkpoint capacity that bounds new relay enrollments and resets.
+func federationRelayCapacityLines(status api.FederationProjectStatus) []string {
+	lines := []string{fmt.Sprintf("relay checkpoint: %s of %s", formatMiB(status.RelayCheckpointBytes), formatMiB(status.RelayCheckpointCapacity))}
+	switch {
+	case status.RelayCheckpointBytes > status.RelayCheckpointCapacity:
+		lines = append(lines, "warning: relay checkpoint exceeds capacity; new relay enrollments and resets are refused until issues are purged")
+	case status.RelayCheckpointBytes*10 >= status.RelayCheckpointCapacity*9:
+		lines = append(lines, "warning: relay checkpoint is within 10% of capacity; purge issues the project no longer needs before new relays are refused")
+	}
+	return lines
+}
+
+func formatMiB(bytes int64) string {
+	return fmt.Sprintf("%.1f MiB", float64(bytes)/float64(1<<20))
+}
+
 func formatFederationResetBlocker(blocker string) string {
 	if blocker == "" {
 		return "none"
@@ -2157,6 +2196,12 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 		return err
 	}
 	for _, status := range body.Statuses {
+		var checkpointBytes, checkpointCapacity string
+		if status.RelayCheckpointCapacity > 0 {
+			checkpointBytes = strconv.FormatInt(status.RelayCheckpointBytes, 10)
+			checkpointCapacity = strconv.FormatInt(status.RelayCheckpointCapacity, 10)
+		}
+		checkpointError := status.RelayCheckpointError
 		if err := writeAgentKVRow(out,
 			agentRowField("project", status.ProjectName),
 			agentRowField("role", status.Role),
@@ -2174,10 +2219,38 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentRowField("enrollments", strconv.FormatInt(status.EnrollmentCount, 10)),
 			agentRowField("active_quarantine", strconv.FormatInt(status.ActiveQuarantineCount, 10)),
 			agentRowField("reset_blocker", formatFederationResetBlocker(status.ResetBlocker)),
+			agentOptionalRowField("root_signing_key", &status.RootSigningKey),
+			agentOptionalRowField("relay_checkpoint_bytes", &checkpointBytes),
+			agentOptionalRowField("relay_checkpoint_capacity_bytes", &checkpointCapacity),
+			agentOptionalRowField("relay_checkpoint_error", &checkpointError),
 			agentRowField("unresolved_violations", strconv.FormatInt(status.UnresolvedViolationCount, 10)),
 			agentRowField("recent_violations", strconv.FormatInt(status.RecentViolationCount, 10)),
 		); err != nil {
 			return err
+		}
+		if status.Embedding != nil {
+			e := status.Embedding
+			counts := e.ArtifactCounts()
+			producer := "none"
+			if e.Producer != nil {
+				producer = e.Producer.ProducerInstanceUID
+			}
+			if err := writeAgentKVRow(out,
+				agentRowField("embedding_project", status.ProjectName),
+				agentRowField("state", e.State),
+				agentRowField("reason", formatFederationStatusError(nil, &e.Reason)),
+				agentRowField("last_error", formatFederationStatusError(nil, &e.LastError)),
+				agentRowField("producer", producer),
+				agentRowField("generated", strconv.Itoa(counts["generated"])),
+				agentRowField("reused", strconv.Itoa(counts["reused"])),
+				agentRowField("incompatible", strconv.Itoa(counts["incompatible"])),
+				agentRowField("stored_unindexed", strconv.Itoa(counts["stored_unindexed"])),
+				agentRowField("retained", strconv.Itoa(len(e.Artifacts))),
+				agentRowField("limit", strconv.Itoa(e.ArtifactLimit)),
+				agentRowField("limited", strconv.FormatBool(e.Limited)),
+			); err != nil {
+				return err
+			}
 		}
 		for _, violation := range status.RecentViolations {
 			if err := writeAgentKVRow(out,

@@ -4,6 +4,26 @@ import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test.each(['verified', 'pending', 'legacy'] as const)(
+    'retains %s creation projections in accepted snapshots',
+    (verification) => {
+      const wire = snapshot()
+      const attribution = {
+        verification,
+        accountable_actor: 'member-one',
+        source_actor: 'source-agent',
+        teammate: 'example-worker',
+      }
+      Object.assign(wire.collection![0]!, attribution)
+      Object.assign(wire.selected!.issue!, attribution)
+      Object.assign(wire.selected!.comments![0]!, attribution)
+      const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
+      expect(projection.issues[0]).toMatchObject(attribution)
+      expect(projection.selected_detail?.issue).toMatchObject(attribution)
+      expect(projection.selected_detail?.comments[0]).toMatchObject(attribution)
+    },
+  )
+
   test('adapts the native snapshot to the ported immutable collection model', () => {
     const projection = normalizeKataUISnapshot(snapshot(), '2026-08-01T12:30:00.000Z')
 

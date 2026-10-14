@@ -49,6 +49,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropCommentReplySchema(ctx, t, admin, schema)
+	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE cron_upgrade.meta SET value='30' WHERE key='schema_version'`)
 	require.NoError(t, err)
@@ -61,7 +62,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	require.Zero(t, count)
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 32, version)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 	got, err := upgraded.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, issue, got)
@@ -78,12 +79,14 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "cron_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fresh.Close() })
-	require.Equal(t, columnFingerprint(ctx, t, admin, "cron_fresh"), columnFingerprint(ctx, t, admin, schema))
+	require.Equal(t, projectAccessStructure(t, fresh, "cron_fresh"), projectAccessStructure(t, upgraded, schema), "upgrade and canonical schemas must agree")
 	require.Equal(t, cronPhysicalShape(ctx, t, admin, "cron_fresh"), cronPhysicalShape(ctx, t, admin, schema))
 }
 
 func cronPhysicalShape(ctx context.Context, t *testing.T, admin *sql.DB, schema string) []string {
 	t.Helper()
+	// Columns that later migrations drop and re-add keep new ordinal positions,
+	// so compare only the objects this migration owns.
 	rows, err := admin.QueryContext(ctx, `SELECT value FROM (
  SELECT 'constraint:' || c.relname || ':' || con.conname || ':' || replace(pg_get_constraintdef(con.oid,true),$1||'.','') AS value FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1
  UNION ALL SELECT 'index:' || tablename || ':' || indexname || ':' || replace(indexdef,$1||'.','') FROM pg_indexes WHERE schemaname=$1

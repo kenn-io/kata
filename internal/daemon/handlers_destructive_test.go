@@ -9,9 +9,30 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type pendingRelayPurgeStore struct{ db.Storage }
+
+func (s pendingRelayPurgeStore) PurgeIssue(context.Context, int64, string, *string) (db.PurgeLog, error) {
+	return db.PurgeLog{}, db.ErrFederationResetBlockedByPendingPush
+}
+
+// The native purge guard retains pending artifact bytes. Its owner-facing
+// route must report a retryable conflict rather than an internal failure.
+func TestPurge_PendingRelayDeliveryIsConflict(t *testing.T) {
+	h, projectID := bootstrapProject(t, func(cfg *daemon.ServerConfig) {
+		cfg.DB = pendingRelayPurgeStore{cfg.DB}
+	})
+	issue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectID, Title: "Pending delivery", Author: "member"})
+	require.NoError(t, err)
+	response := postWithHeader(t, h.ts.(*httptest.Server), issueURLRef(projectID, issue.ShortID, "actions/purge"), map[string]string{"X-Kata-Confirm": confirmHeader(t, h, projectID, issue.ID, "PURGE")}, map[string]any{"actor": "member"})
+	assertAPIError(t, response.status, response.body, http.StatusConflict, "federation_pending_delivery")
+	_, err = h.DB().IssueByUID(t.Context(), issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+}
 
 // confirmHeader builds the X-Kata-Confirm value for an issue. After Task 11
 // the daemon expects "<verb> <project>#<short_id>" rather than the old

@@ -155,7 +155,7 @@ func (s *Store) CreateRecurrenceForIssue(
 		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
-		issue, err := scanIssue(tx.QueryRowContext(ctx,
+		issue, err := scanIssue(ctx, tx.QueryRowContext(ctx,
 			issueSelect+` WHERE i.id = $1 AND i.project_id = $2 AND i.deleted_at IS NULL FOR UPDATE OF i`,
 			input.IssueID, create.ProjectID))
 		if err != nil {

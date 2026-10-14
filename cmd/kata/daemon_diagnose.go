@@ -13,6 +13,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -48,7 +49,9 @@ type daemonDiagnosis struct {
 	HubOrigin           string `json:"hub_origin,omitempty"`
 	Writable            *bool  `json:"writable,omitempty"`
 	ActorPolicy         string `json:"actor_policy,omitempty"`
-	NextAction          string `json:"next_action"`
+	// RootSigning is present when the live daemon cannot sign for a root project.
+	RootSigning *api.RootSigningHealth `json:"root_signing,omitempty"`
+	NextAction  string                 `json:"next_action"`
 }
 
 func daemonDiagnoseCmd() *cobra.Command {
@@ -261,6 +264,7 @@ func diagnoseDaemonSelection(
 	result, selection, err = probeDaemonSelection(ctx, result, selection)
 	if result.State == "ready" {
 		result.Writable, result.ActorPolicy = liveDaemonCapabilities(ctx, selection.Resolved)
+		result.RootSigning = liveRootSigningHealth(ctx, selection.Resolved)
 	}
 	if err == nil && result.State == "ready" && selection.Profile != nil &&
 		result.RuntimeVersion != version.Version {
@@ -423,6 +427,30 @@ func liveDaemonCapabilities(ctx context.Context, resolved client.ResolvedDaemon)
 	return instance.Capabilities.Writable, instance.Capabilities.ActorPolicy
 }
 
+// liveRootSigningHealth reads the owner diagnostics block from health. Other
+// principals and older daemons omit it, leaving the condition unreported.
+func liveRootSigningHealth(ctx context.Context, resolved client.ResolvedDaemon) *api.RootSigningHealth {
+	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
+	if err != nil {
+		return nil
+	}
+	apiClient, err := kataapi.NewWithHTTPClient(resolved.BaseURL, hc)
+	if err != nil {
+		return nil
+	}
+	resp, err := apiClient.HealthWithResponse(ctx)
+	if err != nil || resp == nil || resp.JSON200 == nil {
+		return nil
+	}
+	var health struct {
+		RootSigning *api.RootSigningHealth `json:"root_signing"`
+	}
+	if json.Unmarshal(resp.Body, &health) != nil {
+		return nil
+	}
+	return health.RootSigning
+}
+
 func unavailableRemoteState(endpoint string) string {
 	parsed, err := url.Parse(endpoint)
 	if err == nil {
@@ -504,6 +532,11 @@ func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {
 	}
 	if result.Message != "" {
 		if _, err = fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", result.Message); err != nil {
+			return err
+		}
+	}
+	if result.RootSigning != nil {
+		if _, err = fmt.Fprintf(cmd.OutOrStdout(), "  warning: %s\n", daemon.RootSigningWarning(*result.RootSigning)); err != nil {
 			return err
 		}
 	}

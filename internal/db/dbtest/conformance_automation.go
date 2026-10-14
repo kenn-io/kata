@@ -243,6 +243,28 @@ func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 	})
 	assert.ErrorIs(t, err, db.ErrNotFound)
 
+	// Ordinary human credentials may expire independently of subtree scope.
+	// Relay enrollments link to that live credential rather than widening scope.
+	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
+	ordinary, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "expiring-ordinary-token", Actor: "ordinary-member",
+		AdminActor: db.BootstrapActor, ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+	require.Nil(t, ordinary.Scope)
+	require.NotNil(t, ordinary.ExpiresAt)
+	require.WithinDuration(t, expiresAt, *ordinary.ExpiresAt, time.Millisecond)
+	liveOrdinary, err := store.ResolveAPIToken(ctx, "expiring-ordinary-token")
+	require.NoError(t, err)
+	require.Equal(t, ordinary.ID, liveOrdinary.ID)
+	_, _, err = store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "expired-ordinary-token", Actor: "ordinary-member",
+		AdminActor: db.BootstrapActor, ExpiresAt: &expiredAt,
+	})
+	require.NoError(t, err)
+	_, err = store.ResolveAPIToken(ctx, "expired-ordinary-token")
+	require.ErrorIs(t, err, db.ErrNotFound)
+
 	blankName := "  "
 	invalid := []db.CreateAPITokenParams{
 		{Actor: "actor", AdminActor: db.BootstrapActor},
@@ -250,7 +272,6 @@ func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 		{PlaintextToken: "another-token", Actor: "actor"},
 		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, Name: &blankName},
 		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, Scope: scope},
-		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, ExpiresAt: &expiresAt},
 		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor,
 			Scope: &db.APITokenScope{Kind: "unknown", ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID}, ExpiresAt: &expiresAt},
 	}

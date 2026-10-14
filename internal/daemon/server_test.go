@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,6 +65,8 @@ func TestServer_ExposesStandardPprofHandlers(t *testing.T) {
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, ts.Listener.Addr().(*net.TCPAddr)))
 			if tc.cancelBeforeHandle {
 				ctx, cancel := context.WithCancel(req.Context())
 				cancel()

@@ -59,7 +59,7 @@ func (s *Store) ReconcileDueNotification(ctx context.Context, input db.Reconcile
 	var output db.ReconcileDueNotificationOut
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.ReconcileDueNotificationOut{}
-		issue, recurrenceTimezone, err := scanScheduledIssue(tx.QueryRowContext(ctx,
+		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, tx.QueryRowContext(ctx,
 			scheduledIssueSelect+` WHERE i.id = $1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL FOR UPDATE OF i`,
 			input.IssueID))
 		if err != nil {

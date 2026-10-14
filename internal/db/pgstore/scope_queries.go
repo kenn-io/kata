@@ -9,15 +9,22 @@ import (
 )
 
 func appendAllowedIssueIDsPostgres(conditions *[]string, args *[]any, issueIDs []int64) {
+	if predicate, ok := allowedIssueIDsPredicate(issueIDs, numberedArg(args)); ok {
+		*conditions = append(*conditions, predicate)
+	}
+}
+
+// allowedIssueIDsPredicate renders the scoped candidate set as an issue row
+// predicate with the caller's placeholder style. ok is false for an
+// unrestricted (nil) candidate set; an empty set fails closed.
+func allowedIssueIDsPredicate(issueIDs []int64, bind func(any) string) (string, bool) {
 	if issueIDs == nil {
-		return
+		return "", false
 	}
 	if len(issueIDs) == 0 {
-		*conditions = append(*conditions, "FALSE")
-		return
+		return "FALSE", true
 	}
-	*args = append(*args, issueIDs)
-	*conditions = append(*conditions, fmt.Sprintf("i.id = ANY($%d::bigint[])", len(*args)))
+	return "i.id = ANY(" + bind(issueIDs) + "::bigint[])", true
 }
 
 func appendAllowedIssueIDsPostgresBuilder(query *strings.Builder, args *[]any, issueIDs []int64) {
@@ -54,7 +61,7 @@ func readIssueScopedMembers(ctx context.Context, query exportQueryer, scope db.A
 	defer func() { _ = rows.Close() }()
 	issues := []db.Issue{}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			return nil, err
 		}

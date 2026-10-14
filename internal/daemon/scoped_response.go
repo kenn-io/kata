@@ -3,7 +3,10 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
+	"os"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -35,7 +38,11 @@ type bufferedScopedResponse struct {
 	header     http.Header
 	body       bytes.Buffer
 	status     int
+	spill      *os.File
+	writeErr   error
 }
+
+const scopedResponseMemoryLimit = 1 << 20
 
 func newBufferedScopedResponse(w http.ResponseWriter) *bufferedScopedResponse {
 	return &bufferedScopedResponse{underlying: w, header: make(http.Header)}
@@ -52,14 +59,88 @@ func (w *bufferedScopedResponse) WriteHeader(status int) {
 
 func (w *bufferedScopedResponse) Write(body []byte) (int, error) {
 	w.WriteHeader(http.StatusOK)
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	if w.spill == nil && w.body.Len()+len(body) > scopedResponseMemoryLimit {
+		if err := w.startSpill(); err != nil {
+			w.writeErr = err
+			return 0, err
+		}
+	}
+	if w.spill != nil {
+		n, err := w.spill.Write(body)
+		if err == nil && n != len(body) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			w.writeErr = err
+		}
+		return n, err
+	}
 	return w.body.Write(body)
+}
+
+func (w *bufferedScopedResponse) startSpill() error {
+	file, err := os.CreateTemp("", "kata-scoped-response-")
+	if err != nil {
+		return err
+	}
+	if w.body.Len() > 0 {
+		n, writeErr := file.Write(w.body.Bytes())
+		if writeErr == nil && n != w.body.Len() {
+			writeErr = io.ErrShortWrite
+		}
+		if writeErr != nil {
+			closeErr := file.Close()
+			removeErr := os.Remove(file.Name())
+			return errors.Join(writeErr, closeErr, removeErr)
+		}
+	}
+	w.body = bytes.Buffer{}
+	w.spill = file
+	return nil
+}
+
+func (w *bufferedScopedResponse) prepare() error {
+	if w.writeErr != nil {
+		return w.writeErr
+	}
+	if w.spill != nil {
+		if _, err := w.spill.Seek(0, io.SeekStart); err != nil {
+			w.writeErr = err
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *bufferedScopedResponse) writeTo(destination http.ResponseWriter) {
 	for key, values := range w.header {
 		destination.Header()[key] = append([]string(nil), values...)
 	}
-	w.WriteHeader(http.StatusOK)
-	destination.WriteHeader(w.status)
+	status := w.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	destination.WriteHeader(status)
+	if w.spill != nil {
+		_, _ = io.Copy(destination, w.spill)
+		return
+	}
 	_, _ = destination.Write(w.body.Bytes())
+}
+
+func (w *bufferedScopedResponse) close() error {
+	if w.spill == nil {
+		return nil
+	}
+	name := w.spill.Name()
+	closeErr := w.spill.Close()
+	w.spill = nil
+	removeErr := os.Remove(name)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(closeErr, removeErr)
 }

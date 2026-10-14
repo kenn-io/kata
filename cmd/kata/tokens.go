@@ -59,8 +59,9 @@ func newTokensCmd() *cobra.Command {
 
 func tokensCreateCmd() *cobra.Command {
 	var actor, name, issue, expiresIn, tokenFile string
+	var teamNames []string
 	cmd := &cobra.Command{
-		Use:   "create --actor <actor> [--name <name>] [--issue <ref> --expires-in <duration> --token-file <path>]",
+		Use:   "create --actor <actor> [--name <name>] [--expires-in <duration>] [--issue <ref> --token-file <path>]",
 		Short: "create an identity token",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -68,9 +69,19 @@ func tokensCreateCmd() *cobra.Command {
 			if actor == "" {
 				return &cliError{Message: "actor is required", Kind: kindUsage, ExitCode: ExitUsage}
 			}
-			scoped := strings.TrimSpace(issue) != "" || strings.TrimSpace(expiresIn) != "" || strings.TrimSpace(tokenFile) != ""
+			scoped := strings.TrimSpace(issue) != "" || strings.TrimSpace(tokenFile) != ""
 			if scoped {
-				return createScopedToken(cmd, actor, name, issue, expiresIn, tokenFile)
+				return createScopedToken(cmd, actor, name, issue, expiresIn, tokenFile, teamNames)
+			}
+
+			var lifetimeSeconds *int64
+			if expiresIn = strings.TrimSpace(expiresIn); expiresIn != "" {
+				duration, err := time.ParseDuration(expiresIn)
+				if err != nil || duration <= 0 || duration < time.Second || duration%time.Second != 0 {
+					return &cliError{Message: "--expires-in must be a positive whole-second duration", Kind: kindValidation, Code: "invalid_token_expiration", ExitCode: ExitValidation}
+				}
+				seconds := int64(duration / time.Second)
+				lifetimeSeconds = &seconds
 			}
 			a, err := dialDaemon(cmd.Context())
 			if err != nil {
@@ -80,7 +91,11 @@ func tokensCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			payload := &generated.CreateTokenBody{Actor: actor}
+			payload := &generated.CreateTokenBody{Actor: actor, ExpiresInSeconds: lifetimeSeconds}
+			payload.TeamUids, err = resolveInitialTeamUIDs(a.ctx, apiClient, teamNames)
+			if err != nil {
+				return err
+			}
 			if trimmed := strings.TrimSpace(name); trimmed != "" {
 				payload.Name = &trimmed
 			}
@@ -105,12 +120,13 @@ func tokensCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&actor, "actor", "", "actor this token identifies")
 	cmd.Flags().StringVar(&name, "name", "", "human label for the token")
 	cmd.Flags().StringVar(&issue, "issue", "", "limit the token to this issue subtree")
-	cmd.Flags().StringVar(&expiresIn, "expires-in", "", "required lifetime for a scoped token")
+	cmd.Flags().StringVar(&expiresIn, "expires-in", "", "token lifetime; required with --issue")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "new owner-only file for scoped token plaintext")
+	cmd.Flags().StringArrayVar(&teamNames, "team", nil, "enroll the canonical actor in this team atomically (repeatable name or UID)")
 	return cmd
 }
 
-func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenPath string) (retErr error) {
+func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenPath string, teamNames []string) (retErr error) {
 	issue = strings.TrimSpace(issue)
 	expiresIn = strings.TrimSpace(expiresIn)
 	tokenPath = strings.TrimSpace(tokenPath)
@@ -168,6 +184,10 @@ func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenP
 		Actor:            actor,
 		Scope:            &generated.TokenScopeIn{Kind: generated.IssueSubtree, ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID},
 		ExpiresInSeconds: new(int64(duration / time.Second)),
+	}
+	payload.TeamUids, err = resolveInitialTeamUIDs(a.ctx, apiClient, teamNames)
+	if err != nil {
+		return err
 	}
 	if trimmed := strings.TrimSpace(name); trimmed != "" {
 		payload.Name = &trimmed

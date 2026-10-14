@@ -101,7 +101,7 @@ func TestSearchEndpoint_EmptyQueryIsValidationError(t *testing.T) {
 func TestSearchEndpoint_UnknownProjectIs404(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envGetRaw(t, env, "/api/v1/projects/9999/search?q=anything")
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 // TestSearchEndpointRepeatedLabelFiltersRequireEveryLabel pins that ?label=

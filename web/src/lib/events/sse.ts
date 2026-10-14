@@ -10,6 +10,7 @@ export async function* openEventStream(
   fetcher: typeof fetch,
   cursor: number,
   signal?: AbortSignal,
+  onOpen?: (() => void) | undefined,
 ): AsyncGenerator<EventFrame> {
   const headers = new Headers({ Accept: 'text/event-stream' })
   if (cursor > 0) headers.set('Last-Event-ID', String(cursor))
@@ -27,6 +28,7 @@ export async function* openEventStream(
   }
   if (response.status === 401) throw new AuthenticationRequiredError('Event stream unavailable')
   if (!response.ok || !response.body) throw new Error('Event stream unavailable')
+  onOpen?.()
   yield* parseEventStream(response.body)
 }
 

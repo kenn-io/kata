@@ -55,6 +55,7 @@ interface KataFixture {
   ): Promise<SeededIssue>
   restart(): Promise<void>
   restartReadonly(): Promise<void>
+  restartIdentity(enabled?: boolean): Promise<void>
 }
 
 interface RunningFixture {
@@ -240,6 +241,21 @@ listen = "127.0.0.1:${port}"
     },
     async restart() {
       await stopDaemon(daemon)
+      daemon = startDaemon(binary, workspace, environment)
+      await waitForPing(origin, daemon)
+    },
+    async restartIdentity(enabled = true) {
+      await stopDaemon(daemon)
+      const configPath = join(home, 'config.toml')
+      const original = (await readFile(configPath, 'utf8')).replace(
+        /\n\[auth\]\nrequire_token_identity = true\n$/,
+        '',
+      )
+      await writeFile(
+        configPath,
+        original + (enabled ? '\n[auth]\nrequire_token_identity = true\n' : ''),
+        { mode: 0o600 },
+      )
       daemon = startDaemon(binary, workspace, environment)
       await waitForPing(origin, daemon)
     },

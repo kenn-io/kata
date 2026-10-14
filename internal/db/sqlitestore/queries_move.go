@@ -35,6 +35,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return out, err
+	}
 
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
@@ -137,6 +140,14 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		in.ToProjectID, newShortID, newRev, ts, in.IssueID,
 	); err != nil {
 		return out, err
+	}
+	// A moved issue changes who can see it, so in-flight requests recheck
+	// what they exposed exactly as they do after a policy change.
+	if err := bumpProjectAccess(ctx, tx); err != nil {
+		return out, fmt.Errorf("advance project access revision: %w", err)
+	}
+	if err := rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, toProjectUID); err != nil {
+		return out, fmt.Errorf("rehome embedding artifacts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issue_claims SET project_id = ? WHERE issue_id = ?`, in.ToProjectID, in.IssueID); err != nil {

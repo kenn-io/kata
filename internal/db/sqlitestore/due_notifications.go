@@ -65,7 +65,7 @@ func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDue
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	issue, recurrenceTimezone, err := scanScheduledIssue(tx.QueryRowContext(ctx,
+	issue, recurrenceTimezone, err := scanScheduledIssue(ctx, tx.QueryRowContext(ctx,
 		scheduledIssueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, in.IssueID))
 	if err != nil {
 		return out, err

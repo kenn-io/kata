@@ -1,4 +1,5 @@
 import type { UIIssue, UILink } from '../api/generated'
+import type { KataCreationAttributionWire } from '@kenn-io/kata-ui'
 import type { UISnapshot } from '../state/snapshot'
 import type {
   KataLinkPeer,
@@ -244,7 +245,7 @@ function normalizeSelectedDetail(
       id: comment.id,
       issue_id: comment.issue_id,
       author: comment.author,
-      ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),
+      ...creationFields(comment),
       body: comment.body,
       created_at: comment.created_at,
     })),
@@ -310,6 +311,7 @@ function normalizeIssue(
     owner: issue.owner,
     assignment_expires_on: issue.assignment_expires_on,
     author: issue.author,
+    ...creationFields(issue),
     priority: issue.priority,
     labels: [...(issue.labels ?? [])],
     blocks: [],
@@ -322,6 +324,18 @@ function normalizeIssue(
     closed_reason: normalizeClosedReason(issue.closed_reason),
     closed_at: issue.closed_at,
     deleted_at: issue.deleted_at,
+  }
+}
+
+function creationFields(source: KataCreationAttributionWire): KataCreationAttributionWire {
+  return {
+    ...(source.verification === undefined ? {} : { verification: source.verification }),
+    ...(source.accountable_actor === undefined
+      ? {}
+      : { accountable_actor: source.accountable_actor }),
+    ...(source.source_actor === undefined ? {} : { source_actor: source.source_actor }),
+    ...(source.teammate === undefined ? {} : { teammate: source.teammate }),
+    ...(source.authority_uid === undefined ? {} : { authority_uid: source.authority_uid }),
   }
 }
 

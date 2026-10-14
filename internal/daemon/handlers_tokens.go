@@ -33,6 +33,13 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := db.ValidateTokenActor(in.Body.Actor); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
+		teams, err := db.NormalizeInitialTeams(in.Body.TeamUIDs)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		if err := validateInitialTeamAccess(ctx, cfg.DB, teams); err != nil {
+			return nil, err
+		}
 		plaintext, err := newPlaintextToken()
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -45,17 +52,19 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		tok, _, err := cfg.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		tok, event, err := cfg.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
 			PlaintextToken: plaintext,
 			Actor:          in.Body.Actor,
 			Name:           name,
 			AdminActor:     tokenAdminAuditActor(ctx, db.BootstrapActor),
 			Scope:          scope,
 			ExpiresAt:      expiresAt,
+			TeamUIDs:       teams,
 		})
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		cfg.Publish().Event(event.ProjectID, event)
 		out := &api.CreateTokenResponse{}
 		out.Body.Token = tokenOut(tok, tokenObservationTime(cfg))
 		out.Body.Plaintext = plaintext
@@ -164,11 +173,14 @@ func validateTokenGrantRequest(
 	expiresInSeconds int64,
 ) (*db.APITokenScope, *time.Time, error) {
 	if requested == nil {
-		if expiresInSeconds != 0 {
-			return nil, nil, api.NewError(400, "invalid_token_scope",
-				"expires_in_seconds requires a token scope", "", nil)
+		if expiresInSeconds == 0 {
+			return nil, nil, nil
 		}
-		return nil, nil, nil
+		if expiresInSeconds < 0 || expiresInSeconds > math.MaxInt64/int64(time.Second) {
+			return nil, nil, api.NewError(400, "invalid_token_expiration", "expires_in_seconds must be a positive, non-overflowing duration", "", nil)
+		}
+		expiresAt := time.Now().UTC().Add(time.Duration(expiresInSeconds) * time.Second)
+		return nil, &expiresAt, nil
 	}
 	if expiresInSeconds <= 0 || expiresInSeconds > math.MaxInt64/int64(time.Second) {
 		return nil, nil, api.NewError(400, "invalid_token_scope",

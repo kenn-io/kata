@@ -48,7 +48,7 @@ func readIssueScopedMembers(ctx context.Context, query uiQueryer, scope db.APITo
 	defer func() { _ = rows.Close() }()
 	issues := []db.Issue{}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			return nil, err
 		}

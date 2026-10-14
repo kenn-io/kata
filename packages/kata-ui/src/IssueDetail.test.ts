@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import IssueDetail from './IssueDetail.svelte'
 import type { KataIssueDetailModel } from './types.js'
+import { projectIssueDetail } from './projectIssueDetail.js'
 
 const detail: KataIssueDetailModel = {
   issue: {
@@ -60,6 +61,47 @@ const detail: KataIssueDetailModel = {
 
 describe('IssueDetail', () => {
   afterEach(cleanup)
+
+  it.each(['verified', 'pending', 'legacy'])(
+    'renders %s creation status for issues and comments',
+    (verification) => {
+      const wire = {
+        issue: {
+          uid: '01TASK',
+          title: 'Example issue',
+          status: 'open',
+          author: 'source-agent',
+          source_actor: 'source-agent',
+          teammate: 'example-worker',
+          verification,
+          accountable_actor: 'member-one',
+        },
+        comments: [
+          {
+            id: 1,
+            author: 'comment-agent',
+            source_actor: 'comment-agent',
+            teammate: 'comment-worker',
+            verification,
+            accountable_actor: 'member-two',
+            body: 'Example comment',
+            created_at: '2026-08-01T12:00:00Z',
+          },
+        ],
+      }
+      render(IssueDetail, { props: { detail: projectIssueDetail(wire) } })
+      expect(screen.getAllByText(`Creation: ${verification}`)).toHaveLength(2)
+      expect(screen.getByText('Source: source-agent / example-worker')).toBeTruthy()
+      expect(screen.getByText('Source: comment-agent / comment-worker')).toBeTruthy()
+      if (verification === 'verified') {
+        expect(screen.getByText('Accountable: member-one')).toBeTruthy()
+        expect(screen.getByText('Accountable: member-two')).toBeTruthy()
+      } else {
+        expect(screen.queryByText(/Accountable:/)).toBeNull()
+        expect(screen.queryByText(/member-one|member-two/)).toBeNull()
+      }
+    },
+  )
 
   it('renders the complete read-only issue presentation', async () => {
     render(IssueDetail, { props: { detail } })

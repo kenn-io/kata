@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
 )
 
@@ -19,6 +20,11 @@ var signingCapabilities = map[string][]string{
 	"getFederationProjectMetadata":  {"pull", "push"},
 	"pollFederationProjectEvents":   {"pull"},
 	"ingestFederationProjectEvents": {"push"},
+	"disconnectRelayEnrollment":     {"push"},
+	"getRelayReset":                 {"pull"},
+	"offerRelayDeliveries":          {"pull"},
+	"acceptRelayDeliveries":         {"push"},
+	"ackRelayDeliveries":            {"pull"},
 	"claimIssue":                    {"claim"},
 	"acquireIssueLease":             {"claim"},
 	"renewIssueLease":               {"claim"},
@@ -85,7 +91,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// used by metadata, event polls, and lease requests.
 		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
-		if route.operation == "ingestFederationProjectEvents" {
+		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" {
 			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
 		}
@@ -119,7 +125,14 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		}
 		auth := r.Header.Get("Authorization")
 		operation := federationTransportOperation(route.operation)
-		authorization, err := evaluateFederationRequestForCapabilities(ctx, s.cfg, auth, route.projectID, route.capabilities, operation)
+		relayCleanup := route.operation == "disconnectRelayEnrollment"
+		var authorization federationAuthorization
+		var err error
+		if relayCleanup {
+			authorization, err = evaluateRelaySelfRevocation(ctx, s.cfg, auth, route.projectID)
+		} else {
+			authorization, err = evaluateFederationRequestForCapabilities(ctx, s.cfg, auth, route.projectID, route.capabilities, operation)
+		}
 		if err != nil {
 			writeFederationPreauthorizationError(w, err)
 			return
@@ -153,12 +166,48 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			}
 			// Revocation during body upload must also stop reads. Mutations retain
 			// their native transaction fence through the cached authorization.
-			if _, err := s.cfg.DB.AuthorizeFederationToken(ctx, auth[len(authBearerPrefix):], route.projectID, authorization.capability); err != nil {
-				api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "federation enrollment revoked")
-				return
+			if !relayCleanup {
+				if _, err := s.cfg.DB.AuthorizeFederationToken(ctx, auth[len(authBearerPrefix):], route.projectID, authorization.capability); err != nil {
+					api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "federation enrollment revoked")
+					return
+				}
 			}
+		}
+		if relayCleanup {
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
 		}
 		ctx = withFederationAuthorization(ctx, auth, route.projectID, strings.Join(route.capabilities, ","), operation, authorization)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func evaluateRelaySelfRevocation(
+	ctx context.Context,
+	cfg ServerConfig,
+	authHeader string,
+	projectID int64,
+) (federationAuthorization, error) {
+	if !strings.HasPrefix(authHeader, authBearerPrefix) {
+		return federationAuthorization{}, api.NewError(http.StatusUnauthorized, "auth_required", "Authorization bearer required", "", nil)
+	}
+	token := strings.TrimPrefix(authHeader, authBearerPrefix)
+	if token == "" {
+		return federationAuthorization{}, api.NewError(http.StatusUnauthorized, "auth_required", "Authorization bearer required", "", nil)
+	}
+	resolver, ok := cfg.DB.(db.RelaySelfRevocationAuthenticator)
+	if !ok {
+		return federationAuthorization{}, api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "relay cleanup authentication unavailable", "", nil)
+	}
+	enrollmentID, err := resolver.RelaySelfRevocationEnrollmentID(ctx, token, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return federationAuthorization{}, federationCredentialDenied()
+	}
+	if err != nil {
+		return federationAuthorization{}, internalAPIError(err)
+	}
+	return federationAuthorization{principal: federationPrincipal{
+		EnrollmentID: enrollmentID, ScopedProjectID: projectID,
+	}}, nil
 }

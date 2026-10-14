@@ -46,7 +46,18 @@ type HealthResponse struct {
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
+		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
 	}
+}
+
+// RootSigningHealth reports root projects whose signed writes this daemon
+// cannot record because federation-root.key is missing, unreadable, or does
+// not match their pin. The block is absent when every local pin is signable.
+type RootSigningHealth struct {
+	KeyFile    string   `json:"key_file,omitempty"`
+	KeyLoaded  bool     `json:"key_loaded"`
+	KeyProblem string   `json:"key_problem,omitempty"`
+	Projects   []string `json:"projects"`
 }
 
 // IdleShutdownHealth advertises effective auto-start idle shutdown behavior. The
@@ -128,14 +139,18 @@ type FederationConfigHealth struct {
 // further calls.
 type InstanceResponse struct {
 	Body struct {
-		InstanceUID          string         `json:"instance_uid"`
-		Version              string         `json:"version"`
-		SchemaVersion        int64          `json:"schema_version"`
-		WebUIContractVersion string         `json:"web_ui_contract_version,omitempty"`
-		WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
-		IssueStatusSync      bool           `json:"issue_status_sync"`
-		IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
-		Auth                 AuthInfoOut    `json:"auth"`
+		InstanceUID                      string         `json:"instance_uid"`
+		Version                          string         `json:"version"`
+		SchemaVersion                    int64          `json:"schema_version"`
+		RelayProtocolVersion             int            `json:"relay_protocol_version,omitempty"`
+		ProvenanceProtocolVersion        int            `json:"provenance_protocol_version,omitempty"`
+		EmbeddingArtifactProtocolVersion int            `json:"embedding_artifact_protocol_version,omitempty"`
+		WebUIContractVersion             string         `json:"web_ui_contract_version,omitempty"`
+		WebUICapabilities                UICapabilities `json:"web_ui_capabilities"`
+		IssueStatusSync                  bool           `json:"issue_status_sync"`
+		IssueSubtreeTokens               bool           `json:"issue_subtree_tokens"`
+		FederationSigningRequired        bool           `json:"federation_signing_required,omitempty" doc:"True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source."`
+		Auth                             AuthInfoOut    `json:"auth"`
 	}
 }
 
@@ -174,6 +189,7 @@ type CreateTokenRequest struct {
 		Name             string        `json:"name,omitempty"`
 		Scope            *TokenScopeIn `json:"scope,omitempty"`
 		ExpiresInSeconds int64         `json:"expires_in_seconds,omitempty"`
+		TeamUIDs         []string      `json:"team_uids,omitempty" maxItems:"256"`
 	}
 }
 

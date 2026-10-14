@@ -4,13 +4,77 @@ import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/m
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
-function acceptCanonicalWire(
-  wire: ShowIssueResponseBody,
-): KataIssueDetailWire {
+function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
 
 describe('projectIssueDetail', () => {
+  it.each(['verified', 'pending', 'legacy'])(
+    'preserves %s creation attribution without inventing accountability',
+    (verification) => {
+      const wire = {
+        issue: {
+          uid: '01TASK',
+          title: 'Example issue',
+          status: 'open',
+          author: 'source-agent',
+          source_actor: 'source-agent',
+          teammate: 'example-worker',
+          verification,
+          accountable_actor: 'member-one',
+        },
+        comments: [
+          {
+            id: 1,
+            author: 'comment-agent',
+            source_actor: 'comment-agent',
+            teammate: 'comment-worker',
+            verification,
+            accountable_actor: 'member-two',
+            body: 'Example comment',
+            created_at: '2026-08-01T12:00:00Z',
+          },
+        ],
+      }
+      const model = projectIssueDetail(wire)
+      expect(model.issue).toHaveProperty('creation', {
+        verification,
+        sourceActor: 'source-agent',
+        teammate: 'example-worker',
+        ...(verification === 'verified' ? { accountableActor: 'member-one' } : {}),
+      })
+      expect(model.comments[0]).toHaveProperty('creation', {
+        verification,
+        sourceActor: 'comment-agent',
+        teammate: 'comment-worker',
+        ...(verification === 'verified' ? { accountableActor: 'member-two' } : {}),
+      })
+    },
+  )
+
+  it('does not assert proof for older daemons and treats unknown states as legacy', () => {
+    const wire = {
+      issue: {
+        uid: '01TASK',
+        title: 'Example issue',
+        status: 'open',
+        author: 'source-agent',
+      },
+    }
+    expect(projectIssueDetail(wire).issue).not.toHaveProperty('creation')
+    const unknown = {
+      issue: {
+        ...wire.issue,
+        verification: 'unknown',
+        accountable_actor: 'unverified-account',
+      },
+    }
+    expect(projectIssueDetail(unknown).issue).toHaveProperty('creation', {
+      verification: 'legacy',
+      sourceActor: 'source-agent',
+    })
+  })
+
   it('accepts the generated canonical issue-detail response type', () => {
     expect(acceptCanonicalWire).toBeTypeOf('function')
   })

@@ -69,6 +69,8 @@ func FederationEnrollmentAuthorizationMatches(
 ) bool {
 	if current.ID != admitted.ID || current.RevokedAt != nil ||
 		current.SpokeInstanceUID != admitted.SpokeInstanceUID ||
+		current.RelayBindingUID != admitted.RelayBindingUID || current.RelayProtocolVersion != admitted.RelayProtocolVersion ||
+		!sameOptionalInt64(current.ParentTokenID, admitted.ParentTokenID) || current.RelayResetEpoch != admitted.RelayResetEpoch || current.RelayServeDownstream != admitted.RelayServeDownstream ||
 		current.Capabilities != admitted.Capabilities || current.Actor != admitted.Actor ||
 		current.AllowAdoptionSnapshotAuthors != admitted.AllowAdoptionSnapshotAuthors ||
 		current.AdoptionBaselineOpen != admitted.AdoptionBaselineOpen ||

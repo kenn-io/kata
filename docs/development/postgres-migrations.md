@@ -131,3 +131,48 @@ columns takes a brief exclusive lock on `comments`. Existing table grants cover
 the new columns. Validation-only runtime credentials cannot migrate. Schema-31
 binaries cannot reopen schema 32; rollback requires the pre-upgrade backup and
 its matching older binary.
+
+## Schema 33: project hub relay
+
+The 32→33 migration adds the tables behind team access policies, signed root
+attribution, project relay transport, and portable embedding artifacts:
+
+- `teams`, `team_memberships`, `project_access_policies`, and
+  `project_access_teams`, plus the `project_access_revision` metadata key.
+  Membership belongs to a canonical actor, so rotating or revoking an
+  individual token does not remove it. Existing projects default to `all`
+  visibility for authenticated users. A `teams` policy with no remaining teams
+  stays restricted.
+- `federation_root_keys`, `federation_event_provenance`, and
+  `federation_entity_provenance`. Public-key pins identify each project's root
+  authority. Receipts and issue/comment creation references survive event
+  compaction. Existing rows stay legacy; the migration does not manufacture
+  attribution for historical authors. Private signing keys are not stored.
+- A wider `api_tokens` scope constraint, so an expiring relay parent token can
+  have no issue-subtree scope. `relay_config` on `federation_bindings`, and
+  `relay_binding_uid`, `relay_protocol_version`, `parent_token_id`,
+  `relay_reset_epoch`, and `relay_serve_downstream` on
+  `federation_enrollments`. `federation_relay_outbox`,
+  `federation_relay_inbox`, and `federation_relay_cursors`, with indexes for
+  pending relay work.
+- No new CHECK constraints. The row shapes these tables and columns need
+  (identifier and digest lengths, enumerations, positive epochs and
+  sequences, cursor ordering, relay enrollment shape and artifact size bounds)
+  are validated in Go for native writes, JSONL import and federation ingest;
+  the widened `api_tokens` scope constraint rewrites a pre-existing one.
+- `federation_embedding_artifacts`, which retains original little-endian
+  float32 vectors and their chunk manifests independently of the local vector
+  index. Pre-content staging is limited to 32 artifacts and 32 MiB per project
+  for 24 hours and is excluded from durable presence. The table starts empty;
+  upgrading does not request embeddings or convert a lossy index into original
+  vectors.
+
+Stop the daemon and run `kata storage postgres migrate` as the schema owner.
+The migration and the version stamp commit under the existing schema advisory
+lock. Refresh runtime grants for the eleven new tables using the procedure in
+[PostgreSQL operations](../operations/postgres.md), then start the matching
+binary. Validation-only runtime credentials cannot perform this upgrade. Schema
+32 binaries cannot reopen schema 33; rollback requires a pre-upgrade backup and
+the matching older binary. Whole-database backups retain policies, team
+memberships, receipts, relay state, and artifacts; project exports exclude the
+hub-local administrative objects and relay delivery state.

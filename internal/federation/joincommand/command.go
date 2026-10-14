@@ -39,12 +39,14 @@ func Build(in api.FederationJoinInstructions) string {
 		args = append(args, "--adopt-existing")
 	}
 	for i, arg := range args {
-		args[i] = shellQuote(arg)
+		args[i] = ShellQuote(arg)
 	}
 	return strings.Join(args, " ")
 }
 
-func shellQuote(s string) string {
+// ShellQuote returns s as one POSIX shell argument, quoting it only when it
+// holds characters outside the plain command-line set.
+func ShellQuote(s string) string {
 	if s != "" && strings.IndexFunc(s, func(r rune) bool {
 		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("-_./:=,", r)
 	}) == -1 {

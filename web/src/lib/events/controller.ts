@@ -7,6 +7,7 @@ export class InvalidationController {
   readonly #refresh: Refresh
   #pending: ReturnType<typeof setTimeout> | undefined
   #full = false
+  #fullGeneration = 0
   #dirty = false
   #running = false
   #stopped = false
@@ -17,8 +18,27 @@ export class InvalidationController {
   }
 
   frame(frame: EventFrame): void {
-    this.#full ||= frame.event === 'sync.reset_required'
+    if (frame.event === 'sync.reset_required') {
+      this.refreshAll()
+      return
+    }
     this.refresh()
+  }
+
+  refreshAll(): void {
+    this.#full = true
+    this.#fullGeneration += 1
+    this.refresh()
+  }
+
+  reconnect(): void {
+    this.#full = true
+    this.#fullGeneration += 1
+    this.#stopped = false
+    this.#dirty = true
+    if (this.#pending !== undefined) clearTimeout(this.#pending)
+    this.#pending = undefined
+    if (!this.#running) void this.#drain()
   }
 
   refresh(): void {
@@ -30,13 +50,14 @@ export class InvalidationController {
   async resume(): Promise<boolean> {
     this.#stopped = false
     const full = this.#full
+    const fullGeneration = this.#fullGeneration
     let accepted = false
     try {
       accepted = await this.#refresh(full)
     } catch {
       // The visible recovery action can retry without losing a reset latch.
     }
-    if (full && accepted) this.#full = false
+    if (full && accepted && fullGeneration === this.#fullGeneration) this.#full = false
     return accepted
   }
 
@@ -56,6 +77,7 @@ export class InvalidationController {
       while (this.#dirty) {
         this.#dirty = false
         const full = this.#full
+        const fullGeneration = this.#fullGeneration
         let accepted = false
         try {
           accepted = await this.#refresh(full)
@@ -63,7 +85,7 @@ export class InvalidationController {
           // A bounded retry preserves event authority after transient failure.
         }
         if (accepted) this.#retryDelay = 1000
-        if (full && accepted) this.#full = false
+        if (full && accepted && fullGeneration === this.#fullGeneration) this.#full = false
         if (!accepted) {
           retry = true
           break
@@ -111,7 +133,7 @@ export class ReconnectBackoff {
 }
 
 interface EventStreamControllerOptions {
-  connect: (cursor: number, signal: AbortSignal) => AsyncIterable<EventFrame>
+  connect: (cursor: number, signal: AbortSignal, onOpen: () => void) => AsyncIterable<EventFrame>
   onFrame: (frame: EventFrame) => void
   onState?: ((state: 'connecting' | 'online' | 'reconnecting' | 'stopped') => void) | undefined
   onAuthenticationRequired?: (() => void) | undefined
@@ -157,10 +179,16 @@ export class EventStreamController {
     const backoff = new ReconnectBackoff()
     while (!signal.aborted) {
       let productive = false
+      let opened = false
+      const markOnline = (): void => {
+        if (signal.aborted || opened) return
+        opened = true
+        this.#onState('online')
+      }
       try {
-        for await (const frame of this.#connect(this.#cursor, signal)) {
+        for await (const frame of this.#connect(this.#cursor, signal, markOnline)) {
           if (signal.aborted) return
-          if (!productive) this.#onState('online')
+          markOnline()
           productive = true
           const eventID = Number.parseInt(frame.id, 10)
           if (Number.isSafeInteger(eventID) && eventID >= 0) this.#cursor = eventID

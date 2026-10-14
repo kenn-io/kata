@@ -143,10 +143,14 @@ func registerLeaseTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, true)
 	mutating := toolHints(false, true, true)
+	addTool(server, "kata.federation_bridge_connect", "Connect project bridge", "Connect a selected project through a named hub catalog account. Preflight is read-only; requires --all and daemon-owner API authority.", mutating, handlers.federationBridgeConnect)
+	addTool(server, "kata.federation_bridge_status", "Read project bridge status", "Read one local bridge's recorded state, including a pending enrollment, without secrets or upstream requests. Requires --all and daemon-owner API authority.", read, handlers.federationBridgeStatus)
+	addTool(server, "kata.federation_bridge_disconnect", "Disconnect project bridge", "Preview or resume narrow-grant revocation and detach while preserving local data. local_only detaches from a hub that is gone without revoking its grant. Requires --all and daemon-owner API authority.", mutating, handlers.federationBridgeDisconnect)
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
 	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, or commit phase of resumable federation leave.", mutating, handlers.federationLeave)
+	addTool(server, "kata.federation_root_key_repin", "Repin root signing key", "Preview or pin a hub project rooted on this daemon to its loaded federation-root.key, creating the key when missing. Without previous_key_file, downstream relays that pinned the previous key can no longer sync this project. Requires --all and daemon-owner API authority.", toolHints(false, true, false), handlers.federationRootKeyRepin)
 	addTool(server, "kata.federation_quarantine", "Resolve quarantine", "Retry or skip a federation quarantine batch after exact confirmation.", mutating, handlers.federationQuarantine)
 }
 

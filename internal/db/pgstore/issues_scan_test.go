@@ -75,14 +75,14 @@ func TestIssueDestinationsMapsSelectPositionsToFields(t *testing.T) {
 	var issue db.Issue
 	var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 	dest := issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt)
-	require.Len(t, dest, 21, "issueSelect projects twenty-one columns")
+	require.Len(t, dest, 22, "issueSelect includes the creation attribution projection")
 
 	row := fakeIssueRow{columns: []any{
 		int64(701), "issue-uid-2", int64(703), "project-uid-4", "short-5",
 		"title-6", "body-7", "closed", "completed", "owner-10",
 		"2026-05-23T12:30:00.000Z", int64(712), "author-13", `{"column":14}`, int64(715), int64(716),
 		"occurrence-17", "2026-05-23T12:00:00.000Z", "2026-05-23T13:01:00.000Z",
-		"2026-05-24T14:02:00.000Z", "2026-05-25T15:03:00.000Z",
+		"2026-05-24T14:02:00.000Z", "2026-05-25T15:03:00.000Z", nil,
 	}}
 	require.NoError(t, row.Scan(dest...))
 	issue.AssignmentExpiresOn = assignmentExpiresOn.Time

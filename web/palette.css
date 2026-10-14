@@ -21,6 +21,9 @@
 
   --accent-blue: #0061d5;
   --accent-amber: #b45309;
+  --accent-yellow: #b58a00;
+  --bg-connection: #fff3bb;
+  --text-connection: #493800;
   --accent-purple: #6d4ad6;
   --accent-green: #047857;
   --accent-red: #c62828;
@@ -54,6 +57,9 @@
 
   --accent-blue: #4d9cff;
   --accent-amber: #f0a64a;
+  --accent-yellow: #e8c547;
+  --bg-connection: #332d13;
+  --text-connection: #f3e7bc;
   --accent-purple: #a995f5;
   --accent-green: #4cc38a;
   --accent-red: #f27474;

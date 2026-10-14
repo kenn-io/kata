@@ -110,7 +110,9 @@ jobs:
             -e KATA_BACKUP_DIR=/data/backups -e KATA_BACKUP_INTERVAL=1s \
             -e KATA_BACKUP_RETAIN=1h -e KATA_TELEMETRY_ENABLED=off "$image")
           port=$(docker port "$container" 7777/tcp)
-          curl --fail --retry 60 --retry-delay 1 --retry-connrefused \
+          # Docker's port proxy accepts and resets connections until the
+          # daemon listens; plain --retry does not retry a reset.
+          curl --fail --retry 60 --retry-delay 1 --retry-all-errors \
             -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/ping"
           curl --fail -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/health"
           test "$(docker exec "$container" id -u)" = 1000

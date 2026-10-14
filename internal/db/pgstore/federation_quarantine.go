@@ -31,6 +31,18 @@ func (s *Store) RecordFederationQuarantine(
 	var output db.FederationQuarantine
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationQuarantine{}
+		if input.RelayBindingUID != "" {
+			if err := lockProjectAccess(ctx, tx); err != nil {
+				return err
+			}
+			grant, err := s.upstreamRelayGrantTx(ctx, tx, input.RelayBindingUID)
+			if err != nil {
+				return err
+			}
+			if grant.ProjectID == nil || *grant.ProjectID != input.ProjectID || grant.RelayResetEpoch != input.RelayResetEpoch {
+				return db.ErrNotFound
+			}
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO federation_quarantine(
   project_id,direction,first_event_id,last_event_id,event_uids,error,created_at
 ) SELECT $1,$2,$3,$4,$5,$6,$7
@@ -98,11 +110,18 @@ func (s *Store) SkipFederationQuarantine(
 	var output db.FederationQuarantine
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationQuarantine{}
+		relay, err := s.quarantineRelayBindingTx(ctx, tx, input.ProjectID)
+		if err != nil {
+			return err
+		}
 		quarantine, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
 			federationQuarantineSelect+` WHERE id=$1 AND project_id=$2 AND skipped_at IS NULL FOR UPDATE`,
 			input.ID, input.ProjectID))
 		if err != nil {
 			return err
+		}
+		if relay {
+			return db.ErrRelayQuarantineSkipUnsupported
 		}
 		if quarantine.Direction != db.FederationQuarantineDirectionPush {
 			return fmt.Errorf("skip federation quarantine: unsupported direction %q", quarantine.Direction)
@@ -127,7 +146,8 @@ skipped_by=$2,skip_reason=$3 WHERE id=$4 AND project_id=$5 AND skipped_at IS NUL
 	return output, err
 }
 
-// RetryFederationQuarantine resolves a push quarantine without advancing its cursor.
+// RetryFederationQuarantine resolves a legacy push or negotiated relay quarantine
+// without advancing any cursor.
 func (s *Store) RetryFederationQuarantine(
 	ctx context.Context,
 	input db.RetryFederationQuarantineParams,
@@ -143,13 +163,17 @@ func (s *Store) RetryFederationQuarantine(
 	var output db.FederationQuarantine
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationQuarantine{}
+		relay, err := s.quarantineRelayBindingTx(ctx, tx, input.ProjectID)
+		if err != nil {
+			return err
+		}
 		quarantine, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
 			federationQuarantineSelect+` WHERE id=$1 AND project_id=$2 AND skipped_at IS NULL FOR UPDATE`,
 			input.ID, input.ProjectID))
 		if err != nil {
 			return err
 		}
-		if quarantine.Direction != db.FederationQuarantineDirectionPush {
+		if quarantine.Direction != db.FederationQuarantineDirectionPush && !relay {
 			return fmt.Errorf("%w: %s", db.ErrFederationQuarantineRetryUnsupportedDirection, quarantine.Direction)
 		}
 		reason := strings.TrimSpace(input.Reason)
@@ -202,4 +226,16 @@ func scanFederationQuarantine(row rowScanner) (db.FederationQuarantine, error) {
 		quarantine.SkipReason = &skipReason.String
 	}
 	return quarantine, nil
+}
+
+// Disposition cannot reinterpret a relay hop sequence as a legacy event cursor.
+func (s *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
+	if err := lockProjectAccess(ctx, tx); err != nil {
+		return false, err
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	return binding.RelayConfig != nil, err
 }

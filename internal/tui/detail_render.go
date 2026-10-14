@@ -108,6 +108,9 @@ func (dm detailModel) documentHeader(width int, chrome viewChrome) []string {
 	if byline := renderDocumentByline(width, iss); byline != "" {
 		lines = append(lines, withGutter(byline))
 	}
+	for _, row := range creationAttributionLines(iss.AttributionView, iss.Author, iss.Teammate, width) {
+		lines = append(lines, withGutter(subtleStyle.Render(row)))
+	}
 	for _, row := range renderDocumentMetadata(
 		width, iss, dm.parent, dm.children, chrome.scope, dm.uidFormat,
 	) {

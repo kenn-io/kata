@@ -20,6 +20,10 @@ func TestAllSchemaTablesExist(t *testing.T) {
 	d := openTestDB(t)
 	wanted := []string{
 		"cron_jobs", "cron_workflows", "cron_runs",
+		"federation_embedding_artifacts",
+		"federation_root_keys", "federation_event_provenance", "federation_entity_provenance",
+		"federation_relay_outbox", "federation_relay_inbox", "federation_relay_cursors",
+		"teams", "team_memberships", "project_access_policies", "project_access_teams",
 		"projects", "project_aliases", "issues", "comments",
 		"links", "issue_labels", "events", "purge_log", "project_purge_log",
 		"api_tokens", "federation_bindings", "federation_sync_status",

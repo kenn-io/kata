@@ -97,7 +97,7 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 			return err
 		}
 		event, changed = &created, true
-		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})
 	return issue, event, changed, err
@@ -203,7 +203,7 @@ func (s *Store) updateIssueAttribute(
 			return err
 		}
 		event, changed = &created, true
-		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})
 	return issue, event, changed, err
@@ -306,7 +306,7 @@ func (s *Store) ClaimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 		}
 		result.Changed = true
 		result.PreviousOwner = previousOwner
-		result.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		result.Issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		if err == nil {
 			result.Event = &result.Events[len(result.Events)-1]
 		}
@@ -466,7 +466,7 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
-		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})
 	return issue, events, changed, err
@@ -511,7 +511,7 @@ func (s *Store) RestoreIssue(ctx context.Context, issueID int64, actor string) (
 			return err
 		}
 		event, changed = &created, true
-		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})
 	return issue, event, changed, err
@@ -567,7 +567,7 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 			}
 		}
 		event, changed = &created, true
-		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})
 	return issue, event, changed, err
@@ -579,7 +579,7 @@ func lockedIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, includeDelete
 		query += ` AND i.deleted_at IS NULL`
 	}
 	query += ` FOR UPDATE OF i`
-	issue, err := scanIssue(tx.QueryRowContext(ctx, query, issueID))
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, query, issueID))
 	if err != nil {
 		return db.Issue{}, db.Project{}, err
 	}
@@ -589,6 +589,9 @@ func lockedIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, includeDelete
 	}
 	if project.DeletedAt != nil {
 		return db.Issue{}, db.Project{}, db.ErrNotFound
+	}
+	if err := db.CheckProjectAccessTransaction(ctx, tx, project.UID); err != nil {
+		return db.Issue{}, db.Project{}, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 		return db.Issue{}, db.Project{}, err

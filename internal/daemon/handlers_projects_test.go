@@ -1050,7 +1050,7 @@ func TestRenameProject_MissingIs404(t *testing.T) {
 	resp, bs := patchJSON(t, ts, "/api/v1/projects/9999", map[string]any{
 		"name": "Missing", "actor": "user-a",
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 func TestMergeProject_SourceMovesIntoSurvivingTarget(t *testing.T) {
@@ -1101,7 +1101,7 @@ func TestMergeProject_SystemProjectReturns404(t *testing.T) {
 	resp, bs = postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/merge", map[string]any{
 		"source_project_id": target.ID, "actor": "user-a",
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+	assertAPIError(t, resp.StatusCode, bs, 404, "not_found")
 }
 
 // TestRemoveProject_ArchivesAndDropsAliases pins #24's wire shape: DELETE
@@ -1424,6 +1424,27 @@ func TestMergeProject_IssueSyncBindingReturns409(t *testing.T) {
 	})
 
 	assertAPIError(t, resp.StatusCode, bs, 409, "project_merge_issue_sync_binding")
+}
+
+func TestMergeProject_RestrictedSourceIntoOpenTargetReturns409(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	ctx := t.Context()
+	source, err := h.db.CreateProject(ctx, "source")
+	require.NoError(t, err)
+	target, err := h.db.CreateProject(ctx, "target")
+	require.NoError(t, err)
+	team, _, err := h.db.CreateTeam(ctx, "source-team", "admin")
+	require.NoError(t, err)
+	_, _, err = h.db.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{
+		ProjectUID: source.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+	}, "admin")
+	require.NoError(t, err)
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(target.ID, 10)+"/merge", map[string]any{
+		"source_project_id": source.ID, "actor": "user-a",
+	})
+
+	assertAPIError(t, resp.StatusCode, bs, 409, "project_merge_access_policy")
 }
 
 func TestInit_MergedKataTomlNameResolvesToSurvivingProject(t *testing.T) {

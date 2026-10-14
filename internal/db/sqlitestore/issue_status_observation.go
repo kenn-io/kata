@@ -41,7 +41,7 @@ func (s *Store) observeIssueStatusTx(ctx context.Context, tx *sql.Tx, p db.Issue
 	if err != nil {
 		return false, nil, err
 	}
-	issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1 AND i.deleted_at IS NULL`, *current.Mapping.IssueID))
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1 AND i.deleted_at IS NULL`, *current.Mapping.IssueID))
 	if err != nil {
 		return false, nil, err
 	}

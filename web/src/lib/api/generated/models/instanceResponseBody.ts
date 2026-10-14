@@ -6,9 +6,14 @@ import type { UICapabilities } from './uICapabilities.ts'
 
 export interface InstanceResponseBody {
   auth: AuthInfoOut
+  embedding_artifact_protocol_version?: number
+  /** True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source. */
+  federation_signing_required?: boolean
   instance_uid: string
   issue_status_sync: boolean
   issue_subtree_tokens: boolean
+  provenance_protocol_version?: number
+  relay_protocol_version?: number
   schema_version: number
   version: string
   web_ui_capabilities: UICapabilities

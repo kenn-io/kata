@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,41 @@ func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing
 	assert.Equal(t, 1, calls)
 }
 
+func TestWebDaemonRestrictedRosterFallsBackToLocalMux(t *testing.T) {
+	localMux := http.NewServeMux()
+	localMux.HandleFunc("GET /api/v1/ui/snapshot", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "local snapshot")
+	})
+	gateway := &webDaemonGateway{
+		catalog:  []config.CatalogDaemonConfig{{Name: "local", URL: "https://daemon.example"}},
+		localMux: localMux,
+	}
+	ctx := db.WithAuthorizedProjects(
+		WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}),
+		[]string{"example-project-uid"},
+	)
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil).WithContext(ctx)
+	roster := httptest.NewRecorder()
+	gateway.list(roster, request)
+	require.Equal(t, http.StatusOK, roster.Code)
+	var listed webDaemonRosterResponse
+	require.NoError(t, json.Unmarshal(roster.Body.Bytes(), &listed))
+	require.Len(t, listed.Daemons, 1,
+		"a project-scoped browser must retain access to its authorized local daemon when all configured targets are remote")
+	assert.Equal(t, "local-local", listed.Daemons[0].ID,
+		"the local fallback id must not collide with a configured remote daemon")
+	assert.True(t, listed.Daemons[0].Local)
+	assert.True(t, listed.Daemons[0].Default)
+
+	proxyRequest := httptest.NewRequest(http.MethodGet,
+		"http://127.0.0.1/api/v1/ui/snapshot", nil).WithContext(ctx)
+	proxyRequest.Header.Set(webDaemonHeaderName, listed.Daemons[0].ID)
+	proxyResponse := httptest.NewRecorder()
+	gateway.ServeHTTP(proxyResponse, proxyRequest)
+	assert.Equal(t, http.StatusOK, proxyResponse.Code, proxyResponse.Body.String())
+	assert.Equal(t, "local snapshot", proxyResponse.Body.String())
+}
+
 func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads(t *testing.T) {
 	var snapshotReads int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +125,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 			ContractVersion: api.UISnapshotContractVersion,
 			Cursor:          7,
 			Capabilities: api.UICapabilities{
-				Writable: true, Updates: "sse", ActorPolicy: "request", TokenAuditRead: true,
+				Writable: true, Updates: "sse", ActorPolicy: "request", TokenAuditRead: true, AccessAdmin: true,
 			},
 		})
 	}))
@@ -109,6 +145,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.False(t, snapshot.Capabilities.Writable)
 	assert.Equal(t, "poll", snapshot.Capabilities.Updates)
 	assert.False(t, snapshot.Capabilities.TokenAuditRead)
+	assert.False(t, snapshot.Capabilities.AccessAdmin)
 	gatewayETag := first.Header().Get("ETag")
 	require.NotEmpty(t, gatewayETag)
 	assert.NotEqual(t, `"remote-snapshot"`, gatewayETag)
@@ -157,6 +194,17 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 		"/api/v1/projects/7/recurrences/01J00000000000000000000001", nil, "")
 	assert.Equal(t, http.StatusForbidden, mutationResponse.Code, mutationResponse.Body.String())
 	assert.Equal(t, 0, mutationCalls)
+}
+
+// The lower gateway layer also preserves identity policy when a trusted host
+// supplies an otherwise admitted source; a target never upgrades it to writes.
+func TestDelegatedWebDaemonPolicyPreservesIdentitySourceAttribution(t *testing.T) {
+	gateway := &webDaemonGateway{}
+	source := gateway.sourcePolicy(WithPrincipal(t.Context(), Principal{Kind: PrincipalTrustedProxy, Actor: "user-a"}))
+	require.True(t, source.writable)
+	delegated := delegatedWebDaemonSourcePolicy(source)
+	assert.Equal(t, "identity", delegated.actorPolicy)
+	assert.False(t, delegated.writable)
 }
 
 func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
@@ -704,4 +752,57 @@ func authorizedGatewayRequest(
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+// A browser whose session is backed by an ordinary database token selects the
+// local daemon through the switcher, so its event stream arrives on the
+// gateway path. The stream must flush live frames there exactly as it does on
+// the direct path; a buffered read-withholding response cannot carry SSE.
+func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T) {
+	store := openAuthTestDB(t)
+	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
+	token, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-test-token", Actor: "member", AdminActor: "admin"})
+	require.NoError(t, err)
+	manager, err := NewWebSessionManager(WebSessionManagerConfig{
+		Origin: "http://127.0.0.1:27123", InstanceID: "instance_a", Writable: true, Updates: "sse", DB: store,
+	})
+	require.NoError(t, err)
+	server := NewServer(ServerConfig{
+		DB: store, StartedAt: time.Now().UTC(), WebSessions: manager,
+		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{
+		Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true,
+	})
+	require.NoError(t, err)
+	listener := httptest.NewServer(handler)
+	t.Cleanup(listener.Close)
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalDBToken, Actor: "member", TokenID: token.ID}, "/kata")
+	require.NoError(t, err)
+
+	for _, path := range []string{pathEventsStreamPath, webDaemonProxyPrefix + pathEventsStreamPath} {
+		t.Run(path, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, listener.URL+path, nil)
+			require.NoError(t, err)
+			request.Host = "127.0.0.1:27123"
+			request.Header.Set("Accept", "text/event-stream")
+			request.Header.Set(webDaemonHeaderName, "example-local")
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			request.Header.Set("Origin", "http://127.0.0.1:27123")
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			response, err := listener.Client().Do(request)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			require.Equal(t, "text/event-stream", response.Header.Get("Content-Type"))
+			handshake := make([]byte, 16)
+			n, err := response.Body.Read(handshake)
+			require.NoError(t, err)
+			require.Contains(t, string(handshake[:n]), ": connected", "the stream flushes its handshake before any event")
+		})
+	}
 }

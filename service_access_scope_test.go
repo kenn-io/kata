@@ -686,13 +686,16 @@ func TestServiceAccessControllerSuppliesFederationReplicaActor(t *testing.T) {
 	response, err := server.Client().Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
-	require.Equal(t, http.StatusOK, response.StatusCode)
+	responseBody := new(bytes.Buffer)
+	_, err = responseBody.ReadFrom(response.Body)
+	require.NoError(t, err)
+	require.Equalf(t, http.StatusOK, response.StatusCode, "response body: %s", responseBody.String())
 	var created struct {
 		Binding struct {
 			Actor string `json:"actor"`
 		} `json:"binding"`
 	}
-	require.NoError(t, json.NewDecoder(response.Body).Decode(&created))
+	require.NoError(t, json.NewDecoder(bytes.NewReader(responseBody.Bytes())).Decode(&created))
 	assert.Equal(t, "Example User", created.Binding.Actor)
 }
 

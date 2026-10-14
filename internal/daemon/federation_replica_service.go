@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.kenn.io/kata/internal/api"
+
 	"go.kenn.io/kata/internal/httpurl"
 
 	"go.kenn.io/kata/internal/config"
@@ -95,11 +97,17 @@ type EnsureFederationReplicaParams struct {
 	HubProjectID                       int64
 	ReplayHorizonEventID               int64
 	Credential                         config.FederationCredential
-	CredentialRekey                    *FederationReplicaCredentialRekeySource
-	ManagedReservation                 *FederationReplicaManagedReservation
-	ProjectEventSink                   func(db.Event)
-	PushEnabled, AdoptExisting         bool
-	AttachEmpty                        bool
+	// ExpectedCredential fences a manual enrollment response against the exact
+	// local candidate retained before network I/O.
+	ExpectedCredential         *config.FederationCredential
+	CredentialRekey            *FederationReplicaCredentialRekeySource
+	ManagedReservation         *FederationReplicaManagedReservation
+	ProjectEventSink           func(db.Event)
+	PushEnabled, AdoptExisting bool
+	AttachEmpty                bool
+	Relay                      *api.RelayHandshake
+	RelayLocalActor            string
+	RelayServeDownstream       bool
 }
 
 // FederationReplicaCredentialRekeySource identifies the standalone credential
@@ -553,6 +561,14 @@ func EnsureFederationReplica(
 		return EnsureFederationReplicaResult{}, err
 	}
 	p = normalized
+	if p.Relay != nil {
+		if err := replicaRelayConfig(p).Validate(store.InstanceUID()); err != nil {
+			return EnsureFederationReplicaResult{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid relay hop enrollment", "")
+		}
+		if err := federationcoord.ValidateRelayRootAuthority(ctx, store, *p.Relay); err != nil {
+			return EnsureFederationReplicaResult{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid relay root enrollment", "")
+		}
+	}
 	result, err := ensureFederationReplicaState(ctx, store, credentials, p)
 	if err != nil {
 		return result, err
@@ -561,6 +577,19 @@ func EnsureFederationReplica(
 		wake()
 	}
 	return result, nil
+}
+
+func replicaRelayConfig(p EnsureFederationReplicaParams) db.RelayBindingConfig {
+	return db.RelayBindingConfig{
+		ProtocolVersion:     p.Relay.ProtocolVersion,
+		BindingUID:          p.Relay.BindingUID,
+		UpstreamInstanceUID: p.Relay.UpstreamInstanceUID,
+		AuthorityUID:        p.Relay.Root.AuthorityUID,
+		HubPath:             p.Relay.HubPath,
+		LocalActor:          p.RelayLocalActor,
+		ServeDownstream:     p.RelayServeDownstream,
+		ResetEpoch:          p.Relay.ResetEpoch,
+	}
 }
 
 // ReserveFederationReplicaCredential reserves an initial credential while
@@ -688,6 +717,21 @@ func ensureFederationReplicaState(
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
+	if p.ExpectedCredential != nil {
+		if _, ok := credentials.(config.FederationCredentialReplacer); !ok {
+			return EnsureFederationReplicaResult{}, credentialIOError("exact enrollment candidate activation is unavailable")
+		}
+		if credentials == nil {
+			return EnsureFederationReplicaResult{}, credentialIOError("read enrollment candidate before setup")
+		}
+		current, found, err := credentials.FederationCredential(ctx, p.HubProjectUID)
+		if err != nil {
+			return EnsureFederationReplicaResult{}, credentialIOError("read enrollment candidate before setup")
+		}
+		if !found || !current.Equal(*p.ExpectedCredential) {
+			return EnsureFederationReplicaResult{}, federationReplicaError(ErrFederationReplicaReservationChanged, "enrollment candidate changed while contacting the hub", "retry after resolving the current credential")
+		}
+	}
 	if err := revalidateManagedReservation(ctx, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
@@ -719,19 +763,89 @@ func ensureFederationReplicaState(
 	if err != nil {
 		return result, err
 	}
+	if p.Relay != nil {
+		var beforeCredential config.FederationCredential
+		var hadCredential bool
+		if credentials != nil {
+			beforeCredential, hadCredential, err = credentials.FederationCredential(ctx, result.Project.UID)
+			if err != nil {
+				return result, credentialIOError("read relay credential before drain")
+			}
+			if beforeCredential.LeavePending {
+				return result, federationReplicaError(ErrFederationReplicaLeavePending, "explicit federation leave is pending", "finish the pending leave before reconnecting")
+			}
+		}
+		key := federationReplicaOperationKey(store, p.ProjectName, p.Credential)
+		beforeLeave := federationReplicaTransitions.state(key)
+		// Rebind acquires the project gate before the global replica mutex.
+		// Match that order while waiting for network-bound sync to drain.
+		ensureFederationReplicaMu.Unlock()
+		finish, gateErr := federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), result.Project.ID), store, result.Project.ID)
+		ensureFederationReplicaMu.Lock()
+		if gateErr != nil {
+			return result, gateErr
+		}
+		defer finish()
+		if federationReplicaTransitions.state(key) != beforeLeave {
+			return result, federationReplicaError(ErrFederationReplicaLeavePending, "explicit federation leave is pending", "finish the pending leave before reconnecting")
+		}
+		currentProject, currentErr := store.ProjectByUID(ctx, p.HubProjectUID)
+		if currentErr != nil || currentProject.ID != result.Project.ID || currentProject.Name != p.ProjectName || currentProject.DeletedAt != nil {
+			return result, ErrFederationReplicaBindingConflict
+		}
+		currentBinding, currentErr := store.FederationBindingByProject(ctx, currentProject.ID)
+		if currentErr != nil || !currentBinding.Enabled || len(replicaBindingConflictDetails(currentBinding, p)) > 0 {
+			return result, ErrFederationReplicaBindingConflict
+		}
+		result.Project, result.Binding = currentProject, currentBinding
+		if credentials != nil {
+			current, found, readErr := credentials.FederationCredential(ctx, currentProject.UID)
+			if readErr != nil {
+				return result, credentialIOError("read relay credential after drain")
+			}
+			if found != hadCredential || (found && !current.Equal(beforeCredential)) || (p.ExpectedCredential != nil && (!found || !current.Equal(*p.ExpectedCredential))) {
+				return result, federationReplicaError(ErrFederationReplicaReservationChanged, "enrollment candidate changed during transport drain", "retry after resolving the current credential")
+			}
+		}
+		if err := revalidateManagedReservation(ctx, credentials, p); err != nil {
+			return result, err
+		}
+		if err := federationcoord.PinRelayRootAuthority(ctx, store, *p.Relay); err != nil {
+			return result, err
+		}
+		if !result.Binding.PushEnabled {
+			result.Binding, err = enableReplicaPush(ctx, store, result.Project.ID)
+			if err != nil {
+				return result, err
+			}
+		}
+		result.Binding, err = store.SetRelayBindingConfig(ctx, result.Project.ID, replicaRelayConfig(p))
+		if err != nil {
+			return result, err
+		}
+	}
 	if p.Credential.Token != "" {
 		if credentials == nil {
 			return result, credentialIOError(
 				"store federation replica credential",
 			)
 		}
-		if err := credentials.StoreFederationCredential(ctx, result.Project.UID, p.Credential); err != nil {
-			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return result, err
+		var credentialErr error
+		if p.ExpectedCredential != nil {
+			credentialErr = credentials.(config.FederationCredentialReplacer).ReplaceFederationCredential(ctx, config.FederationCredentialReplacement{
+				ProjectUID: result.Project.UID, Expected: *p.ExpectedCredential, Replacement: p.Credential,
+			})
+		} else {
+			credentialErr = credentials.StoreFederationCredential(ctx, result.Project.UID, p.Credential)
+		}
+		if credentialErr != nil {
+			if errors.Is(credentialErr, config.ErrFederationCredentialConflict) {
+				if p.ExpectedCredential != nil {
+					return result, federationReplicaError(ErrFederationReplicaReservationChanged, "enrollment candidate changed before activation", "retry after resolving the current credential")
+				}
+				return result, credentialErr
 			}
-			return result, credentialIOError(
-				"store federation replica credential",
-			)
+			return result, credentialIOError("store federation replica credential")
 		}
 	}
 	if p.PushEnabled && !result.Binding.PushEnabled {
@@ -903,6 +1017,14 @@ func normalizeFederationReplicaParams(
 		return EnsureFederationReplicaParams{}, err
 	}
 	p.Credential.Capabilities = capabilities
+	if p.Relay != nil {
+		if !p.PushEnabled || !federationCapabilitiesContain(capabilities, "pull") || !federationCapabilitiesContain(capabilities, "push") || p.Relay.Root.ProjectUID != p.HubProjectUID {
+			return EnsureFederationReplicaParams{}, federationReplicaError(ErrFederationReplicaInvalidInput, "relay requires a matching project and bidirectional grant", "")
+		}
+		if err := db.ValidateTokenActor(p.RelayLocalActor); err != nil {
+			return EnsureFederationReplicaParams{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid local relay account", "")
+		}
+	}
 	if p.PushEnabled && !federationCapabilitiesContain(capabilities, "push") {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			errFederationReplicaCapabilityMismatch,

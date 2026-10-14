@@ -26,10 +26,17 @@ type HostFederationOperation struct {
 // hostOperationPolicies declares for the same route, which is why this table is
 // its own source of truth and not derived from that registry.
 var federationTransportOperations = map[string]HostFederationOperation{
-	"claimIssue":        {ID: "claimIssue", Mutation: true},
-	"acquireIssueLease": {ID: "acquireIssueLease", Mutation: true},
-	"renewIssueLease":   {ID: "renewIssueLease", Mutation: true},
-	"releaseIssueLease": {ID: "releaseIssueLease", Mutation: true},
+	// Cleanup authenticates its exact secret/project/peer inside the native
+	// revocation transaction; it cannot acquire project data or write authority.
+	"disconnectRelayEnrollment": {ID: "disconnectRelayEnrollment", Mutation: true},
+	"getRelayReset":             {ID: "getRelayReset", Mutation: true},
+	"offerRelayDeliveries":      {ID: "offerRelayDeliveries", Mutation: true},
+	"acceptRelayDeliveries":     {ID: "acceptRelayDeliveries", Mutation: true},
+	"ackRelayDeliveries":        {ID: "ackRelayDeliveries", Mutation: true},
+	"claimIssue":                {ID: "claimIssue", Mutation: true},
+	"acquireIssueLease":         {ID: "acquireIssueLease", Mutation: true},
+	"renewIssueLease":           {ID: "renewIssueLease", Mutation: true},
+	"releaseIssueLease":         {ID: "releaseIssueLease", Mutation: true},
 	// forceReleaseIssueLease never authenticates an enrollment credential
 	// (resolveClaimPrincipal receives allowEnrollment=false); the entry exists
 	// so its call site names one table like every other lease route.

@@ -45,11 +45,12 @@ type TokensOutput struct {
 
 // TokenCreateInput identifies the actor subject for a new token.
 type TokenCreateInput struct {
-	TokenActor       string `json:"token_actor"`
-	Name             string `json:"name,omitempty"`
-	Issue            string `json:"issue,omitempty"`
-	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
-	TokenFile        string `json:"token_file,omitempty"`
+	TokenActor       string   `json:"token_actor"`
+	TeamUIDs         []string `json:"team_uids,omitempty"`
+	Name             string   `json:"name,omitempty"`
+	Issue            string   `json:"issue,omitempty"`
+	ExpiresInSeconds int64    `json:"expires_in_seconds,omitempty"`
+	TokenFile        string   `json:"token_file,omitempty"`
 }
 
 // TokenCreateOutput returns an unscoped token's one-time plaintext or a scoped
@@ -108,7 +109,7 @@ func (h toolHandlers) tokenCreate(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if scoped {
 		return h.scopedTokenCreate(ctx, input, actor)
 	}
-	response, err := h.options.Client.CreateToken(ctx, &generated.CreateTokenRequestOptions{Body: &generated.CreateTokenBody{Actor: actor, Name: optionalString(input.Name)}})
+	response, err := h.options.Client.CreateToken(ctx, &generated.CreateTokenRequestOptions{Body: &generated.CreateTokenBody{Actor: actor, TeamUids: input.TeamUIDs, Name: optionalString(input.Name)}})
 	if err != nil {
 		return nil, TokenCreateOutput{}, err
 	}
@@ -156,7 +157,7 @@ func (h toolHandlers) scopedTokenCreate(ctx context.Context, input TokenCreateIn
 	}
 	response, err := h.options.Client.CreateToken(ctx, &generated.CreateTokenRequestOptions{
 		Body: &generated.CreateTokenBody{
-			Actor: actor, Name: optionalString(input.Name), Scope: &scope,
+			Actor: actor, TeamUids: input.TeamUIDs, Name: optionalString(input.Name), Scope: &scope,
 			ExpiresInSeconds: &input.ExpiresInSeconds,
 		},
 	})

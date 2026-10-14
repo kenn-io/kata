@@ -60,7 +60,7 @@ func TestStatusCodeReportsDaemonErrorEnvelope(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, client.StatusCode(err))
 	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
 	require.True(t, ok)
-	assert.Equal(t, "project_not_found", envelope.ErrorData.Code)
+	assert.Equal(t, "not_found", envelope.ErrorData.Code)
 }
 
 func TestStatusCodeReportsUndecodableErrorBody(t *testing.T) {

@@ -7,6 +7,7 @@ export interface WebDaemonInfo {
   id: string
   url: string
   default: boolean
+  local?: boolean
   auth: 'none' | 'token'
   health: WebDaemonHealth
   hint?: string
@@ -84,17 +85,25 @@ function proxyablePath(raw: string): boolean {
   )
     return false
   if (path === '/api/v1/tokens' || path.startsWith('/api/v1/tokens/')) return false
+  // Owner administration belongs to the source browser principal, just like
+  // credential audit. The gateway never delegates it to a target credential.
+  if (path === '/api/v1/teams' || path.startsWith('/api/v1/teams/')) return false
+  if (/^\/api\/v1\/projects\/[^/]+\/access$/.test(path)) return false
+  // Sync status belongs to the source project, including a selected local
+  // catalog entry. The status view is withheld for remote workspaces.
+  if (/^\/api\/v1\/projects\/[^/]+\/federation\/status$/.test(path)) return false
   return !path.startsWith(daemonProxyPrefix)
 }
 
 function parseDaemon(value: unknown): WebDaemonInfo {
   if (!isRecord(value)) throw new Error('Configured daemons are unavailable')
-  const { id, url, default: isDefault, auth, health, hint } = value
+  const { id, url, default: isDefault, auth, health, hint, local } = value
   if (
     typeof id !== 'string' ||
     id.length === 0 ||
     typeof url !== 'string' ||
     typeof isDefault !== 'boolean' ||
+    (local !== undefined && typeof local !== 'boolean') ||
     (auth !== 'none' && auth !== 'token') ||
     (health !== 'connected' &&
       health !== 'auth_required' &&
@@ -108,6 +117,7 @@ function parseDaemon(value: unknown): WebDaemonInfo {
     id,
     url,
     default: isDefault,
+    local: local === true,
     auth,
     health,
     ...(typeof hint === 'string' && hint ? { hint } : {}),

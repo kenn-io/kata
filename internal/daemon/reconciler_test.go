@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
@@ -267,6 +270,136 @@ func TestReconcileOnceModelChangeCutsOver(t *testing.T) {
 	if !ok || key != emb2.Generation().Fingerprint() {
 		t.Fatalf("active = %q, want new model's generation", key)
 	}
+}
+
+func TestReconcileRecipeChangeCutsOverEligibleProjectsWithDeferredSharedContent(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	privateProject, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	sharedProject, err := store.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: sharedProject.ID, Role: db.FederationRoleHub,
+		HubProjectID: sharedProject.ID, HubProjectUID: sharedProject.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: privateProject.ID, Title: "private search target", Author: "member",
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: sharedProject.ID, Title: "shared search target", Author: "member",
+	})
+	require.NoError(t, err)
+
+	oldEmbedder := newReconcilerArtifactEmbedder(t, "example-model-v1")
+	oldRecipe, err := oldEmbedder.ArtifactIdentity("", "", "")
+	require.NoError(t, err)
+	oldProducer := db.ProjectEmbeddingProducer{ProducerInstanceUID: store.InstanceUID(), Recipe: oldRecipe}
+	oldRaw, err := json.Marshal(oldProducer)
+	require.NoError(t, err)
+	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID: sharedProject.ID, Actor: "owner",
+		Patch: map[string]jsontext.Value{db.ProjectEmbeddingMetadataKey: oldRaw},
+	})
+	require.NoError(t, err)
+
+	idx := openTestVectorIndex(t)
+	oldReconciler := NewReconciler(store, idx, oldEmbedder, ReconcilerConfig{BatchSize: 64})
+	require.NoError(t, oldReconciler.reconcileOnce(ctx))
+	oldKey := oldEmbedder.Generation().Fingerprint()
+	activeKey, active, err := idx.ActiveGeneration(ctx)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.Equal(t, oldKey, activeKey)
+
+	newEmbedder := newReconcilerArtifactEmbedder(t, "example-model-v2")
+	newReconciler := NewReconciler(store, idx, newEmbedder, ReconcilerConfig{BatchSize: 64})
+	require.NoError(t, newReconciler.reconcileOnce(ctx))
+	newKey := newEmbedder.Generation().Fingerprint()
+	activeKey, active, err = idx.ActiveGeneration(ctx)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.Equal(t, newKey, activeKey, "eligible private search must use the new recipe even while shared content is deferred")
+	embedded, skipped, backlog, err := idx.Coverage(ctx, newKey)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, embedded)
+	require.Zero(t, skipped)
+	require.EqualValues(t, 1, backlog, "deferred shared content remains pending")
+	require.EqualValues(t, 1, newReconciler.Health().Backlog)
+	encoded := newEmbedder.inputs()
+	require.Len(t, encoded, 1)
+	require.Contains(t, encoded[0][0], "private search target")
+	require.NotContains(t, encoded[0][0], "shared search target", "the worker must not generate for a project whose producer has not adopted the recipe")
+
+	// An unchanged project policy remains deferred on the next pass rather than
+	// being stamped skipped or dispatched under the new recipe.
+	require.NoError(t, newReconciler.reconcileOnce(ctx))
+	require.Len(t, newEmbedder.inputs(), 1)
+	_, _, backlog, err = idx.Coverage(ctx, newKey)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, backlog)
+
+	newRecipe, err := newEmbedder.ArtifactIdentity("", "", "")
+	require.NoError(t, err)
+	newProducer := db.ProjectEmbeddingProducer{ProducerInstanceUID: store.InstanceUID(), Recipe: newRecipe}
+	newRaw, err := json.Marshal(newProducer)
+	require.NoError(t, err)
+	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID: sharedProject.ID, Actor: "owner",
+		Patch: map[string]jsontext.Value{db.ProjectEmbeddingMetadataKey: newRaw},
+	})
+	require.NoError(t, err)
+	require.NoError(t, newReconciler.reconcileOnce(ctx))
+	_, _, backlog, err = idx.Coverage(ctx, newKey)
+	require.NoError(t, err)
+	require.Zero(t, backlog, "shared content resumes after the root adopts the new recipe")
+	encoded = newEmbedder.inputs()
+	require.Len(t, encoded, 2)
+	require.Contains(t, encoded[1][0], "shared search target")
+}
+
+type reconcilerArtifactEmbedder struct {
+	client *embedding.Client
+	mu     sync.Mutex
+	calls  [][]string
+}
+
+func newReconcilerArtifactEmbedder(t *testing.T, model string) *reconcilerArtifactEmbedder {
+	t.Helper()
+	client, err := embedding.New(embedding.Config{BaseURL: "https://embedder.example", Model: model, Dims: 2})
+	require.NoError(t, err)
+	return &reconcilerArtifactEmbedder{client: client}
+}
+
+func (e *reconcilerArtifactEmbedder) Generation() kitvec.Generation { return e.client.Generation() }
+
+func (e *reconcilerArtifactEmbedder) ArtifactIdentity(projectUID, issueUID, producerUID string) (embedding.ArtifactIdentity, error) {
+	return e.client.ArtifactIdentity(projectUID, issueUID, producerUID)
+}
+
+func (e *reconcilerArtifactEmbedder) EncodeFunc() kitvec.EncodeFunc {
+	return func(_ context.Context, texts []string) ([][]float32, error) {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		e.calls = append(e.calls, append([]string(nil), texts...))
+		vectors := make([][]float32, len(texts))
+		for i := range vectors {
+			vectors[i] = []float32{1, 0}
+		}
+		return vectors, nil
+	}
+}
+
+func (e *reconcilerArtifactEmbedder) inputs() [][]string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	inputs := make([][]string, len(e.calls))
+	for i := range e.calls {
+		inputs[i] = append([]string(nil), e.calls[i]...)
+	}
+	return inputs
 }
 
 func TestReconcileErrorReportsPendingBacklog(t *testing.T) {

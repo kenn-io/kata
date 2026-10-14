@@ -38,6 +38,12 @@ func TestUISnapshotScopedAuthorityContract(t *testing.T) {
 	})
 }
 
+func TestUISnapshotProjectAuthorityRelationshipsContract(t *testing.T) {
+	dbtest.RunUISnapshotProjectAuthorityRelationshipsContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 	ctx := context.Background()
 	store := openUIStore(t)

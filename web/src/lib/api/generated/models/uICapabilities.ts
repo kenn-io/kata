@@ -5,8 +5,12 @@ import type { TokenScopeOut } from './tokenScopeOut.ts'
 import type { UICapabilitiesUpdates } from './uICapabilitiesUpdates.ts'
 
 export interface UICapabilities {
+  access_admin?: boolean
+  account?: string
   actor_policy: string
   allowed_actions?: string[]
+  /** How this request authenticated; matches the instance auth kind. Never contains credentials. */
+  auth_kind?: string
   close_requires_evidence?: boolean
   expires_at?: string
   scope?: TokenScopeOut

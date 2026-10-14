@@ -1,0 +1,3 @@
+Connected · Hub: long-hub-lo… · Account: member-memb… · Project: example-project
+Connected · Hub: long-hub-long-hub-lon… · Account: member-member-member-… · Project: example-project
+Connected · Hub: shared-hub · Account: member · Project: example-project                                                 Daemon: shared-hub · kata カタ · v0.1.0

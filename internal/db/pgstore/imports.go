@@ -287,7 +287,7 @@ func (s *Store) importIssue(
 			return nil, nil, err
 		}
 	}
-	existing, err := scanIssue(tx.QueryRowContext(ctx,
+	existing, err := scanIssue(ctx, tx.QueryRowContext(ctx,
 		issueSelect+` WHERE i.id=$1 AND i.deleted_at IS NULL FOR UPDATE OF i`, *mapping.IssueID))
 	if err != nil {
 		return nil, nil, err
@@ -421,7 +421,7 @@ created_at,updated_at,closed_at,priority
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issueID))
+	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, issueID))
 	return issue, event, err
 }
 
@@ -477,7 +477,7 @@ updated_at=$7,closed_at=$8,priority=$9`+bump+` WHERE id=$10`,
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
+	updated, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
 	return updated, event, err
 }
 
@@ -508,7 +508,7 @@ func (s *Store) updateImportedPresentationTitle(
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
+	updated, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
 	return updated, event, err
 }
 
@@ -536,6 +536,6 @@ func (s *Store) healImportedCreatedAt(
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	healed, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
+	healed, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, existing.ID))
 	return healed, event, err
 }

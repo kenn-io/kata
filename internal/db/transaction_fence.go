@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 )
 
 // Transaction is the storage-neutral database/sql surface available to a
@@ -109,29 +110,82 @@ func HasTransactionFence(ctx context.Context) bool {
 	return fence != nil
 }
 
-// WithIssueScopeTargets records the issues authorized or exposed by one request.
-// They are rechecked before domain writes and before sending hydrated responses.
-func WithIssueScopeTargets(ctx context.Context) context.Context {
-	return context.WithValue(ctx, issueScopeTargetsKey{}, make(map[int64]struct{}))
+// issueIDSet is a per-request registry of issue IDs. Handlers that fan out
+// (hybrid search runs text and vector lookups on separate goroutines) share one
+// request context, so the set is safe for concurrent use.
+type issueIDSet struct {
+	mu  sync.Mutex
+	ids map[int64]struct{}
+}
+
+func newIssueIDSet() *issueIDSet { return &issueIDSet{ids: make(map[int64]struct{})} }
+
+func (s *issueIDSet) add(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ids[id] = struct{}{}
+}
+
+func (s *issueIDSet) list() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]int64, 0, len(s.ids))
+	for id := range s.ids {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func issueIDSetFrom(ctx context.Context, key any) *issueIDSet {
+	set, _ := ctx.Value(key).(*issueIDSet)
+	return set
 }
 
 type issueScopeTargetsKey struct{}
 
+type exposedIssuesKey struct{}
+
+// WithIssueScopeTargets records the issues authorized or exposed by one request.
+// They are rechecked before domain writes and before sending hydrated responses.
+func WithIssueScopeTargets(ctx context.Context) context.Context {
+	return context.WithValue(ctx, issueScopeTargetsKey{}, newIssueIDSet())
+}
+
+// WithExposedIssues installs the registry of issues a request has read. The
+// project access release rechecks each one against the caller's projects, so
+// a response never carries an issue that moved out of reach mid-request.
+func WithExposedIssues(ctx context.Context) context.Context {
+	return context.WithValue(ctx, exposedIssuesKey{}, newIssueIDSet())
+}
+
+// ExposedIssues returns the issues this request has read so far.
+func ExposedIssues(ctx context.Context) []int64 {
+	if exposed := issueIDSetFrom(ctx, exposedIssuesKey{}); exposed != nil {
+		return exposed.list()
+	}
+	return nil
+}
+
+// RecordExposedIssue registers an issue a store returned to the request. Every
+// issue scan in both stores calls it; a context without a registry records
+// nothing.
+func RecordExposedIssue(ctx context.Context, issueID int64) {
+	if exposed := issueIDSetFrom(ctx, exposedIssuesKey{}); exposed != nil {
+		exposed.add(issueID)
+	}
+}
+
 // RecordIssueScopeTarget retains a target for transaction and response checks.
 func RecordIssueScopeTarget(ctx context.Context, issueID int64) {
-	if targets, ok := ctx.Value(issueScopeTargetsKey{}).(map[int64]struct{}); ok {
-		targets[issueID] = struct{}{}
+	if targets := issueIDSetFrom(ctx, issueScopeTargetsKey{}); targets != nil {
+		targets.add(issueID)
 	}
 }
 
 // IssueScopeTargets returns the targets admitted so far by this request.
 func IssueScopeTargets(ctx context.Context) []int64 {
-	if targets, ok := ctx.Value(issueScopeTargetsKey{}).(map[int64]struct{}); ok {
-		ids := make([]int64, 0, len(targets))
-		for id := range targets {
-			ids = append(ids, id)
-		}
-		return ids
+	if targets := issueIDSetFrom(ctx, issueScopeTargetsKey{}); targets != nil {
+		return targets.list()
 	}
 	return nil
 }

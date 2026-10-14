@@ -31,6 +31,7 @@ func (d *Store) appendRelationshipsForChunk(
 	ctx context.Context, chunk []int64, out map[int64]db.IssueRelationships,
 ) error {
 	placeholders, args := relationshipChunkPlaceholders(chunk)
+	endpoints := authorizedLinkPredicate(ctx, "l.", &args)
 
 	// Maps child issue id → parent issue row id; callers resolve the row id
 	// to a display identity themselves (parents may live in other projects).
@@ -40,6 +41,7 @@ func (d *Store) appendRelationshipsForChunk(
 	          JOIN issues parent ON parent.id = l.to_issue_id
 	          WHERE l.type = 'parent'
 	            AND l.from_issue_id IN (`+placeholders+`)
+	            AND `+endpoints+`
 	          ORDER BY l.from_issue_id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			value := peer
@@ -55,6 +57,7 @@ func (d *Store) appendRelationshipsForChunk(
 	          WHERE l.type = 'blocks'
 	            AND blocked.deleted_at IS NULL
 	            AND l.from_issue_id IN (`+placeholders+`)
+	            AND `+endpoints+`
 	          ORDER BY l.from_issue_id ASC, blocked.id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			rel.Blocks = append(rel.Blocks, peer)
@@ -72,6 +75,7 @@ func (d *Store) appendRelationshipsForChunk(
 	          WHERE l.type = 'blocks'
 	            AND blocker.deleted_at IS NULL
 	            AND l.to_issue_id IN (`+placeholders+`)
+	            AND `+endpoints+`
 	          ORDER BY l.to_issue_id ASC, blocker.id ASC`, args, out,
 		func(rel *db.IssueRelationships, peer int64) {
 			rel.BlockedBy = append(rel.BlockedBy, peer)
@@ -89,6 +93,7 @@ func (d *Store) appendRelationshipsForChunk(
 	             WHERE l.type = 'related'
 	               AND peer.deleted_at IS NULL
 	               AND l.from_issue_id IN (` + placeholders + `)
+	               AND ` + endpoints + `
 	            UNION ALL
 	            SELECT l.to_issue_id AS viewer_id, peer.id AS peer_number
 	              FROM links l
@@ -96,8 +101,10 @@ func (d *Store) appendRelationshipsForChunk(
 	             WHERE l.type = 'related'
 	               AND peer.deleted_at IS NULL
 	               AND l.to_issue_id IN (` + placeholders + `)
+	               AND ` + endpoints + `
 	          ) ORDER BY viewer_id ASC, peer_number ASC`
-	// Each chunk's args are reused for both halves of the UNION.
+	// Each chunk's args, endpoint bindings included, are reused for both
+	// halves of the UNION.
 	combined := make([]any, 0, len(args)*2)
 	combined = append(combined, args...)
 	combined = append(combined, args...)
@@ -108,10 +115,10 @@ func (d *Store) appendRelationshipsForChunk(
 		return fmt.Errorf("related numbers by issues: %w", err)
 	}
 
-	if err := d.appendChildCountsToRelationships(ctx, placeholders, args, out); err != nil {
+	if err := d.appendChildCountsToRelationships(ctx, chunk, out); err != nil {
 		return err
 	}
-	return d.appendActivelyBlockedToRelationships(ctx, placeholders, args, out)
+	return d.appendActivelyBlockedToRelationships(ctx, chunk, out)
 }
 
 func (d *Store) scanRelationshipPairs(
@@ -139,8 +146,9 @@ func (d *Store) scanRelationshipPairs(
 }
 
 func (d *Store) appendChildCountsToRelationships(
-	ctx context.Context, placeholders string, args []any, out map[int64]db.IssueRelationships,
+	ctx context.Context, chunk []int64, out map[int64]db.IssueRelationships,
 ) error {
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	query := `SELECT l.to_issue_id,
 	                 SUM(CASE WHEN child.status = 'open' THEN 1 ELSE 0 END) AS open_count,
 	                 COUNT(*) AS total_count
@@ -151,6 +159,7 @@ func (d *Store) appendChildCountsToRelationships(
 	            AND child.deleted_at IS NULL
 	            AND cp.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
+	            AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
 	          GROUP BY l.to_issue_id
 	          ORDER BY l.to_issue_id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)
@@ -175,12 +184,13 @@ func (d *Store) appendChildCountsToRelationships(
 }
 
 func (d *Store) appendActivelyBlockedToRelationships(
-	ctx context.Context, placeholders string, args []any, out map[int64]db.IssueRelationships,
+	ctx context.Context, chunk []int64, out map[int64]db.IssueRelationships,
 ) error {
 	// Mirrors the ReadyIssues predicate on both sides: the target row must be
 	// an open, live issue, and an incoming `blocks` link must carry an open,
 	// live blocker in a non-archived project. DISTINCT collapses multiple
 	// qualifying blockers to one row.
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	query := `SELECT DISTINCT l.to_issue_id
 	          FROM links l
 	          JOIN issues blocked ON blocked.id = l.to_issue_id
@@ -192,7 +202,8 @@ func (d *Store) appendActivelyBlockedToRelationships(
 	            AND blocker.status = 'open'
 	            AND blocker.deleted_at IS NULL
 	            AND bp.deleted_at IS NULL
-	            AND l.to_issue_id IN (` + placeholders + `)`
+	            AND l.to_issue_id IN (` + placeholders + `)
+	            AND ` + authorizedLinkPredicate(ctx, "l.", &args)
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("actively blocked issue ids: %w", err)

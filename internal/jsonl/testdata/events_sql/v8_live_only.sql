@@ -1,5 +1,5 @@
 SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, events.project_name, events.issue_id, events.issue_uid,
-	                 CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type IN ('issue.links_changed', 'issue.commented') AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_id END, CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL AND events.type <> 'issue.commented') OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_uid END,
+	                 CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type IN ('issue.links_changed', 'issue.commented') AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_id END, CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL AND events.type NOT IN ('issue.commented', 'issue.links_changed')) OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_uid END,
 	                 events.type, events.actor, events.payload, CAST(events.created_at AS TEXT)
 	          FROM events
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id

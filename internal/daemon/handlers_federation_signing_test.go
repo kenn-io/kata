@@ -180,7 +180,7 @@ func TestCreateFederationReplicaSigningReferencesRequireOwnerAuthority(t *testin
 					"replay_horizon_event_id": 1, "token": "enrollment-secret",
 					"signing_key_id": "key-a", "signing_key_env": keyEnv,
 				}, tc.headers)
-				assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_signing_admin_forbidden")
+				assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "not_found")
 				require.Zero(t, credentials.storeCalls)
 			})
 		}

@@ -3,8 +3,6 @@ package pgstore
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -45,45 +43,45 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if request.any {
 		matchQuery = anyQuery
 	}
-	args := []any{request.params.ProjectID}
-
-	rowFilter := `AND i.deleted_at IS NULL`
-	if request.params.IncludeDeleted {
-		rowFilter = ""
+	// The kit builder binds the source predicate's anonymous ? placeholders in
+	// textual order, so every fragment appends its value as it is rendered.
+	var predicateArgs []any
+	bind := func(value any) string {
+		predicateArgs = append(predicateArgs, value)
+		return "?"
+	}
+	var rowFilter strings.Builder
+	rowFilter.WriteString("EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = " + bind(request.params.ProjectID))
+	if !request.params.IncludeDeleted {
+		rowFilter.WriteString("\n   AND i.deleted_at IS NULL")
 	}
 	if request.params.Status != "" {
-		args = append(args, request.params.Status)
-		rowFilter += fmt.Sprintf("\n   AND i.status = $%d", len(args))
+		rowFilter.WriteString("\n   AND i.status = " + bind(request.params.Status))
 	}
 	// Label predicates mirror ListIssues (AND across Labels, exclusion for
 	// ExcludeLabels) and live in the candidate row selection, so they narrow
 	// the result set before LIMIT rather than after.
-	addLabelFilter := func(predicate, label string) {
-		args = append(args, strings.ToLower(label))
-		rowFilter += "\n   " + fmt.Sprintf(predicate, len(args))
-	}
 	for _, label := range request.params.Labels {
-		addLabelFilter("AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", label)
+		rowFilter.WriteString("\n   AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = " + bind(strings.ToLower(label)) + ")")
 	}
 	for _, label := range request.params.ExcludeLabels {
-		addLabelFilter("AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", label)
+		rowFilter.WriteString("\n   AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = " + bind(strings.ToLower(label)) + ")")
 	}
-	var scopeFilter strings.Builder
-	appendAllowedIssueIDsPostgresBuilder(&scopeFilter, &args, request.params.AllowedIssueIDs)
-	appendIssueScopePostgres(&scopeFilter, &args, request.params.IssueScope)
-	rowFilter += scopeFilter.String()
-	if request.params.After != nil {
-		args = append(args, formatStoredTime(request.params.After.CreatedAt), request.params.After.ID)
-		rowFilter += fmt.Sprintf(" AND (i.created_at,i.id) > ($%d,$%d)", len(args)-1, len(args))
+	if allowed, ok := allowedIssueIDsPredicate(request.params.AllowedIssueIDs, bind); ok {
+		rowFilter.WriteString("\n   AND " + allowed)
 	}
-
-	predicate := "EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = $1 " + rowFilter + ")"
-	var predicateArgs []any
-	predicate = regexp.MustCompile(`\$[0-9]+`).ReplaceAllStringFunc(predicate, func(parameter string) string {
-		position, _ := strconv.Atoi(parameter[1:])
-		predicateArgs = append(predicateArgs, args[position-1])
-		return "?"
-	})
+	rowFilter.WriteString("\n   AND " + authorizedIssuePredicateWith(ctx, "i.project_id", bind))
+	if scope := request.params.IssueScope; scope != nil {
+		// The members CTE binds the root once and the project twice, in that
+		// textual order.
+		rowFilter.WriteString("\n   AND i.id IN (" + strings.NewReplacer("$1", bind(scope.RootIssueUID), "$2", "?").Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
+		predicateArgs = append(predicateArgs, scope.ProjectUID, scope.ProjectUID)
+	}
+	if after := request.params.After; after != nil {
+		rowFilter.WriteString("\n   AND (i.created_at,i.id) > (" + bind(formatStoredTime(after.CreatedAt)) + "," + bind(after.ID) + ")")
+	}
+	rowFilter.WriteString(")")
+	predicate := rowFilter.String()
 	relation, err := postgres.BuildLexical(postgres.LexicalRequest{
 		Mapping: postgres.LexicalMapping{SourceTable: "issues_search", SourceKey: "issue_id", Vector: "d.tsv"},
 		Config:  "kata_simple_unaccent", TSQuery: matchQuery, TSQueryArgs: []any{queryText},
@@ -103,9 +101,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
   SELECT %s AS any_query
 )
-SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
-       i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at,
+SELECT `+issueColumns+`,
        candidates.score,
        to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
        to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
@@ -117,9 +113,8 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
   JOIN projects p ON p.id = i.project_id
  CROSS JOIN queries
  ORDER BY %s`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1), order)
-	args = relation.Args
 
-	rows, err := s.QueryContext(ctx, query, args...)
+	rows, err := s.QueryContext(ctx, query, relation.Args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", mapSQLError(err, nil))
 	}
@@ -139,6 +134,9 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
+		handle, _ := db.IssueTeammate(issue.Metadata)
+		issue.SourceFallback(issue.Author, handle)
+		db.RecordExposedIssue(ctx, issue.ID)
 		matchedIn := make([]string, 0, 3)
 		if inTitle {
 			matchedIn = append(matchedIn, "title")

@@ -532,19 +532,28 @@ func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter)
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 	                 push_cursor_event_id, bound_actor, allow_insecure, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
-	                 CAST(last_sync_at AS TEXT)
+	                 CAST(last_sync_at AS TEXT), relay_config
 	          FROM federation_bindings`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY project_id ASC`
 	return streamRows(ctx, d.readQ, "federation_bindings", query, args,
 		func(rows *sql.Rows) (db.FederationBindingExport, error) {
 			var rec db.FederationBindingExport
+			var relayConfig *string
 			var enabled, pushEnabled, allowInsecure int
 			if err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 				&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
 				&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
-				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt); err != nil {
+				&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt, &relayConfig); err != nil {
 				return db.FederationBindingExport{}, scanError("federation_binding", err)
+			}
+			var err error
+			rec.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
+			if err != nil {
+				return db.FederationBindingExport{}, err
+			}
+			if f.ProjectID != nil {
+				rec.RelayConfig = nil
 			}
 			rec.PushEnabled = pushEnabled == 1
 			rec.AllowInsecure = allowInsecure == 1
@@ -605,23 +614,27 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 	                 allow_adoption_snapshot_authors,
 	                 adoption_baseline_open, adoption_baseline_next_source_event_id,
 	                 adoption_baseline_end_source_event_id,
-	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT),relay_binding_uid,relay_protocol_version,parent_token_id,relay_reset_epoch,relay_serve_downstream
 	          FROM federation_enrollments`
 	query, args := withProjectIDFilter(query, f, "project_id")
+	if f.ProjectID != nil {
+		query += ` AND relay_protocol_version=0 AND parent_token_id IS NULL AND relay_binding_uid IS NULL`
+	}
 	query += ` ORDER BY id ASC`
 	return streamRows(ctx, d.readQ, "federation_enrollments", query, args,
 		func(rows *sql.Rows) (db.FederationEnrollmentExport, error) {
 			var rec db.FederationEnrollmentExport
 			var allow int
-			var baselineOpen int
+			var baselineOpen, serveDownstream int
 			if err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
 				&rec.Capabilities, &rec.Actor, &allow, &baselineOpen,
 				&rec.AdoptionBaselineNextSourceEventID, &rec.AdoptionBaselineEndSourceEventID,
-				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt); err != nil {
+				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt, &rec.RelayBindingUID, &rec.RelayProtocolVersion, &rec.ParentTokenID, &rec.RelayResetEpoch, &serveDownstream); err != nil {
 				return db.FederationEnrollmentExport{}, scanError("federation_enrollment", err)
 			}
 			rec.AllowAdoptionSnapshotAuthors = allow != 0
 			rec.AdoptionBaselineOpen = baselineOpen != 0
+			rec.RelayServeDownstream = serveDownstream != 0
 			return rec, nil
 		})
 }
@@ -756,10 +769,12 @@ func (d *Store) ExportProjectPurgeLog(ctx context.Context, f db.ExportFilter) it
 func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[db.EventExport, error] {
 	// Missing peer rows require a numeric-FK scrub. Comment events retain their
 	// portable target UID when a target has been purged, so their content hash
-	// and removed-target evidence survive export and restore. A project-filtered
-	// export still strips references to a peer in an omitted project.
+	// and removed-target evidence survive export and restore. Link history keeps
+	// its peer UID when no local peer exists, because federation-inserted link
+	// events carry only that UID. A project-filtered export still strips
+	// references to a peer in an omitted project.
 	relatedIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
-	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type <> 'issue.commented')`
+	relatedUIDScrub := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL) AND events.type NOT IN ('issue.commented', 'issue.links_changed'))`
 	// SELECT-list args precede every WHERE-clause arg. Each expression binds
 	// its own project filter when the peer is in an omitted project.
 	var scrubArgs []any
@@ -773,6 +788,13 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 		relatedUIDScrub += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
 	relatedIDExpr := `CASE WHEN ` + relatedIDScrub + ` THEN NULL ELSE events.related_issue_id END`
+	// Root receipts sign related_issue_uid as part of the event hash. Keep that
+	// value when a signed event's peer is omitted, while clearing its local FK.
+	relatedUIDScrub = `(` + relatedUIDScrub + `) AND NOT EXISTS (
+		SELECT 1 FROM federation_event_provenance signed_receipt
+		 WHERE signed_receipt.project_uid=export_project.uid
+		   AND signed_receipt.event_uid=events.uid
+		   AND signed_receipt.content_hash=events.content_hash)`
 	relatedUIDExpr := `CASE WHEN ` + relatedUIDScrub + ` THEN NULL ELSE events.related_issue_uid END`
 	issueIDExpr := `events.issue_id`
 	var subjectArgs []any

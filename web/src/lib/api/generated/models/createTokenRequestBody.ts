@@ -8,4 +8,6 @@ export interface CreateTokenRequestBody {
   expires_in_seconds?: number
   name?: string
   scope?: TokenScopeIn
+  /** @maxItems 256 */
+  team_uids?: string[]
 }

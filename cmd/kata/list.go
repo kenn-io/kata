@@ -354,7 +354,17 @@ func agentRowListField(name string, values []string) agentField {
 }
 
 func writeAgentKVRow(w io.Writer, fields ...agentField) error {
-	if _, err := fmt.Fprint(w, "-"); err != nil {
+	return writeAgentFieldLine(w, "-", fields...)
+}
+
+// writeAgentOKLine emits the agent success header for command followed by
+// its key=value fields, so the first token is always OK.
+func writeAgentOKLine(w io.Writer, command string, fields ...agentField) error {
+	return writeAgentFieldLine(w, "OK "+command, fields...)
+}
+
+func writeAgentFieldLine(w io.Writer, lead string, fields ...agentField) error {
+	if _, err := fmt.Fprint(w, lead); err != nil {
 		return err
 	}
 	for _, f := range fields {

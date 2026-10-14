@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-26
+last_edited: 2026-10-12
 ---
 
 # Web UI
@@ -129,12 +129,43 @@ move among them without leaving that browser origin. Configured bearer tokens
 remain server-side, and the application remembers the active route separately
 for each daemon.
 
+Project visibility can limit the switcher. If team visibility hides at least
+one project from your account, or your token is limited to an issue subtree,
+the switcher lists only the local daemon. Configured target tokens do not carry
+your project limits, so the gateway refuses to use them for you. If you can
+see every project, or you are signed in as the daemon owner, the switcher
+lists every configured daemon. See
+[Project access](../reference/http-api.md#project-access) for the exact rules.
+
 ![Kata Web UI switching between two synthetic configured daemons](/docs/assets/screenshots/web-ui/daemon-switcher.png)
 
 Use `kata ui --daemon <name>` when you want to open one configured target
 directly instead. See [Configuration](../reference/configuration.md#daemon-config)
 for catalog settings and [Remote daemon](../operations/remote-daemon.md) for
 network, authentication, and proxy setup.
+
+## Check the current connection
+
+The yellow summary at the top shows the active hub, account, and credential
+status. It stays visible while you navigate and wraps on narrow screens.
+The TUI shows the same information in its existing header row.
+
+Account-bound credentials show their canonical actor. A connection without an
+account identity shows how it authenticated instead:
+
+| Connection | Account label |
+| --- | --- |
+| Owner-local socket or direct loopback browser tab | **Local connection** |
+| Shared `[auth].token` daemon token | **Shared daemon token** |
+| Bootstrap token in token-identity mode | **Bootstrap token** |
+| `--insecure-readonly` anonymous reader | **Anonymous (read-only)** |
+| Tokenless private-network writes | **Unauthenticated private network** |
+| Trusted proxy request without an asserted actor | **Proxy without account** |
+
+Switching daemons or losing current authority clears the previous account
+while reconnection is pending. Finite credentials show **Credential expired**
+when their lifetime ends. These summaries never show token values and do not
+load the administrator credential inventory.
 
 ## Audit provisioned credentials
 

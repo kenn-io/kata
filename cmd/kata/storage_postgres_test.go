@@ -59,6 +59,12 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 		GRANT EXECUTE ON FUNCTION operator_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
 	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
+		)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
+	})
 
 	runtimeDSN := postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password")
 	t.Setenv("KATA_DSN", runtimeDSN)

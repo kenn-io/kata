@@ -125,10 +125,10 @@ func countProjectPurge(ctx context.Context, c connExec, projectID int64) (projec
 }
 
 // deleteProjectScoped removes every project-scoped row in FK-safe order. Events
-// physically in the project are deleted; external events detach the numeric
-// issue FK. Comment events keep their portable related issue UID so a surviving
-// reply keeps its target identity and content hash. federation_bindings is
-// absent (refused upfront).
+// physically in the project are deleted; events in OTHER projects that reference
+// purged issues have only their local foreign keys detached, so signed UIDs and
+// a surviving reply's target identity and content hash stay intact.
+// federation_bindings is absent (refused upfront).
 // NOTE: purge_log (issue tombstones) is intentionally NOT deleted — it has no FK
 // to projects so it survives, preserving prior-purge audit history (spec Finding 3).
 // recurrences / issue_sync_bindings / issue_sync_status / import_mappings are not
@@ -137,15 +137,21 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 	if err := db.DeleteCronProject(ctx, c, projectID); err != nil {
 		return err
 	}
+	var projectUID string
+	if err := c.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&projectUID); err != nil {
+		return fmt.Errorf("load purged project UID: %w", err)
+	}
+	if err := deleteProjectRelayMetadata(ctx, c, projectUID); err != nil {
+		return fmt.Errorf("delete project relay metadata: %w", err)
+	}
 	const sub = `(SELECT id FROM issues WHERE project_id = ?)`
 	stmts := []struct {
 		q    string
 		args []any
 	}{
 		{`DELETE FROM events WHERE project_id = ?`, []any{projectID}},
-		{`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN ` + sub, []any{projectID}},
-		{`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN ` + sub + ` AND type = 'issue.commented'`, []any{projectID}},
-		{`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN ` + sub + ` AND type <> 'issue.commented'`, []any{projectID}},
+		{`UPDATE events SET issue_id = NULL WHERE issue_id IN ` + sub, []any{projectID}},
+		{`UPDATE events SET related_issue_id = NULL WHERE related_issue_id IN ` + sub, []any{projectID}},
 		{`DELETE FROM comments WHERE issue_id IN ` + sub, []any{projectID}},
 		{`DELETE FROM links WHERE from_issue_id IN ` + sub + ` OR to_issue_id IN ` + sub, []any{projectID, projectID}},
 		{`DELETE FROM issue_labels WHERE issue_id IN ` + sub, []any{projectID}},
@@ -242,6 +248,9 @@ func (d *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
 		return 0, fmt.Errorf("delete orphan project events: %w", err)
+	}
+	if err := deleteProjectRelayMetadata(ctx, conn, project.UID); err != nil {
+		return 0, fmt.Errorf("delete orphan project relay metadata: %w", err)
 	}
 	reservedCursor, err := reserveEventSequence(ctx, conn, counts.minEventID.Valid)
 	if err != nil {

@@ -154,7 +154,11 @@ func validateHelpCommand(line string) error {
 	if (!cmd.Runnable() || cmd == root) && len(args) > 0 {
 		return fmt.Errorf("unresolved command path: %v", args)
 	}
-	return cmd.ValidateArgs(args)
+	if err := cmd.ValidateArgs(args); err != nil {
+		return err
+	}
+	// An advertised command must also carry every flag it requires.
+	return cmd.ValidateRequiredFlags()
 }
 
 // splitHelpWords splits the shell notation used in help: single and double

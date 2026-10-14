@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-10
+last_edited: 2026-10-12
 ---
 
 # HTTP API schema
@@ -204,12 +204,136 @@ request schema and are rejected for strict request objects.
 ## Health diagnostics
 
 `GET /api/v1/health` without credentials provides liveness and version fields.
-`db_path`, `embeddings`, and `federation_config` are optional diagnostics:
-authenticated unscoped principals and the owner-local transport receive them
+`db_path`, `embeddings`, `federation_config`, and `root_signing` are optional
+diagnostics:
+daemon-owner credentials and genuine owner-local transport receive them
 when configured. Public remote probes and scoped credentials do not. An
 explicit scoped bearer remains scoped over loopback; an invalid bearer returns
 an authentication error. Clients must handle the public response without these
 fields. `idle_shutdown` keeps its availability rules described above.
+
+`root_signing` appears only when this daemon cannot sign root receipts for a
+hub project it roots:
+
+| Field | Meaning |
+| --- | --- |
+| `key_file` | Path of `federation-root.key` on the daemon host. |
+| `key_loaded` | Whether the daemon holds a usable signing key. |
+| `key_problem` | Why no key is loaded, such as `key file is missing`. |
+| `projects` | Hub projects whose pin the loaded key cannot satisfy. Signed writes to them return `409 root_signing_key_unavailable`. |
+
+`GET /api/v1/federation/status` adds `root_signing_key` (`available` or
+`unavailable`) to each hub project this daemon roots, and
+`relay_checkpoint_bytes` and `relay_checkpoint_capacity_bytes` to each such
+project that has a live relay enrollment. The checkpoint fields are the
+estimated size of the signed reset checkpoint the root would build now and
+the capacity that refuses new relay enrollments and resets once exceeded.
+When the measurement fails, the project carries `relay_checkpoint_error`
+instead of the size fields and the rest of the response is unaffected.
+
+`POST /api/v1/federation/root-keys/{project_name}/repin` is owner-only. It pins
+that hub project to the daemon's loaded root signing key and creates the key
+file when it is missing. The body accepts `preflight`, `previous_key_file`,
+an absolute path on the daemon host that requires daemon-owner transport or
+token, and `strand_relays`. The response reports `status` (`ready`,
+`current`, `pinned`, `repinned`, or `rotated`), `method` (`none`, `pin`,
+`signed_rotation`, or `unsigned_repin`), `key_file`, `creates_key_file`,
+`key_id`, `previous_key_id`, `active_relay_enrollments`, and `consequence`. A
+project this daemon does not root returns `409 root_key_not_local`; a previous
+key that does not match the pin returns `409 root_signing_key_mismatch`. An
+`unsigned_repin` while `active_relay_enrollments` is above zero returns
+`409 root_repin_strands_relays` unless `strand_relays` is true. See
+[Root signing key](../operations/federation.md#root-signing-key).
+
+## Project access
+
+Ordinary identity credentials can read, write and administer a project when
+its visibility is `all`, or when their authenticated actor belongs to any team
+assigned to a project with visibility `teams`. This includes archived projects:
+`GET /api/v1/projects?include=archived` lists the archived projects the
+credential can access. A project restricted to teams with no assigned teams is
+inaccessible to ordinary credentials. The system project is administrative
+state. Missing proxy identity and anonymous clients receive only unrestricted
+projects; a request-supplied actor grants no team membership. Explicit
+tokenless private-network writes remain limited to unrestricted projects.
+
+Project access applies to direct references, collections, search candidates,
+counts, graphs, relationships, audit events and browser snapshots. Unauthorized
+references return a generic `404`, including references supplied in request
+bodies. Project access intersects issue-subtree and hosted grants. Writes,
+including purge and merge, recheck the issue's or projects' current state
+inside their transaction. Before any response leaves the daemon, the same
+rule applies to reads and writes alike: the response is withheld with `404`
+when the caller lost one of the projects admitted for the request, or when an
+issue the request read, whether for a list, a preview, a reload after a
+commit or a plain show, now sits in a project the caller does not hold. An
+event page, digest or issue history counts every issue its events name: the
+subject, the related issue and the issues in the payload. A
+write that committed stays committed even when its response is withheld.
+Unrelated changes, such as a new team, a new project, an issue move elsewhere,
+the deletion of an issue the request read, or a project the request itself
+merged or purged away, do not affect a request in flight. Archiving a project
+does not withdraw it from its access holders, so an issue linked to a peer in
+an archived project stays readable.
+
+An open event stream picks up projects created or restored after it
+connected, including one created while the stream was being admitted. It
+closes when the caller loses an admitted project or gains a project whose
+creation or restore the stream has already passed or is inside the batch it
+is delivering; the client reconnects and reloads. Before each frame the stream
+rechecks that frame's event under the caller's current projects. When its
+issue, or an issue it references, now sits in a project the caller does not
+hold, the stream sends `sync.reset_required` at that event's ID in place of
+the frame and closes, whatever the credential's issue scope. Browser cache
+validators include the principal and policy revision.
+
+Project administration follows project access. A credential that can access a
+project can rename it, archive it (`DELETE /api/v1/projects/{project_id}`),
+restore it, purge it, detach its aliases, purge its issues, rewrite its author
+identities, and enable, disable, inspect or run its issue sync. Merge requires
+access to both the source and the target project. Each operation rechecks
+access to every project it names inside its transaction.
+
+Daemon-owner credentials keep the administration that reaches beyond one
+project: token list, create and revoke; team and project-visibility
+administration; diagnostics; federation status, replica creation, bridges and
+the enrollment catalog; and root signing key configuration. Token
+administration stays with the owner because a credential that could mint a
+token for another actor would inherit that actor's team access.
+Ordinary user credentials may create a credential-bound relay enrollment
+(`relay` in the request) for an authorized project. `relay.rebind_parent`
+re-attaches an existing relay grant to a live same-account credential and
+keeps its transport token; the enrollment rotation route refuses account
+tokens, so a relay grant is never rotated. A legacy project grant from an
+account token is refused with `403 federation_enrollment_requires_relay`
+regardless of `[auth].require_token_identity`, because it would outlive that
+token. An all-project grant requires owner authority and returns
+`404 not_found` to anyone else. A relay enrollment whose handshake advertised
+a root key that was replaced before the grant committed returns
+`409 relay_root_changed`; the peer enrolls again and receives the current key.
+A relay enrollment for a project whose signed reset checkpoint would exceed
+the 64 MiB relay checkpoint capacity returns `409 relay_project_too_large`
+with the measured size in the message and no grant. The hint names the only
+remedy, purging issues the project no longer needs; see
+[Relay checkpoint capacity](../operations/federation.md#relay-checkpoint-capacity).
+Enrollment transport checks the actor bound to its authenticated credential
+against current project access. It cannot claim team authority from an event's
+source labels.
+
+The browser gateway hides configured daemon targets from a principal when
+project policy hides at least one project from it, or when its token is limited
+to an issue subtree. For that principal, the daemon roster omits targets that
+are not local, and proxied requests return `403` with code
+`project_authority_not_delegated` before the gateway contacts the target. A
+principal that can see every project keeps the configured targets under the
+ordinary gateway rules, and daemon-owner credentials are never limited this
+way. Project delegation across the browser gateway requires a separate
+protocol.
+
+An ordinary account token may also supply `expires_in_seconds` without `scope`.
+The lifetime must be positive and fit the server's duration range. The token
+keeps its account authority until expiration; omitted or zero lifetime retains
+the existing non-expiring ordinary credential.
 
 ## Issue-scoped credentials
 

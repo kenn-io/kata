@@ -1,4 +1,29 @@
-import type { KataIssueDetailModel, KataIssueDetailWire } from './types.js'
+import type {
+  KataCreationAttributionModel,
+  KataCreationAttributionWire,
+  KataIssueDetailModel,
+  KataIssueDetailWire,
+} from './types.js'
+
+function creationFor(wire: KataCreationAttributionWire & { author?: string | undefined }): {
+  creation?: KataCreationAttributionModel
+} {
+  if (!wire.verification) return {}
+  const verification =
+    wire.verification === 'verified' || wire.verification === 'pending'
+      ? wire.verification
+      : 'legacy'
+  return {
+    creation: {
+      verification,
+      sourceActor: wire.source_actor || wire.author || '',
+      ...(wire.teammate === undefined ? {} : { teammate: wire.teammate }),
+      ...(verification === 'verified' && wire.accountable_actor
+        ? { accountableActor: wire.accountable_actor }
+        : {}),
+    },
+  }
+}
 
 function referenceFor(issue: {
   uid: string
@@ -64,6 +89,7 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       title: issue.title,
       body: issue.body ?? '',
       status: issue.status,
+      ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),
       ...(issue.priority === undefined ? {} : { priority: issue.priority }),
       ...(issue.metadata?.scheduled_on === undefined
@@ -79,6 +105,7 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
     comments: (wire.comments ?? []).map((comment) => ({
       id: String(comment.id),
       author: comment.author,
+      ...creationFor(comment),
       ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),
       body: comment.body,
       createdAt: comment.created_at,

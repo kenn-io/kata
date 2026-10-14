@@ -505,6 +505,12 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 		GRANT EXECUTE ON FUNCTION isolated_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
 `, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
+		)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
+	})
 	runtimeStore, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"), pgstore.Config{
 		Schema:      "isolated_store",
 		SchemaMode:  pgstore.SchemaModeValidate,

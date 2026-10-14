@@ -312,7 +312,7 @@ func (s *Store) CheckClaimGate(ctx context.Context, input db.ClaimGateParams) er
 		if issueRef == "" {
 			return db.ErrNotFound
 		}
-		issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+
+		issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+
 			` WHERE i.project_id=$1 AND (i.short_id=$2 OR i.uid=$2) FOR UPDATE OF i`,
 			input.ProjectID, issueRef))
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -36,10 +37,14 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.InstanceUID = uid
 		out.Body.Version = version.Version
 		out.Body.SchemaVersion = sv
+		out.Body.RelayProtocolVersion = db.RelayProtocolVersion
+		out.Body.ProvenanceProtocolVersion = 1
+		out.Body.EmbeddingArtifactProtocolVersion = 1
 		out.Body.WebUIContractVersion = api.UISnapshotContractVersion
 		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
 		out.Body.IssueSubtreeTokens = true
 		out.Body.IssueStatusSync = true
+		out.Body.FederationSigningRequired = cfg.FederationSigningRequired
 		out.Body.Auth = instanceAuthInfo(ctx, cfg)
 		return out, nil
 	})
@@ -49,20 +54,37 @@ func instanceAuthInfo(ctx context.Context, cfg ServerConfig) api.AuthInfoOut {
 	principal, ok := PrincipalFromContext(ctx)
 	if !ok {
 		return api.AuthInfoOut{
-			Kind: "none", CloseRequiresEvidence: closeRequiresEvidence(ctx),
+			Kind: requestAuthKind(ctx), CloseRequiresEvidence: closeRequiresEvidence(ctx),
 			TokenAuditRead: tokenAuditReadAllowed(ctx),
 		}
 	}
 	out := api.AuthInfoOut{
-		Kind:  string(principal.Kind),
-		Actor: principal.Actor,
+		Kind:      requestAuthKind(ctx),
+		Actor:     principal.Actor,
+		ExpiresAt: principal.ExpiresAt,
 	}
 	if principal.Scope != nil {
 		out.Scope = tokenScopeOut(principal.Scope)
-		out.ExpiresAt = principal.ExpiresAt
 		out.AllowedActions = issueScopedAllowedActions(effectiveUIPolicy(ctx, cfg).Capabilities.Writable)
 	}
 	out.CloseRequiresEvidence = closeRequiresEvidence(ctx)
 	out.TokenAuditRead = tokenAuditReadAllowed(ctx)
 	return out
+}
+
+// requestAuthKind names how the current request authenticated so clients can
+// label a connection that carries no account. Requests without a principal
+// are owner-local unless an explicit unauthenticated network mode admitted them.
+func requestAuthKind(ctx context.Context) string {
+	if principal, ok := PrincipalFromContext(ctx); ok {
+		return string(principal.Kind)
+	}
+	switch {
+	case insecureReadonlyRequest(ctx):
+		return "insecure_readonly"
+	case unauthenticatedPrivateNetworkRequest(ctx):
+		return "unauthenticated_private_network"
+	default:
+		return "none"
+	}
 }

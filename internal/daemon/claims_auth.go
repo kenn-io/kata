@@ -17,6 +17,7 @@ type claimPrincipal struct {
 	db.ClaimPrincipal
 	IdentityToken    bool
 	Enrollment       bool
+	OwnerAuthority   bool
 	RequestPrincipal *Principal
 }
 
@@ -52,7 +53,8 @@ func resolveClaimPrincipal(
 		principal := localClaimPrincipalWithHolder(cfg, body, actorFor(ctx, body.Holder))
 		principal.IdentityToken = requestPrincipal.Kind == PrincipalDBToken
 		principal.RequestPrincipal = &requestPrincipal
-		return ctx, principal, nil
+		principal.OwnerAuthority = projectOwnerAuthority(ctx)
+		return claimRequestContext(ctx, principal), principal, nil
 	}
 	if cfg.Auth.Token != "" {
 		if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, body, false); ok || err != nil {
@@ -79,7 +81,9 @@ func resolveClaimPrincipal(
 	if cfg.InsecureReadonly {
 		return ctx, claimPrincipal{}, localAuthError(cfg, authz)
 	}
-	return ctx, localClaimPrincipal(cfg, body), nil
+	principal := localClaimPrincipal(cfg, body)
+	principal.OwnerAuthority = projectOwnerAuthority(ctx)
+	return claimRequestContext(ctx, principal), principal, nil
 }
 
 func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
@@ -145,7 +149,9 @@ func authorizeClaimStatusRead(
 		if cfg.InsecureReadonly {
 			return ctx, localAuthError(cfg, authz)
 		}
-		return ctx, nil
+		principal := localClaimPrincipal(cfg, api.ClaimActionBody{})
+		principal.OwnerAuthority = projectOwnerAuthority(ctx)
+		return claimRequestContext(ctx, principal), nil
 	}
 	if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, api.ClaimActionBody{}, true); ok || err != nil {
 		return claimRequestContext(ctx, principal), err
@@ -167,13 +173,17 @@ func resolveLocalClaimPrincipal(
 		if cfg.InsecureReadonly {
 			return claimPrincipal{}, false, nil
 		}
-		return localClaimPrincipal(cfg, body), true, nil
+		principal := localClaimPrincipal(cfg, body)
+		principal.OwnerAuthority = projectOwnerAuthority(ctx)
+		return principal, true, nil
 	case validLocalBearer(cfg.Auth.Token, authz):
 		if cfg.Auth.RequireTokenIdentity && !allowBootstrap {
 			return claimPrincipal{}, false, api.NewError(http.StatusForbidden, "bootstrap_token_write_forbidden",
 				"bootstrap token cannot perform attributed writes; use a user token", "", nil)
 		}
-		return localClaimPrincipal(cfg, body), true, nil
+		principal := localClaimPrincipal(cfg, body)
+		principal.OwnerAuthority = true // configured bearer verified above
+		return principal, true, nil
 	case cfg.Auth.RequireTokenIdentity && hasBearerHeader(authz):
 		if cfg.DB == nil {
 			return claimPrincipal{}, false, api.NewError(http.StatusInternalServerError, "internal",
@@ -199,6 +209,16 @@ func resolveLocalClaimPrincipal(
 }
 
 func claimRequestContext(ctx context.Context, principal claimPrincipal) context.Context {
+	if principal.OwnerAuthority {
+		// Only validated daemon credentials or the derived owner-local transport
+		// grant this authority. Holder labels are attribution, never access.
+		if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+			decision.owner = true
+			decision.ProjectUIDs = nil
+			decision.targets = nil
+		}
+		ctx = db.WithAuthorizedProjects(ctx, nil)
+	}
 	if principal.RequestPrincipal == nil {
 		return ctx
 	}

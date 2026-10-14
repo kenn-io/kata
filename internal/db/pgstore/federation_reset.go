@@ -20,7 +20,7 @@ func (s *Store) ResetFederatedProject(
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err
 		}
-		if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
 		if err := clearFederatedProjectTx(ctx, tx, projectID); err != nil {
@@ -49,7 +49,7 @@ func (s *Store) ResetFederatedProjectIfNoPendingPush(
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err
 		}
-		if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
 		var quarantineID int64
@@ -83,7 +83,17 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err !
 	})
 }
 
-func rejectFederationResetExternalRootHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
+func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var relayConfig *string
+	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&relayConfig); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		return mapSQLError(err, nil)
+	}
+	if relayConfig != nil {
+		return db.ErrRelayResetRequiresRootProof
+	}
 	var bindingID int64
 	err := tx.QueryRowContext(ctx,
 		`SELECT id FROM external_root_bindings WHERE project_id=$1 LIMIT 1 FOR UPDATE`, projectID).Scan(&bindingID)
@@ -96,7 +106,26 @@ func rejectFederationResetExternalRootHistory(ctx context.Context, tx *sql.Tx, p
 	return mapSQLError(err, nil)
 }
 
+// clearRelayProjectTx replaces a relay project's projection but keeps
+// daemon-local catalog history, such as renames and alias removals, which has
+// no root receipt and is not in the snapshot. Every other record, including
+// anything a root receipt attests, is replaced.
+func clearRelayProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
+	// #nosec G202 -- The event-type list is fixed native SQL; the project values are bound.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND NOT (type IN (`+db.RelayResetRetainedEventTypesSQL()+`) AND issue_uid IS NULL AND issue_id IS NULL AND NOT EXISTS(SELECT 1 FROM federation_event_provenance p WHERE p.project_uid=$2 AND p.event_uid=events.uid))`, projectID, projectUID); err != nil {
+		return mapSQLError(err, nil)
+	}
+	return clearFederatedProjectionTx(ctx, tx, projectID)
+}
+
 func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID); err != nil {
+		return mapSQLError(err, nil)
+	}
+	return clearFederatedProjectionTx(ctx, tx, projectID)
+}
+
+func clearFederatedProjectionTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
 		return err
 	}
@@ -111,7 +140,6 @@ func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) e
 		query string
 		args  []any
 	}{
-		{`DELETE FROM events WHERE project_id=$1`, []any{projectID}},
 		{`DELETE FROM pending_claim_requests WHERE project_id=$1`, []any{projectID}},
 		{`DELETE FROM issue_claims WHERE project_id=$1`, []any{projectID}},
 		{`DELETE FROM issue_labels WHERE issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, []any{projectID}},

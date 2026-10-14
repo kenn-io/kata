@@ -56,7 +56,10 @@ test('daemon restart keeps an old draft visible but unsubmittable', async ({ pag
   await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('Draft survives process restart')
   await kata.restart()
-  await page.getByRole('button', { name: 'Add comment' }).click()
+  // Wait for the renewed session to restore writable authority, so the comment
+  // box is editable again and only the draft fence can keep the old draft back.
+  await expect(page.getByRole('button', { name: 'New task' })).toBeEnabled()
+  await expect(page.getByRole('textbox', { name: 'Comment' })).toBeEnabled()
   await expect(page.getByRole('textbox', { name: 'Comment' })).toHaveValue(
     'Draft survives process restart',
   )

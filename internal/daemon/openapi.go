@@ -273,7 +273,9 @@ func replaceStrictResponseAdditionalProperties(doc *huma.OpenAPI, replacement an
 }
 
 // requestReachableSchemas returns every schema reachable from a request body.
-// Response uses of these schemas receive separate component definitions.
+// These are excluded from relaxation so a schema shared between a request and a
+// response is never silently loosened. Relay transport shares request/response
+// types while retaining strict request validation.
 func requestReachableSchemas(ops []*huma.Operation, reg huma.Registry) map[*huma.Schema]struct{} {
 	strict := map[*huma.Schema]struct{}{}
 	seen := map[*huma.Schema]struct{}{}

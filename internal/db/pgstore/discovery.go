@@ -26,6 +26,7 @@ func (s *Store) ReadyIssues(
 	if at.IsZero() {
 		at = time.Now()
 	}
+	args := []any{projectID}
 	var query strings.Builder
 	query.WriteString(scheduledIssueSelect + `
  WHERE i.project_id = $1
@@ -38,16 +39,17 @@ func (s *Store) ReadyIssues(
        JOIN projects blocker_project ON blocker_project.id = blocker.project_id
       WHERE l.type = 'blocks'
         AND l.to_issue_id = i.id
+        AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
         AND blocker.status = 'open'
         AND blocker.deleted_at IS NULL
         AND blocker_project.deleted_at IS NULL
    )`)
-	args := []any{projectID}
 	addArg := func(value any) string {
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
 	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
@@ -73,7 +75,7 @@ func (s *Store) ReadyIssues(
 	defer func() { _ = rows.Close() }()
 	var issues []db.Issue
 	for rows.Next() {
-		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
+		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -109,6 +111,7 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	if at.IsZero() {
 		at = time.Now()
 	}
+	args := []any{}
 	var query strings.Builder
 	query.WriteString(`SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
   FROM issues i
@@ -124,16 +127,17 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
        JOIN projects blocker_project ON blocker_project.id = blocker.project_id
       WHERE l.type = 'blocks'
         AND l.to_issue_id = i.id
+        AND ` + authorizedLinkPredicate(ctx, "l.", &args) + `
         AND blocker.status = 'open'
         AND blocker.deleted_at IS NULL
         AND blocker_project.deleted_at IS NULL
    )`)
-	args := []any{}
 	addArg := func(value any) string {
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
 	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
@@ -171,6 +175,9 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
+		handle, _ := db.IssueTeammate(issue.Metadata)
+		issue.SourceFallback(issue.Author, handle)
+		db.RecordExposedIssue(ctx, issue.ID)
 		due, err := metadata.ScheduledOnDue(
 			string(issue.Metadata), at,
 			scheduleDefaultTimezone(recurrenceTimezone.String, filter.DefaultTimezone),

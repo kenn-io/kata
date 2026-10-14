@@ -15,7 +15,7 @@ import (
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id,
        hub_project_uid, replay_horizon_event_id, pull_cursor_event_id, push_enabled,
        push_cursor_event_id, bound_actor, allow_insecure, enabled, created_at,
-       updated_at, last_sync_at FROM federation_bindings`
+       updated_at, last_sync_at, relay_config FROM federation_bindings`
 
 const federationSyncStatusSelect = `SELECT project_id, last_pull_started_at,
        last_pull_success_at, last_push_started_at, last_push_success_at,
@@ -24,7 +24,7 @@ const federationSyncStatusSelect = `SELECT project_id, last_pull_started_at,
 const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid,
        project_id, capabilities, bound_actor, allow_adoption_snapshot_authors,
        adoption_baseline_open, adoption_baseline_next_source_event_id,
-       adoption_baseline_end_source_event_id, created_at, updated_at, revoked_at
+       adoption_baseline_end_source_event_id, created_at, updated_at, revoked_at, relay_binding_uid, relay_protocol_version, parent_token_id, relay_reset_epoch, relay_serve_downstream
   FROM federation_enrollments`
 
 // ListFederationBindings returns every configured binding in project order.
@@ -142,6 +142,9 @@ WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBi
 		}
 		previous, err := federationBindingTransitionState(ctx, tx, input.ProjectID)
 		if err != nil {
+			return err
+		}
+		if err := db.CheckRelayBindingUpdate(previous, input); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO federation_bindings(
@@ -388,6 +391,17 @@ func (s *Store) RotateFederationEnrollment(
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.CreatedFederationEnrollment{}
 		p := prepared.Params
+		// Legacy rotation cannot revoke or downgrade a negotiated relay.
+		if err := lockProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		var relay bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_enrollments WHERE spoke_instance_uid=$1 AND project_id=$2 AND revoked_at IS NULL AND relay_protocol_version<>0)`, p.SpokeInstanceUID, *p.ProjectID).Scan(&relay); err != nil {
+			return err
+		}
+		if relay {
+			return db.ErrFederationEnrollmentTokenConflict
+		}
 		existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
 			federationEnrollmentSelect+` WHERE token_hash=$1`, db.FederationTokenHash(p.Token)))
 		matched := err == nil
@@ -517,29 +531,34 @@ WHERE project_id=$1
   AND capabilities=$3
   AND bound_actor=$4
   AND allow_adoption_snapshot_authors=$5
-  AND revoked_at IS NULL
+  AND revoked_at IS NULL AND relay_protocol_version=0
 ORDER BY id DESC
 LIMIT 1`,
 		p.ProjectID, p.SpokeInstanceUID, p.Capabilities, p.Actor,
 		storedBool(p.AllowAdoptionSnapshotAuthors)))
 }
 
-// RevokeFederationEnrollment marks an enrollment inactive without changing its first revocation time.
+// RevokeFederationEnrollment marks an enrollment inactive without changing its
+// first revocation time. A relay grant's delivery rows go with its authority
+// in the same transaction.
 func (s *Store) RevokeFederationEnrollment(ctx context.Context, id int64) error {
-	result, err := s.ExecContext(ctx, `UPDATE federation_enrollments SET
+	return s.relayTx(ctx, func(tx *sql.Tx) error {
+		var bindingUID sql.NullString
+		err := tx.QueryRowContext(ctx, `UPDATE federation_enrollments SET
 revoked_at=COALESCE(revoked_at,to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
-updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') WHERE id=$1`, id)
-	if err != nil {
-		return mapSQLError(err, nil)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		return db.ErrNotFound
-	}
-	return nil
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') WHERE id=$1
+RETURNING relay_binding_uid`, id).Scan(&bindingUID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		if !bindingUID.Valid || bindingUID.String == "" {
+			return nil
+		}
+		return deleteRelayBindingStateTx(ctx, tx, bindingUID.String)
+	})
 }
 
 // AuthorizeFederationToken validates scope, capability, and the target hub binding.
@@ -558,10 +577,16 @@ WHERE token_hash=$1 AND revoked_at IS NULL
   AND (',' || capabilities || ',') LIKE ('%,' || $2 || ',%')
   AND (project_id=$3 OR project_id IS NULL)
   AND EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id
-             WHERE b.project_id=$3 AND p.deleted_at IS NULL AND b.role='hub' AND b.enabled=1)`,
+             WHERE b.project_id=$3 AND p.deleted_at IS NULL AND (b.role='hub' OR federation_enrollments.relay_protocol_version=1) AND b.enabled=1)`,
 		db.FederationTokenHash(token), capability, projectID))
 	if err != nil {
 		return db.FederationEnrollment{}, err
+	}
+	if enrollment.RelayProtocolVersion != 0 {
+		err = s.relayReadAuthority(ctx, enrollment, projectID)
+		if err != nil {
+			return db.FederationEnrollment{}, err
+		}
 	}
 	if enrollment.ProjectID == nil {
 		enrollment.AllowAdoptionSnapshotAuthors = false
@@ -587,22 +612,14 @@ func (s *Store) FederationEnrollmentTransactionFence(
 	capability string,
 ) db.TransactionFence {
 	return func(ctx context.Context, transaction db.Transaction) error {
-		var active int
-		err := transaction.QueryRowContext(ctx, `
-			SELECT binding.enabled
-			FROM federation_bindings AS binding
-			JOIN projects AS project ON project.id=binding.project_id
-			WHERE binding.project_id=$1 AND binding.role='hub'
-			  AND binding.enabled=1 AND project.deleted_at IS NULL
-			FOR SHARE OF binding, project`, projectID).Scan(&active)
-		if errors.Is(err, sql.ErrNoRows) {
-			return db.ErrNotFound
+		if admitted.RelayProtocolVersion != 0 {
+			if err := lockProjectAccess(ctx, transaction); err != nil {
+				return err
+			}
 		}
+		_, _, err := s.relayServingBindingTx(ctx, transaction, projectID, admitted.RelayProtocolVersion)
 		if err != nil {
 			return err
-		}
-		if active != 1 {
-			return db.ErrNotFound
 		}
 		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
 			federationEnrollmentSelect+` WHERE id=$1 FOR SHARE`, admitted.ID))
@@ -612,7 +629,7 @@ func (s *Store) FederationEnrollmentTransactionFence(
 		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
 			return db.ErrNotFound
 		}
-		return nil
+		return s.checkRelayParentTx(ctx, transaction, current, projectID)
 	}
 }
 
@@ -628,16 +645,21 @@ func scanFederationBinding(row rowScanner) (db.FederationBinding, error) {
 	var binding db.FederationBinding
 	var role string
 	var lastSyncAt storedNullTime
+	var relayConfig *string
 	err := row.Scan(&binding.ProjectID, &role, &binding.HubURL, &binding.HubProjectID,
 		&binding.HubProjectUID, &binding.ReplayHorizonEventID, &binding.PullCursorEventID,
 		(*storedBool)(&binding.PushEnabled), &binding.PushCursorEventID, &binding.Actor,
 		(*storedBool)(&binding.AllowInsecure), (*storedBool)(&binding.Enabled),
-		(*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &lastSyncAt)
+		(*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &lastSyncAt, &relayConfig)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationBinding{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.FederationBinding{}, mapSQLError(err, nil)
+	}
+	binding.RelayConfig, err = db.DecodeRelayBindingConfig(relayConfig)
+	if err != nil {
+		return db.FederationBinding{}, err
 	}
 	binding.Role = db.FederationRole(role)
 	binding.LastSyncAt = lastSyncAt.Time
@@ -685,6 +707,8 @@ func federationEnrollmentByIDTx(
 func scanFederationEnrollment(row rowScanner) (db.FederationEnrollment, error) {
 	var enrollment db.FederationEnrollment
 	var projectID sql.NullInt64
+	var parentID sql.NullInt64
+	var bindingUID sql.NullString
 	var revokedAt storedNullTime
 	err := row.Scan(&enrollment.ID, &enrollment.TokenHash, &enrollment.SpokeInstanceUID,
 		&projectID, &enrollment.Capabilities, &enrollment.Actor,
@@ -693,7 +717,7 @@ func scanFederationEnrollment(row rowScanner) (db.FederationEnrollment, error) {
 		&enrollment.AdoptionBaselineNextSourceEventID,
 		&enrollment.AdoptionBaselineEndSourceEventID,
 		(*storedTime)(&enrollment.CreatedAt), (*storedTime)(&enrollment.UpdatedAt),
-		&revokedAt)
+		&revokedAt, &bindingUID, &enrollment.RelayProtocolVersion, &parentID, &enrollment.RelayResetEpoch, (*storedBool)(&enrollment.RelayServeDownstream))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationEnrollment{}, db.ErrNotFound
 	}
@@ -702,6 +726,10 @@ func scanFederationEnrollment(row rowScanner) (db.FederationEnrollment, error) {
 	}
 	if projectID.Valid {
 		enrollment.ProjectID = &projectID.Int64
+	}
+	enrollment.RelayBindingUID = bindingUID.String
+	if parentID.Valid {
+		enrollment.ParentTokenID = &parentID.Int64
 	}
 	enrollment.RevokedAt = revokedAt.Time
 	return enrollment, nil

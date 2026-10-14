@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // ReplayEventProjectName selects the durable name covered by an event's
@@ -34,6 +36,14 @@ func ReplayEventProjectName(event *EventExport, currentName string, recomputeHas
 func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 	if err := ValidateImportRecords(records); err != nil {
 		return err
+	}
+	if opts.NewInstance {
+		for _, record := range records {
+			binding, ok := record.(*FederationBindingExport)
+			if ok && binding.RelayConfig != nil {
+				return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
+			}
+		}
 	}
 	if !opts.PreserveIssueSyncBindingEnabled {
 		return nil
@@ -72,7 +82,13 @@ func ValidateImportRecords(records []ImportRecord) error {
 	if err := validateReplayStatusIntent(records); err != nil {
 		return err
 	}
-	return validateReplayBindingScopedMappings(records)
+	if err := validateReplayBindingScopedMappings(records); err != nil {
+		return err
+	}
+	if err := validateRelayConfigurationReplay(records); err != nil {
+		return err
+	}
+	return validateProvenanceReplay(records)
 }
 
 // Validate complete portable cron documents before either backend clears
@@ -263,10 +279,55 @@ func validateImportRecord(record ImportRecord) error {
 		return ValidateCronRecord(record)
 	case nil:
 		return errors.New("nil record")
+	case *EmbeddingArtifactExport:
+		if err := requireImportPayload(rec, "federation_embedding_artifact"); err != nil {
+			return err
+		}
+		return embedding.ValidateArtifact(rec.EmbeddingArtifact, "", "")
 	case *MetaKV:
 		return requireImportPayload(rec, ImportKindMeta)
 	case *ProjectExport:
 		return requireImportPayload(rec, ImportKindProject)
+	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
+		return ValidateRelayDeliveryRecord(record)
+	case *RootKeyPin:
+		if err := requireImportPayload(rec, "federation_root_key"); err != nil {
+			return err
+		}
+		return ValidateRootKeyPin(*rec)
+	case *AttributionReceipt:
+		if err := requireImportPayload(rec, "federation_event_provenance"); err != nil {
+			return err
+		}
+		_, err := receiptSigningBytes(*rec)
+		return err
+	case *EntityProvenance:
+		if rec == nil || !uid.Valid(rec.ProjectUID) || !uid.Valid(rec.EventUID) || !uid.Valid(rec.EntityUID) || (rec.Kind != "issue" && rec.Kind != "comment") {
+			return errors.New("invalid creation provenance")
+		}
+		return nil
+	case *Team:
+		if rec == nil || !uid.Valid(rec.UID) || strings.TrimSpace(rec.Name) == "" || rec.Revision < 1 {
+			return errors.New("invalid team record")
+		}
+		return nil
+	case *TeamMembership:
+		if rec == nil || !uid.Valid(rec.TeamUID) {
+			return errors.New("invalid membership record")
+		}
+		return ValidateTokenActor(rec.Actor)
+	case *ProjectAccessPolicy:
+		if rec == nil || !uid.Valid(rec.ProjectUID) || rec.Revision < 1 || (rec.Visibility != "all" && rec.Visibility != "teams") || (rec.Visibility == "all" && len(rec.TeamUIDs) > 0) {
+			return errors.New("invalid project policy record")
+		}
+		seen := make(map[string]bool)
+		for _, teamUID := range rec.TeamUIDs {
+			if !uid.Valid(teamUID) || seen[teamUID] {
+				return errors.New("invalid policy team record")
+			}
+			seen[teamUID] = true
+		}
+		return nil
 	case *AliasExport:
 		return requireImportPayload(rec, ImportKindProjectAlias)
 	case *IssueSyncBindingExport:
@@ -319,7 +380,14 @@ func validateImportRecord(record ImportRecord) error {
 	case *FederationQuarantineExport:
 		return requireImportPayload(rec, ImportKindFederationQuarantine)
 	case *FederationEnrollmentExport:
-		return requireImportPayload(rec, ImportKindFederationEnrollment)
+		if err := requireImportPayload(rec, ImportKindFederationEnrollment); err != nil {
+			return err
+		}
+		epoch := rec.RelayResetEpoch
+		if epoch == 0 {
+			epoch = 1 // omitted in exports written before relay support
+		}
+		return ValidateFederationEnrollmentRelayShape(rec.RelayProtocolVersion, rec.RelayBindingUID, rec.ParentTokenID, rec.ProjectID, epoch, rec.RelayServeDownstream)
 	case *IssueClaimExport:
 		return requireImportPayload(rec, ImportKindIssueClaim)
 	case *PendingClaimRequestExport:
@@ -374,11 +442,11 @@ func importReplayRank(kind string) int {
 		return 0
 	case ImportKindProject:
 		return 1
-	case ImportKindProjectAlias, ImportKindIssueSyncBinding, ImportKindRecurrence:
+	case "team", ImportKindProjectAlias, ImportKindIssueSyncBinding, ImportKindRecurrence:
 		return 2
-	case ImportKindIssueSyncStatus, ImportKindIssue:
+	case "team_membership", ImportKindIssueSyncStatus, ImportKindIssue:
 		return 3
-	case ImportKindComment, ImportKindIssueLabel, ImportKindLink,
+	case "project_access_policy", ImportKindComment, ImportKindIssueLabel, ImportKindLink,
 		ImportKindFederationBinding, ImportKindFederationEnrollment,
 		ImportKindIssueClaim, ImportKindPendingClaimRequest:
 		return 4
@@ -399,6 +467,14 @@ func importReplayRank(kind string) int {
 		return 11
 	case ImportKindSQLiteSequence:
 		return 12
+	case "federation_root_key":
+		return 13
+	case "federation_event_provenance":
+		return 14
+	case "federation_entity_provenance":
+		return 15
+	case "federation_embedding_artifact":
+		return 16
 	default:
 		return 10
 	}
@@ -467,6 +543,7 @@ func ValidReplayContentHash(value string) bool {
 // ReplayTokenCreated is the durable token.created event payload used to
 // rebuild the API-token projection during replay.
 type ReplayTokenCreated struct {
+	TeamUIDs    []string       `json:"team_uids,omitempty"`
 	TokenID     int64          `json:"token_id"`
 	TokenHash   string         `json:"token_hash"`
 	TargetActor string         `json:"target_actor"`

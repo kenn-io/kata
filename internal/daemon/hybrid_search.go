@@ -195,6 +195,16 @@ func (p hybridParams) retrievalLimit() int {
 // ceiling, so the leg's short result is a limit of the retrieval depth rather
 // than of the corpus.
 func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams, fetch int) ([]db.SearchCandidate, bool, error) {
+	project, err := store.ProjectByID(ctx, p.ProjectID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := authorizeProjectTarget(ctx, project.UID); err != nil {
+		return nil, false, err
+	}
+	// The vector index ranks only the searched project's chunks, so another
+	// project's closer chunks cannot starve this one out of the window.
+	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 	if err := emb.MissingCredentialError(); err != nil {
 		return nil, false, err
 	}

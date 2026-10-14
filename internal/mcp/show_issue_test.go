@@ -24,6 +24,12 @@ func TestIssueFromShowCopiesEveryIssueField(t *testing.T) {
 		name := issueValue.Type().Field(i).Name
 		source := shownValue.FieldByName(name)
 		require.Truef(t, source.IsValid(), "ShowIssueOut lacks Issue field %s", name)
+		// OpenAPI generates distinct named enum types for flattened records.
+		// Compare their converted values while retaining the non-zero check.
+		if source.Type() != issueValue.Field(i).Type() {
+			require.Truef(t, source.Type().ConvertibleTo(issueValue.Field(i).Type()), "field %s types differ", name)
+			source = source.Convert(issueValue.Field(i).Type())
+		}
 		require.Equalf(t, source.Interface(), issueValue.Field(i).Interface(), "field %s", name)
 	}
 }

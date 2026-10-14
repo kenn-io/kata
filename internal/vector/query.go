@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"go.kenn.io/kata/internal/db"
 	kitvec "go.kenn.io/kit/vector"
 	"go.kenn.io/kit/vector/sqlitevec"
 )
@@ -31,6 +32,9 @@ func (ix *Index) Query(ctx context.Context, key string, query kitvec.Vector, lim
 	}
 	if limit <= 0 {
 		return nil, nil
+	}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		return ix.queryAuthorizedSQLite(ctx, key, query, limit)
 	}
 	candidates, err := ix.store.BuildCandidateQuery(ctx, ix.db, key, query, sqlitevec.CandidateQuery{CandidateLimit: limit})
 	if err != nil {
@@ -61,7 +65,8 @@ func (ix *Index) QueryWithProbe(ctx context.Context, key string, query kitvec.Ve
 	if limit <= 0 {
 		return QueryWindow{}, nil
 	}
-	if ix.pg != nil {
+	_, restricted := db.AuthorizedProjects(ctx)
+	if ix.pg != nil || restricted {
 		hits, err := ix.Query(ctx, key, query, limit+1)
 		if err != nil {
 			return QueryWindow{}, err

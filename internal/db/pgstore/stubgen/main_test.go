@@ -5,7 +5,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,19 +39,51 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-
-	var stubbed []string
+	require.NotEmpty(t, methods)
 	for _, method := range methods {
-		switch method.Status {
-		case MethodImplemented:
-		case MethodStubbed:
-			stubbed = append(stubbed, method.Name)
-		default:
-			assert.Fail(t, "unknown method status", "%s has status %q", method.Name, method.Status)
-		}
+		assert.Equal(t, MethodImplemented, method.Status,
+			"pgstore must implement Storage method %s instead of serving a generated stub", method.Name)
 	}
+}
 
-	assert.Empty(t, stubbed)
+func TestStorageMethodInventoryMarksUnportedMethodsStubbed(t *testing.T) {
+	names := append(implementedMethodNames(), "UnportedMethod")
+	inventory, err := CollectStorageMethodInventory(writeStorageFixture(t, names))
+	require.NoError(t, err)
+	statuses := make(map[string]MethodStatus, len(inventory))
+	for _, method := range inventory {
+		statuses[method.Name] = method.Status
+	}
+	assert.Equal(t, MethodStubbed, statuses["UnportedMethod"])
+	assert.Equal(t, MethodImplemented, statuses["APITokenByID"])
+}
+
+func TestStorageMethodInventoryRejectsStaleImplementedEntry(t *testing.T) {
+	names := slices.DeleteFunc(implementedMethodNames(), func(name string) bool { return name == "APITokenByID" })
+	_, err := CollectStorageMethodInventory(writeStorageFixture(t, names))
+	require.EqualError(t, err, `implemented method "APITokenByID" is not declared by Storage`)
+}
+
+func implementedMethodNames() []string {
+	names := make([]string, 0, len(alreadyImplemented))
+	for name := range alreadyImplemented {
+		names = append(names, name)
+	}
+	return names
+}
+
+// writeStorageFixture writes a Storage interface that declares names.
+func writeStorageFixture(t *testing.T, names []string) string {
+	t.Helper()
+	var source strings.Builder
+	source.WriteString("package db\ntype Storage interface {\n")
+	for _, name := range names {
+		source.WriteString("\t" + name + "()\n")
+	}
+	source.WriteString("}\n")
+	storagePath := filepath.Join(t.TempDir(), "storage.go")
+	require.NoError(t, os.WriteFile(storagePath, []byte(source.String()), 0o600))
+	return storagePath
 }
 
 func TestImplementedStorageMethodsHaveConformanceCoverage(t *testing.T) {

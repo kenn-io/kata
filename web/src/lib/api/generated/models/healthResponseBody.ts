@@ -4,6 +4,7 @@
 import type { EmbeddingsHealth } from './embeddingsHealth.ts'
 import type { FederationConfigHealth } from './federationConfigHealth.ts'
 import type { IdleShutdownHealth } from './idleShutdownHealth.ts'
+import type { RootSigningHealth } from './rootSigningHealth.ts'
 
 export interface HealthResponseBody {
   api_schema_version?: string
@@ -12,6 +13,7 @@ export interface HealthResponseBody {
   federation_config?: FederationConfigHealth
   idle_shutdown?: IdleShutdownHealth
   ok: boolean
+  root_signing?: RootSigningHealth
   schema_version: number
   started_at: string
   uptime: string

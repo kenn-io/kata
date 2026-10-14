@@ -1,15 +1,77 @@
 package daemon_test
 
 import (
+	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	katauid "go.kenn.io/kata/internal/uid"
 )
+
+func enableTestRelayBoundary(t *testing.T, env *testenv.Env, project db.Project) {
+	t.Helper()
+	rootUID, err := katauid.New()
+	require.NoError(t, err)
+	bindingUID, err := katauid.New()
+	require.NoError(t, err)
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, env.DB.PinRootAuthority(t.Context(), db.RootKeyPin{
+		ProjectUID: project.UID, AuthorityUID: rootUID,
+		KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID,
+		Actor: "tester", Enabled: true, PushEnabled: true,
+	})
+	require.NoError(t, err)
+	_, err = env.DB.SetRelayBindingConfig(t.Context(), project.ID, db.RelayBindingConfig{
+		ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+		UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+		HubPath: []string{rootUID, env.DB.InstanceUID()}, LocalActor: "tester",
+		ServeDownstream: true, ResetEpoch: 1,
+	})
+	require.NoError(t, err)
+}
+
+type relayBoundaryAfterCheckStore struct {
+	db.Storage
+	afterCheck func(context.Context) error
+}
+
+func (s *relayBoundaryAfterCheckStore) CheckLinkBoundary(ctx context.Context, fromIssueID, toIssueID int64) error {
+	checker, ok := s.Storage.(interface {
+		CheckLinkBoundary(context.Context, int64, int64) error
+	})
+	if !ok {
+		return nil
+	}
+	if err := checker.CheckLinkBoundary(ctx, fromIssueID, toIssueID); err != nil {
+		return err
+	}
+	if s.afterCheck == nil {
+		return nil
+	}
+	afterCheck := s.afterCheck
+	s.afterCheck = nil
+	return afterCheck(ctx)
+}
+
+func (s *relayBoundaryAfterCheckStore) ReplaceParentAndEvents(
+	ctx context.Context,
+	input db.ReplaceParentAndEventsParams,
+) (db.ReplaceParentAndEventsResult, error) {
+	return s.Storage.(db.ParentLinkReplacementStorage).ReplaceParentAndEvents(ctx, input)
+}
 
 func TestCreateLink_HappyPath(t *testing.T) {
 	env := testenv.New(t)
@@ -133,6 +195,100 @@ func TestCreateLink_ParentReplaceSwapsParent(t *testing.T) {
 	})
 	require.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, p2Iss.ShortID, out.Link.To.ShortID)
+}
+
+func TestCreateLink_ParentReplaceKeepsOldParentWhenRelayBoundaryRejectsNewParent(t *testing.T) {
+	env := testenv.New(t)
+	projectID, childID, oldParentID := setupTwoIssues(t, env)
+	project, err := env.DB.ProjectByID(t.Context(), projectID)
+	require.NoError(t, err)
+	enableTestRelayBoundary(t, env, project)
+	newProject, err := env.DB.CreateProject(t.Context(), "unshared-project")
+	require.NoError(t, err)
+	newParentID := createIssueViaHTTP(t, env, newProject.ID, "unshared parent")
+	oldParent, err := env.DB.IssueByID(t.Context(), oldParentID)
+	require.NoError(t, err)
+	newParent, err := env.DB.IssueByID(t.Context(), newParentID)
+	require.NoError(t, err)
+	postLink(t, env, projectID, childID, "parent", oldParentID)
+	var beforeUnlinks int
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM events WHERE project_id=? AND type='issue.unlinked'`, projectID).Scan(&beforeUnlinks))
+
+	resp, _ := postLinkRaw(t, env, projectID, childID, map[string]any{
+		"actor": "tester", "type": "parent",
+		"to_ref": newProject.Name + "#" + newParent.ShortID, "replace": true,
+	})
+	assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+	parent, err := env.DB.ParentOf(t.Context(), childID)
+	require.NoError(t, err)
+	assert.Equal(t, oldParent.ID, parent.ToIssueID, "the rejected replacement must preserve the existing parent")
+	var afterUnlinks int
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM events WHERE project_id=? AND type='issue.unlinked'`, projectID).Scan(&afterUnlinks))
+	assert.Equal(t, beforeUnlinks, afterUnlinks, "the rejected replacement must not emit an unlink event")
+}
+
+func TestCreateLink_ParentReplaceKeepsOldParentWhenRelayBoundaryChangesAfterPreflight(t *testing.T) {
+	env := testenv.New(t)
+	projectID, childID, oldParentID := setupTwoIssues(t, env)
+	project, err := env.DB.ProjectByID(t.Context(), projectID)
+	require.NoError(t, err)
+	newProject, err := env.DB.CreateProject(t.Context(), "unshared-project")
+	require.NoError(t, err)
+	newParentID := createIssueViaHTTP(t, env, newProject.ID, "unshared parent")
+	newParent, err := env.DB.IssueByID(t.Context(), newParentID)
+	require.NoError(t, err)
+	postLink(t, env, projectID, childID, "parent", oldParentID)
+
+	rootUID, err := katauid.New()
+	require.NoError(t, err)
+	bindingUID, err := katauid.New()
+	require.NoError(t, err)
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	wrapped := &relayBoundaryAfterCheckStore{Storage: env.DB}
+	wrapped.afterCheck = func(ctx context.Context) error {
+		if err := env.DB.PinRootAuthority(ctx, db.RootKeyPin{
+			ProjectUID: project.UID, AuthorityUID: rootUID,
+			KeyID: db.RootPublicKeyID(publicKey), PublicKey: publicKey,
+		}); err != nil {
+			return err
+		}
+		if _, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: project.ID, Role: db.FederationRoleSpoke,
+			HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID,
+			Actor: "tester", Enabled: true, PushEnabled: true,
+		}); err != nil {
+			return err
+		}
+		_, err := env.DB.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{
+			ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+			UpstreamInstanceUID: rootUID, AuthorityUID: rootUID,
+			HubPath: []string{rootUID, env.DB.InstanceUID()}, LocalActor: "tester",
+			ServeDownstream: true, ResetEpoch: 1,
+		})
+		return err
+	}
+	server := daemon.NewServer(daemon.ServerConfig{DB: wrapped})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	raceEnv := *env
+	raceEnv.URL = httpServer.URL
+	resp, _ := postLinkRaw(t, &raceEnv, projectID, childID, map[string]any{
+		"actor": "tester", "type": "parent",
+		"to_ref": newProject.Name + "#" + newParent.ShortID, "replace": true,
+	})
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	parent, err := env.DB.ParentOf(t.Context(), childID)
+	require.NoError(t, err)
+	assert.Equal(t, oldParentID, parent.ToIssueID,
+		"a boundary change after preflight must not commit the old-parent unlink")
+	var unlinks int
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM events WHERE project_id=? AND type='issue.unlinked'`, projectID).Scan(&unlinks))
+	assert.Zero(t, unlinks)
 }
 
 func TestCreateLink_ParentReplaceUnlinkEventPointsToOldParent(t *testing.T) {

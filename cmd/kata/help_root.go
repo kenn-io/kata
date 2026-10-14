@@ -72,6 +72,7 @@ var kataCommandGroups = map[string]string{
 	"version":             "setup",
 	"projects":            "admin",
 	"tokens":              "admin",
+	"teams":               "admin",
 	"storage":             "admin",
 	"federation":          "admin",
 	"sync":                "admin",

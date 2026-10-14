@@ -133,6 +133,17 @@ WHERE project_id=$3`, enableEvent.ID, enableEvent.ID-1, project.ID); err != nil 
 
 // LeaveFederationReplica detaches a spoke while preserving its materialized project state.
 func (s *Store) LeaveFederationReplica(ctx context.Context, projectID int64) (db.LeaveFederationResult, error) {
+	return s.leaveFederationReplica(ctx, projectID, false)
+}
+
+// DetachRelayReplicaLocally is LeaveFederationReplica for a relay whose hub
+// is gone: it discards the binding's undeliverable hop state instead of
+// waiting for delivery. See db.RelayLocalDetacher.
+func (s *Store) DetachRelayReplicaLocally(ctx context.Context, projectID int64) (db.LeaveFederationResult, error) {
+	return s.leaveFederationReplica(ctx, projectID, true)
+}
+
+func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, discardRelay bool) (db.LeaveFederationResult, error) {
 	var output db.LeaveFederationResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.LeaveFederationResult{}
@@ -152,6 +163,17 @@ func (s *Store) LeaveFederationReplica(ctx context.Context, projectID int64) (db
 		}
 		if binding.Role != db.FederationRoleSpoke {
 			return db.ErrFederationNotSpoke
+		}
+		if discardRelay {
+			err = s.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
+		} else {
+			err = s.validateRelayLifecycleTx(ctx, tx, projectID)
+			if err == nil && binding.RelayConfig != nil {
+				err = deleteRelayBindingStateTx(ctx, tx, binding.RelayConfig.BindingUID)
+			}
+		}
+		if err != nil {
+			return err
 		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
@@ -239,7 +261,7 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 	defer func() { _ = rows.Close() }()
 	var output []db.Issue
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, err := scanIssue(ctx, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -429,6 +451,29 @@ func (s *Store) materializeFederatedProjectTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
+	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
+}
+
+func (s *Store) materializeFederatedProjectRelayTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+	validator *db.CronReplayValidator,
+) error {
+	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
+}
+
+func (s *Store) materializeFederatedProjectTxScoped(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+	acceptedEventUIDs []string,
+	validator *db.CronReplayValidator,
+	projectOnlyLinks bool,
+) error {
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -484,9 +529,13 @@ func (s *Store) materializeFederatedProjectTx(
 		// — is the transaction's lock-acquisition order under concurrent
 		// materialization of two projects in one group. Do not hoist it into the
 		// struct's construction above.
-		m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
-		if err != nil {
-			return err
+		if projectOnlyLinks {
+			m.groupProjectIDs = []int64{projectID}
+		} else {
+			m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+			if err != nil {
+				return err
+			}
 		}
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err

@@ -221,7 +221,10 @@ func ingestFullRebuildReference(ctx context.Context, d *Store, p db.FederationIn
 			result.Duplicates++
 			continue
 		}
-		audit, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, in.Event)
+		audit, err := d.annotateFederationIngestClaimWorkTx(ctx, tx, p.ProjectID, in.Event, db.ClaimPrincipal{
+			HolderInstanceUID: p.SpokeInstanceUID,
+			Holder:            p.BoundActor,
+		})
 		if err != nil {
 			return result, err
 		}
