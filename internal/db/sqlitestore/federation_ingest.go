@@ -51,7 +51,11 @@ func (d *Store) ingestFederationEventsOnce(
 	if len(p.Events) == 0 {
 		return d.negotiateEmptyFederationIngest(ctx, p)
 	}
-	tx, err := d.BeginTx(ctx, nil)
+	txCtx := ctx
+	if !lockBeforePreparation {
+		txCtx = withOptimisticWrite(ctx)
+	}
+	tx, err := d.BeginTx(txCtx, nil)
 	if err != nil {
 		return db.FederationIngestResult{}, fmt.Errorf("begin federation ingest: %w", err)
 	}

@@ -326,7 +326,9 @@ deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
 SQLite hubs prepare the event fold and projection differences in the read phase
-of a deferred transaction, before the project lock takes the writer lock.
+of a deferred transaction, before the project lock takes the writer lock. This
+is the one transaction that reads before joining the SQLite
+[write queue](data-model.md#storage-backends); it joins at the project lock.
 The write phase inserts accepted events and updates only changed issues,
 comments, labels, links and status-intent pointers. Validation failures still
 roll back the entire batch.

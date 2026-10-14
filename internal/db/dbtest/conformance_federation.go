@@ -62,17 +62,23 @@ func runConcurrentFederationRotations(
 	t.Helper()
 	require.Len(t, params, 2)
 	require.NotNil(t, backend.InstallEnrollmentRotationStage)
+	require.NotNil(t, backend.OpenSame)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	barrier := newFederationRotationStageBarrier()
-	removeStage := backend.InstallEnrollmentRotationStage(store, barrier.afterLookup)
-	defer removeStage()
+	// Each rotation uses its own handle, as separate processes would, because
+	// a backend may serialize write transactions within one handle.
+	stores := [2]db.Storage{store, backend.OpenSame(t, store)}
+	for _, handle := range stores {
+		removeStage := backend.InstallEnrollmentRotationStage(handle, barrier.afterLookup)
+		defer removeStage()
+	}
 
 	results := make(chan federationRotationResult, 2)
-	for _, input := range params {
+	for i, input := range params {
 		go func() {
-			created, err := store.RotateFederationEnrollment(ctx, input)
+			created, err := stores[i].RotateFederationEnrollment(ctx, input)
 			results <- federationRotationResult{created: created, err: err}
 		}()
 	}

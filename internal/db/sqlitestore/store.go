@@ -94,14 +94,15 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 	}
 	pragmas = append(pragmas,
 		fmt.Sprintf("_pragma=synchronous(%s)", synchronous),
-		"_pragma=busy_timeout(5000)",
+		fmt.Sprintf("_pragma=busy_timeout(%d)", sqliteBusyTimeout.Milliseconds()),
 	)
 	dsn := fmt.Sprintf("file:%s?%s", sqliteURIPath(path), strings.Join(pragmas, "&"))
-	sdb, err := sql.Open("sqlite", dsn)
+	// Writers on this handle take turns through one write queue; reads stay
+	// concurrent.
+	sdb, err := openQueuedSQLite(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	// Single writer is fine for v1; SetMaxOpenConns left at default for reads.
 	if err := sqliteconfig.ConfigureWAL(ctx, sdb, fast); err != nil {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("configure %s: %w", path, err)

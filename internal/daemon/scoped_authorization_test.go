@@ -42,7 +42,12 @@ func TestScopedPrincipalTransactionFenceRejectsRevocationBeforeFirstWrite(t *tes
 		close(done)
 	}()
 	<-gated.entered
-	_, _, err = store.RevokeAPIToken(t.Context(), principal.TokenID, db.BootstrapActor)
+	// The store serializes its own write transactions, so the revocation comes
+	// from a second handle, as another process would commit it.
+	peer, err := sqlitestore.Open(t.Context(), store.Path())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, peer.Close()) })
+	_, _, err = peer.RevokeAPIToken(t.Context(), principal.TokenID, db.BootstrapActor)
 	require.NoError(t, err)
 	close(gated.release)
 

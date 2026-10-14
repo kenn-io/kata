@@ -214,6 +214,23 @@ assuming a generated name. Constraint classification maps only query-owned
 constraint names to `db.Storage` sentinels; other server errors retain SQLSTATE
 and constraint diagnostics while omitting row values, hints, and query text.
 
+SQLite has one writer at a time. Within one store handle, write transactions
+take turns through a first-in, first-out write queue. Each one joins when it
+begins, so the snapshot it reads is still current when it writes. The queue
+hands the writer to the next waiter as soon as the current one commits or rolls
+back. Without it, SQLite's busy handler leaves blocked writers sleeping and
+polling, so a long transaction that restarts immediately, such as federation
+materialization, can starve paced local writes, and the reverse.
+
+- Read-only transactions and autocommit reads never wait for the queue.
+- A write that waits longer than the 5-second busy timeout fails with busy
+  contention, and the store retries the whole transaction.
+- Federation push preparation is the one optimistic exception. It reads before
+  joining the queue and retries when another write commits first; see
+  [Push Replication](federation.md#push-replication).
+- Other processes that open the same file still contend through SQLite's
+  `busy_timeout`.
+
 Backend parity is measured behaviorally rather than inferred from interface
 satisfaction or schema shape. `internal/db/dbtest` runs the same observable
 storage scenarios against fresh SQLite and Postgres stores. The Postgres
