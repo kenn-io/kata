@@ -45,6 +45,9 @@ type CommentGraphRecord struct {
 type CommentGraphTarget struct {
 	Status string
 	Record *CommentGraphRecord
+	// ProjectID retains authority for soft-deleted targets without exposing
+	// their content. Purged and pending targets have no current project.
+	ProjectID int64
 }
 
 // CommentGraphData is captured wholly inside one backend read transaction.
@@ -211,10 +214,11 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 		}
 
 		var status string
+		var projectID int64
 		statusArgs := []any{}
 		visibleProject := projectPredicate(&statusArgs)
 		statusArgs = append(statusArgs, targetUID)
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END`+commentGraphFrom+` WHERE c.uid=`+bind(len(statusArgs)), statusArgs...).Scan(&status)
+		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END, i.project_id`+commentGraphFrom+` WHERE c.uid=`+bind(len(statusArgs)), statusArgs...).Scan(&status, &projectID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return data, err
 		}
@@ -229,7 +233,11 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 				status = "pending"
 			}
 		}
-		data.Targets[targetUID] = CommentGraphTarget{Status: status}
+		state := CommentGraphTarget{Status: status}
+		if status == "removed" {
+			state.ProjectID = projectID
+		}
+		data.Targets[targetUID] = state
 	}
 	return data, nil
 }

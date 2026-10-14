@@ -51,21 +51,27 @@ func projectCommentGraph(ctx context.Context, data db.CommentGraphData) ([]comme
 	states := map[string]commentref.TargetState{}
 	for id, state := range data.Targets {
 		projected := commentref.TargetState{Status: state.Status}
+		projectID := state.ProjectID
 		if state.Record != nil {
-			if err := authorizeCommentEndpoint(ctx, state.Record.ProjectID); err != nil {
+			projectID = state.Record.ProjectID
+		}
+		if projectID != 0 {
+			if err := authorizeCommentEndpoint(ctx, projectID); err != nil {
 				var apiErr *api.APIError
 				if errors.As(err, &apiErr) && apiErr.Status == 404 {
 					projected.Status = "hidden"
-				} else {
-					return nil, err
+					states[id] = projected
+					continue
 				}
-			} else {
-				r := graphRecord(*state.Record)
-				if suffix := handles[r.ProjectID][r.UID]; suffix != "" {
-					r.Handle = "c:" + suffix
-				}
-				projected.Target = &r
+				return nil, err
 			}
+		}
+		if state.Record != nil {
+			r := graphRecord(*state.Record)
+			if suffix := handles[r.ProjectID][r.UID]; suffix != "" {
+				r.Handle = "c:" + suffix
+			}
+			projected.Target = &r
 		}
 		states[id] = projected
 	}

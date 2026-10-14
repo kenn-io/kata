@@ -365,11 +365,6 @@ func projectCommentMutationResponse(ctx context.Context, store db.Storage, comme
 		clearCommentReply(&comment)
 		return comment, nil
 	}
-	if targetIssue.DeletedAt != nil {
-		// Deleted endpoints remain visible as removed evidence without exposing
-		// a live project endpoint that still needs host authorization.
-		return comment, nil
-	}
 	if err := authorizeCommentEndpoint(ctx, targetIssue.ProjectID); err != nil {
 		var apiErr *api.APIError
 		if errors.As(err, &apiErr) && apiErr.Status == 404 {

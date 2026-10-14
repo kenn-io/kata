@@ -66,6 +66,7 @@ func checkCommentGraphDeletedSource(t *testing.T, store db.Storage) error {
 	require.Equal(t, movedProject.ID, graph.Targets[movedComment.UID].Record.ProjectID)
 	require.Equal(t, "removed", graph.Targets[removedComment.UID].Status)
 	require.Nil(t, graph.Targets[removedComment.UID].Record)
+	require.Equal(t, sourceProject.ID, graph.Targets[removedComment.UID].ProjectID)
 
 	scopedGraph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{
 		ProjectID: sourceProject.ID, IncludeDeletedSourceIssueID: source.ID,

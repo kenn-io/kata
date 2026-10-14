@@ -148,8 +148,20 @@ func TestCommentEndpoint_IdempotencyReauthorizesMovedIssue(t *testing.T) {
 }
 
 func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T) {
-	for _, operation := range []string{"edit", "idempotent replay"} {
-		t.Run(operation, func(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		operation string
+		deleted   bool
+		allowed   bool
+	}{
+		{name: "live/edit", operation: "edit"},
+		{name: "live/replay", operation: "idempotent replay"},
+		{name: "deleted/edit", operation: "edit", deleted: true},
+		{name: "deleted/replay", operation: "idempotent replay", deleted: true},
+		{name: "allowed deleted/edit", operation: "edit", deleted: true, allowed: true},
+		{name: "allowed deleted/replay", operation: "idempotent replay", deleted: true, allowed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			h, initialServer, projectID, sourceIssueID := bootstrapProjectWithIssue(t)
 			sourceIssue, err := h.DB().IssueByID(t.Context(), sourceIssueID)
 			require.NoError(t, err)
@@ -167,7 +179,7 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 			}
 			idempotencyKey := "host-reply-redaction"
 			replyUID := ""
-			if operation == "edit" {
+			if test.operation == "edit" {
 				reply, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
 					IssueID: sourceIssue.ID, Author: "agent", Body: "Response",
 					ReplyToUID: targetComment.UID, ReplyKind: "reply",
@@ -196,9 +208,18 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 			})
 			require.NoError(t, err)
 
+			if test.deleted {
+				_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), targetIssue.ID, "coordinator")
+				require.NoError(t, err)
+				require.True(t, changed)
+			}
+			deniedProjectID := deniedProject.ID
+			if test.allowed {
+				deniedProjectID = 0
+			}
 			server := daemon.NewServer(daemon.ServerConfig{
 				DB: h.DB(), StartedAt: time.Now(),
-				HostAccess: commentProjectHostAccess{deniedProjectID: deniedProject.ID},
+				HostAccess: commentProjectHostAccess{deniedProjectID: deniedProjectID},
 			})
 			hostServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
@@ -223,12 +244,20 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 				}
 			}
 			require.NotNil(t, projected)
-			assert.Empty(t, projected.ReplyToUID)
-			assert.Empty(t, projected.ReplyKind)
+			if test.allowed {
+				assert.Equal(t, targetComment.UID, projected.ReplyToUID)
+				assert.Equal(t, "reply", projected.ReplyKind)
+				require.NotNil(t, projected.Reply)
+				assert.Equal(t, "removed", projected.Reply.Status)
+			} else {
+				assert.Empty(t, projected.ReplyToUID)
+				assert.Empty(t, projected.ReplyKind)
+				assert.Nil(t, projected.Reply)
+			}
 
 			var response *http.Response
 			var responseBody []byte
-			if operation == "edit" {
+			if test.operation == "edit" {
 				response, responseBody = doReq(t, hostServer, http.MethodPatch,
 					issueURL(projectID, sourceIssueID, "comments/"+replyUID),
 					map[string]any{"actor": "agent", "body": "Edited response"}, nil)
@@ -238,9 +267,14 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 					map[string]string{"Idempotency-Key": idempotencyKey})
 			}
 			require.Equalf(t, http.StatusOK, response.StatusCode, "mutation response: %s", responseBody)
-			require.NotContains(t, string(responseBody), targetComment.UID)
-			require.NotContains(t, string(responseBody), `"reply_to_uid"`)
-			require.NotContains(t, string(responseBody), `"reply_kind"`)
+			if test.allowed {
+				assert.Contains(t, string(responseBody), targetComment.UID)
+				assert.Contains(t, string(responseBody), `"reply_kind":"reply"`)
+			} else {
+				assert.NotContains(t, string(responseBody), targetComment.UID)
+				assert.NotContains(t, string(responseBody), `"reply_to_uid"`)
+				assert.NotContains(t, string(responseBody), `"reply_kind"`)
+			}
 		})
 	}
 }
