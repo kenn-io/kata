@@ -62,6 +62,10 @@ func TestHTTPListPaginationSurvivesEdits(t *testing.T) {
 		for _, sort := range []string{"oldest", "created"} {
 			t.Run(fmt.Sprintf("global=%v/%s", global, sort), func(t *testing.T) {
 				env, pid, issues := paginationFixture(t, 6)
+				wantIDs := []int64{issues[0].ID, issues[1].ID, issues[2].ID, issues[3].ID, issues[4].ID, issues[5].ID}
+				if sort == "created" {
+					wantIDs = []int64{issues[5].ID, issues[4].ID, issues[3].ID, issues[2].ID, issues[1].ID, issues[0].ID}
+				}
 				path := fmt.Sprintf("/api/v1/projects/%d/issues?sort=%s&limit=1&include_total=true", pid, sort)
 				if global {
 					path = fmt.Sprintf("/api/v1/issues?project_ids=%d&sort=%s&limit=1&include_total=true", pid, sort)
@@ -74,6 +78,7 @@ func TestHTTPListPaginationSurvivesEdits(t *testing.T) {
 					require.NotNil(t, page.Total)
 					require.Equal(t, int64(6), *page.Total)
 					issue := page.Issues[0]
+					require.Equal(t, wantIDs[i], issue.ID)
 					require.False(t, seen[issue.ID])
 					seen[issue.ID] = true
 					require.Equal(t, i == 5, page.Complete)
@@ -84,9 +89,11 @@ func TestHTTPListPaginationSurvivesEdits(t *testing.T) {
 						require.Empty(t, page.NextCursor)
 					}
 					cursor = page.NextCursor
-					for _, row := range issues {
-						_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: row.ID, Body: new(fmt.Sprintf("updated %d", i)), Actor: "example-agent"})
+					if i < 5 {
+						// Editing the last unseen row must not move it ahead of the next page.
+						_, _, changed, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: wantIDs[5], Body: new(fmt.Sprintf("updated %d", i)), Actor: "example-agent"})
 						require.NoError(t, err)
+						require.True(t, changed)
 					}
 				}
 				require.Len(t, seen, 6)

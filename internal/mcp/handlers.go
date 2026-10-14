@@ -101,9 +101,11 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	for index := range projects {
 		group.Go(func() error {
 			limit64 := int64(limit + 1)
+			if pageMetadata {
+				limit64 = int64(limit)
+			}
 			var sortOrder *generated.SearchIssuesQuerySort
 			if stable {
-				limit64 = int64(limit)
 				sortOrder = new(generated.SearchIssuesQuerySort("oldest"))
 			}
 			response, searchErr := h.options.Client.SearchIssues(groupContext, &generated.SearchIssuesRequestOptions{

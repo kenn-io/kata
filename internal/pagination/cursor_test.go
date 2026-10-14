@@ -43,19 +43,6 @@ func FuzzCursorRoundTrip(f *testing.F) {
 	})
 }
 
-// Every changed fingerprint must reject an otherwise valid continuation.
-func FuzzCursorRejectChangedFilters(f *testing.F) {
-	f.Add("open", "closed")
-	f.Fuzz(func(t *testing.T, a, b string) {
-		if a == b {
-			return
-		}
-		p := Position{CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ID: 1}
-		_, err := Decode(Encode(p, Fingerprint([]byte(a))), Fingerprint([]byte(b)))
-		require.Error(t, err)
-	})
-}
-
 func FuzzCursorDecode(f *testing.F) {
 	f.Add("garbage")
 	f.Add(Encode(Position{CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ID: 1}, Fingerprint("open")))

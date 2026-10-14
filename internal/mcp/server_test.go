@@ -615,7 +615,7 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 		wantKey    string
 		wantMatch  string
 	}{
-		{name: "search", tool: "kata.search", arguments: map[string]any{"query": "callback race", "limit": 3, "labels": []string{"bug"}}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/search", wantQuery: []string{"q=callback+race", "limit=4", "label=bug"}, wantMatch: "abc1"},
+		{name: "search", tool: "kata.search", arguments: map[string]any{"query": "callback race", "limit": 3, "labels": []string{"bug"}}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/search", wantQuery: []string{"q=callback+race", "limit=3", "label=bug"}, wantMatch: "abc1"},
 		{name: "list", tool: "kata.list", arguments: map[string]any{"status": "open", "limit": 3, "unowned": true}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/issues", wantQuery: []string{"status=open", "limit=3", "unowned=true", "sort=created"}, wantMatch: "abc1"},
 		{name: "show", tool: "kata.show", arguments: map[string]any{"ref": "abc1", "comment_limit": 1}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/issues/abc1", wantMatch: "Issue title"},
 		{name: "ready", tool: "kata.ready", arguments: map[string]any{"limit": 3, "unowned": true}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/ready", wantQuery: []string{"limit=4", "unowned=true"}, wantMatch: "abc1"},
@@ -883,7 +883,7 @@ func TestDiscoveryToolsReportIncompletePages(t *testing.T) {
 				}
 				require.Equal(t, tt.path, request.URL.Path)
 				count := 3
-				if tt.tool == "kata.list" {
+				if tt.tool != "kata.ready" {
 					count = 2
 				}
 				require.Equal(t, fmt.Sprint(count), request.URL.Query().Get("limit"))
@@ -1213,7 +1213,7 @@ func listLikeResponse(tool string, count int) []byte {
 		results = append(results, map[string]any{"issue": issue, "score": 1.0, "matched_in": []string{"title"}})
 	}
 	if tool == "kata.search" {
-		return mustJSONBytes(map[string]any{"query": "work", "mode": "lexical", "results": results})
+		return mustJSONBytes(map[string]any{"query": "work", "mode": "lexical", "complete": false, "truncated": true, "results": results})
 	}
 	return mustJSONBytes(map[string]any{"complete": false, "truncated": true, "next_cursor": "page-two", "issues": issues})
 }

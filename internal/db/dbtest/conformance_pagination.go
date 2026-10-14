@@ -36,6 +36,10 @@ func checkListPagination(t *testing.T, store db.Storage) error {
 	require.Len(t, original, 6)
 	for _, global := range []bool{false, true} {
 		for _, oldest := range []bool{false, true} {
+			wantIDs := []int64{original[0].ID, original[1].ID, original[2].ID, original[3].ID, original[4].ID, original[5].ID}
+			if !oldest {
+				wantIDs = []int64{original[5].ID, original[4].ID, original[3].ID, original[2].ID, original[1].ID, original[0].ID}
+			}
 			var after *pagination.Position
 			seen := map[int64]bool{}
 			for pageIndex := range 7 {
@@ -50,12 +54,16 @@ func checkListPagination(t *testing.T, store db.Storage) error {
 					break
 				}
 				require.Len(t, page, 1)
+				require.Less(t, pageIndex, len(wantIDs))
+				require.Equal(t, wantIDs[pageIndex], page[0].ID)
 				require.False(t, seen[page[0].ID])
 				seen[page[0].ID] = true
 				after = &pagination.Position{CreatedAt: page[0].CreatedAt, ID: page[0].ID}
-				for _, issue := range original {
-					_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Body: new(fmt.Sprintf("updated body %d", pageIndex)), Actor: "example-agent"})
+				if pageIndex < 5 {
+					// Editing the last unseen row must not move it ahead of the next page.
+					_, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: wantIDs[5], Body: new(fmt.Sprintf("updated body %d", pageIndex)), Actor: "example-agent"})
 					require.NoError(t, err)
+					require.True(t, changed)
 				}
 			}
 			require.Len(t, seen, 6)

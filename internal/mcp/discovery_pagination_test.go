@@ -169,12 +169,14 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 		complete      *bool
 		rows          int
 		wantTruncated bool
+		wantLimit     string
 	}{
-		{"legacy before transcripts", "0.25.0", nil, 1, false},
-		{"legacy exhausted", "0.26.0", nil, 1, false},
-		{"legacy probe", "0.26.0", nil, 4, true},
-		{"current exhausted", "0.27.0", new(true), 1, false},
-		{"current incomplete", "0.27.0", new(false), 1, true},
+		{"legacy before transcripts", "0.25.0", nil, 1, false, "4"},
+		{"legacy exhausted", "0.26.0", nil, 1, false, "4"},
+		{"legacy probe", "0.26.0", nil, 4, true, "4"},
+		{"current exhausted", "0.27.0", new(true), 1, false, "3"},
+		{"current incomplete", "0.27.0", new(false), 1, true, "3"},
+		{"current candidate ceiling", "0.27.0", new(false), 3, true, "3"},
 	} {
 		modes := []string{"auto", "hybrid", "semantic", "lexical"}
 		if tc.complete != nil && *tc.complete {
@@ -200,6 +202,14 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 						writeJSON(w, map[string]any{"projects": catalog})
 					default:
 						require.Contains(t, []string{"/api/v1/projects/42/search", "/api/v1/projects/43/search"}, r.URL.Path)
+						// The real daemon returns 503 when the ceiling leaves three hits but the request asks for four.
+						if tc.name == "current candidate ceiling" && r.URL.Query().Get("limit") == "4" {
+							w.WriteHeader(http.StatusServiceUnavailable)
+							writeJSON(w, map[string]any{"status": 503, "error": map[string]any{"code": "unavailable", "message": "search filters exhausted the semantic candidate ceiling; semantic results may be incomplete"}})
+							return
+						}
+						require.Equal(t, tc.wantLimit, r.URL.Query().Get("limit"))
+						require.Empty(t, r.URL.Query().Get("sort"))
 						results := make([]any, 0, tc.rows)
 						for i := 0; i < tc.rows; i++ {
 							results = append(results, map[string]any{"issue": issueJSON(42, "example-project", fmt.Sprintf("a%03d", i)), "score": 1.0, "matched_in": []string{"title"}})
@@ -209,6 +219,10 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 							responseMode = "lexical"
 						}
 						body := map[string]any{"query": "needle", "mode": responseMode, "results": results}
+						if tc.name == "current candidate ceiling" {
+							body["degraded"] = true
+							body["degraded_reason"] = "search filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
+						}
 						if tc.complete != nil {
 							body["complete"] = *tc.complete
 						}
@@ -222,6 +236,11 @@ func TestMCPSearchCompletenessAcrossDaemonVersions(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, tc.wantTruncated, output.Truncated)
 				require.Equal(t, !tc.wantTruncated, output.Complete)
+				if tc.name == "current candidate ceiling" {
+					require.Len(t, output.Results, 3)
+					require.True(t, output.Degraded)
+					require.Empty(t, output.NextCursor)
+				}
 			})
 		}
 	}
