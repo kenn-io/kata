@@ -50,6 +50,9 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN", "CGO_CFLAGS", "CGO_LDFLAGS"}
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
+		if key == "" {
+			continue // Windows drive-directory entries cannot be changed with Setenv.
+		}
 		lookupKey := key
 		if runtime.GOOS == "windows" {
 			lookupKey = strings.ToUpper(key)

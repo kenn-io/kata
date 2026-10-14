@@ -967,11 +967,13 @@ func writeRuntimeRecordForPID(t *testing.T, home string, pid int, addr string) e
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
+	identity, _ := kitdaemon.ReadProcessIdentity(pid)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:       pid,
-		Address:   addr,
-		Metadata:  map[string]string{"db_path": filepath.Join(home, "kata.db")},
-		StartedAt: time.Now().UTC(),
+		PID:               pid,
+		ProcessIdentityV2: identity,
+		Address:           addr,
+		Metadata:          map[string]string{"db_path": filepath.Join(home, "kata.db")},
+		StartedAt:         time.Now().UTC(),
 	})
 	return err
 }
