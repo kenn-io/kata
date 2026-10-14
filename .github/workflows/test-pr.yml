@@ -1,8 +1,6 @@
 name: Tests
 
-# The PR dispatcher always calls the main-pinned workflow. That workflow
-# independently routes same-repository jobs to the managed public fleet
-# and fork jobs to GitHub-hosted runners.
+# Pin PR checks to main; test-candidate.yml runs workflow edits from trusted branches.
 on:
   pull_request:
 

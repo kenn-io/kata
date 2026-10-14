@@ -170,7 +170,8 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-Public CI profiles use Namespace's
+Windows tests use GitHub-hosted runners. Linux tests use Namespace profiles for
+trusted runs and GitHub-hosted runners for forks. Namespace profiles use the
 [Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
 which disables workload access to Namespace features and APIs. GitHub fork
 approvals, token permissions, and secrets are separate controls.
