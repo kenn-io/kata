@@ -300,7 +300,7 @@ func (f *conformanceFixture) serve(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid", 400)
 				return
 			}
-			raw = editedFields(raw)
+			raw = appliedOptions(raw)
 			f.record(raw)
 			for key, value := range raw {
 				switch key {
@@ -336,6 +336,7 @@ func (f *conformanceFixture) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid", 400)
 			return
 		}
+		raw = appliedOptions(raw)
 		f.record(raw)
 		f.issue.Labels = []label{}
 		for _, item := range raw["labels"].([]any) {
@@ -367,11 +368,7 @@ func (f *conformanceFixture) serve(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, created)
 			return
 		}
-		if r.URL.Query().Get("page") == "1" {
-			writeJSON(w, f.comments)
-		} else {
-			writeJSON(w, []comment{})
-		}
+		writeJSON(w, f.comments)
 	default:
 		http.NotFound(w, r)
 	}

@@ -30,9 +30,12 @@ func writeJSON(w http.ResponseWriter, value any) {
 		http.Error(w, "invalid fixture response", http.StatusInternalServerError)
 	}
 }
-func TestCommentPaginationAndStableContentRevisions(t *testing.T) {
-	pages := map[string][]nativeComment{"1": {commentAt(12, "later", 3), commentAt(9, "mixed-width ID", 3)}, "2": {commentAt(10, "earlier", 4), commentAt(11, "middle", 5)}}
-	requests := []string{}
+
+// Forgejo's issue comment endpoint has no pagination: it ignores page and
+// limit and returns every comment on each request.
+func TestCommentsAreReadInOneRequestAndKeepStableContentRevisions(t *testing.T) {
+	comments := []nativeComment{commentAt(12, "later", 3), commentAt(9, "mixed-width ID", 3), commentAt(10, "earlier", 4), commentAt(11, "middle", 5)}
+	requests := 0
 	s := provider(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/user":
@@ -42,8 +45,12 @@ func TestCommentPaginationAndStableContentRevisions(t *testing.T) {
 		case "/api/v1/repos/owner/renamed/issues/7":
 			_, _ = w.Write([]byte(issueJSON))
 		case "/api/v1/repos/owner/renamed/issues/7/comments":
-			requests = append(requests, r.URL.Query().Get("page"))
-			writeJSON(w, pages[r.URL.Query().Get("page")])
+			requests++
+			if requests > 5 {
+				http.Error(w, "too many comment requests", http.StatusTooManyRequests)
+				return
+			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -52,16 +59,15 @@ func TestCommentPaginationAndStableContentRevisions(t *testing.T) {
 	h := New("secret-test-token")
 	p := connector.ListCommentsParams{RootKey: "23#7@91"}
 	a := result[connector.ListCommentsResult](t, exchange(t, h, s.URL, "list_comments", p))
-	if len(a.Comments) != 4 || a.Comments[0].ID != "10" || a.Comments[1].ID != "11" || a.Comments[2].ID != "12" || a.Comments[3].ID != "9" || len(requests) != 3 {
-		t.Fatalf("comments %#v requests %v", a, requests)
+	if len(a.Comments) != 4 || a.Comments[0].ID != "10" || a.Comments[1].ID != "11" || a.Comments[2].ID != "12" || a.Comments[3].ID != "9" || requests != 1 {
+		t.Fatalf("comments %#v requests %d", a, requests)
 	}
-	pages["2"][0].Body = "externally edited"
+	comments[2].Body = "externally edited"
 	b := result[connector.ListCommentsResult](t, exchange(t, h, s.URL, "list_comments", p))
 	if b.Comments[0].ID != a.Comments[0].ID || b.Comments[0].Revision == a.Comments[0].Revision {
 		t.Fatal("edit did not retain ID and advance revision")
 	}
 }
-
 func TestListCommentsAcceptsGhostAndMissingAuthors(t *testing.T) {
 	ghost := commentAt(201, "deleted account comment", -1)
 	missing := commentAt(202, "comment with missing author", 4)
@@ -76,11 +82,7 @@ func TestListCommentsAcceptsGhostAndMissingAuthors(t *testing.T) {
 		case "/api/v1/repos/owner/renamed/issues/7":
 			_, _ = w.Write([]byte(issueJSON))
 		case "/api/v1/repos/owner/renamed/issues/7/comments":
-			if r.URL.Query().Get("page") == "1" {
-				writeJSON(w, comments)
-			} else {
-				writeJSON(w, []nativeComment{})
-			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -129,11 +131,7 @@ func TestPublicationRetryAfterLostResponseAndScopedStripping(t *testing.T) {
 				writeJSON(w, c)
 				return
 			}
-			if r.URL.Query().Get("page") == "1" {
-				writeJSON(w, comments)
-			} else {
-				writeJSON(w, []nativeComment{})
-			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -236,11 +234,7 @@ func TestPublicationRetryFindsDeliveryAfterUnfinishedMarker(t *testing.T) {
 				writeJSON(w, created)
 				return
 			}
-			if r.URL.Query().Get("page") == "1" {
-				writeJSON(w, comments)
-			} else {
-				writeJSON(w, []nativeComment{})
-			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -298,11 +292,7 @@ func TestPublicationMarkerStaysHiddenAfterCredentialAccountChange(t *testing.T) 
 				writeJSON(w, created)
 				return
 			}
-			if r.URL.Query().Get("page") == "1" {
-				writeJSON(w, comments)
-			} else {
-				writeJSON(w, []nativeComment{})
-			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -347,11 +337,7 @@ func TestPublicationRetryIgnoresForeignMarkerQuotesButRejectsFormerActorPublicat
 				http.Error(w, "controlled response loss", 500)
 				return
 			}
-			if r.URL.Query().Get("page") == "1" {
-				writeJSON(w, comments)
-			} else {
-				writeJSON(w, []nativeComment{})
-			}
+			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			http.NotFound(w, r)

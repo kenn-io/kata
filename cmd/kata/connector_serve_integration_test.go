@@ -86,10 +86,6 @@ func (f *forgejoBridgeProvider) serve(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(comment)
 			return
 		}
-		if r.URL.Query().Get("page") != "1" {
-			_ = json.NewEncoder(w).Encode([]any{})
-			return
-		}
 		_ = json.NewEncoder(w).Encode(f.comments)
 	default:
 		w.WriteHeader(http.StatusNotFound)

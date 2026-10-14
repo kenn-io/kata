@@ -156,7 +156,7 @@ func TestImmutableRootsAndVerifiedCompletion(t *testing.T) {
 					http.Error(w, "invalid fixture request", http.StatusBadRequest)
 					return
 				}
-				if v = editedFields(v); len(v) != 1 || v["state"] != "closed" {
+				if v = appliedOptions(v); len(v) != 1 || v["state"] != "closed" {
 					t.Errorf("close payload %#v", v)
 				}
 				body = strings.Replace(body, `"state":"open"`, `"state":"closed"`, 1)

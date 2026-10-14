@@ -29,10 +29,15 @@ func pages[T any](fetch func(forgejosdk.ListOptions) ([]T, *forgejosdk.Response,
 	}
 	return nil, failure("provider_error", "Forgejo pagination exceeded its limit")
 }
+
+// comments lists every comment on an issue. Forgejo does not paginate this
+// endpoint, so one request returns them all.
 func (c *client) comments(ref issueRef) ([]*forgejosdk.Comment, *connector.Error) {
-	return pages(func(options forgejosdk.ListOptions) ([]*forgejosdk.Comment, *forgejosdk.Response, error) {
-		return c.api.ListIssueComments(ref.owner, ref.repo, ref.number, forgejosdk.ListIssueCommentOptions{ListOptions: options})
-	})
+	comments, response, err := c.api.ListIssueComments(ref.owner, ref.repo, ref.number, forgejosdk.ListIssueCommentOptions{})
+	if err != nil {
+		return nil, providerFailure(response)
+	}
+	return comments, nil
 }
 func (c *client) scope(root string) string { return digest([]string{c.instance, root}) }
 func (c *client) marker(root string, actor int64, operation string) string {

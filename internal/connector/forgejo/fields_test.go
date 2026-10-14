@@ -71,7 +71,7 @@ func newFieldProvider(t *testing.T) (*fieldProvider, string) {
 					http.Error(w, "invalid fixture request", http.StatusBadRequest)
 					return
 				}
-				payload = editedFields(payload)
+				payload = appliedOptions(payload)
 				p.writes = append(p.writes, payload)
 				if p.failPatch {
 					http.Error(w, "private-error", 500)

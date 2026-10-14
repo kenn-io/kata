@@ -202,12 +202,16 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 						if organization.ID <= 0 || organization.UserName != ref.owner {
 							return connector.WriteFieldsResult{}, failure("provider_error", "Forgejo repository organization is invalid")
 						}
-						organizationLabels, err := c.organizationLabels(ctx, ref.owner)
+						organizationLabels, err := pages(func(options forgejosdk.ListOptions) ([]*forgejosdk.Label, *forgejosdk.Response, error) {
+							return c.api.ListOrgLabels(ref.owner, forgejosdk.ListLabelsOptions{ListOptions: options})
+						})
 						if err != nil {
 							return connector.WriteFieldsResult{}, err
 						}
-						for _, n := range organizationLabels {
-							available[n] = true
+						for _, v := range organizationLabels {
+							if v != nil {
+								available[v.ID] = true
+							}
 						}
 					}
 				}

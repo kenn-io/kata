@@ -39,9 +39,9 @@ type comment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// editedFields keeps only the issue edit fields Forgejo applies: it skips null
-// options and ignores an empty title.
-func editedFields(raw map[string]any) map[string]any {
+// appliedOptions keeps only the request options Forgejo applies: it skips null
+// options and ignores an empty issue title.
+func appliedOptions(raw map[string]any) map[string]any {
 	edited := map[string]any{}
 	for key, value := range raw {
 		if value == nil || (key == "title" && value == "") {

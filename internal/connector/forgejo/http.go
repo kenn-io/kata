@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -39,9 +38,8 @@ func (t cappedTransport) RoundTrip(request *http.Request) (*http.Response, error
 }
 
 type client struct {
-	origin, token, instance string
-	http                    *http.Client
-	api                     *forgejosdk.Client
+	origin, instance string
+	api              *forgejosdk.Client
 }
 
 func failure(code, message string) *connector.Error {
@@ -121,47 +119,9 @@ func (h *handler) client(ctx context.Context) (*client, *connector.Error) {
 	if e != nil {
 		return nil, failure("provider_error", "Forgejo client could not be created")
 	}
-	return &client{origin: origin, token: h.token, instance: invocation.Instance, http: httpClient, api: api}, nil
+	return &client{origin: origin, instance: invocation.Instance, api: api}, nil
 }
 
-// organizationLabels lists an organization's label IDs. The SDK has no
-// organization label endpoint, so this is the connector's only direct request.
-func (c *client) organizationLabels(ctx context.Context, owner string) ([]int64, *connector.Error) {
-	return pages(func(options forgejosdk.ListOptions) ([]int64, *forgejosdk.Response, error) {
-		path := fmt.Sprintf("%s/api/v1/orgs/%s/labels?page=%d&limit=%d", c.origin, url.PathEscape(owner), options.Page, options.PageSize)
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		request.Header.Set("Authorization", "token "+c.token)
-		request.Header.Set("User-Agent", "kata")
-		request.Header.Set("Accept", "application/json")
-		raw, err := c.http.Do(request)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer func() { _ = raw.Body.Close() }()
-		response := &forgejosdk.Response{Response: raw}
-		if raw.StatusCode < 200 || raw.StatusCode >= 300 {
-			return nil, response, fmt.Errorf("forgejo returned HTTP %d", raw.StatusCode)
-		}
-		var labels []struct {
-			ID int64 `json:"id"`
-		}
-		body, err := io.ReadAll(raw.Body)
-		if err != nil {
-			return nil, response, err
-		}
-		if err := json.Unmarshal(body, &labels); err != nil {
-			return nil, response, err
-		}
-		ids := make([]int64, 0, len(labels))
-		for _, label := range labels {
-			ids = append(ids, label.ID)
-		}
-		return ids, response, nil
-	})
-}
 func (c *client) self() (*forgejosdk.User, *connector.Error) {
 	u, response, err := c.api.GetMyUserInfo()
 	if err != nil {
