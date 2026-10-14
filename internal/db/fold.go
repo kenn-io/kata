@@ -676,30 +676,28 @@ func advanceIssueUpdatedAt(issue *FoldIssue, updatedAt string) {
 }
 
 func issueUID(e FoldEvent, payload map[string]jsontext.Value) string {
-	if e.IssueUID != "" {
-		return e.IssueUID
+	return resolveIssueUID(e.IssueUID, payload)
+}
+
+// FederationEventIssueUID resolves the issue identity carried by a federated
+// event, using the same envelope and payload fields as the fold engine.
+func FederationEventIssueUID(issueUID *string, payload string) string {
+	envelope := ""
+	if issueUID != nil {
+		envelope = *issueUID
+	}
+	return resolveIssueUID(envelope, PayloadMap(jsontext.Value(payload)))
+}
+
+func resolveIssueUID(envelope string, payload map[string]jsontext.Value) string {
+	if envelope != "" {
+		return envelope
 	}
 	if v, ok := stringValue(payload["issue_uid"]); ok {
 		return v
 	}
 	if v, ok := stringValue(payload["uid"]); ok {
 		return v
-	}
-	return ""
-}
-
-// FederationEventIssueUID resolves the issue identity carried by a federated
-// event, using the same envelope and payload fields as the fold engine.
-func FederationEventIssueUID(issueUID *string, payload string) string {
-	if issueUID != nil && *issueUID != "" {
-		return *issueUID
-	}
-	values := PayloadMap(jsontext.Value(payload))
-	if value, ok := StringValue(values["issue_uid"]); ok && value != "" {
-		return value
-	}
-	if value, ok := StringValue(values["uid"]); ok {
-		return value
 	}
 	return ""
 }
