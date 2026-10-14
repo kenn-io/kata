@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/safefileio"
 )
 
 func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
@@ -473,9 +474,7 @@ func extractTokenPlaintext(t *testing.T, out string) string {
 func privateTokenFilePath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if runtime.GOOS != "windows" {
-		require.NoError(t, os.Chmod(dir, 0o700)) //nolint:gosec // Directory mode, not a secret file.
-	}
+	require.NoError(t, safefileio.EnsurePrivateDir(dir))
 	return filepath.Join(dir, "worker.token")
 }
 

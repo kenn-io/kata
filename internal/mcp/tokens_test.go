@@ -4,7 +4,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kit/safefileio"
 )
 
 func TestScopedTokenToolWritesProtectedFileWithoutReturningPlaintext(t *testing.T) {
@@ -43,9 +43,7 @@ func TestScopedTokenToolWritesProtectedFileWithoutReturningPlaintext(t *testing.
 		Actor: "coordinator", Version: "test-version",
 	})
 	dir := t.TempDir()
-	if runtime.GOOS != "windows" {
-		require.NoError(t, os.Chmod(dir, 0o700)) //nolint:gosec // Directory mode, not a secret file.
-	}
+	require.NoError(t, safefileio.EnsurePrivateDir(dir))
 	tokenPath := filepath.Join(dir, "worker.token")
 
 	output := callAdministrationTool(t, session, "kata.token_create", map[string]any{
