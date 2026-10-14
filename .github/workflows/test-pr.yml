@@ -1,8 +1,6 @@
 name: Tests
 
-# The PR dispatcher always calls the main-pinned workflow. That workflow
-# independently routes same-repository jobs to the managed public fleet
-# and fork jobs to GitHub-hosted runners.
+# The main-pinned PR dispatcher routes trusted Linux jobs to Namespace and Windows jobs to GitHub-hosted runners.
 on:
   pull_request:
 
