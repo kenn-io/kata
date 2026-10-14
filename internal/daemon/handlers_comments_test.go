@@ -245,6 +245,81 @@ func TestCommentMutationResponsesRedactHostDeniedMovedReplyTargets(t *testing.T)
 	}
 }
 
+func TestCommentMutationResponsesRespectNativeProjectPermissions(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		targetIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Reply target", Author: "member",
+		})
+		require.NoError(t, err)
+		target, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+			IssueID: targetIssue.ID, Author: "member", Body: "Finding",
+		})
+		require.NoError(t, err)
+
+		path := issueURLRef(f.public.ID, f.visible.UID, "comments")
+		writeBody := map[string]string{"body": "Response", "reply_to": target.UID, "kind": "reply"}
+		replies := make(map[string]db.Comment)
+		for _, actor := range []string{"member", "nonmember"} {
+			status, _, raw := f.request(t, http.MethodPost, path, actor, writeBody,
+				map[string]string{"Idempotency-Key": "reply-" + actor})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var created struct {
+				Comment db.Comment `json:"comment"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &created))
+			require.Equal(t, target.UID, created.Comment.ReplyToUID)
+			require.Equal(t, "reply", created.Comment.ReplyKind)
+			replies[actor] = created.Comment
+		}
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: targetIssue.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID,
+			IfMatchRev: targetIssue.Revision, Actor: "member",
+		})
+		require.NoError(t, err)
+
+		for _, actor := range []string{"member", "nonmember"} {
+			t.Run(actor, func(t *testing.T) {
+				status, _, raw := f.request(t, http.MethodGet,
+					issueURLRef(f.private.ID, targetIssue.UID, ""), actor, nil, nil)
+				if actor == "member" {
+					require.Equal(t, http.StatusOK, status, string(raw))
+				} else {
+					require.Equal(t, http.StatusNotFound, status, string(raw))
+				}
+				for _, operation := range []string{"edit", "idempotent replay"} {
+					t.Run(operation, func(t *testing.T) {
+						var status int
+						var raw []byte
+						if operation == "edit" {
+							status, _, raw = f.request(t, http.MethodPatch, path+"/"+replies[actor].UID,
+								actor, map[string]string{"actor": actor, "body": "Edited response"}, nil)
+						} else {
+							status, _, raw = f.request(t, http.MethodPost, path, actor, writeBody,
+								map[string]string{"Idempotency-Key": "reply-" + actor})
+						}
+						require.Equal(t, http.StatusOK, status, string(raw))
+						var result struct {
+							Comment db.Comment `json:"comment"`
+						}
+						require.NoError(t, json.Unmarshal(raw, &result))
+						require.Equal(t, replies[actor].UID, result.Comment.UID)
+						require.Equal(t, "Edited response", result.Comment.Body)
+						if actor == "member" {
+							assert.Equal(t, target.UID, result.Comment.ReplyToUID)
+							assert.Equal(t, "reply", result.Comment.ReplyKind)
+						} else {
+							assert.NotContains(t, string(raw), target.UID)
+							assert.NotContains(t, string(raw), `"reply_to_uid"`)
+							assert.NotContains(t, string(raw), `"reply_kind"`)
+						}
+					})
+				}
+			})
+		}
+	})
+}
+
 func TestDeletedSourceShowRedactsHostDeniedMovedReplyTarget(t *testing.T) {
 	h, _, projectID, sourceIssueID := bootstrapProjectWithIssue(t)
 	sourceIssue, err := h.DB().IssueByID(t.Context(), sourceIssueID)

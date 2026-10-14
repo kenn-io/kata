@@ -333,9 +333,6 @@ func projectCommentMutationResponse(ctx context.Context, store db.Storage, comme
 	if comment.ReplyToUID == "" {
 		return comment, nil
 	}
-	if _, hostControlled := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); !hostControlled {
-		return comment, nil
-	}
 	issueIDs, err := store.CommentIssueIDsByUIDs(ctx, []string{comment.ReplyToUID})
 	if err != nil {
 		return db.Comment{}, internalAPIError(err)
@@ -348,6 +345,9 @@ func projectCommentMutationResponse(ctx context.Context, store db.Storage, comme
 	}
 	targetIssue, err := store.IssueByID(ctx, issueID)
 	if errors.Is(err, db.ErrNotFound) {
+		// The comment exists, but its issue lookup can be filtered by native
+		// project permissions. Treat that endpoint as hidden, not pending.
+		clearCommentReply(&comment)
 		return comment, nil
 	}
 	if err != nil {
