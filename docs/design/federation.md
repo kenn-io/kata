@@ -328,18 +328,23 @@ materializes the batch, and returns the advanced push cursor.
 SQLite hubs prepare the event fold and projection differences in the read phase
 of a deferred transaction, before the project lock takes the writer lock.
 The write phase inserts accepted events and updates only changed issues,
-comments, labels, links and status-intent pointers. A concurrent commit during
-preparation invalidates the snapshot; SQLite reports busy contention and the
-hub retries the whole batch against a fresh snapshot. Validation failures still
+comments, labels, links and status-intent pointers. Validation failures still
 roll back the entire batch.
 
-For issue-only batches, this keeps writer time independent of unrelated event
-history and untouched projection rows. Batches with cron events also materialize
-cron definitions and run observations in the write phase. Total preparation
-still reads and folds project history, plus link-bearing group history when
-links can change. Existing full-text search triggers can aggregate comments on
-a changed issue, and claim auditing can expire claims. Custom transaction fences
-that write may acquire the lock before
+A commit anywhere in the database during preparation invalidates the snapshot.
+SQLite then reports busy contention, and the hub retries the whole batch against
+a fresh snapshot. The first two attempts prepare outside the writer lock. Later
+attempts take the project lock before preparing, so steady unrelated writes
+cannot make every attempt fail. Those attempts hold the writer for the whole
+preparation, as full materialization does.
+
+For issue-only batches, preparing outside the lock keeps writer time independent
+of unrelated event history and untouched projection rows. Batches with cron
+events also materialize cron definitions and run observations in the write
+phase. Total preparation still reads and folds project history, plus
+link-bearing group history when links can change. Existing full-text search
+triggers can aggregate comments on a changed issue, and claim auditing can
+expire claims. Custom transaction fences that write may acquire the lock before
 preparation; native enrollment fences only read. Explicit full materialization
 remains available for recovery.
 

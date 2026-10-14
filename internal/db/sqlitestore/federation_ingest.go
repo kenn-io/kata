@@ -27,17 +27,26 @@ func (d *Store) IngestFederationEvents(
 	p db.FederationIngestParams,
 ) (db.FederationIngestResult, error) {
 	var result db.FederationIngestResult
+	attempt := 0
 	err := d.RetryTransient(ctx, func() error {
+		attempt++
 		var err error
-		result, err = d.ingestFederationEventsOnce(ctx, p)
+		result, err = d.ingestFederationEventsOnce(ctx, p, attempt > federationIngestOptimisticAttempts)
 		return err
 	})
 	return result, err
 }
 
+// federationIngestOptimisticAttempts bounds how often a push prepares its
+// materialization outside the writer lock. Any commit during preparation
+// invalidates the snapshot, so steady unrelated writes could otherwise make
+// every attempt fail. Later attempts take the project lock before preparing.
+const federationIngestOptimisticAttempts = 2
+
 func (d *Store) ingestFederationEventsOnce(
 	ctx context.Context,
 	p db.FederationIngestParams,
+	lockBeforePreparation bool,
 ) (db.FederationIngestResult, error) {
 	if len(p.Events) == 0 {
 		return d.negotiateEmptyFederationIngest(ctx, p)
@@ -51,6 +60,11 @@ func (d *Store) ingestFederationEventsOnce(
 	projectUID, projectName, err := requireFederationIngestHub(ctx, tx, p.ProjectID)
 	if err != nil {
 		return db.FederationIngestResult{}, err
+	}
+	if lockBeforePreparation {
+		if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 	}
 	required, err := db.ProjectRequiredEventFeatures(ctx, tx, projectUID)
 	if err != nil {
@@ -192,11 +206,13 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
-	if len(cronTargets) > 0 && d.federationIngestPrepared != nil {
-		d.federationIngestPrepared()
-	}
-	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
-		return db.FederationIngestResult{}, err
+	if !lockBeforePreparation {
+		if d.federationIngestPrepared != nil {
+			d.federationIngestPrepared()
+		}
+		if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 	}
 	for _, in := range prepared {
 		if in.Duplicate {

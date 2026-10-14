@@ -12,7 +12,8 @@ import (
 
 // A deferred SQLite transaction keeps this history-sized preparation out of
 // the writer interval. A concurrent commit makes the first write fail with
-// BUSY_SNAPSHOT; the caller retries validation and preparation together.
+// BUSY_SNAPSHOT; the caller retries validation and preparation together, and
+// takes the project lock before preparing once optimistic attempts run out.
 // Request fences still run first and may themselves acquire the writer lock.
 type federationMaterialization struct {
 	projection   db.FoldProjection

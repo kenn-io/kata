@@ -78,6 +78,35 @@ func TestFederationIngestRetriesPreparedSnapshot(t *testing.T) {
 	require.JSONEq(t, `{"retained":true}`, string(project.Metadata))
 }
 
+// Steady unrelated commits can invalidate every snapshot prepared outside the
+// writer lock. Ingestion must still finish instead of exhausting its retries.
+func TestFederationIngestSucceedsWhenEveryPreparedSnapshotIsStale(t *testing.T) {
+	t.Parallel()
+	d, p, issue := incrementalTestStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	competingWrites := 0
+	d.federationIngestPrepared = func() {
+		competingWrites++
+		_, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: other.ID, Actor: "tester",
+			Patch: map[string]jsontext.Value{"write": []byte(strconv.Itoa(competingWrites))}})
+		require.NoError(t, err, "the competing write must commit while ingestion prepares")
+	}
+	ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"updated"}`, 9_000_000_000_000)
+	result, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID,
+		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Accepted)
+	updated, err := d.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "updated", updated.Title)
+	otherProject, err := d.ProjectByID(ctx, other.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"write":`+strconv.Itoa(competingWrites)+`}`, string(otherProject.Metadata))
+}
+
 func TestFederationPreparationExcludesUntouchedRows(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
