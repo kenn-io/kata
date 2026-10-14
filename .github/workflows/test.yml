@@ -2,7 +2,6 @@ name: Tests
 
 on:
   workflow_call:
-  workflow_dispatch:
   push:
     branches:
       - main
@@ -292,7 +291,7 @@ jobs:
       - name: Set up Windows Go directories
         shell: pwsh
         run: |
-          foreach ($name in @('GOCACHE', 'GOMODCACHE', 'GOTMPDIR')) {
+          foreach ($name in @('GOCACHE', 'GOMODCACHE', 'GOTMPDIR', 'TMP', 'TEMP', 'SystemTemp')) {
             $path = Join-Path $env:RUNNER_TEMP $name
             New-Item -ItemType Directory -Force -Path $path | Out-Null
             "$name=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
