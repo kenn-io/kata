@@ -35,3 +35,9 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 	store.relayHistoryFullScanObserver = observe
 	return func() { store.relayHistoryFullScanObserver = previous }
 }
+
+// MaterializeFederatedProjectOnceForTest runs one materialization attempt
+// without RetryTransient, so tests can observe a lost writer race directly.
+func MaterializeFederatedProjectOnceForTest(store *Store, ctx context.Context, projectID int64) error {
+	return store.materializeFederatedProject(ctx, projectID)
+}
