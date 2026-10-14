@@ -1,7 +1,6 @@
 package forgejo
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,8 +14,11 @@ import (
 	"strings"
 	"time"
 
+	forgejosdk "codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"go.kenn.io/kata/pkg/connector"
 )
+
+const maxResponseBytes = 8 * 1024 * 1024
 
 var providerTransport = func() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -24,18 +26,42 @@ var providerTransport = func() *http.Transport {
 	return transport
 }()
 
+// cappedTransport bounds every provider response body, because the SDK reads
+// bodies without a limit.
+type cappedTransport struct{ next http.RoundTripper }
+
+func (t cappedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.next.RoundTrip(request)
+	if err == nil {
+		response.Body = http.MaxBytesReader(nil, response.Body, maxResponseBytes)
+	}
+	return response, err
+}
+
 type client struct {
 	origin, token, instance string
 	http                    *http.Client
-}
-type user struct {
-	ID       int64  `json:"id"`
-	Login    string `json:"login"`
-	FullName string `json:"full_name"`
+	api                     *forgejosdk.Client
 }
 
 func failure(code, message string) *connector.Error {
 	return &connector.Error{Code: code, Message: message}
+}
+
+// providerFailure maps an SDK result to a connector error without exposing the
+// provider's response body, which can echo credentials or private content.
+func providerFailure(response *forgejosdk.Response) *connector.Error {
+	if response == nil || response.Response == nil {
+		return failure("provider_error", "Forgejo request failed")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		code := "provider_error"
+		if response.StatusCode == http.StatusNotFound {
+			code = "not_found"
+		}
+		return failure(code, fmt.Sprintf("Forgejo returned HTTP %d", response.StatusCode))
+	}
+	return failure("provider_error", "Forgejo returned an invalid response")
 }
 func id(n int64) string { return strconv.FormatInt(n, 10) }
 func numeric(s string) (int64, bool) {
@@ -88,53 +114,61 @@ func (h *handler) client(ctx context.Context) (*client, *connector.Error) {
 	if strings.TrimSpace(h.token) == "" {
 		return nil, failure("authentication", "Forgejo token is required")
 	}
-	return &client{origin: origin, token: h.token, instance: invocation.Instance, http: &http.Client{Transport: providerTransport, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
-}
-func (c *client) request(ctx context.Context, method, path string, payload, output any) *connector.Error {
-	var body io.Reader
-	if payload != nil {
-		raw, e := json.Marshal(payload)
-		if e != nil {
-			return failure("invalid_request", "Forgejo request is invalid")
-		}
-		body = bytes.NewReader(raw)
-	}
-	request, e := http.NewRequestWithContext(ctx, method, c.origin+"/api/v1"+path, body)
+	httpClient := &http.Client{Transport: cappedTransport{next: providerTransport}, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// An empty version skips the SDK's /version probe and version gates.
+	api, e := forgejosdk.NewClient(origin, forgejosdk.SetHTTPClient(httpClient), forgejosdk.SetToken(h.token),
+		forgejosdk.SetForgejoVersion(""), forgejosdk.SetContext(ctx), forgejosdk.SetUserAgent("kata"))
 	if e != nil {
-		return failure("provider_error", "Forgejo request could not be sent")
+		return nil, failure("provider_error", "Forgejo client could not be created")
 	}
-	request.Header.Set("Authorization", "token "+c.token)
-	request.Header.Set("Accept", "application/json")
-	if payload != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	response, e := c.http.Do(request)
-	if e != nil {
-		return failure("provider_error", "Forgejo request failed")
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		code := "provider_error"
-		if response.StatusCode == http.StatusNotFound {
-			code = "not_found"
-		}
-		return failure(code, fmt.Sprintf("Forgejo returned HTTP %d", response.StatusCode))
-	}
-	if output != nil {
-		raw, e := io.ReadAll(io.LimitReader(response.Body, 8*1024*1024+1))
-		if e != nil || len(raw) > 8*1024*1024 || json.Unmarshal(raw, output) != nil {
-			return failure("provider_error", "Forgejo returned an invalid response")
-		}
-	}
-	return nil
+	return &client{origin: origin, token: h.token, instance: invocation.Instance, http: httpClient, api: api}, nil
 }
-func (c *client) self(ctx context.Context) (user, *connector.Error) {
-	var u user
-	if err := c.request(ctx, "GET", "/user", nil, &u); err != nil {
-		return u, err
+
+// organizationLabels lists an organization's label IDs. The SDK has no
+// organization label endpoint, so this is the connector's only direct request.
+func (c *client) organizationLabels(ctx context.Context, owner string) ([]int64, *connector.Error) {
+	return pages(func(options forgejosdk.ListOptions) ([]int64, *forgejosdk.Response, error) {
+		path := fmt.Sprintf("%s/api/v1/orgs/%s/labels?page=%d&limit=%d", c.origin, url.PathEscape(owner), options.Page, options.PageSize)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		request.Header.Set("Authorization", "token "+c.token)
+		request.Header.Set("User-Agent", "kata")
+		request.Header.Set("Accept", "application/json")
+		raw, err := c.http.Do(request)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer func() { _ = raw.Body.Close() }()
+		response := &forgejosdk.Response{Response: raw}
+		if raw.StatusCode < 200 || raw.StatusCode >= 300 {
+			return nil, response, fmt.Errorf("forgejo returned HTTP %d", raw.StatusCode)
+		}
+		var labels []struct {
+			ID int64 `json:"id"`
+		}
+		body, err := io.ReadAll(raw.Body)
+		if err != nil {
+			return nil, response, err
+		}
+		if err := json.Unmarshal(body, &labels); err != nil {
+			return nil, response, err
+		}
+		ids := make([]int64, 0, len(labels))
+		for _, label := range labels {
+			ids = append(ids, label.ID)
+		}
+		return ids, response, nil
+	})
+}
+func (c *client) self() (*forgejosdk.User, *connector.Error) {
+	u, response, err := c.api.GetMyUserInfo()
+	if err != nil {
+		return nil, providerFailure(response)
 	}
 	if u.ID <= 0 {
-		return u, failure("provider_error", "Forgejo returned an invalid account")
+		return nil, failure("provider_error", "Forgejo returned an invalid account")
 	}
 	return u, nil
 }

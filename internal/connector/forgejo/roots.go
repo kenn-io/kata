@@ -6,30 +6,14 @@ import (
 	"strings"
 	"time"
 
+	forgejosdk "codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"go.kenn.io/kata/pkg/connector"
 )
 
-type repository struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
-}
-type label struct {
-	ID int64 `json:"id"`
-}
-type issue struct {
-	ID          int64       `json:"id"`
-	Number      int64       `json:"number"`
-	Title       string      `json:"title"`
-	Body        string      `json:"body"`
-	State       string      `json:"state"`
-	UpdatedAt   time.Time   `json:"updated_at"`
-	User        *user       `json:"user"`
-	Repository  *repository `json:"repository"`
-	PullRequest any         `json:"pull_request"`
-	DueDate     *time.Time  `json:"due_date"`
-	Labels      []label     `json:"labels"`
-	Assignees   []user      `json:"assignees"`
-	Milestone   *label      `json:"milestone"`
+// issueRef names an issue by the repository path the provider currently reports.
+type issueRef struct {
+	owner, repo string
+	number      int64
 }
 type rootKey struct{ repo, number, issue int64 }
 
@@ -41,33 +25,33 @@ func parseKey(s string) (rootKey, bool) {
 	i, c := numeric(issue)
 	return rootKey{r, n, i}, ok && ok2 && a && b && c
 }
-func repoPath(name string) (string, bool) {
+func splitRepoName(name string) (owner, repo string, ok bool) {
 	parts := strings.Split(name, "/")
 	if len(parts) != 2 {
-		return "", false
+		return "", "", false
 	}
 	for _, part := range parts {
 		if part == "" || part == "." || part == ".." || strings.TrimSpace(part) != part {
-			return "", false
+			return "", "", false
 		}
 		for _, r := range part {
 			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.' {
-				return "", false
+				return "", "", false
 			}
 		}
 	}
-	return "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]), true
+	return parts[0], parts[1], true
 }
-func (c *client) locator(s string) (string, int64, *connector.Error) {
+func (c *client) locator(s string) (issueRef, *connector.Error) {
 	var name, number string
 	if strings.Contains(s, "://") {
 		u, e := url.Parse(s)
 		if e != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" || strings.Contains(s, "#") || u.RawPath != "" || normalizedOrigin(u) != c.origin {
-			return "", 0, failure("invalid_locator", "Forgejo issue locator is invalid")
+			return issueRef{}, failure("invalid_locator", "Forgejo issue locator is invalid")
 		}
 		p := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 		if len(p) != 4 || p[2] != "issues" {
-			return "", 0, failure("invalid_locator", "Forgejo issue locator is invalid")
+			return issueRef{}, failure("invalid_locator", "Forgejo issue locator is invalid")
 		}
 		name = p[0] + "/" + p[1]
 		number = p[3]
@@ -75,63 +59,63 @@ func (c *client) locator(s string) (string, int64, *connector.Error) {
 		var ok bool
 		name, number, ok = strings.Cut(s, "#")
 		if !ok {
-			return "", 0, failure("invalid_locator", "Forgejo issue locator is invalid")
+			return issueRef{}, failure("invalid_locator", "Forgejo issue locator is invalid")
 		}
 	}
-	path, ok := repoPath(name)
+	owner, repo, ok := splitRepoName(name)
 	n, valid := numeric(number)
 	if !ok || !valid {
-		return "", 0, failure("invalid_locator", "Forgejo issue locator is invalid")
+		return issueRef{}, failure("invalid_locator", "Forgejo issue locator is invalid")
 	}
-	return path, n, nil
+	return issueRef{owner: owner, repo: repo, number: n}, nil
 }
-func (c *client) load(ctx context.Context, key string) (issue, string, *connector.Error) {
+func (c *client) load(key string) (*forgejosdk.Issue, issueRef, *connector.Error) {
 	k, ok := parseKey(key)
 	if !ok {
-		return issue{}, "", failure("invalid_root", "Forgejo root key is invalid")
+		return nil, issueRef{}, failure("invalid_root", "Forgejo root key is invalid")
 	}
-	var repo repository
-	if err := c.request(ctx, "GET", "/repositories/"+id(k.repo), nil, &repo); err != nil {
-		if err.Code == "not_found" {
-			err.Code = "root_not_found"
-		}
-		return issue{}, "", err
+	repo, response, e := c.api.GetRepoByID(k.repo)
+	if e != nil {
+		return nil, issueRef{}, rootFailure(response)
 	}
-	path, ok := repoPath(repo.FullName)
+	owner, name, ok := splitRepoName(repo.FullName)
 	if !ok || repo.ID != k.repo {
-		return issue{}, "", failure("identity_mismatch", "Forgejo repository identity changed")
+		return nil, issueRef{}, failure("identity_mismatch", "Forgejo repository identity changed")
 	}
-	return c.loadIssue(ctx, path, k)
+	return c.loadIssue(issueRef{owner: owner, repo: name, number: k.number}, k)
 }
-func (c *client) loadIssue(ctx context.Context, path string, k rootKey) (issue, string, *connector.Error) {
-	var i issue
-	endpoint := path + "/issues/" + id(k.number)
-	if err := c.request(ctx, "GET", endpoint, nil, &i); err != nil {
-		if err.Code == "not_found" {
-			err.Code = "root_not_found"
-		}
-		return i, "", err
+func rootFailure(response *forgejosdk.Response) *connector.Error {
+	err := providerFailure(response)
+	if err.Code == "not_found" {
+		err.Code = "root_not_found"
 	}
-	if i.ID <= 0 || i.Number != k.number || (k.issue != 0 && i.ID != k.issue) || i.Repository == nil || i.Repository.ID != k.repo {
-		return i, "", failure("identity_mismatch", "Forgejo issue identity changed")
+	return err
+}
+func (c *client) loadIssue(ref issueRef, k rootKey) (*forgejosdk.Issue, issueRef, *connector.Error) {
+	i, response, e := c.api.GetIssue(ref.owner, ref.repo, ref.number)
+	if e != nil {
+		return nil, ref, rootFailure(response)
+	}
+	if i.ID <= 0 || i.Index != k.number || (k.issue != 0 && i.ID != k.issue) || i.Repository == nil || i.Repository.ID != k.repo {
+		return i, ref, failure("identity_mismatch", "Forgejo issue identity changed")
 	}
 	if i.PullRequest != nil {
-		return i, "", failure("unsupported", "Forgejo pull requests are unsupported")
+		return i, ref, failure("unsupported", "Forgejo pull requests are unsupported")
 	}
-	if i.State != "open" && i.State != "closed" {
-		return i, "", failure("provider_error", "Forgejo issue state is invalid")
+	if i.State != forgejosdk.StateOpen && i.State != forgejosdk.StateClosed {
+		return i, ref, failure("provider_error", "Forgejo issue state is invalid")
 	}
 	if _, err := fieldValues(i); err != nil {
-		return i, "", err
+		return i, ref, err
 	}
-	return i, endpoint, nil
+	return i, ref, nil
 }
-func (c *client) root(i issue) connector.Root {
+func (c *client) root(i *forgejosdk.Issue) connector.Root {
 	state := "open"
-	if i.State == "closed" {
+	if i.State == forgejosdk.StateClosed {
 		state = "complete"
 	}
-	root := connector.Root{Key: id(i.Repository.ID) + "#" + id(i.Number) + "@" + id(i.ID), IdentityKey: c.origin, Title: i.Title, Body: i.Body, State: state, UpdatedAt: i.UpdatedAt, ObservedAt: time.Now().UTC()}
+	root := connector.Root{Key: id(i.Repository.ID) + "#" + id(i.Index) + "@" + id(i.ID), IdentityKey: c.origin, Title: i.Title, Body: i.Body, State: state, UpdatedAt: i.Updated, ObservedAt: time.Now().UTC()}
 	root.Fields, _ = fieldValues(i)
 	observed := root.ObservedAt
 	root.ObservedAt = time.Time{}
@@ -144,22 +128,19 @@ func (h *handler) ResolveRoot(ctx context.Context, p connector.ResolveRootParams
 	if err != nil {
 		return connector.Root{}, err
 	}
-	path, n, err := c.locator(p.Locator)
+	ref, err := c.locator(p.Locator)
 	if err != nil {
 		return connector.Root{}, err
 	}
-	var repo repository
-	if err := c.request(ctx, "GET", path, nil, &repo); err != nil {
-		if err.Code == "not_found" {
-			err.Code = "root_not_found"
-		}
-		return connector.Root{}, err
+	repo, response, e := c.api.GetRepo(ref.owner, ref.repo)
+	if e != nil {
+		return connector.Root{}, rootFailure(response)
 	}
-	path, ok := repoPath(repo.FullName)
+	owner, name, ok := splitRepoName(repo.FullName)
 	if !ok || repo.ID <= 0 {
 		return connector.Root{}, failure("provider_error", "Forgejo repository is invalid")
 	}
-	i, _, err := c.loadIssue(ctx, path, rootKey{repo: repo.ID, number: n})
+	i, _, err := c.loadIssue(issueRef{owner: owner, repo: name, number: ref.number}, rootKey{repo: repo.ID, number: ref.number})
 	if err != nil {
 		return connector.Root{}, err
 	}
@@ -170,7 +151,7 @@ func (h *handler) ReadRoot(ctx context.Context, p connector.ReadRootParams) (con
 	if err != nil {
 		return connector.Root{}, err
 	}
-	i, _, err := c.load(ctx, p.RootKey)
+	i, _, err := c.load(p.RootKey)
 	if err != nil {
 		return connector.Root{}, err
 	}
@@ -181,19 +162,20 @@ func (h *handler) CompleteRoot(ctx context.Context, p connector.CompleteRootPara
 	if err != nil {
 		return connector.Root{}, err
 	}
-	i, path, err := c.load(ctx, p.RootKey)
+	i, ref, err := c.load(p.RootKey)
 	if err != nil {
 		return connector.Root{}, err
 	}
-	if i.State != "closed" {
-		if err := c.request(ctx, "PATCH", path, map[string]string{"state": "closed"}, nil); err != nil {
-			return connector.Root{}, err
+	if i.State != forgejosdk.StateClosed {
+		closed := forgejosdk.StateClosed
+		if _, response, e := c.api.EditIssue(ref.owner, ref.repo, ref.number, forgejosdk.EditIssueOption{State: &closed}); e != nil {
+			return connector.Root{}, providerFailure(response)
 		}
-		i, _, err = c.load(ctx, p.RootKey)
+		i, _, err = c.load(p.RootKey)
 		if err != nil {
 			return connector.Root{}, err
 		}
-		if i.State != "closed" {
+		if i.State != forgejosdk.StateClosed {
 			return connector.Root{}, failure("provider_error", "Forgejo completion readback did not match")
 		}
 	}

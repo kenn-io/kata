@@ -19,7 +19,7 @@ func (h *handler) Describe(ctx context.Context, _ connector.DescribeParams) (con
 	if err != nil {
 		return connector.Description{}, err
 	}
-	self, err := c.self(ctx)
+	self, err := c.self()
 	if err != nil {
 		return connector.Description{}, err
 	}

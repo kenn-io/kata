@@ -6,6 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/lipgloss/v2 v2.0.5
+	codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3 v3.0.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
@@ -52,6 +53,7 @@ require (
 require (
 	cloud.google.com/go v0.123.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
+	github.com/42wim/httpsig v1.2.3 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -75,6 +77,7 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
+	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
@@ -85,11 +88,25 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/getkin/kin-openapi v0.146.0 // indirect
+	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/go-openapi/errors v0.22.7 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
-	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
+	github.com/go-openapi/strfmt v0.26.3 // indirect
+	github.com/go-openapi/swag v0.26.0 // indirect
+	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
+	github.com/go-openapi/swag/conv v0.26.0 // indirect
+	github.com/go-openapi/swag/fileutils v0.26.0 // indirect
+	github.com/go-openapi/swag/jsonname v0.26.0 // indirect
+	github.com/go-openapi/swag/jsonutils v0.26.0 // indirect
+	github.com/go-openapi/swag/loading v0.26.0 // indirect
+	github.com/go-openapi/swag/mangling v0.26.0 // indirect
+	github.com/go-openapi/swag/netutils v0.26.0 // indirect
+	github.com/go-openapi/swag/stringutils v0.26.0 // indirect
+	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
+	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -98,6 +115,7 @@ require (
 	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect

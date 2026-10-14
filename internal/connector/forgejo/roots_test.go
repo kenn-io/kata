@@ -107,16 +107,16 @@ func TestFullIssueLocatorNormalizesOrigin(t *testing.T) {
 		"https://FORGEJO.EXAMPLE/owner/repo/issues/7",
 		"https://forgejo.example:443/owner/repo/issues/7",
 	} {
-		path, number, err := c.locator(locator)
-		if err != nil || path != "/repos/owner/repo" || number != 7 {
-			t.Errorf("locator %q: path=%q number=%d err=%v", locator, path, number, err)
+		ref, err := c.locator(locator)
+		if err != nil || ref != (issueRef{owner: "owner", repo: "repo", number: 7}) {
+			t.Errorf("locator %q: ref=%+v err=%v", locator, ref, err)
 		}
 	}
 	for _, locator := range []string{
 		"https://other.example/owner/repo/issues/7",
 		"https://forgejo.example:444/owner/repo/issues/7",
 	} {
-		if _, _, err := c.locator(locator); err == nil {
+		if _, err := c.locator(locator); err == nil {
 			t.Errorf("accepted cross-origin locator %q", locator)
 		}
 	}
@@ -156,7 +156,7 @@ func TestImmutableRootsAndVerifiedCompletion(t *testing.T) {
 					http.Error(w, "invalid fixture request", http.StatusBadRequest)
 					return
 				}
-				if len(v) != 1 || v["state"] != "closed" {
+				if v = editedFields(v); len(v) != 1 || v["state"] != "closed" {
 					t.Errorf("close payload %#v", v)
 				}
 				body = strings.Replace(body, `"state":"open"`, `"state":"closed"`, 1)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	forgejosdk "codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"go.kenn.io/kata/pkg/connector"
 )
 
@@ -19,10 +20,10 @@ func descriptors() []connector.FieldDescriptor {
 func knownField(id string) bool {
 	return id == "due_date" || id == "labels" || id == "assignees" || id == "milestone"
 }
-func fieldValues(i issue) (map[string]connector.FieldValue, *connector.Error) {
+func fieldValues(i *forgejosdk.Issue) (map[string]connector.FieldValue, *connector.Error) {
 	values := map[string]connector.FieldValue{"due_date": {Kind: "null"}, "milestone": {Kind: "null"}, "labels": {Kind: "string_set", Values: []string{}}, "assignees": {Kind: "string_set", Values: []string{}}}
-	if i.DueDate != nil {
-		values["due_date"] = connector.FieldValue{Kind: "date", Value: i.DueDate.Format("2006-01-02")}
+	if i.Deadline != nil {
+		values["due_date"] = connector.FieldValue{Kind: "date", Value: i.Deadline.Format("2006-01-02")}
 	}
 	if i.Milestone != nil {
 		if i.Milestone.ID <= 0 {
@@ -32,7 +33,7 @@ func fieldValues(i issue) (map[string]connector.FieldValue, *connector.Error) {
 	}
 	labels := []string{}
 	for _, label := range i.Labels {
-		if label.ID <= 0 {
+		if label == nil || label.ID <= 0 {
 			return nil, failure("provider_error", "Forgejo label identity is invalid")
 		}
 		labels = append(labels, id(label.ID))
@@ -40,10 +41,10 @@ func fieldValues(i issue) (map[string]connector.FieldValue, *connector.Error) {
 	values["labels"] = connector.FieldValue{Kind: "string_set", Values: labels}
 	assignees := []string{}
 	for _, assignee := range i.Assignees {
-		if assignee.Login == "" {
+		if assignee == nil || assignee.UserName == "" {
 			return nil, failure("provider_error", "Forgejo assignee identity is invalid")
 		}
-		assignees = append(assignees, assignee.Login)
+		assignees = append(assignees, assignee.UserName)
 	}
 	values["assignees"] = connector.FieldValue{Kind: "string_set", Values: assignees}
 	for key, value := range values {
@@ -55,7 +56,7 @@ func fieldValues(i issue) (map[string]connector.FieldValue, *connector.Error) {
 	}
 	return values, nil
 }
-func selectFields(i issue, ids []string) (map[string]connector.FieldValue, *connector.Error) {
+func selectFields(i *forgejosdk.Issue, ids []string) (map[string]connector.FieldValue, *connector.Error) {
 	all, err := fieldValues(i)
 	if err != nil {
 		return nil, err
@@ -74,7 +75,7 @@ func (h *handler) ListFields(ctx context.Context, _ connector.ListFieldsParams) 
 	if err != nil {
 		return connector.ListFieldsResult{}, err
 	}
-	if _, err := c.self(ctx); err != nil {
+	if _, err := c.self(); err != nil {
 		return connector.ListFieldsResult{}, err
 	}
 	return connector.ListFieldsResult{Fields: descriptors()}, nil
@@ -89,7 +90,7 @@ func (h *handler) ReadFields(ctx context.Context, p connector.ReadFieldsParams) 
 	if err != nil {
 		return connector.ReadFieldsResult{}, err
 	}
-	i, _, err := c.load(ctx, p.RootKey)
+	i, _, err := c.load(p.RootKey)
 	if err != nil {
 		return connector.ReadFieldsResult{}, err
 	}
@@ -147,12 +148,12 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 	if err != nil {
 		return connector.WriteFieldsResult{}, err
 	}
-	current, path, err := c.load(ctx, p.RootKey)
+	_, ref, err := c.load(p.RootKey)
 	if err != nil {
 		return connector.WriteFieldsResult{}, err
 	}
-	repoPath := strings.TrimSuffix(path, "/issues/"+id(current.Number))
-	patch := map[string]any{}
+	var edit forgejosdk.EditIssueOption
+	edited := false
 	ids := []string{}
 	var labels []int64
 	// Validate every catalog before touching either mutation endpoint.
@@ -160,22 +161,28 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 		ids = append(ids, key)
 		switch key {
 		case "due_date":
+			edited = true
 			if value.Kind == "null" {
-				patch["unset_due_date"] = true
+				remove := true
+				edit.RemoveDeadline = &remove
 			} else {
 				date, _ := time.Parse("2006-01-02", value.Value)
-				patch["due_date"] = date.Format(time.RFC3339)
+				edit.Deadline = &date
 			}
 		case "labels":
 			labels = []int64{}
 			if len(value.Values) > 0 {
-				catalog, err := pages[label](ctx, c, repoPath+"/labels")
+				catalog, err := pages(func(options forgejosdk.ListOptions) ([]*forgejosdk.Label, *forgejosdk.Response, error) {
+					return c.api.ListRepoLabels(ref.owner, ref.repo, forgejosdk.ListLabelsOptions{ListOptions: options})
+				})
 				if err != nil {
 					return connector.WriteFieldsResult{}, err
 				}
 				available := map[int64]bool{}
 				for _, v := range catalog {
-					available[v.ID] = true
+					if v != nil {
+						available[v.ID] = true
+					}
 				}
 				missing := false
 				for _, s := range value.Values {
@@ -186,25 +193,21 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 					// Repository catalogs omit labels owned by the repository's
 					// organization. Discover only the current owner namespace,
 					// derived from the immutable repository lookup above.
-					owner, _, _ := strings.Cut(strings.TrimPrefix(repoPath, "/repos/"), "/")
-					var organization struct {
-						ID       int64  `json:"id"`
-						Username string `json:"username"`
-					}
-					err := c.request(ctx, "GET", "/orgs/"+owner, nil, &organization)
-					if err != nil && err.Code != "not_found" {
-						return connector.WriteFieldsResult{}, err
-					}
-					if err == nil {
-						if organization.ID <= 0 || organization.Username != owner {
+					organization, response, e := c.api.GetOrg(ref.owner)
+					if e != nil {
+						if err := providerFailure(response); err.Code != "not_found" {
+							return connector.WriteFieldsResult{}, err
+						}
+					} else {
+						if organization.ID <= 0 || organization.UserName != ref.owner {
 							return connector.WriteFieldsResult{}, failure("provider_error", "Forgejo repository organization is invalid")
 						}
-						organizationLabels, err := pages[label](ctx, c, "/orgs/"+owner+"/labels")
+						organizationLabels, err := c.organizationLabels(ctx, ref.owner)
 						if err != nil {
 							return connector.WriteFieldsResult{}, err
 						}
-						for _, v := range organizationLabels {
-							available[v.ID] = true
+						for _, n := range organizationLabels {
+							available[n] = true
 						}
 					}
 				}
@@ -219,14 +222,15 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 		case "assignees":
 			selected := []string{}
 			if len(value.Values) > 0 {
-				var catalog []user
-				err := c.request(ctx, "GET", repoPath+"/assignees", nil, &catalog)
-				if err != nil {
-					return connector.WriteFieldsResult{}, err
+				catalog, response, e := c.api.GetAssignees(ref.owner, ref.repo)
+				if e != nil {
+					return connector.WriteFieldsResult{}, providerFailure(response)
 				}
 				available := map[string]bool{}
 				for _, v := range catalog {
-					available[v.Login] = true
+					if v != nil {
+						available[v.UserName] = true
+					}
 				}
 				for _, login := range value.Values {
 					if !available[login] {
@@ -235,37 +239,41 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 					selected = append(selected, login)
 				}
 			}
-			patch["assignees"] = selected
+			edited = true
+			edit.Assignees = selected
 		case "milestone":
 			n := int64(0)
 			if value.Kind == "string" {
 				n, _ = numeric(value.Value)
-				catalog, err := pages[label](ctx, c, repoPath+"/milestones?state=all")
+				catalog, err := pages(func(options forgejosdk.ListOptions) ([]*forgejosdk.Milestone, *forgejosdk.Response, error) {
+					return c.api.ListRepoMilestones(ref.owner, ref.repo, forgejosdk.ListMilestoneOption{ListOptions: options, State: forgejosdk.StateAll})
+				})
 				if err != nil {
 					return connector.WriteFieldsResult{}, err
 				}
 				found := false
 				for _, v := range catalog {
-					found = found || v.ID == n
+					found = found || (v != nil && v.ID == n)
 				}
 				if !found {
 					return connector.WriteFieldsResult{}, failure("invalid_fields", "Forgejo milestone is unknown")
 				}
 			}
-			patch["milestone"] = n
+			edited = true
+			edit.Milestone = &n
 		}
 	}
 	if labels != nil {
-		if err := c.request(ctx, "PUT", path+"/labels", map[string]any{"labels": labels}, nil); err != nil {
-			return connector.WriteFieldsResult{}, err
+		if _, response, e := c.api.ReplaceIssueLabels(ref.owner, ref.repo, ref.number, forgejosdk.IssueLabelsOption{Labels: labels}); e != nil {
+			return connector.WriteFieldsResult{}, providerFailure(response)
 		}
 	}
-	if len(patch) > 0 {
-		if err := c.request(ctx, "PATCH", path, patch, nil); err != nil {
-			return connector.WriteFieldsResult{}, err
+	if edited {
+		if _, response, e := c.api.EditIssue(ref.owner, ref.repo, ref.number, edit); e != nil {
+			return connector.WriteFieldsResult{}, providerFailure(response)
 		}
 	}
-	fresh, _, err := c.load(ctx, p.RootKey)
+	fresh, _, err := c.load(p.RootKey)
 	if err != nil {
 		return connector.WriteFieldsResult{}, err
 	}
@@ -273,20 +281,20 @@ func (h *handler) WriteFields(ctx context.Context, p connector.WriteFieldsParams
 	if err != nil {
 		return connector.WriteFieldsResult{}, err
 	}
-	if wanted, ok := p.Fields["due_date"]; ok && wanted.Kind == "date" && fresh.DueDate != nil &&
+	if wanted, ok := p.Fields["due_date"]; ok && wanted.Kind == "date" && fresh.Deadline != nil &&
 		values["due_date"].Kind == "date" {
 		requestedDate, _ := time.Parse("2006-01-02", wanted.Value)
-		_, offset := fresh.DueDate.Zone()
+		_, offset := fresh.Deadline.Zone()
 		if offset > 0 && values["due_date"].Value == requestedDate.AddDate(0, 0, 1).Format("2006-01-02") {
 			// Forgejo stores the submitted calendar date at the end of that day
 			// in the submitted offset, then reads it in its configured UI zone.
 			// Reissue the same date using the returned provider offset so a
 			// positive UI offset does not turn the readback into the next day.
-			correctedDate := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, fresh.DueDate.Location())
-			if err := c.request(ctx, "PATCH", path, map[string]any{"due_date": correctedDate.Format(time.RFC3339)}, nil); err != nil {
-				return connector.WriteFieldsResult{}, err
+			correctedDate := time.Date(requestedDate.Year(), requestedDate.Month(), requestedDate.Day(), 0, 0, 0, 0, fresh.Deadline.Location())
+			if _, response, e := c.api.EditIssue(ref.owner, ref.repo, ref.number, forgejosdk.EditIssueOption{Deadline: &correctedDate}); e != nil {
+				return connector.WriteFieldsResult{}, providerFailure(response)
 			}
-			fresh, _, err = c.load(ctx, p.RootKey)
+			fresh, _, err = c.load(p.RootKey)
 			if err != nil {
 				return connector.WriteFieldsResult{}, err
 			}

@@ -300,6 +300,7 @@ func (f *conformanceFixture) serve(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid", 400)
 				return
 			}
+			raw = editedFields(raw)
 			f.record(raw)
 			for key, value := range raw {
 				switch key {
