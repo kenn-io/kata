@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"fmt"
 	"slices"
 
 	"go.kenn.io/kata/internal/db"
@@ -26,7 +25,7 @@ type federationMaterialization struct {
 	issueIDs     map[string]int64
 	commentRows  map[string]federatedCommentRow
 	labelRows    map[federatedLabelKey]struct{}
-	staleIssues  map[string]federatedIssueRow
+	staleIssues  map[string]int64
 	linkIDs      map[string]int64
 	linkRows     map[db.FoldLinkKey]federatedLinkRow
 }
@@ -123,14 +122,13 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 			m.linkIDs[uid] = id
 		}
 	}
-	issueIDs := m.issueIDs
 	if err := applyFederatedStatusIntentTx(ctx, tx, m.status); err != nil {
 		return err
 	}
-	if err := reconcileFederatedCommentsFromRows(ctx, tx, issueIDs, m.projection, m.commentRows); err != nil {
+	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLabelsFromRows(ctx, tx, issueIDs, m.projection, m.labelRows); err != nil {
+	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows); err != nil {
 		return err
 	}
 	if m.linkProjects != nil {
@@ -138,23 +136,10 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 			return err
 		}
 	}
-	for uid, row := range m.staleIssues {
-		var refs int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events WHERE issue_id = ? OR related_issue_id = ?`, row.id, row.id).Scan(&refs); err != nil {
-			return err
-		}
-		if refs == 0 {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, row.id); err != nil {
-				return fmt.Errorf("delete stale federated issue %s: %w", uid, err)
-			}
-		}
+	if err := deleteUnreferencedFederatedIssues(ctx, tx, m.staleIssues); err != nil {
+		return err
 	}
-	if raw := m.projection.ProjectMetadata[m.binding.HubProjectUID]; len(raw) > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE projects SET metadata = ?, revision = revision + 1 WHERE id = ? AND metadata IS NOT ?`, string(raw), projectID, string(raw)); err != nil {
-			return err
-		}
-	}
-	return nil
+	return updateFederatedProjectMetadataTx(ctx, tx, projectID, m.projection.ProjectMetadata[m.binding.HubProjectUID])
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:
@@ -166,12 +151,12 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 	}
 	m.issueRows = existing
 	m.issueIDs = make(map[string]int64, len(existing))
-	m.staleIssues = map[string]federatedIssueRow{}
+	m.staleIssues = map[string]int64{}
 	for uid, row := range existing {
 		if _, ok := m.projection.Issues[uid]; ok {
 			m.issueIDs[uid] = row.id
 		} else {
-			m.staleIssues[uid] = row
+			m.staleIssues[uid] = row.id
 		}
 	}
 	for _, issue := range m.projection.SortedIssues() {

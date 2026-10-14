@@ -1190,14 +1190,19 @@ func (d *Store) materializeFederatedProjectTx(
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
 		return err
 	}
-	if raw := projection.ProjectMetadata[binding.HubProjectUID]; len(raw) > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects
-			    SET metadata = ?, revision = revision + 1
-			  WHERE id = ? AND metadata IS NOT ?`,
-			string(raw), projectID, string(raw)); err != nil {
-			return fmt.Errorf("update federated project metadata: %w", err)
-		}
+	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
+}
+
+func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, raw jsontext.Value) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE projects
+		    SET metadata = ?, revision = revision + 1
+		  WHERE id = ? AND metadata IS NOT ?`,
+		string(raw), projectID, string(raw)); err != nil {
+		return fmt.Errorf("update federated project metadata: %w", err)
 	}
 	return nil
 }
@@ -1913,18 +1918,15 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (
 	for rows.Next() {
 		var uid string
 		var row federatedIssueRow
-		row.values = make([]any, 14)
-		targets := []any{&uid, &row.id}
-		for i := range row.values {
-			targets = append(targets, &row.values[i])
-		}
-		if err := rows.Scan(targets...); err != nil {
+		var status, closedReason, owner, assignmentExpiresOn, priority, author any
+		var createdAt, updatedAt, closedAt, deletedAt, metadata any
+		if err := rows.Scan(&uid, &row.id, &row.shortID, &row.title, &row.body, &status, &closedReason, &owner,
+			&assignmentExpiresOn, &priority, &author, &createdAt, &updatedAt, &closedAt, &deletedAt, &metadata); err != nil {
 			return nil, fmt.Errorf("scan federated issue row: %w", err)
 		}
-		row.shortID = row.values[0].(string)
-		row.title = row.values[1].(string)
-		row.body = row.values[2].(string)
-		row.deleted = row.values[12] != nil
+		row.deleted = deletedAt != nil
+		row.values = []any{row.shortID, row.title, row.body, status, closedReason, owner, assignmentExpiresOn,
+			priority, author, createdAt, updatedAt, closedAt, deletedAt, metadata}
 		out[uid] = row
 	}
 	return out, rows.Err()
@@ -2595,21 +2597,16 @@ func pruneFederatedIssues(ctx context.Context, tx *sql.Tx, projectID int64, issu
 	if err != nil {
 		return fmt.Errorf("list stale federated issues: %w", err)
 	}
-	var candidates []struct {
-		id  int64
-		uid string
-	}
+	candidates := map[string]int64{}
 	for rows.Next() {
-		var c struct {
-			id  int64
-			uid string
-		}
-		if err := rows.Scan(&c.id, &c.uid); err != nil {
+		var id int64
+		var uid string
+		if err := rows.Scan(&id, &uid); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("scan stale federated issue: %w", err)
 		}
-		if _, ok := issueIDs[c.uid]; !ok {
-			candidates = append(candidates, c)
+		if _, ok := issueIDs[uid]; !ok {
+			candidates[uid] = id
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -2618,19 +2615,25 @@ func pruneFederatedIssues(ctx context.Context, tx *sql.Tx, projectID int64, issu
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate stale federated issues: %w", err)
 	}
-	for _, c := range candidates {
+	return deleteUnreferencedFederatedIssues(ctx, tx, candidates)
+}
+
+// deleteUnreferencedFederatedIssues removes stale projection rows, keyed by
+// issue UID, that no stored event still references.
+func deleteUnreferencedFederatedIssues(ctx context.Context, tx *sql.Tx, candidates map[string]int64) error {
+	for uid, id := range candidates {
 		var refs int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT count(*)
 			  FROM events
-			 WHERE issue_id = ? OR related_issue_id = ?`, c.id, c.id).Scan(&refs); err != nil {
-			return fmt.Errorf("count federated issue event refs %s: %w", c.uid, err)
+			 WHERE issue_id = ? OR related_issue_id = ?`, id, id).Scan(&refs); err != nil {
+			return fmt.Errorf("count federated issue event refs %s: %w", uid, err)
 		}
 		if refs > 0 {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, c.id); err != nil {
-			return fmt.Errorf("delete stale federated issue %s: %w", c.uid, err)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete stale federated issue %s: %w", uid, err)
 		}
 	}
 	return nil
