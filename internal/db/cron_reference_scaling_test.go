@@ -17,7 +17,7 @@ import (
 
 // The observer delegates SQL to real SQLite and counts consumed rows, rather
 // than guessing cost from query text or measuring scheduler-sensitive time.
-type referenceWork struct{ queries, rows int }
+type referenceWork struct{ queries, rows, bodyBytes int }
 type referenceConnector struct{ work *referenceWork }
 
 func (c referenceConnector) Driver() driver.Driver { return &sqlite.Driver{} }
@@ -55,6 +55,16 @@ func (r *referenceRows) Next(v []driver.Value) error {
 	err := r.Rows.Next(v)
 	if err == nil {
 		r.work.rows++
+		for index, column := range r.Columns() {
+			if column == "body" {
+				switch body := v[index].(type) {
+				case string:
+					r.work.bodyBytes += len(body)
+				case []byte:
+					r.work.bodyBytes += len(body)
+				}
+			}
+		}
 	}
 	return err
 }

@@ -69,6 +69,8 @@ func checkEventlessArchivedProjectPurgeAdvancesSnapshotCursor(t *testing.T, stor
 		ProjectUID: survivingProjectUID, SelectedIssueUID: survivingIssueUID,
 	})
 	require.NoError(t, err)
+	require.Equal(t, "hidden", before.CommentGraph.Targets[targetCommentUID].Status,
+		"the archived target project hides the imported cross-project reply endpoint")
 
 	log, err := store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: archivedProject.ID, Actor: "worker"})
 	require.NoError(t, err)
@@ -87,6 +89,8 @@ func checkEventlessArchivedProjectPurgeAdvancesSnapshotCursor(t *testing.T, stor
 		"every successful project purge must reserve a reset cursor")
 	assert.Greater(t, conditional.Cursor, before.Cursor,
 		"the reset cursor must advance beyond the prior snapshot authority")
+	assert.NotEqual(t, "hidden", conditional.CommentGraph.Targets[targetCommentUID].Status,
+		"after purge the surviving reply target is unavailable rather than hidden")
 
 	return nil
 }

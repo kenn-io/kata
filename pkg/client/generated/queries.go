@@ -102,7 +102,26 @@ func (l ListAllIssuesQuery) Validate() error {
 }
 
 type ShowIssueByUIDQuery struct {
-	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+	Thread         *string                  `json:"thread,omitempty"`
+	Inbound        *string                  `json:"inbound,omitempty"`
+	Kind           *ShowIssueByUIDQueryKind `json:"kind,omitempty"`
+	Since          *string                  `json:"since,omitempty"`
+	IncludeDeleted *bool                    `json:"include_deleted,omitempty"`
+}
+
+func (s ShowIssueByUIDQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if s.Kind != nil {
+		if v, ok := any(s.Kind).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Kind", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ListProjectsQuery struct {
@@ -244,7 +263,26 @@ func (l ListIssuesQuery) Validate() error {
 }
 
 type ShowIssueQuery struct {
-	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+	Thread         *string             `json:"thread,omitempty"`
+	Inbound        *string             `json:"inbound,omitempty"`
+	Kind           *ShowIssueQueryKind `json:"kind,omitempty"`
+	Since          *string             `json:"since,omitempty"`
+	IncludeDeleted *bool               `json:"include_deleted,omitempty"`
+}
+
+func (s ShowIssueQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if s.Kind != nil {
+		if v, ok := any(s.Kind).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Kind", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type UnbindExternalRootQuery struct {
@@ -274,7 +312,26 @@ func (d DeleteLinkQuery) Validate() error {
 }
 
 type IssuePlanningDatesQuery struct {
-	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+	Thread         *string                      `json:"thread,omitempty"`
+	Inbound        *string                      `json:"inbound,omitempty"`
+	Kind           *IssuePlanningDatesQueryKind `json:"kind,omitempty"`
+	Since          *string                      `json:"since,omitempty"`
+	IncludeDeleted *bool                        `json:"include_deleted,omitempty"`
+}
+
+func (i IssuePlanningDatesQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if i.Kind != nil {
+		if v, ok := any(i.Kind).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Kind", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ReadyIssuesQuery struct {

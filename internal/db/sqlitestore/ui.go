@@ -102,10 +102,24 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			}
 			data.SelectedState = "available"
 			data.SelectedIssue = &selected
-			data.Comments, err = readUIComments(ctx, tx, selected.ID)
+			data.CommentGraph, err = db.ReadCommentGraphTx(ctx, tx,
+				db.CommentGraphQuery{ProjectID: selected.ProjectID, AllowedIssueIDs: query.AllowedIssueIDs, SelectedIssueID: selected.ID},
+				func(int) string { return "?" },
+				func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
+				`json_extract(e.payload,'$.reply_to_uid')`,
+				strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
+			)
 			if err != nil {
 				return db.UISnapshotData{}, err
 			}
+			for _, record := range data.CommentGraph.Comments {
+				if record.Comment.IssueID == selected.ID {
+					data.Comments = append(data.Comments, record.Comment)
+				}
+			}
+			slices.SortFunc(data.Comments, func(a, b db.Comment) int {
+				return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
+			})
 			data.SelectedLabels, err = readUIIssueLabels(ctx, tx, selected.ID)
 			if err != nil {
 				return db.UISnapshotData{}, err
@@ -800,36 +814,6 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 		labels = append(labels, label)
 	}
 	return labels, rows.Err()
-}
-
-func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+commentColumns+` FROM comments WHERE issue_id = ?`, issueID)
-	if err != nil {
-		return nil, fmt.Errorf("read UI comments: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	comments := []db.Comment{}
-	for rows.Next() {
-		comment, err := scanComment(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan UI comment: %w", err)
-		}
-		comments = append(comments, comment)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// Order by the parsed instant, exactly like CommentsByIssue. SQL-side
-	// lexical ordering only normalizes fixed-width canonical stamps, so
-	// legacy space-separated rows would otherwise sort by text layout
-	// instead of chronology within the same day.
-	slices.SortFunc(comments, func(a, b db.Comment) int {
-		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
-			return order
-		}
-		return cmp.Compare(a.ID, b.ID)
-	})
-	return comments, nil
 }
 
 func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueLabel, error) {

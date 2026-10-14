@@ -20,7 +20,7 @@ func checkCommentReplyProjectPurgeLineage(t *testing.T, store db.Storage) error 
 	require.NoError(t, err)
 	targetComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "worker", Body: "Finding"})
 	require.NoError(t, err)
-	_, replyEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
+	reply, replyEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: source.ID, Author: "worker", Body: "Response", ReplyToUID: targetComment.UID, ReplyKind: "confirm",
 	})
 	require.NoError(t, err)
@@ -45,5 +45,26 @@ func checkCommentReplyProjectPurgeLineage(t *testing.T, store db.Storage) error 
 	require.Equal(t, target.UID, *events[0].RelatedIssueUID)
 	require.Equal(t, replyEvent.ContentHash, events[0].ContentHash, "retained UID must preserve the source event hash")
 
+	var tombstones int
+	filter := db.ExportFilter{ProjectID: &targetProject.ID}
+	for record, err := range store.ExportPurgeLog(ctx, filter) {
+		require.NoError(t, err)
+		if record.IssueUID != nil && *record.IssueUID == target.UID {
+			tombstones++
+		}
+	}
+	require.Equal(t, 1, tombstones, "project purge must retain per-issue identity in existing purge_log")
+
+	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: sourceProject.ID})
+	require.NoError(t, err)
+	require.Contains(t, graph.Targets, targetComment.UID)
+	require.Equal(t, "removed", graph.Targets[targetComment.UID].Status)
+	for _, record := range graph.Comments {
+		if record.Comment.UID == reply.UID {
+			require.Equal(t, targetComment.UID, record.Comment.ReplyToUID)
+			return nil
+		}
+	}
+	require.Fail(t, "the source reply must remain visible after target project purge")
 	return nil
 }

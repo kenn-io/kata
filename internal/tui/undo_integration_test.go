@@ -2,15 +2,162 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestCommentFormPreventsUndoingEarlierEdit(t *testing.T) {
+	for _, kind := range []string{"plain", "reply"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := context.Background()
+			env := testenv.New(t)
+			base := NewClient(env.URL, env.HTTP)
+			project, err := base.EnsureProject(ctx, "example:project", "alice")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Example", Body: "before", Author: "alice",
+			})
+			require.NoError(t, err)
+			_, err = base.AddComment(ctx, project.ID, issue.UID, "Original finding", "alice")
+			require.NoError(t, err)
+			comments, err := base.ListComments(ctx, project.ID, issue.UID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+
+			client := newConnectedUndoClient(t, base)
+			m := initialModel(Options{})
+			m.api = client
+			m.view = viewDetail
+			m.list.actor = "alice"
+			m.detail = detailModel{scopePID: project.ID, activeTab: tabComments,
+				issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, Status: "open"}, comments: comments}
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			require.NoError(t, err)
+			updated, _ := m.Update(mutationDoneMsg{resp: edited})
+			m = updated.(Model)
+			require.Len(t, m.undoHistory.entries, 1)
+			if kind == "plain" {
+				m = m.openCommentForm()
+			} else {
+				m = m.openTypedReplyForm(kind)
+			}
+			m.input.fields[0].area.SetValue("Follow-up finding")
+			m, cmd := m.commitFormInput(inputCommentForm)
+			require.NotNil(t, cmd)
+			result := cmd().(mutationDoneMsg)
+			require.NoError(t, result.err)
+			updated, _ = m.Update(result)
+			m = updated.(Model)
+			require.Equal(t, inputNone, m.input.kind)
+			comments, err = base.ListComments(ctx, project.ID, issue.UID)
+			require.NoError(t, err)
+			require.Len(t, comments, 2)
+			require.Equal(t, "Follow-up finding", comments[1].Body)
+			if kind == "reply" {
+				require.NotNil(t, comments[1].Reply)
+				require.Equal(t, comments[0].UID, comments[1].Reply.UID)
+			}
+
+			updated, cmd = m.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+			m = updated.(Model)
+			require.NotNil(t, cmd)
+			if m.undoInFlight {
+				updated, _ = m.Update(cmd())
+				m = updated.(Model)
+			}
+			current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, "after", current.Body, "Undo must stop at the newly added comment")
+			require.Contains(t, m.toast.text, "nothing to undo: comment addition cannot be undone")
+		})
+	}
+}
+
+func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
+	for _, failure := range []string{"old daemon", "health transport", "health server", "comment transport"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx := t.Context()
+			env := testenv.New(t)
+			project, err := env.DB.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Example", Body: "before", Author: "alice",
+			})
+			require.NoError(t, err)
+			transport := env.HTTP.Transport
+			if transport == nil {
+				transport = http.DefaultTransport
+			}
+			var commentPosts atomic.Int32
+			transportErr := errors.New("request transport failed")
+			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/api/v1/health" {
+					switch failure {
+					case "old daemon":
+						return &http.Response{StatusCode: http.StatusOK, Request: r,
+							Header: http.Header{"Content-Type": {"application/json"}},
+							Body:   io.NopCloser(strings.NewReader(`{"ok":true,"api_schema_version":"0.27.0"}`))}, nil
+					case "health transport":
+						return nil, transportErr
+					case "health server":
+						return &http.Response{StatusCode: http.StatusServiceUnavailable, Request: r,
+							Header: http.Header{"Content-Type": {"application/json"}},
+							Body:   io.NopCloser(strings.NewReader(`{"error":{"code":"unavailable","message":"health unavailable"}}`))}, nil
+					}
+				}
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
+					commentPosts.Add(1)
+					return nil, transportErr
+				}
+				return transport.RoundTrip(r)
+			})}
+			client := newConnectedUndoClient(t, NewClient(env.URL, hc))
+			m := initialModel(Options{})
+			m.api = client
+			m.view = viewList
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			require.NoError(t, err)
+			updated, _ := m.Update(mutationDoneMsg{resp: edited})
+			m = updated.(Model)
+			response, err := client.AddCommentReply(ctx, project.ID, issue.UID, "Reply", "alice", "c:abcdef", "reply", false, "reply-key")
+			require.Error(t, err)
+			if failure == "health transport" || failure == "comment transport" {
+				require.ErrorIs(t, err, transportErr)
+			}
+			updated, _ = m.Update(mutationDoneMsg{resp: response, err: err})
+			m = updated.(Model)
+			updated, cmd := m.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+			m = updated.(Model)
+			require.NotNil(t, cmd)
+			if m.undoInFlight {
+				updated, _ = m.Update(cmd())
+				m = updated.(Model)
+			}
+			current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			if failure == "comment transport" {
+				require.Equal(t, int32(1), commentPosts.Load())
+				require.Equal(t, "after", current.Body)
+				require.Contains(t, m.toast.text, "previous action's outcome is unknown")
+			} else {
+				require.Zero(t, commentPosts.Load(), "the reply failed before its write request")
+				require.Equal(t, "before", current.Body, "Undo must still restore the earlier edit")
+				require.Contains(t, m.toast.text, "undid body.edit")
+			}
+		})
+	}
+}
 
 func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 	ctx := context.Background()

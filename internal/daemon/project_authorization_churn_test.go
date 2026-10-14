@@ -21,11 +21,11 @@ type projectAccessCatalogChurnStore struct {
 	afterCreateIssue func()
 }
 
-func (s projectAccessCatalogChurnStore) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
+func (s projectAccessCatalogChurnStore) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery) (db.CommentGraphData, error) {
 	if s.beforeComments != nil {
-		s.beforeComments(issueID)
+		s.beforeComments(query.SelectedIssueID)
 	}
-	return s.Storage.CommentsByIssue(ctx, issueID)
+	return s.Storage.ReadCommentGraph(ctx, query)
 }
 
 func (s projectAccessCatalogChurnStore) CreateIssue(

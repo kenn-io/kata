@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-12
+last_edited: 2026-10-14
 ---
 
 # HTTP API schema
@@ -155,7 +155,7 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-The current main-branch contract is API `0.27.0`. Kata 0.18.0 includes the changes from
+The current main-branch contract is API `0.28.0`. Kata 0.18.0 includes the changes from
 `0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
 credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
 oldest-first lists require `0.21.0`.
@@ -169,6 +169,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
 | `0.23.0` | Added transactional move previews with the optional `dry_run` request field. Preview responses omit `new_short_id` until a move allocates the target ID. Generated clients now type `new_short_id` as optional; read `issue.short_id` for the issue's current short ID. |

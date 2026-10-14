@@ -138,6 +138,7 @@ type UIGraphUnresolvedRef struct {
 
 // UISnapshotData is captured wholly inside one backend read transaction.
 type UISnapshotData struct {
+	CommentGraph        CommentGraphData       `json:"-"`
 	Cursor              int64                  `json:"cursor"`
 	Projects            []UIProject            `json:"projects"`
 	Issues              []UIIssue              `json:"issues"`

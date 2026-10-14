@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -13,48 +12,60 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Scoped callers do not see reply links yet, whether or not the target is in
-// their subtree. Authorized reply rendering is a separate change.
-func TestIssueScopedCommentResponsesOmitReplyFields(t *testing.T) {
-	for _, targetOutsideSubtree := range []bool{true, false} {
-		t.Run(fmt.Sprintf("target_outside=%t", targetOutsideSubtree), func(t *testing.T) {
-			env, project, source, targetComment, replyComment := scopedReplyFixture(t, targetOutsideSubtree)
-			base := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
-			headers := map[string]string{"Authorization": "Bearer worker-token"}
-			tests := []struct {
-				name   string
-				method string
-				path   string
-				body   any
-			}{
-				{name: "show", method: http.MethodGet, path: base},
-				{name: "snapshot", method: http.MethodGet,
-					path: "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + source.UID},
-				{name: "comment edit", method: http.MethodPatch, path: base + "/comments/" + replyComment.UID,
-					body: map[string]string{"actor": "worker", "body": "Updated reply"}},
-			}
-			for _, test := range tests {
-				t.Run(test.name, func(t *testing.T) {
-					resp, body := envDoRaw(t, env, test.method, test.path, test.body, headers)
-					require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
-					require.Contains(t, string(body), replyComment.UID)
-					require.NotContains(t, string(body), targetComment.UID)
-					require.NotContains(t, string(body), `"reply_to_uid"`)
-					require.NotContains(t, string(body), `"reply_kind"`)
-				})
-			}
+func TestIssueScopedShowKeepsReplyWithinSubtree(t *testing.T) {
+	env, project, source, targetComment, _ := scopedReplyFixture(t, false)
+	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
+	resp, body := envDoRaw(t, env, http.MethodGet, path, nil,
+		map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.Contains(t, string(body), `"reply_to_uid":"`+targetComment.UID+`"`,
+		"a visible reply target remains available inside the token subtree")
+}
+
+func TestIssueScopedCommentResponsesRedactOutsideReplyTargets(t *testing.T) {
+	env, project, source, targetComment, replyComment := scopedReplyFixture(t, true)
+	base := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{name: "show", method: http.MethodGet, path: base},
+		{name: "snapshot", method: http.MethodGet,
+			path: "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + source.UID},
+		{name: "comment edit", method: http.MethodPatch, path: base + "/comments/" + replyComment.UID,
+			body: map[string]string{"actor": "worker", "body": "Updated reply"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, test.method, test.path, test.body, headers)
+			require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+			require.NotContains(t, string(body), targetComment.UID,
+				"response must omit the inaccessible target identity")
+			require.NotContains(t, string(body), `"reply_to_uid"`)
+			require.NotContains(t, string(body), `"reply_kind"`)
 		})
 	}
 }
 
-func TestUnscopedShowKeepsReplyFields(t *testing.T) {
+func TestIssueScopedShowHidesReplyToMissingTarget(t *testing.T) {
 	env, project, source, targetComment, _ := scopedReplyFixture(t, true)
+	_, err := env.DB.EnableProjectFederation(t.Context(), project.ID, "coordinator")
+	require.NoError(t, err)
+	_, err = env.DB.PurgeIssue(t.Context(), targetComment.IssueID, "coordinator", nil)
+	require.NoError(t, err)
+
 	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
 	resp, body := envDoRaw(t, env, http.MethodGet, path, nil,
-		map[string]string{"Authorization": "Bearer bootstrap-token"})
+		map[string]string{"Authorization": "Bearer worker-token"})
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
-	require.Contains(t, string(body), `"reply_to_uid":"`+targetComment.UID+`"`)
-	require.Contains(t, string(body), `"reply_kind":"reply"`)
+	require.NotContains(t, string(body), targetComment.UID,
+		"a reply to a missing target must fail closed for a scoped caller")
+	require.NotContains(t, string(body), `"reply_to_uid"`)
+	require.NotContains(t, string(body), `"reply_kind"`)
 }
 
 func scopedReplyFixture(t *testing.T, targetOutsideSubtree bool) (
@@ -90,4 +101,60 @@ func scopedReplyFixture(t *testing.T, targetOutsideSubtree bool) (
 	})
 	require.NoError(t, err)
 	return env, project, source, targetComment, replyComment
+}
+
+func TestTypedSelectorsDoNotDiscloseOutsideSubtree(t *testing.T) {
+	env, project, source, target, reply := scopedReplyFixture(t, true)
+	base := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+	response, body := envDoRaw(t, env, http.MethodGet, base+"?thread="+reply.UID, nil, headers)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	require.NotContains(t, string(body), target.UID)
+	require.NotContains(t, string(body), "reply_kind")
+	response, body = envDoRaw(t, env, http.MethodGet, base+"?thread="+target.UID, nil, headers)
+	require.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+	response, body = envDoRaw(t, env, http.MethodPost, base+"/comments", map[string]string{"body": "Answer", "reply_to": target.UID, "kind": "reply"}, headers)
+	require.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+}
+
+func TestScopedInboundExcludesRepliesOutsideSubtree(t *testing.T) {
+	env, project, source, outsideComment, _ := scopedReplyFixture(t, true)
+	finding, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "coordinator", Body: "Finding on the selected issue",
+	})
+	require.NoError(t, err)
+	visibleReply, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "worker", Body: "Visible response",
+		ReplyToUID: finding.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	outsideReply, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: outsideComment.IssueID, Author: "worker", Body: "Outside response",
+		ReplyToUID: finding.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID +
+		"?inbound=coordinator"
+
+	resp, body := envDoRaw(t, env, http.MethodGet, path, nil,
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.Contains(t, string(body), outsideReply.UID, "an unscoped caller sees every inbound reply")
+
+	resp, body = envDoRaw(t, env, http.MethodGet, path, nil,
+		map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.Contains(t, string(body), visibleReply.UID)
+	require.NotContains(t, string(body), outsideReply.UID,
+		"inbound replies from outside the token subtree must stay hidden")
+}
+
+func TestUnscopedShowKeepsReplyFields(t *testing.T) {
+	env, project, source, targetComment, _ := scopedReplyFixture(t, true)
+	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID
+	resp, body := envDoRaw(t, env, http.MethodGet, path, nil,
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.Contains(t, string(body), `"reply_to_uid":"`+targetComment.UID+`"`)
+	require.Contains(t, string(body), `"reply_kind":"reply"`)
 }

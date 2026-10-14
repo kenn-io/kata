@@ -238,6 +238,9 @@ func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bo
 }
 
 func ambiguousWriteError(err error) bool {
+	if _, ok := errors.AsType[*mutationPreflightError](err); ok {
+		return false
+	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {
 		return false

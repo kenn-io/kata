@@ -7,7 +7,16 @@
   import IssueProperties from './components/IssueProperties.svelte'
   import type { KataIssueDetailProps, KataIssueHostAction } from './types.js'
 
-  let { detail, actions = [], onOpenIssue }: KataIssueDetailProps = $props()
+  let {
+    detail,
+    actions = [],
+    onOpenIssue,
+    onOpenComment,
+    onReplyComment,
+    commentActionsDisabled = false,
+    selectedCommentUID,
+    returnComment,
+  }: KataIssueDetailProps = $props()
 
   function invoke(action: KataIssueHostAction): void {
     if (action.disabled || action.busy) return
@@ -61,7 +70,19 @@
     </section>
   {/if}
 
-  <IssueComments comments={detail.comments} />
+  {#if returnComment && onOpenComment}<Button
+      size="sm"
+      label="Return to original comment"
+      onclick={() => onOpenComment?.(returnComment.issueUID, returnComment.commentUID)}
+    />{/if}
+  <IssueComments
+    issueUID={detail.issue.uid}
+    comments={detail.comments}
+    {onOpenComment}
+    {onReplyComment}
+    {selectedCommentUID}
+    actionsDisabled={commentActionsDisabled || detail.issue.status !== 'open'}
+  />
 </section>
 
 <style>

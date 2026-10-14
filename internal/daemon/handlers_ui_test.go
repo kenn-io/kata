@@ -397,6 +397,47 @@ func TestUISnapshotReusesCollectionAuthorityAcrossSelection(t *testing.T) {
 	require.Equal(t, "available", envelope.Selected.State)
 }
 
+func TestUISnapshotCollectionOnlyOmitsCachedSelection(t *testing.T) {
+	selectedUID := "01J00000000000000000000000"
+	store := &countingUIStore{cursor: 1, snapshotCursor: 1, snapshot: db.UISnapshotData{
+		Issues:        []db.UIIssue{{UID: selectedUID, Title: "Selected issue"}},
+		SelectedState: "available",
+		SelectedIssue: &db.UIIssue{UID: selectedUID, Title: "Selected issue"},
+	}}
+	ts := newUISnapshotServer(t, store, true)
+	resp, body := getUISnapshot(t, ts, url.Values{
+		"view": {"all-open"}, "selected_issue_uid": {selectedUID},
+	}, "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var selected struct {
+		Selected struct {
+			State string     `json:"state"`
+			Issue db.UIIssue `json:"issue"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &selected))
+	require.Equal(t, "available", selected.Selected.State)
+	require.Equal(t, selectedUID, selected.Selected.Issue.UID)
+	require.Equal(t, 1, store.snapshotReads)
+	require.Zero(t, store.cursorReads)
+
+	resp, body = getUISnapshot(t, ts, url.Values{"view": {"all-open"}}, "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var envelope struct {
+		Cursor     int64           `json:"cursor"`
+		Collection []db.UIIssue    `json:"collection"`
+		Selected   json.RawMessage `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.Nil(t, envelope.Selected)
+	require.Equal(t, int64(1), envelope.Cursor)
+	require.Len(t, envelope.Collection, 1)
+	require.Equal(t, selectedUID, envelope.Collection[0].UID)
+	require.Equal(t, "Selected issue", envelope.Collection[0].Title)
+	require.Equal(t, 1, store.snapshotReads, "the collection request must reuse cached authority")
+	require.Equal(t, 1, store.cursorReads, "the cache must be checked against the current cursor")
+}
+
 func TestUISnapshotReusesRecentSelectedEnrichment(t *testing.T) {
 	firstUID := "01J00000000000000000000000"
 	secondUID := "01J00000000000000000000001"

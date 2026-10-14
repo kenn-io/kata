@@ -104,6 +104,16 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
     },
     comments: (wire.comments ?? []).map((comment) => ({
       id: String(comment.id),
+      ...(comment.uid === undefined ? {} : { uid: comment.uid }),
+      ...(comment.handle === undefined ? {} : { handle: comment.handle }),
+      ...(comment.reply === undefined ? {} : { reply: { ...comment.reply } }),
+      ...(comment.backlinks === undefined
+        ? {}
+        : { backlinks: comment.backlinks.map((link) => ({ ...link })) }),
+      ...(comment.edited_at === undefined ? {} : { editedAt: comment.edited_at }),
+      ...(comment.backlinks_truncated === undefined
+        ? {}
+        : { backlinksPartial: comment.backlinks_truncated }),
       author: comment.author,
       ...creationFor(comment),
       ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),

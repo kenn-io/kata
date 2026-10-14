@@ -111,7 +111,7 @@ func TestLegacyCommentReplyExportPreservesSourceEventAfterTargetSoftDelete(t *te
 	require.NoError(t, err)
 	require.True(t, changed)
 
-	// Force the version-aware JSONL exporter used before schema 32.
+	// Force the version-aware JSONL exporter used for older schemas.
 	_, err = source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
 	require.NoError(t, err)

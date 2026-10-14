@@ -50,7 +50,7 @@ func checkCommentEventExportAfterTargetDeletion(t *testing.T, target db.Storage,
 	t.Cleanup(func() { require.NoError(t, purgedSource.Close()) })
 	purgedTarget := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, purgedTarget.Close()) })
-	purgedProject, _, purgedTargetIssue, _, purgedCreation := createCommentExportPair(t, purgedSource)
+	purgedProject, _, purgedTargetIssue, targetComment, purgedCreation := createCommentExportPair(t, purgedSource)
 	_, err = purgedSource.PurgeIssue(ctx, purgedTargetIssue.ID, "worker", nil)
 	require.NoError(t, err)
 
@@ -80,6 +80,9 @@ func checkCommentEventExportAfterTargetDeletion(t *testing.T, target db.Storage,
 	require.Equal(t, purgedCreation.ContentHash, purgedTargetEvents[0].ContentHash)
 	require.NotNil(t, purgedTargetEvents[0].RelatedIssueUID)
 	require.Equal(t, purgedTargetIssue.UID, *purgedTargetEvents[0].RelatedIssueUID)
+	graph, err := purgedTarget.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: purgedTargetProject.ID})
+	require.NoError(t, err)
+	require.Equal(t, "removed", graph.Targets[targetComment.UID].Status)
 	return nil
 }
 

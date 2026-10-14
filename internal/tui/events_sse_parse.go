@@ -152,6 +152,28 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 	if p.IssueShortID != nil {
 		out.issueShortID = *p.IssueShortID
 	}
+	if (p.Type == "issue.commented" || p.Type == "issue.comment_edited") && len(p.Payload) > 0 {
+		var payload struct {
+			CommentUID string `json:"comment_uid"`
+		}
+		if json.Unmarshal(p.Payload, &payload) == nil {
+			out.commentUID = payload.CommentUID
+		}
+	}
+	if p.Type == "issue.snapshot" && len(p.Payload) > 0 {
+		var payload struct {
+			Comments []struct {
+				CommentUID string `json:"comment_uid"`
+			} `json:"comments"`
+		}
+		if json.Unmarshal(p.Payload, &payload) == nil {
+			for _, comment := range payload.Comments {
+				if comment.CommentUID != "" {
+					out.snapshotCommentUIDs = append(out.snapshotCommentUIDs, comment.CommentUID)
+				}
+			}
+		}
+	}
 	if p.Type == "issue.linked" || p.Type == "issue.unlinked" {
 		var link linkPayload
 		if len(p.Payload) > 0 && json.Unmarshal(p.Payload, &link) == nil {

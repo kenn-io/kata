@@ -176,3 +176,23 @@ binary. Validation-only runtime credentials cannot perform this upgrade. Schema
 the matching older binary. Whole-database backups retain policies, team
 memberships, receipts, relay state, and artifacts; project exports exclude the
 hub-local administrative objects and relay delivery state.
+
+## Schema 34: comment reply lookup index
+
+The 33→34 migration adds the partial `idx_comments_reply_to` index on
+`comments(reply_to_uid)` for rows with a reply target. It supports finding
+replies across issues. Existing comments, reply links, and edit timestamps are
+unchanged; the migration adds no columns or constraints. Fresh PostgreSQL and
+SQLite databases include the same index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Creating the
+index scans `comments` and blocks writes while it runs; allow an offline window
+that fits the comment table's size. Existing table grants remain sufficient.
+Validation-only runtime credentials cannot migrate. Versions 25–32 follow the
+existing immutable migration chain before applying schema 34. SQLite uses its
+normal JSONL cutover with backup and swap protections.
+
+Start the matching schema 34 binary after migration. Older binaries cannot open
+schema 34. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

@@ -97,10 +97,22 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			}
 			data.SelectedState = "available"
 			data.SelectedIssue = &selected
-			data.Comments, err = readUIComments(ctx, tx, selected.ID)
+			data.CommentGraph, err = db.ReadCommentGraphTx(ctx, tx,
+				db.CommentGraphQuery{ProjectID: selected.ProjectID, AllowedIssueIDs: query.AllowedIssueIDs, SelectedIssueID: selected.ID},
+				func(n int) string { return fmt.Sprintf("$%d", n) },
+				parseStoredTime,
+				`(e.payload::jsonb->>'reply_to_uid')`,
+				strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
+			)
 			if err != nil {
 				return db.UISnapshotData{}, err
 			}
+			for _, record := range data.CommentGraph.Comments {
+				if record.Comment.IssueID == selected.ID {
+					data.Comments = append(data.Comments, record.Comment)
+				}
+			}
+			sortCommentsByCreatedAt(data.Comments)
 			data.SelectedLabels, err = readUIIssueLabels(ctx, tx, selected.ID)
 			if err != nil {
 				return db.UISnapshotData{}, err
@@ -764,27 +776,6 @@ func makeUIIssue(issue db.Issue, projectName string, labels []string) db.UIIssue
 func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]string, error) {
 	return readUIReferenceStrings(ctx, tx,
 		`SELECT label FROM issue_labels WHERE issue_id = $1 ORDER BY label`, issueID)
-}
-
-func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
-	rows, err := tx.QueryContext(ctx, commentSelect+` WHERE issue_id = $1`, issueID)
-	if err != nil {
-		return nil, fmt.Errorf("read UI comments: %w", mapSQLError(err, nil))
-	}
-	defer func() { _ = rows.Close() }()
-	comments := []db.Comment{}
-	for rows.Next() {
-		comment, err := scanComment(rows)
-		if err != nil {
-			return nil, err
-		}
-		comments = append(comments, comment)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, mapSQLError(err, nil)
-	}
-	sortCommentsByCreatedAt(comments)
-	return comments, nil
 }
 
 func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueLabel, error) {

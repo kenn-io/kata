@@ -72,3 +72,18 @@ func TestFederationCommentReplyValidation(t *testing.T) {
 		require.NoError(t, ValidateFederationEntries("issue.commented", "event", jsontext.Value(payload)))
 	}
 }
+
+func TestFoldReplyNotificationIsExplicitMetadataOnly(t *testing.T) {
+	creation := testEvent("issue.created", 1, `{"uid":"issue-1","title":"Task","author":"worker"}`)
+	reply := testEvent("issue.commented", 2, fmt.Sprintf(`{"comment_uid":%q,"body":"Answer","reply_to_uid":%q,"reply_kind":"reply"}`, replyTestUID, targetTestUID))
+	state := FoldEvents([]FoldEvent{creation, reply})
+	require.NotContains(t, string(state.IssueMetadata["issue-1"]), "notify.")
+	notification := testEvent("issue.metadata_updated", 3, `{"diff":{"notify.worker":{"from":null,"to":{"state":"requested","re":"`+replyTestUID+`"}}}}`)
+	linked := FoldEvents([]FoldEvent{creation, reply, notification})
+	// An older producer omits the link, but the metadata event has the same effect.
+	legacy := reply
+	legacy.Payload = jsontext.Value(fmt.Sprintf(`{"comment_uid":%q,"body":"Answer"}`, replyTestUID))
+	old := FoldEvents([]FoldEvent{creation, legacy, notification})
+	require.Equal(t, old.IssueMetadata["issue-1"], linked.IssueMetadata["issue-1"])
+	require.NotEmpty(t, linked.IssueMetadata["issue-1"])
+}

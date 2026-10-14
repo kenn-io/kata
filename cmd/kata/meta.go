@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -394,12 +395,17 @@ func fetchIssueMetadata(ctx context.Context, client *http.Client, baseURL string
 	return out.Issue, nil
 }
 
-func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string) (metaIssueWire, []byte, error) {
+func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string, selectors ...commentref.Options) (metaIssueWire, []byte, error) {
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return metaIssueWire{}, nil, err
 	}
+	opts := commentref.Options{}
+	if len(selectors) > 0 {
+		opts = selectors[0]
+	}
 	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
+		Query:      &generated.ShowIssueQuery{Thread: nonemptyStringPointer(opts.Thread), Inbound: nonemptyStringPointer(opts.Inbound), Kind: (*generated.ShowIssueQueryKind)(nonemptyStringPointer(opts.Kind)), Since: nonemptyStringPointer(opts.Since)},
 		PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref},
 	})
 	if response == nil {
@@ -591,4 +597,11 @@ func compactRaw(raw jsontext.Value) jsontext.Value {
 		return raw
 	}
 	return buf
+}
+
+func nonemptyStringPointer(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

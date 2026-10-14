@@ -52,12 +52,9 @@ func TestCommentsOrderMixedPrecisionTimestamps(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, want, commentBodies(comments))
 
-	tx, err := store.BeginTx(ctx, nil)
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{SelectedIssueUID: issue.UID})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = tx.Rollback() })
-	uiComments, err := readUIComments(ctx, tx, issue.ID)
-	require.NoError(t, err)
-	assert.Equal(t, want, commentBodies(uiComments))
+	assert.Equal(t, want, commentBodies(snapshot.Comments))
 }
 
 func commentBodies(comments []db.Comment) []string {

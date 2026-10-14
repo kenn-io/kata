@@ -136,6 +136,44 @@ func (c CommentVerification) Validate() error {
 	}
 }
 
+type CommentOutVerification string
+
+const (
+	CommentOutVerificationLegacy   CommentOutVerification = "legacy"
+	CommentOutVerificationPending  CommentOutVerification = "pending"
+	CommentOutVerificationVerified CommentOutVerification = "verified"
+)
+
+// Validate checks if the CommentOutVerification value is valid
+func (c CommentOutVerification) Validate() error {
+	switch c {
+	case CommentOutVerificationLegacy, CommentOutVerificationPending, CommentOutVerificationVerified:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CommentOutVerification value, got: %v", c))
+	}
+}
+
+// CommentRequestBodyKind reply is a general response; confirm asserts verification or reproduction
+type CommentRequestBodyKind string
+
+const (
+	Confirm   CommentRequestBodyKind = "confirm"
+	Refute    CommentRequestBodyKind = "refute"
+	Reply     CommentRequestBodyKind = "reply"
+	Supersede CommentRequestBodyKind = "supersede"
+)
+
+// Validate checks if the CommentRequestBodyKind value is valid
+func (c CommentRequestBodyKind) Validate() error {
+	switch c {
+	case Confirm, Refute, Reply, Supersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CommentRequestBodyKind value, got: %v", c))
+	}
+}
+
 type CreateInitialLinkBodyType string
 
 const (
@@ -814,6 +852,25 @@ func (l ListAllIssuesQuerySort) Validate() error {
 	}
 }
 
+type ShowIssueByUIDQueryKind string
+
+const (
+	ShowIssueByUIDQueryKindConfirm   ShowIssueByUIDQueryKind = "confirm"
+	ShowIssueByUIDQueryKindRefute    ShowIssueByUIDQueryKind = "refute"
+	ShowIssueByUIDQueryKindReply     ShowIssueByUIDQueryKind = "reply"
+	ShowIssueByUIDQueryKindSupersede ShowIssueByUIDQueryKind = "supersede"
+)
+
+// Validate checks if the ShowIssueByUIDQueryKind value is valid
+func (s ShowIssueByUIDQueryKind) Validate() error {
+	switch s {
+	case ShowIssueByUIDQueryKindConfirm, ShowIssueByUIDQueryKindRefute, ShowIssueByUIDQueryKindReply, ShowIssueByUIDQueryKindSupersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ShowIssueByUIDQueryKind value, got: %v", s))
+	}
+}
+
 type OfferRelayDeliveriesQueryStream string
 
 const (
@@ -866,6 +923,44 @@ func (l ListIssuesQuerySort) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListIssuesQuerySort value, got: %v", l))
+	}
+}
+
+type ShowIssueQueryKind string
+
+const (
+	ShowIssueQueryKindConfirm   ShowIssueQueryKind = "confirm"
+	ShowIssueQueryKindRefute    ShowIssueQueryKind = "refute"
+	ShowIssueQueryKindReply     ShowIssueQueryKind = "reply"
+	ShowIssueQueryKindSupersede ShowIssueQueryKind = "supersede"
+)
+
+// Validate checks if the ShowIssueQueryKind value is valid
+func (s ShowIssueQueryKind) Validate() error {
+	switch s {
+	case ShowIssueQueryKindConfirm, ShowIssueQueryKindRefute, ShowIssueQueryKindReply, ShowIssueQueryKindSupersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ShowIssueQueryKind value, got: %v", s))
+	}
+}
+
+type IssuePlanningDatesQueryKind string
+
+const (
+	IssuePlanningDatesQueryKindConfirm   IssuePlanningDatesQueryKind = "confirm"
+	IssuePlanningDatesQueryKindRefute    IssuePlanningDatesQueryKind = "refute"
+	IssuePlanningDatesQueryKindReply     IssuePlanningDatesQueryKind = "reply"
+	IssuePlanningDatesQueryKindSupersede IssuePlanningDatesQueryKind = "supersede"
+)
+
+// Validate checks if the IssuePlanningDatesQueryKind value is valid
+func (i IssuePlanningDatesQueryKind) Validate() error {
+	switch i {
+	case IssuePlanningDatesQueryKindConfirm, IssuePlanningDatesQueryKindRefute, IssuePlanningDatesQueryKindReply, IssuePlanningDatesQueryKindSupersede:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid IssuePlanningDatesQueryKind value, got: %v", i))
 	}
 }
 

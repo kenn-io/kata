@@ -515,7 +515,7 @@ func TestExportProjectIDOmitsRelayEnrollmentsWithSystemParents(t *testing.T) {
 
 	version, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 33, version, "relay enrollments exist from schema 33 on")
+	require.GreaterOrEqual(t, version, 33, "relay enrollments exist from schema 33 on")
 	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true})
 	for _, rec := range records {
 		assert.NotEqual(t, "federation_enrollment", rec["kind"],

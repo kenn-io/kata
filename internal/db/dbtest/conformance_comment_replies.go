@@ -86,6 +86,28 @@ func checkCommentReplyEnvelope(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkCommentIssueIDsByUIDs(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "First", Author: "worker"})
+	require.NoError(t, err)
+	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Second", Author: "worker"})
+	require.NoError(t, err)
+	firstComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: first.ID, Author: "worker", Body: "First comment"})
+	require.NoError(t, err)
+	secondComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: second.ID, Author: "worker", Body: "Second comment"})
+	require.NoError(t, err)
+
+	got, err := store.CommentIssueIDsByUIDs(ctx, []string{firstComment.UID, "01ZZZZZZZZZZZZZZZZZZZZZZZZ", secondComment.UID})
+	require.NoError(t, err)
+	require.Equal(t, map[string]int64{firstComment.UID: first.ID, secondComment.UID: second.ID}, got)
+	empty, err := store.CommentIssueIDsByUIDs(ctx, nil)
+	require.NoError(t, err)
+	require.Empty(t, empty)
+	return nil
+}
+
 func checkCommentReplyFederation(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")

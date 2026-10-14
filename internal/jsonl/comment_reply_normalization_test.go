@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func FuzzCommentEditedAtNormalization(f *testing.F) {
+func FuzzCommentTimestampNormalization(f *testing.F) {
 	f.Add(int64(123456789))
 	f.Add(int64(999999999))
 	f.Fuzz(func(t *testing.T, nanos int64) {
@@ -24,7 +24,8 @@ func FuzzCommentEditedAtNormalization(f *testing.F) {
 		require.NoError(t, err)
 		record, err := toImportRecord(Envelope{Kind: KindComment, Data: jsontext.Value(data)}, 32, "", nil)
 		require.NoError(t, err)
-		parsed, err := time.Parse(time.RFC3339Nano, record.(*db.CommentExport).EditedAt)
+		got := record.(*db.CommentExport)
+		parsed, err := time.Parse(time.RFC3339Nano, got.EditedAt)
 		require.NoError(t, err)
 		require.True(t, timestamp.Equal(parsed))
 		malformed := input

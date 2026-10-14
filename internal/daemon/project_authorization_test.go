@@ -1272,13 +1272,13 @@ func (s *projectAccessBeforeReopenStore) ReopenIssue(
 	return s.Storage.ReopenIssue(ctx, issueID, actor)
 }
 
-func (s *projectAccessBeforeCommentsReadStore) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
+func (s *projectAccessBeforeCommentsReadStore) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery) (db.CommentGraphData, error) {
 	if s.before != nil {
 		before := s.before
 		s.before = nil
-		before(issueID)
+		before(query.SelectedIssueID)
 	}
-	return s.Storage.CommentsByIssue(ctx, issueID)
+	return s.Storage.ReadCommentGraph(ctx, query)
 }
 
 type projectAccessDenyHost struct{}

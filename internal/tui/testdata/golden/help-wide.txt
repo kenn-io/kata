@@ -1,30 +1,30 @@
 kata — keybindings
 
-Global                                 Detail                                     Forms
-?         help                         tab/C-j        next tab                    ctrl+o         save or apply
-q/ctrl+c  quit                         shift+tab/C-k  prev tab                    esc            cancel
-P         projects                     enter          jump to referenced issue    tab/shift+tab  change field
-I         inbox                        esc/backspace  back                        ctrl+e         open editor
-D         daemons                      e              edit body                   ctrl+u         clear prompt
+Global                                 Detail                                            Forms
+?         help                         tab/C-j        next tab                           ctrl+o         save or apply
+q/ctrl+c  quit                         shift+tab/C-k  prev tab                           esc            cancel
+P         projects                     enter          jump to referenced issue           tab/shift+tab  change field
+I         inbox                        esc/backspace  back                               ctrl+e         open editor
+D         daemons                      e              edit body                          ctrl+u         clear prompt
 F         federation                   c              new comment
-C         credentials                  p              set parent                  Filters
-L         toggle layout                b              add blocker                 /       search
-                                       l              add related                 s       cycle status filter
-Graph                                  +              add label                   f       filter (form)
-k           up                         -              remove label                c       clear filters
-j           down                       a              assign owner                ctrl+r  reset filter form
-up/C-p      scroll up                  A              clear owner
-down/C-n    scroll down                t              timed assignment
-pgup/M-v    page up                    !              set priority
-pgdown/C-v  page down
-g/C-M-<     first                      Children
-G/C-M->     last                       N      new child
-enter       open detail                j/k    move child cursor
-space       expand/collapse            ↑↓     scroll detail viewport
-right       expand                     enter  open child
-left        collapse
-E           expand/collapse all
-n           new issue (form)
+C         credentials                  R              typed reply to selected comment    Filters
+L         toggle layout                ]              next comment link                  /       search
+                                       [              previous comment link              s       cycle status filter
+Graph                                  p              set parent                         f       filter (form)
+k           up                         b              add blocker                        c       clear filters
+j           down                       l              add related                        ctrl+r  reset filter form
+up/C-p      scroll up                  +              add label
+down/C-n    scroll down                -              remove label
+pgup/M-v    page up                    a              assign owner
+pgdown/C-v  page down                  A              clear owner
+g/C-M-<     first                      t              timed assignment
+G/C-M->     last                       !              set priority
+enter       open detail
+space       expand/collapse            Children
+right       expand                     N      new child
+left        collapse                   j/k    move child cursor
+E           expand/collapse all        ↑↓     scroll detail viewport
+n           new issue (form)           enter  open child
 v           toggle flat/nested view
 o           toggle graph order
 x           close

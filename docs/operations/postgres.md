@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-10-10
+last_edited: 2026-10-14
 ---
 
 # PostgreSQL operations
@@ -102,6 +102,11 @@ For schema 32 comment replies and edit times, upgrade hubs before spokes and
 stop the daemon while the migration adds the comment columns. See the
 [schema 32 migration requirements](../development/postgres-migrations.md#schema-32-comment-replies-and-edit-times)
 for reply validation, grants, and rollback.
+
+Schema 34 adds an index for reply lookups across issues. Stop daemons and
+imports while the migration scans the comment table and builds the index. See
+the [schema 34 migration requirements](../development/postgres-migrations.md#schema-34-comment-reply-lookup-index)
+for the offline window, grants, and rollback.
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

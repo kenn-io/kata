@@ -38,6 +38,9 @@ enter          jump to referenced issue
 esc/backspace  back
 e              edit body
 c              new comment
+R              typed reply to selected comment
+]              next comment link
+[              previous comment link
 p              set parent
 b              add blocker
 l              add related

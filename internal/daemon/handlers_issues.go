@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/pagination"
@@ -430,7 +431,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted)
+		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -459,7 +460,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
 			return nil, err
 		}
-		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted)
+		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -967,8 +968,8 @@ func issueUIDPrefixMatchesForCaller(
 // canonical Lease* fields onto their deprecated Claim* aliases. Hydration has
 // several early returns; funneling every success through here is what keeps
 // the two spellings from ever disagreeing.
-func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
-	out, err := hydrateShowIssueResponse(ctx, cfg, issue, includeDeleted)
+func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
+	out, err := hydrateShowIssueResponse(ctx, cfg, issue, includeDeleted, selectors...)
 	if err != nil {
 		return nil, err
 	}
@@ -976,16 +977,12 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
-func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
+func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
 	if issue.DeletedAt != nil && !includeDeleted {
 		return nil, api.NewError(404, "issue_not_found",
 			"issue not found",
 			"pass include_deleted=true to view soft-deleted issues",
 			nil)
-	}
-	comments, err := listComments(ctx, cfg.DB, issue.ID)
-	if err != nil {
-		return nil, internalAPIError(err)
 	}
 	links, err := loadLinkOuts(ctx, cfg.DB, issue.ID)
 	if err != nil {
@@ -1022,7 +1019,29 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	out := &api.ShowIssueResponse{}
 	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
-	out.Body.Comments = omitScopedCommentReplies(ctx, comments)
+	var includeDeletedSourceIssueID int64
+	if includeDeleted && issue.DeletedAt != nil {
+		includeDeletedSourceIssueID = issue.ID
+	}
+	opts := commentref.Options{}
+	if len(selectors) > 0 {
+		opts = selectors[0]
+	}
+	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID}
+	if opts.Thread == "" && opts.Inbound == "" && opts.Since == "" {
+		query.SelectedIssueID = issue.ID
+	}
+	records, err := readCommentRecords(ctx, cfg.DB, query)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := commentref.Select(records, issue.UID, opts)
+	if err != nil {
+		return nil, commentReferenceError(err)
+	}
+	recordCommentResponseScope(ctx, records, selected.Comments)
+	out.Body.Comments = selected.Comments
+	out.Body.CommentsTruncated = selected.Truncated
 	out.Body.Links = links
 	out.Body.Labels = labels
 	out.Body.Parent = parent
@@ -1442,12 +1461,6 @@ func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.L
 		})
 	}
 	return out, nil
-}
-
-// listComments fetches every comment attached to issueID in chronological
-// order. Plan 1 ships no pagination; the show handler embeds the full slice.
-func listComments(ctx context.Context, store db.Storage, issueID int64) ([]db.Comment, error) {
-	return store.CommentsByIssue(ctx, issueID)
 }
 
 const (

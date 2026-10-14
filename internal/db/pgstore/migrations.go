@@ -35,6 +35,9 @@ var commentReplyMigrationSQL string
 //go:embed migrations/000033_project_hub_relay.up.sql
 var projectHubRelayMigrationSQL string
 
+//go:embed migrations/000034_comment_reply_index.up.sql
+var commentReplyIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -82,6 +85,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 30, ToVersion: 31, Name: "000031_native_cron.up.sql", SQL: nativeCronMigrationSQL},
 	{FromVersion: 31, ToVersion: 32, Name: "000032_comment_reply.up.sql", SQL: commentReplyMigrationSQL},
 	{FromVersion: 32, ToVersion: 33, Name: "000033_project_hub_relay.up.sql", SQL: projectHubRelayMigrationSQL},
+	{FromVersion: 33, ToVersion: 34, Name: "000034_comment_reply_index.up.sql", SQL: commentReplyIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

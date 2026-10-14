@@ -259,11 +259,15 @@ func filterIssueScopedReportEvents(
 	}
 	out := make([]db.Event, 0, len(events))
 	projectUID := scope.ProjectUID
-	for _, event := range events {
-		projected, ok := projectIssueScopedEvent(event, allowed, projectUID)
-		if !ok {
+	projectedEvents, visibleEvents, err := projectIssueScopedEvents(ctx, store, events, allowed, projectUID)
+	if err != nil {
+		return nil, nil, internalAPIError(err)
+	}
+	for index, event := range events {
+		if !visibleEvents[index] {
 			continue
 		}
+		projected := projectedEvents[index]
 		// Reports keep the typed safe projection and re-add only the
 		// authorized link/parent context the digest and audit aggregators
 		// read, so counts stay truthful without naming hidden peers.
@@ -480,25 +484,4 @@ func scopedClosedReportPayload(rawPayload, safePayload string, allowedUIDs map[s
 		return safePayload
 	}
 	return string(merged)
-}
-
-// omitScopedCommentReplies hides reply links from issue-scoped callers. A reply
-// target can sit outside the caller's subtree, and authorized reply rendering
-// is not built yet.
-func omitScopedCommentReplies(ctx context.Context, comments []db.Comment) []db.Comment {
-	if issueScopeFromContext(ctx) == nil {
-		return comments
-	}
-	out := make([]db.Comment, len(comments))
-	for index, comment := range comments {
-		out[index] = omitScopedCommentReply(ctx, comment)
-	}
-	return out
-}
-
-func omitScopedCommentReply(ctx context.Context, comment db.Comment) db.Comment {
-	if issueScopeFromContext(ctx) != nil {
-		comment.ReplyToUID, comment.ReplyKind = "", ""
-	}
-	return comment
 }

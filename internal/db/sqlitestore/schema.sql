@@ -93,6 +93,8 @@ CREATE TABLE comments (
 );
 CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
 
+CREATE INDEX idx_comments_reply_to ON comments(reply_to_uid) WHERE reply_to_uid IS NOT NULL;
+
 CREATE TABLE links (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   from_issue_id INTEGER NOT NULL REFERENCES issues(id),

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-12
+last_edited: 2026-10-14
 ---
 
 # Backup and restore
@@ -49,7 +49,7 @@ For an online backup on the same host:
 kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
 ```
 
-Current main (schema 33) preserves hub-local teams, memberships and project
+Current main (schema 34) preserves hub-local teams, memberships and project
 visibility policies in a full backup. Project-scoped exports omit those local
 access rules. Both forms retain signed attribution receipts, entity creation
 references and public root keys, including retired verification keys. Restore

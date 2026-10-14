@@ -198,13 +198,17 @@ func readVisibleEvents(
 		if err != nil {
 			return nil, cursor, 0, err
 		}
-		for _, event := range rows {
+		projectedRows, visibleRows, err := projectIssueScopedEvents(ctx, store, rows, allowed, scope.ProjectUID)
+		if err != nil {
+			return nil, cursor, 0, internalAPIError(err)
+		}
+		for index, event := range rows {
 			cursor = event.ID
 			scanned++
 			if event.Type == db.ProjectScopeResetEventType {
 				return nil, event.ID, event.ID, nil
 			}
-			projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+			projected, ok := projectedRows[index], visibleRows[index]
 			if ok && event.Type != "issue.links_changed" {
 				visible = append(visible, projected)
 				if len(visible) == limit {
@@ -268,6 +272,10 @@ func hiddenEventRequiresScopedReset(
 		}
 		return false, nil
 	case "issue.linked", "issue.unlinked":
+		return directlyAllowed, nil
+	case "issue.commented":
+		// Projectable source comments are delivered above. An unprojectable
+		// comment or a hidden source can still change an authorized reply target.
 		return directlyAllowed, nil
 	case "issue.links_changed":
 		return directlyAllowed || compoundLinkEventTouchesScope(event.Payload, allowedUIDs), nil
@@ -428,6 +436,9 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 		return false
 	}
 	if _, ok := allowed[*event.IssueID]; !ok {
+		return false
+	}
+	if event.RelatedIssueUID != nil && *event.RelatedIssueUID != "" && event.RelatedIssueID == nil {
 		return false
 	}
 	if event.RelatedIssueID != nil {
@@ -1051,6 +1062,31 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 				return false, nil
 			}
 			return false, err
+		}
+	}
+	if event.Type == "issue.commented" {
+		if targetUID, ok := scopedEventReplyTarget(event.Payload); ok {
+			targetIssueIDs, err := store.CommentIssueIDsByUIDs(ctx, []string{targetUID})
+			if err != nil {
+				return false, internalAPIError(err)
+			}
+			targetIssueID, found := targetIssueIDs[targetUID]
+			if !found {
+				return false, nil
+			}
+			targetIssue, err := store.IssueByID(ctx, targetIssueID)
+			if errors.Is(err, db.ErrNotFound) {
+				return false, nil
+			}
+			if err != nil {
+				return false, internalAPIError(err)
+			}
+			if err := authorizeIssueScopedIssue(ctx, store, targetIssue); err != nil {
+				if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+					return false, nil
+				}
+				return false, err
+			}
 		}
 	}
 	return true, nil

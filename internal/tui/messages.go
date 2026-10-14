@@ -122,6 +122,7 @@ type openInputMsg struct {
 // else projectName (carried by link peers) is mapped via projectsByID;
 // else the current detail's project is used.
 type jumpDetailMsg struct {
+	commentUID  string
 	connGen     uint64
 	ref         string
 	projectID   int64
@@ -194,15 +195,17 @@ type editorReturnedMsg struct {
 // the old or new parent's pane would stay stale until a manual
 // refresh after a parent replace.
 type eventReceivedMsg struct {
-	gen             uint64
-	eventType       string
-	projectID       int64
-	projectUID      string
-	issueShortID    string
-	issueUID        string
-	relatedIssueUID string
-	link            *linkPayload
-	linksChanged    *linksChangedParents
+	gen                 uint64
+	eventType           string
+	projectID           int64
+	projectUID          string
+	issueShortID        string
+	issueUID            string
+	relatedIssueUID     string
+	commentUID          string
+	snapshotCommentUIDs []string
+	link                *linkPayload
+	linksChanged        *linksChangedParents
 }
 
 // linkPayload mirrors the per-link issue.linked / issue.unlinked

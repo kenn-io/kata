@@ -1353,6 +1353,9 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 	if err != nil {
 		return db.Comment{}, db.Event{}, fmt.Errorf("generate comment uid: %w", err)
 	}
+	if err := validateLocalCommentReplyTx(ctx, tx, commentUID, p, issue); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
 	commentAt := time.Now().UTC()
 	createdAt := commentAt.Format(sqliteCommentTimeFormat)
 	mutationAt := commentAt.Format(sqliteTimeFormat)
@@ -1557,6 +1560,42 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		}
 		return cmp.Compare(a.ID, b.ID)
 	})
+	return out, nil
+}
+
+// CommentIssueIDsByUIDs maps existing comment UIDs to their owning issue IDs.
+func (d *Store) CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[string]int64, error) {
+	out := make(map[string]int64, len(uids))
+	const chunk = 500
+	for i := 0; i < len(uids); i += chunk {
+		end := min(i+chunk, len(uids))
+		slice := uids[i:end]
+		placeholders := make([]string, len(slice))
+		args := make([]any, 0, len(slice))
+		for j, commentUID := range slice {
+			placeholders[j] = "?"
+			args = append(args, commentUID)
+		}
+		rows, err := d.QueryContext(ctx,
+			`SELECT uid, issue_id FROM comments WHERE uid IN (`+strings.Join(placeholders, ",")+")", args...)
+		if err != nil {
+			return nil, fmt.Errorf("comment issue ids by uids: %w", err)
+		}
+		for rows.Next() {
+			var commentUID string
+			var issueID int64
+			if err := rows.Scan(&commentUID, &issueID); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan comment issue id: %w", err)
+			}
+			out[commentUID] = issueID
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("iterate comment issue ids: %w", err)
+		}
+		_ = rows.Close()
+	}
 	return out, nil
 }
 
