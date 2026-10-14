@@ -197,8 +197,12 @@ Use kata as the shared issue ledger for this workspace.
    kata.comment and kata.create when siblings cannot have separate environments.
 
    If a comment-sized task needs ownership or tracked completion, make it a
-   child issue: kata create "fix retry handling" --parent <ref>, then
-   kata claim <child>. Comments record findings; child issues track owned work.
+   child issue and claim it:
+
+      kata create "fix retry handling" --parent <ref> --idempotency-key retry-child
+      kata claim <child>
+
+   Comments record findings; child issues track owned work.
 
 10. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
