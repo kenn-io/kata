@@ -17,7 +17,7 @@ func BroadcastRecipients(candidates []Identity, sender Identity, teammates bool)
 	seen := map[string]bool{}
 	self := Address(sender.Actor, sender.Teammate)
 	for _, id := range candidates {
-		if id.Actor == "" || id.Actor == "system" || id.Actor == "github-sync" || id.Actor == "notion-sync" || id.Actor == "plane-sync" || strings.HasPrefix(id.Actor, "integration:") {
+		if automatedActor(id.Actor) {
 			continue
 		}
 		addresses := []string{id.Actor}
@@ -25,7 +25,7 @@ func BroadcastRecipients(candidates []Identity, sender Identity, teammates bool)
 			addresses = append(addresses, Address(id.Actor, id.Teammate))
 		}
 		for _, r := range addresses {
-			if r == self || (!teammates && r == sender.Actor) {
+			if r == self || r == sender.Actor {
 				continue
 			}
 			if _, e := NormalizeRecipient(r); e != nil {
@@ -43,6 +43,14 @@ func BroadcastRecipients(candidates []Identity, sender Identity, teammates bool)
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// automatedActor reports authors that no one reads an inbox for: the daemon
+// itself and the integrations, which sign their writes <provider>-sync or
+// integration:<name>.
+func automatedActor(actor string) bool {
+	return actor == "" || actor == "system" ||
+		strings.HasSuffix(actor, "-sync") || strings.HasPrefix(actor, "integration:")
 }
 
 // BroadcastRecord represents one metadata event, regardless of its fan-out.

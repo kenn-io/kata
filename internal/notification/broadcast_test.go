@@ -9,11 +9,15 @@ import (
 )
 
 func TestBroadcastRecipientsBoundsAndIdentity(t *testing.T) {
-	candidates := []Identity{{Actor: "sender"}, {Actor: "sender", Teammate: "other"}, {Actor: "reader"}, {Actor: "reader", Teammate: "review"}, {Actor: "system"}, {Actor: "github-sync"}, {Actor: "notion-sync"}, {Actor: "plane-sync"}}
+	candidates := []Identity{{Actor: "sender"}, {Actor: "sender", Teammate: "other"}, {Actor: "reader"}, {Actor: "reader", Teammate: "review"}, {Actor: "system"}, {Actor: "github-sync"}, {Actor: "notion-sync"}, {Actor: "plane-sync"}, {Actor: "linear-sync"}, {Actor: "todoist-sync"}, {Actor: "ticktick-sync"}, {Actor: "twenty-sync"}, {Actor: "integration:example"}}
 	got, e := BroadcastRecipients(candidates, Identity{Actor: "sender"}, false)
 	require.NoError(t, e)
 	require.Equal(t, []string{"reader"}, got)
 	got, e = BroadcastRecipients(candidates, Identity{Actor: "sender"}, true)
+	require.NoError(t, e)
+	require.Equal(t, []string{"reader", "reader/review", "sender/other"}, got)
+	// A teammate sender is still its actor: the actor inbox is the sender's own.
+	got, e = BroadcastRecipients(candidates, Identity{Actor: "sender", Teammate: "lead"}, true)
 	require.NoError(t, e)
 	require.Equal(t, []string{"reader", "reader/review", "sender/other"}, got)
 	candidates = nil

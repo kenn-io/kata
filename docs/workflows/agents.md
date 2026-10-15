@@ -679,8 +679,10 @@ kata inbox --for coordinator
 `--re <cref>` is optional. Broadcast reaches the issue owner and each distinct
 commenter, plus owners and commenters on open child issues one level deep,
 using local links. By default commenters are addressed as actors; add
-`--teammates` to include their teammate addresses. The sender, `system`, and
-integration authors are excluded. All recipient slots are written on the
+`--teammates` to include their teammate addresses. The sender's actor and exact
+address, `system`, and integration authors (`<provider>-sync` and
+`integration:<name>`) are excluded. With `--teammates`, the sender's other
+teammates are still included. All recipient slots are written on the
 broadcast issue in one metadata event. The inbox labels it as a broadcast.
 
 Broadcast refuses closed issues. More than 50 recipients is an error; Kata
