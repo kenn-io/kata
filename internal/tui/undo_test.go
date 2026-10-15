@@ -21,6 +21,9 @@ type undoTestAPI struct {
 	writeResp     *MutationResp
 	createResp    *MutationResp
 	commentResp   *MutationResp
+	replyResp     *MutationResp
+	replyErr      error
+	replyCalls    int
 	timedResp     *MutationResp
 	instanceUID   string
 	instanceCalls int
@@ -31,6 +34,8 @@ type undoTestAPI struct {
 	links         []LinkEntry
 	removedLinkID int64
 }
+
+var _ typedCommentAPI = (*undoTestAPI)(nil)
 
 func (f *undoTestAPI) GetInstance(_ context.Context) (InstanceInfo, error) {
 	f.instanceCalls++
@@ -119,6 +124,11 @@ func (f *undoTestAPI) CreateIssue(_ context.Context, _ int64, _ CreateIssueBody)
 
 func (f *undoTestAPI) AddComment(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
 	return f.commentResp, nil
+}
+
+func (f *undoTestAPI) AddCommentReply(_ context.Context, _ int64, _, _, _, _, _ string, _ bool, _ string) (*MutationResp, error) {
+	f.replyCalls++
+	return f.completeResponse(f.replyResp), f.replyErr
 }
 
 func TestUndoClientRecordsCloseAndBoundsHistory(t *testing.T) {
@@ -290,6 +300,70 @@ func TestUndoClientUnsafeWritesClearHistory(t *testing.T) {
 			require.Contains(t, resp.undo.boundary, tc.reason)
 		})
 	}
+}
+
+func TestUndoClientTypedReplyCreatesCommentBoundary(t *testing.T) {
+	f := &undoTestAPI{replyResp: &MutationResp{Changed: true}}
+	c := newConnectedUndoClient(t, f)
+	m := initialModel(Options{})
+	m.api = c
+	m.undoHistory.push(undoEntry{kind: "close"})
+
+	resp, err := c.AddCommentReply(context.Background(), 7, "abc4", "reply", "bob", "target", "confirm", false, "key")
+	require.NoError(t, err)
+	require.Equal(t, 1, f.replyCalls)
+	require.NotNil(t, resp.undo)
+	m = m.recordUndoAttempt(mutationDoneMsg{resp: resp})
+	require.Empty(t, m.undoHistory.entries)
+	require.Contains(t, m.undoHistory.boundary, "comment addition")
+}
+
+func TestUndoClientTypedReplyAmbiguousFailureClearsHistory(t *testing.T) {
+	f := &undoTestAPI{replyResp: &MutationResp{Changed: true}, replyErr: context.DeadlineExceeded}
+	c := newConnectedUndoClient(t, f)
+	m := initialModel(Options{})
+	m.api = c
+	m.undoHistory.push(undoEntry{kind: "close"})
+
+	resp, err := c.AddCommentReply(context.Background(), 7, "abc4", "reply", "bob", "target", "confirm", false, "key")
+	require.Error(t, err)
+	require.Equal(t, 1, f.replyCalls)
+	require.NotNil(t, resp.undo)
+	require.True(t, resp.undo.unknown)
+	m = m.recordUndoAttempt(mutationDoneMsg{resp: resp, err: err})
+	require.Empty(t, m.undoHistory.entries)
+	require.Contains(t, m.undoHistory.boundary, "outcome is unknown")
+}
+
+func FuzzUndoClientTypedReplyCreatesBoundary(f *testing.F) {
+	f.Add(false, "reply body")
+	f.Add(true, "reply body")
+	f.Fuzz(func(t *testing.T, ambiguous bool, body string) {
+		if len(body) > 1024 {
+			return
+		}
+		fake := &undoTestAPI{replyResp: &MutationResp{Changed: true}}
+		if ambiguous {
+			fake.replyErr = context.DeadlineExceeded
+		}
+		client := newConnectedUndoClient(t, fake)
+		model := initialModel(Options{})
+		model.api = client
+		model.undoHistory.push(undoEntry{kind: "close"})
+
+		resp, err := client.AddCommentReply(context.Background(), 7, "abc4", body, "bob", "target", "confirm", false, "key")
+		if ambiguous {
+			require.Error(t, err)
+			require.NotNil(t, resp.undo)
+			require.True(t, resp.undo.unknown)
+		} else {
+			require.NoError(t, err)
+			require.NotNil(t, resp.undo)
+			require.Contains(t, resp.undo.boundary, "comment addition")
+		}
+		model = model.recordUndoAttempt(mutationDoneMsg{resp: resp, err: err})
+		require.Empty(t, model.undoHistory.entries)
+	})
 }
 
 func TestUndoClientMissingCreatedLinkIsBoundary(t *testing.T) {

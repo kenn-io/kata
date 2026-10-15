@@ -195,17 +195,18 @@ type editorReturnedMsg struct {
 // the old or new parent's pane would stay stale until a manual
 // refresh after a parent replace.
 type eventReceivedMsg struct {
-	gen                 uint64
-	eventType           string
-	projectID           int64
-	projectUID          string
-	issueShortID        string
-	issueUID            string
-	relatedIssueUID     string
-	commentUID          string
-	snapshotCommentUIDs []string
-	link                *linkPayload
-	linksChanged        *linksChangedParents
+	gen             uint64
+	eventType       string
+	projectID       int64
+	projectUID      string
+	issueShortID    string
+	issueUID        string
+	relatedIssueUID string
+	commentUID      string
+	commentUIDs     []string
+	replyToUIDs     []string
+	link            *linkPayload
+	linksChanged    *linksChangedParents
 }
 
 // linkPayload mirrors the per-link issue.linked / issue.unlinked

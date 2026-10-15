@@ -113,6 +113,22 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
 		return out, &db.RevisionConflictError{CurrentRevision: curRevision}
 	}
+	current, err := issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
+		return out, err
+	}
+	in.Patch, err = db.ResolveMetadataPatch(ctx, tx, current, in.Patch)
+	if err != nil {
+		return out, err
+	}
+	if err := db.CheckRecurringMetadataWrite(ctx, in.Patch); err != nil {
+		return out, err
+	}
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return out, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
 	if err := db.CheckMetadataPatchGuard(jsontext.Value(curMetadata), in.Patch, in.Guard); err != nil {
 		return out, err
 	}

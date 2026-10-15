@@ -19,6 +19,7 @@ const commentSelect = `SELECT ` + commentColumns + ` FROM comments`
 
 // CreateComment appends a comment and its issue.commented event atomically.
 func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams) (db.Comment, db.Event, error) {
+	db.RetainCommentEvents(ctx)
 	if err := teammate.Validate(params.Teammate); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
@@ -27,8 +28,9 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	}
 	var comment db.Comment
 	var event db.Event
+	var committedEvents []db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		comment, event = db.Comment{}, db.Event{}
+		comment, event, committedEvents = db.Comment{}, db.Event{}, nil
 		projectUID, err := issueProjectUIDTx(ctx, tx, params.IssueID)
 		if err != nil {
 			return err
@@ -110,8 +112,32 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			return err
 		}
 		comment, err = scanComment(tx.QueryRowContext(ctx, commentSelect+` WHERE id=$1`, comment.ID))
-		return err
+		if err != nil {
+			return err
+		}
+		committedEvents = []db.Event{event}
+		if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+			updates, err := hook(ctx, tx, issue, comment)
+			if err != nil {
+				return err
+			}
+			for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+				result, err := s.patchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+					IssueID: update.IssueID, Actor: effectiveActor, Patch: update.Patch,
+				}, func(_ context.Context, run transactionFunc) error { return run(tx) })
+				if err != nil {
+					return err
+				}
+				if result.Changed {
+					committedEvents = append(committedEvents, result.Event)
+				}
+			}
+		}
+		return nil
 	})
+	if err == nil {
+		db.RetainCommentEvents(ctx, committedEvents...)
+	}
 	return comment, event, err
 }
 
