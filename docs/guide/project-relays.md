@@ -36,6 +36,8 @@ A leaf has an upstream connection and does not serve the project onward.
 These are roles for one project: the same daemon can root one project, relay
 another and keep others private.
 
+Each path supports up to eight hubs, including the root, plus one final leaf.
+
 The names above may differ, but all three copies retain the same project UID.
 Only the selected project travels over each connection. Workspace paths and
 aliases stay local. A relay does not grant access to the hub's other projects.
@@ -52,9 +54,10 @@ You need:
   can enable it with `kata federation enable --project shared-project`, using
   an ordinary account with project access in identity mode.
 - A writable **ordinary account token** from that hub, issued with
-  `kata tokens create`. The account must have access to the project. A daemon
-  bootstrap token, an issue-scoped token or an existing enrollment token cannot
-  take its place. See [Identity tokens](../operations/remote-daemon.md#identity-tokens)
+  `kata tokens create`. The account must have access to the project. Expiring
+  account tokens are accepted while valid; expiry suspends sync until the
+  credential is replaced. A daemon bootstrap token, an issue-scoped token or an
+  existing enrollment token cannot take its place. See [Identity tokens](../operations/remote-daemon.md#identity-tokens)
   and [Team visibility](../operations/federation.md#team-visibility).
 - Owner access to the daemon receiving the replica. Bridge administration uses
   the owner CLI or API; an ordinary browser session cannot connect a bridge.
@@ -205,10 +208,15 @@ embedding provider.
 
 ## Recover or disconnect
 
+A bridge status of `revoked` means the hub refused its credential and can clear
+when access returns. Explicit enrollment revocation, such as
+`kata federation revoke <id>` on the hub, is permanent; the status label alone
+does not establish that it happened.
+
 | Situation | Next step |
 | --- | --- |
 | Network or hub temporarily unavailable | Keep the bridge and its queued work. Sync retries when connectivity returns. |
-| Upstream account token expired or was revoked | Update the catalog credential, restart the receiving daemon to load changed config or environment, and repeat connect for the same upstream account. This retains queued work; an explicitly revoked enrollment cannot be revived. |
+| Upstream account token expired or was revoked | Update the catalog credential, restart the receiving daemon to load changed config or environment, and repeat connect for the same upstream account. This retains queued work. |
 | Team membership was removed | Have the upstream operator restore access. The existing connection rechecks authority before resuming. |
 | `signing_rejected` | Repair the signing source or hub key registration. Reconnecting is not the remedy. |
 | Local project-name or identity collision | Resolve the existing project or choose an unused name; do not initialize another copy to bypass the conflict. |
@@ -225,8 +233,7 @@ kata federation bridge disconnect --project shared-replica
 
 This revokes the saved upstream enrollment and keeps the local project and
 issues. Retry the same request after an interruption. Do not use `--local-only`
-as a routine sync repair, or replace a negotiated relay's state with a legacy
-cursor-only reset.
+as a routine sync repair.
 
 The [operator reference](../operations/federation.md) owns the full credential,
 retention, reset and signing rules. The [technical notes](../design/federation.md)

@@ -43,8 +43,10 @@ Leases provide optional coordination; sync and recovery have explicit limits.
 
 For selected projects shared through a personal or intermediate hub, use the
 [project relay guide](../guide/project-relays.md), available on `main`. It covers
-connection, downstream devices and recovery. The [operator reference](../operations/federation.md)
-also covers older direct-spoke enrollment.
+connection, downstream devices and recovery. The
+[operator reference](../operations/federation.md) also covers direct-spoke
+enrollment, the bootstrap path for hubs using daemon-owner credentials outside
+identity mode.
 
 ## Hosted mode
 

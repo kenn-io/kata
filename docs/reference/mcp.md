@@ -388,12 +388,11 @@ for membership and revocation rules.
 
 Project bridges are available on `main`, after 0.18.0. Use
 [Share projects between hubs](../guide/project-relays.md) for setup and target
-selection. The receiving daemon requires owner authority; its catalog supplies
-an ordinary, unscoped hub account token with write access to the selected
-project. Hub URLs must be root HTTP(S) origins without paths. Environment
-variables and signing-key files belong to the receiving daemon.
+selection. The
+[operator reference](../operations/federation.md#connect-a-project-through-the-daemon-catalog)
+owns the credential, URL and daemon-side source requirements.
 
-MCP can connect one project through that catalog account, but it
+MCP can connect one project through a catalog account, but it
 never handles enrollment secrets. It has no tool to issue an enrollment from
 this daemon, accept an enrollment token, or run a full `kata federation join`;
 the bridge's enrollment token stays in the daemon's credential store.

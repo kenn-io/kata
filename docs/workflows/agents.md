@@ -9,6 +9,8 @@ compaction, multiple workers, incomplete attempts, and close discipline.
 
 ## Choose the daemon and project
 
+Project bridges and team visibility are available on `main`, after 0.18.0.
+
 Select the daemon and project before reading or changing work. `--daemon <name>`
 sends commands to a configured daemon; it does not copy a project. A federation
 bridge keeps a selected project in the receiving daemon's database, where agents

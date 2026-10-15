@@ -12,8 +12,8 @@ keeps a local daemon and local database. It is opt-in per project.
 For a new relay connection, start with
 [Share projects between hubs](../guide/project-relays.md). It explains the
 roles and walks through preview, connection and recovery. Project relays are
-available on `main`, after the 0.18.0 release; the direct-spoke workflows below
-also describe the older enrollment protocol.
+available on `main`, after the 0.18.0 release. Direct-spoke enrollment remains
+the bootstrap path for hubs using daemon-owner credentials outside identity mode.
 
 Use this page for operator details:
 
@@ -81,6 +81,13 @@ The equivalent API lets a daemon owner connect one project to a configured hub u
 ordinary hub account credential. The daemon resolves that entry alone; it does
 not forward its own API token or return either credential.
 
+The receiving daemon requires owner authority. Its catalog entry must hold a
+writable, ordinary account token with access to the existing hub project;
+issue-scoped, bootstrap and enrollment tokens cannot replace it. An expiring
+account token is accepted while valid; expiry suspends transport until the
+account credential is replaced. Environment variables and signing-file paths
+are resolved by the receiving daemon.
+
 ```json
 {
   "hub_catalog": "example-hub",
@@ -98,7 +105,8 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment. Set `preflight` to `false` to connect. `serve_downstream`
 defaults to `false`. Set it to `true` only when this daemon will relay the
-project to its own leaf spokes.
+project to downstream daemons. Each root-to-leaf path supports up to eight
+hubs, including the root, plus one final leaf that does not serve downstream.
 
 A hub that requires [request signing](federation-signing.md) advertises
 `federation_signing_required` in `GET /api/v1/instance`. Preview and connect
@@ -112,11 +120,12 @@ registers that key for the bridge's enrollment ID; see
 [Bridges](federation-signing.md#bridges).
 
 Connecting issues a narrow `claim,pull,push` enrollment bound to the upstream
-credential's human account. The local account remains separate. The daemon
+credential's account. The local account remains separate. The daemon
 pins the root authority and installs the negotiated relay path before activating
 transport. The root establishes its first project pin from the daemon's existing
 owner-only signing key at enrollment. A different retained public pin requires
-[root key recovery](#root-signing-key); enrollment does not replace it. It retains the candidate token in the owner-only credential file
+[root key recovery](#root-signing-key); enrollment does not replace it. It retains
+the candidate token in the owner-only credential file
 before enrollment, so retrying the same connection after a lost response uses
 the same grant. Pending candidates do not sync, forward claims or generate
 shared-project embeddings. A changed local credential prevents an in-flight
@@ -152,7 +161,12 @@ credential status and existing federation diagnostics. It reports a pending
 enrollment even before a replica exists, and never returns tokens. Status does
 not contact the hub: `connected` reflects the configured connection and last
 recorded outcome, while `offline`, `paused` and `revoked` describe observed local
-state. `signing_rejected` means the hub refused or could not verify this
+state. `revoked` records an upstream `401`, `403` or `404` other than a recognized
+signature failure. It can clear after access returns. Explicit enrollment revocation, such as
+`kata federation revoke <id>` on the hub, is permanent and requires a new
+enrollment.
+
+`signing_rejected` means the hub refused or could not verify this
 bridge's request signature; the grant is intact, so fix the signing source on
 this daemon or the key registration on the hub instead of reconnecting. Sync
 timestamps show how recent that observation is. An ambiguous pending project
@@ -333,10 +347,8 @@ that holds it; only a keyless loopback hub accepts the command without a
 credential. In identity mode the daemon token is a bootstrap token: it can
 mint account tokens, but it cannot perform the attributed federation-enable
 step that `kata federation enroll` runs, so use `kata federation bridge
-connect` with an account token instead. In identity mode the daemon derives
-the enrollment actor from the token actor and ignores client-supplied actor
-strings such as `--actor`, `--as`, or `KATA_AUTHOR`. If you only have the
-bootstrap token, first mint an account token as described in
+connect` with an account token instead. If you only have the bootstrap token,
+first mint an account token as described in
 [Identity tokens](remote-daemon.md#identity-tokens).
 
 `--hub-token-env` replaces `--hub-token` for enrollment and leave. Pass only
@@ -369,10 +381,11 @@ After membership is restored, the existing origin-pinned metadata handshake
 can resume a locally suspended relay with the same credential. It verifies the
 project, peer, relay path and root pin before clearing suspension. Old-epoch
 work drains before a required reset. A committed reset whose activation reply
-was lost resumes its retained new namespace on retry. Descendant work that the
-root has not accepted can still block reset installation; the old projection and delivery state remain intact. Existing
-downstream enrollments are carried through the reset, not detached. A validated
-live regrant permits existing descendants again while that reset is blocked.
+was lost resumes its retained new namespace on retry. Installation checks the
+[reset blockers](#reset-recovery) before changing the projection or delivery
+state. Existing downstream enrollments are carried through the reset, not
+detached. A validated live regrant permits existing descendants again while
+that reset is blocked.
 
 The enrollment credential authorizes these project routes:
 
@@ -485,9 +498,10 @@ the limit and warns again above it. A failed estimate shows `not measured`.
 
 Only removing content shrinks the checkpoint. `kata purge <ref>` removes an
 issue's retained history and current-state record. Purge is irreversible;
-export anything you need first. It waits for live relays to acknowledge pending
-deliveries of that issue (`409 federation_pending_delivery`). Sync those relays
-or explicitly revoke their enrollments before retrying.
+export anything you need first. It waits for pending relay deliveries across
+the whole project and for prepared resets to activate
+(`409 federation_pending_delivery`). See [Purge and reset](#purge-and-reset)
+before retrying.
 
 Archiving or deleting without purge retains history. Moving issues is not a
 remedy: cross-project moves involving federated projects are unsupported, and
@@ -510,6 +524,129 @@ Recipients reuse an artifact only when its input and recipe match exactly.
 Start with [Select an embedding producer](#select-an-embedding-producer).
 Use [Embedding status](#embedding-status) to distinguish normal waiting from a
 failed producer check. The rest of this section describes transfer and reuse.
+
+### Select an embedding producer
+
+A root with a configured encoder chooses itself when its worker first needs
+shared-project vectors. To use a relay instead, enroll that relay for this
+project and configure its encoder. On the intended producer, select its Kata
+home and export the configured recipe and daemon identity:
+
+```bash
+kata federation embedding-recipe > recipe.json
+kata federation identity --json
+```
+
+`embedding-recipe` always writes JSON. It reads local home configuration,
+including the model revision, dimensions, normalization and chunk recipe. It
+makes no daemon or provider request and exports no API key or endpoint. A remote
+server selection does not change which local configuration it reads. Use the
+home that runs the intended producer and ensure its running encoder matches
+that configuration.
+
+At the root, use its existing owner-authenticated project metadata API:
+`POST /api/v1/projects/{project_id}/metadata`. Set `patch.federation_embedding`
+to an object with `producer_instance_uid` from that producer's identity and
+`recipe` containing the complete exported JSON. Send the current project ETag
+as `If-Match` so another owner's change cannot be overwritten.
+
+Generate the request body from the exported recipe rather than typing its
+fingerprint or omitting fields:
+
+```bash
+PRODUCER_UID=01J00000000000000000000003
+jq --arg producer "$PRODUCER_UID" \
+  '{actor: "example-owner", patch: {federation_embedding: {producer_instance_uid: $producer, recipe: .}}}' \
+  recipe.json > producer.json
+```
+
+Replace the example UID with that producer's actual instance UID and send
+`producer.json` to the root's metadata route with its owner credential and
+current project ETag. Ordinary project credentials and replicas cannot change
+this reserved key. Select an enrolled relay with current project access and the
+same exact configured recipe. A selected relay must have an authorized upstream
+connection before generation. A different recipe leaves vectors pending; the
+worker does not silently substitute a model. If a selected relay's configured
+model or recipe changes, its project federation status reports
+`reason: producer_recipe_changed`. Export the relay's recipe again and repeat
+this selection at the root to resume generation. Confirm the assignment and state
+with `kata federation status` at each participant and find the shared project row.
+
+An explicit metadata change can choose another producer. Existing compatible
+artifacts remain reusable. Setting the reserved key to `null` removes the
+selection; a capable root can then choose itself again. An outage alone never
+changes the assignment. An in-flight request or an explicit changeover can
+incur duplicate spend; this policy does not promise exactly-once provider billing.
+
+A hub configured for another embedding producer keeps missing shared vectors
+pending. Waiting shared content does not block private local embeddings.
+Compatible retained artifacts are reused before the worker checks generation
+eligibility. An unavailable producer does not trigger local generation.
+The daemon owner controls producer configuration at the root. Only root-origin
+events can change it. Writable replicas cannot change it through metadata
+writes, and a hub rejects any root-origin event pushed by a downstream
+enrollment. Root-origin changes continue downstream through each hub's
+authenticated upstream relay connection.
+Invalid producer configuration is rejected before a metadata change commits.
+Malformed configuration retained by an older backup leaves that project's
+vectors pending while private projects continue indexing. Ordinary enrollment
+and content synchronization continue. Clear or repair the
+root's configuration to resume. A configuration that names the root itself is
+replaced by the root's worker with its current recipe. Pausing transport
+preserves legacy and local root generation; a negotiated relay waits for an
+active authorized upstream.
+
+### Embedding status
+
+Project federation status includes the selected producer and a bounded window of
+up to 32 retained artifact identities. `generated` and `reused` describe the
+artifact's origin relative to this instance. `waiting` means a producer is
+selected without a retained artifact in that window. `incompatible` identifies
+changed input (`input_changed`), a different exact recipe (`recipe_mismatch`), or
+an artifact this daemon skipped because it failed validation
+(`invalid_artifact`). `stored_unindexed` means the complete
+artifact remains portable but this daemon cannot index it, including PostgreSQL
+recipes above 4000 dimensions. `limited` indicates the window may omit older
+artifacts. Status omits vector bytes and provider credentials and requires the
+same current project access as other federation reads.
+
+When this daemon cannot generate for a project it is selected to produce for,
+status adds a `reason`:
+
+- `producer_recipe_changed`: this daemon's configured recipe differs from the
+  selected recipe. After an upgrade that changes the recipe version, the
+  selection can no longer be read and `state` is also `rejected`. Select the
+  producer again at the root, as described in
+  [Select an embedding producer](#select-an-embedding-producer).
+- `producer_unavailable`: the last producer check failed, for example because
+  the upstream hub was unreachable, the federation credential was missing, or
+  the artifact sync failed. `last_error` holds the failure, and the daemon log
+  records each one. The worker retries on its next fill and clears the reason
+  after a check succeeds. A failure is shown only while the selection it was
+  observed under is still current.
+
+Without a `reason`, `waiting` means the producer is expected to supply vectors
+and nothing has failed on this daemon.
+
+`kata federation status` and the TUI federation detail show the producer,
+preferred model and dimension count, and counts from this retained window.
+The agent output adds a separate embedding row for each project, including
+`reason` and `last_error`. A `limited`
+inventory can omit older artifacts. These counts describe stored artifacts,
+not provider requests or billing. JSON preserves the exact preferred recipe
+and each retained artifact's digest and state.
+
+The web project's sync summary shows pending delivery, the last successful sync,
+credential state, producer and retained-artifact counts. Use **Refresh sync** to
+read the current state. This read requires current project access and does not
+require credential inventory or administration. The summary clears when the
+session expires, the project leaves the visible catalog, or connection authority
+changes. It is available on the source daemon, including its local catalog
+entry. Remote workspaces do not delegate federation reads through their target
+credentials. Retained-window counts describe stored artifacts, not provider
+requests or billing.
+
+### Embedding transfer and reuse
 
 The artifact stream accepts bounded manifest offers separately from issue
 and receipt delivery. New relay enrollments atomically queue manifests for
@@ -600,127 +737,6 @@ A retained artifact that fails validation against the current issue input is
 skipped and logged. Its issue stays pending, so the selected producer embeds it
 locally, and reuse continues for other documents.
 
-### Embedding status
-
-Project federation status includes the selected producer and a bounded window of
-up to 32 retained artifact identities. `generated` and `reused` describe the
-artifact's origin relative to this instance. `waiting` means a producer is
-selected without a retained artifact in that window. `incompatible` identifies
-changed input (`input_changed`), a different exact recipe (`recipe_mismatch`), or
-an artifact this daemon skipped because it failed validation
-(`invalid_artifact`). `stored_unindexed` means the complete
-artifact remains portable but this daemon cannot index it, including PostgreSQL
-recipes above 4000 dimensions. `limited` indicates the window may omit older
-artifacts. Status omits vector bytes and provider credentials and requires the
-same current project access as other federation reads.
-
-When this daemon cannot generate for a project it is selected to produce for,
-status adds a `reason`:
-
-- `producer_recipe_changed`: this daemon's configured recipe differs from the
-  selected recipe. After an upgrade that changes the recipe version, the
-  selection can no longer be read and `state` is also `rejected`. Select the
-  producer again at the root, as described in
-  [Select an embedding producer](#select-an-embedding-producer).
-- `producer_unavailable`: the last producer check failed, for example because
-  the upstream hub was unreachable, the federation credential was missing, or
-  the artifact sync failed. `last_error` holds the failure, and the daemon log
-  records each one. The worker retries on its next fill and clears the reason
-  after a check succeeds. A failure is shown only while the selection it was
-  observed under is still current.
-
-Without a `reason`, `waiting` means the producer is expected to supply vectors
-and nothing has failed on this daemon.
-
-`kata federation status` and the TUI federation detail show the producer,
-preferred model and dimension count, and counts from this retained window.
-The agent output adds a separate embedding row for each project, including
-`reason` and `last_error`. A `limited`
-inventory can omit older artifacts. These counts describe stored artifacts,
-not provider requests or billing. JSON preserves the exact preferred recipe
-and each retained artifact's digest and state.
-
-The web project's sync summary shows pending delivery, the last successful sync,
-credential state, producer and retained-artifact counts. Use **Refresh sync** to
-read the current state. This read requires current project access and does not
-require credential inventory or administration. The summary clears when the
-session expires, the project leaves the visible catalog, or connection authority
-changes. It is available on the source daemon, including its local catalog
-entry. Remote workspaces do not delegate federation reads through their target
-credentials. Retained-window counts describe stored artifacts, not provider
-requests or billing.
-
-### Select an embedding producer
-
-A root with a configured encoder chooses itself when its worker first needs
-shared-project vectors. To use a relay instead, enroll that relay for this
-project and configure its encoder. On the intended producer, select its Kata
-home and export the configured recipe and daemon identity:
-
-```bash
-kata federation embedding-recipe > recipe.json
-kata federation identity --json
-```
-
-`embedding-recipe` always writes JSON. It reads local home configuration,
-including the model revision, dimensions, normalization and chunk recipe. It
-makes no daemon or provider request and exports no API key or endpoint. A remote
-server selection does not change which local configuration it reads. Use the
-home that runs the intended producer and ensure its running encoder matches
-that configuration.
-
-At the root, use its existing owner-authenticated project metadata API:
-`POST /api/v1/projects/{project_id}/metadata`. Set `patch.federation_embedding`
-to an object with `producer_instance_uid` from that producer's identity and
-`recipe` containing the complete exported JSON. Send the current project ETag
-as `If-Match` so another owner's change cannot be overwritten.
-
-Generate the request body from the exported recipe rather than typing its
-fingerprint or omitting fields:
-
-```bash
-PRODUCER_UID=01J00000000000000000000003
-jq --arg producer "$PRODUCER_UID" \
-  '{actor: "example-owner", patch: {federation_embedding: {producer_instance_uid: $producer, recipe: .}}}' \
-  recipe.json > producer.json
-```
-
-Replace the example UID with that producer's actual instance UID and send
-`producer.json` to the root's metadata route with its owner credential and
-current project ETag. Ordinary project credentials and replicas cannot change
-this reserved key. Select an enrolled relay with current project access and the
-same exact configured recipe. A selected relay must have an authorized upstream
-connection before generation. A different recipe leaves vectors pending; the
-worker does not silently substitute a model. If a selected relay's configured
-model or recipe changes, its project federation status reports
-`reason: producer_recipe_changed`. Export the relay's recipe again and repeat
-this selection at the root to resume generation. Confirm the assignment and state
-with `kata federation status` at each participant and find the shared project row.
-
-An explicit metadata change can choose another producer. Existing compatible
-artifacts remain reusable. Setting the reserved key to `null` removes the
-selection; a capable root can then choose itself again. An outage alone never
-changes the assignment. An in-flight request or an explicit changeover can
-incur duplicate spend; this policy does not promise exactly-once provider billing.
-
-A hub configured for another embedding producer keeps missing shared vectors
-pending. Waiting shared content does not block private local embeddings.
-Compatible retained artifacts are reused before the worker checks generation
-eligibility. An unavailable producer does not trigger local generation.
-The daemon owner controls producer configuration at the root. Only root-origin
-events can change it. Writable replicas cannot change it through metadata
-writes, and a hub rejects any root-origin event pushed by a downstream
-enrollment. Root-origin changes continue downstream through each hub's
-authenticated upstream relay connection.
-Invalid producer configuration is rejected before a metadata change commits.
-Malformed configuration retained by an older backup leaves that project's
-vectors pending while private projects continue indexing. Ordinary enrollment
-and content synchronization continue. Clear or repair the
-root's configuration to resume. A configuration that names the root itself is
-replaced by the root's worker with its current recipe. Pausing transport
-preserves legacy and local root generation; a negotiated relay waits for an
-active authorized upstream.
-
 ### Artifact retention and transfer limits
 
 Adopting an unfederated populated project preserves its current and stale
@@ -765,12 +781,6 @@ explicitly before sharing the project. New links and initial issue links must
 stay inside the selected project. A signed bootstrap omits whole historical
 records that reference excluded endpoints; the owner store retains their
 original bytes.
-
-Negotiated lease requests continue through the personal relay to the root.
-Each authenticated hop retains a device-specific holder identity in the
-existing lease tuple under its upstream account. Two leaves using the same
-account and client label cannot renew or release each other's root lease;
-copying a displayed holder label or client identity grants no authority.
 
 A fresh negotiated enrollment pins the public signing-key history received from
 its selected trusted hop, validates the complete signed rotation chain, and
@@ -818,45 +828,58 @@ cursor-only resets before deleting data or changing their delivery state.
 Before detach or archive, resolve retained deliveries through root acceptance
 and explicitly detach or revoke downstream enrollments. A hop acknowledgement
 alone cannot discard work still awaiting its root receipt. Detach and archive
-recheck these blockers in the native transaction. Reset installation rechecks
-the root-acceptance blockers but keeps downstream enrollments; see
-[Root resets on a relay with downstream enrollments](#root-resets-on-a-relay-with-downstream-enrollments).
+recheck these blockers in the native transaction. Reset installation keeps
+downstream enrollments; see
+[Downstream reset recovery](#root-resets-on-a-relay-with-downstream-enrollments).
 Refused changes keep the project, credential and descendant grants available
 for retry.
 
-When the upstream advertises a changed relay epoch, the existing sync connection
-retrieves its signed checkpoint and installs the snapshot, creation proofs and
-three stream baselines in one transaction. The snapshot carries the root's
-current issues, cron job and workflow definitions, and cron run history as
-snapshot records, so a replica that installs it holds the same definitions and
-runs as the root. The rebuild replaces relayed and issue-scoped history
-only; daemon-local catalog history such as project renames and alias removals
-has no root receipt and stays in place. New enrollments also use this path
-when a purge boundary or missing creation history makes ordinary replay
-incomplete. Uncompacted enrollment keeps the existing small-batch replay.
-The signed snapshot includes complete ordered manifests for retained artifacts
-that match each issue's current content, without vector bytes. Reset installation preserves validated portable bytes for retained issues,
-removes bytes for excluded issues, and reconciles unexpired staging against the
-new issue projection. A manifest alone cannot supply or acknowledge vectors.
-Root and forwarded resets reoffer retained artifacts in the new child epoch;
-normal manifest-first exchange transfers only exact misses.
-Relays forward the original root
-manifest and snapshot unchanged, with their own authenticated child translation.
-The issuing hub prepares the checkpoint while keeping the old hop epoch live.
-Work arriving before installation drains with its original delivery identity;
-that fresh intent can require a new capture. After local installation, the
-first authenticated request for the prepared epoch activates it upstream. A
-lost activation request resumes the installed namespace. Writes committed
-upstream after capture remain owed and are offered in the new epoch.
-Retries without fresh intent retain the same checkpoint bytes and identities
-until a later root purge requires a new snapshot. The signed root history boundary detects those later
-purges independently of hop epochs. Before requesting a signaled new epoch,
-sync drains the existing source and receipt streams through their usual commit
-and emitted-prefix checks. Every download checks
-current enrollment, parent credential and project access. Deliveries the root
-has not accepted, quarantine and external bindings block replacement before
-data changes. Snapshots carry artifact manifests; complete vector misses
-use the ordinary artifact stream.
+Installing a reset is blocked by:
+
+- Unacknowledged deliveries to the upstream hub, in any stream.
+- Local events still awaiting a root receipt.
+- Open lease requests that are neither resolved nor rejected.
+- Event deliveries this relay still owes a downstream enrollment that the
+  root has not accepted.
+- Active quarantine or a retained external-root binding.
+
+A matching event UID and content hash attested by the incoming checkpoint
+can satisfy the local or downstream event check. Downstream receipt deliveries
+stay owed; artifact offers are replaced by the forwarded checkpoint. Neither
+independently blocks installation.
+
+When the upstream advertises a changed relay epoch, the existing sync connection retrieves its
+signed checkpoint and installs the snapshot, creation proofs and three stream baselines in one
+transaction. The snapshot carries the root's current issues, cron job and workflow definitions,
+and cron run history as snapshot records, so a replica that installs it holds the same
+definitions and runs as the root. The rebuild replaces relayed and issue-scoped history only;
+daemon-local catalog history such as project renames and alias removals has no root receipt and
+stays in place. New enrollments also use this path when a purge boundary or missing creation
+history makes ordinary replay incomplete. Uncompacted enrollment keeps the existing small-batch
+replay.
+
+The signed snapshot includes complete ordered manifests for retained artifacts that
+match each issue's current content, without vector bytes. Reset installation preserves validated
+portable bytes for retained issues, removes bytes for excluded issues, and reconciles unexpired
+staging against the new issue projection. A manifest alone cannot supply or acknowledge vectors.
+Root and forwarded resets reoffer retained artifacts in the new child epoch; normal
+manifest-first exchange transfers only exact misses.
+
+Relays forward the original root manifest
+and snapshot unchanged, with their own authenticated child translation. The issuing hub prepares
+the checkpoint while keeping the old hop epoch live. Work arriving before installation drains
+with its original delivery identity; that fresh intent can require a new capture. After local
+installation, the first authenticated request for the prepared epoch activates it upstream. A
+lost activation request resumes the installed namespace. Writes committed upstream after capture
+remain owed and are offered in the new epoch.
+
+Retries without fresh intent retain the same
+checkpoint bytes and identities until a later root purge requires a new snapshot. The signed
+root history boundary detects those later purges independently of hop epochs. Before requesting
+a signaled new epoch, sync drains the existing source and receipt streams through their usual
+commit and emitted-prefix checks. Every download checks current enrollment, parent credential
+and project access. The blocker checks above run before data changes. Snapshots carry artifact
+manifests; complete vector misses use the ordinary artifact stream.
 
 ### Root resets on a relay with downstream enrollments
 
@@ -876,6 +899,11 @@ flows through the whole hierarchy on the next sync of each hop:
    checkpoint and installs it. Its first request for the new epoch activates
    that epoch on the relay. Creation receipts and the downstream grant
    survive unchanged.
+
+A downstream enrollment with an expired or revoked parent credential does not
+by itself block its relay's reset. The relay retains a prepared checkpoint for
+that child, which must restore access before downloading or activating it.
+Unaccepted event deliveries owed to that child still block installation.
 
 Event and artifact deliveries the downstream had not acknowledged when the
 relay installed the reset are superseded by the forwarded checkpoint: the
@@ -899,10 +927,10 @@ before the downstream activates, the relay replaces the earlier forward's
 unemitted rows for that next epoch with rows derived from the newer
 checkpoint.
 
-One blocker remains: a downstream enrollment that still holds an event
-delivery the root has not accepted, that is, an event without a root receipt
-that the installed checkpoint does not attest either. No checkpoint can stand
-in for that work, and the relay could not forward a checkpoint to that
+For downstream deliveries, the blocker is an event this relay still owes a
+downstream enrollment that the root has not accepted: an event without a root
+receipt that the incoming checkpoint does not attest either. No checkpoint can
+stand in for that work, and the relay could not forward a checkpoint to that
 downstream either. Installation then fails with
 `federation reset blocked by pending push: downstream enrollment <binding_uid>
 still holds events deliveries the root has not accepted; let it synchronize
@@ -1020,11 +1048,10 @@ see [first-run embeddings setup](../get-started/quickstart.md#optional-first-run
 
 ## Config-driven enrollment
 
-For direct-spoke setup with a hub-owner administration credential outside
-identity mode, declare project mappings in the spoke's `<KATA_HOME>/config.toml`. Account tokens cannot
-use this legacy enrollment path. For an account-token relay, use a catalog
-entry and [bridge connect](../guide/project-relays.md) without a
-`[[federation.project]]` mapping:
+For direct-spoke setup with a hub-owner administration credential outside identity mode, declare
+project mappings in the spoke's `<KATA_HOME>/config.toml`. Account tokens cannot use this
+legacy enrollment path. For an account-token relay, use a catalog entry and
+[bridge connect](../guide/project-relays.md) without a `[[federation.project]]` mapping:
 
 ```toml
 [[daemon]]
@@ -1206,6 +1233,10 @@ This prevents an old-origin response from applying events or advancing a cursor
 after cutover; the next sync rereads the new binding and credential.
 
 ## TUI enrollment workflow
+
+This flow uses direct-spoke enrollment with a hub-owner credential outside
+identity mode. An ordinary account token cannot use it; use
+[bridge connect](../guide/project-relays.md) for account-token enrollment.
 
 The TUI federation view is scoped to the active daemon. Press `F` from the
 queue or project selector to open federation for that daemon, then press `n` to
@@ -1479,11 +1510,24 @@ kata federation join --project fedlab \
   --push
 ```
 
-`join` fetches hub project metadata using the enrollment token, so the hub must
-be reachable and the token must include `pull`. The command creates a spoke
-replica project bound to the hub project UID and replay horizon, stores the hub
+By default, `join` fetches hub project metadata using the enrollment token, so
+the hub must be reachable and the token must include `pull`. The command
+creates a spoke replica project bound to the hub project UID and replay horizon, stores the hub
 URL/project/token locally, and enables push only when `--push` is present.
 `--actor` is required and should be copied from the printed join command.
+
+Scripts can supply metadata explicitly:
+
+- `--hub-project-uid` supplies the hub project's durable UID.
+- `--replay-horizon` supplies the first event ID available for replay.
+- `--baseline-through` supplies the hub's baseline event marker.
+
+Supplying both a non-empty `--hub-project-uid` and a positive `--replay-horizon`
+skips the metadata request; include `--baseline-through` too if the script
+needs that value. Otherwise, the request fills an empty project UID and replaces
+nonpositive replay-horizon and baseline values, preserving positive values.
+The initial pull cursor is one below the replay
+horizon, with a minimum of zero; `--baseline-through` does not select it.
 
 When the hub is reached over plain HTTP through a private overlay hostname
 rather than a literal non-public IP address, opt in explicitly:
@@ -1584,6 +1628,10 @@ By default this **detaches**: the local `federation_bindings`,
 credential is deleted, and all of the project's issues and current state are
 kept. Leaving is revoke-first: the hub enrollment is revoked before any local
 teardown, so a hub failure leaves local state intact for a clean retry.
+
+An in-flight sync cannot recreate sync-status or quarantine rows after the
+binding has been removed. Its database writes recheck the binding before
+recording a late result.
 
 For config-driven federation, leave also removes the exact managed credential
 reservation whether reconciliation stopped before or after adoption. If the
@@ -1696,6 +1744,10 @@ kata federation join --project <spoke-project> --hub-url <url> \
   --hub-project-id <id> --token <fresh-enrollment-token> --actor <actor> --push
 ```
 
+Rejoin also recovers a join that created the local project but failed before
+saving its binding. Repeat the join for the same local name and hub project
+identity to bind that existing project.
+
 Pull restarts from the hub's replay horizon (already-applied events
 deduplicate by event UID), and a push-enabled rejoin re-offers local-origin
 events from the beginning; the hub deduplicates what it already has and
@@ -1721,6 +1773,9 @@ INTO hub project Y) and requires typing the local project's name. Creating
 a new replica and rejoining stay single-step confirmations.
 
 ## Sync model
+
+This section describes direct-spoke transport. Negotiated relays use
+[credential-bound relay transport](#credential-bound-relay-transport).
 
 A spoke polls the hub for events after its pull cursor. It applies hub events
 in order, deduplicates by event UID and content hash, folds portable payloads
@@ -1750,11 +1805,20 @@ spoke instead of retrying forever.
 
 ## Leases and write gates
 
-Leases are hub-authoritative. A spoke forwards acquire, renew, release, and
-status requests to the hub with an enrollment token that has lease capability.
-The hub derives `holder_instance_uid` and the human-readable holder from the
-enrollment token. Client-supplied holder strings are ignored for
-enrollment-authenticated lease requests.
+Lease commands first authenticate to the local daemon through its ordinary API.
+In identity mode, use an ordinary account token for these attributed commands.
+Enrollment tokens authenticate only the subsequent transport between daemons.
+
+The root arbitrates leases. A direct spoke forwards acquire, renew, release and
+status requests to its hub with an enrollment token that has `claim` capability.
+The hub derives `holder_instance_uid` and the holder from that enrollment;
+client-supplied holder strings do not change its authority.
+
+Negotiated lease requests continue through relays to the root. Each
+authenticated hop retains a device-specific holder identity under its upstream
+account. Two leaves using the same account and client label cannot renew or
+release each other's root lease. Copying a displayed holder label or client
+identity grants no authority.
 
 Use leases when an agent or operator wants to say "I am actively working this
 issue; avoid overlapping non-comment edits until I release it." Holding a lease
@@ -1819,6 +1883,10 @@ conflicts with another holder's live lease is kept, but the hub records
 Link mutations check both materialized endpoints in the compatible federation
 group, expire timed leases in each endpoint's owning project, and record any
 violation in that owning project.
+
+Ingest audits current lease state, not authority at the time an offline edit
+was made. An edit covered by a lease locally can arrive after another holder
+acquires a lease and be recorded as a violation.
 
 ## Root signing key
 
@@ -2029,9 +2097,10 @@ hub.
 Hard purge is hub-admin-only for federated projects. A spoke rejects hard purge
 with `federated_admin_required`. A hub purge uses normal local/admin daemon
 auth, exact confirmation, and the same live-lease conflict gate as other issue
-mutations. A relay hub also waits for current live enrollments' event, receipt
-and artifact deliveries, including prepared checkpoints, before permanently
-purging an issue. A `409 federation_pending_delivery` preserves the issue and
+mutations. Purge also waits for every non-revoked enrollment to acknowledge the
+project's current event, receipt and artifact deliveries and activate any
+prepared reset. This covers the whole project, including deliveries for other
+issues. A `409 federation_pending_delivery` preserves the issue and
 its downloadable vectors. Sync the retained deliveries or explicitly revoke
 their enrollments, then retry. Retired epoch history does not block cleanup.
 
@@ -2053,8 +2122,9 @@ brings a project back under the
 [relay checkpoint capacity](#relay-checkpoint-capacity); the purged events'
 receipts remain in it.
 
-A push-enabled spoke refuses reset while it has unaccepted local-origin events
-or active quarantine.
+A direct, push-enabled spoke refuses reset while it has unaccepted local-origin
+events or active quarantine. Negotiated relays use the full
+[reset blocker checks](#reset-recovery).
 
 ## Consistency limitations
 
@@ -2077,10 +2147,12 @@ Federation has expected stale or deferred states:
 - Purge causes spoke re-bootstrap.
 - Enrollment creation uses normal daemon auth; the generated enrollment token
   only authorizes the spoke transport grant and is not a user daemon API token.
-- Pushed event actors are bound to the enrollment actor. A buggy, old, or
-  malicious spoke that pushes a different actor is rejected by the hub and the
-  spoke records the failed batch in quarantine.
-- Links may span projects. A missing peer does not quarantine push: the event
+- Direct-spoke push binds event actors to the enrollment actor. A spoke that
+  pushes a different actor is rejected and records the batch in quarantine.
+  Negotiated relays preserve source actors separately from accountable
+  attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
+- Direct-spoke links may span projects; negotiated relays reject cross-project
+  links. For direct spokes, a missing peer does not quarantine push: the event
   and cursor advance while the edge remains absent. The edge materializes when
   both endpoint projects are enabled through the same hub federation group.
   Pulling clients must enroll both projects and use the same normalized hub URL

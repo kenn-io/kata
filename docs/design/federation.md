@@ -82,29 +82,21 @@ separate:
   same hub origin. They never send the default daemon's global token to the
   hub. `kata federation enroll` selects the hub with `--hub-url` while the CLI's
   default daemon remains the spoke being enrolled.
-- **Federation enrollment tokens** authorize one spoke to call hub federation
-  transport routes for an enrolled scope and capability set. They are created by
-  bridge connection or direct enrollment, stored hashed on the hub, and stored
-  plaintext only in the spoke federation credentials file. They authorize pull,
-  push, join metadata fetches and forwarded lease actions. Each enrollment is bound to an account.
-  Direct-spoke transport requires pushed event actors and forwarded lease holders to match that account.
-  Negotiated relays preserve the original event actor and origin across hops;
-  the authenticated hop and root receipt establish accountable authority.
-  They are not general daemon API tokens.
-  A relay enrollment candidate may be retained with
-  `relay_enrollment_pending = true` for an exact enrollment retry. Its status is
-  `enrollment_pending`; sync, forwarded claims and shared-project embedding
+- **Federation enrollment tokens** authorize one spoke to call hub federation transport routes
+  for an enrolled scope and capability set. They are created by bridge connection or direct
+  enrollment, stored hashed on the hub, and stored plaintext only in the spoke federation
+  credentials file. They authorize pull, push, join metadata fetches and forwarded lease
+  actions. Each enrollment is bound to an account. Direct-spoke transport requires pushed event
+  actors and forwarded lease holders to match that account. Negotiated relays preserve the
+  original event actor and origin across hops; the authenticated hop and root receipt establish
+  accountable authority. They are not general daemon API tokens. A relay enrollment candidate
+  may be retained with `relay_enrollment_pending = true` for an exact enrollment retry. Its
+  status is `enrollment_pending`; sync, forwarded claims and shared-project embedding
   generation wait until the negotiated binding activates that credential.
 
-Lease commands have two hops on a spoke. The CLI first talks to the local spoke
-daemon using the normal daemon API auth rules. The spoke then forwards the lease
-request to the hub with its federation enrollment token; the hub derives
-`holder_instance_uid` and holder from that enrollment. A hub-local lease
-command has only the first hop and uses daemon API auth. When
-`[auth].require_token_identity = true`, local operator and lease commands must
-use DB-backed API tokens from
-`kata tokens create`; enrollment tokens still only authenticate spoke-to-hub
-federation transport.
+The [lease reference](../operations/federation.md#leases-and-write-gates)
+explains request authority for direct spokes and relays. Enrollment credentials
+are transport grants, not credentials for local CLI or API commands.
 
 When a daemon listens on a non-loopback address, configure a daemon API token
 and explicitly trust the private network:
@@ -153,19 +145,19 @@ Parent-token expiry or revocation and loss of project membership stop transport;
 [explicit reconnect](../operations/federation.md#connect-a-project-through-the-daemon-catalog)
 can bind the retained grant to a new live token for the same account.
 
-Direct `enroll`/`join` uses the older event-cursor protocol and hub-owner
-administration credentials. An account token cannot mint a legacy enrollment
-that would outlive its authority. See [Token boundaries](../operations/federation.md#token-boundaries)
-and [the direct-spoke setup](../operations/federation.md#hub-setup).
+Direct `enroll`/`join` uses the event-cursor protocol and hub-owner administration credentials.
+An account token cannot mint a legacy enrollment that would outlive its authority. See
+[Token boundaries](../operations/federation.md#token-boundaries) and
+[the direct-spoke setup](../operations/federation.md#hub-setup).
 
-Adopting an existing project is a current-state cutover, not a history merge.
-It preserves current issues, comments, labels and links through fresh snapshot
-events and replaces the pre-adoption event timeline. A direct-spoke enrollment's
-historical-author permission spans the entire initial baseline, including
-retries, and is consumed only after its terminal chunk commits. Negotiated relay
-adoption rejects cross-project links. Export the old timeline before adoption
-when it is needed for audit. The [adoption procedure](../operations/federation.md#adopting-an-existing-project)
-owns the commands and confirmation rules.
+Adopting an existing project is a current-state cutover, not a history merge. It preserves
+current issues, comments, labels and links through fresh snapshot events and replaces the
+pre-adoption event timeline. A direct-spoke enrollment's historical-author permission spans the
+entire initial baseline, including retries, and is consumed only after its terminal chunk
+commits. Negotiated relay adoption rejects cross-project links. Export the old timeline before
+adoption when it is needed for audit. The
+[adoption procedure](../operations/federation.md#adopting-an-existing-project) owns the commands
+and confirmation rules.
 
 ## Relay delivery and recovery
 
@@ -208,11 +200,19 @@ post-capture writes remain owed.
 
 A relay prepares checkpoints for its downstream enrollments in the same
 transaction as its own installation. Event and artifact deliveries represented
-by the checkpoint are superseded; unacknowledged receipts remain owed. Pending
-work without root acceptance, quarantine or external bindings can block
-installation before data changes. Existing descendant enrollments alone do not
-block it. The [operator recovery procedure](../operations/federation.md#root-resets-on-a-relay-with-downstream-enrollments)
-explains how to resolve retained-work blockers.
+by the checkpoint are superseded; unacknowledged receipts remain owed.
+Installation checks pending upstream deliveries, local events awaiting root
+receipts, open lease requests, downstream event acceptance, quarantine and
+external-root bindings before replacing data. Checkpoint receipts can satisfy
+the local and downstream event checks; see the full
+[reset blockers](../operations/federation.md#reset-recovery).
+
+Existing downstream enrollments alone do not block installation. A child's
+credential suspension also leaves its prepared checkpoint intact without
+blocking the parent; that child must restore access to download or activate it.
+Unaccepted event deliveries owed to the child remain blockers. The
+[reset recovery](../operations/federation.md#root-resets-on-a-relay-with-downstream-enrollments)
+explains how to resolve them.
 
 ### Retention and capacity
 
@@ -340,13 +340,12 @@ quarantine on the spoke instead of retrying forever.
 
 ### Cross-Project Link Convergence
 
-Direct-spoke federation can carry cross-project links; negotiated relay
-projects reject them. For direct spokes, a missing link peer is not a permanent
-validation failure. The hub accepts the event, advances the push cursor, and keeps the edge absent until both endpoint
-issues are materialized inside one compatible federation group. Hub projects
-on one daemon form a group. Spoke projects form a group when they are enabled
-and their stored hub URLs have the same scheme, lowercase hostname, and
-effective port.
+Direct-spoke federation can carry cross-project links; negotiated relay projects reject them.
+For direct spokes, a missing link peer is not a permanent validation failure. The hub accepts
+the event, advances the push cursor, and keeps the edge absent until both endpoint issues are
+materialized inside one compatible federation group. Hub projects on one daemon form a group.
+Spoke projects form a group when they are enabled and their stored hub URLs have the same
+scheme, lowercase hostname, and effective port.
 
 Link folding and reconciliation run across the complete group whenever any
 member project materializes. The event log therefore acts as durable pending
@@ -359,46 +358,16 @@ the same daemon.
 
 ## Leases And Write Gates
 
-Leases are hub-authoritative. A spoke forwards acquire, renew, release, and status
-requests to the hub using an enrollment token with `claim` capability. The hub
-derives the holder and `holder_instance_uid` from that enrollment; client
-holder strings cannot change its authority. Negotiated relay hops preserve a
-device-specific holder identity through to the root.
+The root arbitrates leases, while replicas accept ordinary edits locally.
+A lease coordinates exclusive non-comment work; it is not required for every
+edit. Direct spokes derive the holder from their enrollment, and relays retain
+a device-specific holder identity through to the root.
 
-Leases exist for agent coordination, not for general edit permission. An agent
-acquires a lease to signal "I am actively working this issue" and to get
-temporary exclusivity against other non-comment mutations while the lease is
-live. Status and audit surfaces can then show who is actively working. A lease
-does not replace durable `owner`, does not serialize all collaboration, and is
-not required before ordinary federated edits.
-
-For federated projects, ordinary edits of existing issues are local-first and
-converge by LWW. Creating new issues is also local-first. A lease is optional
-coordination: when another holder has a live lease on an affected existing
-issue, non-comment mutations are denied until the lease is released or expires.
-Comment creation and comment body edits bypass leases because they remain
-comment-level collaboration and maintenance actions rather than leased issue
-work.
-
-Spokes refresh cached lease state before checking exclusivity when online.
-When offline, cached hard leases can still be used as a continuity hint, but
-they are not proof that exclusivity still holds. Timed leases expire by hub
-time and stop blocking edits once expired.
-
-The hub checks pushed work against the live lease state at ingest time. Work
-that conflicts with another holder's live lease is not dropped; the hub records
-`claim.violated`. Work on unleased issues is normal and is not a violation.
-For link work, the audit checks every materialized endpoint in the compatible
-federation group and records the violation in the endpoint's owning project.
-Timed leases are expired in each affected owning project before that check.
-This is best-effort, not a causal proof that the work was unauthorized when
-originally performed. An offline edit that was covered at edit time can arrive
-after another holder acquires a lease and be marked violated because the hub
-checks current state during ingest.
-
-`kata show` surfaces the current lease and recent unresolved lease violations
-for a federated issue. `kata federation status` shows project-level counts and
-recent violation summaries.
+This split means ingest can only audit the lease state it sees when work
+arrives. It records conflicts as `claim.violated` without discarding the work;
+it cannot prove whether an offline edit was authorized when made. The
+[operator reference](../operations/federation.md#leases-and-write-gates) owns
+lease commands, write gates, cached reads, expiry and violation reporting.
 
 ## Operator Commands
 
@@ -409,11 +378,13 @@ recovery must use the API or CLI rather than editing database rows or cursors.
 
 ## Quarantine
 
-Permanent validation failures retain the rejected batch. Direct spokes
-quarantine push; negotiated relays can quarantine either push or pull, and an
-active relay quarantine stops automatic sync for that project. Retry resolves
-the stop marker without advancing a cursor or changing the source identities, so the same data is offered again after the cause is fixed.
-Transient schema skew is retried after the upstream is upgraded.
+Permanent validation failures retain the rejected batch. Direct spokes quarantine push;
+negotiated relays can quarantine either push or pull, and an active relay quarantine stops
+automatic sync for that project. Retry resolves the stop marker without advancing a cursor or
+changing the source identities, so the same data is offered again after the cause is fixed.
+Transient schema skew is retried after the upstream is upgraded. Retry supports legacy push
+quarantines and negotiated relay quarantines. A legacy pull retry returns
+`federation_quarantine_retry_unsupported`.
 
 Only legacy push quarantine supports an intentional skip. It advances past the
 batch without delivering that work. Negotiated relays reject skip because a
