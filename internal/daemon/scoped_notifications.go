@@ -72,7 +72,9 @@ func projectNotificationJSONWithWalker(
 	raw jsontext.Value,
 	walk notificationJSONWalker,
 ) (jsontext.Value, error) {
-	if !notificationReadRestricted(ctx) {
+	// Every slot key carries this prefix, even inside a string-encoded
+	// payload. Most responses have no slots and skip the decode entirely.
+	if !notificationReadRestricted(ctx) || !bytes.Contains(raw, []byte(notification.KeyPrefix)) {
 		return raw, nil
 	}
 	uids := map[string]bool{}
@@ -178,7 +180,7 @@ func walkNotificationJSON(raw jsontext.Value, keep func(jsontext.Value) (bool, e
 			}
 			object[key] = value
 		}
-		return json.Marshal(object)
+		return json.Marshal(object, json.Deterministic(true))
 	case '[':
 		var items []jsontext.Value
 		if err := json.Unmarshal(raw, &items); err != nil {
@@ -241,7 +243,7 @@ func walkNotificationSlots(slots map[string]jsontext.Value, keep func(jsontext.V
 			delete(slots, key)
 		}
 	}
-	return json.Marshal(slots)
+	return json.Marshal(slots, json.Deterministic(true))
 }
 
 func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
@@ -290,7 +292,7 @@ func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep fun
 		return nil, err
 	}
 	payload[field] = projected
-	return json.Marshal(payload)
+	return json.Marshal(payload, json.Deterministic(true))
 }
 
 // Stream frames recheck notification targets after page projection, immediately

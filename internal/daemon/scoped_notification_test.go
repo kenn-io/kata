@@ -24,3 +24,24 @@ func TestScopedNotificationPointersHiddenAcrossReads(t *testing.T) {
 		})
 	}
 }
+
+// Projection rewrites a restricted reader's response. The same state must
+// still produce the same bytes, so diffs and caches see no phantom changes.
+func TestScopedNotificationProjectionIsDeterministic(t *testing.T) {
+	env, p, source, target, _ := scopedReplyFixture(t, false)
+	patch := map[string]jsontext.Value{"notify.d29ya2Vy": jsontext.Value(fmt.Sprintf(`{"from":"lead","message":"visible","re":%q,"kind":"reply"}`, target.UID))}
+	for i := range 16 {
+		patch[fmt.Sprintf("review.field-%02d", i)] = jsontext.Value(fmt.Sprintf("%d", i))
+	}
+	_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: patch})
+	require.NoError(t, e)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", p.ID, source.ShortID)
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+	_, first := envDoRaw(t, env, http.MethodGet, path, nil, headers)
+	require.Contains(t, string(first), target.UID)
+	for range 8 {
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, headers)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Equal(t, string(first), string(body))
+	}
+}
