@@ -153,7 +153,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 }
 
 func broadcastCandidatesTx(ctx context.Context, tx *sql.Tx, issue db.Issue, allowed map[int64]bool) ([]notification.Identity, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.project_id,COALESCE(i.owner,''),COALESCE(c.author,''),COALESCE(c.teammate,'') FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN comments c ON c.issue_id=i.id AND NOT EXISTS(SELECT 1 FROM import_mappings m WHERE m.comment_id=c.id AND m.object_type='comment') WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND (i.id=$1 OR (i.status='open' AND EXISTS(SELECT 1 FROM links l WHERE l.from_issue_id=i.id AND l.to_issue_id=$1 AND l.type='parent'))) ORDER BY i.id,c.uid`, issue.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT i.id,i.project_id,p.uid,COALESCE(i.owner,''),COALESCE(c.author,''),COALESCE(c.teammate,'') FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN comments c ON c.issue_id=i.id AND NOT EXISTS(SELECT 1 FROM import_mappings m WHERE m.comment_id=c.id AND m.object_type='comment') WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND (i.id=$1 OR (i.status='open' AND EXISTS(SELECT 1 FROM links l WHERE l.from_issue_id=i.id AND l.to_issue_id=$1 AND l.type='parent'))) ORDER BY i.id,c.uid`, issue.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +162,8 @@ func broadcastCandidatesTx(ctx context.Context, tx *sql.Tx, issue db.Issue, allo
 	readableProjects := map[int64]bool{issue.ProjectID: true}
 	for rows.Next() {
 		var id, projectID int64
-		var owner, actor, tm string
-		if err := rows.Scan(&id, &projectID, &owner, &actor, &tm); err != nil {
+		var projectUID, owner, actor, tm string
+		if err := rows.Scan(&id, &projectID, &projectUID, &owner, &actor, &tm); err != nil {
 			return nil, err
 		}
 		if !notificationIssueAllowed(allowed, id) {
@@ -172,7 +172,7 @@ func broadcastCandidatesTx(ctx context.Context, tx *sql.Tx, issue db.Issue, allo
 		readable, known := readableProjects[projectID]
 		if !known {
 			var err error
-			readable, err = notificationProjectReadable(ctx, projectID)
+			readable, err = notificationProjectReadable(ctx, projectID, projectUID)
 			if err != nil {
 				return nil, err
 			}

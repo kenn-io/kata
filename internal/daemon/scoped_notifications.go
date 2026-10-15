@@ -47,7 +47,7 @@ func notificationIssueReadable(ctx context.Context, store db.Storage, issueID in
 	if err != nil {
 		return false, err
 	}
-	return notificationProjectReadable(ctx, issue.ProjectID)
+	return notificationProjectReadable(ctx, issue.ProjectID, issue.ProjectUID)
 }
 
 func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext.Value) (jsontext.Value, error) {

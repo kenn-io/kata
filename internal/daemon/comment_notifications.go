@@ -47,7 +47,8 @@ func commentNotificationHook() db.CommentMetadataHook {
 			in.Owner = *issue.Owner
 		}
 		var parentID, parentProjectID int64
-		err = tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,COALESCE(i.owner,'') FROM links l JOIN issues i ON i.id=l.to_issue_id JOIN projects p ON p.id=i.project_id WHERE l.from_issue_id=$1 AND l.type='parent' AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, issue.ID).Scan(&parentID, &parentProjectID, &in.ParentOwner)
+		var parentProjectUID string
+		err = tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,p.uid,COALESCE(i.owner,'') FROM links l JOIN issues i ON i.id=l.to_issue_id JOIN projects p ON p.id=i.project_id WHERE l.from_issue_id=$1 AND l.type='parent' AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, issue.ID).Scan(&parentID, &parentProjectID, &parentProjectUID, &in.ParentOwner)
 		if !notificationIssueAllowed(allowed, parentID) {
 			in.ParentOwner = ""
 		}
@@ -55,7 +56,7 @@ func commentNotificationHook() db.CommentMetadataHook {
 			return nil, err
 		}
 		if err == nil && in.ParentOwner != "" && parentProjectID != issue.ProjectID {
-			readable, err := notificationProjectReadable(ctx, parentProjectID)
+			readable, err := notificationProjectReadable(ctx, parentProjectID, parentProjectUID)
 			if err != nil {
 				return nil, err
 			}

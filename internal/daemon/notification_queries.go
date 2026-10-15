@@ -88,7 +88,8 @@ func notificationCommentTx(ctx context.Context, tx *sql.Tx, issue db.Issue, uid 
 // different from the notification's source project.
 func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, allowed map[int64]bool) (bool, error) {
 	var issueID, projectID int64
-	err := tx.QueryRowContext(ctx, `SELECT c.issue_id, i.project_id FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.uid=$1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, uid).Scan(&issueID, &projectID)
+	var projectUID string
+	err := tx.QueryRowContext(ctx, `SELECT c.issue_id, i.project_id, p.uid FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.uid=$1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, uid).Scan(&issueID, &projectID, &projectUID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -98,7 +99,7 @@ func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, a
 	if !notificationIssueAllowed(allowed, issueID) {
 		return false, nil
 	}
-	readable, err := notificationProjectReadable(ctx, projectID)
+	readable, err := notificationProjectReadable(ctx, projectID, projectUID)
 	if err != nil || !readable {
 		return false, err
 	}
@@ -108,8 +109,16 @@ func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, a
 }
 
 // Discovery reads other projects without widening the source mutation's host
-// authority. A denied project contributes no recipient identities.
-func notificationProjectReadable(ctx context.Context, projectID int64) (bool, error) {
+// authority. A denied project contributes no recipient identities. Callers
+// resolve the project UID themselves: discovery runs inside a write
+// transaction, and a pooled lookup could wait on the connection it holds.
+func notificationProjectReadable(ctx context.Context, projectID int64, projectUID string) (bool, error) {
+	if authorizeProjectTarget(ctx, projectUID) != nil {
+		return false, nil
+	}
+	// Native project access is settled above; keep the host check from
+	// repeating it with a pooled project read.
+	ctx = context.WithValue(ctx, projectAccessContextKey{}, (*ProjectAccessDecision)(nil))
 	if state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); ok {
 		isolated := *state
 		isolated.authorized = false
