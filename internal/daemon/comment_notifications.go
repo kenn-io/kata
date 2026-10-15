@@ -122,8 +122,8 @@ func commentNotificationHook() db.CommentMetadataHook {
 				}
 				// Compare keys directly without trusting malformed recipient encodings.
 				for _, id := range append(in.PriorLinkers, in.Target, notification.Identity{Actor: in.Owner}, notification.Identity{Actor: in.ParentOwner}) {
-					address := notification.Address(id.Actor, id.Teammate)
-					if notification.MetadataKey(address) == key {
+					address := notification.RecipientOf(id)
+					if address != "" && notification.MetadataKey(address) == key {
 						in.PendingTargets[address] = target
 					}
 				}

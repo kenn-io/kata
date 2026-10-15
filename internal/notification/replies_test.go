@@ -178,3 +178,22 @@ func TestSettlePatchPreservesRequestsAndSkipsNotices(t *testing.T) {
 	patch = SettlePatch(map[string]jsontext.Value{key: selfRequest}, sender, "original", link)
 	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch)
 }
+
+// Actors are stored as written, but inbox, wait, and notify --to address the
+// normalized recipient. Every derived slot key must use that same form.
+func TestNotificationKeysUseNormalizedRecipients(t *testing.T) {
+	sender := Identity{Actor: " worker "}
+	patch, err := LinkPatch(LinkInput{Sender: sender, Target: Identity{Actor: " reviewer ", Teammate: "reader"}, ReplyUID: "new", TargetUID: "target", Kind: "reply"})
+	require.NoError(t, err)
+	require.Contains(t, patch, MetadataKey("reviewer/reader"))
+
+	link, err := LinkValue(sender, "new", "reply")
+	require.NoError(t, err)
+	request := jsontext.Value(`{"from":" lead ","message":"respond","re":"target"}`)
+	settled := SettlePatch(map[string]jsontext.Value{MetadataKey("worker"): request}, sender, "target", link)
+	require.Equal(t, map[string]jsontext.Value{MetadataKey("worker"): jsontext.Value("null"), MetadataKey("lead"): link}, settled)
+
+	got, err := BroadcastRecipients([]Identity{{Actor: " reader "}, {Actor: "worker"}}, sender, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"reader"}, got)
+}

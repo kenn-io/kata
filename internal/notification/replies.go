@@ -29,6 +29,18 @@ type LinkInput struct {
 	PendingTargets                                map[string]string
 }
 
+// RecipientOf returns the normalized inbox address of an identity: the form
+// inbox, wait, and notify --to use. Actors are stored as written, so every
+// slot key derived from a stored identity goes through here. It returns ""
+// for an identity no inbox can address.
+func RecipientOf(id Identity) string {
+	recipient, err := NormalizeRecipient(Address(strings.TrimSpace(id.Actor), strings.TrimSpace(id.Teammate)))
+	if err != nil {
+		return ""
+	}
+	return recipient
+}
+
 // LinkValue is the slot value that reports one typed reply. The message names
 // the reply by its shortest possible handle; inbox resolves the current handle
 // from Re when it lists the slot.
@@ -46,20 +58,20 @@ func LinkValue(sender Identity, replyUID, kind string) (jsontext.Value, error) {
 // LinkPatch computes one explicit metadata patch. Replay never calls it.
 func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 	patch := map[string]jsontext.Value{}
-	sender := Address(in.Sender.Actor, in.Sender.Teammate)
-	if in.Sender == in.Target {
+	sender := RecipientOf(in.Sender)
+	if sender == RecipientOf(in.Target) {
 		return patch, nil
 	}
 	value, err := LinkValue(in.Sender, in.ReplyUID, in.Kind)
 	if err != nil {
 		return nil, err
 	}
-	recipients := []string{Address(in.Target.Actor, in.Target.Teammate)}
+	recipients := []string{RecipientOf(in.Target)}
 	if in.Kind == "confirm" {
-		recipients = append(recipients, in.Owner, in.ParentOwner)
+		recipients = append(recipients, RecipientOf(Identity{Actor: in.Owner}), RecipientOf(Identity{Actor: in.ParentOwner}))
 		seen := map[string]bool{}
 		for _, identity := range in.PriorLinkers {
-			recipient := Address(identity.Actor, identity.Teammate)
+			recipient := RecipientOf(identity)
 			if recipient == "" || recipient == sender || seen[recipient] {
 				continue
 			}
@@ -72,9 +84,6 @@ func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 	}
 	for _, recipient := range recipients {
 		if recipient == "" || recipient == sender {
-			continue
-		}
-		if _, err := NormalizeRecipient(recipient); err != nil {
 			continue
 		}
 		key := MetadataKey(recipient)
@@ -95,7 +104,10 @@ func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 // kata wait --until reply watches. Replay never calls it.
 func SettlePatch(slots map[string]jsontext.Value, sender Identity, answeredUID string, link jsontext.Value) map[string]jsontext.Value {
 	patch := map[string]jsontext.Value{}
-	senderAddress := Address(sender.Actor, sender.Teammate)
+	senderAddress := RecipientOf(sender)
+	if senderAddress == "" {
+		return patch
+	}
 	key := MetadataKey(senderAddress)
 	var request Value
 	if json.Unmarshal(slots[key], &request) != nil || request.Re == "" || request.Re != answeredUID {
@@ -106,11 +118,8 @@ func SettlePatch(slots map[string]jsontext.Value, sender Identity, answeredUID s
 	if request.Kind != "" || request.From == "" {
 		return patch
 	}
-	requester := Address(request.From, request.Teammate)
-	if requester == senderAddress {
-		return patch
-	}
-	if _, err := NormalizeRecipient(requester); err != nil {
+	requester := RecipientOf(Identity{Actor: request.From, Teammate: request.Teammate})
+	if requester == "" || requester == senderAddress {
 		return patch
 	}
 	if requesterKey := MetadataKey(requester); linkSlotWritable(slots, requesterKey) {

@@ -15,20 +15,17 @@ import (
 // includes both the actor inbox and each exact teammate inbox.
 func BroadcastRecipients(candidates []Identity, sender Identity, teammates bool) ([]string, error) {
 	seen := map[string]bool{}
-	self := Address(sender.Actor, sender.Teammate)
+	self, selfActor := RecipientOf(sender), RecipientOf(Identity{Actor: sender.Actor})
 	for _, id := range candidates {
-		if automatedActor(id.Actor) {
+		if automatedActor(strings.TrimSpace(id.Actor)) {
 			continue
 		}
-		addresses := []string{id.Actor}
+		addresses := []string{RecipientOf(Identity{Actor: id.Actor})}
 		if teammates && id.Teammate != "" {
-			addresses = append(addresses, Address(id.Actor, id.Teammate))
+			addresses = append(addresses, RecipientOf(id))
 		}
 		for _, r := range addresses {
-			if r == self || r == sender.Actor {
-				continue
-			}
-			if _, e := NormalizeRecipient(r); e != nil {
+			if r == "" || r == self || r == selfActor {
 				continue
 			}
 			seen[r] = true
