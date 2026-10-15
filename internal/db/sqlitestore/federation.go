@@ -1215,13 +1215,14 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	validator *db.CronReplayValidator,
 	projectOnlyLinks bool,
 ) error {
-	// This write must stay the transaction's first statement. Besides
-	// serializing cron state, it makes the deferred transaction a writer
-	// before it reads the event log: a write after those reads fails with
-	// SQLITE_BUSY_SNAPSHOT whenever another connection commits in between,
-	// which starves spoke pulls under steady local writes. The write queue
-	// covers this within one store handle; the lock covers other handles
-	// and processes on the same file.
+	// Take this lock before reading anything. Besides serializing cron
+	// state, it makes a fresh deferred transaction, such as the one
+	// materializeFederatedProject begins, a writer before it reads the event
+	// log: a write after those reads fails with SQLITE_BUSY_SNAPSHOT whenever
+	// another connection commits in between, which starves spoke pulls under
+	// steady local writes. The write queue covers this within one store
+	// handle; the lock covers other handles and processes on the same file.
+	// Callers whose transaction has already written are writers already.
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}

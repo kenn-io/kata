@@ -18,6 +18,8 @@ import (
 // and under steady local writes every retry loses the same race. The store's
 // write queue already orders writers within one handle, so the competing
 // writer uses a second handle, where only the lock prevents the race.
+// The race is timing-based: the test reliably catches a missing lock or an
+// event-log read ahead of it, but not a single short read squeezed in first.
 func TestMaterializeFederatedProjectSurvivesConcurrentLocalWrites(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "local-writer")
@@ -50,19 +52,17 @@ func TestMaterializeFederatedProjectSurvivesConcurrentLocalWrites(t *testing.T) 
 
 	writerCtx, stop := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for writerCtx.Err() == nil {
 			_, _ = peer.DB.ExecContext(writerCtx, `UPDATE projects SET name = name WHERE id = ?`, other.ID)
 		}
-	}()
+	})
 
 	// One attempt each, no retry: under the old read-then-write transaction
 	// most attempts fail; with the writer lock taken first none may.
 	var failures []error
 	for range 20 {
-		if err := sqlitestore.MaterializeFederatedProjectOnceForTest(d, ctx, p.ID); err != nil {
+		if err := sqlitestore.MaterializeFederatedProjectOnceForTest(ctx, d, p.ID); err != nil {
 			failures = append(failures, err)
 		}
 	}
