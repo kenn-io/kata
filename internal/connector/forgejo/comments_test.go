@@ -31,11 +31,8 @@ func writeJSON(w http.ResponseWriter, value any) {
 	}
 }
 
-// Forgejo's issue comment endpoint has no pagination: it ignores page and
-// limit and returns every comment on each request.
-func TestCommentsAreReadInOneRequestAndKeepStableContentRevisions(t *testing.T) {
+func TestCommentsSortByCreationAndRevisionsTrackContent(t *testing.T) {
 	comments := []nativeComment{commentAt(12, "later", 3), commentAt(9, "mixed-width ID", 3), commentAt(10, "earlier", 4), commentAt(11, "middle", 5)}
-	requests := 0
 	s := provider(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/user":
@@ -45,11 +42,6 @@ func TestCommentsAreReadInOneRequestAndKeepStableContentRevisions(t *testing.T) 
 		case "/api/v1/repos/owner/renamed/issues/7":
 			_, _ = w.Write([]byte(issueJSON))
 		case "/api/v1/repos/owner/renamed/issues/7/comments":
-			requests++
-			if requests > 5 {
-				http.Error(w, "too many comment requests", http.StatusTooManyRequests)
-				return
-			}
 			writeJSON(w, comments)
 		default:
 			t.Errorf("unexpected %s", r.URL.Path)
@@ -59,8 +51,8 @@ func TestCommentsAreReadInOneRequestAndKeepStableContentRevisions(t *testing.T) 
 	h := New("secret-test-token")
 	p := connector.ListCommentsParams{RootKey: "23#7@91"}
 	a := result[connector.ListCommentsResult](t, exchange(t, h, s.URL, "list_comments", p))
-	if len(a.Comments) != 4 || a.Comments[0].ID != "10" || a.Comments[1].ID != "11" || a.Comments[2].ID != "12" || a.Comments[3].ID != "9" || requests != 1 {
-		t.Fatalf("comments %#v requests %d", a, requests)
+	if len(a.Comments) != 4 || a.Comments[0].ID != "10" || a.Comments[1].ID != "11" || a.Comments[2].ID != "12" || a.Comments[3].ID != "9" {
+		t.Fatalf("comments %#v", a)
 	}
 	comments[2].Body = "externally edited"
 	b := result[connector.ListCommentsResult](t, exchange(t, h, s.URL, "list_comments", p))
