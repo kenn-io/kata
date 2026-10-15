@@ -143,3 +143,21 @@ func messagePrefix(kind Kind) (string, bool) {
 		return "", false
 	}
 }
+
+// AttentionOnlyDiff reports whether an issue.metadata_updated payload changes
+// only notification slots. Such a change asks someone to look at an issue; it
+// is communication like a comment, not leased work on the issue.
+func AttentionOnlyDiff(payload jsontext.Value) bool {
+	var decoded struct {
+		Diff map[string]jsontext.Value `json:"diff"`
+	}
+	if json.Unmarshal(payload, &decoded) != nil || len(decoded.Diff) == 0 {
+		return false
+	}
+	for key := range decoded.Diff {
+		if !strings.HasPrefix(key, KeyPrefix) {
+			return false
+		}
+	}
+	return true
+}
