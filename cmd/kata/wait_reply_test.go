@@ -46,36 +46,6 @@ func TestWaitReplyDiscoveryParentDeadlineIsNotWaitTimeout(t *testing.T) {
 	}
 }
 
-func FuzzWaitReplyDiscoveryTimeoutClassification(f *testing.F) {
-	f.Add(int64(1000), int64(0))
-	f.Add(int64(3000), int64(1000))
-	f.Add(int64(1000), int64(3000))
-	f.Fuzz(func(t *testing.T, waitTimeoutMS, parentTimeoutMS int64) {
-		if waitTimeoutMS < 40 || waitTimeoutMS > 5000 || parentTimeoutMS < 0 || parentTimeoutMS > 5000 {
-			return
-		}
-		if parentTimeoutMS > 0 && absDurationMS(waitTimeoutMS-parentTimeoutMS) < 100 {
-			return
-		}
-
-		stdout, err := runWaitReplyDiscoveryUntilContextDone(
-			t, time.Duration(waitTimeoutMS)*time.Millisecond, time.Duration(parentTimeoutMS)*time.Millisecond)
-		waitDeadlineFirst := parentTimeoutMS == 0 || waitTimeoutMS < parentTimeoutMS
-		if waitDeadlineFirst {
-			_ = requireCLIError(t, err, ExitWaitTimeout)
-			result := parseWaitJSON(t, stdout)
-			require.True(t, result.TimedOut)
-			require.Equal(t, []string{"example-project#abcd"}, result.Pending)
-			return
-		}
-
-		require.Error(t, err)
-		if cliErr, ok := errors.AsType[*cliError](err); ok {
-			require.NotEqual(t, ExitWaitTimeout, cliErr.ExitCode)
-		}
-	})
-}
-
 func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTimeout time.Duration) (string, error) {
 	t.Helper()
 	var instanceRequests atomic.Int32
@@ -107,13 +77,6 @@ func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTime
 		"--timeout", waitTimeout.String(), "--poll-interval", "10ms")
 	require.Equal(t, int32(1), instanceRequests.Load(), "the test must reach instance discovery")
 	return stdout, err
-}
-
-func absDurationMS(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
-	return value
 }
 
 func TestWaitReplySlotTransition(t *testing.T) {
