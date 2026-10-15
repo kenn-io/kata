@@ -493,6 +493,7 @@ func TestCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T) {
 
 func FuzzCommentEditPublishesCommittedProjectAfterConcurrentMove(f *testing.F) {
 	f.Add("Redacted evidence", uint8(0))
+	f.Add(concurrentMoveOriginalBody, uint8(1))
 	f.Fuzz(func(t *testing.T, body string, projectOffset uint8) {
 		if len(body) > 256 {
 			return
@@ -503,6 +504,8 @@ func FuzzCommentEditPublishesCommittedProjectAfterConcurrentMove(f *testing.F) {
 		checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, body, projectOffset)
 	})
 }
+
+const concurrentMoveOriginalBody = "Original evidence"
 
 func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, body string, projectOffset uint8) {
 	t.Helper()
@@ -518,7 +521,7 @@ func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, 
 	})
 	require.NoError(t, err)
 	comment, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
-		IssueID: issue.ID, Author: "reviewer", Body: "Original evidence",
+		IssueID: issue.ID, Author: "reviewer", Body: concurrentMoveOriginalBody,
 	})
 	require.NoError(t, err)
 	for i := uint8(0); i < projectOffset%4; i++ {
@@ -537,6 +540,20 @@ func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, 
 	)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "edit comment: %s", responseBody)
 	require.True(t, wrapped.moved)
+	if body == concurrentMoveOriginalBody {
+		// An unchanged body is a no-op edit: nothing commits, so nothing publishes.
+		var edited struct {
+			Changed bool `json:"changed"`
+		}
+		require.NoError(t, json.Unmarshal(responseBody, &edited))
+		require.False(t, edited.Changed)
+		select {
+		case msg := <-sub.Ch:
+			t.Fatalf("no-op edit published %+v", msg.Event)
+		default:
+		}
+		return
+	}
 	select {
 	case msg := <-sub.Ch:
 		require.NotNil(t, msg.Event)

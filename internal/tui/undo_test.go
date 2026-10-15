@@ -319,7 +319,7 @@ func TestUndoClientTypedReplyCreatesCommentBoundary(t *testing.T) {
 }
 
 func TestUndoClientTypedReplyAmbiguousFailureClearsHistory(t *testing.T) {
-	f := &undoTestAPI{replyResp: &MutationResp{Changed: true}, replyErr: context.DeadlineExceeded}
+	f := &undoTestAPI{replyErr: context.DeadlineExceeded}
 	c := newConnectedUndoClient(t, f)
 	m := initialModel(Options{})
 	m.api = c

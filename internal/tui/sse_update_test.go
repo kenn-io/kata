@@ -1037,7 +1037,9 @@ func tuiCommentGraphRecord(uid, replyToUID, replyKind, issueUID string, projectI
 }
 
 func TestFederatedCommentIdentityRefreshesPendingReplyTarget(t *testing.T) {
-	for _, eventType := range []string{"issue.commented", "issue.snapshot", "issue.created"} {
+	// Cross-project issue.snapshot arrival is covered by
+	// TestCommentArrivalMakesPendingReplyTargetNavigable.
+	for _, eventType := range []string{"issue.commented", "issue.created"} {
 		t.Run(eventType, func(t *testing.T) {
 			m := sseDetailFixture(7, "source", "source-issue")
 			m.detail.comments = []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
