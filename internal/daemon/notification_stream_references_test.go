@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
@@ -62,16 +64,47 @@ func TestNotificationStreamPreviousAndCurrentPointer(t *testing.T) {
 
 func TestUnscopedNotificationEventStillVisible(t *testing.T) {
 	fixture := newLateReplyTargetFixture(t)
-	payload, err := json.Marshal(map[string]any{
-		"notify.worker": map[string]string{"re": fixture.targetUID},
+	result, err := fixture.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: fixture.source.ID, Actor: "worker",
+		Patch: map[string]jsontext.Value{"notify.worker": jsontext.Value(fmt.Sprintf(`{"re":%q}`, fixture.targetUID))},
 	})
 	require.NoError(t, err)
 
-	visible, err := notificationEventStillVisible(context.Background(), fixture.store, db.Event{
-		Type: "issue.metadata_updated", Payload: string(payload),
-	})
+	visible, err := notificationEventStillVisible(context.Background(), fixture.store, result.Event)
 	require.NoError(t, err)
 	require.True(t, visible, "unscoped streams keep notification events visible")
+}
+
+func TestNotificationStreamRechecksMovedProjectTarget(t *testing.T) {
+	fixture := newLateReplyTargetFixture(t)
+	result, err := fixture.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: fixture.source.ID, Actor: "worker",
+		Patch: map[string]jsontext.Value{"notify.worker": jsontext.Value(fmt.Sprintf(`{"re":%q,"message":"Target context"}`, fixture.targetUID))},
+	})
+	require.NoError(t, err)
+	ctx := db.WithAuthorizedProjects(t.Context(), []string{fixture.project.UID})
+	projected, err := projectNotificationEventPayload(ctx, fixture.store, result.Event)
+	require.NoError(t, err)
+	result.Event.Payload = string(projected)
+	response := httptest.NewRecorder()
+	require.True(t, writeRevalidatedEventFrame(ctx, fixture.store, response, response, result.Event))
+	require.Contains(t, response.Body.String(), fixture.targetUID)
+
+	ids, err := fixture.store.CommentIssueIDsByUIDs(t.Context(), []string{fixture.targetUID})
+	require.NoError(t, err)
+	target, err := fixture.store.IssueByID(t.Context(), ids[fixture.targetUID])
+	require.NoError(t, err)
+	hidden, err := fixture.store.CreateProject(t.Context(), "restricted-project")
+	require.NoError(t, err)
+	_, err = fixture.store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: target.ID,
+		FromProjectID: target.ProjectID, ToProjectID: hidden.ID, IfMatchRev: target.Revision, Actor: "admin"})
+	require.NoError(t, err)
+
+	response = httptest.NewRecorder()
+	require.False(t, writeRevalidatedEventFrame(ctx, fixture.store, response, response, result.Event))
+	require.Contains(t, response.Body.String(), "sync.reset_required")
+	require.NotContains(t, response.Body.String(), fixture.targetUID)
+	require.NotContains(t, response.Body.String(), "Target context")
 }
 
 func FuzzNotificationStreamReferences(f *testing.F) {

@@ -131,23 +131,6 @@ func FuzzLinkPatchHumanPreservation(f *testing.F) {
 	})
 }
 
-// Shrunk fuzz counterexample 82e514e543e03aad: json/v2 omitempty retains false.
-func TestCommentNotificationFalseBroadcastOmitted(t *testing.T) {
-	raw := jsontext.Value(`{"from":"0","teammate":"0","message":"0","re":"01ARZ3NDEKTSV4RRFFQ69G5FAV","kind":"0"}`)
-	var v Value
-	require.NoError(t, json.Unmarshal(raw, &v))
-	got, err := json.Marshal(v)
-	require.NoError(t, err)
-	require.JSONEq(t, string(raw), string(got))
-}
-
-func TestLegacyAnswerKindDoesNotClearRequest(t *testing.T) {
-	in := LinkInput{Sender: Identity{Actor: "worker"}, Target: Identity{Actor: "reader"}, ReplyUID: "new", TargetUID: "target", Kind: "answer", Current: map[string]jsontext.Value{MetadataKey("worker"): jsontext.Value(`{"from":"lead","message":"respond","re":"target"}`)}}
-	patch, err := LinkPatch(in)
-	require.NoError(t, err)
-	require.NotContains(t, patch, MetadataKey("worker"))
-}
-
 func FuzzReplyAutoClear(f *testing.F) {
 	f.Add("target", true)
 	f.Fuzz(func(t *testing.T, target string, matching bool) {

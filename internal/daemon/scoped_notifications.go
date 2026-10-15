@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -18,7 +19,7 @@ import (
 func scopedNotificationTransformer(store db.Storage) func(huma.Context, string, any) (any, error) {
 	return func(hctx huma.Context, _ string, value any) (any, error) {
 		ctx := hctx.Context()
-		if issueScopeFromContext(ctx) == nil {
+		if !notificationReadRestricted(ctx) {
 			return value, nil
 		}
 		raw, err := json.Marshal(value)
@@ -31,6 +32,22 @@ func scopedNotificationTransformer(store db.Storage) func(huma.Context, string, 
 		}
 		return projected, nil
 	}
+}
+
+func notificationReadRestricted(ctx context.Context) bool {
+	_, projectRestricted := db.AuthorizedProjects(ctx)
+	return issueScopeFromContext(ctx) != nil || projectRestricted || hostAccessGoverns(ctx)
+}
+
+func notificationIssueReadable(ctx context.Context, store db.Storage, issueID int64) (bool, error) {
+	issue, err := store.IssueByID(ctx, issueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return notificationProjectReadable(ctx, issue.ProjectID)
 }
 
 func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext.Value) (jsontext.Value, error) {
@@ -55,7 +72,7 @@ func projectNotificationJSONWithWalker(
 	raw jsontext.Value,
 	walk notificationJSONWalker,
 ) (jsontext.Value, error) {
-	if issueScopeFromContext(ctx) == nil {
+	if !notificationReadRestricted(ctx) {
 		return raw, nil
 	}
 	uids := map[string]bool{}
@@ -79,17 +96,29 @@ func projectNotificationJSONWithWalker(
 	if err != nil {
 		return nil, err
 	}
-	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, store)
 	if err != nil {
 		return nil, err
 	}
+	readable := make(map[int64]bool)
 	return walk(raw, func(slot jsontext.Value) (bool, error) {
 		for _, uid := range notificationReferences(slot) {
 			id, ok := ids[uid]
 			if !ok {
 				return false, nil
 			}
-			if _, ok := allowed[id]; !ok {
+			if _, ok := allowed[id]; scoped && !ok {
+				return false, nil
+			}
+			visible, known := readable[id]
+			if !known {
+				visible, err = notificationIssueReadable(ctx, store, id)
+				if err != nil {
+					return false, err
+				}
+				readable[id] = visible
+			}
+			if !visible {
 				return false, nil
 			}
 			db.RecordIssueScopeTarget(ctx, id)
@@ -267,8 +296,7 @@ func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep fun
 // Stream frames recheck notification targets after page projection, immediately
 // before release. Membership read during projection is only a snapshot.
 func notificationEventStillVisible(ctx context.Context, store db.Storage, event db.Event) (bool, error) {
-	scope := issueScopeFromContext(ctx)
-	if scope == nil {
+	if !notificationReadRestricted(ctx) {
 		return true, nil
 	}
 	var uids []string
@@ -294,9 +322,16 @@ func notificationEventStillVisible(ctx context.Context, store db.Storage, event 
 			return false, nil
 		}
 		if !seen[id] {
+			readable, err := notificationIssueReadable(ctx, store, id)
+			if err != nil || !readable {
+				return false, err
+			}
 			seen[id] = true
 			ids = append(ids, id)
 		}
 	}
-	return store.IssueInScope(ctx, *scope, ids...)
+	if scope := issueScopeFromContext(ctx); scope != nil {
+		return store.IssueInScope(ctx, *scope, ids...)
+	}
+	return true, nil
 }

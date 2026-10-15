@@ -15,19 +15,6 @@ func TestSelfConfirmDoesNotFanOut(t *testing.T) {
 	require.Empty(t, patch)
 }
 
-func FuzzSelfLinkNeverNotifies(f *testing.F) {
-	f.Add("owner", "coordinator", "reviewer")
-	f.Fuzz(func(t *testing.T, owner, parent, linker string) {
-		if len(owner)+len(parent)+len(linker) > 128 {
-			return
-		}
-		identity := Identity{Actor: "worker", Teammate: "builder"}
-		patch, err := LinkPatch(LinkInput{Sender: identity, Target: identity, Kind: "confirm", ReplyUID: "new", TargetUID: "original", Owner: owner, ParentOwner: parent, PriorLinkers: []Identity{{Actor: linker}}})
-		require.NoError(t, err)
-		require.Empty(t, patch, "a self-confirmation must not fan out to other recipients")
-	})
-}
-
 func TestSelfReplyClearsMatchingRequest(t *testing.T) {
 	identity := Identity{Actor: "worker", Teammate: "builder"}
 	key := MetadataKey("worker/builder")

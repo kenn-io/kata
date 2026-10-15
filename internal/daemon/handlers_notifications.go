@@ -91,17 +91,16 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, err
 				}
-				if allowed != nil {
+				if notificationReadRestricted(ctx) {
 					for index := range records {
 						if records[index].Re == "" {
 							continue
 						}
-						err := notificationCommentTx(ctx, tx, current, records[index].Re, allowed)
-						if errors.Is(err, db.ErrNotFound) {
-							records[index].Hidden = true
-						} else if err != nil {
+						visible, err := notificationHistoryVisibleTx(ctx, tx, records[index].Re, allowed)
+						if err != nil {
 							return nil, err
 						}
+						records[index].Hidden = !visible
 					}
 				}
 				if limited := notification.CheckBroadcastRate(records, notification.Address(mutationActor, tm), in.Body.Message, time.Now().UTC()); limited != nil {

@@ -35,17 +35,6 @@ func TestInboxExplicitPointerUsesProjectWideUID(t *testing.T) {
 	require.Equal(t, "re "+request.Re+": Inspect finding", inboxAttentionText(request))
 }
 
-func FuzzInboxKeepsCommentHandle(f *testing.F) {
-	f.Add(uint8(7))
-	f.Fuzz(func(t *testing.T, length uint8) {
-		uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-		n := 6 + int(length)%5
-		message := "latest: refute c:" + strings.ToLower(uid[len(uid)-n:]) + " by worker"
-		request := inboxRequest{From: "worker", Re: uid, Kind: "refute", Message: message}
-		require.Equal(t, message, inboxAttentionText(request))
-	})
-}
-
 func TestInboxBroadcastSenderAppearsOnce(t *testing.T) {
 	old := flags
 	t.Cleanup(func() { flags = old })

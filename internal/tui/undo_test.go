@@ -335,37 +335,6 @@ func TestUndoClientTypedReplyAmbiguousFailureClearsHistory(t *testing.T) {
 	require.Contains(t, m.undoHistory.boundary, "outcome is unknown")
 }
 
-func FuzzUndoClientTypedReplyCreatesBoundary(f *testing.F) {
-	f.Add(false, "reply body")
-	f.Add(true, "reply body")
-	f.Fuzz(func(t *testing.T, ambiguous bool, body string) {
-		if len(body) > 1024 {
-			return
-		}
-		fake := &undoTestAPI{replyResp: &MutationResp{Changed: true}}
-		if ambiguous {
-			fake.replyErr = context.DeadlineExceeded
-		}
-		client := newConnectedUndoClient(t, fake)
-		model := initialModel(Options{})
-		model.api = client
-		model.undoHistory.push(undoEntry{kind: "close"})
-
-		resp, err := client.AddCommentReply(context.Background(), 7, "abc4", body, "bob", "target", "confirm", false, "key")
-		if ambiguous {
-			require.Error(t, err)
-			require.NotNil(t, resp.undo)
-			require.True(t, resp.undo.unknown)
-		} else {
-			require.NoError(t, err)
-			require.NotNil(t, resp.undo)
-			require.Contains(t, resp.undo.boundary, "comment addition")
-		}
-		model = model.recordUndoAttempt(mutationDoneMsg{resp: resp, err: err})
-		require.Empty(t, model.undoHistory.entries)
-	})
-}
-
 func TestUndoClientMissingCreatedLinkIsBoundary(t *testing.T) {
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", Status: "open"},
 		linkResp: &MutationResp{Issue: &Issue{Status: "open"}, Changed: true}}

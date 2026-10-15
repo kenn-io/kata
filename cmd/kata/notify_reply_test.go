@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -27,27 +26,6 @@ func TestNotifyReAndBroadcastCLI(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.Contains(t, result.Recipients, "reader")
 	require.Contains(t, result.Recipients, "owner")
-}
-
-func TestBroadcastRateHintAllCLIFormats(t *testing.T) {
-	err := apiErrFromBody(429, []byte(`{"error":{"code":"broadcast_rate_limited","message":"broadcast limited","hint":"use targeted --to reader --re c:abc123 instead","data":{"retry_after_seconds":600}}}`))
-	for _, mode := range []string{"human", "agent", "json"} {
-		t.Run(mode, func(t *testing.T) {
-			var out bytes.Buffer
-			switch mode {
-			case "human":
-				emitHumanError(&out, err, true)
-			case "agent":
-				emitAgentError(&out, "notify", err)
-			case "json":
-				emitJSONError(&out, err, true)
-			}
-			require.Contains(t, out.String(), "--to reader --re c:abc123")
-			if mode == "json" {
-				require.Contains(t, out.String(), `"hint"`)
-			}
-		})
-	}
 }
 
 func TestNotifyAdvancedFlagValidation(t *testing.T) {

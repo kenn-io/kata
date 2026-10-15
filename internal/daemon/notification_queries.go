@@ -84,6 +84,29 @@ func notificationCommentTx(ctx context.Context, tx *sql.Tx, issue db.Issue, uid 
 	return nil
 }
 
+// Historical pointers follow the comment's current project, even when it is
+// different from the notification's source project.
+func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, allowed map[int64]bool) (bool, error) {
+	var issueID, projectID int64
+	err := tx.QueryRowContext(ctx, `SELECT c.issue_id, i.project_id FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.uid=$1 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, uid).Scan(&issueID, &projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !notificationIssueAllowed(allowed, issueID) {
+		return false, nil
+	}
+	readable, err := notificationProjectReadable(ctx, projectID)
+	if err != nil || !readable {
+		return false, err
+	}
+	db.RecordIssueScopeTarget(ctx, issueID)
+	db.RecordExposedIssue(ctx, issueID)
+	return true, nil
+}
+
 // Discovery reads other projects without widening the source mutation's host
 // authority. A denied project contributes no recipient identities.
 func notificationProjectReadable(ctx context.Context, projectID int64) (bool, error) {
