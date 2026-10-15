@@ -19,7 +19,7 @@ import (
 func scopedNotificationTransformer(store db.Storage) func(huma.Context, string, any) (any, error) {
 	return func(hctx huma.Context, _ string, value any) (any, error) {
 		ctx := hctx.Context()
-		if !notificationReadRestricted(ctx) {
+		if !notificationReadRestricted(ctx) || federationReplicationOperation(hctx.Operation()) {
 			return value, nil
 		}
 		raw, err := json.Marshal(value)
@@ -31,6 +31,23 @@ func scopedNotificationTransformer(store db.Storage) func(huma.Context, string, 
 			return nil, err
 		}
 		return projected, nil
+	}
+}
+
+// federationReplicationOperation reports routes that serve replicated events
+// and project state to a federation peer. The peer is authorized for the whole
+// project and checks each payload against its content hash, so the payloads
+// must leave verbatim.
+func federationReplicationOperation(operation *huma.Operation) bool {
+	if operation == nil {
+		return false
+	}
+	switch operation.OperationID {
+	case "pollFederationProjectEvents", "getFederationProjectMetadata",
+		"offerRelayDeliveries", "getRelayReset":
+		return true
+	default:
+		return false
 	}
 }
 
