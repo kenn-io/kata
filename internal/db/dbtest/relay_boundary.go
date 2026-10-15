@@ -197,8 +197,10 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	uidTarget, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "UID evidence target"})
 	require.NoError(t, err)
-	shortTarget, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "Short ID evidence target"})
+	// This short ID also occurs in the JSON field name created_at.
+	shortTarget, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, UID: "0000000000000000000000CREA", Author: "member", Title: "Short ID evidence target"})
 	require.NoError(t, err)
+	require.Equal(t, "crea", shortTarget.ShortID)
 	uidSource, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "UID evidence source"})
 	require.NoError(t, err)
 	shortSource, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: evidenceProject.ID, Author: "member", Title: "Short ID evidence source"})
@@ -248,7 +250,14 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 			require.NoError(t, err)
 			require.NotContains(t, string(source.Payload), uidTarget.UID, "reset cannot disclose a UID evidence target from another project")
 			require.NotContains(t, string(source.Payload), shortTarget.UID, "reset cannot disclose a short-ID evidence target from another project")
-			require.NotContains(t, string(source.Payload), shortTarget.ShortID, "reset cannot disclose a short-ID evidence reference from another project")
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			require.NoError(t, json.Unmarshal(source.Payload, &payload))
+			for _, evidence := range payload.Evidence {
+				require.NotEqual(t, shortTarget.ShortID, evidence.IssueRef, "reset cannot disclose a short-ID evidence reference from another project")
+				require.NotEqual(t, restrictedProject.Name+"#"+shortTarget.ShortID, evidence.IssueRef, "reset cannot disclose a qualified evidence reference from another project")
+			}
 		}
 	}
 }
