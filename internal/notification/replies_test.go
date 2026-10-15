@@ -47,7 +47,7 @@ func FuzzCommentNotificationRoundTrip(f *testing.F) {
 	})
 }
 
-func TestLinkPatchRecipientsAndClearing(t *testing.T) {
+func TestLinkPatchRecipients(t *testing.T) {
 	for _, kind := range []string{"reply", "confirm", "refute", "supersede"} {
 		t.Run(kind, func(t *testing.T) {
 			in := LinkInput{Sender: Identity{Actor: "worker", Teammate: "builder"}, Target: Identity{Actor: "reviewer", Teammate: "reader"}, ReplyUID: "new-reply", TargetUID: "old-finding", Kind: kind, Owner: "owner", ParentOwner: "lead", Current: map[string]jsontext.Value{MetadataKey("worker/builder"): jsontext.Value(`{"from":"lead","message":"respond","re":"old-finding"}`)}}
@@ -57,11 +57,7 @@ func TestLinkPatchRecipientsAndClearing(t *testing.T) {
 			require.NoError(t, json.Unmarshal(patch[MetadataKey("reviewer/reader")], &got))
 			require.Equal(t, "new-reply", got.Re)
 			require.Equal(t, kind, got.Kind)
-			if kind == "reply" {
-				require.Equal(t, "null", string(patch[MetadataKey("worker/builder")]))
-			} else {
-				require.NotContains(t, patch, MetadataKey("worker/builder"))
-			}
+			require.NotContains(t, patch, MetadataKey("worker/builder"), "SettlePatch owns the sender's request")
 			if kind == "confirm" {
 				require.Contains(t, patch, MetadataKey("owner"))
 				require.Contains(t, patch, MetadataKey("lead"))
@@ -78,7 +74,11 @@ func TestLinkPatchHumanSelfAndLatest(t *testing.T) {
 	p, e := LinkPatch(in)
 	require.NoError(t, e)
 	require.Empty(t, p)
-	in.Current[MetadataKey("reader")] = jsontext.Value(`{"from":"lead","message":"link","re":"old"}`)
+	in.Current[MetadataKey("reader")] = jsontext.Value(`{"from":"lead","message":"request","re":"old"}`)
+	p, e = LinkPatch(in)
+	require.NoError(t, e)
+	require.Empty(t, p, "a request that names a comment is still a request")
+	in.Current[MetadataKey("reader")] = jsontext.Value(`{"from":"lead","message":"link","re":"old","kind":"reply"}`)
 	p, e = LinkPatch(in)
 	require.NoError(t, e)
 	require.Contains(t, p, MetadataKey("reader"))
@@ -131,9 +131,10 @@ func FuzzLinkPatchHumanPreservation(f *testing.F) {
 	})
 }
 
-func FuzzReplyAutoClear(f *testing.F) {
-	f.Add("target", true)
-	f.Fuzz(func(t *testing.T, target string, matching bool) {
+func FuzzSettlePatchClearsMatchingRequest(f *testing.F) {
+	f.Add("target", true, uint8(0))
+	f.Add("target", false, uint8(1))
+	f.Fuzz(func(t *testing.T, target string, matching bool, kindIndex uint8) {
 		if target == "" || len(target) > 128 {
 			return
 		}
@@ -145,12 +146,35 @@ func FuzzReplyAutoClear(f *testing.F) {
 		if err != nil {
 			return
 		}
-		patch, err := LinkPatch(LinkInput{Sender: Identity{Actor: "worker"}, Target: Identity{Actor: "reader"}, ReplyUID: "new", TargetUID: target, Kind: "reply", Current: map[string]jsontext.Value{MetadataKey("worker"): raw}})
+		kinds := [...]string{"reply", "confirm", "refute", "supersede"}
+		sender := Identity{Actor: "worker"}
+		link, err := LinkValue(sender, "new", kinds[int(kindIndex)%len(kinds)])
 		require.NoError(t, err)
+		patch := SettlePatch(map[string]jsontext.Value{MetadataKey("worker"): raw}, sender, target, link)
 		if matching {
 			require.Equal(t, "null", string(patch[MetadataKey("worker")]))
+			require.Equal(t, string(link), string(patch[MetadataKey("lead")]))
 		} else {
-			require.NotContains(t, patch, MetadataKey("worker"))
+			require.Empty(t, patch)
 		}
 	})
+}
+
+func TestSettlePatchPreservesRequestsAndSkipsNotices(t *testing.T) {
+	sender := Identity{Actor: "worker", Teammate: "builder"}
+	link, err := LinkValue(sender, "new", "confirm")
+	require.NoError(t, err)
+	key := MetadataKey("worker/builder")
+	request := jsontext.Value(`{"from":"lead","teammate":"plan","message":"respond","re":"original"}`)
+
+	patch := SettlePatch(map[string]jsontext.Value{key: request, MetadataKey("lead/plan"): jsontext.Value(`{"from":"other","message":"human"}`)}, sender, "original", link)
+	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch, "the requester's own request is preserved")
+
+	notice := jsontext.Value(`{"from":"lead","message":"latest: reply","re":"original","kind":"reply"}`)
+	patch = SettlePatch(map[string]jsontext.Value{key: notice}, sender, "original", link)
+	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch, "answering a reply notice tells nobody")
+
+	selfRequest := jsontext.Value(`{"from":"worker","teammate":"builder","message":"note to self","re":"original"}`)
+	patch = SettlePatch(map[string]jsontext.Value{key: selfRequest}, sender, "original", link)
+	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch)
 }

@@ -28,8 +28,9 @@ func newNotifyCmd() *cobra.Command {
 		Long: `Put a request in the recipient's inbox. --to takes an address: <actor> or
 <actor>/<teammate>. --message is required unless --clear. One request per
 issue and recipient; a new one replaces the old. Clear it after handling.
---re <comment> asks the recipient to answer that comment; their reply with
-comment --reply clears the request, and wait --until reply wakes you.
+--re <comment> asks the recipient to answer that comment. Their answer with
+comment --reply, --confirm, --refute, or --supersede clears the request and
+tells you on this issue, so wait --until reply here wakes.
 --broadcast replaces --to: it asks this issue's participants and those of
 its open children (at most 50); --teammates adds their teammate inboxes.`,
 		Example: `  kata notify abc4 --to coordinator --message "Need a decision on the schema" --agent

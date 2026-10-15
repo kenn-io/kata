@@ -57,9 +57,10 @@ and prints qualified refs. --context emits bounded context for a harness.
 --context conflicts with --agent, --json, or --format; omit output selectors.
 Reading does not clear a request; clear it with kata notify --clear.
 
-A row with re=<comment> asks you to answer that comment; answering with
-comment --reply <comment> on that issue clears it. A row with kind= reports
-a reply to one of your comments; broadcast=true marks a notify --broadcast.`,
+A row with re=<comment> asks you to answer that comment; answering it with
+comment --reply, --confirm, --refute, or --supersede clears it. A row with
+kind= reports a reply to one of your comments or an answer to your request;
+broadcast=true marks a notify --broadcast.`,
 		Example: `  kata inbox --for coordinator/teammate-1 --agent
   kata inbox --for coordinator --all --agent
   kata inbox --for coordinator/teammate-1 --context`,

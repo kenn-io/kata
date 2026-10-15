@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 )
 
 // Identity names one exact actor inbox, optionally narrowed to a teammate.
@@ -21,31 +22,35 @@ func Address(actor, teammate string) string {
 // PriorLinkers are newest first. PendingTargets maps recipients to the target
 // of the comment currently referenced in their slot.
 type LinkInput struct {
-	Sender, Target                                             Identity
-	ReplyUID, ReplyHandle, TargetUID, Kind, Owner, ParentOwner string
-	PriorLinkers                                               []Identity
-	Current                                                    map[string]jsontext.Value
-	PendingTargets                                             map[string]string
+	Sender, Target                                Identity
+	ReplyUID, TargetUID, Kind, Owner, ParentOwner string
+	PriorLinkers                                  []Identity
+	Current                                       map[string]jsontext.Value
+	PendingTargets                                map[string]string
+}
+
+// LinkValue is the slot value that reports one typed reply. The message names
+// the reply by its shortest possible handle; inbox resolves the current handle
+// from Re when it lists the slot.
+func LinkValue(sender Identity, replyUID, kind string) (jsontext.Value, error) {
+	handle := strings.ToLower(replyUID)
+	if len(handle) > 6 {
+		handle = handle[len(handle)-6:]
+	}
+	return json.Marshal(Value{
+		From: sender.Actor, Teammate: sender.Teammate, Re: replyUID, Kind: kind,
+		Message: fmt.Sprintf("latest: %s c:%s by %s", kind, handle, Address(sender.Actor, sender.Teammate)),
+	})
 }
 
 // LinkPatch computes one explicit metadata patch. Replay never calls it.
 func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 	patch := map[string]jsontext.Value{}
 	sender := Address(in.Sender.Actor, in.Sender.Teammate)
-	if in.Kind == "reply" {
-		var pending Value
-		if json.Unmarshal(in.Current[MetadataKey(sender)], &pending) == nil && pending.Re != "" && pending.Re == in.TargetUID {
-			patch[MetadataKey(sender)] = jsontext.Value("null")
-		}
-	}
 	if in.Sender == in.Target {
 		return patch, nil
 	}
-	handle := in.ReplyHandle
-	if handle == "" {
-		handle = "c:" + commentSuffix(in.ReplyUID)
-	}
-	value, err := json.Marshal(Value{From: in.Sender.Actor, Teammate: in.Sender.Teammate, Message: fmt.Sprintf("latest: %s %s by %s", in.Kind, handle, sender), Re: in.ReplyUID, Kind: in.Kind})
+	value, err := LinkValue(in.Sender, in.ReplyUID, in.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +78,8 @@ func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 			continue
 		}
 		key := MetadataKey(recipient)
-		if raw, ok := in.Current[key]; ok && string(raw) != "null" {
-			var pending Value
-			// Malformed values are also preserved: do not silently destroy requests.
-			if json.Unmarshal(raw, &pending) != nil || pending.Re == "" {
-				continue
-			}
+		if !linkSlotWritable(in.Current, key) {
+			continue
 		}
 		if in.Kind == "confirm" && in.PendingTargets[recipient] == in.TargetUID {
 			continue
@@ -88,9 +89,45 @@ func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 	return patch, nil
 }
 
-func commentSuffix(uid string) string {
-	if len(uid) > 6 {
-		uid = uid[len(uid)-6:]
+// SettlePatch answers the sender's request in one issue's slots. Any typed
+// reply to the comment a request names settles that request. The requester
+// then learns of the answer on the issue where they asked, which is where
+// kata wait --until reply watches. Replay never calls it.
+func SettlePatch(slots map[string]jsontext.Value, sender Identity, answeredUID string, link jsontext.Value) map[string]jsontext.Value {
+	patch := map[string]jsontext.Value{}
+	senderAddress := Address(sender.Actor, sender.Teammate)
+	key := MetadataKey(senderAddress)
+	var request Value
+	if json.Unmarshal(slots[key], &request) != nil || request.Re == "" || request.Re != answeredUID {
+		return patch
 	}
-	return uid
+	patch[key] = jsontext.Value("null")
+	// A slot with a kind reports an earlier reply; nobody is waiting on it.
+	if request.Kind != "" || request.From == "" {
+		return patch
+	}
+	requester := Address(request.From, request.Teammate)
+	if requester == senderAddress {
+		return patch
+	}
+	if _, err := NormalizeRecipient(requester); err != nil {
+		return patch
+	}
+	if requesterKey := MetadataKey(requester); linkSlotWritable(slots, requesterKey) {
+		patch[requesterKey] = link
+	}
+	return patch
+}
+
+// linkSlotWritable reports whether a reply notice may replace a slot. Only an
+// earlier reply notice, which always has a kind, is replaced. Requests, with
+// or without a comment reference, and malformed values are preserved: do not
+// silently destroy them.
+func linkSlotWritable(slots map[string]jsontext.Value, key string) bool {
+	raw, ok := slots[key]
+	if !ok || string(raw) == "null" {
+		return true
+	}
+	var pending Value
+	return json.Unmarshal(raw, &pending) == nil && pending.Kind != ""
 }

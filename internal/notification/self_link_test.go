@@ -15,10 +15,16 @@ func TestSelfConfirmDoesNotFanOut(t *testing.T) {
 	require.Empty(t, patch)
 }
 
+// Answering your own comment still settles a request about it.
 func TestSelfReplyClearsMatchingRequest(t *testing.T) {
 	identity := Identity{Actor: "worker", Teammate: "builder"}
 	key := MetadataKey("worker/builder")
-	patch, err := LinkPatch(LinkInput{Sender: identity, Target: identity, Kind: "reply", ReplyUID: "new", TargetUID: "original", Current: map[string]jsontext.Value{key: jsontext.Value(`{"from":"lead","message":"respond","re":"original"}`)}})
+	slots := map[string]jsontext.Value{key: jsontext.Value(`{"from":"lead","message":"respond","re":"original"}`)}
+	patch, err := LinkPatch(LinkInput{Sender: identity, Target: identity, Kind: "reply", ReplyUID: "new", TargetUID: "original", Current: slots})
 	require.NoError(t, err)
-	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch)
+	require.Empty(t, patch)
+	link, err := LinkValue(identity, "new", "reply")
+	require.NoError(t, err)
+	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null"), MetadataKey("lead"): link},
+		SettlePatch(slots, identity, "original", link))
 }

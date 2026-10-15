@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -58,4 +59,41 @@ func TestNotifyReplyClearsMatchingRequest(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(current.Metadata), notificationMetadataKey("reader/review"))
 	require.Contains(t, string(current.Metadata), "Keep this human request")
+}
+
+// Any typed answer to the requested comment settles the request and tells
+// the requester, on the issue where they asked, even when the comment has
+// another author and the answer is posted on a different issue.
+func TestNotifyTypedAnswerSettlesRequestAndNotifiesRequester(t *testing.T) {
+	for _, tc := range []struct{ kind, flag string }{
+		{"reply", "--reply"}, {"confirm", "--confirm"}, {"refute", "--refute"},
+	} {
+		for _, elsewhere := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/elsewhere=%t", tc.kind, elsewhere), func(t *testing.T) {
+				env, dir, pid := setupCLIWorkspace(t)
+				issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Finding", Author: "coordinator"})
+				require.NoError(t, err)
+				target, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Finding"})
+				require.NoError(t, err)
+				answerIssue := issue
+				if elsewhere {
+					answerIssue, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Follow-up", Author: "worker"})
+					require.NoError(t, err)
+				}
+				runCLIAs(t, env, dir, "coordinator", "notify", issue.ShortID, "--to", "worker", "--re", target.UID, "--message", "Please confirm or refute this finding")
+				runCLIAs(t, env, dir, "worker", "comment", answerIssue.ShortID, tc.flag, target.UID, "--body", "I reproduced the finding with the exact steps listed in the report above.")
+
+				current, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				var slots map[string]notificationValue
+				require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
+				require.NotContains(t, slots, notificationMetadataKey("worker"), "the answer settles the request")
+				answered, ok := slots[notificationMetadataKey("coordinator")]
+				require.True(t, ok, "the requester learns the request was answered: %s", current.Metadata)
+				require.Equal(t, "worker", answered.From)
+				require.Equal(t, tc.kind, answered.Kind)
+				require.NotEmpty(t, answered.Re)
+			})
+		}
+	}
 }
