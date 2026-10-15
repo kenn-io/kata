@@ -228,3 +228,49 @@ func testForgejoConnectorProcessBridgeLoop(t *testing.T, publish bool) {
 	_, err = service.MapField(t.Context(), rootbridge.MapFieldParams{ConnectorInstance: "forgejo-example", KataField: "deadline_on", ExternalField: "due_date"})
 	require.Error(t, err)
 }
+
+// A Forgejo server whose clock runs ahead of the daemon stamps updated_at
+// later than the daemon's own observation time.
+func TestForgejoConnectorProcessBridgeAcceptsProviderClockAhead(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("FORGEJO_TEST_PROCESS", "1")
+	t.Setenv("FORGEJO_PROCESS_VALUE", "example-token")
+	f := &forgejoBridgeProvider{state: "open", title: "External title", body: "External body", comments: []map[string]any{}, stamp: time.Now().UTC().Add(5 * time.Minute)}
+	provider := httptest.NewServer(http.HandlerFunc(f.serve))
+	defer provider.Close()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	registry, err := rootbridge.NewRegistry(t.Context(), []config.ConnectorConfig{{
+		ID: "forgejo-example", Command: executable, Args: []string{"-test.run=^TestForgejoRPCProcess$"},
+		Env:      map[string]string{"FORGEJO_TEST_PROCESS": "FORGEJO_TEST_PROCESS", "FORGEJO_TOKEN": "FORGEJO_PROCESS_VALUE"},
+		Settings: map[string]any{"origin": provider.URL},
+	}}, nil)
+	require.NoError(t, err)
+	_, err = registry.Refresh(t.Context(), "forgejo-example")
+	require.NoError(t, err)
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "example.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Local title", Author: "operator"})
+	require.NoError(t, err)
+	reconciler := rootbridge.NewReconciler(store, registry, rootbridge.ReconcilerConfig{})
+	service := rootbridge.NewService(store, registry, func(ctx context.Context, id int64, token string) ([]db.Event, error) {
+		result, err := reconciler.Run(ctx, id, rootbridge.RunOptions{ClaimToken: token})
+		return result.Events, err
+	})
+	binding, _, err := service.Bind(t.Context(), rootbridge.BindParams{ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "forgejo-example", Locator: "example-owner/example-repo#42", Actor: "operator"})
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssue(t.Context(), issue.ID, "done", "verifier", "Verified external root completion", []db.Evidence{{Type: "test", Command: "go test ./cmd/kata -run TestForgejoConnectorProcessBridgeAcceptsProviderClockAhead"}})
+	require.NoError(t, err)
+	_, err = reconciler.Run(t.Context(), binding.ID, rootbridge.RunOptions{Manual: true})
+	require.NoError(t, err)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	assert.Equal(t, "closed", f.state)
+}

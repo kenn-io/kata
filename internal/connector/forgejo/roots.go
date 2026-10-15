@@ -115,12 +115,15 @@ func (c *client) root(i *forgejosdk.Issue) connector.Root {
 	if i.State == forgejosdk.StateClosed {
 		state = "complete"
 	}
-	root := connector.Root{Key: id(i.Repository.ID) + "#" + id(i.Index) + "@" + id(i.ID), IdentityKey: c.origin, Title: i.Title, Body: i.Body, State: state, UpdatedAt: i.Updated, ObservedAt: time.Now().UTC()}
+	root := connector.Root{Key: id(i.Repository.ID) + "#" + id(i.Index) + "@" + id(i.ID), IdentityKey: c.origin, Title: i.Title, Body: i.Body, State: state, UpdatedAt: i.Updated}
 	root.Fields, _ = fieldValues(i)
-	observed := root.ObservedAt
-	root.ObservedAt = time.Time{}
 	root.Revision = digest(root)
-	root.ObservedAt = observed
+	// Forgejo stamps updated_at with its own clock, which can run ahead of
+	// ours. An observation cannot predate the update it observed.
+	root.ObservedAt = time.Now().UTC()
+	if root.ObservedAt.Before(i.Updated) {
+		root.ObservedAt = i.Updated
+	}
 	return root
 }
 func (h *handler) ResolveRoot(ctx context.Context, p connector.ResolveRootParams) (connector.Root, *connector.Error) {
