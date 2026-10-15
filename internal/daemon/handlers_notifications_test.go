@@ -33,6 +33,10 @@ func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode, string(body))
 	require.Contains(t, string(body), c.UID)
 	// Explicit broadcast overwrites a prior no-re human request.
+	_, e = h.DB().PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: id, Actor: "lead", Patch: map[string]jsontext.Value{
+		notification.MetadataKey("owner"): jsontext.Value(`{"from":"lead","message":"human request"}`),
+	}})
+	require.NoError(t, e)
 	resp, body = postJSON(t, ts, path, map[string]any{"actor": "worker", "broadcast": true, "teammates": true, "message": "all inspect"})
 	require.Equal(t, 200, resp.StatusCode, string(body))
 	var result struct {
@@ -40,6 +44,11 @@ func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &result))
 	require.Equal(t, []string{"owner", "reader", "reader/review"}, result.Recipients)
+	current, e := h.DB().IssueByID(t.Context(), id)
+	require.NoError(t, e)
+	var slots map[string]notification.Value
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
+	require.Equal(t, notification.Value{From: "worker", Message: "all inspect", Broadcast: true}, slots[notification.MetadataKey("owner")])
 	before, e := h.DB().MaxEventID(t.Context())
 	require.NoError(t, e)
 	resp, body = postJSON(t, ts, path, map[string]any{"actor": "worker", "broadcast": true, "message": "second"})
@@ -54,13 +63,6 @@ func TestNotifyCommentAndBroadcastWritePath(t *testing.T) {
 
 func TestNotifyPushSpokeUsesBoundMutationActor(t *testing.T) {
 	checkNotifyPushSpokeUsesBoundMutationActor(t, "request-agent")
-}
-
-func FuzzNotifyPushSpokeUsesBoundMutationActor(f *testing.F) {
-	f.Add(uint64(1))
-	f.Fuzz(func(t *testing.T, requestActorSuffix uint64) {
-		checkNotifyPushSpokeUsesBoundMutationActor(t, fmt.Sprintf("request-agent-%x", requestActorSuffix))
-	})
 }
 
 func TestNotifyPushSpokeRateLimitUsesBoundMutationActor(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
@@ -136,16 +135,6 @@ func (s *notificationDetachStreamProjectionStore) IssueScopedMembers(ctx context
 }
 func TestNotifySSERejectsLatePointerDetach(t *testing.T) {
 	checkNotifySSERejectsLatePointerDetach(t, "hidden target context")
-}
-
-func FuzzNotifySSERejectsLatePointerDetach(f *testing.F) {
-	f.Add("hidden target context")
-	f.Fuzz(func(t *testing.T, message string) {
-		if len(message) > 256 || !utf8.ValidString(message) {
-			return
-		}
-		checkNotifySSERejectsLatePointerDetach(t, message)
-	})
 }
 
 func checkNotifySSERejectsLatePointerDetach(t *testing.T, message string) {

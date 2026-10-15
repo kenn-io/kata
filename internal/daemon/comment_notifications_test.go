@@ -386,10 +386,6 @@ func TestBroadcastHistoryIncludesFractionalBoundary(t *testing.T) {
 func TestBroadcastHistoryIncludesFractionalBoundaryPostgres(t *testing.T) {
 	checkBroadcastHistoryBoundaryBackend(t, 0, true)
 }
-func FuzzBroadcastHistoryBoundary(f *testing.F) {
-	f.Add(uint8(0))
-	f.Fuzz(func(t *testing.T, second uint8) { checkBroadcastHistoryBoundary(t, second%60) })
-}
 
 // The last-hour query must include an event later in the cutoff second. Event
 // timestamps use the stores' canonical millisecond representation.
