@@ -775,16 +775,27 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(runtimePath)
-		return err == nil
-	}, 3*time.Second, 10*time.Millisecond)
-
-	body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
-	require.NoError(t, err)
+	// The file can exist before the daemon finishes writing it, and Windows
+	// refuses to open a file another process still holds. Wait for a complete
+	// record rather than for the path alone.
 	var got daemonRuntimeRecordJSON
-	require.NoError(t, json.Unmarshal(body, &got))
-	return ns, got
+	deadline := time.After(3 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
+		if err == nil {
+			err = json.Unmarshal(body, &got)
+		}
+		if err == nil {
+			return ns, got
+		}
+		select {
+		case <-poll.C:
+		case <-deadline:
+			t.Fatalf("runtime record never became readable: %v", err)
+		}
+	}
 }
 
 func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
