@@ -99,13 +99,27 @@ func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, a
 	if !notificationIssueAllowed(allowed, issueID) {
 		return false, nil
 	}
-	readable, err := notificationProjectReadable(ctx, projectID, projectUID)
+	readable, err := notificationPeerProjectReadableTx(ctx, tx, projectID, projectUID)
 	if err != nil || !readable {
 		return false, err
 	}
 	db.RecordIssueScopeTarget(ctx, issueID)
 	db.RecordExposedIssue(ctx, issueID)
 	return true, nil
+}
+
+// notificationPeerProjectReadableTx authorizes a peer project that discovery
+// found inside its write transaction. Access admitted with the request is only
+// a snapshot, so the grant is rechecked live in tx before the cached check
+// records the project as a target of this request.
+func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, projectID int64, projectUID string) (bool, error) {
+	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+		if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return notificationProjectReadable(ctx, projectID, projectUID)
 }
 
 // Discovery reads other projects without widening the source mutation's host

@@ -52,7 +52,7 @@ func commentNotificationHook() db.CommentMetadataHook {
 			return nil, err
 		}
 		if err == nil && in.ParentOwner != "" && parentProjectID != issue.ProjectID {
-			readable, err := notificationProjectReadable(ctx, parentProjectID, parentProjectUID)
+			readable, err := notificationPeerProjectReadableTx(ctx, tx, parentProjectID, parentProjectUID)
 			if err != nil {
 				return nil, err
 			}

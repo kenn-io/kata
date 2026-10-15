@@ -157,33 +157,48 @@ func broadcastCandidatesTx(ctx context.Context, tx *sql.Tx, issue db.Issue, allo
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []notification.Identity
-	readableProjects := map[int64]bool{issue.ProjectID: true}
+	type candidate struct {
+		projectID           int64
+		projectUID          string
+		owner, actor, tmate string
+	}
+	// Drain the rows first: the live project check below queries the same
+	// transaction, which cannot run a second statement while rows are open.
+	var candidates []candidate
 	for rows.Next() {
-		var id, projectID int64
-		var projectUID, owner, actor, tm string
-		if err := rows.Scan(&id, &projectID, &projectUID, &owner, &actor, &tm); err != nil {
+		var id int64
+		var c candidate
+		if err := rows.Scan(&id, &c.projectID, &c.projectUID, &c.owner, &c.actor, &c.tmate); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
-		if !notificationIssueAllowed(allowed, id) {
-			continue
+		if notificationIssueAllowed(allowed, id) {
+			candidates = append(candidates, c)
 		}
-		readable, known := readableProjects[projectID]
+	}
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []notification.Identity
+	readableProjects := map[int64]bool{issue.ProjectID: true}
+	for _, c := range candidates {
+		readable, known := readableProjects[c.projectID]
 		if !known {
-			var err error
-			readable, err = notificationProjectReadable(ctx, projectID, projectUID)
+			readable, err = notificationPeerProjectReadableTx(ctx, tx, c.projectID, c.projectUID)
 			if err != nil {
 				return nil, err
 			}
-			readableProjects[projectID] = readable
+			readableProjects[c.projectID] = readable
 		}
-		if !readable {
-			continue
+		if readable {
+			out = append(out, notification.Identity{Actor: c.owner}, notification.Identity{Actor: c.actor, Teammate: c.tmate})
 		}
-		out = append(out, notification.Identity{Actor: owner}, notification.Identity{Actor: actor, Teammate: tm})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func broadcastHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, origin string, now time.Time) ([]notification.BroadcastRecord, error) {
