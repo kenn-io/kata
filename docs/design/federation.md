@@ -620,7 +620,9 @@ Spokes join both projects and use their existing project credentials to prove
 push authority at both endpoints. Supplemental source credentials are sent only
 to that same hub origin, outside hashed event envelopes, and are never persisted
 in move history. Moves across different hubs, paused bindings, and mixed
-local/federated projects remain unsupported. Deferred work includes
+local/federated projects remain unsupported. Source leave and archive refuse
+known pending moves until the destination acknowledges them, retaining the
+source credential needed for delivery. Deferred work includes
 element-level array CRDTs for metadata,
 HLC skew-guard thresholds, a snapshot fast-path for very large projects, and
 federated authoring of recurrences from spokes.

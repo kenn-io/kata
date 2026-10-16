@@ -261,6 +261,15 @@ func PrepareFederationReplicaLeave(
 }
 
 func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (PrepareFederationReplicaLeaveResult, error) {
+	// Refuse known source credential dependencies before marking leave pending
+	// or allowing the caller to revoke that credential at the hub.
+	if project.ID > 0 {
+		if lifecycle, ok := store.(db.RelayLifecycleStore); ok {
+			if err := lifecycle.ValidateRelayLifecycle(ctx, project.ID); err != nil {
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+		}
+	}
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()

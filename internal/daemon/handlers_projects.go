@@ -340,6 +340,8 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrProjectAlreadyArchived):
 			return nil, api.NewError(409, "project_already_archived",
 				"project is already archived", "", nil)
+		case errors.Is(err, db.ErrFederationResetBlockedByPendingPush), errors.Is(err, db.ErrFederationResetBlockedByDownstream):
+			return nil, federationReplicaAPIError(err)
 		}
 		if openErr, ok := errors.AsType[*db.ProjectHasOpenIssuesError](err); ok {
 			return nil, api.NewError(409, "project_has_open_issues",

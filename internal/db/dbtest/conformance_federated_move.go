@@ -381,6 +381,70 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 // fresh bridge claim, even if that local guard is absent from a spoke snapshot.
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
+	t.Run("source lifecycle awaits destination move", func(t *testing.T) {
+		for _, operation := range []string{"leave", "archive"} {
+			t.Run(operation, func(t *testing.T) {
+				source, err := store.CreateProject(ctx, operation+"-lifecycle-source")
+				require.NoError(t, err)
+				target, err := store.CreateProject(ctx, operation+"-lifecycle-target")
+				require.NoError(t, err)
+				unrelated, err := store.CreateProject(ctx, operation+"-lifecycle-unrelated")
+				require.NoError(t, err)
+				for _, project := range []db.Project{source, target, unrelated} {
+					_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+					require.NoError(t, err)
+				}
+				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "pending move", Author: "worker"})
+				require.NoError(t, err)
+				move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+				require.NoError(t, err)
+				lifecycle := store.(db.RelayLifecycleStore)
+				require.NoError(t, lifecycle.ValidateRelayLifecycle(ctx, unrelated.ID), "other sources must not be blocked")
+				_, err = store.LeaveFederationReplica(ctx, unrelated.ID)
+				require.NoError(t, err, "unrelated pending moves must not block teardown")
+				teardown := func() error {
+					if operation == "leave" {
+						_, err := store.LeaveFederationReplica(ctx, source.ID)
+						return err
+					}
+					_, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "worker"})
+					return err
+				}
+				require.ErrorIs(t, teardown(), db.ErrFederationResetBlockedByPendingPush)
+				targetBinding, err := store.FederationBindingByProject(ctx, target.ID)
+				require.NoError(t, err)
+				targetBinding.Enabled, targetBinding.PushEnabled = false, false
+				_, err = store.UpsertFederationBinding(ctx, targetBinding)
+				require.NoError(t, err)
+				require.ErrorIs(t, teardown(), db.ErrFederationResetBlockedByPendingPush, "paused destinations retain the source credential dependency")
+				binding, err := store.FederationBindingByProject(ctx, source.ID)
+				require.NoError(t, err)
+				require.True(t, binding.Enabled)
+				project, err := store.ProjectByID(ctx, source.ID)
+				require.NoError(t, err)
+				require.Nil(t, project.DeletedAt)
+				require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
+				require.NoError(t, lifecycle.ValidateRelayLifecycle(ctx, source.ID))
+				require.NoError(t, teardown(), "acknowledgment releases the source for ordinary teardown")
+			})
+		}
+	})
+	t.Run("hub moves do not wait for native push", func(t *testing.T) {
+		source, err := store.CreateProject(ctx, "hub-lifecycle-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "hub-lifecycle-target")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "hub move", Author: "worker"})
+		require.NoError(t, err)
+		for _, project := range []db.Project{source, target} {
+			_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
+			require.NoError(t, err)
+		}
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "worker"})
+		require.NoError(t, err)
+	})
 	for _, kind := range []string{"recurrence", "bridge", "ownership", "enrollment", "host-scope", "two-enrollments", "wrong-source-actor", "wrong-source-instance", "read-only-source", "missing-source-proof"} {
 		t.Run(kind, func(t *testing.T) {
 			source, err := store.CreateProject(ctx, kind+"-move-source")
