@@ -110,5 +110,47 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Equal(t, projects[2].ID, got.ProjectID)
 	})
+	for _, kind := range []string{"later branch wins", "earlier branch loses", "current owner proof required"} {
+		t.Run(kind, func(t *testing.T) {
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "concurrent branches", Author: "worker"})
+			require.NoError(t, err)
+			physical := time.Now().Add(time.Second).UnixMilli()
+			firstClock, secondClock := physical, physical+1
+			if kind == "earlier branch loses" {
+				firstClock, secondClock = secondClock, firstClock
+			}
+			grants := make([]db.CreatedFederationEnrollment, len(projects))
+			for i, project := range projects {
+				grants[i], err = store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &project.ID, Capabilities: "push,pull", Actor: "worker"})
+				require.NoError(t, err)
+			}
+			first := moveEvent(issue, 0, 1, firstClock)
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: projects[1].ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grants[1].Enrollment.ID, MoveSourceEnrollmentIDs: map[string]int64{projects[0].UID: grants[0].Enrollment.ID}, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 10, Event: first}}})
+			require.NoError(t, err)
+			second := moveEvent(issue, 0, 2, secondClock)
+			proofs := map[string]int64{projects[0].UID: grants[0].Enrollment.ID}
+			if kind != "current owner proof required" {
+				proofs[projects[1].UID] = grants[1].Enrollment.ID
+			}
+			before, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: projects[2].ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grants[2].Enrollment.ID, MoveSourceEnrollmentIDs: proofs, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 11, Event: second}}})
+			if kind == "current owner proof required" {
+				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+				after, readErr := store.MaxEventID(ctx)
+				require.NoError(t, readErr)
+				require.Equal(t, before, after, "missing current-owner authority must reject atomically")
+				return
+			}
+			require.NoError(t, err, "a known historical source is a concurrent branch, not an undelivered predecessor")
+			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			winner := projects[2].ID
+			if kind == "earlier branch loses" {
+				winner = projects[1].ID
+			}
+			require.Equal(t, winner, got.ProjectID, "retained deterministic clocks decide concurrent ownership")
+		})
+	}
 	return nil
 }

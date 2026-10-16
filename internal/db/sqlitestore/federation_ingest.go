@@ -214,7 +214,14 @@ func (d *Store) ingestFederationEventsOnce(
 				}
 			}
 			if current != moveFrom && current != moveTo {
-				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue predecessor has not arrived", db.ErrNotFound)
+				fromUID, _ := db.StringValue(db.PayloadMap(ev.Payload)["from_project_uid"])
+				observed, err := db.FederationMoveSourceObserved(ctx, tx, *ev.IssueUID, fromUID)
+				if err != nil {
+					return db.FederationIngestResult{}, err
+				}
+				if !observed {
+					return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue predecessor has not arrived", db.ErrNotFound)
+				}
 			}
 		}
 		if adoptionSnapshotAuthorState.duplicateOnly {

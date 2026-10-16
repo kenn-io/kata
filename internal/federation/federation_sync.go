@@ -1437,22 +1437,23 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 }
 
 // Supplemental proofs use joined credentials without crossing their configured
-// hub origins. Ordinary events can precede a move the sender has not pulled yet,
-// so their proofs include eligible same-hub projects rather than local ownership.
+// hub origins. Offline events and concurrent moves can encounter an ownership
+// change the sender has not pulled, so proofs include eligible same-hub projects.
 func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
 	var tokens map[string]string
 	var projectUIDs []string
 	requiredSources := map[string]bool{}
-	ordinaryIssueWork := false
+	issueWork := false
 	for _, event := range events {
 		if event.Type != "issue.moved" {
-			ordinaryIssueWork = ordinaryIssueWork || strings.HasPrefix(event.Type, "issue.")
+			issueWork = issueWork || strings.HasPrefix(event.Type, "issue.")
 			if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
 				issueUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["issue_uid"])
-				ordinaryIssueWork = ordinaryIssueWork || issueUID != ""
+				issueWork = issueWork || issueUID != ""
 			}
 			continue
 		}
+		issueWork = true
 		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
 		if fromUID == "" {
 			return nil, db.ErrFederationIngestValidation
@@ -1460,7 +1461,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		projectUIDs = append(projectUIDs, fromUID)
 		requiredSources[fromUID] = true
 	}
-	if ordinaryIssueWork {
+	if issueWork {
 		bindings, err := store.ListFederationBindings(ctx)
 		if err != nil {
 			return nil, err
