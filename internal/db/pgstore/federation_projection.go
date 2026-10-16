@@ -394,6 +394,15 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 
 // MaterializeFederatedProject rebuilds one project's read model from portable events.
 func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	// Ownership can change while retained history is folded. Take the policy
+	// writer lock before request fences or project rows to avoid lock upgrades.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if err := lockProjectAccessExclusive(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
+	})
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
 	})
@@ -519,6 +528,11 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 		return db.CheckNativeRecurringParentMove(ctx, tx, true, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
 	})
 	if err != nil {
 		return err
