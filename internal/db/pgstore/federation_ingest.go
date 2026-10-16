@@ -93,6 +93,7 @@ func (s *Store) IngestFederationEvents(
 		// Projection writes happen after validation; later moves can depend on
 		// fully validated creations earlier in this batch.
 		batchIssueProjects := map[string]int64{}
+		moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, `payload::jsonb->'snapshot'`, params.Events)
 		freshSnapshotSeen := false
 		boundActor := strings.TrimSpace(params.BoundActor)
 		for _, input := range params.Events {
@@ -206,6 +207,9 @@ func (s *Store) IngestFederationEvents(
 				AdoptionBaseline:                adoptionState.allowAuthorPreservation || adoptionState.overrideSnapshotAuthors,
 				Known:                           db.FederationAttributionSQL{Tx: tx, ProjectID: params.ProjectID},
 			}); err != nil {
+				return err
+			}
+			if err := moveSnapshots.Validate(ctx, event, boundActor); err != nil {
 				return err
 			}
 			if freshSnapshotSeen && !db.IsFederationSnapshotEvent(event.Type) {
@@ -585,7 +589,7 @@ func payloadDeferredLinkIssueUIDs(
 			add(*event.RelatedIssueUID)
 		}
 
-	case "issue.created", "issue.snapshot":
+	case "issue.created", "issue.snapshot", "issue.moved":
 		links, err := payloadLinks(event)
 		if err != nil {
 			return nil, fmt.Errorf("%w: decode links: %v", db.ErrFederationIngestValidation, err)
@@ -797,6 +801,7 @@ type payloadLink struct {
 }
 
 func payloadLinks(event db.RemoteEvent) ([]payloadLink, error) {
+	event = db.FederationMoveSnapshotEvent(event)
 	var payload struct {
 		Links []payloadLink `json:"links"`
 	}
@@ -931,6 +936,11 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		default:
 			continue
 		}
+		replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, event)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, replyIssues...)
 		refs = append(refs, primary)
 		for _, issueUID := range refs {
 			if issueUID == "" {
