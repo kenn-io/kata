@@ -146,7 +146,7 @@ func refreshSpokeClaimStatusForGate(
 		}
 		return err
 	}
-	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.UID)
 	if err != nil {
 		if isTransportClaimError(err) || isOfflineClaimHubStatusError(err) {
 			return nil
