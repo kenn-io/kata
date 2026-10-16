@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,13 +28,14 @@ import (
 // cliUseTelemetry is the daemon's reporter; block, when set, holds every capture until closed.
 type cliUseTelemetry struct {
 	block    chan struct{}
+	fail     bool
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string
 }
 
 func (*cliUseTelemetry) EventAllowed(event string) bool {
-	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
+	return event == "app_opened" || event == "agent_active" || event == "agent_call_count" || event == "issue_created" || event == "issue_closed"
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
 func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]any, error) {
@@ -46,6 +49,9 @@ func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error
 	defer c.mu.Unlock()
 	c.captured = append(c.captured, properties)
 	c.events = append(c.events, event)
+	if c.fail {
+		return errors.New("telemetry unavailable")
+	}
 	return nil
 }
 
@@ -412,4 +418,30 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
+}
+
+func TestCLITelemetrySharesActionDeadline(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+		posts.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	cmd := findCommand(t, "create")
+	cmd.SetContext(context.Background())
+	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
+	t.Cleanup(func() { cliUseTarget.Store(nil) })
+	wait := reportCLIIssueAction(cmd, "issue_created", true)
+	deadline, ok := cmd.Context().Value(cliTelemetryDeadlineKey{}).(time.Time)
+	require.True(t, ok, "the action report shares its deadline with CLI use reporting")
+	wait()
+	assert.False(t, time.Now().Before(deadline), "the action report consumes its shared deadline")
+	reportCLIUse(cmd)
+	assert.Equal(t, int32(1), posts.Load(), "the expired shared deadline refuses a second report")
 }

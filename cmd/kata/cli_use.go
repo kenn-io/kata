@@ -31,6 +31,8 @@ var cliUseNow = time.Now
 // cliUseTarget is the resolved daemon this invocation built its own client from.
 var cliUseTarget atomic.Pointer[client.ResolvedDaemon]
 
+type cliTelemetryDeadlineKey struct{}
+
 // agentFacingCommands run for agents or hook runners, not a person at a prompt.
 var agentFacingCommands = []string{"mcp serve", "agent-hook", "attention-hook", "agent-contract-hook"}
 
@@ -99,8 +101,15 @@ func reportCLIUse(cmd *cobra.Command) {
 	if agent {
 		timeout = agentUseReportTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	deadline := time.Now().Add(timeout)
+	if shared, ok := parent.Value(cliTelemetryDeadlineKey{}).(time.Time); !agent && ok && shared.Before(deadline) {
+		deadline = shared
+	}
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(parent), deadline)
 	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
 	if target == nil {
 		resolved, err := discoverDaemonResolved(ctx)
 		if err != nil {
@@ -115,24 +124,47 @@ func reportCLIUse(cmd *cobra.Command) {
 			return
 		}
 	}
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
-	if err != nil {
-		return
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
-	if err != nil {
-		return
-	}
 	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
 	if agent {
 		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
 	}
-	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: body,
-	})
-	if !agent && err == nil && resp.JSON202 != nil {
+	if captureCLIUsage(ctx, *target, timeout, body) && !agent {
 		recordCLIUseDay(marker, day)
 	}
+}
+
+func captureCLIUsage(ctx context.Context, target client.ResolvedDaemon, timeout time.Duration, body *generated.CaptureTelemetryEventBody) bool {
+	hc, err := client.NewHTTPClientForResolved(ctx, target, client.Opts{Timeout: timeout})
+	if err != nil {
+		return false
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
+	if err != nil {
+		return false
+	}
+	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
+	return err == nil && resp != nil && resp.JSON202 != nil
+}
+
+// reportCLIIssueAction starts delivery at commit acknowledgement. Its returned
+// join runs after command output and follow-ups, including failed comments.
+func reportCLIIssueAction(cmd *cobra.Command, event string, changed bool) func() {
+	target := cliUseTarget.Load()
+	if !changed || target == nil || !reportsCLIUse(cmd) {
+		return func() {}
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), cliUseReportTimeout)
+	deadline, _ := ctx.Deadline()
+	cmd.SetContext(context.WithValue(cmd.Context(), cliTelemetryDeadlineKey{}, deadline))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer cancel()
+		captureCLIUsage(ctx, *target, cliUseReportTimeout, &generated.CaptureTelemetryEventBody{
+			Event: event, Properties: map[string]any{"surface": "cli"},
+		})
+	}()
+	return func() { <-done }
 }
 
 // cliUseMarkerPath names the file holding the last UTC day target accepted a

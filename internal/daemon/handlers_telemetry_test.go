@@ -58,20 +58,33 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 
 type fakeTelemetryReporter struct {
 	failNext bool
+	reporter *telemetry.Reporter
 	captured []map[string]any
+	events   []string
 }
 
-func (*fakeTelemetryReporter) EventAllowed(event string) bool {
+func (f *fakeTelemetryReporter) EventAllowed(event string) bool {
+	if f.reporter != nil {
+		return f.reporter.EventAllowed(event)
+	}
 	event = strings.TrimSpace(event)
 	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
-func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
 	if f.failNext {
 		f.failNext = false
 		return errors.New("capture failed")
 	}
+	if f.reporter != nil {
+		sanitized, err := f.reporter.SanitizeProperties(event, properties)
+		if err != nil {
+			return err
+		}
+		properties = sanitized
+	}
 	f.captured = append(f.captured, properties)
+	f.events = append(f.events, event)
 	return nil
 }
 
@@ -376,10 +389,75 @@ func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
 	require.Len(t, reporter.captured, 1, "yesterday's claim and today's opt-out leave today's visit eligible")
 }
 
-func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
+func (f *fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
+	if f.reporter != nil {
+		return f.reporter.SanitizeProperties(event, properties)
+	}
 	reporter, err := telemetry.NewReporter(telemetry.Options{})
 	if err != nil {
 		return nil, err
 	}
 	return reporter.SanitizeProperties(event, properties)
+}
+
+func TestCaptureCoreActionsRetainsEventsAndSanitizes(t *testing.T) {
+	allowlist, err := telemetry.NewReporter(telemetry.Options{})
+	require.NoError(t, err)
+	cases := []struct {
+		name       string
+		properties []string
+		surface    string
+	}{
+		{
+			name: "valid surface repeats",
+			properties: []string{
+				`,"properties":{"surface":"web","title":"private","reason":"done"}`,
+				`,"properties":{"surface":"web","title":"private","reason":"done"}`,
+			},
+			surface: "web",
+		},
+		{name: "missing properties", properties: []string{""}},
+		{name: "empty properties", properties: []string{`,"properties":{}`}},
+		{name: "unknown surface", properties: []string{`,"properties":{"surface":"desktop","title":"private"}`}},
+		{
+			name: "invalid surface",
+			properties: []string{
+				`,"properties":{"surface":"","title":"private"}`,
+				`,"properties":{"surface":7,"title":"private"}`,
+			},
+		},
+		{name: "missing surface", properties: []string{`,"properties":{"title":"private"}`}},
+	}
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		for _, test := range cases {
+			t.Run(event+"/"+test.name, func(t *testing.T) {
+				reporter := &fakeTelemetryReporter{reporter: allowlist}
+				server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+				for _, properties := range test.properties {
+					response := server.post(t.Context(), t, `{"event":"`+event+`"`+properties+`}`)
+					require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+					assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+				}
+				require.Len(t, reporter.captured, len(test.properties))
+				require.Len(t, reporter.events, len(test.properties))
+				for _, capturedEvent := range reporter.events {
+					assert.Equal(t, event, capturedEvent)
+				}
+				for _, properties := range reporter.captured {
+					assert.NotContains(t, properties, "title")
+					assert.NotContains(t, properties, "reason")
+					if test.surface == "" {
+						assert.NotContains(t, properties, "surface")
+					} else {
+						assert.Equal(t, test.surface, properties["surface"])
+					}
+				}
+			})
+		}
+	}
+
+	disabled := newTelemetryTestServer(t, newDisabledReporter(t), Principal{Kind: PrincipalWebLocal})
+	response := disabled.post(t.Context(), t, `{"event":"issue_created","properties":{"surface":"web"}}`)
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
 }

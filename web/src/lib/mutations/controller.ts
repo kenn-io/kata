@@ -20,6 +20,7 @@ export interface MutationOptions<TDraft = unknown> {
   revision?: string
   createKey?: string
   draft?: TDraft
+  onChanged?: () => void
 }
 
 export type MutationState<TDraft = unknown> =
@@ -46,6 +47,7 @@ export class MutationController {
   readonly #refresh: () => Promise<boolean>
   readonly #onAuthenticationRequired: () => void
   readonly #committedCreates = new Map<string, unknown>()
+  readonly #uncertainCreates = new Set<string>()
 
   state: MutationState = { kind: 'idle' }
 
@@ -89,6 +91,7 @@ export class MutationController {
         this.state = withDraft({ kind: 'blocked' }, options.draft)
         return false
       }
+      if (options.createKey) this.#uncertainCreates.add(options.createKey)
       await this.#refreshAfterUncertainWrite()
       this.state = withDraft({ kind: 'uncertain' }, options.draft)
       return false
@@ -111,13 +114,24 @@ export class MutationController {
           options.draft,
         )
       } else {
+        if (options.createKey) this.#uncertainCreates.add(options.createKey)
         await this.#refreshAfterUncertainWrite()
         this.state = withDraft({ kind: 'uncertain' }, options.draft)
       }
       return false
     }
 
-    if (options.createKey) this.#committedCreates.set(options.createKey, result.data)
+    const data = asObject(result.data)
+    const recoveredCreate =
+      options.createKey &&
+      this.#uncertainCreates.has(options.createKey) &&
+      data?.reused === true &&
+      asObject(data.original_event) !== undefined
+    if (data?.changed === true || recoveredCreate) options.onChanged?.()
+    if (options.createKey) {
+      this.#uncertainCreates.delete(options.createKey)
+      this.#committedCreates.set(options.createKey, result.data)
+    }
     this.state = { kind: 'idle' }
     await this.#refreshAfterUncertainWrite()
     return result.data as T

@@ -97,15 +97,17 @@ func TestNewReporterDisabledDuringGoTests(t *testing.T) {
 	assert.False(t, reporter.Enabled())
 }
 
-func TestAppOpenedSurfaceAllowlist(t *testing.T) {
+func TestValidSurfaceAllowlist(t *testing.T) {
 	reporter, err := NewReporter(Options{DistinctID: "anonymous-instance-id"})
 	require.NoError(t, err)
 
-	for _, surface := range []string{"cli", "tui", "web"} {
-		props, err := reporter.SanitizeProperties("app_opened", map[string]any{"surface": surface, "path": "/example"})
-		require.NoError(t, err)
-		assert.Equal(t, surface, props["surface"])
-		assert.NotContains(t, props, "path")
+	for _, event := range []string{"app_opened", "issue_created", "issue_closed"} {
+		for _, surface := range []string{"cli", "tui", "web"} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"surface": surface, "path": "/example"})
+			require.NoError(t, err)
+			assert.Equal(t, surface, props["surface"])
+			assert.NotContains(t, props, "path")
+		}
 	}
 	for _, surface := range []any{"desktop", "", 1} {
 		props, err := reporter.SanitizeProperties("app_opened", map[string]any{"surface": surface})

@@ -151,6 +151,17 @@ func (c *Client) reportUsage(ctx context.Context, event string, properties map[s
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
+func (c *Client) reportChangedIssue(ctx context.Context, event string, changed bool) {
+	if !changed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	go func() {
+		defer cancel()
+		_ = c.reportUsage(ctx, event, map[string]any{"surface": "tui"})
+	}()
+}
+
 // ReportScreenViewed sends the visible screen to the connected daemon.
 func (c *Client) ReportScreenViewed(ctx context.Context, screen string) error {
 	apiClient, err := c.generatedClient()
@@ -289,6 +300,7 @@ func (c *Client) CreateIssue(ctx context.Context, projectID int64, body CreateIs
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_created", resp.Changed)
 	return &resp, nil
 }
 
@@ -311,6 +323,7 @@ func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) 
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_closed", resp.Changed)
 	return &resp, nil
 }
 
@@ -345,6 +358,7 @@ func (c *Client) CloseWithEvidence(
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_closed", resp.Changed)
 	return &resp, nil
 }
 

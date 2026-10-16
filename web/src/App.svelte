@@ -194,6 +194,13 @@
     stopAppOpened = undefined
     reportAppOpened()
   }
+  function reportIssueAction(event: 'issue_created' | 'issue_closed'): void {
+    if (destroyed) return
+    void captureTelemetryEvent(
+      { event, properties: { surface: 'web' } },
+      { signal: AbortSignal.timeout(1000), keepalive: true },
+    ).catch(() => undefined)
+  }
   let reportedScreen: string | undefined
   let reportedScreenDay: string | undefined
   function reportScreenViewed(visit = false): void {
@@ -484,28 +491,30 @@
             key: globalThis.crypto.randomUUID(),
           }
     pendingCreate = create
-    const accepted = await runMutation({ draft: title, createKey: create.key }, (context) =>
-      createIssueRequest(
-        { projectId: String(project.id) },
-        context.body(
-          {
-            title,
-            ...(parent
-              ? {
-                  links: [
-                    {
-                      type: 'parent' as const,
-                      to_ref: parent.issueUID,
-                      to_project_uid: parent.projectUID,
-                    },
-                  ],
-                }
-              : {}),
-          },
-          requestActor,
+    const accepted = await runMutation(
+      { draft: title, createKey: create.key, onChanged: () => reportIssueAction('issue_created') },
+      (context) =>
+        createIssueRequest(
+          { projectId: String(project.id) },
+          context.body(
+            {
+              title,
+              ...(parent
+                ? {
+                    links: [
+                      {
+                        type: 'parent' as const,
+                        to_ref: parent.issueUID,
+                        to_project_uid: parent.projectUID,
+                      },
+                    ],
+                  }
+                : {}),
+            },
+            requestActor,
+          ),
+          { headers: { 'Idempotency-Key': create.key } },
         ),
-        { headers: { 'Idempotency-Key': create.key } },
-      ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
     pendingCreate = undefined
@@ -798,11 +807,13 @@
     const selected = selectedIssue()
     const target = selected ? selectedMutationTarget(selected.uid) : undefined
     if (!target) return false
-    return runMutation({ draft: request }, (context) =>
-      closeIssueRequest(
-        { projectId: target.project_id, ref: target.ref },
-        context.body({ ...request }, requestActor),
-      ),
+    return runMutation(
+      { draft: request, onChanged: () => reportIssueAction('issue_closed') },
+      (context) =>
+        closeIssueRequest(
+          { projectId: target.project_id, ref: target.ref },
+          context.body({ ...request }, requestActor),
+        ),
     )
   }
 
@@ -828,7 +839,7 @@
   }
 
   async function runMutation(
-    options: { draft?: unknown; revision?: string; createKey?: string },
+    options: { draft?: unknown; revision?: string; createKey?: string; onChanged?: () => void },
     mutate: (context: MutationContext) => Promise<MutationResult>,
     controller: MutationController = mutations,
   ): Promise<boolean> {

@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-16
 ---
 
 # Configuration
@@ -1075,6 +1075,21 @@ a shared daemon counts that daemon's install. The daemon forwards one
 `app_opened` per surface per UTC day and forgets what it sent when it restarts,
 so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
+
+Completed issue creates and closes report `issue_created` and `issue_closed`
+with only `surface: web`, `tui`, or `cli`. Web issue removal closes the issue
+and reports `issue_closed` when changed. Each successful mutation with
+`changed: true` counts, including repeated actions in one day. Ordinary retries
+that reuse a create, already-closed issues, failed writes, dry runs, and reopen
+operations send nothing. Only a retry in the same open browser tab can count a
+recovered create once. CLI/TUI retries, browser reloads, and retries from another
+interface leave an uncertain create uncounted. Events carry no request identifier
+to match counts across clients. A close, reopen, close sequence counts two closes;
+undoing a reopen in the TUI counts the resulting close too. CLI actions use the
+same terminal and agent-mode rules above. Reporting happens before follow-up
+comments, so a comment failure still counts a completed close. Action reporting
+and `app_opened` share the CLI's one-second reporting budget. Delivery is
+best effort and uses the daemon's opt-out setting.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.

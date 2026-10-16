@@ -160,7 +160,7 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case "agent_active":
 			err = agentGate.capture(reporter)
 		case "app_opened":
-			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
+			gate.capture(telemetry.ValidSurface(in.Body.Properties), capture)
 		case "screen_viewed":
 			var properties map[string]any
 			properties, err = reporter.SanitizeProperties(in.Body.Event, in.Body.Properties)

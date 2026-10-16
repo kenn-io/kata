@@ -329,6 +329,9 @@ func runActionWithHeaders(
 			return err
 		}
 		bs = response.Body
+		if response.JSON200 != nil {
+			defer reportCLIIssueAction(cmd, "issue_closed", response.JSON200.Changed)()
+		}
 	case "reopen":
 		var payload generated.ReopenIssueBody
 		if err := json.Unmarshal(encoded, &payload); err != nil {

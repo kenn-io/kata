@@ -191,3 +191,48 @@ function failure(status: number, code: string, detail: string) {
     headers: new Headers(),
   }
 }
+
+describe('completed issue actions', () => {
+  it('reports each changed write before refresh, excluding cached creates, no-ops and failures', async () => {
+    const calls: string[] = []
+    const onChanged = () => {
+      calls.push('action')
+    }
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh: async () => {
+        calls.push('refresh')
+        throw new Error('refresh unavailable')
+      },
+    })
+    const create = { createKey: 'create-key', onChanged }
+    await controller.execute(create, async () => ok({ changed: true }))
+    await controller.execute(create, async () => ok({ changed: true }))
+    await controller.execute({ onChanged }, async () => ok({ changed: false }))
+    await controller.execute({ onChanged }, async () => failure(500, 'failed', 'Write failed'))
+    await controller.execute({ onChanged }, async () => ok({ changed: true }))
+    expect(calls).toEqual(['action', 'refresh', 'refresh', 'refresh', 'action', 'refresh'])
+  })
+})
+
+it('counts one recovered create after an uncertain result, while ordinary replay stays silent', async () => {
+  for (const uncertain of ['transport', 'server', 'malformed'] as const) {
+    const onChanged = vi.fn()
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh: async () => true,
+    })
+    const options = { createKey: uncertain, onChanged }
+    await controller.execute(options, async () => {
+      if (uncertain === 'transport') throw new TypeError('connection closed')
+      if (uncertain === 'server') return failure(502, 'upstream_failure', 'Response lost')
+      return { status: 200, headers: new Headers() }
+    })
+    const recovered = { changed: false, reused: true, original_event: { kind: 'issue.created' } }
+    await controller.execute(options, async () => ok(recovered))
+    await controller.execute(options, async () => ok(recovered))
+    expect(onChanged).toHaveBeenCalledTimes(1)
+    await controller.execute({ createKey: 'ordinary-replay', onChanged }, async () => ok(recovered))
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  }
+})

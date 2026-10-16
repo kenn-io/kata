@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-10
+last_edited: 2026-10-16
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Count completed issue creates and closes from the web UI, TUI, and human CLI
+  commands with anonymous `issue_created` and `issue_closed` events. Each event
+  carries only its interface in `surface`. `KATA_TELEMETRY_ENABLED=0` opts out.
+  Web issue removal counts as a close.
 
 - Walk `kata --help` to find the agent workflow, issue conventions, and command
   examples. Related commands are grouped, and subcommands list global flags

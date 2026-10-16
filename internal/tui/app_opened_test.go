@@ -29,7 +29,7 @@ func (*recordingTelemetry) EventAllowed(event string) bool {
 	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*recordingTelemetry) Enabled() bool { return true }
-func (r *recordingTelemetry) Capture(_ string, properties map[string]any) error {
+func (r *recordingTelemetry) Capture(event string, properties map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.captured = append(r.captured, properties)
