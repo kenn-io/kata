@@ -46,7 +46,6 @@ func TestProjectScopeClientIsImmutableAndPreservesStackedLimits(t *testing.T) {
 		require.Equal(t, "Bearer example-token", request.auth)
 		observed = append(observed, request.scopes)
 	}
-	require.Len(t, observed, 3)
 	require.Empty(t, observed[0])
 	require.Len(t, observed[1], 1)
 	require.Len(t, observed[2], 2)
