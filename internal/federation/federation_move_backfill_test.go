@@ -218,3 +218,75 @@ func TestSyncFederationMoveRecoversHistoryBeforeDestinationCursor(t *testing.T) 
 		})
 	}
 }
+
+func TestSyncFederationConcurrentMoveRecoversMissedSourceHistory(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "branch-history-source", "branch-history-middle", "branch-history-target")
+	receiver := newMoveDeliverySpoke(t, hub, projects)
+	authors := []moveDeliverySpoke{newMoveDeliverySpoke(t, hub, projects), newMoveDeliverySpoke(t, hub, projects)}
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "initial title", Body: "initial body", Author: "worker"})
+	require.NoError(t, err)
+	for _, spoke := range append(authors, receiver) {
+		for i := range projects {
+			require.NoError(t, spoke.sync(t, i))
+		}
+	}
+
+	title, body := "missed source title", "missed source body"
+	_, edit, _, err := hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Body: &body, Actor: "worker"})
+	require.NoError(t, err)
+	if edit == nil {
+		t.Fatal("missing source edit event")
+	}
+	_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "missed source discussion"})
+	require.NoError(t, err)
+	for _, author := range authors {
+		require.NoError(t, author.sync(t, 0))
+	}
+	for destination := 1; destination < len(projects); destination++ {
+		_, _, err = hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[destination].ID, Title: "advance destination cursor", Author: "worker"})
+		require.NoError(t, err)
+		require.NoError(t, receiver.sync(t, destination))
+		binding, err := receiver.env.DB.FederationBindingByProject(ctx, receiver.projects[destination].ID)
+		require.NoError(t, err)
+		require.Greater(t, binding.PullCursorEventID, edit.ID)
+	}
+
+	var moves []db.FoldEvent
+	for index, author := range authors {
+		local, err := author.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		moved, err := author.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: author.projects[0].ID, ToProjectID: author.projects[index+1].ID, IfMatchRev: local.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		if moved.Event == nil {
+			t.Fatal("missing concurrent move event")
+		}
+		event := moved.Event
+		moves = append(moves, db.FoldEvent{UID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: projects[index+1].UID, IssueUID: issue.UID, Type: event.Type, Actor: event.Actor, Payload: []byte(event.Payload), HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter})
+	}
+	winningProject := db.FoldEvents(moves).Issues[issue.UID].ProjectUID
+	winner, loser := 0, 1
+	if winningProject == projects[2].UID {
+		winner, loser = 1, 0
+	}
+	require.NoError(t, authors[winner].sync(t, winner+1))
+	require.NoError(t, authors[loser].sync(t, loser+1), "the losing move arrives last")
+	current, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[winner+1].ID, current.ProjectID)
+
+	_, err = receiver.env.DB.LeaveFederationReplica(ctx, receiver.projects[0].ID)
+	require.NoError(t, err)
+	require.NoError(t, receiver.credentials.DeleteFederationCredential(ctx, receiver.projects[0].UID))
+	require.NoError(t, receiver.sync(t, winner+1))
+	require.NoError(t, receiver.sync(t, winner+1), "ordinary retry must retain the recovered history after source leave")
+	got, err := receiver.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, receiver.projects[winner+1].ID, got.ProjectID)
+	require.Equal(t, title, got.Title)
+	require.Equal(t, body, got.Body)
+	comments, err := receiver.env.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "missed source discussion", comments[0].Body)
+}

@@ -3,7 +3,6 @@ package federation
 import (
 	"cmp"
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"slices"
@@ -14,8 +13,8 @@ import (
 // Recover original source deltas before applying an inbound move. A project
 // cursor can already be newer than those deltas even when creation is retained.
 // Using the original clocks avoids treating the move snapshot as a content edit.
-func backfillFederationMoveHistory(ctx context.Context, client *Client, projectID int64, projectUID string, page api.PollEventsBody) ([]api.EventEnvelope, error) {
-	lastTargets := map[string]string{}
+func backfillFederationMoveHistory(ctx context.Context, client *Client, projectID int64, page api.PollEventsBody) ([]api.EventEnvelope, error) {
+	movedSubjects := map[string]bool{}
 	var subjects []string
 	seen := map[string]bool{}
 	for _, event := range page.Events {
@@ -23,22 +22,15 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 		if event.Type != "issue.moved" || event.IssueUID == nil {
 			continue
 		}
-		var move struct {
-			ToProjectUID string `json:"to_project_uid"`
-		}
-		if err := json.Unmarshal(event.Payload, &move); err != nil {
-			return nil, err
-		}
-		if _, ok := lastTargets[*event.IssueUID]; !ok {
+		if !movedSubjects[*event.IssueUID] {
 			subjects = append(subjects, *event.IssueUID)
+			movedSubjects[*event.IssueUID] = true
 		}
-		lastTargets[*event.IssueUID] = move.ToProjectUID
 	}
 	events := slices.Clone(page.Events)
 	for _, uid := range subjects {
-		if lastTargets[uid] != projectUID {
-			continue
-		}
+		// Arrival order does not determine ownership for concurrent moves.
+		// The hub checks current ownership before returning this history.
 		history, err := client.issueHistoryThrough(ctx, projectID, uid, page.NextAfterID)
 		if err != nil {
 			return nil, err
