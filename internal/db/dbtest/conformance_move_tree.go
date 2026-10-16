@@ -243,3 +243,39 @@ func checkMoveTreeMappingCollision(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+// Contract: merges must reserve both an old short ID and longer replacement
+// candidates belonging to issues that have moved out of the target project.
+func checkMergeMoveReservations(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	target, err := store.CreateProject(ctx, "reservation-target")
+	require.NoError(t, err)
+	away, err := store.CreateProject(ctx, "reservation-away")
+	require.NoError(t, err)
+	source, err := store.CreateProject(ctx, "reservation-source")
+	require.NoError(t, err)
+	var historical []db.Issue
+	for _, uid := range []string{"01HZNQ7VFPK1XGD8R5MABXD4EX", "01HZNQ7VFPK1XGD8R5MCDXD4EX"} {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, UID: uid, Title: "moved task", Author: "worker"})
+		require.NoError(t, err)
+		historical = append(historical, issue)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: target.ID, ToProjectID: away.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+	}
+	require.Equal(t, "d4ex", historical[0].ShortID)
+	require.Equal(t, "xd4ex", historical[1].ShortID)
+	incoming, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MEFXD4EX", Title: "incoming", Author: "worker"})
+	require.NoError(t, err)
+	require.Equal(t, "d4ex", incoming.ShortID)
+	_, err = store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID, Actor: "worker"})
+	require.NoError(t, err)
+	got, err := store.IssueByID(ctx, incoming.ID)
+	require.NoError(t, err)
+	require.Equal(t, "fxd4ex", got.ShortID)
+	for _, before := range historical {
+		resolved, err := store.IssueByShortID(ctx, target.ID, before.ShortID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, before.UID, resolved.UID)
+	}
+	return nil
+}

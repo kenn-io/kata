@@ -235,6 +235,7 @@ var storageScenarios = []scenario{
 	{name: "issue move tree external claim", methods: []string{"MoveIssueProject"}, run: checkMoveTreeExternalClaim},
 	{name: "issue move tree expanded fence", methods: []string{"MoveIssueProject"}, run: checkMoveTreeExpandedFence},
 	{name: "issue move tree mapping collision", methods: []string{"MoveIssueProject"}, run: checkMoveTreeMappingCollision},
+	{name: "issue move merge reservations", methods: []string{"MoveIssueProject", "MergeProjects"}, run: checkMergeMoveReservations},
 	{name: "issue move tree", methods: []string{"MoveIssueProject"}, run: checkMoveTree},
 	{name: "issue move tree guards", methods: []string{"MoveIssueProject"}, run: checkMoveTreeGuards},
 	{name: "issue status move", methods: []string{"CreateProject", "CreateIssue", "CloseIssueWithEvents", "MoveIssueProject", "UpsertIssueSyncBinding", "UpsertImportMapping"}, run: checkIssueStatusMove},

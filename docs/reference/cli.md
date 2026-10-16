@@ -831,8 +831,11 @@ kata move <issue-ref> <project> [--single] [--dry] [--comment TEXT]
 `move` moves the issue and all active descendants in one transaction, including
 closed descendants and children in other projects. It preserves their nesting,
 status, UIDs, comments, and history. Use `--single` to move only the selected
-issue. Old project-qualified short IDs continue to resolve through the move
-events. The daemon reserves those IDs so newly created issues cannot reuse them. The target project is resolved the same way as `kata projects show`.
+issue. Old project-qualified short IDs resolve while their move history and
+original project identity remain. While retained, those IDs stay reserved so
+new issues cannot reuse them. Purging history or merging a former project ends
+that compatibility; use the current reference returned by the move. Stable issue
+UIDs remain unchanged. The target project is resolved the same way as `kata projects show`.
 The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
 collision. `--dry` asks the daemon to validate the same move restrictions
