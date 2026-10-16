@@ -26,6 +26,19 @@ func (d *Store) IngestFederationEvents(
 	ctx context.Context,
 	p db.FederationIngestParams,
 ) (db.FederationIngestResult, error) {
+	for _, input := range p.Events {
+		if input.Event.Type != "issue.moved" {
+			continue
+		}
+		original := ctx
+		ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+			if err := lockProjectAccess(fenceCtx, tx); err != nil {
+				return err
+			}
+			return db.ApplyTransactionFence(original, tx)
+		})
+		break
+	}
 	var result db.FederationIngestResult
 	attempt := 0
 	err := d.RetryTransient(ctx, func() error {
@@ -105,6 +118,9 @@ func (d *Store) ingestFederationEventsOnce(
 	}
 	prepared := make([]preparedFederationIngestEvent, 0, len(p.Events))
 	seenBatch := map[string]string{}
+	// Projection writes happen after validation; later moves can depend on
+	// fully validated creations earlier in this batch.
+	batchIssueProjects := map[string]int64{}
 	freshSnapshotSeen := false
 	boundActor := strings.TrimSpace(p.BoundActor)
 	for _, in := range p.Events {
@@ -182,16 +198,18 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		if ev.Type == "issue.moved" {
-			var current int64
-			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, *ev.IssueUID).Scan(&current)
-			if errors.Is(err, sql.ErrNoRows) {
-				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue source creation has not arrived", db.ErrNotFound)
-			}
-			if err != nil {
-				return db.FederationIngestResult{}, err
+			current, staged := batchIssueProjects[*ev.IssueUID]
+			if !staged {
+				err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, *ev.IssueUID).Scan(&current)
+				if errors.Is(err, sql.ErrNoRows) {
+					return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue source creation has not arrived", db.ErrNotFound)
+				}
+				if err != nil {
+					return db.FederationIngestResult{}, err
+				}
 			}
 			if current != moveFrom && current != moveTo {
-				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue is outside source and destination", db.ErrFederationIngestValidation)
+				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue predecessor has not arrived", db.ErrNotFound)
 			}
 		}
 		if adoptionSnapshotAuthorState.duplicateOnly {
@@ -225,6 +243,13 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		seenBatch[ev.EventUID] = ev.ContentHash
 		rememberIngestIssueUIDs(ev, knownIssueUIDs)
+		if ev.Type == "issue.created" {
+			if issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload)); err == nil {
+				batchIssueProjects[issueUID] = p.ProjectID
+			}
+		} else if ev.Type == "issue.moved" {
+			batchIssueProjects[*ev.IssueUID] = moveTo
+		}
 		prepared = append(prepared, preparedFederationIngestEvent{
 			SourceEventID: in.SourceEventID,
 			Event:         ev,
