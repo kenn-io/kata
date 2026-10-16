@@ -7,9 +7,16 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestSyncFederationMoveCarriesSnapshotPeerProof(t *testing.T) {
-	for _, kind := range []string{"link", "reply"} {
-		t.Run(kind, func(t *testing.T) {
+func TestSyncFederationMovePreservesHistoricalPeerReferences(t *testing.T) {
+	for _, tc := range []struct {
+		kind     string
+		archived bool
+	}{{"link", false}, {"reply", false}, {"link", true}, {"reply", true}} {
+		name := tc.kind
+		if tc.archived {
+			name += "-archived"
+		}
+		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "snapshot-source", "snapshot-target", "snapshot-peer")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
@@ -17,7 +24,7 @@ func TestSyncFederationMoveCarriesSnapshotPeerProof(t *testing.T) {
 			require.NoError(t, err)
 			peer, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[2].ID, Title: "Joined peer", Author: "worker"})
 			require.NoError(t, err)
-			if kind == "link" {
+			if tc.kind == "link" {
 				_, err = hub.DB.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "worker"})
 				require.NoError(t, err)
 			} else {
@@ -29,14 +36,18 @@ func TestSyncFederationMoveCarriesSnapshotPeerProof(t *testing.T) {
 			for _, i := range []int{2, 0, 1} {
 				require.NoError(t, spoke.sync(t, i))
 			}
+			if tc.archived {
+				_, _, err = hub.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: projects[2].ID, Actor: "worker", Force: true})
+				require.NoError(t, err)
+			}
 			local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			spoke.move(t, local, 0, 1)
-			require.NoError(t, spoke.sync(t, 1), "a move-only batch must carry its joined peer's existing proof")
+			require.NoError(t, spoke.sync(t, 1), "retained historical references must not block an authorized move")
 			got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			require.Equal(t, projects[1].ID, got.ProjectID)
-			if kind == "reply" {
+			if tc.kind == "reply" {
 				comments, err := hub.DB.CommentsByIssue(ctx, got.ID)
 				require.NoError(t, err)
 				require.Len(t, comments, 1)
