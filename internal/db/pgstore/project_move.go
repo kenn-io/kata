@@ -169,7 +169,7 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return err
 		}
 		if federated {
-			movedIssue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, current.ID))
+			movedIssue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, current.ID))
 			if err != nil {
 				return err
 			}

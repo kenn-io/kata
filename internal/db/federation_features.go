@@ -231,7 +231,7 @@ WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"
 		return "", err
 	}
 	if native {
-		features = MergeEventFeatures(features, SupportedEventFeatures)
+		features = MergeEventFeatures(features, CronEventFeature, RecurringCronEventFeature)
 	}
 	return features, nil
 }

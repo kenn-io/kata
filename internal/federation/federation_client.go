@@ -121,7 +121,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 		}
 		schemaVersion = max(schemaVersion, version)
 		if required != "" {
-			requiredFeatures = required
+			requiredFeatures = db.MergeEventFeatures(requiredFeatures, required)
 		}
 	}
 	if requiredFeatures != "" {

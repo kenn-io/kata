@@ -334,7 +334,7 @@ func CheckRecurringSpokeEvent(ctx context.Context, tx *sql.Tx, event RemoteEvent
 	if err != nil {
 		return err
 	}
-	protected := RequireEventFeatures(CronEventFeature, features) != nil
+	protected := strings.Contains(","+features+",", ","+RecurringCronEventFeature+",")
 	if !protected && !strings.HasPrefix(event.Type, "cron.job.") {
 		return nil
 	}
