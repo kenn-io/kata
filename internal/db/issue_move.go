@@ -111,7 +111,9 @@ func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssuePro
 }
 
 // MovedIssueUID resolves a historical short ID from the existing move journal.
-// It follows the stable issue UID even after multiple moves.
+// It follows the stable issue UID even after multiple moves. Compatibility is
+// history-scoped: purging move history or merging a former project can retire
+// these aliases. The move returns the current reference; stable UIDs do not change.
 func MovedIssueUID(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, projectID int64, shortID string, postgres bool) (string, error) {
