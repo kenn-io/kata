@@ -1,6 +1,8 @@
 package federation
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"net/http"
 	"testing"
 
@@ -8,12 +10,13 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // The sender can still see the old owner when another joined spoke has already
 // moved the issue on the hub. Supplemental proofs cannot rely on local ownership.
 func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T) {
-	for _, kind := range []string{"same-origin", "other-binding-origin", "other-credential-origin", "other-actor", "pull-only"} {
+	for _, kind := range []string{"same-origin", "other-binding-origin", "other-credential-origin", "other-actor", "pull-only", "relay"} {
 		t.Run(kind, func(t *testing.T) {
 			hub, projects := newMoveDeliveryHub(t, "proof-source", "proof-target")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
@@ -38,6 +41,20 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			}
 			_, err = spoke.env.DB.UpsertFederationBinding(t.Context(), target)
 			require.NoError(t, err)
+			if kind == "relay" {
+				bindingUID, err := uid.New()
+				require.NoError(t, err)
+				public, _, err := ed25519.GenerateKey(rand.Reader)
+				require.NoError(t, err)
+				require.NoError(t, spoke.env.DB.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: projects[1].UID, AuthorityUID: hub.DB.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+				_, err = spoke.env.DB.SetRelayBindingConfig(t.Context(), target.ProjectID, db.RelayBindingConfig{
+					ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID,
+					UpstreamInstanceUID: hub.DB.InstanceUID(), AuthorityUID: hub.DB.InstanceUID(),
+					HubPath:    []string{hub.DB.InstanceUID(), spoke.env.DB.InstanceUID()},
+					LocalActor: "worker", ResetEpoch: 1,
+				})
+				require.NoError(t, err)
+			}
 			binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
 			require.NoError(t, err)
 			tokens, err := federationMoveSourceTokens(t.Context(), spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
