@@ -812,7 +812,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, Limit: limit})
+		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}

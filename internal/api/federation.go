@@ -460,6 +460,7 @@ type FederationPollEventsRequest struct {
 	ProjectID     int64       `path:"project_id"`
 	Authorization string      `header:"Authorization"`
 	AfterID       int64       `query:"after_id,omitempty"`
+	IssueUID      string      `query:"issue_uid,omitempty" doc:"Read retained history only for an issue currently owned by this project, independently of the project cursor."`
 	Limit         OptionalInt `query:"limit,omitempty"`
 }
 
@@ -474,9 +475,10 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
-	// MoveSourceTokens proves authority for move sources outside the route
-	// enrollment's scope. These credentials are transport-only, never events.
-	MoveSourceTokens           map[string]string               `json:"move_source_tokens,omitempty"`
+	// MoveSourceTokens proves authority outside the route enrollment's scope:
+	// move sources and current owners of historical-envelope subjects or peers.
+	// These credentials are transport-only, never events.
+	MoveSourceTokens           map[string]string               `json:"move_source_tokens,omitempty" doc:"Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history."`
 	SchemaVersion              int                             `json:"schema_version"`
 	AdoptionBaseline           string                          `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty,omitzero"`

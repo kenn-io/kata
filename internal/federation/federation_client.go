@@ -60,11 +60,24 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 func (c *Client) PollProjectEvents(
 	ctx context.Context, hubProjectID, afterID int64, limit int,
 ) (api.PollEventsBody, error) {
+	return c.pollProjectEvents(ctx, hubProjectID, "", afterID, limit)
+}
+
+// PollIssueEvents reads retained history for an issue currently owned by the
+// authenticated hub project, independently of that project's polling cursor.
+func (c *Client) PollIssueEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
+	return c.pollProjectEvents(ctx, hubProjectID, issueUID, afterID, limit)
+}
+
+func (c *Client) pollProjectEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return api.PollEventsBody{}, err
 	}
 	query := &generated.PollFederationProjectEventsQuery{AfterID: &afterID}
+	if issueUID != "" {
+		query.IssueUID = &issueUID
+	}
 	if limit > 0 {
 		query.Limit = new(int64(limit))
 	}

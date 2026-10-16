@@ -87,6 +87,12 @@ move history and the original project identity remain. Purging that history or
 merging the former project can end compatibility; the move returns the current
 reference, and the stable issue UID stays unchanged.
 
+Destination sync recovers retained source history even when its cursor has
+already passed those events. This preserves missed changes and comments without
+replacing newer edits. Once the move is received, leaving the source does not
+discard that recovered history; its original project identity and move history
+must remain for historical references to keep resolving.
+
 The spoke sends the source project's existing enrollment credential with the
 move batch, alongside the destination credential, only to their shared hub
 origin. Both grants must permit push for the same spoke and actor. Joining both

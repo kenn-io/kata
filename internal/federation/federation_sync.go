@@ -322,6 +322,10 @@ func syncDirectSpoke(
 			return err
 		}
 	}
+	body.Events, err = backfillFederationMoveHistory(ctx, client, hubProjectID, binding.HubProjectUID, body)
+	if err != nil {
+		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+	}
 	var pulledEvents []db.Event
 	if err := store.RetryTransient(ctx, func() error {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {

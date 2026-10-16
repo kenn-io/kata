@@ -2518,6 +2518,7 @@ components:
         move_source_tokens:
           additionalProperties:
             type: string
+          description: Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
           type: object
         schema_version:
           format: int64
@@ -8741,6 +8742,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+          explode: false
+          in: query
+          name: issue_uid
+          schema:
+            description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+            type: string
         - explode: false
           in: query
           name: limit
