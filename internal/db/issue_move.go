@@ -74,6 +74,7 @@ func validateIssueMoveTreeMappings(ctx context.Context, tx *sql.Tx, inputs []Mov
 		predicates = append(predicates, fmt.Sprintf("(issue_id=$%d AND project_id=$%d)", len(args)+1, len(args)+2))
 		args = append(args, item.IssueID, item.FromProjectID)
 	}
+	//nolint:gosec // Predicates contain generated placeholders; all project and issue IDs are bound parameters.
 	rows, err := tx.QueryContext(ctx, `SELECT source, external_id, object_type FROM import_mappings
  WHERE `+strings.Join(predicates, " OR ")+`
  GROUP BY source, external_id, object_type HAVING COUNT(*)>1
