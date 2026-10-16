@@ -703,3 +703,32 @@ func TestMoveIssuePublishesSubtreeEventsOnce(t *testing.T) {
 	require.Len(t, captured, 2, "each moved issue must enqueue its hook event once")
 	require.NotEqual(t, captured[0].UID, captured[1].UID)
 }
+
+func TestMoveIssueWakesLiveFormerProjectStream(t *testing.T) {
+	env := testenv.New(t)
+	source, target, issue := seedMovePair(t, env)
+	cursor, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	response := openSSE(t, env, fmt.Sprintf("project_id=%d&after_id=%d", source.ID, cursor-1), nil)
+	defer response.Body.Close()
+	framer := newSSEFramer(response.Body)
+	initial, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "initial source event must finish draining before the move")
+	require.Equal(t, "issue.created", initial.event)
+
+	// A global wakeup may cover unrelated data, but the durable project filter
+	// must still omit that event from this source stream.
+	unrelated, event, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "unrelated", Author: "tester"})
+	require.NoError(t, err)
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(target.ID, event))
+	env.Broadcaster.Broadcast(daemon.NewResetMsg(target.ID, event.ID))
+	moved, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.ShortID, "actions/move"),
+		map[string]any{"actor": "tester", "to_project_uid": target.UID},
+		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
+	require.Equal(t, http.StatusOK, moved.StatusCode, string(raw))
+	frame, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "former-project live stream must observe the move without another source mutation")
+	require.Equal(t, "issue.moved", frame.event)
+	require.Contains(t, frame.data, issue.UID)
+	require.NotContains(t, frame.data, unrelated.UID)
+}

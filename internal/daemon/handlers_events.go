@@ -737,14 +737,11 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 
-	subscriptionProjectID := projectID
-	if issueScopeFromContext(ctx) != nil {
-		// Hidden blockers can live in another project. Scoped filtering still
-		// happens against the durable log; the global subscription is only the
-		// wakeup needed to notice an identity-free invalidation promptly.
-		subscriptionProjectID = 0
-	}
-	sub := cfg.Broadcaster.Subscribe(SubFilter{ProjectID: subscriptionProjectID})
+	// Moves are stored and published in the destination project, but also
+	// belong to the source's stream. Hidden blockers can likewise affect
+	// issue-scoped streams across projects. Subscribe to all wakeups and keep
+	// project and authority filtering on the durable read below.
+	sub := cfg.Broadcaster.Subscribe(SubFilter{})
 	defer sub.Unsub()
 
 	if projectID > 0 {
@@ -943,6 +940,9 @@ func runLivePhase(base context.Context, deps livePhaseDeps, projectID, lastSent 
 			}
 			switch msg.Kind {
 			case StreamKindReset:
+				if resetProjectID != 0 && msg.ProjectID != 0 && msg.ProjectID != resetProjectID {
+					continue
+				}
 				if _, err := revalidateEventStreamAuthority(base, deps.cfg.DB); err != nil {
 					return
 				}
