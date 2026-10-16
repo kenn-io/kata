@@ -491,6 +491,12 @@ func shouldDeliverDuplicatePulledEvent(
 	// Its former source's cursor cannot tell whether the move was pushed.
 	if projectID != binding.ProjectID {
 		actualBinding, err := store.FederationBindingByProject(ctx, projectID)
+		if errors.Is(err, db.ErrNotFound) {
+			// This local event was already applied before its source left.
+			// Backfilling it through a destination needs no new delivery or
+			// acknowledgement from the retired source stream.
+			return false, nil
+		}
 		if err != nil {
 			return false, err
 		}
