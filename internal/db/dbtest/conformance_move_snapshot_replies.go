@@ -43,10 +43,11 @@ func checkMoveSnapshotReplyProjectScope(t *testing.T, store db.Storage) error {
 			require.NoError(t, err)
 			require.NotNil(t, moved.Event)
 			require.Contains(t, moved.Event.Payload, hiddenUID)
-			if state == "moved-out" {
+			switch state {
+			case "moved-out":
 				_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: peer.ID, FromProjectID: projects[1].ID, ToProjectID: projects[2].ID, IfMatchRev: peer.Revision, Actor: "worker"})
 				require.NoError(t, err)
-			} else if state == "missing" {
+			case "missing":
 				_, err = store.PurgeIssue(ctx, peer.ID, "worker", nil)
 				require.NoError(t, err)
 			}
