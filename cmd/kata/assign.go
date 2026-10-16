@@ -103,13 +103,13 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwn
 	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
 	}
-	return printAssignMutation(cmd, bs, unassign)
+	return printAssignMutation(cmd, bs, unassign, issue.ProjectName)
 }
 
 // printAssignMutation formats the assign/unassign response. Quiet mode prints
 // nothing; JSON mode emits the daemon body under the kata_api_version
 // envelope; otherwise prints a single human-readable line.
-func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
+func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool, requestedProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -117,6 +117,10 @@ func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
+	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
 		return err
 	}
 	if mode == outputAgent {
@@ -128,6 +132,7 @@ func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
+		m.Issue.ShortID = displayRef
 		return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, true, func(w io.Writer, m agentIssueMutation) error {
 			if unassign {
 				return writeAgentField(w, "Owner-Cleared", "true")
@@ -148,6 +153,7 @@ func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	b.Issue.ShortID = displayRef
 	if flags.Quiet {
 		return nil
 	}
@@ -167,6 +173,6 @@ func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
 	if b.Issue.Owner != nil {
 		owner = *b.Issue.Owner
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s assigned to %s\n", b.Issue.ShortID, owner)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s assigned to %s\n", b.Issue.ShortID, owner)
 	return err
 }

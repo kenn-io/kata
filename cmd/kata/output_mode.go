@@ -66,11 +66,16 @@ func (f outputFormatFlag) String() string {
 
 func (f outputFormatFlag) Type() string { return "string" }
 
-func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, extra func(io.Writer, agentIssueMutation) error) error {
+func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, requestedProject string, extra func(io.Writer, agentIssueMutation) error) error {
 	var m agentIssueMutation
 	if err := json.Unmarshal(bs, &m); err != nil {
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
+	m.Issue.ShortID = displayRef
 	return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, false, extra)
 }
 

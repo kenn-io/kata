@@ -35,8 +35,11 @@ func historicalOutputFixture(t *testing.T) (*testenv.Env, string, db.Project, db
 
 func TestHistoricalIssueOutputRefRoundTripsToMovedIssue(t *testing.T) {
 	for _, mode := range []string{"human", "agent", "json"} {
-		for _, operation := range []string{"show", "edit", "label add", "label rm", "restore"} {
+		for _, operation := range []string{"show", "edit", "label add", "label rm", "restore", "assign", "unassign", "claim", "comment", "comment edit"} {
 			t.Run(mode+"/"+operation, func(t *testing.T) {
+				if mode == "human" && strings.HasPrefix(operation, "comment") {
+					t.Skip("human comment acknowledgements contain no issue reference")
+				}
 				env, dir, target, moved, oldRef := historicalOutputFixture(t)
 				args := []string{"show", oldRef}
 				switch operation {
@@ -48,6 +51,19 @@ func TestHistoricalIssueOutputRefRoundTripsToMovedIssue(t *testing.T) {
 					_, err := env.DB.AddLabel(t.Context(), moved.ID, "example-label", "worker")
 					require.NoError(t, err)
 					args = []string{"label", "rm", oldRef, "example-label"}
+				case "assign":
+					args = []string{"assign", oldRef, "worker"}
+				case "unassign":
+					runCLI(t, env, dir, "assign", oldRef, "worker")
+					args = []string{"unassign", oldRef}
+				case "claim":
+					args = []string{"claim", oldRef}
+				case "comment":
+					args = []string{"comment", oldRef, "--body", "Continued discussion"}
+				case "comment edit":
+					comment, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: moved.ID, Body: "Earlier discussion", Author: "worker"})
+					require.NoError(t, err)
+					args = []string{"comment", "edit", oldRef, comment.UID, "--body", "Updated discussion"}
 				case "restore":
 					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), moved.ID, "worker")
 					require.NoError(t, err)
@@ -112,7 +128,7 @@ func TestHistoricalOutputUsesResolvedProjectContext(t *testing.T) {
 
 func TestHistoricalOutputLookupFailureUsesStableUID(t *testing.T) {
 	for _, mode := range []string{"human", "agent", "json"} {
-		for _, operation := range []string{"show", "label no-op"} {
+		for _, operation := range []string{"show", "label no-op", "assign no-op", "claim no-op"} {
 			t.Run(mode+"/"+operation, func(t *testing.T) {
 				env, dir, target, moved, oldRef := historicalOutputFixture(t)
 				upstream, err := url.Parse(env.URL)
@@ -135,7 +151,14 @@ func TestHistoricalOutputLookupFailureUsesStableUID(t *testing.T) {
 					require.NoError(t, err)
 					args = []string{"label", "add", "source-project#" + oldRef, "example-label"}
 				}
-				output := runCLI(t, env, dir, append(args, "--format", mode)...)
+				if operation == "assign no-op" || operation == "claim no-op" {
+					runCLIAs(t, env, dir, "worker", "assign", oldRef, "worker")
+					args = []string{"assign", oldRef, "worker"}
+					if operation == "claim no-op" {
+						args = []string{"claim", oldRef}
+					}
+				}
+				output := runCLIAs(t, env, dir, "worker", append(args, "--format", mode)...)
 				if mode == "json" {
 					var response struct {
 						Issue db.Issue `json:"issue"`
