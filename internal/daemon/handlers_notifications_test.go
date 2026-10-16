@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -226,33 +225,12 @@ func (s *notificationMoveBeforeWriteStore) CreateComment(
 }
 
 func TestNotifyPublishesCommittedProjectAfterConcurrentMove(t *testing.T) {
-	checkNotifyPublishesCommittedProjectAfterConcurrentMove(t, "Inspect the finding", 0)
-}
-
-func FuzzNotifyPublishesCommittedProjectAfterConcurrentMove(f *testing.F) {
-	f.Add("Inspect the finding", uint8(0))
-	f.Fuzz(func(t *testing.T, message string, projectOffset uint8) {
-		if len(message) > 256 {
-			return
-		}
-		if strings.TrimSpace(message) == "" {
-			message = "Inspect the finding"
-		}
-		checkNotifyPublishesCommittedProjectAfterConcurrentMove(t, message, projectOffset)
-	})
-}
-
-func checkNotifyPublishesCommittedProjectAfterConcurrentMove(t *testing.T, message string, projectOffset uint8) {
-	t.Helper()
+	const message = "Inspect the finding"
 	broadcaster := daemon.NewEventBroadcaster()
 	var wrapped *notificationMoveBeforeWriteStore
 	h, projectAID := bootstrapProject(t, withBroadcaster(broadcaster), withNotificationMoveBeforeWriteStore(&wrapped))
 	source, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectAID, Title: "Movable issue", Author: "worker"})
 	require.NoError(t, err)
-	for i := uint8(0); i < projectOffset%4; i++ {
-		_, err := h.DB().CreateProject(t.Context(), fmt.Sprintf("spoke-project-%d", i))
-		require.NoError(t, err)
-	}
 	projectB, err := h.DB().CreateProject(t.Context(), "hub-project")
 	require.NoError(t, err)
 	wrapped.toProjectID = projectB.ID

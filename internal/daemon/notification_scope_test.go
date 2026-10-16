@@ -110,6 +110,19 @@ func TestNotifyRateErrorRedactsHiddenPointer(t *testing.T) {
 	resp, body = envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID), map[string]any{"broadcast": true, "message": "New finding"}, headers)
 	require.Equal(t, 429, resp.StatusCode, string(body))
 	require.NotContains(t, string(body), "hidden target context", "rate errors must respect the notification pointer projection")
+	var result struct {
+		Error struct {
+			Data struct {
+				Prefix string `json:"last_message_prefix"`
+				Retry  int    `json:"retry_after_seconds"`
+				Window string `json:"window"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &result))
+	require.Empty(t, result.Error.Data.Prefix, "hidden history cannot leak through rate diagnostics")
+	require.Positive(t, result.Error.Data.Retry, "the refusal stays actionable")
+	require.NotEmpty(t, result.Error.Data.Window)
 }
 
 type notificationDetachStreamProjectionStore struct {

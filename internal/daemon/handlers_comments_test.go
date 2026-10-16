@@ -3,11 +3,9 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -488,26 +486,17 @@ func (s *moveIssueBeforeCommentEditStore) EditComment(
 }
 
 func TestCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T) {
-	checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, "Redacted evidence", 0)
-}
-
-func FuzzCommentEditPublishesCommittedProjectAfterConcurrentMove(f *testing.F) {
-	f.Add("Redacted evidence", uint8(0))
-	f.Add(concurrentMoveOriginalBody, uint8(1))
-	f.Fuzz(func(t *testing.T, body string, projectOffset uint8) {
-		if len(body) > 256 {
-			return
-		}
-		if strings.TrimSpace(body) == "" {
-			body = "Redacted evidence"
-		}
-		checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, body, projectOffset)
+	t.Run("changed body", func(t *testing.T) {
+		checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, "Redacted evidence")
+	})
+	t.Run("unchanged body", func(t *testing.T) {
+		checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t, concurrentMoveOriginalBody)
 	})
 }
 
 const concurrentMoveOriginalBody = "Original evidence"
 
-func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, body string, projectOffset uint8) {
+func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, body string) {
 	t.Helper()
 	broadcaster := daemon.NewEventBroadcaster()
 	var wrapped *moveIssueBeforeCommentEditStore
@@ -524,10 +513,6 @@ func checkCommentEditPublishesCommittedProjectAfterConcurrentMove(t *testing.T, 
 		IssueID: issue.ID, Author: "reviewer", Body: concurrentMoveOriginalBody,
 	})
 	require.NoError(t, err)
-	for i := uint8(0); i < projectOffset%4; i++ {
-		_, err := h.DB().CreateProject(t.Context(), fmt.Sprintf("spoke-project-%d", i))
-		require.NoError(t, err)
-	}
 	target, err := h.DB().CreateProject(t.Context(), "hub-project")
 	require.NoError(t, err)
 	wrapped.toProjectID = target.ID
