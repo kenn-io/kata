@@ -23,7 +23,7 @@ func (s *Store) ResetFederatedProject(
 		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
-		if err := clearFederatedProjectTx(ctx, tx, projectID); err != nil {
+		if err := clearFederatedProjectTx(ctx, tx, projectID, s.InstanceUID()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
@@ -79,7 +79,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		return clearFederatedProjectTx(ctx, tx, projectID)
+		return clearFederatedProjectTx(ctx, tx, projectID, s.InstanceUID())
 	})
 }
 
@@ -118,8 +118,8 @@ func clearRelayProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, proje
 	return clearFederatedProjectionTx(ctx, tx, projectID)
 }
 
-func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID); err != nil {
+func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, originInstanceUID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID); err != nil {

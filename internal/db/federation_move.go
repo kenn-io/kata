@@ -267,7 +267,70 @@ func RestrictFoldProject(p *FoldProjection, projectUID string) {
 
 // ClearFederatedMovedIssueHistory removes every contributing stream for issues
 // being reset. Keeping a former source baseline would recreate a purged issue.
-func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM events WHERE issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+	// Only quarantines covering subject events being removed block this reset;
+	// unrelated quarantined work in a contributing stream remains independent.
+	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q
+ WHERE q.project_id<>$1 AND q.direction='push' AND q.skipped_at IS NULL
+ AND EXISTS(SELECT 1 FROM events e WHERE e.project_id=q.project_id
+ AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1))`, projectID)
+	if err != nil {
+		return err
+	}
+	quarantineUIDs := map[string]bool{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		var uids []string
+		if err := json.Unmarshal([]byte(raw), &uids); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		for _, uid := range uids {
+			quarantineUIDs[uid] = true
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(quarantineUIDs) > 0 {
+		args := []any{projectID}
+		placeholders := make([]string, 0, len(quarantineUIDs))
+		for uid := range quarantineUIDs {
+			args = append(args, uid)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		var quarantined bool
+		//nolint:gosec // Only generated placeholders are joined; all UIDs are bound.
+		query := `SELECT EXISTS(SELECT 1 FROM events WHERE project_id<>$1
+  AND issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+  AND uid IN (` + strings.Join(placeholders, ",") + `))`
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&quarantined); err != nil {
+			return err
+		}
+		if quarantined {
+			return ErrFederationResetBlockedByQuarantine
+		}
+	}
+	// A destination reset must not discard offline work awaiting its former
+	// source stream's acknowledgement, even when the destination is read-only.
+	var pending bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
+ LEFT JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
+ AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND e.id>COALESCE(b.push_cursor_event_id,0)
+ AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending {
+		return ErrFederationResetBlockedByPendingPush
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM events WHERE issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	return err
 }
