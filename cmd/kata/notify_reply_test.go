@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -68,18 +67,24 @@ func TestNotifyTypedAnswerSettlesRequestAndNotifiesRequester(t *testing.T) {
 	for _, tc := range []struct{ kind, flag string }{
 		{"reply", "--reply"}, {"confirm", "--confirm"}, {"refute", "--refute"},
 	} {
-		for _, elsewhere := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/elsewhere=%t", tc.kind, elsewhere), func(t *testing.T) {
+		// The request sits on the issue the coordinator waits on. The
+		// requested comment, and the answer, can live on another issue.
+		for _, layout := range []string{"same issue", "answer elsewhere", "comment and answer elsewhere"} {
+			t.Run(tc.kind+"/"+layout, func(t *testing.T) {
 				env, dir, pid := setupCLIWorkspace(t)
 				issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Finding", Author: "coordinator"})
 				require.NoError(t, err)
-				target, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Finding"})
+				other, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Follow-up", Author: "worker"})
 				require.NoError(t, err)
-				answerIssue := issue
-				if elsewhere {
-					answerIssue, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: "Follow-up", Author: "worker"})
-					require.NoError(t, err)
+				commentIssue, answerIssue := issue, issue
+				if layout != "same issue" {
+					answerIssue = other
 				}
+				if layout == "comment and answer elsewhere" {
+					commentIssue = other
+				}
+				target, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: commentIssue.ID, Author: "reviewer", Body: "Finding"})
+				require.NoError(t, err)
 				runCLIAs(t, env, dir, "coordinator", "notify", issue.ShortID, "--to", "worker", "--re", target.UID, "--message", "Please confirm or refute this finding")
 				runCLIAs(t, env, dir, "worker", "comment", answerIssue.ShortID, tc.flag, target.UID, "--body", "I reproduced the finding with the exact steps listed in the report above.")
 
