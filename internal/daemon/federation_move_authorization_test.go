@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,7 +62,7 @@ func TestFederationMoveSourceHostAuthority(t *testing.T) {
 		mode   string
 		status int
 	}{
-		{"allow", 200}, {"admission-denied", 403}, {"fence-denied", 403},
+		{"allow", 200}, {"global-grant", 200}, {"missing-proof", 403}, {"invalid-proof", 403}, {"proof-wrong-actor", 403}, {"proof-wrong-spoke", 403}, {"proof-pull-only", 403}, {"proof-revoked", 403}, {"admission-denied", 403}, {"fence-denied", 403},
 		{"missing-fence", 503}, {"unavailable", 503}, {"limited", 429},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -77,7 +78,11 @@ func TestFederationMoveSourceHostAuthority(t *testing.T) {
 			require.NoError(t, err)
 			sourceGrant, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "tester"})
 			require.NoError(t, err)
-			targetGrant, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "tester"})
+			targetProjectID := &target.ID
+			if tc.mode == "global-grant" {
+				targetProjectID = nil
+			}
+			targetGrant, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: targetProjectID, Capabilities: "push,pull", Actor: "tester"})
 			require.NoError(t, err)
 			require.NotEqual(t, sourceGrant.Enrollment.ID, targetGrant.Enrollment.ID)
 			eventUID, err := uid.New()
@@ -107,11 +112,42 @@ func TestFederationMoveSourceHostAuthority(t *testing.T) {
 				}
 				return err
 			}
+			encoded, err := json.Marshal(body)
+			require.NoError(t, err)
+			var request map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &request))
+			if tc.mode != "missing-proof" && tc.mode != "global-grant" {
+				proof := sourceGrant.Token
+				if tc.mode == "invalid-proof" {
+					proof = targetGrant.Token
+				}
+				if strings.HasPrefix(tc.mode, "proof-") {
+					params := db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &source.ID, Capabilities: "push,pull", Actor: "tester"}
+					switch tc.mode {
+					case "proof-wrong-actor":
+						params.Actor = "other-actor"
+					case "proof-wrong-spoke":
+						params.SpokeInstanceUID, err = uid.New()
+						require.NoError(t, err)
+					case "proof-pull-only":
+						params.Capabilities = "pull"
+					}
+					other, err := env.DB.CreateFederationEnrollment(t.Context(), params)
+					require.NoError(t, err)
+					if tc.mode == "proof-revoked" {
+						require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), other.Enrollment.ID))
+					}
+					proof = other.Token
+				}
+				request["move_source_tokens"] = map[string]string{source.UID: proof}
+			}
 			headers := bearer(targetGrant.Token)
 			headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
-			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(target.ID)+"/federation/events:ingest", body, headers)
+			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(target.ID)+"/federation/events:ingest", request, headers)
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
-			require.Positive(t, access.sourceChecks.Load(), "source host authority must be checked")
+			if tc.mode != "missing-proof" && tc.mode != "invalid-proof" && !strings.HasPrefix(tc.mode, "proof-") {
+				require.Positive(t, access.sourceChecks.Load(), "source host authority must be checked")
+			}
 			got, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			if tc.status == http.StatusOK {

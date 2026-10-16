@@ -95,6 +95,7 @@ func (c *Client) IngestProjectEvents(
 
 // IngestProjectEventsOptions carries optional metadata for federation ingest.
 type IngestProjectEventsOptions struct {
+	MoveSourceTokens           map[string]string
 	AdoptionBaseline           string
 	AdoptionBaselineEndEventID int64
 }
@@ -138,7 +139,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 	}
 	data, err := json.Marshal(api.FederationIngestEventsRequestBody{
 		SchemaVersion: schemaVersion, AdoptionBaseline: opts.AdoptionBaseline,
-		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events,
+		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events, MoveSourceTokens: opts.MoveSourceTokens,
 	})
 	if err != nil {
 		return api.FederationIngestEventsBody{}, err
