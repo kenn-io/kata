@@ -165,7 +165,7 @@ func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
 	for _, dry := range []bool{true, false} {
 		expanded, cleaned := false, false
 		denied := errors.New("descendant fence denied")
-		fenced := db.WithTransactionFence(ctx, func(_ context.Context, tx db.Transaction) error {
+		fenced := db.WithTransactionFence(ctx, func(_ context.Context, _ db.Transaction) error {
 			if !expanded {
 				return nil
 			}
