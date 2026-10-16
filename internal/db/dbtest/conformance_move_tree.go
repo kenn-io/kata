@@ -202,3 +202,44 @@ func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+// Contract: preview and execution reject mapping keys that would collide when
+// descendants from different source projects arrive in the same destination.
+func checkMoveTreeMappingCollision(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, err := store.CreateProject(ctx, "mapping-source")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "mapping-other")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "mapping-target")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	for _, issue := range []db.Issue{root, child} {
+		_, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{
+			ProjectID: issue.ProjectID, Source: "connector", ExternalID: "same-task", ObjectType: "issue", IssueID: &issue.ID,
+		})
+		require.NoError(t, err)
+	}
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	for _, dry := range []bool{true, false} {
+		_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker", DryRun: dry,
+		})
+		var collision *db.ProjectMergeImportMappingCollisionError
+		require.ErrorAs(t, err, &collision)
+		require.Equal(t, []db.ProjectMergeImportMappingCollision{{Source: "connector", ExternalID: "same-task", ObjectType: "issue"}}, collision.Mappings)
+		for _, before := range []db.Issue{root, child} {
+			got, err := store.IssueByID(ctx, before.ID)
+			require.NoError(t, err)
+			require.Equal(t, before, got)
+		}
+		after, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, cursor, after)
+	}
+	return nil
+}

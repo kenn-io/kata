@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // IssueMoveTreeInputs captures descendant revisions inside the move transaction.
@@ -56,7 +57,44 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 			return nil, err
 		}
 	}
+	if err := validateIssueMoveTreeMappings(ctx, tx, inputs, in.ToProjectID); err != nil {
+		return nil, err
+	}
 	return inputs, nil
+}
+
+// Validate the complete proposed mapping set before previews or writes. Checking
+// each issue against the unchanged target misses collisions within the subtree.
+func validateIssueMoveTreeMappings(ctx context.Context, tx *sql.Tx, inputs []MoveIssueProjectIn, targetID int64) error {
+	predicates := []string{"project_id=$1"}
+	args := []any{targetID}
+	for _, item := range inputs {
+		predicates = append(predicates, fmt.Sprintf("(issue_id=$%d AND project_id=$%d)", len(args)+1, len(args)+2))
+		args = append(args, item.IssueID, item.FromProjectID)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT source, external_id, object_type FROM import_mappings
+ WHERE `+strings.Join(predicates, " OR ")+`
+ GROUP BY source, external_id, object_type HAVING COUNT(*)>1
+ ORDER BY source, object_type, external_id LIMIT 20`, args...)
+	if err != nil {
+		return fmt.Errorf("check subtree import mapping collisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var collisions []ProjectMergeImportMappingCollision
+	for rows.Next() {
+		var collision ProjectMergeImportMappingCollision
+		if err := rows.Scan(&collision.Source, &collision.ExternalID, &collision.ObjectType); err != nil {
+			return err
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(collisions) > 0 {
+		return &ProjectMergeImportMappingCollisionError{Mappings: collisions}
+	}
+	return nil
 }
 
 // authorizeIssueMoveProjects expands admission and then rechecks its updated
