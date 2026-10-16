@@ -426,6 +426,21 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
+func TestCLIIssueActionReportsWithoutCommandContext(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	target := newCLIUseDaemon(t)
+	cmd := findCommand(t, "create")
+	require.Nil(t, cmd.Context())
+	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
+	t.Cleanup(func() { cliUseTarget.Store(nil) })
+
+	wait := reportCLIIssueAction(cmd, "issue_created", true)
+	wait()
+	assert.Equal(t, int32(1), target.posts.Load())
+}
+
 func TestCLIUseReportsAfterIssueActionTimesOut(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv(hooks.HookVersionEnv, "")

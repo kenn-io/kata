@@ -147,7 +147,11 @@ func reportCLIIssueAction(cmd *cobra.Command, event string, changed bool) func()
 	if !changed || target == nil || !reportsCLIUse(cmd) {
 		return func() {}
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), cliUseReportTimeout)
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cliUseReportTimeout)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

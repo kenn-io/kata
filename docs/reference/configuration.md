@@ -1081,14 +1081,15 @@ with only `surface: web`, `tui`, or `cli`. Web issue removal closes the issue
 and reports `issue_closed` when changed. Each successful mutation with
 `changed: true` counts, including repeated actions in one day. Ordinary retries
 that reuse a create, already-closed issues, failed writes, dry runs, and reopen
-operations send nothing. Only a retry in the same open browser tab can count a
-recovered create once. CLI/TUI retries, browser reloads, and retries from another
-interface leave an uncertain create uncounted. Events carry no request identifier
-to match counts across clients. A close, reopen, close sequence counts two closes;
+operations send nothing. Creates without an acknowledged `changed: true`
+response remain uncounted across all interfaces.
+A close, reopen, close sequence counts two closes;
 undoing a reopen in the TUI counts the resulting close too. CLI actions use the
 same terminal and agent-mode rules above. Reporting happens before follow-up
 comments, so a comment failure still counts a completed close. Action reporting
-and `app_opened` share the CLI's one-second reporting budget. Delivery is
+has its own one-second deadline. The command waits for that attempt before
+post-run `app_opened` reporting starts its separate one-second deadline, so
+reporting can add two consecutive one-second waits. Delivery is
 best effort and uses the daemon's opt-out setting.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
