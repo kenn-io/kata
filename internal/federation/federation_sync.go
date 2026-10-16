@@ -1442,10 +1442,15 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
 	var tokens map[string]string
 	var projectUIDs []string
+	requiredSources := map[string]bool{}
 	ordinaryIssueWork := false
 	for _, event := range events {
 		if event.Type != "issue.moved" {
 			ordinaryIssueWork = ordinaryIssueWork || strings.HasPrefix(event.Type, "issue.")
+			if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
+				issueUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["issue_uid"])
+				ordinaryIssueWork = ordinaryIssueWork || issueUID != ""
+			}
 			continue
 		}
 		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
@@ -1453,6 +1458,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			return nil, db.ErrFederationIngestValidation
 		}
 		projectUIDs = append(projectUIDs, fromUID)
+		requiredSources[fromUID] = true
 	}
 	if ordinaryIssueWork {
 		bindings, err := store.ListFederationBindings(ctx)
@@ -1515,7 +1521,10 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			continue
 		}
 		if credential.LeavePending || credential.RelayEnrollmentPending {
-			return nil, db.ErrFederationMoveSourceUnauthorized
+			if requiredSources[fromUID] {
+				return nil, db.ErrFederationMoveSourceUnauthorized
+			}
+			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
 			return nil, errors.New("move source credential project differs from binding")

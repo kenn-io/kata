@@ -901,14 +901,31 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			continue
 		}
 		event := input.event
-		payload := db.PayloadMap(event.Payload)
-		primary, err := payloadIssueUID(event, payload)
-		if err != nil {
-			return err
-		}
-		refs, err := payloadReferencedIssueUIDs(event, payload)
-		if err != nil {
-			return err
+		var primary string
+		var refs []string
+		switch {
+		case strings.HasPrefix(event.Type, "issue."):
+			payload := db.PayloadMap(event.Payload)
+			var err error
+			primary, err = payloadIssueUID(event, payload)
+			if err != nil {
+				return err
+			}
+			refs, err = payloadReferencedIssueUIDs(event, payload)
+			if err != nil {
+				return err
+			}
+		case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
+			// A run's UID identifies the run, not its optional issue reference.
+			var run db.CronRunObservation
+			if err := json.Unmarshal(event.Payload, &run); err != nil {
+				return err
+			}
+			if run.IssueUID != nil {
+				primary = *run.IssueUID
+			}
+		default:
+			continue
 		}
 		refs = append(refs, primary)
 		for _, issueUID := range refs {
