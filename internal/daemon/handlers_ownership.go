@@ -345,13 +345,13 @@ func forwardTimedAssignmentClaim(
 	issue db.Issue,
 	actor string,
 ) (*api.ClaimResponse, bool, error) {
-	finishTransport, err := beginClaimFederationTransport(ctx, cfg, in.ProjectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
 	if err != nil {
 		return nil, true, err
 	}
 	defer finishTransport()
 
-	binding, err := cfg.DB.FederationBindingByProject(ctx, in.ProjectID)
+	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
@@ -377,7 +377,7 @@ func forwardTimedAssignmentClaim(
 	if err != nil {
 		return nil, true, assignmentClaimForwardError(err)
 	}
-	response, err := applyForwardedAssignmentClaim(ctx, cfg, in.ProjectID, issue.UID, forwarded)
+	response, err := applyForwardedAssignmentClaim(ctx, cfg, issue.ProjectID, issue.UID, forwarded)
 	if err != nil {
 		return nil, true, claimAPIError(err)
 	}
