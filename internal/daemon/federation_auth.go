@@ -325,10 +325,13 @@ func federationCredentialDenied() error {
 		"federation credential is not currently authorized", "", nil)
 }
 
-// authorizeFederationMoveSource applies the same host policy to the source as
-// the route applies to the destination. Storage has already proved and fenced
-// this source enrollment; its temporary context does not widen the whole batch.
+// authorizeFederationMoveSource preserves the request's fixed project limit and
+// applies the same host policy as the route. Storage has already proved and
+// fenced this enrollment; its temporary context does not widen the whole batch.
 func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transaction db.Transaction, enrollment db.FederationEnrollment, source db.Project) error {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, source.UID) {
+		return ErrHostAccessDenied
+	}
 	if cfg.HostFederationAccess == nil {
 		return nil
 	}

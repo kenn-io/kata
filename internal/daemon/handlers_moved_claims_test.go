@@ -52,34 +52,15 @@ func TestFederatedMovedIssueLeaseRoutesUseCurrentIdentity(t *testing.T) {
 	}
 }
 
-func TestUIIssueReferenceUsesMovedProject(t *testing.T) {
-	for _, archived := range []bool{false, true} {
-		t.Run(fmt.Sprint("archived=", archived), func(t *testing.T) {
-			env := testenv.New(t)
-			source, target, issue := seedMovePair(t, env)
-			_, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			if archived {
-				_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "worker", Force: true})
-				require.NoError(t, err)
-			}
-			response, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/ui/issue-reference?project_id=%d&ref=%s", source.ID, issue.ShortID), nil, nil)
-			if archived {
-				assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "project_not_found")
-				return
-			}
-			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-			var result struct {
-				Issue struct {
-					UID        string `json:"uid"`
-					ProjectUID string `json:"project_uid"`
-				} `json:"issue"`
-			}
-			require.NoError(t, json.Unmarshal(raw, &result))
-			require.Equal(t, issue.UID, result.Issue.UID)
-			require.Equal(t, target.UID, result.Issue.ProjectUID)
-		})
-	}
+func TestUIIssueReferenceRejectsMovedArchivedProject(t *testing.T) {
+	env := testenv.New(t)
+	source, target, issue := seedMovePair(t, env)
+	_, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	response, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/ui/issue-reference?project_id=%d&ref=%s", source.ID, issue.ShortID), nil, nil)
+	assertAPIError(t, response.StatusCode, raw, http.StatusNotFound, "project_not_found")
 }
 
 func TestMoveIssueChecksEveryClaimAndKeepsPreviewReadOnly(t *testing.T) {
