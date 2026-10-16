@@ -61,7 +61,7 @@ func labelAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := project.comment(bs, issue.RefForAPI, actor, comment, handle); err != nil {
+			if err := project.comment(bs, actor, comment, handle); err != nil {
 				return err
 			}
 			return printLabelMutation(cmd, bs)
