@@ -17,6 +17,44 @@ type moveQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// CheckFederationMoveSourceLifecycle keeps a native source joined while a
+// destination still owes a locally authored move that needs its credential.
+func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+	var sourceUID string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
+ JOIN federation_bindings b ON b.project_id=p.id
+ WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// A paused destination retains its owed move and may resume. Its durable
+	// acknowledgment cursor, rather than its current push flag, releases source
+	// authority for teardown.
+	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.type='issue.moved' AND e.origin_instance_uid=$1
+ AND b.role='spoke' AND b.relay_config IS NULL
+ AND e.id>b.push_cursor_event_id`, originInstanceUID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return err
+		}
+		fromUID, _ := StringValue(PayloadMap([]byte(payload))["from_project_uid"])
+		if fromUID == sourceUID {
+			return fmt.Errorf("%w: sync pending issue moves in destination projects, then retry source leave or archive", ErrFederationResetBlockedByPendingPush)
+		}
+	}
+	return rows.Err()
+}
+
 // CheckFederatedIssueMove allows local projects, or two active bindings in one
 // hub group. Hub bindings belong to this daemon; spoke bindings name an origin.
 func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) error {

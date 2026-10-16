@@ -9,9 +9,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// ValidateRelayLifecycle checks the project’s retained relay state before lifecycle changes.
+// ValidateRelayLifecycle checks retained federation work before lifecycle changes.
 func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.relayReset(tx).ValidateLifecycle(ctx, projectID) })
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
 }
 
 // FenceRelayDisconnect validates retained relay work and disables writes in
@@ -21,6 +21,9 @@ func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error
 }
 
 func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+		return err
+	}
 	return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
 }
 
