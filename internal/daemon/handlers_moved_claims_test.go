@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestMovedIssueLeaseRoutesUseCurrentIdentity(t *testing.T) {
+func TestFederatedMovedIssueLeaseRoutesUseCurrentIdentity(t *testing.T) {
 	for _, refKind := range []string{"short ID", "ULID"} {
 		for _, action := range []string{"claim", "renew", "release", "status"} {
 			t.Run(refKind+"/"+action, func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestUIIssueReferenceChecksMovedProjectAccess(t *testing.T) {
 	require.ElementsMatch(t, []int64{source.ID, target.ID}, access.requests[len(access.requests)-1].Operation.ProjectIDs)
 }
 
-func TestMovedIssueLeaseRejectsFormerProjectEnrollment(t *testing.T) {
+func TestFederatedMovedIssueLeaseRejectsFormerProjectEnrollment(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("owner-token"))
 	source, issue := createClaimHubIssueNamed(t, env, "source-project")
 	target, _ := createClaimHubIssueNamed(t, env, "target-project")
@@ -182,7 +182,7 @@ func TestMovedIssueLeaseRejectsFormerProjectEnrollment(t *testing.T) {
 	require.False(t, status.Held)
 }
 
-func TestMovedIssueLeaseAllowsEnrollmentAuthorizedForBothProjects(t *testing.T) {
+func TestFederatedMovedIssueLeaseAllowsEnrollmentAuthorizedForBothProjects(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("owner-token"))
 	source, issue := createClaimHubIssueNamed(t, env, "source-project")
 	target, _ := createClaimHubIssueNamed(t, env, "target-project")

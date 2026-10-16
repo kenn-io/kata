@@ -46,7 +46,7 @@ func TestClaimGatePendingMoveUsesCachedLease(t *testing.T) {
 	}
 }
 
-func TestMovedIssueLeaseForwardsCurrentBindingAndUID(t *testing.T) {
+func TestFederatedMovedIssueLeaseForwardsCurrentBindingAndUID(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	source, issue := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "target-project")
