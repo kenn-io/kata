@@ -208,3 +208,39 @@ func TestWaitReplyJoinAndClosedCompletion(t *testing.T) {
 		})
 	}
 }
+
+// Delivery keys a teammate's slot by the trimmed actor. A wait that infers
+// its inbox from an actor with surrounding spaces must watch the same slot.
+func TestWaitReplyInfersNormalizedTeammateInbox(t *testing.T) {
+	var polls atomic.Int32
+	deliveredKey := notification.MetadataKey("worker/review")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case r.URL.Path == "/api/v1/instance":
+			_, _ = w.Write([]byte(`{"auth":{}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/projects/1/issues/"):
+			metadata := `{}`
+			if polls.Add(1) >= 2 {
+				metadata = fmt.Sprintf(`{%q:{"from":"reviewer","message":"latest: reply c:abc123 by reviewer","re":"reply","kind":"reply"}}`, deliveredKey)
+			}
+			_, _ = fmt.Fprintf(w, `{"issue":{"short_id":"abcd","status":"open","metadata":%s}}`, metadata)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("KATA_INBOX_USER", "")
+	t.Setenv("KATA_TEAMMATE", "")
+	t.Setenv("KATA_AUTHOR", "")
+	resetFlags(t)
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL),
+		"--as", "worker ", "--teammate", "review", "--json", "wait", "example-project#abcd", "--until", "reply",
+		"--timeout", "2s", "--poll-interval", "10ms")
+	require.NoError(t, err)
+	result := parseWaitJSON(t, stdout)
+	require.Len(t, result.Results, 1)
+	require.Equal(t, "reply", result.Results[0].Reason)
+}

@@ -362,7 +362,8 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			if err != nil {
 				return err
 			}
-			recipient = notification.Address(actor, tm)
+			// Delivery keys slots by the normalized identity; watch that slot.
+			recipient = notification.RecipientOf(notification.Identity{Actor: actor, Teammate: tm})
 		}
 		recipient, err = normalizeNotificationRecipient(recipient)
 		if err != nil {
