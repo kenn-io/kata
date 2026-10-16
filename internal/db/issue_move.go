@@ -3,23 +3,31 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/shortid"
 )
 
+// ErrIssueMoveTreeChanged reports membership changes since external validation.
+var ErrIssueMoveTreeChanged = errors.New("issue move tree changed during validation")
+
 // IssueMoveTreeInputs captures descendant revisions inside the move transaction.
 // Both backends serialize the entire discovery/validation/write operation. Parent
 // links point from child to parent and may cross project boundaries.
 func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn) ([]MoveIssueProjectIn, error) {
 	if in.Single {
+		inputs := []MoveIssueProjectIn{in}
+		if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
+			return nil, err
+		}
 		if in.AuthorizeProjects != nil {
 			if err := authorizeIssueMoveProjects(ctx, tx, in, []int64{in.FromProjectID}); err != nil {
 				return nil, err
 			}
 		}
-		return []MoveIssueProjectIn{in}, nil
+		return inputs, nil
 	}
 	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE tree(id) AS (
  SELECT id FROM issues WHERE id=$1
@@ -50,6 +58,9 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	if len(inputs) == 0 || inputs[0].IssueID != in.IssueID {
 		return nil, fmt.Errorf("issue %d not in project %d: %w", in.IssueID, in.FromProjectID, ErrNotFound)
 	}
+	if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
+		return nil, err
+	}
 	if in.AuthorizeProjects != nil {
 		ids := make([]int64, 0, len(inputs))
 		for _, item := range inputs {
@@ -63,6 +74,25 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 		return nil, err
 	}
 	return inputs, nil
+}
+
+func validateIssueMoveMembership(expected []int64, inputs []MoveIssueProjectIn) error {
+	if expected == nil {
+		return nil
+	}
+	want := make(map[int64]struct{}, len(expected))
+	for _, id := range expected {
+		want[id] = struct{}{}
+	}
+	if len(want) != len(inputs) {
+		return ErrIssueMoveTreeChanged
+	}
+	for _, item := range inputs {
+		if _, ok := want[item.IssueID]; !ok {
+			return ErrIssueMoveTreeChanged
+		}
+	}
+	return nil
 }
 
 // Validate the complete proposed mapping set before previews or writes. Checking

@@ -545,6 +545,9 @@ type ProjectMergeResult struct {
 type MoveIssueProjectIn struct {
 	// AuthorizeProjects checks every source project discovered in the transaction.
 	AuthorizeProjects func([]int64) error
+	// ExpectedIssueIDs fences externally validated membership. Nil permits fresh
+	// discovery; a supplied set must match every issue affected by the move.
+	ExpectedIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
