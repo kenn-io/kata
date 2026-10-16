@@ -165,7 +165,7 @@ func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
 	for _, dry := range []bool{true, false} {
 		expanded, cleaned := false, false
 		denied := errors.New("descendant fence denied")
-		fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
+		fenced := db.WithTransactionFence(ctx, func(_ context.Context, tx db.Transaction) error {
 			if !expanded {
 				return nil
 			}
@@ -231,6 +231,9 @@ func checkMoveTreeMappingCollision(t *testing.T, store db.Storage) error {
 		})
 		var collision *db.ProjectMergeImportMappingCollisionError
 		require.ErrorAs(t, err, &collision)
+		if collision == nil {
+			t.Fatal("missing import mapping collision detail")
+		}
 		require.Equal(t, []db.ProjectMergeImportMappingCollision{{Source: "connector", ExternalID: "same-task", ObjectType: "issue"}}, collision.Mappings)
 		for _, before := range []db.Issue{root, child} {
 			got, err := store.IssueByID(ctx, before.ID)
@@ -254,11 +257,11 @@ func checkMergeMoveReservations(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	source, err := store.CreateProject(ctx, "reservation-source")
 	require.NoError(t, err)
-	var historical []db.Issue
-	for _, uid := range []string{"01HZNQ7VFPK1XGD8R5MABXD4EX", "01HZNQ7VFPK1XGD8R5MCDXD4EX"} {
+	var historical [2]db.Issue
+	for index, uid := range []string{"01HZNQ7VFPK1XGD8R5MABXD4EX", "01HZNQ7VFPK1XGD8R5MCDXD4EX"} {
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, UID: uid, Title: "moved task", Author: "worker"})
 		require.NoError(t, err)
-		historical = append(historical, issue)
+		historical[index] = issue
 		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: target.ID, ToProjectID: away.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 		require.NoError(t, err)
 	}
