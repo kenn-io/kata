@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -196,4 +197,18 @@ func TestNotificationKeysUseNormalizedRecipients(t *testing.T) {
 	got, err := BroadcastRecipients([]Identity{{Actor: " reader "}, {Actor: "worker"}}, sender, false)
 	require.NoError(t, err)
 	require.Equal(t, []string{"reader"}, got)
+}
+
+// Two different authors that no inbox can address are not the same person:
+// a confirmation between them still reaches the owners.
+func TestLinkPatchUnaddressableAuthorsAreNotSelf(t *testing.T) {
+	long := strings.Repeat("a", RecipientMaxBytes+1)
+	patch, err := LinkPatch(LinkInput{Sender: Identity{Actor: long + "-worker"}, Target: Identity{Actor: long + "-reviewer"}, ReplyUID: "new", TargetUID: "target", Kind: "confirm", Owner: "owner"})
+	require.NoError(t, err)
+	require.Contains(t, patch, MetadataKey("owner"))
+
+	self := Identity{Actor: long}
+	patch, err = LinkPatch(LinkInput{Sender: self, Target: self, ReplyUID: "new", TargetUID: "target", Kind: "confirm", Owner: "owner"})
+	require.NoError(t, err)
+	require.Empty(t, patch, "confirming your own comment fans out to nobody")
 }

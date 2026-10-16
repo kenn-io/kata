@@ -59,7 +59,9 @@ func LinkValue(sender Identity, replyUID, kind string) (jsontext.Value, error) {
 func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 	patch := map[string]jsontext.Value{}
 	sender := RecipientOf(in.Sender)
-	if sender == RecipientOf(in.Target) {
+	// Unaddressable identities all normalize to "", so only a real address
+	// can match the target's.
+	if in.Sender == in.Target || (sender != "" && sender == RecipientOf(in.Target)) {
 		return patch, nil
 	}
 	value, err := LinkValue(in.Sender, in.ReplyUID, in.Kind)
