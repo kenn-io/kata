@@ -1,12 +1,12 @@
 package db_test
 
 import (
-	"go.kenn.io/kata/internal/db/sqlitestore"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 // Move payloads carry a projection snapshot that older peers cannot apply.

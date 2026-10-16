@@ -243,11 +243,12 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		seenBatch[ev.EventUID] = ev.ContentHash
 		rememberIngestIssueUIDs(ev, knownIssueUIDs)
-		if ev.Type == "issue.created" {
+		switch ev.Type {
+		case "issue.created":
 			if issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload)); err == nil {
 				batchIssueProjects[issueUID] = p.ProjectID
 			}
-		} else if ev.Type == "issue.moved" {
+		case "issue.moved":
 			batchIssueProjects[*ev.IssueUID] = moveTo
 		}
 		prepared = append(prepared, preparedFederationIngestEvent{
