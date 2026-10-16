@@ -76,6 +76,10 @@ func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) e
 // FederationMoveProjects checks the normal move envelope and its existing
 // snapshot format. Both local replicas must be joined before accepting a move.
 func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e RemoteEvent) (int64, int64, error) {
+	return federationMoveProjects(ctx, tx, routeID, e, false)
+}
+
+func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e RemoteEvent, historical bool) (int64, int64, error) {
 	var payload struct {
 		IssueUID, FromProjectUID, ToProjectUID, ToShortID string
 		Snapshot                                          struct {
@@ -96,7 +100,11 @@ func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 	}
 	lookup := func(uid string) (int64, error) {
 		var id int64
-		err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1 AND deleted_at IS NULL`, uid).Scan(&id)
+		query := `SELECT id FROM projects WHERE uid=$1`
+		if !historical {
+			query += ` AND deleted_at IS NULL`
+		}
+		err := tx.QueryRowContext(ctx, query, uid).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("%w: move project %s is not joined; join it and retry sync", ErrFederationIngestValidation, uid)
 		}
@@ -110,7 +118,7 @@ func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 	if err != nil {
 		return 0, 0, err
 	}
-	if routeID != from && routeID != to {
+	if !historical && routeID != from && routeID != to {
 		return 0, 0, fmt.Errorf("%w: move outside requested project", ErrFederationIngestValidation)
 	}
 	if err := CheckFederatedIssueMove(ctx, tx, from, to); err != nil {
@@ -119,28 +127,26 @@ func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 	return from, to, nil
 }
 
-// RemoteIssueEventProject keeps portable event hashes tied to their original
-// project even when a moved issue's history arrives through its other stream.
+// RemoteIssueEventProject keeps portable hashes and receipts tied to their
+// envelope project. A trusted hub may deliver issue history through any later
+// destination, including a page that precedes the move itself.
 func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e RemoteEvent) (int64, error) {
-	if e.Type == "issue.moved" {
-		_, to, err := FederationMoveProjects(ctx, tx, route, e)
-		return to, err
-	}
-	if e.IssueUID == nil {
-		return route, nil
-	}
-	var moved bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE type='issue.moved' AND issue_uid=$1)`, *e.IssueUID).Scan(&moved); err != nil {
-		return 0, err
-	}
-	if !moved {
-		return route, nil
-	}
 	var project int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1 AND deleted_at IS NULL`, e.ProjectUID).Scan(&project); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
+		}
 		return 0, err
+	}
+	if e.Type == "issue.moved" {
+		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
+			return 0, err
+		}
 	}
 	if project != route {
+		if e.IssueUID == nil {
+			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
+		}
 		if err := CheckFederatedIssueMove(ctx, tx, project, route); err != nil {
 			return 0, err
 		}
@@ -150,7 +156,7 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64) error) ([]int64, error) {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error) ([]int64, error) {
 	moved := map[string]bool{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -163,29 +169,41 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			continue
 		}
 		var target int64
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1 AND deleted_at IS NULL`, issue.ProjectUID).Scan(&target); err != nil {
+		var active bool
+		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&target, &active); err != nil {
 			return nil, err
 		}
-		projects[target] = true
 		var id, source int64
 		var recurrence *int64
 		err := tx.QueryRowContext(ctx, `SELECT id,project_id,recurrence_id FROM issues WHERE uid=$1`, issue.UID).Scan(&id, &source, &recurrence)
 		if errors.Is(err, sql.ErrNoRows) {
+			if active {
+				projects[target] = true
+			} else {
+				delete(p.Issues, issue.UID)
+			}
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		if source == target {
+			if active {
+				projects[target] = true
+			}
 			continue
 		}
+		if !active {
+			return nil, ErrNotFound
+		}
+		projects[target] = true
 		if err := CheckFederatedIssueMove(ctx, tx, source, target); err != nil {
 			return nil, err
 		}
 		if recurrence != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
-		if err := validate(id); err != nil {
+		if err := validate(id, source, target); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
@@ -245,4 +263,11 @@ func RestrictFoldProject(p *FoldProjection, projectUID string) {
 			delete(p.Labels, key)
 		}
 	}
+}
+
+// ClearFederatedMovedIssueHistory removes every contributing stream for issues
+// being reset. Keeping a former source baseline would recreate a purged issue.
+func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM events WHERE issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	return err
 }

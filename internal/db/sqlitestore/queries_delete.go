@@ -626,7 +626,7 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 // (issue.created with an initial-link to this issue, issue.links_changed
 // with this issue in a *_uids slice) are likewise PRESERVED.
 func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
-	clause := `(issue_id = ? OR (related_issue_id = ? AND type NOT IN ('issue.links_changed', 'issue.commented')))`
-	args := []any{issue.ID, issue.ID}
+	clause := `(issue_id = ? OR issue_uid = ? OR ((related_issue_id = ? OR related_issue_uid = ?) AND type NOT IN ('issue.links_changed', 'issue.commented')))`
+	args := []any{issue.ID, issue.UID, issue.ID, issue.UID}
 	return clause, args
 }

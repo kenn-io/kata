@@ -25,6 +25,30 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0
 	})
+	// A destination cursor can start after creation. Seed its first available
+	// move snapshot before replaying deltas, including deltas preceding the move.
+	// The snapshot is a baseline rather than a later content edit.
+	baselines := map[string]bool{}
+	for _, e := range ordered {
+		payload := PayloadMap(e.Payload)
+		uid := issueUID(e, payload)
+		if uid == "" || baselines[uid] {
+			continue
+		}
+		switch e.Type {
+		case "issue.created", "issue.snapshot":
+			baselines[uid] = true
+		case "issue.moved":
+			if raw := payload["snapshot"]; len(raw) > 0 {
+				snapshot := e
+				snapshot.Type, snapshot.Payload = "issue.snapshot", raw
+				snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
+				snapshot.HLCPhysicalMS, snapshot.HLCCounter = 0, 0
+				p.applyIssueCreated(snapshot)
+				baselines[uid] = true
+			}
+		}
+	}
 	for _, e := range ordered {
 		p.apply(e)
 	}
