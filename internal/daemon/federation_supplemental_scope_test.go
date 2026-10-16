@@ -65,9 +65,10 @@ func TestFederationSupplementalAuthorityPreservesRequestScope(t *testing.T) {
 					body["move_source_tokens"] = map[string]string{supplemental.UID: supplementalToken}
 					headers := bearer(routeToken)
 					headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
-					if scope == "both-projects" {
+					switch scope {
+					case "both-projects":
 						headers[requestProjectScopeHeader] = requestScopeValue(t, source.UID, target.UID)
-					} else if scope == "route-only" {
+					case "route-only":
 						headers[requestProjectScopeHeader] = requestScopeValue(t, route.UID)
 					}
 					before, err := env.DB.MaxEventID(t.Context())
