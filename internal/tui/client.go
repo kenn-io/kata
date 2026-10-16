@@ -158,12 +158,10 @@ func (c *Client) reportChangedIssue(ctx context.Context, event string, changed b
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	c.actionReports.Add(1)
-	go func() {
-		defer c.actionReports.Done()
+	c.actionReports.Go(func() {
 		defer cancel()
 		_ = c.reportUsage(ctx, event, map[string]any{"surface": "tui"})
-	}()
+	})
 }
 
 // ReportScreenViewed sends the visible screen to the connected daemon.
