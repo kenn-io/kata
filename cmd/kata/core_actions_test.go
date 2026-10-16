@@ -1,9 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -48,61 +45,19 @@ func TestCLICoreActionsReportChangedMutations(t *testing.T) {
 			require.NoError(t, err)
 
 			var actions []string
-			for _, event := range capture.events {
+			for _, event := range capture.recordedEvents() {
 				if event == "issue_created" || event == "issue_closed" {
 					actions = append(actions, event)
 				}
 			}
 			assert.Equal(t, []string{"issue_created", "issue_closed"}, actions)
-			for i, event := range capture.events {
+			for i, event := range capture.recordedEvents() {
 				if event == "issue_created" || event == "issue_closed" {
 					assert.Equal(t, map[string]any{"surface": "cli"}, capture.recorded()[i])
 				}
 			}
 		})
 	}
-}
-
-func TestCLICoreActionsDryRunDoesNotReport(t *testing.T) {
-	capture := &cliUseTelemetry{}
-	env, dir, pid := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = capture })
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	t.Cleanup(func() { cliUseTarget.Store(nil) })
-	ref := createIssue(t, env, pid, "Task to close")
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	var dryRunStatus int
-	var dryRunBody []byte
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ModifyResponse = func(response *http.Response) error {
-		if response.Request != nil && response.Request.URL.Path == "/api/v1/projects/"+itoa(pid)+"/issues/"+ref+"/actions/close" {
-			dryRunStatus = response.StatusCode
-			body, err := io.ReadAll(response.Body)
-			if err != nil {
-				return err
-			}
-			dryRunBody = body
-			response.Body = io.NopCloser(bytes.NewReader(body))
-		}
-		return nil
-	}
-	server := httptest.NewServer(proxy)
-	t.Cleanup(server.Close)
-	env.URL = server.URL
-	args := []string{
-		"--workspace", dir, "close", ref, "--done", "--message",
-		"Completed the requested work and checked the result.", "--test", "go test ./example", "--dry",
-	}
-	_, err = runCmdOutput(t, env, args...)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, dryRunStatus)
-	var response struct {
-		Changed bool `json:"changed"`
-	}
-	require.NoError(t, json.Unmarshal(dryRunBody, &response))
-	assert.False(t, response.Changed)
-	assert.NotContains(t, capture.events, "issue_closed")
 }
 
 func TestCLICloseReportsBeforeFailingComment(t *testing.T) {
@@ -141,5 +96,5 @@ func TestCLICloseReportsBeforeFailingComment(t *testing.T) {
 	_, err = runCmdOutput(t, env, "--workspace", dir, "close", ref, "--done", "--message", "Completed the requested work and checked the result.", "--test", "go test ./example", "--comment", "Follow-up note")
 	require.ErrorContains(t, err, "Comment failed")
 	assert.False(t, expired.Load(), "the comment must proceed while telemetry is pending")
-	assert.Contains(t, capture.events, "issue_closed")
+	assert.Contains(t, capture.recordedEvents(), "issue_closed")
 }

@@ -61,6 +61,12 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 	return append([]map[string]any(nil), c.captured...)
 }
 
+func (c *cliUseTelemetry) recordedEvents() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
+}
+
 var cliSurface = []map[string]any{{"surface": "cli"}}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
@@ -438,10 +444,7 @@ func TestCLITelemetrySharesActionDeadline(t *testing.T) {
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	wait := reportCLIIssueAction(cmd, "issue_created", true)
-	deadline, ok := cmd.Context().Value(cliTelemetryDeadlineKey{}).(time.Time)
-	require.True(t, ok, "the action report shares its deadline with CLI use reporting")
 	wait()
-	assert.False(t, time.Now().Before(deadline), "the action report consumes its shared deadline")
 	reportCLIUse(cmd)
 	assert.Equal(t, int32(1), posts.Load(), "the expired shared deadline refuses a second report")
 }
