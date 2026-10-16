@@ -1131,7 +1131,7 @@ func revalidateEventStreamFrameAuthority(ctx context.Context, store db.Storage) 
 }
 
 func revalidateEventStream(ctx context.Context, store db.Storage, adoptGained bool) (context.Context, error) {
-	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && !decision.owner {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && (!decision.owner || decision.fixedUIDs != nil) {
 		gained, kept, _, err := decision.refresh(ctx)
 		if err != nil {
 			return ctx, err

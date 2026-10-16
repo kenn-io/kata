@@ -20,7 +20,7 @@ import (
 
 func TestAdministrationToolsArePublished(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true,
 		Actor: "example-agent", Version: "test-version",
 	})
 	result, err := session.ListTools(t.Context(), nil)

@@ -152,9 +152,13 @@ require an explicit `project` in multi-project mode. Project administration
 `--all` daemon-wide scope; a scoped server can read its projects but
 cannot alter or destroy the catalog it was bound to.
 
-Tool calls cannot change the startup actor or expand the startup scope. The
-daemon remains authoritative for authentication, attribution, revision
-checks, federation trust, claims, and mutation policy. Scoped servers replace
+Tool calls cannot change the startup actor or expand the startup scope.
+Historical issue references remain usable only while the issue's current
+project is included. Reads and writes retain that boundary if an issue moves
+during a call, and a subtree move is rejected atomically if any descendant
+comes from an excluded project. The daemon remains authoritative for
+authentication, attribution, revision checks, federation trust, claims, and
+mutation policy. Scoped servers replace
 close-guard refusal messages (`parent_has_open_children`,
 `sibling_throttle`, `duplicate_message`) with scope-safe guidance because
 the daemon prose can name children, siblings, and prior closes in other
