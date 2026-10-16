@@ -9,7 +9,74 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestSyncFederationMoveUsesBaselineAfterLocalMove(t *testing.T) {
+	for _, joinOriginal := range []bool{true, false} {
+		name := "original_project_joined"
+		if !joinOriginal {
+			name = "only_federated_projects_joined"
+		}
+		t.Run(name, func(t *testing.T) {
+			hub := testenv.New(t)
+			projects := make([]db.Project, 3)
+			for i, projectName := range []string{"local-origin", "baseline-source", "baseline-target"} {
+				var err error
+				projects[i], err = hub.DB.CreateProject(t.Context(), projectName)
+				require.NoError(t, err)
+			}
+			// Enable the eventual destination first so its ordinary poll page,
+			// as well as the independent backfill, includes the old local move.
+			_, err := hub.DB.EnableProjectFederation(t.Context(), projects[2].ID, "worker")
+			require.NoError(t, err)
+			issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "local title", Body: "local body", Author: "worker"})
+			require.NoError(t, err)
+			_, _, err = hub.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "before federation"})
+			require.NoError(t, err)
+			issue, err = hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			_, err = hub.DB.EnableProjectFederation(t.Context(), projects[1].ID, "worker")
+			require.NoError(t, err)
+			joined := projects[1:]
+			if joinOriginal {
+				_, err = hub.DB.EnableProjectFederation(t.Context(), projects[0].ID, "worker")
+				require.NoError(t, err)
+				joined = projects
+			}
+			spoke := newMoveDeliverySpoke(t, hub, joined)
+			title, body := "after baseline title", "after baseline body"
+			_, _, _, err = hub.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Title: &title, Body: &body, Actor: "worker"})
+			require.NoError(t, err)
+			_, _, err = hub.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "after federation"})
+			require.NoError(t, err)
+			issue, err = hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[1].ID, ToProjectID: projects[2].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			target := len(joined) - 1
+			require.NoError(t, spoke.sync(t, target), "the federation baseline supersedes the snapshotless local move")
+			got, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, spoke.projects[target].ID, got.ProjectID)
+			require.Equal(t, title, got.Title)
+			require.Equal(t, body, got.Body)
+			comments, err := spoke.env.DB.CommentsByIssue(t.Context(), got.ID)
+			require.NoError(t, err)
+			bodies := make([]string, 0, len(comments))
+			for _, comment := range comments {
+				bodies = append(bodies, comment.Body)
+			}
+			require.ElementsMatch(t, []string{"before federation", "after federation"}, bodies)
+			if !joinOriginal {
+				_, err = spoke.env.DB.ProjectByUID(t.Context(), projects[0].UID)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			}
+		})
+	}
+}
 
 func TestFederationIssueHistoryRequiresCurrentProject(t *testing.T) {
 	hub, projects := newMoveDeliveryHub(t, "history-authorized", "history-excluded")

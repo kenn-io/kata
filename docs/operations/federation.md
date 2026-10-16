@@ -93,6 +93,10 @@ replacing newer edits. Once the move is received, leaving the source does not
 discard that recovered history; its original project identity and move history
 must remain for historical references to keep resolving.
 
+A local move made before federation starts is covered by the issue's first
+retained federation baseline. Spokes can receive later moves without joining
+the former local project; later edits and comments still synchronize normally.
+
 The spoke sends the source project's existing enrollment credential with the
 move batch, alongside the destination credential, only to their shared hub
 origin. Both grants must permit push for the same spoke and actor. Joining both
