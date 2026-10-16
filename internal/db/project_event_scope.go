@@ -96,28 +96,7 @@ func EventRequiresProjectScopeReset(
 		}
 		return false, nil
 	}
-
-	switch event.Type {
-	case "issue.moved":
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
-		for _, key := range []string{"from_project_uid", "to_project_uid"} {
-			uid, ok := StringValue(payload[key])
-			if !ok || uid == "" {
-				return true, nil
-			}
-			if _, visible := allowed[uid]; !visible {
-				return true, nil
-			}
-		}
-		return false, nil
-	case "issue.created", "issue.snapshot":
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
+	checkSnapshotLinks := func(payload map[string]jsontext.Value) (bool, error) {
 		rawLinks, found := payload["links"]
 		if !found {
 			return false, nil
@@ -135,6 +114,37 @@ func EventRequiresProjectScopeReset(
 			uids = append(uids, uid)
 		}
 		return checkUIDs(uids)
+	}
+
+	switch event.Type {
+	case "issue.moved":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		for _, key := range []string{"from_project_uid", "to_project_uid"} {
+			uid, ok := StringValue(payload[key])
+			if !ok || uid == "" {
+				return true, nil
+			}
+			if _, visible := allowed[uid]; !visible {
+				return true, nil
+			}
+		}
+		if snapshot, found := payload["snapshot"]; found {
+			var snapshotPayload map[string]jsontext.Value
+			if err := json.Unmarshal(snapshot, &snapshotPayload); err != nil {
+				return true, nil
+			}
+			return checkSnapshotLinks(snapshotPayload)
+		}
+		return false, nil
+	case "issue.created", "issue.snapshot":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		return checkSnapshotLinks(payload)
 	case "issue.closed":
 		var payload struct {
 			ParentUID     *string    `json:"parent_uid"`
