@@ -1189,14 +1189,21 @@ func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response
 }
 
 // Native hub and spoke project UIDs identify the same projects. Carry the
-// caller's fixed request limit so a stale local issue cannot resolve outside
-// that boundary at the hub, even when its transport credential is broader.
+// caller's effective project authority, including fixed request limits, so a
+// broader transport credential cannot escape it when the spoke is stale.
 func addClaimForwardProjectScope(ctx context.Context, req *http.Request) error {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
-	if decision == nil || decision.fixedUIDs == nil {
+	if decision == nil {
 		return nil
 	}
-	limit, err := json.Marshal(decision.fixedUIDs)
+	projects := narrowProjectUIDs(decision.ProjectUIDs, decision.fixedUIDs)
+	if projects == nil {
+		return nil
+	}
+	if len(projects) == 0 {
+		return projectAccessDenied()
+	}
+	limit, err := json.Marshal(projects)
 	if err != nil {
 		return err
 	}
@@ -1347,7 +1354,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		}
 		return nil, err
 	}
-	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.UID)
 	cancelRemote()
 	if err != nil {
 		if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
