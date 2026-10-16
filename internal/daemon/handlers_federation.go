@@ -855,6 +855,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
+				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
+			},
 			EventFeatures:                    in.EventFeatures,
 			ProjectID:                        in.ProjectID,
 			FederationEnrollmentID:           principal.EnrollmentID,
@@ -947,6 +950,10 @@ func federationIngestError(err error) error {
 		return internalAPIError(err)
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
+	case errors.Is(err, ErrHostFederationAdmissionLimited):
+		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)
+	case errors.Is(err, errHostFederationAccessUnavailable):
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation transaction access decision unavailable", "", nil)
 	case errors.Is(err, db.ErrRemoteEventConflict):
 		return api.NewError(http.StatusConflict, "remote_event_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventHashMismatch), errors.Is(err, db.ErrFederationIngestValidation):

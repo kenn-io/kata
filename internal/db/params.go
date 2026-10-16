@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"time"
 
@@ -830,6 +831,9 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	// AuthorizeMove checks source host authority after matching native source
+	// enrollment and project-policy fences have run inside the ingest transaction.
+	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
 	EventFeatures                    string
 	ProjectID                        int64
 	FederationEnrollmentID           int64
