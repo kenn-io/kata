@@ -32,6 +32,7 @@ type Client struct {
 	hc                     *http.Client
 	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
 	mu                     sync.RWMutex
+	actionReports          sync.WaitGroup
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
@@ -132,6 +133,7 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 
 // ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
 func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
+	c.actionReports.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
@@ -156,7 +158,9 @@ func (c *Client) reportChangedIssue(ctx context.Context, event string, changed b
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	c.actionReports.Add(1)
 	go func() {
+		defer c.actionReports.Done()
 		defer cancel()
 		_ = c.reportUsage(ctx, event, map[string]any{"surface": "tui"})
 	}()

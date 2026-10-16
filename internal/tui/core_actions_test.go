@@ -72,6 +72,7 @@ func TestCoreActionsReportChangedMutations(t *testing.T) {
 }
 
 func TestCoreActionResultDoesNotWaitForTelemetry(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	synctest.Test(t, func(t *testing.T) {
 		delivered := make(chan struct{})
 		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -92,4 +93,65 @@ func TestCoreActionResultDoesNotWaitForTelemetry(t *testing.T) {
 		synctest.Wait()
 		assert.Equal(t, time.Second, time.Since(started))
 	})
+}
+
+func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+	}{
+		{"accepted", 500 * time.Millisecond},
+		{"timed out", time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				started := make(chan struct{})
+				finished := make(chan struct{})
+				var mu sync.Mutex
+				var completed []string
+				hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					if req.URL.Path != "/api/v1/ui/telemetry" {
+						return jsonResponse(t, map[string]any{"changed": true}), nil
+					}
+					var event struct {
+						Event string `json:"event"`
+					}
+					require.NoError(t, json.NewDecoder(req.Body).Decode(&event))
+					if event.Event == "issue_closed" {
+						defer close(finished)
+						close(started)
+						if tc.name == "timed out" {
+							<-req.Context().Done()
+						} else {
+							time.Sleep(tc.delay)
+						}
+					}
+					mu.Lock()
+					completed = append(completed, event.Event)
+					mu.Unlock()
+					if req.Context().Err() != nil {
+						return nil, req.Context().Err()
+					}
+					response := jsonResponse(t, map[string]any{"status": "queued"})
+					response.StatusCode = http.StatusAccepted
+					return response, nil
+				})}
+				c := NewClient("http://127.0.0.1:7777", hc)
+				before := time.Now()
+				resp, err := c.Close(t.Context(), 7, "abcd", "user-a")
+				require.NoError(t, err)
+				require.True(t, resp.Changed)
+				assert.Equal(t, time.Duration(0), time.Since(before))
+				<-started
+				require.NoError(t, c.ReportSessionEnded(time.Minute))
+				assert.Equal(t, tc.delay, time.Since(before))
+				mu.Lock()
+				assert.Equal(t, []string{"issue_closed", "session_ended"}, completed)
+				mu.Unlock()
+				<-finished
+				synctest.Wait()
+			})
+		})
+	}
 }
