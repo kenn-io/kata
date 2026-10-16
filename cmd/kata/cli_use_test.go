@@ -33,7 +33,7 @@ type cliUseTelemetry struct {
 }
 
 func (*cliUseTelemetry) EventAllowed(event string) bool {
-	return event == "app_opened" || event == "agent_active" || event == "agent_call_count" || event == "issue_created" || event == "issue_closed"
+	return telemetry.NewReporterOrDisabled(telemetry.Options{}).EventAllowed(event)
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
 func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]any, error) {

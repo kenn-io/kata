@@ -101,9 +101,6 @@ func reportCLIUse(cmd *cobra.Command) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
 	defer cancel()
-	if ctx.Err() != nil {
-		return
-	}
 	if target == nil {
 		resolved, err := discoverDaemonResolved(ctx)
 		if err != nil {

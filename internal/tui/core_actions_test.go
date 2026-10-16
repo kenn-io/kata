@@ -72,11 +72,14 @@ func TestCoreActionsReportChangedMutations(t *testing.T) {
 func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	for _, tc := range []struct {
-		name  string
-		delay time.Duration
+		name     string
+		delay    time.Duration
+		switched bool
 	}{
-		{"accepted", 500 * time.Millisecond},
-		{"timed out", time.Second},
+		{"accepted", 500 * time.Millisecond, false},
+		{"timed out", time.Second, false},
+		{"switched daemon accepted", 500 * time.Millisecond, true},
+		{"switched daemon timed out", time.Second, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -95,14 +98,14 @@ func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 					if event.Event == "issue_closed" {
 						defer close(finished)
 						close(started)
-						if tc.name == "timed out" {
+						if tc.delay == time.Second {
 							<-req.Context().Done()
 						} else {
 							time.Sleep(tc.delay)
 						}
 					}
 					mu.Lock()
-					completed = append(completed, event.Event)
+					completed = append(completed, req.URL.Host+"/"+event.Event)
 					mu.Unlock()
 					if req.Context().Err() != nil {
 						return nil, req.Context().Err()
@@ -112,8 +115,14 @@ func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 					return response, nil
 				})}
 				c := NewClient("http://127.0.0.1:7777", hc)
+				active := c
+				if tc.switched {
+					m := buildRunModel(Options{}, c, bootInit{view: viewEmpty})
+					active = NewClient("http://127.0.0.1:8888", hc)
+					_, _ = m.installDaemonConnection(daemonConnection{api: active, init: bootInit{view: viewEmpty}})
+				}
 				before := time.Now()
-				resp, err := c.Close(t.Context(), 7, "abcd", "user-a")
+				resp, err := active.Close(t.Context(), 7, "abcd", "user-a")
 				require.NoError(t, err)
 				require.True(t, resp.Changed)
 				assert.Equal(t, time.Duration(0), time.Since(before))
@@ -121,11 +130,50 @@ func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 				require.NoError(t, c.ReportSessionEnded(time.Minute))
 				assert.Equal(t, tc.delay, time.Since(before))
 				mu.Lock()
-				assert.Equal(t, []string{"issue_closed", "session_ended"}, completed)
+				actionHost := "127.0.0.1:7777"
+				if tc.switched {
+					actionHost = "127.0.0.1:8888"
+				}
+				assert.Equal(t, []string{actionHost + "/issue_closed", "127.0.0.1:7777/session_ended"}, completed)
 				mu.Unlock()
 				<-finished
 				synctest.Wait()
 			})
 		})
 	}
+}
+
+func TestSessionEndDoesNotStartLateActionReports(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mutationStarted := make(chan struct{})
+		acknowledge := make(chan struct{})
+		var events []string
+		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/api/v1/ui/telemetry" {
+				close(mutationStarted)
+				<-acknowledge
+				return jsonResponse(t, map[string]any{"changed": true}), nil
+			}
+			var event struct {
+				Event string `json:"event"`
+			}
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&event))
+			events = append(events, event.Event)
+			response := jsonResponse(t, map[string]any{"status": "queued"})
+			response.StatusCode = http.StatusAccepted
+			return response, nil
+		})}
+		c := NewClient("http://127.0.0.1:7777", hc)
+		closed := make(chan bool)
+		go func() {
+			resp, err := c.Close(t.Context(), 7, "abcd", "user-a")
+			closed <- err == nil && resp != nil && resp.Changed
+		}()
+		<-mutationStarted
+		require.NoError(t, c.ReportSessionEnded(time.Minute))
+		close(acknowledge)
+		require.True(t, <-closed)
+		synctest.Wait()
+		assert.Equal(t, []string{"session_ended"}, events)
+	})
 }

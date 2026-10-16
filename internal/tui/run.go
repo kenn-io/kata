@@ -139,6 +139,7 @@ func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnecti
 	// interface otherwise and m.api != nil checks remain correct.
 	if c != nil {
 		m.api = newUndoClient(c)
+		m.actionReports = c.actionReports
 	}
 	m.scope = bi.scope
 	m.view = bi.view

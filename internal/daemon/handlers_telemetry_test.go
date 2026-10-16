@@ -383,3 +383,65 @@ func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[st
 	}
 	return reporter.SanitizeProperties(event, properties)
 }
+
+type coreActionTelemetryReporter struct {
+	*telemetry.Reporter
+	events     []string
+	properties []map[string]any
+}
+
+func (*coreActionTelemetryReporter) Enabled() bool { return true }
+
+func (r *coreActionTelemetryReporter) Capture(event string, properties map[string]any) error {
+	safe, err := r.SanitizeProperties(event, properties)
+	if err != nil {
+		return err
+	}
+	r.events = append(r.events, event)
+	r.properties = append(r.properties, safe)
+	return nil
+}
+
+func TestCaptureCoreActionsUsesProductionAllowlist(t *testing.T) {
+	allowlist, err := telemetry.NewReporter(telemetry.Options{})
+	require.NoError(t, err)
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		t.Run(event, func(t *testing.T) {
+			for _, surface := range []string{"web", "tui", "cli", "off-list", ""} {
+				t.Run(surface, func(t *testing.T) {
+					reporter := &coreActionTelemetryReporter{Reporter: allowlist}
+					server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+					properties := map[string]any{"title": "Example task"}
+					if surface != "" {
+						properties["surface"] = surface
+					}
+					body, err := json.Marshal(map[string]any{"event": event, "properties": properties})
+					require.NoError(t, err)
+					for range 2 {
+						response := server.post(t.Context(), t, string(body))
+						require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+						assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+					}
+					assert.Equal(t, []string{event, event}, reporter.events)
+					for _, captured := range reporter.properties {
+						assert.NotContains(t, captured, "title")
+						if surface == "" || surface == "off-list" {
+							assert.NotContains(t, captured, "surface")
+						} else {
+							assert.Equal(t, surface, captured["surface"])
+						}
+					}
+				})
+			}
+			t.Run("opted out", func(t *testing.T) {
+				t.Setenv(telemetry.EnabledEnv, "0")
+				reporter, err := telemetry.NewReporter(telemetry.Options{})
+				require.NoError(t, err)
+				server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+				response := server.post(t.Context(), t, `{"event":"`+event+`","properties":{"surface":"web"}}`)
+				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+				assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
+			})
+		})
+	}
+}

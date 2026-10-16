@@ -32,7 +32,14 @@ type Client struct {
 	hc                     *http.Client
 	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
 	mu                     sync.RWMutex
-	actionReports          sync.WaitGroup
+	actionReports          *actionReportSession
+}
+
+// actionReportSession joins reports from every daemon used during one TUI run.
+type actionReportSession struct {
+	mu      sync.Mutex
+	closed  bool
+	pending sync.WaitGroup
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
@@ -42,6 +49,7 @@ func NewClient(base string, hc *http.Client) *Client {
 		base:                   base,
 		hc:                     hc,
 		refreshLocalHTTPClient: refreshLocalHTTPClientForTUI,
+		actionReports:          &actionReportSession{},
 	}
 }
 
@@ -133,7 +141,11 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 
 // ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
 func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
-	c.actionReports.Wait()
+	// Close admission before waiting so the first report cannot race shutdown.
+	c.actionReports.mu.Lock()
+	c.actionReports.closed = true
+	c.actionReports.mu.Unlock()
+	c.actionReports.pending.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
@@ -157,8 +169,13 @@ func (c *Client) reportChangedIssue(ctx context.Context, event string, changed b
 	if !changed {
 		return
 	}
+	c.actionReports.mu.Lock()
+	defer c.actionReports.mu.Unlock()
+	if c.actionReports.closed {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	c.actionReports.Go(func() {
+	c.actionReports.pending.Go(func() {
 		defer cancel()
 		_ = c.reportUsage(ctx, event, map[string]any{"surface": "tui"})
 	})
