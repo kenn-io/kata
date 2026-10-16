@@ -345,7 +345,7 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.
 		event.CreatedAt = createdAt
 		output = append(output, event)
 	}
-	return output, mapSQLError(rows.Err(), nil)
+	return db.FederationMoveBaselineEvents(output), mapSQLError(rows.Err(), nil)
 }
 
 func federationGroupIssueIDs(

@@ -1871,7 +1871,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return db.FederationMoveBaselineEvents(out), rows.Err()
 }
 
 func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
