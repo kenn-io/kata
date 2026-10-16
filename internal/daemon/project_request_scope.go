@@ -28,8 +28,8 @@ func requestProjectScope(ctx context.Context, store db.Storage, header http.Head
 		layer := make([]string, 0, len(refs))
 		for _, ref := range refs {
 			projectUID := ref
-			if strings.HasPrefix(ref, "id:") {
-				id, _ := strconv.ParseInt(strings.TrimPrefix(ref, "id:"), 10, 64)
+			if rawID, numeric := strings.CutPrefix(ref, "id:"); numeric {
+				id, _ := strconv.ParseInt(rawID, 10, 64)
 				if store == nil {
 					return nil, api.NewError(http.StatusServiceUnavailable, "unavailable", "project storage unavailable", "", nil)
 				}
