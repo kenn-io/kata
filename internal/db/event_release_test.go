@@ -21,7 +21,7 @@ func TestEventIssueLookupRegistersSubjectNamedByUID(t *testing.T) {
 			return Issue{ID: 41, UID: visibleUID, ProjectUID: projectUID}, nil
 		}
 		return Issue{}, ErrNotFound
-	}, func(string, string) (Issue, error) { return Issue{}, ErrNotFound })
+	}, func(string, string) (Issue, error) { return Issue{}, ErrNotFound }, nil)
 	ctx := WithExposedIssues(WithAuthorizedProjects(context.Background(), []string{projectUID}))
 
 	for _, tc := range []struct {

@@ -491,6 +491,17 @@ func projectScopedMutationEvent(
 			}
 			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
 		},
+		func(uid string) (db.Issue, error) {
+			owners, err := store.CommentIssueIDsByUIDs(ctx, []string{uid})
+			if err != nil {
+				return db.Issue{}, err
+			}
+			id, found := owners[uid]
+			if !found {
+				return db.Issue{}, db.ErrNotFound
+			}
+			return store.IssueByID(ctx, id)
+		},
 	)
 	if err != nil {
 		return nil, err
