@@ -296,7 +296,7 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		}
 		return db.ErrFederationResetBlockedByPendingPush
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, projectID); err != nil {

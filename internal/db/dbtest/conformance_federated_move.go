@@ -141,7 +141,16 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 		got, err := cold.IssueByUID(ctx, root.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		require.Equal(t, coldProjects[target.UID].ID, got.ProjectID)
+		unrelated, event, err := cold.CreateIssue(ctx, db.CreateIssueParams{ProjectID: coldProjects[source.UID].ID, Title: "independent source work", Author: "worker"})
+		require.NoError(t, err)
+		_, err = cold.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: coldProjects[source.UID].ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: event.ID, LastEventID: event.ID, EventUIDs: []string{event.UID}, Error: "independent review", CreatedAt: time.Now().UTC()})
+		require.NoError(t, err)
 		require.NoError(t, cold.ResetFederatedProject(ctx, coldProjects[target.UID].ID, read.NextAfterID+1, read.NextAfterID))
+		_, err = cold.ActiveFederationQuarantine(ctx, coldProjects[source.UID].ID, db.FederationQuarantineDirectionPush)
+		require.NoError(t, err, "unrelated source quarantine must remain independent of destination reset")
+		retained, err := cold.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, unrelated.ID, retained.ID)
 		require.NoError(t, cold.MaterializeFederatedProject(ctx, coldProjects[source.UID].ID))
 		_, err = cold.IssueByUID(ctx, root.UID, db.IncludeDeletedYes)
 		require.ErrorIs(t, err, db.ErrNotFound, "reset must remove contributing history from every former project")
@@ -161,6 +170,33 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 
 	pull(source)
 	pull(target)
+	t.Run("reset preserves pending former source work", func(t *testing.T) {
+		for _, guarded := range []bool{true, false} {
+			var err error
+			if guarded {
+				err = spoke.ResetFederatedProjectIfNoPendingPush(ctx, replicas[target.ID].ID, cursors[target.ID]+1, cursors[target.ID], spoke.InstanceUID(), 0)
+			} else {
+				err = spoke.ResetFederatedProject(ctx, replicas[target.ID].ID, cursors[target.ID]+1, cursors[target.ID])
+			}
+			require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
+			retained, err := spoke.EventsByUIDs(ctx, replicas[source.ID].ID, []string{e.UID})
+			require.NoError(t, err)
+			require.Len(t, retained, 1)
+		}
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, replicas[source.ID].ID, e.ID))
+		q, err := spoke.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: replicas[source.ID].ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: e.ID, LastEventID: e.ID, EventUIDs: []string{e.UID}, Error: "pending review", CreatedAt: time.Now().UTC()})
+		require.NoError(t, err)
+		for _, guarded := range []bool{true, false} {
+			if guarded {
+				err = spoke.ResetFederatedProjectIfNoPendingPush(ctx, replicas[target.ID].ID, cursors[target.ID]+1, cursors[target.ID], spoke.InstanceUID(), 0)
+			} else {
+				err = spoke.ResetFederatedProject(ctx, replicas[target.ID].ID, cursors[target.ID]+1, cursors[target.ID])
+			}
+			require.ErrorIs(t, err, db.ErrFederationResetBlockedByQuarantine)
+		}
+		_, err = spoke.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{ID: q.ID, ProjectID: replicas[source.ID].ID, Actor: "worker", Reason: "Resolved source work for the isolated test", Now: time.Now().UTC()})
+		require.NoError(t, err)
+	})
 	// Replay and duplicate delivery must not undo the move or duplicate comments.
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, replicas[source.ID].ID))
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, replicas[target.ID].ID))

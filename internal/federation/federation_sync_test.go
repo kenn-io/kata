@@ -4689,7 +4689,54 @@ func TestSyncFederationOnceMoveUsesEnvelopeProject(t *testing.T) {
 		for _, e := range events {
 			if e.Type == "issue.moved" {
 				require.Equal(t, replicas[0].ID, project)
+				require.NotEqual(t, spoke.DB.InstanceUID(), e.OriginInstanceUID, "an acknowledged local move must not be published a second time")
 			}
 		}
 	})
+}
+
+func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	projects, replicas := make([]db.Project, 2), make([]db.Project, 2)
+	creds := make([]config.FederationCredential, 2)
+	for i, name := range []string{"creation-source", "creation-destination"} {
+		var err error
+		projects[i], err = hub.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+		require.NoError(t, err)
+		replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+		require.NoError(t, err)
+		_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: name + "-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &projects[i].ID, Capabilities: "push,pull", Actor: "worker"})
+		require.NoError(t, err)
+		creds[i] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: grant.Token}
+	}
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replicas[0].ID, Title: "created before first push", Author: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: replicas[0].ID, ToProjectID: replicas[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	syncProject := func(i int) error {
+		binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[i].ID)
+		if err != nil {
+			return err
+		}
+		return SyncFederationOnce(ctx, spoke.DB, binding, creds[i])
+	}
+	err = syncProject(1)
+	var status *HubStatusError
+	require.ErrorAs(t, err, &status)
+	require.Equal(t, http.StatusNotFound, status.StatusCode)
+	_, err = spoke.DB.ActiveFederationQuarantine(ctx, replicas[1].ID, db.FederationQuarantineDirectionPush)
+	require.ErrorIs(t, err, db.ErrNotFound, "missing source creation must not poison the push")
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
+	require.NoError(t, err)
+	require.True(t, binding.Enabled)
+	require.NoError(t, syncProject(0))
+	require.NoError(t, syncProject(1), "the next ordinary sync must retry without credential or quarantine intervention")
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[1].ID, got.ProjectID)
 }

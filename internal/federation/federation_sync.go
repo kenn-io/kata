@@ -468,9 +468,14 @@ func shouldDeliverDuplicatePulledEvent(
 		return false, nil
 	}
 	event := events[0]
-	// A different stream's push cursor cannot suppress this event's delivery.
+	// Duplicate local history uses its own stream's acknowledgement boundary.
+	// Its former source's cursor cannot tell whether the move was pushed.
 	if projectID != binding.ProjectID {
-		return true, nil
+		actualBinding, err := store.FederationBindingByProject(ctx, projectID)
+		if err != nil {
+			return false, err
+		}
+		binding, runStartBinding = actualBinding, actualBinding
 	}
 	if event.ID > binding.PushCursorEventID {
 		return true, nil
