@@ -79,9 +79,9 @@ func SyncFederationOnce(
 }
 
 // SyncFederationOnceWithPulledEvents is SyncFederationOnce with a post-commit
-// callback for freshly inserted hub-origin events. The daemon uses this to
-// fan pulled events out to SSE subscribers and hooks without making this
-// package depend on daemon internals.
+// callback for freshly inserted hub-origin events and local materialization
+// reset controls. The daemon publishes resets without hooks and fans ordinary
+// pulled events out to SSE subscribers and hooks.
 func SyncFederationOnceWithPulledEvents(
 	ctx context.Context,
 	store db.Storage,
@@ -404,8 +404,14 @@ func syncDirectSpoke(
 			if err := federationFailpoint("during_spoke_pull_apply_before_materialize"); err != nil {
 				return err
 			}
-			if err := store.MaterializeFederatedProject(ctx, binding.ProjectID); err != nil {
+			applyCtx, resets := db.WithFederationMoveResetCapture(ctx)
+			if err := store.MaterializeFederatedProject(applyCtx, binding.ProjectID); err != nil {
 				return err
+			}
+			if onPulledEvents != nil {
+				for _, reset := range resets.Resets {
+					onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+				}
 			}
 		}
 		if shouldDeliverPage && len(deliverUIDs) > 0 {

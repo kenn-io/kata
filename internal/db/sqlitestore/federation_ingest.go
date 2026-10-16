@@ -91,6 +91,7 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 	result := db.FederationIngestResult{RequiredEventFeatures: required}
+	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	for _, input := range p.Events {
 		feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
 		if err != nil {
@@ -364,6 +365,7 @@ func (d *Store) ingestFederationEventsOnce(
 	if err := tx.Commit(); err != nil {
 		return db.FederationIngestResult{}, fmt.Errorf("commit federation ingest: %w", err)
 	}
+	result.Resets = resets.Resets
 	return result, nil
 }
 

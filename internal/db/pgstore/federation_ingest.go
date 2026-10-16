@@ -47,6 +47,7 @@ func (s *Store) IngestFederationEvents(
 	var result db.FederationIngestResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result = db.FederationIngestResult{}
+		ctx, resets := db.WithFederationMoveResetCapture(ctx)
 		projectUID, projectName, err := requireFederationIngestHub(ctx, tx, params.ProjectID, true)
 		if err != nil {
 			return err
@@ -314,6 +315,7 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
+		result.Resets = resets.Resets
 		return nil
 	})
 	return result, err

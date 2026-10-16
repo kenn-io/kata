@@ -867,6 +867,7 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
+	Resets []FederationProjectReset `json:"-"`
 	// Events retains every committed event in transaction insertion order.
 	Events                []Event
 	RequiredEventFeatures string

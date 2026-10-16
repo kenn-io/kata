@@ -877,6 +877,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationIngestError(err)
 		}
+		for _, reset := range result.Resets {
+			cfg.Publish().Reset(reset.ProjectID, reset.EventID)
+		}
 		if err := federationFailpoint("after_federation_ingest_commit_before_broadcast"); err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
 		}

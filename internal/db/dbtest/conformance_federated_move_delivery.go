@@ -1,8 +1,11 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,7 +137,14 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			}
 			before, err := store.MaxEventID(ctx)
 			require.NoError(t, err)
-			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: projects[2].ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grants[2].Enrollment.ID, MoveSourceEnrollmentIDs: proofs, EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 11, Event: second}}})
+			editPayload, err := json.Marshal(map[string]string{"uid": issue.UID, "title": "after concurrent branch"})
+			require.NoError(t, err)
+			edit := newRemoteEvent(t, projects[2], &issue.UID, "issue.updated", "worker", origin, physical+2, editPayload)
+			batch := []db.FederationIngestEvent{{SourceEventID: 11, Event: second}}
+			if kind == "later branch wins" {
+				batch = append(batch, db.FederationIngestEvent{SourceEventID: 12, Event: edit})
+			}
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: projects[2].ID, SpokeInstanceUID: origin, BoundActor: "worker", FederationEnrollmentID: grants[2].Enrollment.ID, MoveSourceEnrollmentIDs: proofs, EventFeatures: db.SupportedEventFeatures, Events: batch})
 			if kind == "current owner proof required" {
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 				after, readErr := store.MaxEventID(ctx)
@@ -150,6 +160,102 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 				winner = projects[1].ID
 			}
 			require.Equal(t, winner, got.ProjectID, "retained deterministic clocks decide concurrent ownership")
+			stored, err := store.EventsByUIDs(ctx, projects[2].ID, []string{second.EventUID})
+			require.NoError(t, err)
+			require.Len(t, stored, 1)
+			require.Equal(t, second.ContentHash, stored[0].ContentHash, "departure notification cannot rewrite the move envelope")
+			reset, err := store.PurgeResetCheck(ctx, before, projects[1].ID)
+			require.NoError(t, err)
+			page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: projects[1].ID, AfterID: before, Limit: 10, Features: db.SupportedEventFeatures})
+			require.NoError(t, err)
+			if kind == "later branch wins" {
+				require.Equal(t, stored[0].ID, reset, "actual displaced project resets at the winning move, not the later edit")
+				require.Positive(t, page.ResetAfterID)
+				require.Equal(t, stored[0].ID, page.ResetAfterID)
+			} else {
+				require.Zero(t, reset, "a losing branch does not displace the current project")
+				require.Zero(t, page.ResetAfterID)
+			}
+			reset, err = store.PurgeResetCheck(ctx, stored[0].ID, projects[1].ID)
+			require.NoError(t, err)
+			require.Zero(t, reset, "clients past the departure cursor need no repeated reset")
+		})
+	}
+	for _, kind := range []string{"pull", "reattach", "ordinary replay"} {
+		t.Run("materialized displacement "+kind, func(t *testing.T) {
+			local := make([]db.Project, 3)
+			for i, name := range []string{"source", "middle", "target"} {
+				var err error
+				local[i], err = store.CreateProject(ctx, "displaced-"+strings.ReplaceAll(kind, " ", "-")+"-"+name)
+				require.NoError(t, err)
+				if kind != "reattach" || i != 2 {
+					_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: local[i].ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: int64(i + 1), HubProjectUID: local[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+					require.NoError(t, err)
+				}
+			}
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: local[0].ID, Title: "retained move displacement", Author: "worker"})
+			require.NoError(t, err)
+			makeMove := func(to int, at int64) db.RemoteEvent {
+				payload, err := json.Marshal(map[string]any{"issue_uid": issue.UID, "from_project_uid": local[0].UID, "from_short_id": issue.ShortID, "to_project_uid": local[to].UID, "to_short_id": issue.ShortID, "snapshot": map[string]string{"uid": issue.UID, "short_id": issue.ShortID, "title": issue.Title, "author": "worker", "status": "open"}})
+				require.NoError(t, err)
+				return newRemoteEvent(t, local[to], &issue.UID, "issue.moved", "worker", origin, at, payload)
+			}
+			at := time.Now().Add(time.Second).UnixMilli()
+			_, err = store.InsertRemoteEvents(ctx, local[1].ID, []db.RemoteEvent{makeMove(1, at)})
+			require.NoError(t, err)
+			require.NoError(t, store.MaterializeFederatedProject(ctx, local[1].ID))
+			_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{makeMove(2, at+1)})
+			require.NoError(t, err)
+			if kind == "reattach" {
+				require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
+				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: local[2].ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 3, HubProjectUID: local[2].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+				require.NoError(t, err)
+			}
+			if kind == "ordinary replay" {
+				payload, err := json.Marshal(map[string]string{"uid": issue.UID, "title": "later ordinary history"})
+				require.NoError(t, err)
+				_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{newRemoteEvent(t, local[0], &issue.UID, "issue.updated", "worker", origin, at+2, payload)})
+				require.NoError(t, err)
+			}
+			seen, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.NoError(t, store.MaterializeFederatedProject(ctx, local[2].ID))
+			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, local[2].ID, got.ProjectID)
+			reset, err := store.PurgeResetCheck(ctx, seen, local[1].ID)
+			require.NoError(t, err)
+			require.Greater(t, reset, seen, "a reader can already be past the retained winning move before materialization")
+			query := store.(interface {
+				QueryRowContext(context.Context, string, ...any) *sql.Row
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			})
+			var controlUID, actor, payload string
+			var subject, related sql.NullString
+			require.NoError(t, query.QueryRowContext(ctx, `SELECT uid,actor,payload,issue_uid,related_issue_uid FROM events WHERE id=$1`, reset).Scan(&controlUID, &actor, &payload, &subject, &related))
+			require.Equal(t, "system", actor)
+			require.JSONEq(t, `{}`, payload)
+			require.False(t, subject.Valid)
+			require.False(t, related.Valid)
+			var forwarding int
+			require.NoError(t, query.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM federation_event_provenance WHERE event_uid=$1)+(SELECT COUNT(*) FROM federation_relay_outbox WHERE source_uid=$1)`, controlUID).Scan(&forwarding))
+			require.Zero(t, forwarding, "local reset control has no root receipt or relay output")
+			pending, err := store.PendingFederationPushEvents(ctx, local[1].ID, store.InstanceUID(), seen, 10)
+			require.NoError(t, err)
+			require.Empty(t, pending, "local reset is not native spoke intent")
+			// A portable history without its optional reset metadata still
+			// cannot export local control rows as federated source events.
+			_, err = query.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.FederationPurgeResetMetadataPrefix+local[1].UID)
+			require.NoError(t, err)
+			page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: local[1].ID, AfterID: seen, Limit: 10, Features: db.SupportedEventFeatures})
+			require.NoError(t, err)
+			require.Empty(t, page.Events, "native read never exports local reset controls")
+			beforeRepeat, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.NoError(t, store.MaterializeFederatedProject(ctx, local[2].ID))
+			afterRepeat, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.Equal(t, beforeRepeat, afterRepeat, "unchanged replay cannot allocate repeated resets")
 		})
 	}
 	return nil

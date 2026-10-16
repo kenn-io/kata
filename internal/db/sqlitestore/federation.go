@@ -1181,6 +1181,8 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 }
 
 func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64) error {
+	parent := ctx
+	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin federated materialization: %w", err)
@@ -1192,6 +1194,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit federated materialization: %w", err)
 	}
+	db.CommitFederationMoveResets(parent, resets.Resets)
 	return nil
 }
 
@@ -1283,6 +1286,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, acceptedEventUIDs, func(project db.Project) (int64, error) {
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
+		return event.ID, err
 	})
 	if err != nil {
 		return err
