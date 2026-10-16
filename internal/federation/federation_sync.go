@@ -1426,19 +1426,51 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	}
 }
 
-// Move proofs use the existing source credential without crossing its configured
-// hub origin. The ordinary destination bearer can cover both projects when no
-// separate source credential exists and the hub granted it that broader scope.
+// Supplemental proofs use joined credentials without crossing their configured
+// hub origins. Ordinary events can precede a move the sender has not pulled yet,
+// so their proofs include eligible same-hub projects rather than local ownership.
 func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
 	var tokens map[string]string
+	var projectUIDs []string
+	ordinaryIssueWork := false
 	for _, event := range events {
 		if event.Type != "issue.moved" {
+			ordinaryIssueWork = ordinaryIssueWork || strings.HasPrefix(event.Type, "issue.")
 			continue
 		}
 		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
 		if fromUID == "" {
 			return nil, db.ErrFederationIngestValidation
 		}
+		projectUIDs = append(projectUIDs, fromUID)
+	}
+	if ordinaryIssueWork {
+		bindings, err := store.ListFederationBindings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+		if err != nil {
+			return nil, err
+		}
+		for _, binding := range bindings {
+			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || !binding.Enabled || !binding.PushEnabled || binding.Actor != destination.Actor || binding.HubProjectUID == "" {
+				continue
+			}
+			origin, err := httpurl.CanonicalHTTPOrigin(binding.HubURL)
+			if err != nil || origin != destinationOrigin {
+				continue
+			}
+			project, err := store.ProjectByUID(ctx, binding.HubProjectUID)
+			if err != nil {
+				return nil, err
+			}
+			if project.DeletedAt == nil {
+				projectUIDs = append(projectUIDs, project.UID)
+			}
+		}
+	}
+	for _, fromUID := range projectUIDs {
 		if _, known := tokens[fromUID]; known {
 			continue
 		}

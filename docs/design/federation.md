@@ -617,9 +617,13 @@ multiple spokes would each materialize duplicate occurrences, since the
 occurrence-uniqueness constraint is per-database and UIDs differ across nodes.
 Cross-project issue moves are supported within one active hub federation group.
 Spokes join both projects and use their existing project credentials to prove
-push authority at both endpoints. Supplemental source credentials are sent only
-to that same hub origin, outside hashed event envelopes, and are never persisted
-in move history. Moves across different hubs, paused bindings, and mixed
+push authority at both endpoints. Fresh events authored under a former project
+also require push, actor, and host authority for each affected issue’s current
+project. Spokes include their joined push credentials for the same hub origin and
+actor so delayed edits can prove that authority even before the sender learns of
+a move. Supplemental credentials stay outside hashed event envelopes and are
+never persisted in history; accepted duplicate retries need no new current-owner
+authority. Moves across different hubs, paused bindings, and mixed
 local/federated projects remain unsupported. Source leave and archive refuse
 known pending moves until the destination acknowledges them, retaining the
 source credential needed for delivery. Deferred work includes
