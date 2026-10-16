@@ -16,6 +16,7 @@ const (
 	apiVersionListSort              = "0.21.0"
 	apiVersionDiscoveryPagination   = "0.27.0"
 	apiVersionMoveDryRun            = "0.23.0"
+	apiVersionMoveSubtree           = "0.29.0"
 	apiVersionCloseTranscript       = "0.26.0"
 	apiVersionCommentLinks          = "0.28.0"
 	apiVersionReadyAndSearchFilters = "0.8.0"

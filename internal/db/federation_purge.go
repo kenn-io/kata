@@ -64,7 +64,8 @@ func FederationPurgeProjects(ctx context.Context, tx federationPurgeQuery, issue
 }
 
 // RecordFederationPurgeResets invalidates former project streams atomically with
-// history deletion. One metadata value replaces any earlier reset for each UID.
+// history deletion or ownership changes. One cursor replaces any earlier reset
+// for each project UID.
 func RecordFederationPurgeResets(ctx context.Context, tx Transaction, projectUIDs []string, cursor int64) error {
 	for _, projectUID := range projectUIDs {
 		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
