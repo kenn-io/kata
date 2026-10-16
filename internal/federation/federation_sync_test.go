@@ -1459,9 +1459,15 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				linked = true
 			}
 			syncEligible := func() {
+				credentials := newMoveCredentialStore()
+				for _, project := range projects {
+					if project.enrolled {
+						credentials[project.hub.UID] = project.credential
+					}
+				}
 				for _, project := range syncOrder {
 					if project.enrolled {
-						matrixSyncProject(t, spoke.DB, project)
+						matrixSyncProject(t, spoke.DB, project, credentials)
 					}
 				}
 			}
@@ -4190,11 +4196,11 @@ func matrixApplyPostEnrollmentState(
 	return result.Issue
 }
 
-func matrixSyncProject(t *testing.T, spoke *sqlitestore.Store, project *matrixFederationProject) {
+func matrixSyncProject(t *testing.T, spoke *sqlitestore.Store, project *matrixFederationProject, credentials config.FederationCredentialStore) {
 	t.Helper()
 	binding, err := spoke.FederationBindingByProject(t.Context(), project.local.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnce(t.Context(), spoke, binding, project.credential))
+	require.NoError(t, SyncFederationOnce(t.Context(), spoke, binding, project.credential, credentials))
 }
 
 func matrixAssertPortableState(
