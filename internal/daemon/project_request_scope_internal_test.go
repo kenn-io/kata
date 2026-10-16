@@ -32,11 +32,9 @@ func TestRequestProjectScopeIntersectsFederationAuthority(t *testing.T) {
 
 type requestScopeRevisionStore struct {
 	db.Storage
-	reads int
 }
 
-func (s *requestScopeRevisionStore) ProjectAccessRevision(context.Context) (int64, error) {
-	s.reads++
+func (*requestScopeRevisionStore) ProjectAccessRevision(context.Context) (int64, error) {
 	return 2, nil
 }
 
@@ -44,8 +42,8 @@ func TestRequestProjectScopeRevalidatesOwnerStream(t *testing.T) {
 	store := &requestScopeRevisionStore{}
 	decision := &ProjectAccessDecision{ProjectUIDs: []string{"01HAAAAAAAAAAAAAAAAAAAAAAA"}, fixedUIDs: []string{"01HAAAAAAAAAAAAAAAAAAAAAAA"}, owner: true, PolicyRevision: 1, store: store}
 	ctx := context.WithValue(t.Context(), projectAccessContextKey{}, decision)
-	_, err := revalidateEventStream(ctx, store, true)
+	revalidated, err := revalidateEventStream(ctx, store, true)
 	require.NoError(t, err)
-	require.Positive(t, store.reads, "limited owner streams must revalidate before delivering frames")
-	require.Equal(t, int64(2), decision.PolicyRevision)
+	require.True(t, db.ProjectAttributionVisible(revalidated, "01HAAAAAAAAAAAAAAAAAAAAAAA"), "the original project remains admitted")
+	require.False(t, db.ProjectAttributionVisible(revalidated, "01HBBBBBBBBBBBBBBBBBBBBBBB"), "owner stream revalidation must exclude projects outside its explicit scope")
 }
