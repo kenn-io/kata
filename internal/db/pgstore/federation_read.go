@@ -30,9 +30,9 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			}
 			return scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		}
-		readEvents := func() ([]db.Event, error) {
+		readPage := func(afterID int64, limit int) ([]db.Event, error) {
 			rows, err := tx.QueryContext(ctx, eventSelect+` WHERE (e.project_id=$1 OR e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- OR (e.type='issue.moved' AND e.payload::jsonb->>'from_project_uid'=(SELECT uid FROM projects WHERE id=$1))) AND e.id>$2 AND ($4='' OR e.issue_uid=$4) ORDER BY e.id LIMIT $3`, project.ID, in.AfterID, in.Limit, in.IssueUID)
+ OR (e.type='issue.moved' AND e.payload::jsonb->>'from_project_uid'=(SELECT uid FROM projects WHERE id=$1))) AND e.id>$2 AND ($4='' OR e.issue_uid=$4) ORDER BY e.id LIMIT $3`, project.ID, afterID, limit, in.IssueUID)
 			if err != nil {
 				return nil, err
 			}
@@ -46,6 +46,9 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 				events = append(events, event)
 			}
 			return events, rows.Err()
+		}
+		readEvents := func() ([]db.Event, error) {
+			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, `m.payload::jsonb->'snapshot'`, readPage)
 		}
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err
