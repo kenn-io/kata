@@ -951,6 +951,9 @@ func (c *claimHubClient) ClaimIssue(
 		return api.ClaimResponseBody{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return api.ClaimResponseBody{}, err
+	}
 	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
 	if err != nil {
 		return api.ClaimResponseBody{}, err
@@ -1169,7 +1172,11 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 type claimHubDoer struct{ client *http.Client }
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
+	req = req.Clone(ctx)
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return nil, err
+	}
+	resp, err := d.client.Do(req) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err
 	}
@@ -1179,6 +1186,22 @@ func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response
 		return nil, &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	return resp, nil
+}
+
+// Native hub and spoke project UIDs identify the same projects. Carry the
+// caller's fixed request limit so a stale local issue cannot resolve outside
+// that boundary at the hub, even when its transport credential is broader.
+func addClaimForwardProjectScope(ctx context.Context, req *http.Request) error {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil || decision.fixedUIDs == nil {
+		return nil
+	}
+	limit, err := json.Marshal(decision.fixedUIDs)
+	if err != nil {
+		return err
+	}
+	req.Header.Add(api.ProjectScopeHeader, string(limit))
+	return nil
 }
 
 func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int64) error {
