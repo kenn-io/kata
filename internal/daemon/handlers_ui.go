@@ -108,11 +108,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		issue, err := resolveIssueRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +117,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		out := &api.UIIssueReferenceResponse{}
 		out.Body.Issue.UID = issue.UID
-		out.Body.Issue.ProjectUID = project.UID
+		out.Body.Issue.ProjectUID = issue.ProjectUID
 		return out, nil
 	})
 

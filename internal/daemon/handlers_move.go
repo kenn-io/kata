@@ -74,19 +74,31 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				"to_project_uid resolves to the issue's current project", "", nil)
 		}
 
-		res, err := cfg.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		move := db.MoveIssueProjectIn{
 			IssueID:       iss.ID,
 			FromProjectID: iss.ProjectID,
 			ToProjectID:   tgt.ID,
 			IfMatchRev:    rev,
 			Actor:         actor,
-			DryRun:        in.Body.DryRun,
+			DryRun:        true,
 			Single:        in.Body.Single,
 			AuthorizeProjects: func(ids []int64) error {
 				_, err := authorizeHostProjectScope(ctx, ids, nil, false)
 				return err
 			},
-		})
+		}
+		res, err := cfg.DB.MoveIssueProject(ctx, move)
+		if err == nil {
+			for _, issue := range res.Issues {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+					return nil, err
+				}
+			}
+			if !in.Body.DryRun {
+				move.DryRun = false
+				res, err = cfg.DB.MoveIssueProject(ctx, move)
+			}
+		}
 		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("issue revision is %d", conflict.CurrentRevision), "", nil)

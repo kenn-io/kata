@@ -19,9 +19,20 @@ const mutationClaimStatusRefreshTimeout = 500 * time.Millisecond
 func requireFederatedIssueClaim(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	actor string,
+) error {
+	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true)
+}
+
+// Move previews check cached authority without remote refresh or cache writes.
+func requireFederatedIssueClaimWithRefresh(
+	ctx context.Context,
+	cfg ServerConfig,
+	issue db.Issue,
+	actor string,
+	refresh bool,
 ) error {
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
@@ -35,7 +46,7 @@ func requireFederatedIssueClaim(
 		}
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
 	}
-	return requireFederatedIssueClaimForPrincipal(ctx, cfg, projectID, issue, principal)
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh)
 }
 
 func requireFederatedIssueClaimForPrincipal(
@@ -45,8 +56,17 @@ func requireFederatedIssueClaimForPrincipal(
 	issue db.Issue,
 	principal db.ClaimPrincipal,
 ) error {
-	// Historical references retain their route project; claims belong to the
-	// resolved issue in its current project.
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, true)
+}
+
+func requireFederatedIssueClaimForPrincipalWithRefresh(
+	ctx context.Context,
+	cfg ServerConfig,
+	issue db.Issue,
+	principal db.ClaimPrincipal,
+	refresh bool,
+) error {
+	// Claims belong to the resolved issue in its current project.
 	projectID := issue.ProjectID
 
 	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
@@ -71,7 +91,7 @@ func requireFederatedIssueClaimForPrincipal(
 
 	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 
-	if binding.Role == db.FederationRoleSpoke {
+	if refresh && binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
 			return err
 		}
@@ -214,7 +234,7 @@ func pendingPushMayMaterializeIssue(
 }
 
 func pushEventMaterializesIssue(ev db.Event, issueUID string) bool {
-	if ev.Type != "issue.created" && ev.Type != "issue.snapshot" {
+	if ev.Type != "issue.created" && ev.Type != "issue.snapshot" && ev.Type != "issue.moved" {
 		return false
 	}
 	return ev.IssueUID != nil && *ev.IssueUID == issueUID
