@@ -55,9 +55,10 @@ func TestUIIssueReferenceHistoricalCurrentProject(t *testing.T) {
 			host := state == "host-active" || state == "host-denied" || state == "same-project-denied"
 			if host {
 				access := historicalUIReferenceHostAccess{}
-				if state == "host-denied" {
+				switch state {
+				case "host-denied":
 					access.deniedProjectID = target.ID
-				} else if state == "same-project-denied" {
+				case "same-project-denied":
 					access.deniedProjectID = source.ID
 				}
 				cfg.HostAccess = access

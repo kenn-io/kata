@@ -845,8 +845,10 @@ recurrence-pinned issues, archived projects, federation bindings, active externa
 root claims, and import mapping or issue-sync ownership conflicts just as a real
 move does. Any descendant that fails a rule rejects the whole move. A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
-by a preview. Previews require daemon API 0.23.0 or newer; the CLI checks before
-sending the `dry_run` request field.
+by a preview. Subtree moves require daemon API 0.29.0 or newer. With older
+daemons, `--single` preserves the legacy move request; `--single --dry` requires
+daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
+request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 

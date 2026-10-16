@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -75,6 +76,18 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 			return err
 		}
 	}
+
+	// Older daemons move only the selected issue and reject the single field.
+	// Never silently turn the default subtree move into a single-issue move.
+	subtreeSupported := true
+	if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionMoveSubtree, "subtree move"); err != nil {
+		compatibility, oldDaemon := errors.AsType[*cliError](err)
+		if !single || !oldDaemon || compatibility.Code != "daemon_api_too_old" {
+			return err
+		}
+		subtreeSupported = false
+	}
+
 	target, err := resolveProjectSelector(
 		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, targetProject)
 	if err != nil {
@@ -89,9 +102,16 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 	}
 	// Showing an issue may refresh federation claims. Previews obtain the
 	// source issue from the validation response instead, without that GET.
+	sourceProject := ref.ProjectName
 	var sourceIssue moveIssueWire
 	if !dryRun {
 		sourceIssue, err = fetchMoveIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+		if err != nil {
+			return err
+		}
+	}
+	if !dryRun {
+		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, sourceIssue.ProjectID, sourceProject)
 		if err != nil {
 			return err
 		}
@@ -111,7 +131,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
 		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
 	}
-	request.Body.Single = &single
+	if single && subtreeSupported {
+		request.Body.Single = &single
+	}
 	response, callErr := apiClient.MoveIssueWithResponse(ctx, request)
 	if response == nil {
 		return externalCLITransportError(response, callErr)
@@ -125,12 +147,27 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	if dryRun {
-		return printMovePreview(cmd, ref.ProjectName, moved.Issue.ShortID, target.Name, moved.Issues)
+		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, sourceProject)
+		if err != nil {
+			return err
+		}
+		return printMovePreview(cmd, sourceProject, moved.Issue.ShortID, target.Name, moved.Issues)
 	}
 	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle); err != nil {
 		return err
 	}
-	return printMove(cmd, bs, ref.ProjectName, sourceIssue.ShortID, target.Name)
+	return printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+}
+
+func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {
+	if currentProjectID == 0 || currentProjectID == requestedProjectID {
+		return requestedName, nil
+	}
+	project, err := resolveProjectSelector(daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, strconv.FormatInt(currentProjectID, 10))
+	if err != nil {
+		return "", err
+	}
+	return project.Name, nil
 }
 
 func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, projectID int64, ref string) (moveIssueWire, error) {
