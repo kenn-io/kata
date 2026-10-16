@@ -42,6 +42,7 @@ func TestScopedAgentTelemetryAdmission(t *testing.T) {
 	}{
 		{"agent_active", http.StatusAccepted},
 		{"app_opened", http.StatusForbidden}, {"agent_call_count", http.StatusForbidden},
+		{"issue_created", http.StatusForbidden}, {"issue_closed", http.StatusForbidden},
 	} {
 		resp, body := envDoRaw(t, env, http.MethodPost, "/api/v1/ui/telemetry", map[string]any{"event": test.event, "properties": map[string]any{"call_count_bucket": "over-100"}}, map[string]string{"Authorization": "Bearer worker-token"})
 		require.Equal(t, test.status, resp.StatusCode, string(body))
