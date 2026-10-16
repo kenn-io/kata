@@ -381,7 +381,7 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 // fresh bridge claim, even if that local guard is absent from a spoke snapshot.
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	for _, kind := range []string{"recurrence", "bridge", "ownership", "enrollment", "host-scope", "two-enrollments", "wrong-source-actor", "wrong-source-instance", "read-only-source"} {
+	for _, kind := range []string{"recurrence", "bridge", "ownership", "enrollment", "host-scope", "two-enrollments", "wrong-source-actor", "wrong-source-instance", "read-only-source", "missing-source-proof"} {
 		t.Run(kind, func(t *testing.T) {
 			source, err := store.CreateProject(ctx, kind+"-move-source")
 			require.NoError(t, err)
@@ -428,7 +428,7 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 
 			ingestCtx := ctx
 			params := db.FederationIngestParams{ProjectID: target.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
-			if kind == "enrollment" || kind == "two-enrollments" || kind == "wrong-source-actor" || kind == "wrong-source-instance" || kind == "read-only-source" {
+			if kind == "enrollment" || kind == "two-enrollments" || kind == "wrong-source-actor" || kind == "wrong-source-instance" || kind == "read-only-source" || kind == "missing-source-proof" {
 				grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "destination-token-" + kind, SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
 				require.NoError(t, err)
 				params.FederationEnrollmentID = grant.Enrollment.ID
@@ -445,8 +445,11 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 					if kind == "read-only-source" {
 						capabilities = "pull"
 					}
-					_, err = store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "source-token-" + kind, SpokeInstanceUID: instance, ProjectID: &source.ID, Capabilities: capabilities, Actor: actor})
+					sourceGrant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "source-token-" + kind, SpokeInstanceUID: instance, ProjectID: &source.ID, Capabilities: capabilities, Actor: actor})
 					require.NoError(t, err)
+					if kind != "missing-source-proof" {
+						params.MoveSourceEnrollmentIDs = map[string]int64{source.UID: sourceGrant.Enrollment.ID}
+					}
 				}
 				// Native HTTP enrollment admission initially scopes the request to its
 				// route. The matching source enrollment supplies move-only authority.
@@ -470,8 +473,10 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
 			case "ownership":
 				require.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
-			default:
+			case "host-scope":
 				require.ErrorIs(t, err, db.ErrNotFound)
+			default:
+				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 			}
 			after, readErr := store.MaxEventID(ctx)
 			require.NoError(t, readErr)

@@ -474,6 +474,9 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
+	// MoveSourceTokens proves authority for move sources outside the route
+	// enrollment's scope. These credentials are transport-only, never events.
+	MoveSourceTokens           map[string]string               `json:"move_source_tokens,omitempty"`
 	SchemaVersion              int                             `json:"schema_version"`
 	AdoptionBaseline           string                          `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty,omitzero"`

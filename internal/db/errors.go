@@ -240,6 +240,9 @@ var (
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")
 
+	// ErrFederationMoveSourceUnauthorized reports missing or invalid source credential proof.
+	ErrFederationMoveSourceUnauthorized = errors.New("federated move source authority missing")
+
 	// ErrFederationResetBlockedByPendingPush is returned when a federation reset
 	// is blocked because there are pending push events.
 	ErrFederationCrossProjectBoundary = errors.New("cross-project links involving a relayed project are unsupported")

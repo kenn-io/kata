@@ -831,6 +831,9 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	// MoveSourceEnrollmentIDs contains source grants authenticated by transport.
+	// A matching spoke/actor enrollment alone does not prove token possession.
+	MoveSourceEnrollmentIDs map[string]int64
 	// AuthorizeMove checks source host authority after matching native source
 	// enrollment and project-policy fences have run inside the ingest transaction.
 	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error

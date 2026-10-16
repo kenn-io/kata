@@ -615,9 +615,13 @@ boundary rather than being routine, because deleting replay history fights
 event-truth. Recurrence materialization stays hub-only: running the scheduler on
 multiple spokes would each materialize duplicate occurrences, since the
 occurrence-uniqueness constraint is per-database and UIDs differ across nodes.
-Cross-project issue moves involving any federated project are unsupported.
-The replay protocol cannot apply a move across project event logs. Deferred work
-includes element-level array CRDTs for metadata,
+Cross-project issue moves are supported within one active hub federation group.
+Spokes join both projects and use their existing project credentials to prove
+push authority at both endpoints. Supplemental source credentials are sent only
+to that same hub origin, outside hashed event envelopes, and are never persisted
+in move history. Moves across different hubs, paused bindings, and mixed
+local/federated projects remain unsupported. Deferred work includes
+element-level array CRDTs for metadata,
 HLC skew-guard thresholds, a snapshot fast-path for very large projects, and
 federated authoring of recurrences from spokes.
 

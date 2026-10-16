@@ -826,8 +826,8 @@ func rememberIngestIssueUIDs(event db.RemoteEvent, known map[string]struct{}) {
 	}
 }
 
-// A move carries source authority only when this same spoke and actor retain a
-// live push enrollment there. Ordinary per-project join credentials suffice.
+// A move uses the destination bearer when it covers both projects, or the
+// exact source enrollment authenticated by the transport proof.
 func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, from, to int64, e db.RemoteEvent) error {
 	m := db.PayloadMap(e.Payload)
 	fromUID, _ := db.StringValue(m["from_project_uid"])
@@ -847,11 +847,27 @@ func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 		if err := s.FederationEnrollmentTransactionFence(admitted, to, "push")(ctx, tx); err != nil {
 			return err
 		}
-		source, err := scanFederationEnrollment(tx.QueryRowContext(ctx, federationEnrollmentSelect+` WHERE spoke_instance_uid=$1 AND bound_actor=$2 AND revoked_at IS NULL AND relay_protocol_version=0 AND (project_id=$3 OR project_id IS NULL) AND (',' || capabilities || ',') LIKE '%,push,%' ORDER BY id DESC LIMIT 1`, p.SpokeInstanceUID, p.BoundActor, from))
-		if err != nil {
-			return err
+		source := admitted
+		if admitted.ProjectID != nil && *admitted.ProjectID != from {
+			sourceID := p.MoveSourceEnrollmentIDs[fromUID]
+			if sourceID == 0 {
+				return db.ErrFederationMoveSourceUnauthorized
+			}
+			source, err = federationEnrollmentByIDTx(ctx, tx, sourceID, false)
+			if errors.Is(err, db.ErrNotFound) {
+				return db.ErrFederationMoveSourceUnauthorized
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if source.SpokeInstanceUID != p.SpokeInstanceUID || source.Actor != p.BoundActor || source.RelayProtocolVersion != 0 {
+			return db.ErrFederationMoveSourceUnauthorized
 		}
 		if err := s.FederationEnrollmentTransactionFence(source, from, "push")(ctx, tx); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return fmt.Errorf("%w: %w", db.ErrFederationMoveSourceUnauthorized, err)
+			}
 			return err
 		}
 		if p.AuthorizeMove != nil {

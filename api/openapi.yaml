@@ -2582,6 +2582,10 @@ components:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"
           type: array
+        move_source_tokens:
+          additionalProperties:
+            type: string
+          type: object
         schema_version:
           format: int64
           type: integer

@@ -854,7 +854,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
+		moveSources, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
+		if err != nil {
+			return nil, err
+		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+			MoveSourceEnrollmentIDs: moveSources,
 			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
 				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
 			},
@@ -948,6 +953,8 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
+	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
+		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostFederationAdmissionLimited):

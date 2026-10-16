@@ -80,7 +80,15 @@ Spokes must join both projects before applying a move. Sync refuses the batch
 without partial writes when a project is missing; join it and retry sync. Upgrade
 both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
-stable UIDs, nesting, state, comments, and links. Old references still resolve.
+stable UIDs, nesting, state, comments, and links. Old references resolve while
+move history and the original project identity remain. Purging that history or
+merging the former project can end compatibility; the move returns the current
+reference, and the stable issue UID stays unchanged.
+
+The spoke sends the source project's existing enrollment credential with the
+move batch, alongside the destination credential, only to their shared hub
+origin. Both grants must permit push for the same spoke and actor. Joining both
+projects supplies these credentials automatically; no additional setup is needed.
 
 Moves between different hubs, mixed local/federated projects, and paused bindings
 return `federated_move_unsupported`. Create an issue in the target project and link

@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 const federationPollLimit = 1000
@@ -72,8 +73,9 @@ func SyncFederationOnce(
 	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
+	credentialStores ...config.FederationCredentialStore,
 ) error {
-	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil)
+	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil, credentialStores...)
 }
 
 // SyncFederationOnceWithPulledEvents is SyncFederationOnce with a post-commit
@@ -87,6 +89,7 @@ func SyncFederationOnceWithPulledEvents(
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
+	credentialStores ...config.FederationCredentialStore,
 ) error {
 	finish, err := federationcoord.BeginSync(
 		ctx,
@@ -99,7 +102,7 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	defer finish()
 	for {
-		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
+		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil, credentialStores...)
 		if err != nil || !remaining {
 			return err
 		}
@@ -125,6 +128,7 @@ func syncFederationOnceWithFence(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+	credentialStores ...config.FederationCredentialStore,
 ) (bool, error) {
 	if creds.RelayEnrollmentPending {
 		return false, ErrRelayEnrollmentPending
@@ -164,7 +168,11 @@ func syncFederationOnceWithFence(
 		}
 		return turn.remaining, nil
 	}
-	return false, syncDirectSpoke(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease)
+	credentials := config.FederationCredentialStore(config.DefaultFederationCredentialStore())
+	if len(credentialStores) > 0 && credentialStores[0] != nil {
+		credentials = credentialStores[0]
+	}
+	return false, syncDirectSpoke(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
 }
 
 // syncDirectSpoke pushes and pulls one ordinary spoke binding to completion.
@@ -176,6 +184,8 @@ func syncDirectSpoke(
 	client *Client,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+	credentials config.FederationCredentialStore,
+	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
 	if binding.PushEnabled {
@@ -217,8 +227,13 @@ func syncDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, binding, client.baseURL, batch, opts)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
 				ack, err := client.IngestProjectEventsWithOptions(ctx, hubProjectID,
 					federationIngestEnvelopes(batch), IngestProjectEventsOptions{
+						MoveSourceTokens:           sourceTokens,
 						AdoptionBaseline:           adoptionBaseline,
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
@@ -1034,7 +1049,7 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease)
+	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease, credentialStore)
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
 	}
@@ -1409,4 +1424,85 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			}
 		}
 	}
+}
+
+// Move proofs use the existing source credential without crossing its configured
+// hub origin. The ordinary destination bearer can cover both projects when no
+// separate source credential exists and the hub granted it that broader scope.
+func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
+	var tokens map[string]string
+	for _, event := range events {
+		if event.Type != "issue.moved" {
+			continue
+		}
+		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
+		if fromUID == "" {
+			return nil, db.ErrFederationIngestValidation
+		}
+		if _, known := tokens[fromUID]; known {
+			continue
+		}
+		project, err := store.ProjectByUID(ctx, fromUID)
+		if err != nil {
+			return nil, err
+		}
+		source, err := store.FederationBindingByProject(ctx, project.ID)
+		if err != nil {
+			return nil, err
+		}
+		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || !source.Enabled || !source.PushEnabled || source.HubProjectUID != fromUID || source.Actor != destination.Actor {
+			return nil, db.ErrFederationMoveSourceUnauthorized
+		}
+		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+		if err != nil {
+			return nil, err
+		}
+		sourceURL, err := httpurl.CanonicalHTTPBaseURL(source.HubURL)
+		if err != nil {
+			return nil, errors.New("move source binding origin is invalid")
+		}
+		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(sourceURL)
+		if err != nil || sourceOrigin != destinationOrigin {
+			return nil, errors.New("move source binding origin differs from destination")
+		}
+		credential, found, err := credentials.FederationCredential(ctx, fromUID)
+		if err != nil {
+			return nil, err
+		}
+		if !found || credential.Token == "" {
+			continue
+		}
+		if credential.LeavePending || credential.RelayEnrollmentPending {
+			return nil, db.ErrFederationMoveSourceUnauthorized
+		}
+		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
+			return nil, errors.New("move source credential project differs from binding")
+		}
+		if credential.Actor != "" && credential.Actor != source.Actor {
+			return nil, db.ErrFederationMoveSourceUnauthorized
+		}
+		credentialURL := credential.HubURL
+		if credentialURL == "" {
+			credentialURL = source.HubURL
+		}
+		credentialBase, err := httpurl.CanonicalHTTPBaseURL(credentialURL)
+		if err != nil {
+			return nil, errors.New("move source credential origin is invalid")
+		}
+		credentialOrigin, err := httpurl.CanonicalHTTPOrigin(credentialBase)
+		if err != nil || credentialOrigin != sourceOrigin {
+			return nil, errors.New("move source credential origin differs from binding")
+		}
+		// Validate the source's own plaintext policy before including its token.
+		// The destination credential's opt-in does not authorize source transport.
+		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
+		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+			return nil, err
+		}
+		if tokens == nil {
+			tokens = map[string]string{}
+		}
+		tokens[fromUID] = credential.Token
+	}
+	return tokens, nil
 }

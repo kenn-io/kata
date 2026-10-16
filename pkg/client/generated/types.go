@@ -2670,6 +2670,7 @@ type FederationIngestEventsRequestBody struct {
 	AdoptionBaseline           *string                         `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID *int64                          `json:"adoption_baseline_end_event_id,omitempty"`
 	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
+	MoveSourceTokens           map[string]string               `json:"move_source_tokens,omitempty"`
 	SchemaVersion              int64                           `json:"schema_version"`
 }
 

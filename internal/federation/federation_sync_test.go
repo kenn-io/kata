@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -4656,7 +4657,7 @@ func TestSyncFederationOnceMoveUsesEnvelopeProject(t *testing.T) {
 		t.Helper()
 		binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[i].ID)
 		require.NoError(t, err)
-		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: created.Token}, clientpkg.Opts{}, onEvents))
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: created.Token}, clientpkg.Opts{}, onEvents, newMoveCredentialStore()))
 	}
 	sync(0, nil)
 	sync(1, nil)
@@ -4700,6 +4701,7 @@ func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
 	hub, spoke := testenv.New(t), testenv.New(t)
 	projects, replicas := make([]db.Project, 2), make([]db.Project, 2)
 	creds := make([]config.FederationCredential, 2)
+	credentials := newMoveCredentialStore()
 	for i, name := range []string{"creation-source", "creation-destination"} {
 		var err error
 		projects[i], err = hub.DB.CreateProject(ctx, name)
@@ -4713,6 +4715,7 @@ func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
 		grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: name + "-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &projects[i].ID, Capabilities: "push,pull", Actor: "worker"})
 		require.NoError(t, err)
 		creds[i] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: grant.Token}
+		require.NoError(t, credentials.StoreFederationCredential(ctx, projects[i].UID, creds[i]))
 	}
 	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replicas[0].ID, Title: "created before first push", Author: "worker"})
 	require.NoError(t, err)
@@ -4723,7 +4726,7 @@ func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return SyncFederationOnce(ctx, spoke.DB, binding, creds[i])
+		return SyncFederationOnce(ctx, spoke.DB, binding, creds[i], credentials)
 	}
 	err = syncProject(1)
 	var status *HubStatusError
@@ -4739,4 +4742,124 @@ func TestSyncFederationOnceRetriesMoveAfterSourceCreation(t *testing.T) {
 	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, projects[1].ID, got.ProjectID)
+}
+
+func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
+	for _, kind := range []string{"binding", "credential"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			hub, spoke := testenv.New(t), testenv.New(t)
+			var otherRequests atomic.Int32
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				otherRequests.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(other.Close)
+			projects, replicas := make([]db.Project, 2), make([]db.Project, 2)
+			for i, name := range []string{"proof-source", "proof-destination"} {
+				var err error
+				projects[i], err = hub.DB.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+				require.NoError(t, err)
+				replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+				require.NoError(t, err)
+				_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+				require.NoError(t, err)
+			}
+			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "origin-bound move", Author: "worker"})
+			require.NoError(t, err)
+			local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replicas[0].ID, UID: issue.UID, Title: issue.Title, Author: "worker"})
+			require.NoError(t, err)
+			_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: replicas[0].ID, ToProjectID: replicas[1].ID, IfMatchRev: local.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "origin-proof-destination-token", SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "push,pull", Actor: "worker"})
+			require.NoError(t, err)
+			credentials := newMoveCredentialStore()
+			require.NoError(t, credentials.StoreFederationCredential(ctx, projects[1].UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}))
+			require.NoError(t, credentials.StoreFederationCredential(ctx, projects[0].UID, config.FederationCredential{HubURL: other.URL, HubProjectID: projects[0].ID, Token: "other-origin-source-token", Actor: "worker"}))
+			if kind == "binding" {
+				binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[0].ID)
+				require.NoError(t, err)
+				binding.HubURL = other.URL
+				_, err = spoke.DB.UpsertFederationBinding(ctx, binding)
+				require.NoError(t, err)
+			}
+			binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[1].ID)
+			require.NoError(t, err)
+			runner := Runner{DB: spoke.DB}
+			_, err = runner.runSpoke(ctx, activeSpokeBinding{project: replicas[1], binding: binding}, credentials, nil, nil)
+			require.Error(t, err, "a pending move must not cross an altered source credential origin")
+			var status *HubStatusError
+			require.False(t, errors.As(err, &status), "reject the target mismatch locally before sending source proof")
+			got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[0].ID, got.ProjectID)
+			require.Zero(t, otherRequests.Load())
+		})
+	}
+}
+
+// moveCredentialStore keeps source proofs isolated from host credentials.
+type moveCredentialStore map[string]config.FederationCredential
+
+func newMoveCredentialStore() moveCredentialStore { return make(moveCredentialStore) }
+func (s moveCredentialStore) FederationCredential(_ context.Context, projectUID string) (config.FederationCredential, bool, error) {
+	credential, ok := s[projectUID]
+	return credential, ok, nil
+}
+func (s moveCredentialStore) StoreFederationCredential(_ context.Context, projectUID string, credential config.FederationCredential) error {
+	s[projectUID] = credential
+	return nil
+}
+func (s moveCredentialStore) DeleteFederationCredential(_ context.Context, projectUID string) error {
+	delete(s, projectUID)
+	return nil
+}
+
+func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name                          string
+		bindingAllow, credentialAllow bool
+		wantError                     bool
+	}{
+		{"source opt-in missing", false, false, true},
+		{"source credential opt-in", false, true, false},
+		{"source binding opt-in", true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			env := testenv.New(t)
+			source, err := env.DB.CreateProject(ctx, "plaintext-source")
+			require.NoError(t, err)
+			destination, err := env.DB.CreateProject(ctx, "plaintext-destination")
+			require.NoError(t, err)
+			var destinationBinding db.FederationBinding
+			for _, project := range []db.Project{source, destination} {
+				allow := true
+				if project.ID == source.ID {
+					allow = test.bindingAllow
+				}
+				binding, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, AllowInsecure: allow})
+				require.NoError(t, err)
+				if project.ID == destination.ID {
+					destinationBinding = binding
+				}
+			}
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "source policy", Author: "worker"})
+			require.NoError(t, err)
+			move, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			credentials := newMoveCredentialStore()
+			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
+			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
+			if test.wantError {
+				require.Error(t, err)
+				require.Empty(t, tokens)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "source-plaintext-proof", tokens[source.UID])
+			}
+		})
+	}
 }
