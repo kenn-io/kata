@@ -180,7 +180,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	if cronPresent {
 		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
-			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
+			return MergeEventFeatures(required, CronEventFeature), nil
 		}
 	}
 	if !cronPresent && !issueMoved {
@@ -198,7 +198,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if native {
 			nativeProjectFeatureCache.Store(projectUID, struct{}{})
-			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
+			return MergeEventFeatures(required, CronEventFeature), nil
 		}
 	}
 	if issueMoved {
@@ -207,7 +207,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 			return "", err
 		}
 		if native {
-			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
+			return MergeEventFeatures(required, CronEventFeature), nil
 		}
 	}
 	return required, nil
