@@ -62,9 +62,10 @@ func TestForwardedClaimPreservesFixedProjectScope(t *testing.T) {
 			}
 			method, path := http.MethodPost, claimActionPath(replica.ID, issue.UID, tc.action)
 			var body any = map[string]any{"holder": "local-agent", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 600}
-			if tc.action == "status" {
+			switch tc.action {
+			case "status":
 				method, path, body = http.MethodGet, claimStatusPath(replica.ID, issue.UID), nil
-			} else if tc.action == "assignment" {
+			case "assignment":
 				path = fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.ID, issue.UID)
 				body = map[string]any{"actor": "tester", "ttl_seconds": 600}
 			}
