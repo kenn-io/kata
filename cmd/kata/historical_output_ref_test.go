@@ -133,9 +133,7 @@ func TestHistoricalOutputLookupFailureUsesStableUID(t *testing.T) {
 				env, dir, target, moved, oldRef := historicalOutputFixture(t)
 				upstream, err := url.Parse(env.URL)
 				require.NoError(t, err)
-				forward := httputil.NewSingleHostReverseProxy(upstream)
-				forward.Director = nil
-				forward.Rewrite = func(request *httputil.ProxyRequest) { request.SetURL(upstream) }
+				forward := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) { request.SetURL(upstream) }}
 				proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d", target.ID) {
 						http.Error(w, "project display unavailable", http.StatusServiceUnavailable)

@@ -33,9 +33,10 @@ func TestHistoricalAuxiliaryOutputRefs(t *testing.T) {
 				case "meta unset", "meta get whole", "meta get key":
 					runCLI(t, env, dir, "meta", "set", oldRef, "example.key", "value")
 					args = []string{"meta", "get", oldRef}
-					if operation == "meta unset" {
+					switch operation {
+					case "meta unset":
 						args = []string{"meta", "unset", oldRef, "example.key"}
-					} else if operation == "meta get key" {
+					case "meta get key":
 						args = append(args, "example.key")
 					}
 				case "notify":
@@ -59,8 +60,8 @@ func TestHistoricalAuxiliaryOutputRefs(t *testing.T) {
 					ref = fields[index]
 				case operation == "status" && mode == "agent", operation == "scoped token":
 					for _, field := range fields {
-						if strings.HasPrefix(field, "issue=") {
-							ref = strings.TrimPrefix(field, "issue=")
+						if value, found := strings.CutPrefix(field, "issue="); found {
+							ref = value
 						}
 					}
 				case mode == "agent":
@@ -92,9 +93,7 @@ func TestHistoricalMetadataDisplayFailureRetainsUsableRequestedRef(t *testing.T)
 	runCLI(t, env, dir, "meta", "set", oldRef, "example.key", "value")
 	upstream, err := url.Parse(env.URL)
 	require.NoError(t, err)
-	forward := httputil.NewSingleHostReverseProxy(upstream)
-	forward.Director = nil
-	forward.Rewrite = func(request *httputil.ProxyRequest) { request.SetURL(upstream) }
+	forward := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) { request.SetURL(upstream) }}
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+oldRef) {
 			http.Error(w, "issue display unavailable", http.StatusServiceUnavailable)
