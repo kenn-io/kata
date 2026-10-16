@@ -275,6 +275,7 @@ type FederationReadParams struct {
 	Features  string
 	Metadata  bool
 	AfterID   int64
+	IssueUID  string
 	Limit     int
 }
 
@@ -301,6 +302,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	if err = RequireEventFeatures(in.Features, out.RequiredFeatures); err != nil {
 		return out, err
 	}
+	if in.IssueUID != "" {
+		var owned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, in.IssueUID, project.ID).Scan(&owned); err != nil {
+			return out, err
+		}
+		if !owned {
+			return out, ErrNotFound
+		}
+	}
 	after := in.AfterID
 	if in.Metadata {
 		after = binding.ReplayHorizonEventID
@@ -308,7 +318,8 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	var reset sql.NullInt64
 	err = tx.QueryRowContext(ctx, `SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2) resets`, project.ID, after).Scan(&reset)
+ UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
+ UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, FederationPurgeResetMetadataPrefix+project.UID).Scan(&reset)
 	if err != nil {
 		return out, err
 	}
@@ -326,7 +337,10 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
 		return out, err
 	}
-	if reset.Int64 > 0 {
+	// A retained issue's explicit history is independent of purge gaps for
+	// other issues in the destination stream. Ownership was checked above in
+	// this same read transaction; a purged subject cannot pass that check.
+	if reset.Int64 > 0 && in.IssueUID == "" {
 		out.ResetAfterID = reset.Int64
 		out.NextAfterID = reset.Int64
 		return out, nil

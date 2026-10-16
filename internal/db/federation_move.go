@@ -228,6 +228,16 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&target, &active); err != nil {
 			return nil, err
 		}
+		// A detached destination retains standalone data. Its former streams
+		// may keep syncing, but cannot reconcile that destination's projection.
+		var joined bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, target).Scan(&joined); err != nil {
+			return nil, err
+		}
+		if !joined {
+			delete(p.Issues, issue.UID)
+			continue
+		}
 		var id, source int64
 		var recurrence *int64
 		err := tx.QueryRowContext(ctx, `SELECT id,project_id,recurrence_id FROM issues WHERE uid=$1`, issue.UID).Scan(&id, &source, &recurrence)
@@ -376,12 +386,14 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	}
 	// A destination reset must not discard offline work awaiting its former
 	// source stream's acknowledgement, even when the destination is read-only.
+	// Leaving retires a source binding and its cursor; its retained acknowledged
+	// history must not become pending again against an invented zero cursor.
 	var pending bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
- LEFT JOIN federation_bindings b ON b.project_id=e.project_id
+ JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND e.id>COALESCE(b.push_cursor_event_id,0)
+ AND e.id>b.push_cursor_event_id
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
@@ -389,5 +401,13 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 		return ErrFederationResetBlockedByPendingPush
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM events WHERE issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	return err
+}
+
+// ClearFederatedProjectEvents retains source envelopes still contributing to
+// issues now owned elsewhere. A source reset cannot rewind those destinations.
+func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=events.issue_uid AND i.project_id<>$1)`, projectID)
 	return err
 }

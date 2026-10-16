@@ -20,7 +20,7 @@ func federatedRehomeFixture(t *testing.T, store db.Storage, suffix string) (db.P
 	require.NoError(t, err)
 	target, err := store.CreateProject(ctx, "rehome-target-"+suffix)
 	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Original vectors", Body: "move without regeneration", Author: "worker"})
+	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Original vectors", Body: "move without regeneration", Author: "worker"})
 	require.NoError(t, err)
 	for _, project := range []db.Project{source, target} {
 		_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
@@ -28,7 +28,7 @@ func federatedRehomeFixture(t *testing.T, store db.Storage, suffix string) (db.P
 	}
 	origin, err := uid.New()
 	require.NoError(t, err)
-	at := time.Now().UTC().Add(time.Second)
+	at := time.UnixMilli(max(time.Now().UTC().UnixMilli(), created.HLCPhysicalMS) + 1000).UTC()
 	raw, err := json.Marshal(map[string]any{"issue_uid": issue.UID, "from_project_uid": source.UID, "from_short_id": issue.ShortID, "to_project_uid": target.UID, "to_short_id": issue.ShortID, "updated_at": at.Format(time.RFC3339Nano), "snapshot": map[string]string{"uid": issue.UID, "short_id": issue.ShortID, "title": issue.Title, "body": issue.Body, "author": issue.Author, "status": "open"}})
 	require.NoError(t, err)
 	event := newRemoteEvent(t, target, &issue.UID, "issue.moved", "worker", origin, at.UnixMilli(), jsontext.Value(raw))
