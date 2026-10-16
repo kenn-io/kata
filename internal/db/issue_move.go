@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/shortid"
 )
 
 // IssueMoveTreeInputs captures descendant revisions inside the move transaction.
@@ -123,11 +125,25 @@ func MovedIssueUID(ctx context.Context, q interface {
 		fromProject = "e.payload::jsonb->>'from_project_uid'"
 		fromShort = "e.payload::jsonb->>'from_short_id'"
 	}
+	// Historical short IDs are suffixes of the stable UID. First narrow the
+	// candidate issue identities; each correlated journal lookup can then use
+	// the existing events(issue_uid) index instead of scanning all history.
+	// A full UID also uses the issues UID index directly.
+	candidate := "lower(substr(i.uid, length(i.uid)-length($2)+1))=$2"
+	if len(shortID) == shortid.MaxLength {
+		candidate = "i.uid=upper($2)"
+	}
 	var uid string
-	err := q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
- JOIN projects p ON p.uid=`+fromProject+`
- WHERE e.type='issue.moved' AND p.id=$1 AND (`+fromShort+`=$2 OR e.issue_uid=$2)
- ORDER BY e.id DESC LIMIT 1`, projectID, shortID).Scan(&uid)
+	err := q.QueryRowContext(ctx, `SELECT historical.uid FROM (
+ SELECT i.uid, (
+  SELECT e.id FROM events e WHERE e.issue_uid=i.uid AND e.type='issue.moved'
+   AND `+fromProject+`=(SELECT uid FROM projects WHERE id=$1)
+   AND (`+fromShort+`=$2 OR e.issue_uid=$2)
+  ORDER BY e.id DESC LIMIT 1
+ ) AS move_event_id
+ FROM issues i WHERE `+candidate+`
+ ) historical WHERE historical.move_event_id IS NOT NULL
+ ORDER BY historical.move_event_id DESC LIMIT 1`, projectID, shortID).Scan(&uid)
 	if err == sql.ErrNoRows {
 		return "", ErrNotFound
 	}
