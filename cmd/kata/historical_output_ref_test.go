@@ -15,9 +15,9 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func historicalOutputFixture(t *testing.T) (*testenv.Env, string, db.Project, db.Issue, string) {
+func historicalOutputFixture(t *testing.T, options ...testenv.Option) (*testenv.Env, string, db.Project, db.Issue, string) {
 	t.Helper()
-	env := testenv.New(t)
+	env := testenv.New(t, options...)
 	dir, sourceID := initLocalBoundWorkspace(t, env, "source-project")
 	target, err := env.DB.CreateProject(t.Context(), "target-project")
 	require.NoError(t, err)
