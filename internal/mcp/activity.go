@@ -304,6 +304,10 @@ func (h toolHandlers) editComment(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, EditCommentOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, response.Issue)
+	if err != nil {
+		return nil, EditCommentOutput{}, err
+	}
 	return successResult(), EditCommentOutput{
 		Project: project, Issue: h.summaryFromIssue(project, response.Issue),
 		Comment: commentSummary(response.Comment), Changed: response.Changed, Event: eventSummary(&response.Event),
@@ -386,12 +390,17 @@ func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if to.UID == "" {
 		return nil, MoveOutput{}, errors.New("target project UID is required")
 	}
+	shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: from.ID, Ref: ref}})
+	if err != nil {
+		return nil, MoveOutput{}, err
+	}
+	from, err = h.currentIssueProject(ctx, from, issueFromShow(shown.Issue))
+	if err != nil {
+		return nil, MoveOutput{}, err
+	}
+	ref = shown.Issue.UID
 	revision := input.Revision
 	if revision == nil {
-		shown, showErr := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: from.ID, Ref: ref}})
-		if showErr != nil {
-			return nil, MoveOutput{}, showErr
-		}
 		revision = &shown.Issue.Revision
 	}
 	ifMatch := fmt.Sprintf(`"rev-%d"`, *revision)
@@ -422,7 +431,7 @@ func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input RestoreInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -437,7 +446,7 @@ func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolReques
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) purgeIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input PurgeInput) (*sdkmcp.CallToolResult, PurgeOutput, error) {
@@ -477,6 +486,10 @@ func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, ve
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
+	if err != nil {
+		return ProjectIdentity{}, destructiveIssue{}, "", err
+	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
 	if err != nil {
 		return ProjectIdentity{}, destructiveIssue{}, "", err
 	}
@@ -533,6 +546,10 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
 					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
 				}
+				return nil, WaitOutput{}, showErr
+			}
+			project, showErr = h.currentIssueProject(waitContext, project, issueFromShow(shown.Issue))
+			if showErr != nil {
 				return nil, WaitOutput{}, showErr
 			}
 			actual := shown.Issue.Status

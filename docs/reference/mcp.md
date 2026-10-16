@@ -154,9 +154,10 @@ cannot alter or destroy the catalog it was bound to.
 
 Tool calls cannot change the startup actor or expand the startup scope.
 Historical issue references remain usable only while the issue's current
-project is included. Reads and writes retain that boundary if an issue moves
-during a call, and a subtree move is rejected atomically if any descendant
-comes from an excluded project. The daemon remains authoritative for
+project is included. Returned references and delete/purge confirmations use
+the current project and short ID. Reads and writes retain that boundary if
+an issue moves during a call. A subtree move is rejected atomically if any
+descendant comes from an excluded project. The daemon remains authoritative for
 authentication, attribution, revision checks, federation trust, claims, and
 mutation policy. Scoped servers replace
 close-guard refusal messages (`parent_has_open_children`,
