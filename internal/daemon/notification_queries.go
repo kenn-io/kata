@@ -110,8 +110,8 @@ func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, a
 
 // notificationPeerProjectReadableTx authorizes a peer project that discovery
 // found inside its write transaction. Access admitted with the request is only
-// a snapshot, so the grant is rechecked live in tx before the cached check
-// records the project as a target of this request.
+// a snapshot, so the native grant is rechecked live in tx, and a host's peer
+// decision must also pass its transaction fence in tx.
 func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, projectID int64, projectUID string) (bool, error) {
 	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
 		if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
@@ -119,7 +119,22 @@ func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, p
 		}
 		return false, err
 	}
-	return notificationProjectReadable(ctx, projectID, projectUID)
+	readable, host, err := notificationPeerAccess(ctx, projectID, projectUID)
+	if err != nil || !readable || host == nil {
+		return readable, err
+	}
+	if host.decision.TransactionFence == nil {
+		return false, api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "transaction access decision unavailable", "", nil)
+	}
+	if err := host.decision.TransactionFence(ctx, tx); err != nil {
+		if errors.Is(err, ErrHostAccessDenied) {
+			return false, nil
+		}
+		return false, errors.Join(api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "transaction access decision unavailable", "", nil), err)
+	}
+	return true, nil
 }
 
 // Discovery reads other projects without widening the source mutation's host
@@ -127,22 +142,34 @@ func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, p
 // resolve the project UID themselves: discovery runs inside a write
 // transaction, and a pooled lookup could wait on the connection it holds.
 func notificationProjectReadable(ctx context.Context, projectID int64, projectUID string) (bool, error) {
+	readable, _, err := notificationPeerAccess(ctx, projectID, projectUID)
+	return readable, err
+}
+
+// notificationPeerAccess also returns the host state that decided the peer,
+// or nil when no host governs the request.
+func notificationPeerAccess(ctx context.Context, projectID int64, projectUID string) (bool, *hostAccessState, error) {
 	if authorizeProjectTarget(ctx, projectUID) != nil {
-		return false, nil
+		return false, nil, nil
 	}
 	// Native project access is settled above; keep the host check from
 	// repeating it with a pooled project read.
 	ctx = context.WithValue(ctx, projectAccessContextKey{}, (*ProjectAccessDecision)(nil))
+	var host *hostAccessState
 	if state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); ok {
 		isolated := *state
 		isolated.authorized = false
 		isolated.request.Operation = HostOperation{ID: "showIssue", Method: http.MethodGet,
 			Policy: HostOperationPolicy{Kind: hostOperationTaskRead, Capability: hostCapabilityRead}}
-		ctx = context.WithValue(ctx, hostAccessStateContextKey{}, &isolated)
+		host = &isolated
+		ctx = context.WithValue(ctx, hostAccessStateContextKey{}, host)
 	}
 	_, err := authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
-		return false, nil
+		return false, nil, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, nil, err
+	}
+	return true, host, nil
 }
