@@ -30,15 +30,19 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	// The snapshot is a baseline rather than a later content edit.
 	baselines := map[string]bool{}
 	for _, e := range ordered {
+		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
+			if uid := issueUID(e, PayloadMap(e.Payload)); uid != "" {
+				baselines[uid] = true
+			}
+		}
+	}
+	for _, e := range ordered {
 		payload := PayloadMap(e.Payload)
 		uid := issueUID(e, payload)
 		if uid == "" || baselines[uid] {
 			continue
 		}
-		switch e.Type {
-		case "issue.created", "issue.snapshot":
-			baselines[uid] = true
-		case "issue.moved":
+		if e.Type == "issue.moved" {
 			if raw := payload["snapshot"]; len(raw) > 0 {
 				snapshot := e
 				snapshot.Type, snapshot.Payload = "issue.snapshot", raw
@@ -592,16 +596,6 @@ func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]jsontext.Val
 	if uid == "" {
 		return
 	}
-	if _, known := p.Issues[uid]; !known {
-		if raw := payload["snapshot"]; len(raw) > 0 {
-			snapshot := e
-			snapshot.Type = "issue.snapshot"
-			snapshot.Payload = raw
-			snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
-			p.applyIssueCreated(snapshot)
-		}
-	}
-
 	issue := p.ensureIssue(uid)
 	if v, ok := stringValue(payload["to_project_uid"]); ok {
 		issue.ProjectUID = v
