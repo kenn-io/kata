@@ -58,6 +58,8 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx *sql.Tx, page []Ev
 		for i, uid := range chunk {
 			slots[i], args[i] = fmt.Sprintf("$%d", i+1), uid
 		}
+		// Only generated placeholders and fixed backend JSON expressions enter the SQL; UIDs are bound parameters.
+		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
 		rows, err := tx.QueryContext(ctx, `SELECT history_baseline.issue_uid,history_baseline.baseline_id FROM (
  SELECT issue_uid,MIN(id) AS baseline_id FROM events
  WHERE issue_uid IN (`+strings.Join(slots, ",")+`) AND type='issue.snapshot'
