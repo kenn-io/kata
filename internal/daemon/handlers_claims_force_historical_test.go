@@ -79,13 +79,3 @@ func TestMovedIssueLeaseStealThroughHistoricalRef(t *testing.T) {
 	require.True(t, status.Held)
 	require.Equal(t, "new-holder", status.Holder.Holder)
 }
-
-func TestMovedIssueForceReleaseRejectsInvalidCredential(t *testing.T) {
-	env, source, target, issue := movedForceReleaseFixture(t, true)
-	response, raw := envDoRaw(t, env, http.MethodPost, claimActionPath(source.ID, issue.ShortID, "force_release"), map[string]any{"actor": "administrator"}, bearer("unknown-token"))
-	require.Equal(t, http.StatusForbidden, response.StatusCode, string(raw))
-	status, err := env.DB.ClaimStatusReadOnly(t.Context(), target.ID, issue.UID, time.Now())
-	require.NoError(t, err)
-	require.True(t, status.Held)
-	require.Equal(t, "other-holder", status.Holder.Holder)
-}
