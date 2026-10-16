@@ -66,7 +66,7 @@ func TestRequestProjectScopeIntersectsStackedLimits(t *testing.T) {
 		request.Header.Add(requestProjectScopeHeader, requestScopeValue(t, f.private.UID, f.public.UID))
 		response, err := f.server.Client().Do(request)
 		require.NoError(t, err)
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		raw, err := io.ReadAll(response.Body)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
