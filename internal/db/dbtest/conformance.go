@@ -236,6 +236,7 @@ var storageScenarios = []scenario{
 	{name: "federated move guards", methods: []string{"IngestFederationEvents"}, run: checkFederatedMoveGuards},
 	{name: "federated move delivery", methods: []string{"IngestFederationEvents"}, run: checkFederatedMoveDelivery},
 	{name: "federated move acknowledgement retry", methods: []string{"IngestFederationEvents", "MoveIssueProject", "RevokeFederationEnrollment", "RemoveProject"}, run: checkFederatedMoveAcknowledgementRetry},
+	{name: "federated move snapshot authority", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EnableProjectFederation", "CreateFederationEnrollment", "IngestFederationEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveSnapshotAuthority},
 	{name: "federated cron run issue authority", methods: []string{"IngestFederationEvents", "MoveIssueProject", "ObserveCronRun"}, run: checkFederatedCronRunIssueAuthority},
 	{name: "federated fresh current project authority", methods: []string{"IngestFederationEvents", "MoveIssueProject"}, run: checkFederatedFreshCurrentProjectAuthority},
 	{name: "federated move reset after acknowledged source leave", methods: []string{"CreateIssue", "MoveIssueProject", "AdvanceFederationPushCursor", "LeaveFederationReplica", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush"}, run: checkFederatedMoveResetAfterAcknowledgedSourceLeave},

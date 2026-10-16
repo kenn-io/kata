@@ -1453,9 +1453,25 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			}
 			continue
 		}
-		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
+		payload := db.PayloadMap([]byte(event.Payload))
+		fromUID, _ := db.StringValue(payload["from_project_uid"])
 		if fromUID == "" {
 			return nil, db.ErrFederationIngestValidation
+		}
+		if raw := payload["snapshot"]; len(raw) > 0 {
+			var snapshot struct {
+				Links    []jsontext.Value `json:"links"`
+				Comments []struct {
+					ReplyToUID string `json:"reply_to_uid"`
+				} `json:"comments"`
+			}
+			if err := json.Unmarshal(raw, &snapshot); err != nil {
+				return nil, err
+			}
+			ordinaryIssueWork = ordinaryIssueWork || len(snapshot.Links) > 0
+			for _, comment := range snapshot.Comments {
+				ordinaryIssueWork = ordinaryIssueWork || comment.ReplyToUID != ""
+			}
 		}
 		projectUIDs = append(projectUIDs, fromUID)
 		requiredSources[fromUID] = true
