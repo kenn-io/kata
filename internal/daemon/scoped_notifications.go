@@ -89,9 +89,11 @@ func projectNotificationJSONWithWalker(
 	raw jsontext.Value,
 	walk notificationJSONWalker,
 ) (jsontext.Value, error) {
-	// Every slot key carries this prefix, even inside a string-encoded
-	// payload. Most responses have no slots and skip the decode entirely.
-	if !notificationReadRestricted(ctx) || !bytes.Contains(raw, []byte(notification.KeyPrefix)) {
+	// A slot key either appears literally or hides behind a JSON escape, at
+	// any string-encoding depth. Most responses have neither and skip the
+	// decode entirely.
+	if !notificationReadRestricted(ctx) ||
+		(!bytes.Contains(raw, []byte(notification.KeyPrefix)) && !bytes.Contains(raw, []byte(`\u`))) {
 		return raw, nil
 	}
 	uids := map[string]bool{}

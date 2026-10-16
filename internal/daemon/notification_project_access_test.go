@@ -2,6 +2,8 @@ package daemon_test
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -125,4 +127,38 @@ func TestNotificationReferencesFollowProjectAccess(t *testing.T) {
 			})
 		})
 	}
+}
+
+// JSON can spell a slot key with escapes, and imported history keeps payload
+// bytes as written. Projection must still find such a key when the response
+// holds no literal slot prefix anywhere.
+func TestNotificationProjectionSeesEscapedSlotKeys(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		ctx := t.Context()
+		hidden, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: f.issue.ID, Author: "member", Body: "Restricted finding"})
+		require.NoError(t, err)
+		const message = "Restricted escaped context"
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: f.visible.ID, Actor: "member", Patch: map[string]jsontext.Value{
+			"notify.cmVhZGVy": jsontext.Value(fmt.Sprintf(`{"from":"member","message":%q,"re":%q}`, message, hidden.UID)),
+		}})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: f.visible.ID, Actor: "member", Patch: map[string]jsontext.Value{
+			"notify.cmVhZGVy": jsontext.Value("null"),
+		}})
+		require.NoError(t, err)
+		writer, ok := store.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		})
+		require.True(t, ok)
+		_, err = writer.ExecContext(ctx, `UPDATE events SET payload=replace(payload, '"notify.', '"\u006eotify.') WHERE issue_id=$1`, f.visible.ID)
+		require.NoError(t, err)
+
+		path := "/api/v1/ui/snapshot?view=all-open&project_uid=" + f.public.UID + "&selected_issue_uid=" + f.visible.UID + "&include_history=true"
+		status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		require.Contains(t, string(body), "issue.metadata_updated", "the snapshot must include the escaped history")
+		assert.NotContains(t, string(body), hidden.UID)
+		assert.NotContains(t, string(body), message)
+	})
 }
