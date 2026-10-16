@@ -174,7 +174,26 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
 				"operation is not available to an issue-scoped credential", "", nil)
 		}
-		if err := requireHubClaimBinding(ctx, cfg.DB, in.ProjectID); err != nil {
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization, in.Body,
+				federationTransportOperation("forceReleaseIssueLease"), false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireHubClaimBinding(ctx, cfg.DB, issue.ProjectID); err != nil {
 			return nil, err
 		}
 		actor := actorFor(ctx, strings.TrimSpace(in.Body.Actor))
@@ -189,8 +208,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			reason = "admin_force_release"
 		}
 		result, err := cfg.DB.ForceReleaseClaim(ctx, db.ForceReleaseClaimParams{
-			ProjectID: in.ProjectID,
-			IssueRef:  in.Ref,
+			ProjectID: issue.ProjectID,
+			IssueRef:  issue.UID,
 			Actor:     actor,
 			Reason:    reason,
 			Now:       time.Now().UTC(),
@@ -203,7 +222,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		cfg.Publish().EventsByProject(result.Events)
 		if result.Event != nil {
-			cfg.Publish().Event(in.ProjectID, *result.Event)
+			cfg.Publish().Event(result.Event.ProjectID, *result.Event)
 		}
 		return &api.ClaimActionResponse{Body: claimResultBody(result)}, nil
 	})
