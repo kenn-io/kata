@@ -550,6 +550,9 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			}
 			project, showErr = h.currentIssueProject(waitContext, project, issueFromShow(shown.Issue))
 			if showErr != nil {
+				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
+				}
 				return nil, WaitOutput{}, showErr
 			}
 			actual := shown.Issue.Status
