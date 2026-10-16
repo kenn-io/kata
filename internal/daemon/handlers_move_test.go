@@ -661,3 +661,45 @@ func TestMoveIssue_FederationErrorNamesMoveRestriction(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveIssuePublishesSubtreeEventsOnce(t *testing.T) {
+	sink := &recordingSink{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Hooks = sink })
+	source, target, root := seedMovePair(t, env)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: source.ID, Title: "child", Author: "tester",
+		Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}},
+	})
+	require.NoError(t, err)
+	subscription := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer subscription.Unsub()
+	response, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(source.ID, root.ShortID, "actions/move"),
+		map[string]any{"actor": "tester", "to_project_uid": target.UID},
+		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	expected := map[string]bool{root.UID: false, child.UID: false}
+	for range 2 {
+		select {
+		case message := <-subscription.Ch:
+			require.NotNil(t, message.Event)
+			require.Equal(t, target.ID, message.ProjectID)
+			require.Equal(t, "issue.moved", message.Event.Type)
+			require.NotNil(t, message.Event.IssueUID)
+			uid := *message.Event.IssueUID
+			require.Contains(t, expected, uid)
+			require.False(t, expected[uid], "each moved issue must be broadcast once")
+			expected[uid] = true
+		default:
+			t.Fatal("missing committed move event")
+		}
+	}
+	select {
+	case message := <-subscription.Ch:
+		t.Fatalf("duplicate move broadcast: %+v", message)
+	default:
+	}
+	captured := sink.snapshot()
+	require.Len(t, captured, 2, "each moved issue must enqueue its hook event once")
+	require.NotEqual(t, captured[0].UID, captured[1].UID)
+}

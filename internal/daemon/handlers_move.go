@@ -113,10 +113,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		if res.Event != nil {
-			deliverProjectMutation(cfg, res.Event)
-		}
-
 		cfg.Publish().EventsByProject(res.Events)
 		out := &api.MoveIssueResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
