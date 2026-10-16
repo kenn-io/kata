@@ -119,6 +119,9 @@ func clearRelayProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, proje
 }
 
 func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID); err != nil {
 		return mapSQLError(err, nil)
 	}

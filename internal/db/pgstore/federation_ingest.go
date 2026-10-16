@@ -86,14 +86,15 @@ func (s *Store) IngestFederationEvents(
 			if len(event.Payload) == 0 {
 				event.Payload = jsontext.Value(`{}`)
 			}
+			var moveFrom, moveTo int64
 			if event.Type == "issue.moved" {
-				from, _, err := db.FederationMoveProjects(ctx, tx, params.ProjectID, event)
+				var err error
+				moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, params.ProjectID, event)
 				if err != nil {
 					return err
 				}
-				var issueID int64
-				if err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1 AND project_id IN ($2,$3)`, *event.IssueUID, from, params.ProjectID).Scan(&issueID); err != nil {
-					return fmt.Errorf("%w: unknown moved issue", db.ErrFederationIngestValidation)
+				if err := s.authorizeFederationMoveTx(ctx, tx, params, moveFrom, moveTo, event); err != nil {
+					return db.FinishTransactionRollback(ctx, err, tx.Rollback())
 				}
 				knownIssueUIDs[*event.IssueUID] = struct{}{}
 			}
@@ -149,6 +150,19 @@ func (s *Store) IngestFederationEvents(
 			}
 			if !errors.Is(err, db.ErrNotFound) {
 				return err
+			}
+			if event.Type == "issue.moved" {
+				var current int64
+				err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, *event.IssueUID).Scan(&current)
+				if errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("%w: moved issue source creation has not arrived", db.ErrNotFound)
+				}
+				if err != nil {
+					return err
+				}
+				if current != moveFrom && current != moveTo {
+					return fmt.Errorf("%w: moved issue is outside source and destination", db.ErrFederationIngestValidation)
+				}
 			}
 			if adoptionState.duplicateOnly {
 				return fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
@@ -765,7 +779,7 @@ func currentFederatedIssueUIDSet(
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT issue_uid FROM events
-WHERE project_id=$1 AND issue_uid IS NOT NULL AND type IN ('issue.created','issue.snapshot')`,
+WHERE project_id=$1 AND issue_uid IS NOT NULL AND type IN ('issue.created','issue.snapshot','issue.moved')`,
 		projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -810,4 +824,48 @@ func rememberIngestIssueUIDs(event db.RemoteEvent, known map[string]struct{}) {
 	if event.Type == "issue.created" || event.Type == "issue.snapshot" {
 		known[issueUID] = struct{}{}
 	}
+}
+
+// A move carries source authority only when this same spoke and actor retain a
+// live push enrollment there. Ordinary per-project join credentials suffice.
+func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, from, to int64, e db.RemoteEvent) error {
+	m := db.PayloadMap(e.Payload)
+	fromUID, _ := db.StringValue(m["from_project_uid"])
+	toUID, _ := db.StringValue(m["to_project_uid"])
+	if p.FederationEnrollmentID == 0 {
+		if !db.ProjectAttributionVisible(ctx, fromUID) || !db.ProjectAttributionVisible(ctx, toUID) {
+			return db.ErrNotFound
+		}
+	} else {
+		admitted, err := federationEnrollmentByIDTx(ctx, tx, p.FederationEnrollmentID, false)
+		if err != nil {
+			return err
+		}
+		if admitted.SpokeInstanceUID != p.SpokeInstanceUID || admitted.Actor != p.BoundActor {
+			return db.ErrNotFound
+		}
+		if err := s.FederationEnrollmentTransactionFence(admitted, to, "push")(ctx, tx); err != nil {
+			return err
+		}
+		source, err := scanFederationEnrollment(tx.QueryRowContext(ctx, federationEnrollmentSelect+` WHERE spoke_instance_uid=$1 AND bound_actor=$2 AND revoked_at IS NULL AND relay_protocol_version=0 AND (project_id=$3 OR project_id IS NULL) AND (',' || capabilities || ',') LIKE '%,push,%' ORDER BY id DESC LIMIT 1`, p.SpokeInstanceUID, p.BoundActor, from))
+		if err != nil {
+			return err
+		}
+		if err := s.FederationEnrollmentTransactionFence(source, from, "push")(ctx, tx); err != nil {
+			return err
+		}
+		if p.AuthorizeMove != nil {
+			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, from))
+			if err != nil {
+				return err
+			}
+			if err := p.AuthorizeMove(ctx, tx, source, project); err != nil {
+				return err
+			}
+		}
+	}
+	if p.BoundActor != "" {
+		return s.ProjectAccessTransactionFence(p.BoundActor, []string{fromUID, toUID})(ctx, tx)
+	}
+	return nil
 }

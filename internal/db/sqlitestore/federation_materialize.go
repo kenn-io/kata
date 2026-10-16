@@ -15,6 +15,7 @@ import (
 // takes the project lock before preparing once optimistic attempts run out.
 // Request fences still run first and may themselves acquire the writer lock.
 type federationMaterialization struct {
+	fullReplay   bool
 	projection   db.FoldProjection
 	cronAffected bool
 	status       []federatedStatusIntentUpdate
@@ -64,6 +65,13 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		return federationMaterialization{}, err
 	}
 	events = append(events, fresh...)
+	// A move joins multiple histories and can change the destination's rows.
+	// The per-project delta writer cannot safely reconcile that shared view.
+	for _, event := range events {
+		if event.Type == "issue.moved" {
+			return federationMaterialization{fullReplay: true}, nil
+		}
+	}
 	for _, event := range events {
 		if err := db.ValidateFederationEntries(event.Type, event.UID, event.Payload); err != nil {
 			return federationMaterialization{}, err

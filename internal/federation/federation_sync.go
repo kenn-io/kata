@@ -324,9 +324,21 @@ func syncDirectSpoke(
 		deliver := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
+		eventProjects := make([]int64, len(body.Events))
+		projectsByUID := map[string]int64{binding.HubProjectUID: binding.ProjectID}
 		for i, ev := range body.Events {
+			projectID, ok := projectsByUID[ev.ProjectUID]
+			if !ok {
+				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+				if err != nil {
+					return err
+				}
+				projectID = project.ID
+				projectsByUID[ev.ProjectUID] = projectID
+			}
+			eventProjects[i] = projectID
 			if ev.OriginInstanceUID == localInstanceUID {
-				exists, err := store.ReconcileLocalFederationEcho(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
+				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
 				if err != nil {
 					return err
 				}
@@ -351,7 +363,8 @@ func syncDirectSpoke(
 				duplicate[i] = !inserted[j]
 			}
 		}
-		deliverUIDs := make([]string, 0, len(body.Events))
+		deliverUIDs := map[int64][]string{}
+		var deliverProjects []int64
 		for i, ev := range body.Events {
 			if duplicate[i] && shouldDeliverPage {
 				var err error
@@ -361,7 +374,11 @@ func syncDirectSpoke(
 				}
 			}
 			if deliver[i] {
-				deliverUIDs = append(deliverUIDs, ev.EventUID)
+				project := eventProjects[i]
+				if _, ok := deliverUIDs[project]; !ok {
+					deliverProjects = append(deliverProjects, project)
+				}
+				deliverUIDs[project] = append(deliverUIDs[project], ev.EventUID)
 			}
 		}
 		if len(body.Events) > 0 {
@@ -373,11 +390,22 @@ func syncDirectSpoke(
 			}
 		}
 		if shouldDeliverPage && len(deliverUIDs) > 0 {
-			events, err := store.EventsByUIDs(ctx, binding.ProjectID, deliverUIDs)
-			if err != nil {
-				return err
+			byUID := map[string]db.Event{}
+			for _, project := range deliverProjects {
+				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
+				if err != nil {
+					return err
+				}
+				for _, event := range events {
+					byUID[event.UID] = event
+				}
 			}
-			pulledEvents = events
+			pulledEvents = nil
+			for i, event := range body.Events {
+				if deliver[i] {
+					pulledEvents = append(pulledEvents, byUID[event.EventUID])
+				}
+			}
 		}
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
@@ -390,7 +418,15 @@ func syncDirectSpoke(
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		onPulledEvents(binding.ProjectID, pulledEvents)
+		// Preserve page order while routing each contiguous group to its project.
+		for start := 0; start < len(pulledEvents); {
+			end := start + 1
+			for end < len(pulledEvents) && pulledEvents[end].ProjectID == pulledEvents[start].ProjectID {
+				end++
+			}
+			onPulledEvents(pulledEvents[start].ProjectID, pulledEvents[start:end])
+			start = end
+		}
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
 }
@@ -416,7 +452,15 @@ func shouldDeliverDuplicatePulledEvent(
 	if ev.OriginInstanceUID != localInstanceUID {
 		return true, nil
 	}
-	events, err := store.EventsByUIDs(ctx, binding.ProjectID, []string{ev.EventUID})
+	projectID := binding.ProjectID
+	if ev.ProjectUID != binding.HubProjectUID {
+		project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+		if err != nil {
+			return false, err
+		}
+		projectID = project.ID
+	}
+	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
 	if err != nil {
 		return false, err
 	}
@@ -424,6 +468,10 @@ func shouldDeliverDuplicatePulledEvent(
 		return false, nil
 	}
 	event := events[0]
+	// A different stream's push cursor cannot suppress this event's delivery.
+	if projectID != binding.ProjectID {
+		return true, nil
+	}
 	if event.ID > binding.PushCursorEventID {
 		return true, nil
 	}

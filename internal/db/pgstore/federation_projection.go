@@ -500,9 +500,25 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	projection := db.FoldEvents(events)
 	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue, federatedIssueRow{}, false)
-	}, func(id int64) error {
-		return lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
-
+	}, func(id, source, target int64) error {
+		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
+			return err
+		}
+		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
+			return err
+		}
+		collisions, err := issueMoveImportMappingCollisionsTx(ctx, tx, id, source, target)
+		if err != nil {
+			return err
+		}
+		if len(collisions) > 0 {
+			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
+			return err
+		}
+		return db.CheckNativeRecurringParentMove(ctx, tx, true, source, issueUID)
 	})
 	if err != nil {
 		return err
@@ -689,6 +705,14 @@ UNION ALL SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2
 )`, projectID, candidate, issue.UID).Scan(&occupied)
 		if err != nil {
 			return "", mapSQLError(err, nil)
+		}
+		if !occupied {
+			historical, err := db.MovedIssueUID(ctx, tx, projectID, candidate, true)
+			if err == nil {
+				occupied = historical != issue.UID
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return "", err
+			}
 		}
 		if !occupied {
 			return candidate, nil

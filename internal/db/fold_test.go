@@ -443,3 +443,24 @@ func TestFoldCommentTeammateSurvivesEdit(t *testing.T) {
 	require.Equal(t, "reviewer-7", got.Teammate)
 	require.Equal(t, "revised", got.Body)
 }
+
+func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
+	for _, event := range []FoldEvent{
+		testEvent("issue.commented", 2, `{"comment_uid":"comment-1","body":"discussion","author":"worker"}`),
+		testEvent("issue.updated", 2, `{"title":"newer title"}`),
+	} {
+		t.Run(event.Type, func(t *testing.T) {
+			move := testEvent("issue.moved", 3, `{"issue_uid":"issue-1","to_project_uid":"project-2","to_short_id":"efgh","snapshot":{"uid":"issue-1","title":"baseline title","body":"baseline body","author":"worker","status":"open","created_at":"2026-05-23T12:00:00.000Z"}}`)
+			projection := FoldEvents([]FoldEvent{event, move})
+			issue := projection.Issues["issue-1"]
+			require.Equal(t, "baseline body", issue.Body)
+			require.Equal(t, "worker", issue.Author)
+			require.Equal(t, "project-2", issue.ProjectUID)
+			if event.Type == "issue.updated" {
+				require.Equal(t, "newer title", issue.Title)
+			} else {
+				require.Equal(t, "baseline title", issue.Title)
+			}
+		})
+	}
+}

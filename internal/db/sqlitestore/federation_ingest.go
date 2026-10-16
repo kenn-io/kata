@@ -118,14 +118,15 @@ func (d *Store) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = jsontext.Value(`{}`)
 		}
+		var moveFrom, moveTo int64
 		if ev.Type == "issue.moved" {
-			from, _, err := db.FederationMoveProjects(ctx, tx, p.ProjectID, ev)
+			var err error
+			moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, p.ProjectID, ev)
 			if err != nil {
 				return db.FederationIngestResult{}, err
 			}
-			var issueID int64
-			if err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1 AND project_id IN ($2,$3)`, *ev.IssueUID, from, p.ProjectID).Scan(&issueID); err != nil {
-				return db.FederationIngestResult{}, fmt.Errorf("%w: unknown moved issue", db.ErrFederationIngestValidation)
+			if err := d.authorizeFederationMoveTx(ctx, tx, p, moveFrom, moveTo, ev); err != nil {
+				return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 			}
 			knownIssueUIDs[*ev.IssueUID] = struct{}{}
 		}
@@ -179,6 +180,19 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.FederationIngestResult{}, err
+		}
+		if ev.Type == "issue.moved" {
+			var current int64
+			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, *ev.IssueUID).Scan(&current)
+			if errors.Is(err, sql.ErrNoRows) {
+				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue source creation has not arrived", db.ErrNotFound)
+			}
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if current != moveFrom && current != moveTo {
+				return db.FederationIngestResult{}, fmt.Errorf("%w: moved issue is outside source and destination", db.ErrFederationIngestValidation)
+			}
 		}
 		if adoptionSnapshotAuthorState.duplicateOnly {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
@@ -271,7 +285,13 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if result.Accepted > 0 {
-		if err := materialization.apply(ctx, tx, p.ProjectID, cronValidator); err != nil {
+		var err error
+		if materialization.fullReplay {
+			err = d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, true, result.InsertedEventUIDs, cronValidator)
+		} else {
+			err = materialization.apply(ctx, tx, p.ProjectID, cronValidator)
+		}
+		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
@@ -1288,7 +1308,7 @@ func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int6
 		  FROM events
 		 WHERE project_id = ?
 		   AND issue_uid IS NOT NULL
-		   AND type IN ('issue.created', 'issue.snapshot')`, projectID)
+		   AND type IN ('issue.created', 'issue.snapshot', 'issue.moved')`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list event issue uids: %w", err)
 	}
@@ -1334,4 +1354,48 @@ func rememberIngestIssueUIDs(ev db.RemoteEvent, known map[string]struct{}) {
 			known[uid] = struct{}{}
 		}
 	}
+}
+
+// A move carries source authority only when this same spoke and actor retain a
+// live push enrollment there. Ordinary per-project join credentials suffice.
+func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, from, to int64, e db.RemoteEvent) error {
+	m := db.PayloadMap(e.Payload)
+	fromUID, _ := db.StringValue(m["from_project_uid"])
+	toUID, _ := db.StringValue(m["to_project_uid"])
+	if p.FederationEnrollmentID == 0 {
+		if !db.ProjectAttributionVisible(ctx, fromUID) || !db.ProjectAttributionVisible(ctx, toUID) {
+			return db.ErrNotFound
+		}
+	} else {
+		admitted, err := federationEnrollmentByIDTx(ctx, tx, p.FederationEnrollmentID)
+		if err != nil {
+			return err
+		}
+		if admitted.SpokeInstanceUID != p.SpokeInstanceUID || admitted.Actor != p.BoundActor {
+			return db.ErrNotFound
+		}
+		if err := d.FederationEnrollmentTransactionFence(admitted, to, "push")(ctx, tx); err != nil {
+			return err
+		}
+		source, err := scanFederationEnrollment(tx.QueryRowContext(ctx, federationEnrollmentSelect+` WHERE spoke_instance_uid=$1 AND bound_actor=$2 AND revoked_at IS NULL AND relay_protocol_version=0 AND (project_id=$3 OR project_id IS NULL) AND (',' || capabilities || ',') LIKE '%,push,%' ORDER BY id DESC LIMIT 1`, p.SpokeInstanceUID, p.BoundActor, from))
+		if err != nil {
+			return err
+		}
+		if err := d.FederationEnrollmentTransactionFence(source, from, "push")(ctx, tx); err != nil {
+			return err
+		}
+		if p.AuthorizeMove != nil {
+			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, from))
+			if err != nil {
+				return err
+			}
+			if err := p.AuthorizeMove(ctx, tx, source, project); err != nil {
+				return err
+			}
+		}
+	}
+	if p.BoundActor != "" {
+		return d.ProjectAccessTransactionFence(p.BoundActor, []string{fromUID, toUID})(ctx, tx)
+	}
+	return nil
 }

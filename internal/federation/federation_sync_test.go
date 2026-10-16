@@ -4631,3 +4631,65 @@ func TestSyncFederationOnceReplyPushToOlderHubDoesNotQuarantine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), binding.PushCursorEventID, "the reply stays pending until the hub upgrades")
 }
+
+func TestSyncFederationOnceMoveUsesEnvelopeProject(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	projects := make([]db.Project, 2)
+	replicas := make([]db.Project, 2)
+	for i, name := range []string{"source-project", "destination-project"} {
+		var err error
+		projects[i], err = hub.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = hub.DB.EnableProjectFederation(ctx, projects[i].ID, "worker")
+		require.NoError(t, err)
+		replicas[i], err = spoke.DB.CreateProjectWithUID(ctx, name, projects[i].UID)
+		require.NoError(t, err)
+		_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replicas[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[i].ID, HubProjectUID: projects[i].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+	}
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "moving", Author: "worker"})
+	require.NoError(t, err)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "move-pull-token", SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "pull,push", Actor: "worker"})
+	require.NoError(t, err)
+	sync := func(i int, onEvents func(int64, []db.Event)) {
+		t.Helper()
+		binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[i].ID)
+		require.NoError(t, err)
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[i].ID, Token: created.Token}, clientpkg.Opts{}, onEvents))
+	}
+	sync(0, nil)
+	sync(1, nil)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	seen := false
+	sync(0, func(project int64, events []db.Event) {
+		for _, e := range events {
+			if e.Type == "issue.moved" {
+				seen = true
+				require.Equal(t, replicas[1].ID, project)
+				require.Equal(t, replicas[1].ID, e.ProjectID)
+			}
+		}
+	})
+	require.True(t, seen)
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replicas[0].ID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, binding.PullCursorEventID, move.Events[0].ID)
+	sync(0, nil)
+	sync(1, nil)
+	moved, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: replicas[1].ID, ToProjectID: replicas[0].ID, IfMatchRev: moved.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	sync(0, nil)
+	// The former destination receives a hash-identical local echo whose event
+	// row belongs to the new destination.
+	sync(1, func(project int64, events []db.Event) {
+		for _, e := range events {
+			if e.Type == "issue.moved" {
+				require.Equal(t, replicas[0].ID, project)
+			}
+		}
+	})
+}
