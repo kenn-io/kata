@@ -246,8 +246,8 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					}
 					return nil, internalAPIError(err)
 				}
-				cfg.Publish().Event(in.ProjectID, replaced.UnlinkedEvent)
-				cfg.Publish().Event(in.ProjectID, replaced.LinkedEvent)
+				cfg.Publish().Event(replaced.UnlinkedEvent.ProjectID, replaced.UnlinkedEvent)
+				cfg.Publish().Event(replaced.LinkedEvent.ProjectID, replaced.LinkedEvent)
 				updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 				if err != nil {
 					return nil, internalAPIError(err)
@@ -299,7 +299,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return nil, internalAPIError(err)
 		}
 
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -449,7 +449,7 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
+		cfg.Publish().Event(evt.ProjectID, evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
 			return nil, internalAPIError(err)

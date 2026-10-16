@@ -71,29 +71,44 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// targets and won't corrupt the audit trail.
 		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
 		idempotencyFingerprint := ""
+		includeDeleted := db.IncludeDeletedNo
 		if in.IdempotencyKey != "" {
-			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
-				return nil, err
-			}
-			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
+			// Receipts remain replayable after a soft delete.
+			includeDeleted = db.IncludeDeletedYes
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
+		if err != nil {
+			return nil, err
+		}
+		if in.IdempotencyKey != "" {
+			// Close events persist in the issue's current project, so use that
+			// same scope for serialization and receipt lookup.
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, issue.ProjectID, in.IdempotencyKey)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
-			match, err := lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
+			match, err := lookupCloseIdempotencyMatch(ctx, cfg, issue.ProjectID, in.IdempotencyKey)
 			if err != nil {
 				return nil, err
 			}
+			// A close committed before the move still has its receipt in the
+			// old route project. Preserve exact retries of that request.
+			if match == nil && issue.ProjectID != in.ProjectID {
+				match, err = lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
+				if err != nil {
+					return nil, err
+				}
+			}
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
-					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+					issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
+		if issue.DeletedAt != nil {
+			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
@@ -128,7 +143,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
-			if err := validateEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue.ShortID, in.Body.Evidence); err != nil {
+			if err := validateEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 		}
@@ -217,7 +232,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// it exactly once before replying with the receipt.
 			if in.IdempotencyKey != "" {
 				match, lookupErr := lookupCloseIdempotencyMatch(
-					ctx, cfg, in.ProjectID, in.IdempotencyKey)
+					ctx, cfg, issue.ProjectID, in.IdempotencyKey)
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
@@ -265,7 +280,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// before returning a plain no-op response.
 		if !changed && in.IdempotencyKey != "" {
 			reuse, err := tryCloseIdempotencyMatch(
-				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+				ctx, cfg, issue.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
 			if err != nil {
 				return nil, err
 			}
@@ -549,7 +564,7 @@ func closeIdempotencyFingerprint(
 // envelope alongside the other shape-check errors.
 func validateEvidenceTargets(
 	ctx context.Context, store db.Storage,
-	projectID int64, closingShortID string, evidence []api.Evidence,
+	projectID int64, closing db.Issue, evidence []api.Evidence,
 ) error {
 	for i, e := range evidence {
 		switch e.Type {
@@ -566,9 +581,9 @@ func validateEvidenceTargets(
 			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}
-		if target.ShortID == closingShortID {
+		if target.ID == closing.ID {
 			return fmt.Errorf("evidence[%d] %s cannot reference the issue being closed (%s)",
-				i, e.Type, closingShortID)
+				i, e.Type, closing.ShortID)
 		}
 	}
 	return nil
