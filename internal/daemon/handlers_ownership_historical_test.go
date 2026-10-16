@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
 	"testing"
@@ -59,4 +60,55 @@ func TestClaim_TimedAssignmentHistoricalRouteUsesCurrentFederation(t *testing.T)
 	require.NotNil(t, current.AssignmentExpiresOn)
 	assert.Equal(t, current.AssignmentExpiresOn, authoritative.AssignmentExpiresOn)
 	assert.Equal(t, target.ID, current.ProjectID)
+}
+
+func TestClaim_TimedAssignmentHistoricalEnrollmentScope(t *testing.T) {
+	for _, refKind := range []string{"alias", "full UID"} {
+		for _, bothProjects := range []bool{true, false} {
+			name := refKind + "/source only"
+			if bothProjects {
+				name = refKind + "/both projects"
+			}
+			t.Run(name, func(t *testing.T) {
+				env := testenv.New(t, testenv.WithAuthToken("owner-token"))
+				source, target, issue := moveLocalIssueForLeaseTests(t, env)
+				var projectID *int64
+				if !bothProjects {
+					projectID = &source.ID
+				}
+				enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "historical-assignment-enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: projectID, Capabilities: "claim", Actor: "tester"})
+				require.NoError(t, err)
+				ref := issue.ShortID
+				if refKind == "full UID" {
+					ref = issue.UID
+				}
+				response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, ref, "actions/claim"), map[string]any{"actor": "body-actor", "ttl_seconds": 300}, bearer(enrollment.Token))
+				if bothProjects {
+					require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+					var out struct {
+						Issue   db.Issue `json:"issue"`
+						Changed bool     `json:"changed"`
+					}
+					require.NoError(t, json.Unmarshal(raw, &out))
+					assert.True(t, out.Changed)
+					assert.Equal(t, target.ID, out.Issue.ProjectID)
+					require.NotNil(t, out.Issue.Owner)
+					assert.Equal(t, "tester", *out.Issue.Owner)
+					assert.NotNil(t, out.Issue.AssignmentExpiresOn)
+				} else {
+					assertAPIError(t, response.StatusCode, raw, http.StatusForbidden, "auth_invalid")
+				}
+				current, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				if bothProjects {
+					require.NotNil(t, current.Owner)
+					assert.Equal(t, "tester", *current.Owner)
+					assert.NotNil(t, current.AssignmentExpiresOn)
+				} else {
+					assert.Nil(t, current.Owner)
+					assert.Nil(t, current.AssignmentExpiresOn)
+				}
+			})
+		}
+	}
 }

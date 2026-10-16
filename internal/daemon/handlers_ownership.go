@@ -123,6 +123,25 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization,
+				api.ClaimActionBody{Holder: in.Body.Actor}, federationTransportOperation("claimIssue"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
 		actor := strings.TrimSpace(principal.Holder)
 		if principal.AuthenticatedHost {
 			actor, err = attributedActor(ctx, in.Body.Actor)
@@ -142,17 +161,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"federation claim credentials require ttl_seconds",
 				"pass ttl_seconds to bound the assignment; enrollment claims cannot be permanent", nil)
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
-		}
 		if in.Body.TTLSeconds != nil {
 			forwarded, handled, forwardErr := forwardTimedAssignmentClaim(ctx, cfg, in, issue, actor)
 			if handled {
 				return forwarded, forwardErr
 			}
 		}
-		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, in.ProjectID, issue, principal.ClaimPrincipal); err != nil {
+		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, issue.ProjectID, issue, principal.ClaimPrincipal); err != nil {
 			return nil, err
 		}
 
