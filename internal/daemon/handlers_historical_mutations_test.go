@@ -202,9 +202,30 @@ func TestHistoricalMutationCloseEvidenceUsesStableIdentity(t *testing.T) {
 			if reason == "superseded" {
 				typ = "superseded-by"
 			}
-			body := map[string]any{"actor": "agent", "reason": reason, "message": "Reviewed the evidence and recorded the distinct replacement issue.", "evidence": []map[string]any{{"type": typ, "issue_ref": peer.ShortID}}}
-			resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, closing.ShortID, "actions/close"), body, map[string]string{"Authorization": "Bearer tok"})
+			body := map[string]any{"actor": "agent", "reason": reason, "message": "Reviewed the evidence and recorded the distinct replacement issue.", "evidence": []map[string]any{{"type": typ, "issue_ref": peer.ShortID}}, "retry_protocol": "close-v1"}
+			path := issuePathRef(source.ID, closing.ShortID, "actions/close")
+			headers := map[string]string{"Authorization": "Bearer tok", "Idempotency-Key": "historical-evidence"}
+			resp, raw := envDoRaw(t, env, http.MethodPost, path, body, headers)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: target.ID, IssueUID: closing.UID, Types: []string{"issue.closed"}, Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
+			require.Len(t, payload.Evidence, 1)
+			require.Equal(t, peer.UID, payload.Evidence[0].IssueRef, "persist the validated target, independent of the event project")
+			retry, replay := envDoRaw(t, env, http.MethodPost, path, body, headers)
+			require.Equal(t, http.StatusOK, retry.StatusCode, string(replay))
+			var reused struct {
+				Reused        bool     `json:"reused"`
+				OriginalEvent db.Event `json:"original_event"`
+			}
+			require.NoError(t, json.Unmarshal(replay, &reused))
+			require.True(t, reused.Reused, "fingerprint the original request rather than normalized evidence")
+			require.Equal(t, events[0].UID, reused.OriginalEvent.UID)
+			require.Equal(t, events[0].Payload, reused.OriginalEvent.Payload)
 		})
 	}
 }

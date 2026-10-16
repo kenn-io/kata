@@ -132,11 +132,13 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
+		dbEvidence := evidenceToDB(in.Body.Evidence)
 		if !tuiBypass {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
-			if err := validateEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence); err != nil {
+			dbEvidence, err = resolveEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence)
+			if err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 		}
@@ -145,7 +147,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				scopedCloseRefusal(ctx, err.Error(), "issue has open children; close them before closing the parent"), "", nil)
 		}
 		now := time.Now()
-		dbEvidence := evidenceToDB(in.Body.Evidence)
 		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
 		// for operators who want stricter pacing.
 		if cfg.CloseThrottle.SiblingBurstEnabled {
@@ -563,7 +564,7 @@ func closeIdempotencyFingerprint(
 	return hex.EncodeToString(sum[:])
 }
 
-// validateEvidenceTargets resolves duplicate-of and superseded-by issue
+// resolveEvidenceTargets resolves duplicate-of and superseded-by issue
 // refs in the same project and rejects targets that are missing or that
 // point at the issue being closed. ValidateCloseInput already checks that
 // the issue ref is non-empty; this is the database-backed half of the
@@ -572,10 +573,11 @@ func closeIdempotencyFingerprint(
 //
 // Errors are plain so the caller can wrap them in the 400 validation
 // envelope alongside the other shape-check errors.
-func validateEvidenceTargets(
+func resolveEvidenceTargets(
 	ctx context.Context, store db.Storage,
 	projectID int64, closing db.Issue, evidence []api.Evidence,
-) error {
+) ([]db.Evidence, error) {
+	resolved := evidenceToDB(evidence)
 	for i, e := range evidence {
 		switch e.Type {
 		case api.EvidenceDuplicateOf, api.EvidenceSupersededBy:
@@ -584,19 +586,22 @@ func validateEvidenceTargets(
 		}
 		target, err := resolveIssueRef(ctx, store, projectID, e.IssueRef, db.IncludeDeletedNo)
 		if err != nil {
-			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
+			return nil, fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}
 		if err := authorizeIssueScopedIssue(ctx, store, target); err != nil {
-			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
+			return nil, fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}
 		if target.ID == closing.ID {
-			return fmt.Errorf("evidence[%d] %s cannot reference the issue being closed (%s)",
+			return nil, fmt.Errorf("evidence[%d] %s cannot reference the issue being closed (%s)",
 				i, e.Type, closing.ShortID)
 		}
+		// The event belongs to the issue's current project. Retain the target
+		// identity resolved in the request project, independent of later moves.
+		resolved[i].IssueRef = target.UID
 	}
-	return nil
+	return resolved, nil
 }
 
 // evidenceToDB performs the 1:1 conversion from the api wire type to the
