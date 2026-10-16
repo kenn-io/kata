@@ -1166,6 +1166,15 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	// Ownership can change while retained history is folded. Take the policy
+	// writer lock before request fences or project rows to avoid lock upgrades.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if err := lockProjectAccess(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
+	})
 	return d.RetryTransient(ctx, func() error {
 		return d.materializeFederatedProject(ctx, projectID)
 	})
@@ -1269,6 +1278,11 @@ func (d *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
 	})
 	if err != nil {
 		return err
