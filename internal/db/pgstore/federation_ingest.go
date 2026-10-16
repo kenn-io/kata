@@ -106,16 +106,9 @@ func (s *Store) IngestFederationEvents(
 			if len(event.Payload) == 0 {
 				event.Payload = jsontext.Value(`{}`)
 			}
-			var moveFrom, moveTo int64
-			if event.Type == "issue.moved" {
-				var err error
-				moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, params.ProjectID, event)
-				if err != nil {
-					return err
-				}
-				if err := s.authorizeFederationMoveTx(ctx, tx, params, moveFrom, moveTo, event); err != nil {
-					return db.FinishTransactionRollback(ctx, err, tx.Rollback())
-				}
+			// The subject is portable identity; live source checks apply only to
+			// fresh moves after duplicate recognition and content integrity checks.
+			if event.Type == "issue.moved" && event.IssueUID != nil {
 				knownIssueUIDs[*event.IssueUID] = struct{}{}
 			}
 
@@ -170,6 +163,17 @@ func (s *Store) IngestFederationEvents(
 			}
 			if !errors.Is(err, db.ErrNotFound) {
 				return err
+			}
+			var moveFrom, moveTo int64
+			if event.Type == "issue.moved" {
+				var err error
+				moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, params.ProjectID, event)
+				if err != nil {
+					return err
+				}
+				if err := s.authorizeFederationMoveTx(ctx, tx, params, moveFrom, moveTo, event); err != nil {
+					return db.FinishTransactionRollback(ctx, err, tx.Rollback())
+				}
 			}
 			if event.Type == "issue.moved" {
 				current, staged := batchIssueProjects[*event.IssueUID]
