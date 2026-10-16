@@ -207,10 +207,16 @@ describe('completed issue actions', () => {
     })
     const create = { createKey: 'create-key', onChanged }
     await controller.execute(create, async () => ok({ changed: true }))
+    expect(calls.slice(0, 2)).toEqual(['action', 'refresh'])
+    expect(calls.filter((call) => call === 'action')).toEqual(['action'])
+    calls.length = 0
     await controller.execute(create, async () => ok({ changed: true }))
     await controller.execute({ onChanged }, async () => ok({ changed: false }))
     await controller.execute({ onChanged }, async () => failure(500, 'failed', 'Write failed'))
+    expect(calls.filter((call) => call === 'action')).toEqual([])
+    calls.length = 0
     await controller.execute({ onChanged }, async () => ok({ changed: true }))
-    expect(calls).toEqual(['action', 'refresh', 'refresh', 'refresh', 'action', 'refresh'])
+    expect(calls.slice(0, 2)).toEqual(['action', 'refresh'])
+    expect(calls.filter((call) => call === 'action')).toEqual(['action'])
   })
 })

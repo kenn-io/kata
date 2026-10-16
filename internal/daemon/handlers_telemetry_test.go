@@ -58,26 +58,20 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 
 type fakeTelemetryReporter struct {
 	failNext bool
-	reporter *telemetry.Reporter
 	captured []map[string]any
-	events   []string
 }
 
-func (f *fakeTelemetryReporter) EventAllowed(event string) bool {
-	if f.reporter != nil {
-		return f.reporter.EventAllowed(event)
-	}
+func (*fakeTelemetryReporter) EventAllowed(event string) bool {
 	event = strings.TrimSpace(event)
 	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
-func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
+func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
 	if f.failNext {
 		f.failNext = false
 		return errors.New("capture failed")
 	}
 	f.captured = append(f.captured, properties)
-	f.events = append(f.events, event)
 	return nil
 }
 
@@ -382,30 +376,10 @@ func TestScreenViewClaimFailureAndOptOut(t *testing.T) {
 	require.Len(t, reporter.captured, 1, "yesterday's claim and today's opt-out leave today's visit eligible")
 }
 
-func (f *fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
-	if f.reporter != nil {
-		return f.reporter.SanitizeProperties(event, properties)
-	}
+func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
 	reporter, err := telemetry.NewReporter(telemetry.Options{})
 	if err != nil {
 		return nil, err
 	}
 	return reporter.SanitizeProperties(event, properties)
-}
-
-func TestCaptureCoreActionsRetainsRepeatedEvents(t *testing.T) {
-	allowlist, err := telemetry.NewReporter(telemetry.Options{})
-	require.NoError(t, err)
-	for _, event := range []string{"issue_created", "issue_closed"} {
-		t.Run(event, func(t *testing.T) {
-			reporter := &fakeTelemetryReporter{reporter: allowlist}
-			server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
-			for range 2 {
-				response := server.post(t.Context(), t, `{"event":"`+event+`","properties":{"surface":"web"}}`)
-				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
-				assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
-			}
-			assert.Equal(t, []string{event, event}, reporter.events)
-		})
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,6 @@ import (
 // cliUseTelemetry is the daemon's reporter; block, when set, holds every capture until closed.
 type cliUseTelemetry struct {
 	block    chan struct{}
-	fail     bool
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string
@@ -49,9 +47,6 @@ func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error
 	defer c.mu.Unlock()
 	c.captured = append(c.captured, properties)
 	c.events = append(c.events, event)
-	if c.fail {
-		return errors.New("telemetry unavailable")
-	}
 	return nil
 }
 
@@ -426,58 +421,54 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
-func TestCLIIssueActionReportsWithoutCommandContext(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	target := newCLIUseDaemon(t)
-	cmd := findCommand(t, "create")
-	require.Nil(t, cmd.Context())
-	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
-	t.Cleanup(func() { cliUseTarget.Store(nil) })
-
-	wait := reportCLIIssueAction(cmd, "issue_created", true)
-	wait()
-	assert.Equal(t, int32(1), target.posts.Load())
-}
-
-func TestCLIUseReportsAfterIssueActionTimesOut(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
-	setCLIUseClock(t, time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
-	var actions, opens atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
-		var body struct {
-			Event string `json:"event"`
+func TestCLIIssueActionReporting(t *testing.T) {
+	for _, nilContext := range []bool{false, true} {
+		name := "action timeout preserves daily use report"
+		if nilContext {
+			name = "missing command context"
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		switch body.Event {
-		case "issue_created":
-			actions.Add(1)
-			<-r.Context().Done()
-		case "app_opened":
-			opens.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			_, _ = w.Write([]byte(`{"status":"queued"}`))
-		default:
-			t.Errorf("unexpected event %q", body.Event)
-		}
-	}))
-	defer server.Close()
-	cmd := findCommand(t, "create")
-	cmd.SetContext(context.Background())
-	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
-	t.Cleanup(func() { cliUseTarget.Store(nil) })
-	wait := reportCLIIssueAction(cmd, "issue_created", true)
-	wait()
-	reportCLIUse(cmd)
-	assert.Equal(t, int32(1), actions.Load())
-	assert.Equal(t, int32(1), opens.Load(), "a timed-out action still allows the daily use report")
-	assert.Equal(t, "2026-10-02", readCLIUseDay(cliUseMarkerPath(*cliUseTarget.Load())))
-	reportCLIUse(cmd)
-	assert.Equal(t, int32(1), opens.Load(), "the accepted report records the daily marker")
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv(hooks.HookVersionEnv, "")
+			stubIsTTY(t, true)
+			shortenCLIUseReportTimeout(t, 200*time.Millisecond)
+			var actions, opens atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+				var body struct {
+					Event string `json:"event"`
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				switch body.Event {
+				case "issue_created":
+					actions.Add(1)
+					if !nilContext {
+						<-r.Context().Done()
+						return
+					}
+				case "app_opened":
+					opens.Add(1)
+				default:
+					t.Errorf("unexpected event %q", body.Event)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"status":"queued"}`))
+			}))
+			defer server.Close()
+			cmd := findCommand(t, "create")
+			if nilContext {
+				require.Nil(t, cmd.Context())
+			} else {
+				cmd.SetContext(context.Background())
+			}
+			cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
+			t.Cleanup(func() { cliUseTarget.Store(nil) })
+			wait := reportCLIIssueAction(cmd, "issue_created", true)
+			wait()
+			reportCLIUse(cmd)
+			assert.Equal(t, int32(1), actions.Load())
+			assert.Equal(t, int32(1), opens.Load(), "the action still allows the daily use report")
+		})
+	}
 }

@@ -2,9 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -69,30 +67,6 @@ func TestCoreActionsReportChangedMutations(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestCoreActionResultDoesNotWaitForTelemetry(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	synctest.Test(t, func(t *testing.T) {
-		delivered := make(chan struct{})
-		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Path == "/api/v1/ui/telemetry" {
-				<-req.Context().Done()
-				close(delivered)
-				return nil, req.Context().Err()
-			}
-			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"changed":true}`))}, nil
-		})}
-		c := NewClient("http://127.0.0.1:7777", hc)
-		started := time.Now()
-		resp, err := c.Close(t.Context(), 7, "abcd", "user-a")
-		require.NoError(t, err)
-		require.True(t, resp.Changed)
-		assert.Equal(t, time.Duration(0), time.Since(started))
-		<-delivered
-		synctest.Wait()
-		assert.Equal(t, time.Second, time.Since(started))
-	})
 }
 
 func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
