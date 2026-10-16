@@ -324,3 +324,30 @@ func federationCredentialDenied() error {
 	return api.NewError(http.StatusForbidden, "auth_invalid",
 		"federation credential is not currently authorized", "", nil)
 }
+
+// authorizeFederationMoveSource applies the same host policy to the source as
+// the route applies to the destination. Storage has already proved and fenced
+// this source enrollment; its temporary context does not widen the whole batch.
+func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transaction db.Transaction, enrollment db.FederationEnrollment, source db.Project) error {
+	if cfg.HostFederationAccess == nil {
+		return nil
+	}
+	if projects, restricted := db.AuthorizedProjects(ctx); restricted {
+		ctx = db.WithAuthorizedProjects(ctx, append(slices.Clone(projects), source.UID))
+	}
+	decision, err := cfg.HostFederationAccess.AuthorizeFederation(ctx, HostFederationAccessRequest{
+		Enrollment: enrollment, Project: source, Capability: "push",
+		Operation: federationTransportOperation("ingestFederationProjectEvents"),
+	})
+	switch {
+	case errors.Is(err, ErrHostAccessDenied):
+		return ErrHostAccessDenied
+	case errors.Is(err, ErrHostFederationAdmissionLimited):
+		return ErrHostFederationAdmissionLimited
+	case err != nil:
+		return errors.Join(errHostFederationAccessUnavailable, err)
+	case decision.TransactionFence == nil:
+		return errHostFederationAccessUnavailable
+	}
+	return sanitizeFederationTransactionFence(decision.TransactionFence)(ctx, transaction)
+}
