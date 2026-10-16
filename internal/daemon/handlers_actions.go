@@ -81,24 +81,17 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if in.IdempotencyKey != "" {
-			// Close events persist in the issue's current project, so use that
-			// same scope for serialization and receipt lookup.
-			release, err := cfg.DB.AcquireIdempotencyLock(ctx, issue.ProjectID, in.IdempotencyKey)
+			// A close key keeps one lock across project moves and still
+			// serializes project-key collisions with another issue. Receipt
+			// lookup below remains scoped to the resolved issue and project.
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, 0, "issue.closed\x00"+in.IdempotencyKey)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
-			match, err := lookupCloseIdempotencyMatch(ctx, cfg, issue.ProjectID, in.IdempotencyKey)
+			match, err := lookupCloseIdempotencyMatchForIssue(ctx, cfg, issue, in.IdempotencyKey)
 			if err != nil {
 				return nil, err
-			}
-			// A close committed before the move still has its receipt in the
-			// old route project. Preserve exact retries of that request.
-			if match == nil && issue.ProjectID != in.ProjectID {
-				match, err = lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
-				if err != nil {
-					return nil, err
-				}
 			}
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
@@ -231,8 +224,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// batch this attempt returned is the committed batch, so publish
 			// it exactly once before replying with the receipt.
 			if in.IdempotencyKey != "" {
-				match, lookupErr := lookupCloseIdempotencyMatch(
-					ctx, cfg, issue.ProjectID, in.IdempotencyKey)
+				match, lookupErr := lookupCloseIdempotencyMatchForIssue(
+					ctx, cfg, issue, in.IdempotencyKey)
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
@@ -280,7 +273,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// before returning a plain no-op response.
 		if !changed && in.IdempotencyKey != "" {
 			reuse, err := tryCloseIdempotencyMatch(
-				ctx, cfg, issue.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+				ctx, cfg, issue, in.IdempotencyKey, idempotencyFingerprint)
 			if err != nil {
 				return nil, err
 			}
@@ -355,10 +348,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 func tryCloseIdempotencyMatch(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	issue db.Issue,
 	key, fingerprint string,
 ) (*api.MutationResponse, error) {
-	match, err := lookupCloseIdempotencyMatch(ctx, cfg, projectID, key)
+	match, err := lookupCloseIdempotencyMatchForIssue(ctx, cfg, issue, key)
 	if err != nil {
 		return nil, err
 	}
@@ -366,6 +359,23 @@ func tryCloseIdempotencyMatch(
 		return nil, nil
 	}
 	return closeIdempotencyResponse(ctx, cfg, match, fingerprint)
+}
+
+// lookupCloseIdempotencyMatchForIssue prioritizes this issue's stable receipt,
+// even when a later move left it in an intermediate project. New keys still
+// check the current project for collisions with another issue's close.
+func lookupCloseIdempotencyMatchForIssue(
+	ctx context.Context, cfg ServerConfig, issue db.Issue, key string,
+) (*db.IdempotencyMatch, error) {
+	match, err := cfg.DB.LookupIssueMutationIdempotencyByIssue(
+		ctx, issue.UID, "issue.closed", key, time.Now().Add(-idempotencyWindow))
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	if match != nil {
+		return match, nil
+	}
+	return lookupCloseIdempotencyMatch(ctx, cfg, issue.ProjectID, key)
 }
 
 func lookupCloseIdempotencyMatch(

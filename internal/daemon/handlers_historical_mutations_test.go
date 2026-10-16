@@ -1,13 +1,18 @@
 package daemon_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -202,4 +207,121 @@ func TestHistoricalMutationCloseEvidenceUsesStableIdentity(t *testing.T) {
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		})
 	}
+}
+
+func TestHistoricalMutationKeyedCloseRetryAcrossMultipleMoves(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleted=%t", deleted), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			source, intermediate, issue, _ := historicalMutationIssue(t, env)
+			headers := map[string]string{"Authorization": "Bearer tok", "Idempotency-Key": "multi-hop-close", "If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)}
+			body := map[string]any{"actor": "agent", "reason": "wontfix", "message": "Reviewed the proposed work and recorded why it should stop here.", "retry_protocol": "close-v1"}
+			path := issuePathRef(source.ID, issue.UID, "actions/close")
+			first, raw := envDoRaw(t, env, http.MethodPost, path, body, headers)
+			require.Equal(t, http.StatusOK, first.StatusCode, string(raw))
+			var original struct {
+				Event db.Event `json:"event"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &original))
+			require.Equal(t, intermediate.ID, original.Event.ProjectID)
+			current, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "final-project")
+			require.NoError(t, err)
+			_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: intermediate.ID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: "coordinator"})
+			require.NoError(t, err)
+			if deleted {
+				_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), issue.ID, "agent")
+				require.NoError(t, err)
+			}
+			for _, route := range []int64{source.ID, target.ID} {
+				retry, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(route, issue.UID, "actions/close"), body, headers)
+				require.Equal(t, http.StatusOK, retry.StatusCode, string(raw))
+				var replay struct {
+					Reused        bool     `json:"reused"`
+					OriginalEvent db.Event `json:"original_event"`
+					Issue         db.Issue `json:"issue"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &replay))
+				assert.True(t, replay.Reused)
+				assert.Equal(t, original.Event.UID, replay.OriginalEvent.UID)
+				assert.Equal(t, target.ID, replay.Issue.ProjectID)
+			}
+			team, _, err := env.DB.CreateTeam(t.Context(), "restricted-team", "admin")
+			require.NoError(t, err)
+			_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+				ProjectUID: target.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
+			}, "admin")
+			require.NoError(t, err)
+			_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+				PlaintextToken: "restricted-agent-token", Actor: "agent", AdminActor: "admin",
+			})
+			require.NoError(t, err)
+			server := daemon.NewServer(daemon.ServerConfig{
+				DB: env.DB, StartedAt: time.Now(), Auth: config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true},
+			})
+			defer func() { _ = server.Close() }()
+			hostServer := httptest.NewServer(server.Handler())
+			defer hostServer.Close()
+			headers["Authorization"] = "Bearer restricted-agent-token"
+			retry := postWithHeader(t, hostServer, path, headers, body)
+			assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "issue_not_found")
+		})
+	}
+}
+
+func TestHistoricalMutationConcurrentCloseKeyCollision(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, first, _ := historicalMutationIssue(t, env)
+	otherSource, err := env.DB.CreateProject(t.Context(), "other-source")
+	require.NoError(t, err)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: otherSource.ID, Title: "Second historical issue", Author: "agent"})
+	require.NoError(t, err)
+	_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: second.ID, FromProjectID: otherSource.ID, ToProjectID: target.ID, IfMatchRev: second.Revision, Actor: "coordinator"})
+	require.NoError(t, err)
+	type outcome struct {
+		status int
+		raw    []byte
+		err    error
+	}
+	results := make(chan outcome, 2)
+	start := make(chan struct{})
+	for _, path := range []string{issuePathRef(source.ID, first.UID, "actions/close"), issuePathRef(otherSource.ID, second.UID, "actions/close")} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+path, strings.NewReader(`{"actor":"agent","reason":"wontfix","message":"Reviewed the proposed work and recorded why it should stop here.","retry_protocol":"close-v1"}`))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer tok")
+		req.Header.Set("Idempotency-Key", "concurrent-close")
+		req.Header.Set("Content-Type", "application/json")
+		go func() {
+			<-start
+			resp, err := env.HTTP.Do(req)
+			if err != nil {
+				results <- outcome{err: err}
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			raw, err := io.ReadAll(resp.Body)
+			results <- outcome{status: resp.StatusCode, raw: raw, err: err}
+		}()
+	}
+	close(start)
+	statuses := []int{}
+	for range 2 {
+		result := <-results
+		require.NoError(t, result.err)
+		statuses = append(statuses, result.status)
+		if result.status != http.StatusOK {
+			assertAPIError(t, result.status, result.raw, http.StatusConflict, "idempotency_mismatch")
+		}
+	}
+	assert.ElementsMatch(t, []int{http.StatusOK, http.StatusConflict}, statuses)
+	closed := 0
+	for _, id := range []int64{first.ID, second.ID} {
+		issue, err := env.DB.IssueByID(t.Context(), id)
+		require.NoError(t, err)
+		if issue.Status == "closed" {
+			closed++
+		}
+	}
+	assert.Equal(t, 1, closed)
 }

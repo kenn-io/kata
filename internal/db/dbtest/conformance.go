@@ -322,6 +322,11 @@ var storageScenarios = []scenario{
 		run:     checkIdempotency,
 	},
 	{
+		name:    "historical close receipts",
+		methods: []string{"CreateIssue", "CreateProject", "CloseIssueGuarded", "MoveIssueProject", "SoftDeleteIssue", "LookupIssueMutationIdempotencyByIssue"},
+		run:     checkHistoricalCloseReceipts,
+	},
+	{
 		name:    "concurrent uniqueness",
 		methods: []string{"CreateProject", "ListProjects"},
 		run:     checkConcurrentUniqueness,
