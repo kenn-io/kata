@@ -407,7 +407,17 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=events.issue_uid AND i.project_id<>$1)`, projectID)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=events.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
+		return err
+	}
+	// Retained envelopes may still refer numerically to a peer being reset.
+	// Portable UIDs and content hashes remain intact when local FKs detach.
+	if _, err := tx.ExecContext(ctx, `UPDATE events SET issue_id=NULL
+ WHERE issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id=NULL
+ WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id=$1)`, projectID)
 	return err
 }

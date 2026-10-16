@@ -101,3 +101,40 @@ func checkFederatedMovePurgeFormerStreams(t *testing.T, store db.Storage) error 
 	}
 	return nil
 }
+
+func checkFederatedMoveResetRetainedLink(t *testing.T, store db.Storage) error {
+	for _, guarded := range []bool{false, true} {
+		t.Run(fmt.Sprint(guarded), func(t *testing.T) {
+			ctx := t.Context()
+			source, target, issue, move := federatedRehomeFixture(t, store, fmt.Sprintf("retained-link-%t", guarded))
+			prepareRehomePull(t, store, source, target, "pull")
+			peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "source peer remains", Author: "worker"})
+			require.NoError(t, err)
+			_, linkEvent, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "worker"})
+			require.NoError(t, err)
+			require.Equal(t, &peer.ID, linkEvent.RelatedIssueID)
+			replayFederatedRehome(t, store, target, move, "pull")
+			cursor, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, cursor))
+			if guarded {
+				err = store.ResetFederatedProjectIfNoPendingPush(ctx, source.ID, cursor+1, cursor, store.InstanceUID(), cursor)
+			} else {
+				err = store.ResetFederatedProject(ctx, source.ID, cursor+1, cursor)
+			}
+			require.NoError(t, err, "retained event numeric references must not block source projection reset")
+			retained, err := store.EventsByUIDs(ctx, source.ID, []string{linkEvent.UID})
+			require.NoError(t, err)
+			require.Len(t, retained, 1)
+			require.Nil(t, retained[0].RelatedIssueID)
+			require.Equal(t, linkEvent.RelatedIssueUID, retained[0].RelatedIssueUID)
+			require.Equal(t, linkEvent.Payload, retained[0].Payload)
+			require.Equal(t, linkEvent.ContentHash, retained[0].ContentHash)
+			require.NoError(t, store.MaterializeFederatedProject(ctx, target.ID))
+			moved, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, moved.ProjectID)
+		})
+	}
+	return nil
+}
