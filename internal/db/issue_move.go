@@ -12,7 +12,7 @@ import (
 func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn) ([]MoveIssueProjectIn, error) {
 	if in.Single {
 		if in.AuthorizeProjects != nil {
-			if err := in.AuthorizeProjects([]int64{in.FromProjectID}); err != nil {
+			if err := authorizeIssueMoveProjects(ctx, tx, in, []int64{in.FromProjectID}); err != nil {
 				return nil, err
 			}
 		}
@@ -52,11 +52,24 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 		for _, item := range inputs {
 			ids = append(ids, item.FromProjectID)
 		}
-		if err := in.AuthorizeProjects(ids); err != nil {
+		if err := authorizeIssueMoveProjects(ctx, tx, in, ids); err != nil {
 			return nil, err
 		}
 	}
 	return inputs, nil
+}
+
+// authorizeIssueMoveProjects expands admission and then rechecks its updated
+// transaction fence. Rejected fences finish host cleanup only after rollback.
+func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn, ids []int64) error {
+	err := in.AuthorizeProjects(ids)
+	if err == nil {
+		err = ApplyTransactionFence(ctx, tx)
+	}
+	if err != nil {
+		return FinishTransactionRollback(ctx, err, tx.Rollback())
+	}
+	return nil
 }
 
 // MovedIssueUID resolves a historical short ID from the existing move journal.

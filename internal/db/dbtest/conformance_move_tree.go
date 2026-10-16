@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -138,6 +139,63 @@ func checkMoveTreeExternalClaim(t *testing.T, store db.Storage) error {
 		got, err := store.IssueByID(ctx, root.ID)
 		require.NoError(t, err)
 		require.Equal(t, root, got)
+		after, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, cursor, after)
+	}
+	return nil
+}
+
+// Contract: expanded descendant authorization must run its authoritative fence
+// inside the move transaction and finish rejection cleanup after rollback.
+func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, err := store.CreateProject(ctx, "fence-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "fence-target")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "fence-descendant")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	for _, dry := range []bool{true, false} {
+		expanded, cleaned := false, false
+		denied := errors.New("descendant fence denied")
+		fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
+			if !expanded {
+				return nil
+			}
+			return db.AfterTransactionRollback(denied, func(ctx context.Context) error {
+				// This read must succeed after the transaction released its connection.
+				got, err := store.IssueByID(ctx, root.ID)
+				if err != nil {
+					return err
+				}
+				require.Equal(t, source.ID, got.ProjectID)
+				cleaned = true
+				return nil
+			})
+		})
+		_, err = store.MoveIssueProject(fenced, db.MoveIssueProjectIn{
+			IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: root.Revision, Actor: "worker", DryRun: dry,
+			AuthorizeProjects: func(ids []int64) error {
+				require.Contains(t, ids, other.ID)
+				expanded = true
+				return nil
+			},
+		})
+		require.ErrorIs(t, err, denied)
+		require.True(t, cleaned, "rejection cleanup must run after rollback")
+		for _, before := range []db.Issue{root, child} {
+			got, err := store.IssueByID(ctx, before.ID)
+			require.NoError(t, err)
+			require.Equal(t, before, got)
+		}
 		after, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Equal(t, cursor, after)
