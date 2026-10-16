@@ -211,16 +211,19 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error) ([]int64, error) {
-	moved := map[string]bool{}
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project) (int64, error)) ([]int64, error) {
+	moved := map[string]FoldEvent{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
-			moved[e.IssueUID] = true
+			if previous, known := moved[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
+				moved[e.IssueUID] = e
+			}
 		}
 	}
 	projects := map[int64]bool{}
 	for _, issue := range p.SortedIssues() {
-		if !moved[issue.UID] {
+		winner, known := moved[issue.UID]
+		if !known {
 			continue
 		}
 		var target int64
@@ -239,8 +242,9 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			continue
 		}
 		var id, source int64
+		var sourceProject Project
 		var recurrence *int64
-		err := tx.QueryRowContext(ctx, `SELECT id,project_id,recurrence_id FROM issues WHERE uid=$1`, issue.UID).Scan(&id, &source, &recurrence)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name)
 		if errors.Is(err, sql.ErrNoRows) {
 			if active {
 				projects[target] = true
@@ -279,6 +283,10 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			return nil, err
 		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
+			return nil, err
+		}
+		sourceProject.ID = source
+		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, insertResetControl); err != nil {
 			return nil, err
 		}
 		for _, query := range []string{

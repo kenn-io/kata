@@ -79,9 +79,9 @@ func SyncFederationOnce(
 }
 
 // SyncFederationOnceWithPulledEvents is SyncFederationOnce with a post-commit
-// callback for freshly inserted hub-origin events. The daemon uses this to
-// fan pulled events out to SSE subscribers and hooks without making this
-// package depend on daemon internals.
+// callback for freshly inserted hub-origin events and local materialization
+// reset controls. The daemon publishes resets without hooks and fans ordinary
+// pulled events out to SSE subscribers and hooks.
 func SyncFederationOnceWithPulledEvents(
 	ctx context.Context,
 	store db.Storage,
@@ -462,6 +462,7 @@ func syncDirectSpoke(
 			if err := federationFailpoint("during_spoke_pull_apply_before_materialize"); err != nil {
 				return err
 			}
+			applyCtx, resets := db.WithFederationMoveResetCapture(ctx)
 			// Unadvanced remote duplicates remain candidates: their
 			// insertion may have committed before an interrupted materialization.
 			// Ordinary reconciled local issue echoes already have their projection.
@@ -469,12 +470,17 @@ func syncDirectSpoke(
 			if incremental, ok := store.(interface {
 				MaterializeFederatedEvents(context.Context, int64, []string) error
 			}); ok {
-				err = incremental.MaterializeFederatedEvents(ctx, binding.ProjectID, materializeUIDs)
+				err = incremental.MaterializeFederatedEvents(applyCtx, binding.ProjectID, materializeUIDs)
 			} else {
-				err = store.MaterializeFederatedProject(ctx, binding.ProjectID)
+				err = store.MaterializeFederatedProject(applyCtx, binding.ProjectID)
 			}
 			if err != nil {
 				return err
+			}
+			if onPulledEvents != nil {
+				for _, reset := range resets.Resets {
+					onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+				}
 			}
 		}
 		if shouldDeliverPage && len(deliverUIDs) > 0 {
