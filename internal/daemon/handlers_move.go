@@ -97,8 +97,15 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			}
 			if !in.Body.DryRun {
 				move.DryRun = false
+				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
+				for i, issue := range res.Issues {
+					move.ExpectedIssueIDs[i] = issue.ID
+				}
 				res, err = cfg.DB.MoveIssueProject(ctx, move)
 			}
+		}
+		if errors.Is(err, db.ErrIssueMoveTreeChanged) {
+			return nil, api.NewError(409, "issue_move_tree_changed", "issue subtree changed during claim validation", "retry the move to validate the current subtree", nil)
 		}
 		if err != nil {
 			return nil, moveIssueAPIError(err)
