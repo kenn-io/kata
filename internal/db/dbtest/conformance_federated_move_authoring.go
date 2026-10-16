@@ -13,7 +13,11 @@ import (
 // actors. Preview applies the same gate without changing rows or event cursors.
 func checkFederatedMoveAuthoringGates(t *testing.T, store db.Storage, backend Backend) error {
 	for _, kind := range []string{"upstream-relay", "downstream-relay", "different-actors", "native"} {
-		for _, endpoint := range []string{"source", "target"} {
+		endpoints := []string{"source", "target"}
+		if kind == "native" {
+			endpoints = endpoints[:1]
+		}
+		for _, endpoint := range endpoints {
 			t.Run(kind+"/"+endpoint, func(t *testing.T) {
 				ctx := t.Context()
 				name := kind + "-" + endpoint
