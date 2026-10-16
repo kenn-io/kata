@@ -79,3 +79,28 @@ func TestMovedIssueLeaseStealThroughHistoricalRef(t *testing.T) {
 	require.True(t, status.Held)
 	require.Equal(t, "new-holder", status.Holder.Holder)
 }
+
+func TestMovedIssueForceReleaseRecoversSoftDeletedHardLease(t *testing.T) {
+	env, source, target, issue := movedForceReleaseFixture(t, false)
+	headers := bearer("owner-token")
+	headers["X-Kata-Confirm"] = "DELETE " + target.Name + "#" + issue.ShortID
+	response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(target.ID, issue.UID, "actions/delete"),
+		map[string]string{"actor": "other-holder"}, headers)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+
+	restorePath := issuePathRef(target.ID, issue.UID, "actions/restore")
+	response, raw = envDoRaw(t, env, http.MethodPost, restorePath,
+		map[string]string{"actor": "new-holder"}, bearer("owner-token"))
+	assertAPIError(t, response.StatusCode, raw, http.StatusConflict, "claim_denied")
+
+	response, raw = envDoRaw(t, env, http.MethodPost, claimActionPath(source.ID, issue.ShortID, "force_release"),
+		map[string]string{"actor": "administrator", "reason": "unavailable holder recovery"}, bearer("owner-token"))
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, restorePath,
+		map[string]string{"actor": "new-holder"}, bearer("owner-token"))
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	restored, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, restored.ProjectID)
+	require.Nil(t, restored.DeletedAt)
+}

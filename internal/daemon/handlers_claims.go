@@ -174,7 +174,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
 				"operation is not available to an issue-scoped credential", "", nil)
 		}
-		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		issue, err := locateClaimIssueWithDeleted(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedYes)
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +189,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedYes)
 		if err != nil {
 			return nil, err
 		}
@@ -268,10 +268,14 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 // reads to the route project even when the enrollment permits both projects.
 // Callers must reauthorize and use activeIssueByRef before accessing lease state.
 func locateClaimIssue(ctx context.Context, store db.Storage, projectID int64, ref string) (db.Issue, error) {
+	return locateClaimIssueWithDeleted(ctx, store, projectID, ref, db.IncludeDeletedNo)
+}
+
+func locateClaimIssueWithDeleted(ctx context.Context, store db.Storage, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
 		return db.Issue{}, err
 	}
-	return resolveIssueRef(db.WithAuthorizedProjects(ctx, nil), store, projectID, ref, db.IncludeDeletedNo)
+	return resolveIssueRef(db.WithAuthorizedProjects(ctx, nil), store, projectID, ref, include)
 }
 
 func handleClaimAcquire(
