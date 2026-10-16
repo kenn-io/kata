@@ -810,6 +810,9 @@ type AdoptProjectIntoFederationResult struct {
 	Binding               FederationBinding
 	AdoptionSnapshotCount int64
 	CreatedEvent          *Event
+	// Committed stream invalidations are transient publisher inputs.
+	ResetProjectIDs   []int64 `json:"-"`
+	ResetAfterEventID int64   `json:"-"`
 }
 
 // LeaveFederationResult reports what LeaveFederationReplica removed. ProjectUID

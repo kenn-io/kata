@@ -103,6 +103,7 @@ type EnsureFederationReplicaParams struct {
 	CredentialRekey            *FederationReplicaCredentialRekeySource
 	ManagedReservation         *FederationReplicaManagedReservation
 	ProjectEventSink           func(db.Event)
+	ProjectResetSink           func(projectID, cursor int64)
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
 	Relay                      *api.RelayHandshake
@@ -543,6 +544,8 @@ type EnsureFederationReplicaResult struct {
 	CreatedEvent          *db.Event
 	Adopted               bool
 	AdoptionSnapshotCount int64
+	ResetProjectIDs       []int64 `json:"-"`
+	ResetAfterEventID     int64   `json:"-"`
 }
 
 // EnsureFederationReplica creates or reuses a local spoke binding, optionally
@@ -757,6 +760,11 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if p.ProjectResetSink != nil {
+		for _, projectID := range result.ResetProjectIDs {
+			p.ProjectResetSink(projectID, result.ResetAfterEventID)
+		}
+	}
 	if result.CreatedEvent != nil && p.ProjectEventSink != nil {
 		p.ProjectEventSink(*result.CreatedEvent)
 	}
@@ -1333,6 +1341,8 @@ func ensureReplicaBindingOrAdopt(
 				Adopted:               p.AdoptExisting,
 				AdoptionSnapshotCount: result.AdoptionSnapshotCount,
 				CreatedEvent:          result.CreatedEvent,
+				ResetProjectIDs:       result.ResetProjectIDs,
+				ResetAfterEventID:     result.ResetAfterEventID,
 			}, nil
 		}
 	}
