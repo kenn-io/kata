@@ -2928,6 +2928,10 @@ func (d *Store) adoptProjectIntoFederation(
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
+	formerProjects, err := db.FederationAdoptionFormerProjects(ctx, tx, project)
+	if err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
 	issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
@@ -2983,6 +2987,7 @@ func (d *Store) adoptProjectIntoFederation(
 	}
 
 	var createdEvent *db.Event
+	var resetCursor int64
 	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
 	if !emitMetadataBaseline && len(issues) == 0 {
 		emitMetadataBaseline = true
@@ -3014,6 +3019,7 @@ func (d *Store) adoptProjectIntoFederation(
 				return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("set attachment push cursor: %w", err)
 			}
 		}
+		resetCursor = event.ID
 	}
 
 	var snapshotCount int64
@@ -3023,7 +3029,7 @@ func (d *Store) adoptProjectIntoFederation(
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
 		issueUID := issue.UID
-		if _, err := d.insertEventTx(ctx, tx, eventInsert{
+		event, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID:   project.ID,
 			ProjectUID:  project.UID,
 			ProjectName: project.Name,
@@ -3034,17 +3040,28 @@ func (d *Store) adoptProjectIntoFederation(
 			Payload:     payload,
 			HLC:         &boundary,
 			CreatedAt:   baselineCreatedAt,
-		}); err != nil {
+		})
+		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
+		resetCursor = event.ID
 		snapshotCount++
 	}
 
 	for _, event := range cron {
-		if _, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt}); err != nil {
+		inserted, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt})
+		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
+		resetCursor = inserted.ID
 		snapshotCount++
+	}
+	if err := db.RecordFederationPurgeResets(ctx, tx, append(formerProjects, project.UID), resetCursor); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+	resetProjects, err := db.FederationPurgeResetProjectIDs(ctx, tx, project.ID, resetCursor)
+	if err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, project.ID))
@@ -3067,6 +3084,8 @@ func (d *Store) adoptProjectIntoFederation(
 		Binding:               binding,
 		AdoptionSnapshotCount: snapshotCount,
 		CreatedEvent:          createdEvent,
+		ResetProjectIDs:       resetProjects,
+		ResetAfterEventID:     resetCursor,
 	}, nil
 }
 
