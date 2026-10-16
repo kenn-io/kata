@@ -610,9 +610,6 @@ func resolveEvidenceTargets(
 // internal/api already imports internal/db; both types remain
 // field-for-field identical and the daemon handles the boundary.
 func evidenceToDB(in []api.Evidence) []db.Evidence {
-	if len(in) == 0 {
-		return nil
-	}
 	out := make([]db.Evidence, len(in))
 	for i, e := range in {
 		out[i] = db.Evidence{
