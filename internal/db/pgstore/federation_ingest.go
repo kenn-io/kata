@@ -24,21 +24,23 @@ func (s *Store) IngestFederationEvents(
 	ctx context.Context,
 	params db.FederationIngestParams,
 ) (db.FederationIngestResult, error) {
+	moveBatch := false
 	for _, input := range params.Events {
-		if input.Event.Type != "issue.moved" {
-			continue
-		}
-		// Ownership changes take the exclusive epoch lock before the request's
-		// access fence can acquire its shared lock, avoiding a late upgrade.
-		original := ctx
-		ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		moveBatch = moveBatch || input.Event.Type == "issue.moved"
+	}
+	// Take the ownership/policy epoch before project and enrollment locks. A
+	// local move takes the same epoch exclusively before changing issue owners.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if moveBatch {
 			if err := lockProjectAccessExclusive(fenceCtx, tx); err != nil {
 				return err
 			}
-			return db.ApplyTransactionFence(original, tx)
-		})
-		break
-	}
+		} else if err := lockProjectAccess(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
+	})
 	if len(params.Events) == 0 {
 		return s.negotiateEmptyFederationIngest(ctx, params)
 	}
@@ -237,6 +239,9 @@ func (s *Store) IngestFederationEvents(
 			return err
 		}
 
+		if err := s.authorizeFederationCurrentIssuesTx(ctx, tx, params, prepared); err != nil {
+			return db.FinishTransactionRollback(ctx, err, tx.Rollback())
+		}
 		linksAffected := false
 		for _, input := range prepared {
 			if input.duplicate {
@@ -875,13 +880,100 @@ func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 		if err := s.FederationEnrollmentTransactionFence(admitted, to, "push")(ctx, tx); err != nil {
 			return err
 		}
-		source := admitted
-		if admitted.ProjectID != nil && *admitted.ProjectID != from {
-			sourceID := p.MoveSourceEnrollmentIDs[fromUID]
-			if sourceID == 0 {
+		if err := s.authorizeFederationAffectedProjectTx(ctx, tx, p, from, fromUID); err != nil {
+			return err
+		}
+	}
+	if p.BoundActor != "" {
+		return s.ProjectAccessTransactionFence(p.BoundActor, []string{fromUID, toUID})(ctx, tx)
+	}
+	return nil
+}
+
+// Fresh events retain their authored envelope, but authorization follows every
+// affected issue's current owner. Duplicates already passed this acceptance
+// boundary and must not acquire new authority merely to acknowledge a retry.
+func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []preparedFederationIngestEvent) error {
+	staged := map[string]int64{}
+	checked := map[int64]bool{}
+	for _, input := range events {
+		if input.duplicate {
+			continue
+		}
+		event := input.event
+		payload := db.PayloadMap(event.Payload)
+		primary, err := payloadIssueUID(event, payload)
+		if err != nil {
+			return err
+		}
+		refs, err := payloadReferencedIssueUIDs(event, payload)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, primary)
+		for _, issueUID := range refs {
+			if issueUID == "" {
+				continue
+			}
+			current, known := staged[issueUID]
+			if !known {
+				err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, issueUID).Scan(&current)
+				if errors.Is(err, sql.ErrNoRows) {
+					// Existing validation permits deferred links and fresh creation.
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				staged[issueUID] = current
+			}
+			if current == p.ProjectID || checked[current] {
+				continue
+			}
+			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, current))
+			if err != nil {
+				return err
+			}
+			if err := s.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID); err != nil {
+				return err
+			}
+			checked[current] = true
+		}
+		switch event.Type {
+		case "issue.created", "issue.snapshot":
+			if _, exists := staged[primary]; !exists {
+				staged[primary] = p.ProjectID
+			}
+		case "issue.moved":
+			_, to, err := db.FederationMoveProjects(ctx, tx, p.ProjectID, event)
+			if err != nil {
+				return err
+			}
+			staged[primary] = to
+		}
+	}
+	return nil
+}
+
+// A supplemental project uses the route grant only when that grant covers it;
+// otherwise its exact bearer proof must belong to the same native spoke/actor.
+func (s *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, projectID int64, projectUID string) error {
+	if p.FederationEnrollmentID == 0 {
+		if !db.ProjectAttributionVisible(ctx, projectUID) {
+			return db.ErrNotFound
+		}
+	} else {
+		grantID := p.FederationEnrollmentID
+		grant, err := federationEnrollmentByIDTx(ctx, tx, grantID, false)
+		if err != nil {
+			return err
+		}
+		if grant.ProjectID != nil && *grant.ProjectID != projectID {
+			grantID = p.MoveSourceEnrollmentIDs[projectUID]
+			if grantID == 0 {
 				return db.ErrFederationMoveSourceUnauthorized
 			}
-			source, err = federationEnrollmentByIDTx(ctx, tx, sourceID, false)
+			grant, err = federationEnrollmentByIDTx(ctx, tx, grantID, false)
 			if errors.Is(err, db.ErrNotFound) {
 				return db.ErrFederationMoveSourceUnauthorized
 			}
@@ -889,27 +981,27 @@ func (s *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 				return err
 			}
 		}
-		if source.SpokeInstanceUID != p.SpokeInstanceUID || source.Actor != p.BoundActor || source.RelayProtocolVersion != 0 {
+		if grant.SpokeInstanceUID != p.SpokeInstanceUID || grant.Actor != p.BoundActor || grant.RelayProtocolVersion != 0 {
 			return db.ErrFederationMoveSourceUnauthorized
 		}
-		if err := s.FederationEnrollmentTransactionFence(source, from, "push")(ctx, tx); err != nil {
+		if err := s.FederationEnrollmentTransactionFence(grant, projectID, "push")(ctx, tx); err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				return fmt.Errorf("%w: %w", db.ErrFederationMoveSourceUnauthorized, err)
 			}
 			return err
 		}
 		if p.AuthorizeMove != nil {
-			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, from))
+			project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, projectID))
 			if err != nil {
 				return err
 			}
-			if err := p.AuthorizeMove(ctx, tx, source, project); err != nil {
+			if err := p.AuthorizeMove(ctx, tx, grant, project); err != nil {
 				return err
 			}
 		}
 	}
 	if p.BoundActor != "" {
-		return s.ProjectAccessTransactionFence(p.BoundActor, []string{fromUID, toUID})(ctx, tx)
+		return s.ProjectAccessTransactionFence(p.BoundActor, []string{projectUID})(ctx, tx)
 	}
 	return nil
 }

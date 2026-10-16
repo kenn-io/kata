@@ -353,31 +353,29 @@ func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transa
 }
 
 // authenticateFederationMoveSources validates supplemental bearer possession.
-// Authority remains restricted to the route until storage fences each exact
-// source grant and applies its host policy inside the ingest transaction.
+// Invalid supplemental proofs grant nothing. Storage requires a live exact
+// grant for fresh cross-project effects; acknowledged duplicates need no new
+// authority. The mandatory route bearer is authenticated independently.
 func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, principal federationPrincipal, tokens map[string]string) (map[string]int64, error) {
 	grants := make(map[string]int64, len(tokens))
 	lookupCtx := db.WithAuthorizedProjects(ctx, nil)
-	invalid := func() error {
-		return api.NewError(http.StatusForbidden, "auth_invalid", "move source credential is invalid for this project or principal", "", nil)
-	}
 	for projectUID, token := range tokens {
 		project, err := cfg.DB.ProjectByUID(lookupCtx, projectUID)
 		if errors.Is(err, db.ErrNotFound) || (err == nil && project.DeletedAt != nil) {
-			return nil, invalid()
+			continue
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
 		grant, err := cfg.DB.AuthorizeFederationToken(lookupCtx, token, project.ID, "push")
 		if errors.Is(err, db.ErrNotFound) {
-			return nil, invalid()
+			continue
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
 		if grant.RelayProtocolVersion != 0 || grant.SpokeInstanceUID != principal.SpokeInstanceUID || grant.Actor != principal.Actor {
-			return nil, invalid()
+			continue
 		}
 		grants[projectUID] = grant.ID
 	}
