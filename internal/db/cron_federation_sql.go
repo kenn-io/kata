@@ -122,11 +122,12 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 	// Adoption replaces history with new spoke-originated snapshots. Native
 	// delivery state cannot enter through that path; refuse before rebinding or
 	// deleting local history so the current authority can keep delivering.
+	// Ordinary move history is represented by the issue adoption snapshots.
 	features, err := projectRequiredEventFeaturesForAdoption(ctx, tx, project.UID)
 	if err != nil {
 		return nil, err
 	}
-	if RequireEventFeatures(CronEventFeature, features) != nil {
+	if RequireEventFeatures(CronEventFeature+","+IssueMoveEventFeature, features) != nil {
 		return nil, fmt.Errorf("%w: native recurring delivery history must remain on its owning hub", ErrFederatedSpokeUnsupported)
 	}
 	events, err := CronDefinitionSnapshots(ctx, tx, project)

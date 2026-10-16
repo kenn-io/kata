@@ -220,7 +220,7 @@ func projectRequiredEventFeaturesForAdoption(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	if errors.Is(RequireEventFeatures(CronEventFeature, features), ErrUnsupportedEventFeatures) {
+	if errors.Is(RequireEventFeatures(CronEventFeature+","+IssueMoveEventFeature, features), ErrUnsupportedEventFeatures) {
 		return features, nil
 	}
 	// Adoption is infrequent; inspect candidate issue documents here instead of
