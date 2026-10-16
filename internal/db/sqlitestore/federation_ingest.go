@@ -134,16 +134,9 @@ func (d *Store) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = jsontext.Value(`{}`)
 		}
-		var moveFrom, moveTo int64
-		if ev.Type == "issue.moved" {
-			var err error
-			moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, p.ProjectID, ev)
-			if err != nil {
-				return db.FederationIngestResult{}, err
-			}
-			if err := d.authorizeFederationMoveTx(ctx, tx, p, moveFrom, moveTo, ev); err != nil {
-				return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
-			}
+		// The subject is portable identity; live source checks apply only to
+		// fresh moves after duplicate recognition and content integrity checks.
+		if ev.Type == "issue.moved" && ev.IssueUID != nil {
 			knownIssueUIDs[*ev.IssueUID] = struct{}{}
 		}
 
@@ -196,6 +189,17 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.FederationIngestResult{}, err
+		}
+		var moveFrom, moveTo int64
+		if ev.Type == "issue.moved" {
+			var err error
+			moveFrom, moveTo, err = db.FederationMoveProjects(ctx, tx, p.ProjectID, ev)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if err := d.authorizeFederationMoveTx(ctx, tx, p, moveFrom, moveTo, ev); err != nil {
+				return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+			}
 		}
 		if ev.Type == "issue.moved" {
 			current, staged := batchIssueProjects[*ev.IssueUID]
