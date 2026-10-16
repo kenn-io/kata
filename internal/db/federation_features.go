@@ -18,9 +18,10 @@ const CronEventFeature = "cron_v1"
 // RecurringCronEventFeature fences peers that cannot retain native delivery state.
 const RecurringCronEventFeature = "cron_notify_children_v1"
 
-// SupportedEventFeatures is the complete event format advertisement.
+// IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// SupportedEventFeatures lists event capabilities understood by this daemon.
 const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a

@@ -71,7 +71,9 @@ kata move intake-project#abc4 repository-project
 ```
 
 Both projects must have active federation bindings. On a spoke, both must use
-that hub's HTTP(S) origin and have push enabled for a local move. A preview
+that hub's HTTP(S) origin, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported, including hubs with
+active downstream relays. A preview
 checks the whole tree without changing issues, claims, or cursors. Use `--single`
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.

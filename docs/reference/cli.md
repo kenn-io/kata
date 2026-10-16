@@ -852,7 +852,8 @@ A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
 Federated moves require both projects to use the same active hub. Spokes require
-both projects to be joined and push enabled for a local move. Different hubs,
+both projects to be joined, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported. Different hubs,
 paused bindings, and mixed local/federated projects return
 `federated_move_unsupported`; create an issue in the target project and link it to
 the original. See [Federation](../operations/federation.md#moving-issues-between-projects)

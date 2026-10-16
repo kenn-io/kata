@@ -151,7 +151,7 @@ func TestUIIssueReferenceChecksMovedProjectAccess(t *testing.T) {
 	t.Cleanup(local.Close)
 	response, err := local.Client().Get(fmt.Sprintf("%s/api/v1/ui/issue-reference?project_id=%d&ref=%s", local.URL, source.ID, issue.ShortID))
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	raw, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, response.StatusCode, string(raw))

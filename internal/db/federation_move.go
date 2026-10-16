@@ -59,13 +59,16 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 // hub group. Hub bindings belong to this daemon; spoke bindings name an origin.
 func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) error {
 	type binding struct {
-		role, hub string
-		enabled   bool
+		role, hub, actor string
+		enabled, relay   bool
 	}
 	read := func(id int64) (binding, error) {
 		var b binding
 		var enabled int
-		err := q.QueryRowContext(ctx, `SELECT role,hub_url,enabled FROM federation_bindings WHERE project_id=$1`, id).Scan(&b.role, &b.hub, &enabled)
+		err := q.QueryRowContext(ctx, `SELECT b.role,b.hub_url,b.enabled,b.bound_actor,
+ (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e
+ WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL))
+ FROM federation_bindings b WHERE b.project_id=$1`, id).Scan(&b.role, &b.hub, &enabled, &b.actor, &b.relay)
 		b.enabled = enabled == 1
 		return b, err
 	}
@@ -79,11 +82,11 @@ func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) e
 			return err
 		}
 	}
-	if ae == nil && be == nil && a.enabled && b.enabled && a.role == b.role {
+	if ae == nil && be == nil && a.enabled && b.enabled && !a.relay && !b.relay && a.role == b.role {
 		if a.role == string(FederationRoleHub) {
 			return nil
 		}
-		if a.role == string(FederationRoleSpoke) {
+		if a.role == string(FederationRoleSpoke) && strings.TrimSpace(a.actor) == strings.TrimSpace(b.actor) {
 			origin := func(raw string) string {
 				u, err := url.Parse(raw)
 				if err != nil || u.Hostname() == "" {
@@ -159,8 +162,10 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 	if !historical && routeID != from && routeID != to {
 		return 0, 0, fmt.Errorf("%w: move outside requested project", ErrFederationIngestValidation)
 	}
-	if err := CheckFederatedIssueMove(ctx, tx, from, to); err != nil {
-		return 0, 0, err
+	if !historical {
+		if err := CheckFederatedIssueMove(ctx, tx, from, to); err != nil {
+			return 0, 0, err
+		}
 	}
 	return from, to, nil
 }
@@ -176,6 +181,21 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		}
 		return 0, err
 	}
+	if e.Type == "issue.moved" || project != route {
+		// Native pull trusts the joined hub with this stream's issue history.
+		// A retained historical project identity needs no live credential or
+		// binding after leave. Local authoring and hub push remain strict.
+		var role string
+		var enabled int
+		var relay bool
+		if err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
+ FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
+			return 0, err
+		}
+		if role != string(FederationRoleSpoke) || enabled != 1 || relay {
+			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
+		}
+	}
 	if e.Type == "issue.moved" {
 		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
 			return 0, err
@@ -185,16 +205,13 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		if e.IssueUID == nil {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
-		if err := CheckFederatedIssueMove(ctx, tx, project, route); err != nil {
-			return 0, err
-		}
 	}
 	return project, nil
 }
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error) ([]int64, error) {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error) ([]int64, error) {
 	moved := map[string]bool{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -235,9 +252,8 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			return nil, ErrNotFound
 		}
 		projects[target] = true
-		if err := CheckFederatedIssueMove(ctx, tx, source, target); err != nil {
-			return nil, err
-		}
+		// Move ingress has already checked its authority and endpoints. Replaying
+		// trusted history must also work after a former source has left.
 		if recurrence != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
@@ -250,6 +266,9 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
+			return nil, err
+		}
+		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
 			return nil, err
 		}
 		for _, query := range []string{
