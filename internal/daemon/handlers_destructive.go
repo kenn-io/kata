@@ -150,10 +150,16 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if pl.PurgeResetAfterEventID != nil {
-			if err := refreshFederationBaselineAfterPurge(ctx, cfg, issue.ProjectID, actor); err != nil {
+			projects := pl.ResetProjectIDs
+			if len(projects) == 0 {
+				projects = []int64{pl.ProjectID}
+			}
+			for _, projectID := range projects {
+				cfg.Publish().Reset(projectID, *pl.PurgeResetAfterEventID)
+			}
+			if err := refreshFederationBaselineAfterPurge(ctx, cfg, pl.ProjectID, actor); err != nil {
 				return nil, internalAPIError(err)
 			}
-			cfg.Publish().Reset(issue.ProjectID, *pl.PurgeResetAfterEventID)
 		}
 		out := &api.PurgeResponse{}
 		out.Body.PurgeLog = pl
