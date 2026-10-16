@@ -288,7 +288,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
-	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared); err != nil {
+	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
 		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	for _, in := range prepared {
@@ -1428,7 +1428,7 @@ func (d *Store) authorizeFederationMoveTx(ctx context.Context, tx *sql.Tx, p db.
 // Fresh events retain their authored envelope, but authorization follows every
 // affected issue's current owner. Duplicates already passed this acceptance
 // boundary and must not acquire new authority merely to acknowledge a retry.
-func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []preparedFederationIngestEvent) error {
+func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, events []preparedFederationIngestEvent, moveSnapshots *db.FederationMoveSnapshotValidator) error {
 	staged := map[string]int64{}
 	checked := map[int64]bool{}
 	for _, input := range events {
@@ -1436,6 +1436,10 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			continue
 		}
 		event := input.Event
+		canSeed, err := moveSnapshots.CanSeed(ctx, event)
+		if err != nil {
+			return err
+		}
 		var primary string
 		var refs []string
 		switch {
@@ -1446,9 +1450,11 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			if err != nil {
 				return err
 			}
-			refs, err = payloadReferencedIssueUIDs(event, payload)
-			if err != nil {
-				return err
+			if event.Type != "issue.moved" || canSeed {
+				refs, err = payloadReferencedIssueUIDs(event, payload)
+				if err != nil {
+					return err
+				}
 			}
 		case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
 			// A run's UID identifies the run, not its optional issue reference.
@@ -1462,11 +1468,13 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		default:
 			continue
 		}
-		replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, event)
-		if err != nil {
-			return err
+		if canSeed {
+			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, event)
+			if err != nil {
+				return err
+			}
+			refs = append(refs, replyIssues...)
 		}
-		refs = append(refs, replyIssues...)
 		refs = append(refs, primary)
 		for _, issueUID := range refs {
 			if issueUID == "" {
