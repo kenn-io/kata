@@ -1,9 +1,10 @@
 package federation
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"testing"
 )
 
 func TestSyncFederationPurgeMoveWhileSourceOffline(t *testing.T) {
