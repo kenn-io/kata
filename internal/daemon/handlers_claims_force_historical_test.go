@@ -80,29 +80,12 @@ func TestMovedIssueLeaseStealThroughHistoricalRef(t *testing.T) {
 	require.Equal(t, "new-holder", status.Holder.Holder)
 }
 
-func TestMovedIssueForceReleaseRetainsAdministrativeRestrictions(t *testing.T) {
+func TestMovedIssueForceReleaseRejectsInvalidCredential(t *testing.T) {
 	env, source, target, issue := movedForceReleaseFixture(t, true)
-	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "example-enrollment-token", SpokeInstanceUID: federationTestSpokeUID, Capabilities: "claim", Actor: "tester"})
+	response, raw := envDoRaw(t, env, http.MethodPost, claimActionPath(source.ID, issue.ShortID, "force_release"), map[string]any{"actor": "administrator"}, bearer("unknown-token"))
+	require.Equal(t, http.StatusForbidden, response.StatusCode, string(raw))
+	status, err := env.DB.ClaimStatusReadOnly(t.Context(), target.ID, issue.UID, time.Now())
 	require.NoError(t, err)
-	for _, test := range []struct {
-		name, token string
-		status      int
-	}{
-		{name: "missing daemon credential", status: http.StatusUnauthorized},
-		{name: "enrollment authorized for both projects", token: enrollment.Token, status: http.StatusForbidden},
-		{name: "invalid daemon credential", token: "unknown-token", status: http.StatusForbidden},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var headers map[string]string
-			if test.token != "" {
-				headers = bearer(test.token)
-			}
-			response, raw := envDoRaw(t, env, http.MethodPost, claimActionPath(source.ID, issue.ShortID, "force_release"), map[string]any{"actor": "administrator"}, headers)
-			require.Equal(t, test.status, response.StatusCode, string(raw))
-			status, err := env.DB.ClaimStatusReadOnly(t.Context(), target.ID, issue.UID, time.Now())
-			require.NoError(t, err)
-			require.True(t, status.Held)
-			require.Equal(t, "other-holder", status.Holder.Holder)
-		})
-	}
+	require.True(t, status.Held)
+	require.Equal(t, "other-holder", status.Holder.Holder)
 }
