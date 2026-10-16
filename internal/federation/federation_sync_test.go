@@ -4750,7 +4750,7 @@ func TestSyncFederationMoveProofRejectsOtherOrigin(t *testing.T) {
 			ctx := t.Context()
 			hub, spoke := testenv.New(t), testenv.New(t)
 			var otherRequests atomic.Int32
-			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				otherRequests.Add(1)
 				w.WriteHeader(http.StatusNoContent)
 			}))
