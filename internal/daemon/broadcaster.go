@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json/v2"
 	"sync"
 
 	"go.kenn.io/kata/internal/activity"
@@ -31,17 +32,27 @@ const (
 // NewEventMsg or NewResetMsg: the constructors are what keep Kind and the
 // payload fields consistent.
 type StreamMsg struct {
-	Kind      StreamKind
-	Event     *db.Event // non-nil iff Kind == StreamKindEvent
-	ResetID   int64     // non-zero iff Kind == StreamKindReset
-	ProjectID int64     // 0 = cross-project; used for filter matching
+	Kind                StreamKind
+	Event               *db.Event // non-nil iff Kind == StreamKindEvent
+	ResetID             int64     // non-zero iff Kind == StreamKindReset
+	ProjectID           int64     // 0 = cross-project; used for filter matching
+	movedFromProjectUID string
 }
 
 // NewEventMsg builds an event envelope. ev is taken by value and the envelope
 // points at that copy, so callers can pass a loop variable or a slice element
 // without the next iteration mutating an already-broadcast frame.
 func NewEventMsg(projectID int64, ev db.Event) StreamMsg {
-	return StreamMsg{Kind: StreamKindEvent, Event: &ev, ProjectID: projectID}
+	msg := StreamMsg{Kind: StreamKindEvent, Event: &ev, ProjectID: projectID}
+	if ev.Type == "issue.moved" {
+		var move struct {
+			FromProjectUID string `json:"from_project_uid"`
+		}
+		if json.Unmarshal([]byte(ev.Payload), &move) == nil {
+			msg.movedFromProjectUID = move.FromProjectUID
+		}
+	}
+	return msg
 }
 
 // NewResetMsg builds a purge-reset envelope. Resets are terminal for an SSE
@@ -54,13 +65,17 @@ func NewResetMsg(projectID, resetAfterID int64) StreamMsg {
 // (zero value) means cross-project — every event flows through.
 type SubFilter struct {
 	ProjectID int64
+	// ProjectUID additionally matches moves departing this project, whose
+	// durable event and numeric ProjectID belong to the destination.
+	ProjectUID string
 }
 
 func (f SubFilter) matches(msg StreamMsg) bool {
 	if f.ProjectID == 0 {
 		return true
 	}
-	return msg.ProjectID == f.ProjectID
+	return msg.ProjectID == f.ProjectID ||
+		(msg.Kind == StreamKindEvent && f.ProjectUID != "" && msg.movedFromProjectUID == f.ProjectUID)
 }
 
 // Subscription is the handle returned by Subscribe. Caller must call Unsub()

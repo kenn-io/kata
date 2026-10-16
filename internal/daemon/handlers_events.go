@@ -677,10 +677,13 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		var projectUID string
 		if projectID > 0 {
-			if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
+			project, err := activeProjectByID(ctx, cfg.DB, projectID)
+			if err != nil {
 				return nil, err
 			}
+			projectUID = project.UID
 		}
 		if err := requireHostAccessLease(ctx); err != nil {
 			return nil, err
@@ -688,7 +691,7 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 
 		return &huma.StreamResponse{
 			Body: func(ctx huma.Context) {
-				runSSEStream(ctx, cfg, cursor, projectID)
+				runSSEStream(ctx, cfg, cursor, projectID, projectUID)
 			},
 		}, nil
 	})
@@ -717,7 +720,7 @@ func registerEventsStreamMethodGuards(mux *http.ServeMux) {
 // Steps 4–6 are Subscribe-first / check-second so a purge that fires between
 // cursor parse and Subscribe lands on sub.Ch via the live channel; one
 // committed before parse is captured by PurgeResetCheck. See spec §5.3.
-func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) {
+func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64, projectUID string) {
 	w, ok := hctx.BodyWriter().(http.ResponseWriter)
 	if !ok {
 		return
@@ -737,11 +740,13 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 
-	// Moves are stored and published in the destination project, but also
-	// belong to the source's stream. Hidden blockers can likewise affect
-	// issue-scoped streams across projects. Subscribe to all wakeups and keep
-	// project and authority filtering on the durable read below.
-	sub := cfg.Broadcaster.Subscribe(SubFilter{})
+	filter := SubFilter{ProjectID: projectID, ProjectUID: projectUID}
+	if issueScopeFromContext(ctx) != nil {
+		// Hidden blockers can affect issue-scoped streams across projects;
+		// their durable read still applies the issue authority filter.
+		filter = SubFilter{}
+	}
+	sub := cfg.Broadcaster.Subscribe(filter)
 	defer sub.Unsub()
 
 	if projectID > 0 {

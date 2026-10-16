@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -731,4 +732,49 @@ func TestMoveIssueWakesLiveFormerProjectStream(t *testing.T) {
 	require.Equal(t, "issue.moved", frame.event)
 	require.Contains(t, frame.data, issue.UID)
 	require.NotContains(t, frame.data, unrelated.UID)
+}
+
+type projectEventReadCounter struct {
+	db.Storage
+	projectID int64
+	reads     atomic.Int64
+}
+
+func (s *projectEventReadCounter) EventsAfter(ctx context.Context, query db.EventsAfterParams) ([]db.Event, error) {
+	if query.ProjectID == s.projectID {
+		s.reads.Add(1)
+	}
+	return s.Storage.EventsAfter(ctx, query)
+}
+
+func TestProjectStreamIgnoresUnrelatedEventWakeups(t *testing.T) {
+	var counter *projectEventReadCounter
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		counter = &projectEventReadCounter{Storage: cfg.DB}
+		cfg.DB = counter
+	})
+	source, target, _ := seedMovePair(t, env)
+	counter.projectID = source.ID
+	cursor, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	response := openSSE(t, env, fmt.Sprintf("project_id=%d&after_id=%d", source.ID, cursor-1), nil)
+	defer response.Body.Close()
+	framer := newSSEFramer(response.Body)
+	initial, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok)
+	require.Equal(t, "issue.created", initial.event)
+	before := counter.reads.Load()
+
+	_, foreign, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "unrelated", Author: "tester"})
+	require.NoError(t, err)
+	for range 20 {
+		env.Broadcaster.Broadcast(daemon.NewEventMsg(target.ID, foreign))
+	}
+	own, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", source.ID), map[string]any{"actor": "tester", "title": "source update"}, nil)
+	require.Equal(t, http.StatusOK, own.StatusCode, string(raw))
+	frame, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "source stream must remain available for its own events")
+	require.Equal(t, "issue.created", frame.event)
+	require.Contains(t, frame.data, "source update")
+	require.Equal(t, int64(1), counter.reads.Load()-before, "unrelated wakeups must not trigger durable source-event reads")
 }
