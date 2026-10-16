@@ -111,7 +111,9 @@ func notificationHistoryVisibleTx(ctx context.Context, tx *sql.Tx, uid string, a
 // notificationPeerProjectReadableTx authorizes a peer project that discovery
 // found inside its write transaction. Access admitted with the request is only
 // a snapshot, so the native grant is rechecked live in tx, and a host's peer
-// decision must also pass its transaction fence in tx.
+// decision must also pass its transaction fence in tx. A fence rejection
+// rolls back the whole write, like a rejection of the request's own fence:
+// the fence may have written in tx, and the host may need its cleanup.
 func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, projectID int64, projectUID string) (bool, error) {
 	if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
 		if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
@@ -128,13 +130,32 @@ func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, p
 			"access_unavailable", "transaction access decision unavailable", "", nil)
 	}
 	if err := host.decision.TransactionFence(ctx, tx); err != nil {
+		status, code, message := http.StatusServiceUnavailable, "access_unavailable", "transaction access decision unavailable"
 		if errors.Is(err, ErrHostAccessDenied) {
-			return false, nil
+			status, code, message = http.StatusNotFound, "not_found", "resource not found"
 		}
-		return false, errors.Join(api.NewError(http.StatusServiceUnavailable,
-			"access_unavailable", "transaction access decision unavailable", "", nil), err)
+		return false, &peerFenceRejection{err: errors.Join(api.NewError(status, code, message, "", nil), err)}
 	}
 	return true, nil
+}
+
+// peerFenceRejection carries a peer fence's rejection out of the write
+// transaction. Stores roll back on any error but finish host cleanup only for
+// their own begin-time fences, so the handler finishes this one.
+type peerFenceRejection struct{ err error }
+
+func (e *peerFenceRejection) Error() string { return e.err.Error() }
+func (e *peerFenceRejection) Unwrap() error { return e.err }
+
+// finishPeerFenceRejection runs host cleanup for a peer fence rejection after
+// the store has rolled back and released the transaction's connection. Other
+// errors pass through unchanged.
+func finishPeerFenceRejection(ctx context.Context, err error) error {
+	rejection, ok := errors.AsType[*peerFenceRejection](err)
+	if !ok {
+		return err
+	}
+	return db.FinishTransactionRollback(ctx, rejection.err, nil)
 }
 
 // Discovery reads other projects without widening the source mutation's host

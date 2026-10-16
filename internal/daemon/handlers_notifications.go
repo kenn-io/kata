@@ -120,6 +120,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return patch, nil
 		})
 		result, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: actor})
+		err = finishPeerFenceRejection(ctx, err)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
 		}

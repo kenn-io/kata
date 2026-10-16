@@ -118,6 +118,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			IdempotencyKey:         in.IdempotencyKey,
 			IdempotencyFingerprint: fingerprint,
 		})
+		err = finishPeerFenceRejection(ctx, err)
 		for _, event := range committedEvents {
 			cfg.Publish().Event(event.ProjectID, event)
 		}
