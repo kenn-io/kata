@@ -56,19 +56,34 @@ func moveSnapshotClock(event RemoteEvent) FoldClock {
 
 // Validate checks fresh fallback authors after duplicate recognition.
 func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event RemoteEvent, boundActor string) error {
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
-	if event.Type != "issue.moved" || boundActor == "" {
+	if boundActor == "" {
 		return nil
 	}
+	canSeed, err := v.CanSeed(ctx, event)
+	if err != nil || !canSeed {
+		return err
+	}
+	// An adoption author-preservation grant applies to its baseline,
+	// never to a fresh move that introduces otherwise unretained content.
+	return ValidateFederationBoundActorPayload(ctx, FederationMoveSnapshotEvent(event), FederationBoundActorCheck{BoundActor: boundActor})
+}
+
+// CanSeed reports whether this snapshot supplies the fold's fallback baseline.
+// Ignored snapshots introduce neither attribution nor new project references.
+func (v *FederationMoveSnapshotValidator) CanSeed(ctx context.Context, event RemoteEvent) (bool, error) {
+	if event.Type != "issue.moved" {
+		return false, nil
+	}
+	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
 	if _, known := v.baselines[uid]; !known {
 		var baseline bool
 		if err := v.tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE issue_uid=$1 AND type IN ('issue.created','issue.snapshot'))`, uid).Scan(&baseline); err != nil {
-			return err
+			return false, err
 		}
 		v.baselines[uid] = baseline
 	}
 	if v.baselines[uid] {
-		return nil
+		return false, nil
 	}
 	if !v.loaded[uid] {
 		var retained FoldClock
@@ -76,7 +91,7 @@ func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event Re
  WHERE issue_uid=$1 AND type='issue.moved' AND `+v.snapshotExpression+` IS NOT NULL
  ORDER BY hlc_physical_ms,hlc_counter,origin_instance_uid,uid LIMIT 1`, uid).Scan(&retained.EventUID, &retained.OriginInstanceUID, &retained.HLCPhysicalMS, &retained.HLCCounter)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
+			return false, err
 		}
 		first, known := v.firstMoves[uid]
 		if err == nil && (!known || compareClock(retained, first) < 0) {
@@ -84,12 +99,7 @@ func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event Re
 		}
 		v.loaded[uid] = true
 	}
-	if first := v.firstMoves[uid]; compareClock(moveSnapshotClock(event), first) == 0 {
-		// An adoption author-preservation grant applies to its baseline,
-		// never to a fresh move that introduces otherwise unretained content.
-		return ValidateFederationBoundActorPayload(ctx, FederationMoveSnapshotEvent(event), FederationBoundActorCheck{BoundActor: boundActor})
-	}
-	return nil
+	return compareClock(moveSnapshotClock(event), v.firstMoves[uid]) == 0, nil
 }
 
 // FederationMoveSnapshotReplyIssues resolves known reply targets to their
