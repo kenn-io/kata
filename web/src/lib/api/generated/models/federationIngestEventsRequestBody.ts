@@ -8,6 +8,7 @@ export interface FederationIngestEventsRequestBody {
   adoption_baseline?: string
   adoption_baseline_end_event_id?: number
   events?: FederationIngestEventEnvelope[]
+  /** Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history. */
   move_source_tokens?: FederationIngestEventsRequestBodyMoveSourceTokens
   schema_version: number
 }

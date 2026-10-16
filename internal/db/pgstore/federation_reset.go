@@ -122,7 +122,7 @@ func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, o
 	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, originInstanceUID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
 		return mapSQLError(err, nil)
 	}
 	return clearFederatedProjectionTx(ctx, tx, projectID)
