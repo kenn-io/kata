@@ -1454,7 +1454,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			return nil, err
 		}
 		for _, binding := range bindings {
-			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || !binding.Enabled || !binding.PushEnabled || binding.Actor != destination.Actor || binding.HubProjectUID == "" {
+			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil || !binding.Enabled || !binding.PushEnabled || binding.Actor != destination.Actor || binding.HubProjectUID == "" {
 				continue
 			}
 			origin, err := httpurl.CanonicalHTTPOrigin(binding.HubURL)
