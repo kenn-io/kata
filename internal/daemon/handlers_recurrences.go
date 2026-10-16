@@ -135,12 +135,19 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
+			if issue.ProjectID != in.ProjectID {
+				return nil, api.NewError(400, "validation",
+					"initial_issue_ref must refer to an issue in the recurrence project", "", nil)
+			}
 			if claimErr := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); claimErr != nil {
 				return nil, claimErr
 			}
 			created, createErr := cfg.DB.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
 				IssueID: issue.ID, Recurrence: createInput,
 			})
+			if errors.Is(createErr, db.ErrNotFound) {
+				return nil, api.NewError(404, "issue_not_found", "initial issue not found in the recurrence project", "", nil)
+			}
 			rec, events, err = created.Recurrence, created.Events, createErr
 		} else {
 			var event db.Event
