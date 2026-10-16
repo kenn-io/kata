@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -426,17 +426,31 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
-func TestCLITelemetrySharesActionDeadline(t *testing.T) {
+func TestCLIUseReportsAfterIssueActionTimesOut(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv(hooks.HookVersionEnv, "")
 	stubIsTTY(t, true)
 	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
-	var posts atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	setCLIUseClock(t, time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
+	var actions, opens atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
-		posts.Add(1)
-		_, _ = io.Copy(io.Discard, r.Body)
-		<-r.Context().Done()
+		var body struct {
+			Event string `json:"event"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		switch body.Event {
+		case "issue_created":
+			actions.Add(1)
+			<-r.Context().Done()
+		case "app_opened":
+			opens.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"queued"}`))
+		default:
+			t.Errorf("unexpected event %q", body.Event)
+		}
 	}))
 	defer server.Close()
 	cmd := findCommand(t, "create")
@@ -446,5 +460,9 @@ func TestCLITelemetrySharesActionDeadline(t *testing.T) {
 	wait := reportCLIIssueAction(cmd, "issue_created", true)
 	wait()
 	reportCLIUse(cmd)
-	assert.Equal(t, int32(1), posts.Load(), "the expired shared deadline refuses a second report")
+	assert.Equal(t, int32(1), actions.Load())
+	assert.Equal(t, int32(1), opens.Load(), "a timed-out action still allows the daily use report")
+	assert.Equal(t, "2026-10-02", readCLIUseDay(cliUseMarkerPath(*cliUseTarget.Load())))
+	reportCLIUse(cmd)
+	assert.Equal(t, int32(1), opens.Load(), "the accepted report records the daily marker")
 }
