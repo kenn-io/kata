@@ -122,7 +122,6 @@ func TestUndoReopenCloseDoesNotReportIssueClosed(t *testing.T) {
 		outcome.attempt.complete()
 		synctest.Wait()
 		assert.Empty(t, events, "undoing a reopen is not a user close action")
-		assert.Empty(t, events, "undoing a reopen is not a user close action")
 	})
 }
 
