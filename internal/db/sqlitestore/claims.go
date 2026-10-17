@@ -660,9 +660,26 @@ func (d *Store) UpsertClaimCache(ctx context.Context, claim db.IssueClaim) error
 
 // ApplyClaimStatus reconciles local cache with a hub claim status response.
 func (d *Store) ApplyClaimStatus(ctx context.Context, projectID int64, issueUID string, status db.ClaimStatus) error {
+	// Release the read snapshot before acquiring a writer connection. The
+	// preparation is repeated under the writer lock so queued refreshes cannot
+	// overwrite a newer cache value committed in between.
+	changed, err := d.claimStatusNeedsWrite(ctx, projectID, issueUID, status)
+	if err != nil || !changed {
+		return err
+	}
 	return d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
 		return d.applyClaimStatusTx(ctx, conn, projectID, issueUID, status)
 	})
+}
+
+func (d *Store) claimStatusNeedsWrite(ctx context.Context, projectID int64, issueUID string, status db.ClaimStatus) (bool, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	update, err := prepareClaimStatusTx(ctx, tx, projectID, issueUID, status)
+	return update != nil, err
 }
 
 // CheckClaimGate verifies whether a holder may mutate a federated issue.
@@ -671,26 +688,29 @@ func (d *Store) CheckClaimGate(ctx context.Context, p db.ClaimGateParams) error 
 	if err := validateClaimPrincipal(p.Principal); err != nil {
 		return err
 	}
-	return d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
-		issue, err := resolveClaimGateIssueTx(ctx, conn, p.ProjectID, p.IssueRef)
-		if err != nil {
-			return err
-		}
-		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
-		if errors.Is(err, db.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
-			return nil
-		}
-		if !sameClaimGateHolder(live, p.Principal) {
-			return db.ErrClaimDenied
-		}
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	issue, err := resolveClaimGateIssueTx(ctx, tx, p.ProjectID, p.IssueRef)
+	if err != nil {
+		return err
+	}
+	live, err := liveClaimForIssueTx(ctx, tx, issue.UID)
+	if errors.Is(err, db.ErrNotFound) {
 		return nil
-	})
+	}
+	if err != nil {
+		return err
+	}
+	if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
+		return nil
+	}
+	if !sameClaimGateHolder(live, p.Principal) {
+		return db.ErrClaimDenied
+	}
+	return nil
 }
 
 func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64, issueRef string) (db.Issue, error) {
@@ -840,59 +860,107 @@ func (d *Store) expireTimedClaimRowsTx(
 }
 
 func (d *Store) applyClaimStatusTx(ctx context.Context, tx claimStore, projectID int64, issueUID string, status db.ClaimStatus) error {
+	update, err := prepareClaimStatusTx(ctx, tx, projectID, issueUID, status)
+	if err != nil || update == nil {
+		return err
+	}
+	if update.live != nil {
+		if update.claim != nil && update.live.ClaimUID == update.claim.ClaimUID {
+			if err := updateCachedClaimInPlaceTx(ctx, tx, update.live.ID, *update.claim); err != nil {
+				return err
+			}
+			return assertSingleLiveClaimTx(ctx, tx, update.issueUID)
+		}
+		reason := "status_refresh"
+		if update.claim != nil {
+			reason = "status_refresh_replaced"
+		}
+		if err := releaseCachedClaimTx(ctx, tx, update.live.ID, reason, update.now); err != nil {
+			return err
+		}
+	}
+	if update.claim != nil {
+		if err := insertCachedClaimTx(ctx, tx, *update.claim); err != nil {
+			return err
+		}
+	}
+	return assertSingleLiveClaimTx(ctx, tx, update.issueUID)
+}
+
+type claimStatusUpdate struct {
+	issueUID string
+	now      time.Time
+	live     *db.IssueClaim
+	claim    *db.IssueClaim
+}
+
+// prepareClaimStatusTx validates a hub response against one consistent cache
+// snapshot. A nil update means no persisted claim field would change.
+func prepareClaimStatusTx(ctx context.Context, tx claimStore, projectID int64, issueUID string, status db.ClaimStatus) (*claimStatusUpdate, error) {
 	issue, _, err := resolveClaimIssueTx(ctx, tx, projectID, issueUID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	now := claimNow(status.HubNow)
 	if status.Held && status.Claim != nil {
 		if err := validateStatusClaimIssueIdentity(issue, *status.Claim); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	latestUpdatedAt, hasLatest, err := latestClaimUpdatedAtForIssueTx(ctx, tx, issue.UID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if hasLatest && !status.HubNow.IsZero() && status.HubNow.Before(latestUpdatedAt) {
-		return assertSingleLiveClaimTx(ctx, tx, issue.UID)
+		return nil, assertSingleLiveClaimTx(ctx, tx, issue.UID)
 	}
 	live, liveErr := liveClaimForIssueTx(ctx, tx, issue.UID)
 	if liveErr != nil && !errors.Is(liveErr, db.ErrNotFound) {
-		return liveErr
+		return nil, liveErr
 	}
 
+	update := &claimStatusUpdate{issueUID: issue.UID, now: now}
+	if liveErr == nil {
+		update.live = &live
+	}
 	if !status.Held || status.Claim == nil {
-		if liveErr == nil {
-			if err := releaseCachedClaimTx(ctx, tx, live.ID, "status_refresh", now); err != nil {
-				return err
-			}
+		if update.live == nil {
+			return nil, assertSingleLiveClaimTx(ctx, tx, issue.UID)
 		}
-		return assertSingleLiveClaimTx(ctx, tx, issue.UID)
+		return update, nil
 	}
 
 	claim, err := normalizeCachedClaim(status, issue, now)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if liveErr == nil && live.ClaimUID == claim.ClaimUID {
-		if staleSameClaimRefresh(live, claim) {
-			return assertSingleLiveClaimTx(ctx, tx, issue.UID)
-		}
-		if err := updateCachedClaimInPlaceTx(ctx, tx, live.ID, claim); err != nil {
-			return err
-		}
-		return assertSingleLiveClaimTx(ctx, tx, issue.UID)
-	}
-	if liveErr == nil {
-		if err := releaseCachedClaimTx(ctx, tx, live.ID, "status_refresh_replaced", now); err != nil {
-			return err
+		if staleSameClaimRefresh(live, claim) || sameCachedClaim(live, claim) {
+			return nil, assertSingleLiveClaimTx(ctx, tx, issue.UID)
 		}
 	}
-	if err := insertCachedClaimTx(ctx, tx, claim); err != nil {
-		return err
-	}
-	return assertSingleLiveClaimTx(ctx, tx, issue.UID)
+	update.claim = &claim
+	return update, nil
+}
+
+// Compare the fields written by updateCachedClaimInPlaceTx, excluding local IDs
+// and release metadata. Normalization has already fixed the issue identity.
+func sameCachedClaim(live, incoming db.IssueClaim) bool {
+	sameExpiry := live.ExpiresAt == nil && incoming.ExpiresAt == nil ||
+		live.ExpiresAt != nil && incoming.ExpiresAt != nil && sameCachedClaimTime(*live.ExpiresAt, *incoming.ExpiresAt)
+	return live.Holder == incoming.Holder &&
+		live.HolderInstanceUID == incoming.HolderInstanceUID &&
+		live.ClientKind == incoming.ClientKind &&
+		live.Purpose == incoming.Purpose &&
+		live.ClaimKind == incoming.ClaimKind &&
+		sameCachedClaimTime(live.AcquiredAt, incoming.AcquiredAt) && sameExpiry &&
+		live.Revision == incoming.Revision && sameCachedClaimTime(live.UpdatedAt, incoming.UpdatedAt)
+}
+
+func sameCachedClaimTime(a, b time.Time) bool {
+	// Compare exactly what the cache writes: SQLite stores milliseconds, while
+	// hub timestamps may carry finer precision or a different time zone.
+	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
 }
 
 func validatePendingClaimResolution(pending db.PendingClaimRequest, issue db.Issue, claim db.IssueClaim) error {
