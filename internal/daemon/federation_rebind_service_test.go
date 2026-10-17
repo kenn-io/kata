@@ -706,7 +706,11 @@ func TestRebindFederationReplicaDrainsBeforePreparedLeave(t *testing.T) {
 	}
 	storedBinding, err := store.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, originalBinding, storedBinding)
+	assert.False(t, storedBinding.UpdatedAt.Before(originalBinding.UpdatedAt))
+	expectedBinding := originalBinding
+	expectedBinding.PushEnabled = false
+	expectedBinding.UpdatedAt = storedBinding.UpdatedAt
+	assert.Equal(t, expectedBinding, storedBinding, "native prepare pauses writes while preserving binding identity and cursors")
 }
 
 func prepareFederationRebind(

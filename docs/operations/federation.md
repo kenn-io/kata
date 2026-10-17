@@ -1681,9 +1681,15 @@ credential changes while leave is cleaning it up, the API returns
 and retry `kata federation leave <project>`.
 
 After confirmation, the CLI asks the spoke daemon to prepare the leave before
-it contacts the hub. Preparation durably marks a config-managed reservation,
-blocks new reconciliation work for that mapping, and waits for earlier hub
-enrollment or rotation requests to finish. Any completed enrollment is recorded
+it contacts the hub. On a native spoke using local credentials, preparation
+refuses while another project still owes a locally authored move from this
+source; sync that destination and retry. Otherwise it atomically pauses writes
+on the leaving binding so a new move cannot race hub revocation. Preparation
+then durably marks a config-managed reservation, blocks new reconciliation
+work for that mapping,
+and waits for earlier hub enrollment or rotation requests to finish. If writing
+the credential marker fails, the binding stays paused; retry the same leave
+command to finish preparation. Any completed enrollment is recorded
 and revoked idempotently before local teardown. If the command or daemon stops
 midway, rerun the same leave command; the marker prevents automatic
 re-enrollment and carries the cleanup forward. A successful leave suppresses

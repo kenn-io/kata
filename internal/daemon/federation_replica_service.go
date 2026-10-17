@@ -287,18 +287,45 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	if found && match.Credential.Provider != nil {
 		key = federationReplicaOperationKey(store, project.Name, match.Credential)
 	}
+	// Native moves need the source credential at their destination. Fence both
+	// move endpoints in the DB before the durable credential marker can permit
+	// hub revocation; the earlier read-only preflight cannot close this race.
+	// Providers and relay hops retain their existing drain/teardown protocol.
+	nativeFenced := false
+	if project.ID > 0 && (!found || match.Credential.Provider == nil) {
+		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			ensureFederationReplicaMu.Unlock()
+			return PrepareFederationReplicaLeaveResult{}, bindingErr
+		}
+		if bindingErr == nil && binding.Role == db.FederationRoleSpoke && binding.RelayConfig == nil {
+			fencer, ok := store.(db.RelayDisconnectFenceStore)
+			if !ok {
+				ensureFederationReplicaMu.Unlock()
+				return PrepareFederationReplicaLeaveResult{}, fmt.Errorf("native federation leave fence is unavailable")
+			}
+			if err := fencer.FenceRelayDisconnect(ctx, project.ID); err != nil {
+				ensureFederationReplicaMu.Unlock()
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+			nativeFenced = true
+		}
+	}
 	if found && !match.Credential.LeavePending {
 		replacement := match
 		replacement.Credential.LeavePending = true
 		replacement.Credential.PendingEnrollmentID = 0
 		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
 			ensureFederationReplicaMu.Unlock()
-			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return PrepareFederationReplicaLeaveResult{}, err
+			if !errors.Is(err, config.ErrFederationCredentialConflict) {
+				err = credentialIOError("mark managed reservation for leave")
 			}
-			return PrepareFederationReplicaLeaveResult{}, credentialIOError(
-				"mark managed reservation for leave",
-			)
+			if nativeFenced {
+				// Keep the committed safe fence, including across restarts. A
+				// retry can finish preparation without restoring stale cursors.
+				err = fmt.Errorf("%w; native federation writes remain paused; retry leave preparation", err)
+			}
+			return PrepareFederationReplicaLeaveResult{}, err
 		}
 		match = replacement
 	}
