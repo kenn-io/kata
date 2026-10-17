@@ -1,10 +1,12 @@
 package dbtest
 
 import (
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func checkFederatedPulledMoveApplyReset(t *testing.T, store db.Storage, backend Backend) error {
@@ -13,6 +15,9 @@ func checkFederatedPulledMoveApplyReset(t *testing.T, store db.Storage, backend 
 	})
 	t.Run("unapplied source baseline", func(t *testing.T) {
 		checkFederatedPulledMoveApplyResetCase(t, store, backend, "unapplied", false)
+	})
+	t.Run("competing move destination", func(t *testing.T) {
+		checkFederatedCompetingPulledMoveApplyReset(t, store)
 	})
 	return nil
 }
@@ -104,4 +109,75 @@ func checkFederatedPulledMoveApplyResetCase(t *testing.T, store db.Storage, back
 	noOp, err := cold.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, after, noOp, "already-applied moves must not allocate repeated controls")
+}
+
+func checkFederatedCompetingPulledMoveApplyReset(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	projects := make([]db.Project, 3)
+	for i, name := range []string{"source", "displaced", "winner"} {
+		project, err := store.CreateProject(ctx, "competing-pull-reset-"+name)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		projects[i] = project
+	}
+	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Competing pulled move", Author: "worker"})
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	move := func(to int, clock int64) db.RemoteEvent {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"issue_uid": issue.UID, "from_project_uid": projects[0].UID, "to_project_uid": projects[to].UID,
+			"from_short_id": issue.ShortID, "to_short_id": issue.ShortID,
+			"snapshot": map[string]string{"uid": issue.UID, "short_id": issue.ShortID, "title": issue.Title, "author": "worker", "status": "open"},
+		})
+		require.NoError(t, err)
+		return newRemoteEvent(t, projects[to], &issue.UID, "issue.moved", "worker", origin, clock, payload)
+	}
+	first := move(1, created.HLCPhysicalMS+1)
+	_, err = store.InsertRemoteEvents(ctx, projects[1].ID, []db.RemoteEvent{first})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, projects[1].ID))
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[1].ID, current.ProjectID)
+	winner := move(2, first.HLCPhysicalMS+1)
+	_, err = store.InsertRemoteEvents(ctx, projects[2].ID, []db.RemoteEvent{winner})
+	require.NoError(t, err)
+	seen, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	before, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: projects[2].ID})
+	require.NoError(t, err)
+	require.Empty(t, before, "the winning destination may be observed empty at its append cursor")
+	applyCtx, capture := db.WithFederationMoveResetCapture(ctx)
+	applyCtx = db.WithFederationPulledEventUIDs(applyCtx, []string{winner.EventUID})
+	require.NoError(t, store.MaterializeFederatedProject(applyCtx, projects[2].ID))
+	current, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[2].ID, current.ProjectID)
+	displacedReset, err := store.PurgeResetCheck(ctx, seen, projects[1].ID)
+	require.NoError(t, err)
+	require.Greater(t, displacedReset, seen)
+	require.Contains(t, capture.Resets, db.FederationProjectReset{ProjectID: projects[1].ID, EventID: displacedReset})
+	displacedFeed, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: projects[1].ID, AfterID: seen, Limit: 100, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Equal(t, displacedReset, displacedFeed.ResetAfterID, "the displaced branch retains its existing portable reset")
+	destinationReset, err := store.PurgeResetCheck(ctx, seen, projects[2].ID)
+	require.NoError(t, err)
+	require.Greater(t, destinationReset, seen, "the winning destination needs a fresh UI cursor after append")
+	require.Contains(t, capture.Resets, db.FederationProjectReset{ProjectID: projects[2].ID, EventID: destinationReset})
+	feed, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: projects[2].ID, Limit: 100, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Zero(t, feed.ResetAfterID, "winning-destination UI invalidation must preserve portable history")
+	retained, err := store.EventsByUIDs(ctx, projects[2].ID, []string{winner.EventUID})
+	require.NoError(t, err)
+	require.Len(t, retained, 1)
+	require.Equal(t, winner.ContentHash, retained[0].ContentHash)
+	after, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, projects[2].ID))
+	noOp, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, after, noOp, "an applied competing move must not allocate repeated resets")
 }

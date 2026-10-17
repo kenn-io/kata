@@ -67,20 +67,16 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 			return err
 		}
 		for _, project := range []Project{source, target} {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
- ON CONFLICT(key) DO UPDATE SET value=excluded.value
- WHERE CAST(meta.value AS BIGINT)<CAST(excluded.value AS BIGINT)`, AttributionUIResetMetadataPrefix+project.UID, strconv.FormatInt(cursor, 10)); err != nil {
+			if err := recordFederationMoveUIReset(ctx, tx, project, cursor); err != nil {
 				return err
-			}
-			if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
-				capture.add(FederationProjectReset{ProjectID: project.ID, EventID: cursor})
 			}
 		}
 		return nil
 	}
 	var cursor int64
 	var err error
-	if to == targetUID && slices.Contains(accepted, winner.UID) {
+	atomic := to == targetUID && slices.Contains(accepted, winner.UID)
+	if atomic {
 		err = tx.QueryRowContext(ctx, `SELECT id FROM events WHERE uid=$1`, winner.UID).Scan(&cursor)
 	} else {
 		// Trusted pull may already have exposed the retained move's cursor
@@ -91,11 +87,35 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 	if err != nil {
 		return err
 	}
+	if !atomic {
+		// A competing pull can rehome from a different project than the
+		// declared source. The destination still needs an apply refresh;
+		// its portable history must remain available.
+		var target Project
+		if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, targetUID).Scan(&target.ID, &target.UID, &target.Name); err != nil {
+			return err
+		}
+		if err := recordFederationMoveUIReset(ctx, tx, target, cursor); err != nil {
+			return err
+		}
+	}
 	if err := RecordFederationPurgeResets(ctx, tx, []string{source.UID}, cursor); err != nil {
 		return err
 	}
 	if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
 		capture.add(FederationProjectReset{ProjectID: source.ID, EventID: cursor})
+	}
+	return nil
+}
+
+func recordFederationMoveUIReset(ctx context.Context, tx *sql.Tx, project Project, cursor int64) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
+ ON CONFLICT(key) DO UPDATE SET value=excluded.value
+ WHERE CAST(meta.value AS BIGINT)<CAST(excluded.value AS BIGINT)`, AttributionUIResetMetadataPrefix+project.UID, strconv.FormatInt(cursor, 10)); err != nil {
+		return err
+	}
+	if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
+		capture.add(FederationProjectReset{ProjectID: project.ID, EventID: cursor})
 	}
 	return nil
 }
