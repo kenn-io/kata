@@ -17,9 +17,14 @@ import (
 
 func historicalOutputFixture(t *testing.T, options ...testenv.Option) (*testenv.Env, string, db.Project, db.Issue, string) {
 	t.Helper()
+	return historicalOutputFixtureWithTarget(t, "target-project", options...)
+}
+
+func historicalOutputFixtureWithTarget(t *testing.T, targetName string, options ...testenv.Option) (*testenv.Env, string, db.Project, db.Issue, string) {
+	t.Helper()
 	env := testenv.New(t, options...)
 	dir, sourceID := initLocalBoundWorkspace(t, env, "source-project")
-	target, err := env.DB.CreateProject(t.Context(), "target-project")
+	target, err := env.DB.CreateProject(t.Context(), targetName)
 	require.NoError(t, err)
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sourceID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "Moved task", Author: "worker"})
 	require.NoError(t, err)

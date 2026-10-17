@@ -87,7 +87,7 @@ func printAgentMutationDecoded(
 	extra func(io.Writer, agentIssueMutation) error,
 ) error {
 	if !flags.Quiet {
-		if _, err := fmt.Fprintf(w, "OK %s %s", verb, m.Issue.ShortID); err != nil {
+		if _, err := fmt.Fprintf(w, "OK %s %s", verb, agentValue(m.Issue.ShortID)); err != nil {
 			return err
 		}
 		if m.Reused {
@@ -105,7 +105,7 @@ func printAgentMutationDecoded(
 		}
 	}
 	if m.Issue.ShortID != "" && m.Issue.Title != "" {
-		if _, err := fmt.Fprintf(w, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+		if _, err := fmt.Fprintf(w, "Issue: %s %s\n", agentValue(m.Issue.ShortID), agentValue(m.Issue.Title)); err != nil {
 			return err
 		}
 	}

@@ -498,10 +498,10 @@ func commentAttribution(author, teammate string) string {
 }
 
 func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
-	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, b.Issue.ShortID); err != nil {
+	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, agentValue(b.Issue.ShortID)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", b.Issue.ShortID, agentValue(b.Issue.Title)); err != nil {
+	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", agentValue(b.Issue.ShortID), agentValue(b.Issue.Title)); err != nil {
 		return err
 	}
 	if b.Issue.Status != "" {

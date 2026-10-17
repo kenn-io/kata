@@ -183,7 +183,7 @@ func printDestructive(cmd *cobra.Command, ref, requestedProject, verb string, bs
 			m.Issue.ShortID = displayRef
 			out := cmd.OutOrStdout()
 			if !flags.Quiet {
-				if _, err := fmt.Fprintf(out, "OK delete %s", m.Issue.ShortID); err != nil {
+				if _, err := fmt.Fprintf(out, "OK delete %s", agentValue(m.Issue.ShortID)); err != nil {
 					return err
 				}
 				if !m.Changed {
@@ -196,7 +196,7 @@ func printDestructive(cmd *cobra.Command, ref, requestedProject, verb string, bs
 				}
 			}
 			if m.Issue.ShortID != "" && m.Issue.Title != "" {
-				if _, err := fmt.Fprintf(out, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+				if _, err := fmt.Fprintf(out, "Issue: %s %s\n", agentValue(m.Issue.ShortID), agentValue(m.Issue.Title)); err != nil {
 					return err
 				}
 			}
@@ -219,12 +219,12 @@ func printDestructive(cmd *cobra.Command, ref, requestedProject, verb string, bs
 			}
 			shortID := displayRef
 			if !flags.Quiet {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK purge %s\n", shortID); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK purge %s\n", agentValue(shortID)); err != nil {
 					return err
 				}
 			}
 			if b.PurgeLog.IssueTitle != "" {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s %s\n", shortID, agentValue(b.PurgeLog.IssueTitle)); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s %s\n", agentValue(shortID), agentValue(b.PurgeLog.IssueTitle)); err != nil {
 					return err
 				}
 			}
