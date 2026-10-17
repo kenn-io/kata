@@ -95,7 +95,8 @@ must remain for historical references to keep resolving.
 
 Leaving or archiving a former project preserves its identity for delayed events.
 Purging or merging it is refused while another joined project's retained move
-history still needs that identity. Leave the dependent projects before removing
+history still needs that identity. This includes source and transit streams
+even when the current destination has left. Leave the dependent projects before removing
 the former identity; unrelated bindings and history covered by a standalone
 adoption baseline do not prevent ordinary cleanup.
 
