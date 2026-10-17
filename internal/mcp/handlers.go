@@ -1212,8 +1212,8 @@ func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentit
 	if shown.Issue.ProjectUID != nil {
 		projectUID = *shown.Issue.ProjectUID
 	}
-	if targetProject.UID != "" && projectUID != targetProject.UID {
-		return relationshipTarget{}, fmt.Errorf("relationship reference %q resolved outside the MCP startup scope", ref)
+	if _, err := h.currentIssueProject(ctx, targetProject, issueFromShow(shown.Issue)); err != nil {
+		return relationshipTarget{}, err
 	}
 	if shown.Issue.UID == "" || projectUID == "" {
 		return relationshipTarget{}, fmt.Errorf("relationship reference %q did not resolve to immutable identity", ref)

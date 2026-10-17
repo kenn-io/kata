@@ -158,9 +158,11 @@ require an explicit `project` in multi-project mode. Project administration
 cannot alter or destroy the catalog it was bound to.
 
 Tool calls cannot change the startup actor or expand the startup scope.
-Historical issue references remain usable only while the issue's current
-project is included. Returned references and delete/purge confirmations use
-the current project and short ID. Reads and writes retain that boundary if
+Historical issue references remain usable while both the lookup route and the
+issue's current project are visible within the startup scope. Retained
+references also work as relationship and closure evidence targets. Returned
+references and delete/purge confirmations use the current project and short ID.
+Reads and writes retain that boundary if
 an issue moves during a call. A subtree move is rejected atomically if any
 descendant comes from an excluded project. The daemon remains authoritative for
 authentication, attribution, revision checks, federation trust, claims, and

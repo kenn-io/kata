@@ -968,6 +968,7 @@ func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, 
 		return EventsOutput{}, err
 	}
 	output := EventsOutput{NextAfterID: after}
+	seen := make(map[int64]struct{})
 	for _, project := range projects {
 		response, pollErr := h.options.Client.PollProjectEvents(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: project.ID}, Query: &generated.PollProjectEventsQuery{AfterID: &after, Limit: &limit}})
 		if pollErr != nil {
@@ -987,6 +988,12 @@ func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, 
 			return output, nil
 		}
 		for _, event := range response.Events {
+			// Move events appear in both endpoint feeds. IDs are global to
+			// the selected daemon, so count each event once before limiting.
+			if _, exists := seen[event.EventID]; exists {
+				continue
+			}
+			seen[event.EventID] = struct{}{}
 			output.Events = append(output.Events, streamEvent(event))
 		}
 	}
