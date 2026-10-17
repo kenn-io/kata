@@ -136,6 +136,10 @@ var (
 	// project merge has a federation binding.
 	ErrProjectMergeFederationBinding = errors.New("project merge federation binding")
 
+	// ErrFederationProjectIdentityRequired prevents deleting a former identity
+	// that another joined project still needs for portable event envelopes.
+	ErrFederationProjectIdentityRequired = errors.New("project identity is required by federation history")
+
 	// ErrProjectMergeIssueSyncBinding is returned when either side of a
 	// project merge has an issue sync binding.
 	ErrProjectMergeIssueSyncBinding = errors.New("project merge issue sync binding")

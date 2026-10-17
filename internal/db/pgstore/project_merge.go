@@ -72,6 +72,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
 			return err
 		}
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source, `m.payload::jsonb->'snapshot'`); err != nil {
+			return err
+		}
 		if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {
 			return err
 		}
