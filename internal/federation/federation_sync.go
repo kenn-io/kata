@@ -155,6 +155,17 @@ func syncFederationOnceWithFence(
 	}
 	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
+		if !binding.PushEnabled && binding.RelayConfig == nil {
+			_, startedAt, startErr := startFederationPull(ctx, store, binding.ProjectID)
+			if startErr != nil {
+				return false, errors.Join(err, startErr)
+			}
+			at := time.Now().UTC()
+			if at.Before(startedAt) {
+				at = startedAt
+			}
+			return false, recordFederationSyncErrorAt(ctx, store, binding.ProjectID, err, at)
+		}
 		return false, recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	if binding.RelayConfig != nil {
@@ -271,19 +282,8 @@ func syncDirectSpoke(
 			return err
 		}
 	}
-	previousPull, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return err
-	}
-	resumePull := previousPull.LastPullStartedAt != nil &&
-		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
-	pullStartedAt := time.Now().UTC().Truncate(time.Millisecond)
-	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
-		if previous != nil && !pullStartedAt.After(*previous) {
-			pullStartedAt = previous.Truncate(time.Millisecond).Add(time.Millisecond)
-		}
-	}
-	if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, pullStartedAt); err != nil {
+	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
+	if err != nil {
 		return err
 	}
 	recordPullError := func(pullErr error) error {
@@ -492,6 +492,25 @@ func syncDirectSpoke(
 		completedAt = pullStartedAt
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt)
+}
+
+func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
+	previousPull, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return false, time.Time{}, err
+	}
+	resumePull := previousPull.LastPullStartedAt != nil &&
+		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
+	startedAt := time.Now().UTC().Truncate(time.Millisecond)
+	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
+		if previous != nil && !startedAt.After(*previous) {
+			startedAt = previous.Truncate(time.Millisecond).Add(time.Millisecond)
+		}
+	}
+	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
+		return false, time.Time{}, err
+	}
+	return resumePull, startedAt, nil
 }
 
 func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {

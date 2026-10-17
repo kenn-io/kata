@@ -622,32 +622,53 @@ func TestSyncFederationOnceRecordsPullErrorStatus(t *testing.T) {
 }
 
 func TestSyncFederationOnceRecordsClientConstructionErrorStatus(t *testing.T) {
-	ctx := context.Background()
-	spoke := testenv.New(t)
-	project, err := spoke.DB.CreateProject(ctx, "hub")
-	require.NoError(t, err)
-	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               "http://example.com",
-		HubProjectID:         42,
-		HubProjectUID:        project.UID,
-		ReplayHorizonEventID: 1,
-		Enabled:              true,
-	})
-	require.NoError(t, err)
+	for _, futureClock := range []bool{false, true} {
+		t.Run(fmt.Sprintf("future-clock=%t", futureClock), func(t *testing.T) {
+			ctx := context.Background()
+			spoke := testenv.New(t)
+			project, err := spoke.DB.CreateProject(ctx, "hub")
+			require.NoError(t, err)
+			binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID:            project.ID,
+				Role:                 db.FederationRoleSpoke,
+				HubURL:               "http://example.com",
+				HubProjectID:         42,
+				HubProjectUID:        project.UID,
+				ReplayHorizonEventID: 1,
+				Enabled:              true,
+			})
+			require.NoError(t, err)
 
-	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
-		Token: "token",
-	})
+			var previousStart, previousSuccess time.Time
+			if futureClock {
+				previousSuccess = time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+				previousStart = previousSuccess.Add(time.Millisecond)
+				require.NoError(t, spoke.DB.RecordFederationSyncPullSuccess(ctx, project.ID, previousSuccess))
+				require.NoError(t, spoke.DB.RecordFederationSyncPullStarted(ctx, project.ID, previousStart))
+			}
 
-	require.Error(t, err)
-	status := requireFederationSyncStatus(t, spoke.DB, project.ID)
-	assertStatusTimeSet(t, status.LastPullStartedAt)
-	assert.Nil(t, status.LastPullSuccessAt)
-	assertStatusTimeSet(t, status.LastErrorAt)
-	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "http://example.com")
+			err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+				Token: "token",
+			})
+
+			require.Error(t, err)
+			status := requireFederationSyncStatus(t, spoke.DB, project.ID)
+			assertStatusTimeSet(t, status.LastPullStartedAt)
+			if futureClock {
+				require.NotNil(t, status.LastPullSuccessAt)
+				assert.Equal(t, previousSuccess, *status.LastPullSuccessAt)
+			} else {
+				assert.Nil(t, status.LastPullSuccessAt)
+			}
+			assertStatusTimeSet(t, status.LastErrorAt)
+			require.NotNil(t, status.LastError)
+			assert.Contains(t, *status.LastError, "http://example.com")
+			if futureClock {
+				assert.True(t, status.LastPullStartedAt.After(previousStart), "failed attempts must preserve monotonic recovery status")
+				assert.False(t, status.LastErrorAt.Before(*status.LastPullStartedAt), "the failure must belong to the recorded attempt")
+			}
+		})
+	}
 }
 
 func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
