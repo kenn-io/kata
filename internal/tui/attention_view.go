@@ -68,6 +68,7 @@ func (m Model) transitionToAttention() (Model, tea.Cmd) {
 		m.attention.projectName = m.scope.projectName
 		m.attention.rows = nil
 		m.attention.cursor = 0
+		m.attention.skipped = 0
 		m.attention.selectedUID = ""
 	}
 	m.attention.returnToAttention = false

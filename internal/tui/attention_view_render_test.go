@@ -36,6 +36,18 @@ func TestSnapshot_Attention_Empty(t *testing.T) {
 	assertGolden(t, "attention-empty", renderAttention(m))
 }
 
+func TestAttentionFreshEntryClearsPreviousSkippedCount(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m.attention.skipped = 1
+	m, cmd := m.transitionToAttention()
+	require.NotNil(t, cmd)
+
+	plain := stripANSI(renderAttention(m))
+	require.Contains(t, plain, "Loading attention requests…")
+	require.NotContains(t, plain, "1 skipped",
+		"a fresh loading view must not show the previous result set's skipped count")
+}
+
 func TestAttentionColumnsAlignSelectionMarker(t *testing.T) {
 	defer snapshotInit(t)()
 	m := attentionSnapshot(t)
