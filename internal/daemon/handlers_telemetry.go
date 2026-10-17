@@ -27,6 +27,13 @@ type TelemetryReporter interface {
 	Capture(event string, properties map[string]any) error
 }
 
+func captureCoreAction(ctx context.Context, cfg ServerConfig, event, surface string) {
+	if cfg.Telemetry == nil || issueScopeFromContext(ctx) != nil || surface == "" {
+		return
+	}
+	_ = cfg.Telemetry.Capture(event, map[string]any{"surface": surface})
+}
+
 // appOpenedGate captures one app_opened per surface per UTC day; it forgets on restart.
 type appOpenedGate struct {
 	mu   sync.Mutex

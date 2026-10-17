@@ -22,6 +22,9 @@ func TestCoreActionTelemetry(t *testing.T) {
 			project, err := store.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
 			reporter := &fakeTelemetryReporter{}
+			if surface == "" {
+				reporter.failNext = true
+			}
 			server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal}, store)
 			path := fmt.Sprintf("/api/v1/projects/%d/issues", project.ID)
 			send := func(route, body, key string, status int) api.MutationResponse {
@@ -36,6 +39,9 @@ func TestCoreActionTelemetry(t *testing.T) {
 			}
 			created := send(path, `{"title":"Example task","actor":"user-a"}`, "create-key", 200)
 			require.True(t, created.Body.Changed)
+			if surface == "" {
+				require.True(t, reporter.failNext, "no header must skip capture entirely")
+			}
 			count := 0
 			if surface == "web" || surface == "tui" || surface == "cli" {
 				count = 1
@@ -51,6 +57,9 @@ func TestCoreActionTelemetry(t *testing.T) {
 			body := `{"actor":"user-a","reason":"done","retry_protocol":"close-v1","message":"Completed the requested work and checked the result.","evidence":[{"type":"commit","sha":"abc1234"}]}`
 			closed := send(closePath, body, "close-key", 200)
 			require.True(t, closed.Body.Changed)
+			if surface == "" {
+				require.True(t, reporter.failNext, "no header must skip capture entirely")
+			}
 			assert.Len(t, reporter.captured, 2*count)
 			send(closePath, body, "close-key", 200)
 			noop := send(closePath, body, "", 200)

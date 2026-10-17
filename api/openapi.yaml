@@ -9599,9 +9599,11 @@ paths:
     post:
       operationId: createIssue
       parameters:
-        - in: header
+        - description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+          in: header
           name: X-Kata-Surface
           schema:
+            description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
             type: string
         - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
           in: path
@@ -9840,9 +9842,11 @@ paths:
     post:
       operationId: closeIssue
       parameters:
-        - in: header
+        - description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+          in: header
           name: X-Kata-Surface
           schema:
+            description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
             type: string
         - in: path
           name: project_id

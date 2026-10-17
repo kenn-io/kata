@@ -802,7 +802,7 @@
       closeIssueRequest(
         { projectId: target.project_id, ref: target.ref },
         context.body({ ...request }, requestActor),
-        { headers: { ...context.headers, 'X-Kata-Surface': 'web' } },
+        { headers: { 'X-Kata-Surface': 'web' } },
       ),
     )
   }

@@ -209,9 +209,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if err == nil && changed {
 			cfg.Publish().Events(in.ProjectID, events)
-			if cfg.Telemetry != nil && issueScopeFromContext(ctx) == nil {
-				_ = cfg.Telemetry.Capture("issue_closed", map[string]any{"surface": in.Surface})
-			}
+			captureCoreAction(ctx, cfg, "issue_closed", in.Surface)
 		}
 		if err != nil {
 			// A connection can fail after the database commits. The keyed
@@ -227,6 +225,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if match != nil {
 					if len(events) > 0 && events[0].UID == match.Event.UID {
 						cfg.Publish().Events(in.ProjectID, events)
+						captureCoreAction(ctx, cfg, "issue_closed", in.Surface)
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
