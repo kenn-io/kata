@@ -29,8 +29,8 @@ func TestHistoricalAgentReferencesQuoteProjectNames(t *testing.T) {
 			for _, prefix := range []string{"OK " + operation + " ", "Issue: "} {
 				var line string
 				for _, candidate := range lines {
-					if strings.HasPrefix(candidate, prefix) {
-						line = strings.TrimPrefix(candidate, prefix)
+					if value, ok := strings.CutPrefix(candidate, prefix); ok {
+						line = value
 						break
 					}
 				}
