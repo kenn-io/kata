@@ -346,7 +346,7 @@ func TestAttentionPreservesAuxiliaryViewWithDetailFocusAfterResize(t *testing.T)
 		{"credentials", viewCredentials},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, api := attentionFixture(t)
+			m, _ := attentionFixture(t)
 			m = resizeModel(m, 160, 40)
 			origin := testIssue("origin")
 			m.view, m.prevView, m.focus = tc.view, viewList, focusDetail
@@ -360,7 +360,6 @@ func TestAttentionPreservesAuxiliaryViewWithDetailFocusAfterResize(t *testing.T)
 			require.Equal(t, tc.view, m.view,
 				"Attention should restore the auxiliary foreground that it covered")
 			require.Equal(t, origin.UID, m.detail.issue.UID)
-			require.NotNil(t, api)
 		})
 	}
 }
