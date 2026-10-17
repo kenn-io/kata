@@ -1048,7 +1048,8 @@ Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
 recorded the opening, including after switching the displayed daemon. Delivery
 is best effort and waits at most one second; a rejected authentication request
-drops the event.
+drops the event. TUI exit first waits up to one second for pending issue-action
+reports, then gives `session_ended` its separate one-second deadline.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
 daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
@@ -1083,8 +1084,8 @@ and reports `issue_closed` when changed. Each successful mutation with
 that reuse a create, already-closed issues, failed writes, dry runs, and reopen
 operations send nothing. Creates without an acknowledged `changed: true`
 response remain uncounted across all interfaces.
-The daemon rejects action events with a missing or invalid `surface` with
-HTTP 400 and `invalid_telemetry_property`.
+When telemetry is enabled, the daemon rejects action events with a missing or
+invalid `surface` with HTTP 400 and `invalid_telemetry_property`.
 A close, reopen, close sequence counts two closes;
 undoing a reopen in the TUI counts the resulting close too. CLI actions use the
 same terminal and agent-mode rules above. Reporting happens before follow-up
