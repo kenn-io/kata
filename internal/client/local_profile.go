@@ -210,13 +210,20 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if found.Outcome == daemonScanCompatible {
 			return resolved, nil
 		}
-		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
-			return resolved, err
-		}
+	}
+	// Discovery can ignore startup-only settings, but replacement must validate
+	// the selected home before stopping a daemon that is still serving clients.
+	if _, err := config.ReadDaemonConfigForHome(profile.Home); err != nil {
+		return resolved, err
 	}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	if err != nil {
 		return resolved, err
+	}
+	if found.Outcome != daemonScanNone {
+		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
+			return resolved, err
+		}
 	}
 	running, err := autoStartWithEnvironment(ctx, resolved.LocalProfile.DataDir, env)
 	if err != nil {
