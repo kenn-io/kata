@@ -24,6 +24,7 @@ func FederationMoveSnapshotEvent(event RemoteEvent) RemoteEvent {
 type moveSnapshotComment struct {
 	UID        string `json:"comment_uid"`
 	Author     string `json:"author"`
+	Teammate   string `json:"teammate,omitempty"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
 	EditedAt   string `json:"edited_at"`
@@ -81,15 +82,17 @@ func (l moveSnapshotLink) identity(uid, actor string) moveSnapshotLinkIdentity {
 }
 
 type moveSnapshotProof struct {
-	authors    map[string]bool
-	comments   map[moveSnapshotComment]bool
-	identities map[moveSnapshotComment]bool
-	links      map[moveSnapshotLinkIdentity]bool
+	authors     map[string]bool
+	commentUIDs map[string]bool
+	comments    map[moveSnapshotComment]bool
+	identities  map[moveSnapshotComment]bool
+	links       map[moveSnapshotLinkIdentity]bool
 }
 
 func (p *moveSnapshotProof) addComment(comment moveSnapshotComment) {
 	comment = comment.normalized()
 	p.comments[comment], p.identities[comment.identity()] = true, true
+	p.commentUIDs[comment.UID] = true
 }
 
 // FederationMoveSnapshotValidator verifies all distributed move documents:
@@ -143,7 +146,7 @@ func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event Re
 		return fmt.Errorf("%w: invalid move snapshot: %v", ErrFederationIngestValidation, err)
 	}
 	actor := strings.TrimSpace(boundActor)
-	if author := strings.TrimSpace(snapshot.Author); author != actor && !proof.authors[author] {
+	if author := strings.TrimSpace(snapshot.Author); !proof.authors[author] && (len(proof.authors) != 0 || author != actor) {
 		return fmt.Errorf("%w: unverified move snapshot author", ErrFederationIngestValidation)
 	}
 	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
@@ -160,7 +163,9 @@ func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event Re
 		if owner != "" && owner != uid {
 			return fmt.Errorf("%w: move snapshot comment belongs to another issue", ErrFederationIngestValidation)
 		}
-		if comment.Author == actor || proof.comments[comment] {
+		// A bound actor can introduce its own new comment, but cannot replace
+		// the author or display identity of an established comment UID.
+		if proof.comments[comment] || (comment.Author == actor && owner == "" && !proof.commentUIDs[comment.UID]) {
 			continue
 		}
 		if proof.identities[comment.identity()] && comment.EditedAt != "" {
@@ -240,14 +245,14 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 	if proof, known := v.proofs[uid]; known {
 		return proof, nil
 	}
-	proof := &moveSnapshotProof{authors: map[string]bool{}, comments: map[moveSnapshotComment]bool{}, identities: map[moveSnapshotComment]bool{}, links: map[moveSnapshotLinkIdentity]bool{}}
+	proof := &moveSnapshotProof{authors: map[string]bool{}, commentUIDs: map[string]bool{}, comments: map[moveSnapshotComment]bool{}, identities: map[moveSnapshotComment]bool{}, links: map[moveSnapshotLinkIdentity]bool{}}
 	var author string
 	if err := v.tx.QueryRowContext(ctx, `SELECT author FROM issues WHERE uid=$1`, uid).Scan(&author); err == nil {
 		proof.authors[strings.TrimSpace(author)] = true
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	rows, err := v.tx.QueryContext(ctx, `SELECT c.uid,c.author,c.body,c.created_at,c.edited_at,COALESCE(c.reply_to_uid,''),COALESCE(c.reply_kind,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.uid=$1`, uid)
+	rows, err := v.tx.QueryContext(ctx, `SELECT c.uid,c.author,c.body,c.created_at,c.edited_at,COALESCE(c.reply_to_uid,''),COALESCE(c.reply_kind,''),COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.uid=$1`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +260,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 		var comment moveSnapshotComment
 		var created string
 		var edited sql.NullString
-		if err := rows.Scan(&comment.UID, &comment.Author, &comment.Body, &created, &edited, &comment.ReplyToUID, &comment.ReplyKind); err != nil {
+		if err := rows.Scan(&comment.UID, &comment.Author, &comment.Body, &created, &edited, &comment.ReplyToUID, &comment.ReplyKind, &comment.Teammate); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -316,7 +321,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 		}
 		for _, comment := range projection.Comments {
 			if comment.IssueUID == uid && comment.Author != "" {
-				proof.addComment(moveSnapshotComment{UID: comment.UID, Author: comment.Author, Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt, ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind})
+				proof.addComment(moveSnapshotComment{UID: comment.UID, Author: comment.Author, Teammate: comment.Teammate, Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt, ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind})
 			}
 		}
 		for key, state := range projection.Links {

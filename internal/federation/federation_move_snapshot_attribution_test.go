@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T) {
-	for _, kind := range []string{"forged-issue-author", "forged-comment-author", "forged-comment-body", "historical-authors", "rewritten-and-late-comments"} {
+	for _, kind := range []string{"forged-issue-author", "bound-issue-author", "forged-comment-author", "bound-comment-author", "forged-comment-body", "forged-comment-teammate", "historical-authors", "rewritten-and-late-comments"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			hub := testenv.New(t)
@@ -30,7 +31,7 @@ func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T)
 			}
 			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "verified transit snapshot", Author: author})
 			require.NoError(t, err)
-			_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: commenter, Body: "historical discussion"})
+			_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: commenter, Teammate: "historical-teammate", Body: "historical discussion"})
 			require.NoError(t, err)
 			if kind == "rewritten-and-late-comments" {
 				_, err = hub.DB.RewriteAuthorIdentity(ctx, db.RewriteAuthorIdentityParams{ProjectID: projects[0].ID, Actor: "worker", From: author, To: "renamed-author"})
@@ -58,6 +59,9 @@ func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T)
 			case "forged-issue-author":
 				snapshot["author"], err = json.Marshal("forged-author")
 				require.NoError(t, err)
+			case "bound-issue-author":
+				snapshot["author"], err = json.Marshal("worker")
+				require.NoError(t, err)
 			case "forged-comment-author":
 				var comments []jsontext.Value
 				require.NoError(t, json.Unmarshal(snapshot["comments"], &comments))
@@ -68,11 +72,18 @@ func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T)
 				comments = append(comments, forged)
 				snapshot["comments"], err = json.Marshal(comments)
 				require.NoError(t, err)
-			case "forged-comment-body":
+			case "forged-comment-body", "bound-comment-author", "forged-comment-teammate":
 				var comments []map[string]jsontext.Value
 				require.NoError(t, json.Unmarshal(snapshot["comments"], &comments))
 				require.Len(t, comments, 1)
-				comments[0]["body"], err = json.Marshal("fabricated edit under a historical author")
+				field, value := "body", "fabricated edit under a historical author"
+				switch kind {
+				case "bound-comment-author":
+					field, value = "author", "worker"
+				case "forged-comment-teammate":
+					field, value = "teammate", "fabricated-teammate"
+				}
+				comments[0][field], err = json.Marshal(value)
 				require.NoError(t, err)
 				snapshot["comments"], err = json.Marshal(comments)
 				require.NoError(t, err)
@@ -90,7 +101,7 @@ func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T)
 			client, err := NewClient(ctx, hub.URL, writer.credentials[projects[1].UID].Token, clientpkg.Opts{})
 			require.NoError(t, err)
 			_, pushErr := client.IngestProjectEventsWithOptions(ctx, projects[1].ID, federationIngestEnvelopes([]db.Event{event}), IngestProjectEventsOptions{MoveSourceTokens: map[string]string{projects[0].UID: writer.credentials[projects[0].UID].Token}})
-			forged := kind == "forged-issue-author" || kind == "forged-comment-author" || kind == "forged-comment-body"
+			forged := strings.HasPrefix(kind, "forged-") || strings.HasPrefix(kind, "bound-")
 			if forged && pushErr != nil {
 				var status *HubStatusError
 				require.ErrorAs(t, pushErr, &status)
@@ -125,6 +136,7 @@ func TestSyncFederationTransitSnapshotPreservesVerifiedAttribution(t *testing.T)
 			require.NoError(t, err)
 			require.Len(t, comments, 1, "an ignored move snapshot must not fabricate historical comments downstream")
 			require.Equal(t, commenter, comments[0].Author)
+			require.Equal(t, "historical-teammate", comments[0].Teammate, "historical display attribution must be witnessed too")
 			require.Equal(t, "historical discussion", comments[0].Body, "foreign attribution must have a witnessed body version")
 			require.NoError(t, receiver.sync(t, 2))
 			if kind == "rewritten-and-late-comments" {
