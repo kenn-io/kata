@@ -10,7 +10,7 @@ import (
 )
 
 func checkFederatedReceiverDepartingReferences(t *testing.T, hub db.Storage, backend Backend) error {
-	for _, mode := range []string{"pull", "push"} {
+	for _, mode := range []string{"pull", "push", "merge"} {
 		t.Run(mode, func(t *testing.T) { checkFederatedReceiverDepartingReferenceCase(t, hub, backend, mode) })
 	}
 	return nil
@@ -19,8 +19,11 @@ func checkFederatedReceiverDepartingReferences(t *testing.T, hub db.Storage, bac
 func checkFederatedReceiverDepartingReferenceCase(t *testing.T, hub db.Storage, backend Backend, mode string) {
 	ctx := t.Context()
 	suffix := "11"
-	if mode == "push" {
+	switch mode {
+	case "push":
 		suffix = "22"
+	case "merge":
+		suffix = "33"
 	}
 	source, err := hub.CreateProject(ctx, "receiver-ref-source-"+mode)
 	require.NoError(t, err)
@@ -107,6 +110,30 @@ func checkFederatedReceiverDepartingReferenceCase(t *testing.T, hub db.Storage, 
 	afterReplay, err := receiver.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, beforeReplay, afterReplay, "replaying an applied move cannot accumulate local reference controls")
+	if mode == "merge" {
+		for _, local := range []db.Project{locals[source.UID], locals[target.UID]} {
+			_, err = receiver.LeaveFederationReplica(ctx, local.ID)
+			require.NoError(t, err)
+		}
+		incomingProject, err := receiver.CreateProject(ctx, "receiver-ref-incoming-merge")
+		require.NoError(t, err)
+		incomingBlocker, _, err := receiver.CreateIssue(ctx, db.CreateIssueParams{ProjectID: incomingProject.ID, UID: "01ARZ3NDEKTSV4RRFFQ65BAA33", Title: "Incoming project suffix blocker", Author: "worker"})
+		require.NoError(t, err)
+		require.Equal(t, issue.ShortID, incomingBlocker.ShortID)
+		incoming, _, err := receiver.CreateIssue(ctx, db.CreateIssueParams{ProjectID: incomingProject.ID, UID: "01ARZ3NDEKTSV4RRFFQ66AAA33", Title: "Incoming issue at retained receiver reference", Author: "worker"})
+		require.NoError(t, err)
+		require.Equal(t, departing.ShortID, incoming.ShortID, "merge must discover an already stored receiver-reference collision")
+		_, err = receiver.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: incomingProject.ID, TargetProjectID: locals[source.UID].ID, Actor: "worker"})
+		require.NoError(t, err)
+		merged, err := receiver.IssueByUID(ctx, incoming.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, locals[source.UID].ID, merged.ProjectID)
+		assert.NotEqual(t, departing.ShortID, merged.ShortID, "merge must extend an incoming issue past a retained receiver reference")
+		resolved, err := receiver.IssueByShortID(ctx, locals[source.UID].ID, departing.ShortID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		assert.Equal(t, issue.UID, resolved.UID, "merge must preserve the receiver's historical reference to its original stable issue")
+		return
+	}
 	if mode == "pull" {
 		// Cleanup exercises history lifetime under native hub authority;
 		// joined spokes correctly reject locally authored purge operations.
