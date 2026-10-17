@@ -1766,8 +1766,9 @@ in the web UI or through the project metadata API. This view is separate from
 Press `T` to open Attention: the requests `kata notify` addressed to you, read
 from open issues in the current project or across all projects when the TUI is
 in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticated
-actor, else the TUI actor. Rows show the issue, the sender and any
-`work.attention` state; the panel below shows the message. Enter opens the issue
+actor, else the TUI actor. Rows show the issue, the sender and
+`work.attention` badges for `needs-human` or `stuck`; the panel below shows the
+message. Enter opens the issue
 and Esc returns; `c` clears the selected request (daemon API `0.13.0` or newer,
 guarded against a concurrent replacement); `r` refreshes. Press `T` or Esc to
 return to the previous view.
