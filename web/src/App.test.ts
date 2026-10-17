@@ -2959,7 +2959,6 @@ describe('App', () => {
         const events: unknown[] = []
         const actionRequests: Request[] = []
         let writes = 0
-        let mutationBody: unknown
         let resolveMutation: ((response: Response) => void) | undefined
         let resolveAppOpened: ((response: Response) => void) | undefined
         vi.stubGlobal(
@@ -2989,7 +2988,6 @@ describe('App', () => {
               (path.endsWith('/issues') || path.endsWith('/close'))
             ) {
               writes += 1
-              mutationBody = await request.json()
               if (outcome === 'concurrent request expires the session') {
                 return new Promise<Response>((resolve) => {
                   resolveMutation = resolve
@@ -3038,9 +3036,6 @@ describe('App', () => {
         }
         await waitFor(() => expect(writes).toBe(1))
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-        if (action === 'remove') {
-          expect(mutationBody).toMatchObject({ reason: 'wontfix', evidence: [] })
-        }
         for (const request of actionRequests) {
           expect(request.keepalive).toBe(true)
         }

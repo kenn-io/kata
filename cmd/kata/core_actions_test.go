@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -18,134 +21,121 @@ import (
 )
 
 func TestCLIActionAndAppOpenedReportsShareOneDeadline(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	shortenCLIUseReportTimeout(t, 300*time.Millisecond)
-	env, dir, pid := setupCLIWorkspace(t)
-	ref := createIssue(t, env, pid, "Task to close")
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	type report struct {
-		event string
-		at    time.Time
-	}
-	reports := make(chan report, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			var body struct {
-				Event string `json:"event"`
+	for _, tc := range []struct {
+		name                 string
+		appOpenedAlreadySent bool
+		wantReports          []string
+	}{
+		{name: "both reports share the wait", wantReports: []string{"issue_closed", "app_opened"}},
+		{name: "app_opened already sent", appOpenedAlreadySent: true, wantReports: []string{"issue_closed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv(hooks.HookVersionEnv, "")
+			stubIsTTY(t, true)
+			shortenCLIUseReportTimeout(t, 300*time.Millisecond)
+			env, dir, pid := setupCLIWorkspace(t)
+			ref := createIssue(t, env, pid, "Task to close")
+			target, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			type report struct {
+				event string
+				at    time.Time
 			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			reports <- report{event: body.Event, at: time.Now()}
-			<-r.Context().Done()
-			return
-		}
-		r.Header["X-Forwarded-For"] = nil
-		proxy.ServeHTTP(w, r)
-	}))
-	defer server.Close()
-	env.URL = server.URL
-
-	result := make(chan struct {
-		stdout string
-		stderr string
-		err    error
-	}, 1)
-	started := time.Now()
-	go func() {
-		stdout, stderr, err := runCmdCapture(t, env,
-			"--workspace", dir, "close", ref, "--done", "--message",
-			"Completed the requested work and checked the result.", "--test", "go test ./example",
-		)
-		result <- struct {
-			stdout string
-			stderr string
-			err    error
-		}{stdout: stdout, stderr: stderr, err: err}
-	}()
-
-	first := <-reports
-	second := <-reports
-	seen := map[string]time.Time{first.event: first.at, second.event: second.at}
-	assert.Contains(t, seen, "issue_closed")
-	assert.Contains(t, seen, "app_opened")
-	assert.Less(t, seen["app_opened"].Sub(seen["issue_closed"]), cliUseReportTimeout/2,
-		"both reports should start within the shared wait window")
-
-	var got struct {
-		stdout string
-		stderr string
-		err    error
-	}
-	select {
-	case got = <-result:
-	case <-time.After(time.Second):
-		t.Fatal("close command did not finish after the shared reporting deadline")
-	}
-	require.NoError(t, got.err)
-	assert.Empty(t, got.stderr)
-	assert.NotContains(t, got.stdout, "telemetry")
-	assert.Less(t, time.Since(started), cliUseReportTimeout+200*time.Millisecond)
-}
-
-func TestCLIActionWaitsWhenAppOpenedWasAlreadySent(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
-	env, dir, pid := setupCLIWorkspace(t)
-	ref := createIssue(t, env, pid, "Task to close")
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	type report struct {
-		event string
-		at    time.Time
-	}
-	reports := make(chan report, 2)
-	finished := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			var body struct {
-				Event string `json:"event"`
+			reports := make(chan report, 2)
+			handlerErrors := make(chan error, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/ui/telemetry" {
+					var body struct {
+						Event string `json:"event"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						handlerErrors <- fmt.Errorf("decode telemetry request: %w", err)
+						http.Error(w, "invalid telemetry request", http.StatusBadRequest)
+						return
+					}
+					reports <- report{event: body.Event, at: time.Now()}
+					<-r.Context().Done()
+					return
+				}
+				r.Header["X-Forwarded-For"] = nil
+				proxy.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			env.URL = server.URL
+			if tc.appOpenedAlreadySent {
+				day := cliUseNow().UTC().Format(time.DateOnly)
+				recordCLIUseDay(cliUseMarkerPath(client.ResolvedDaemon{BaseURL: server.URL}), day)
 			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			reports <- report{event: body.Event, at: time.Now()}
-			<-r.Context().Done()
-			close(finished)
-			return
-		}
-		r.Header["X-Forwarded-For"] = nil
-		proxy.ServeHTTP(w, r)
-	}))
-	defer server.Close()
-	env.URL = server.URL
-	day := cliUseNow().UTC().Format(time.DateOnly)
-	recordCLIUseDay(cliUseMarkerPath(client.ResolvedDaemon{BaseURL: server.URL}), day)
 
-	started := time.Now()
-	stdout, stderr, err := runCmdCapture(t, env,
-		"--workspace", dir, "close", ref, "--done", "--message",
-		"Completed the requested work and checked the result.", "--test", "go test ./example",
-	)
-	elapsed := time.Since(started)
-	require.NoError(t, err)
-	assert.Empty(t, stderr)
-	assert.NotContains(t, stdout, "telemetry")
-	select {
-	case event := <-reports:
-		assert.Equal(t, "issue_closed", event.event)
-	case <-time.After(time.Second):
-		t.Fatal("issue-action report did not start")
-	}
-	assert.GreaterOrEqual(t, elapsed, cliUseReportTimeout,
-		"the command must join the issue report when app_opened is already recorded")
-	select {
-	case <-finished:
-	case <-time.After(time.Second):
-		t.Fatal("issue-action report did not stop at its deadline")
+			resetFlags(t)
+			cmd := newRootCmd()
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{
+				"--workspace", dir, "close", ref, "--done", "--message",
+				"Completed the requested work and checked the result.", "--test", "go test ./example",
+			})
+			ctx := contextWithBaseURL(context.Background(), env.URL)
+			cmd.SetContext(ctx)
+			type commandResult struct {
+				err error
+			}
+			result := make(chan commandResult, 1)
+			started := time.Now()
+			go func() {
+				result <- commandResult{err: executeCLICommand(ctx, cmd)}
+			}()
+
+			seen := make(map[string]time.Time, len(tc.wantReports))
+			seenEvents := make([]string, 0, len(tc.wantReports))
+			for range tc.wantReports {
+				select {
+				case got := <-reports:
+					seen[got.event] = got.at
+					seenEvents = append(seenEvents, got.event)
+				case err := <-handlerErrors:
+					t.Fatal(err)
+				case <-time.After(time.Second):
+					t.Fatal("telemetry report did not start")
+				}
+			}
+			assert.ElementsMatch(t, tc.wantReports, seenEvents)
+			if !tc.appOpenedAlreadySent {
+				delta := seen["app_opened"].Sub(seen["issue_closed"])
+				if delta < 0 {
+					delta = -delta
+				}
+				assert.Less(t, delta, cliUseReportTimeout/2,
+					"both reports should start within the shared wait window")
+			}
+
+			var got commandResult
+			select {
+			case got = <-result:
+			case err := <-handlerErrors:
+				t.Fatal(err)
+			case <-time.After(time.Second):
+				t.Fatal("close command did not finish after the shared reporting deadline")
+			}
+			require.NoError(t, got.err)
+			assert.Empty(t, stderr.String())
+			assert.NotContains(t, stdout.String(), "telemetry")
+			assert.GreaterOrEqual(t, time.Since(started), cliUseReportTimeout,
+				"the command must wait for its active report")
+			select {
+			case err := <-handlerErrors:
+				t.Fatal(err)
+			default:
+			}
+			select {
+			case extra := <-reports:
+				t.Fatalf("unexpected telemetry report %q", extra.event)
+			default:
+			}
+		})
 	}
 }
 

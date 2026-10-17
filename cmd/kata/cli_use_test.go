@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -429,13 +430,23 @@ func TestCLIIssueActionBoundsReporting(t *testing.T) {
 	var actions atomic.Int32
 	started := make(chan time.Time, 1)
 	finished := make(chan time.Time, 1)
+	handlerErrors := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+		if r.URL.Path != "/api/v1/ui/telemetry" {
+			handlerErrors <- fmt.Errorf("unexpected telemetry path %q", r.URL.Path)
+			return
+		}
 		var body struct {
 			Event string `json:"event"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		require.Equal(t, "issue_created", body.Event)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			handlerErrors <- fmt.Errorf("decode telemetry request: %w", err)
+			return
+		}
+		if body.Event != "issue_created" {
+			handlerErrors <- fmt.Errorf("unexpected telemetry event %q", body.Event)
+			return
+		}
 		actions.Add(1)
 		started <- time.Now()
 		<-r.Context().Done()
@@ -448,11 +459,20 @@ func TestCLIIssueActionBoundsReporting(t *testing.T) {
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	start := time.Now()
 	startCLIIssueActionReport(cmd, "issue_created", true)
-	requestStarted := <-started
+	var requestStarted time.Time
+	select {
+	case requestStarted = <-started:
+	case err := <-handlerErrors:
+		t.Fatal(err)
+	case <-time.After(cliUseReportTimeout + time.Second):
+		t.Fatal("issue-action report did not start")
+	}
 	assert.Less(t, requestStarted.Sub(start), cliUseReportTimeout)
 	var requestFinished time.Time
 	select {
 	case requestFinished = <-finished:
+	case err := <-handlerErrors:
+		t.Fatal(err)
 	case <-time.After(cliUseReportTimeout + time.Second):
 		t.Fatal("issue-action report did not stop at its deadline")
 	}

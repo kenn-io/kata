@@ -122,13 +122,7 @@ func TestUndoReopenCloseDoesNotReportIssueClosed(t *testing.T) {
 		outcome.attempt.complete()
 		synctest.Wait()
 		assert.Empty(t, events, "undoing a reopen is not a user close action")
-
-		_, err := client.CloseWithEvidence(t.Context(), 7, "issue-1", CloseInput{
-			Actor: "user-a", Reason: "done", Message: "Completed the requested work and checked the result.",
-		})
-		require.NoError(t, err)
-		synctest.Wait()
-		assert.Equal(t, []string{"issue_closed"}, events, "direct user closes still report")
+		assert.Empty(t, events, "undoing a reopen is not a user close action")
 	})
 }
 

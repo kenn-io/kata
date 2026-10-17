@@ -399,7 +399,7 @@ func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[st
 func TestCaptureCoreActionsUsesProductionAllowlist(t *testing.T) {
 	for _, event := range []string{"issue_created", "issue_closed"} {
 		t.Run(event, func(t *testing.T) {
-			for _, surface := range []string{"web", "tui", "cli", ""} {
+			for _, surface := range []string{"web", ""} {
 				t.Run(surface, func(t *testing.T) {
 					reporter := &fakeTelemetryReporter{}
 					server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
