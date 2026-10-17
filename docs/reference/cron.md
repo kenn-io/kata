@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -118,11 +118,20 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `kind` | Required fields |
 | --- | --- |
 | `manual` | None. |
-| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. |
+| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. Day of week accepts `0`–`7`; `0` and `7` are Sunday. Ranges do not wrap: `fri-mon` and `mon-sun` are rejected (`sun` is `0`); use `1-7` for Monday through Sunday. A start with a step extends through `6` unless the start is `7`, so `5/2` is Friday only and `5-7/2` is Friday and Sunday. |
 | `interval` | `interval_seconds`: a positive integer. |
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+
+Kata 0.19.0 and adapters with their own parser reject `7` for Sunday. Stop
+writing affected definitions, let every spoke drain and get its relay queue
+acknowledged (offline spokes and pending retries included), upgrade the hub
+and its spokes in the same window, and only then write new syntax such as
+`7`. Upgrade adapters before writing `7` as well; until then, write `0`.
+Before downgrading a hub, convert each affected day-of-week element to an
+equivalent expression using `0`–`6`: `5-7` becomes `0,5,6`, `5-7/2` becomes
+`0,5`, and `7/2` becomes `0`.
 
 ### Actions
 

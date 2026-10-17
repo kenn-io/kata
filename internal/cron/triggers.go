@@ -51,6 +51,11 @@ func (t Trigger) Validate() error {
 
 // ParseCron preserves the shared five-field and descriptor grammar. Callers
 // evaluating schedules must use this parser rather than another cron dialect.
+// Day of week accepts both 0 and 7 as Sunday.
 func ParseCron(expression string) (cron.Schedule, error) {
+	expression, err := normalizeDayOfWeek(expression)
+	if err != nil {
+		return nil, err
+	}
 	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(expression)
 }
