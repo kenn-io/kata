@@ -115,6 +115,11 @@ retry keeps its request identity; a duplicate refusal offers an explicit force
 action. See the [comment rules](../reference/cli.md#issue-lifecycle) for
 validation and handle syntax.
 
+Fenced code blocks in descriptions and comments use the fence's language tag
+for syntax highlighting, including aliases such as `ts` for TypeScript. Token
+colors follow the light or dark theme. Untagged blocks and unsupported languages
+remain readable as escaped text; inline code keeps its normal inline formatting.
+
 When the editor pane is narrower than 640 pixels, the title appears above the
 actions so it remains readable.
 
@@ -226,6 +231,12 @@ also used by API clients. Plain HTTP outside loopback is limited to an explicitl
 trusted private network; otherwise terminate HTTPS at the same origin.
 `--insecure-readonly` can serve an anonymous browser but never grants mutation
 authority.
+
+Syntax highlighting uses a bundled WebAssembly regex engine. If a reverse proxy
+adds a Content Security Policy, its `script-src` must permit `'self'` and
+`'wasm-unsafe-eval'`, as the daemon's policy does. This allows WebAssembly
+compilation while keeping JavaScript eval, inline scripts, and scripts from
+other origins blocked.
 
 The Web UI exposes ordinary issue and project workflows plus the capability-
 gated, read-only credential ledger. It does not create or revoke tokens and
