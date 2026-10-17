@@ -56,6 +56,7 @@ type DaemonConfig struct {
 	Auth AuthConfig `toml:"auth"`
 	// Web carries browser-listener and externally published origin settings.
 	Web    WebConfig    `toml:"web"`
+	MCP    MCPConfig    `toml:"mcp"`
 	Backup BackupConfig `toml:"backup"`
 	// Storage carries DB selection plus backend-specific startup policy; see
 	// config.KataDSN for DSN precedence (env > file > default).

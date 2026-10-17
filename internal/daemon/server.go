@@ -38,12 +38,18 @@ import (
 	"golang.org/x/net/netutil"
 )
 
+// MCPService is the optional daemon-mounted transport. Its implementation lives
+// outside daemon so the CLI and daemon share tool code without an import cycle.
+type MCPService interface {
+	http.Handler
+	Available(context.Context) (bool, error)
+}
+
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
-// required; Endpoint is only consulted by Run; Broadcaster is owned by the
-// server (NewServer fills it if nil so handler tests don't have to plumb one
-// through). Hooks is optional and defaults to hooks.NewNoop() when nil so
-// mutation handlers can fan out events unconditionally.
+// required; Endpoint is only consulted by Run. Broadcaster and Hooks receive
+// defaults when nil so mutation handlers can publish events unconditionally.
 type ServerConfig struct {
+	MCP                       MCPService
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -367,6 +373,9 @@ func NewServer(cfg ServerConfig) *Server {
 		federationControlAdmission: make(chan struct{}, 16),
 	}
 	registerRoutes(humaAPI, mux, cfg)
+	if cfg.MCP != nil {
+		mux.Handle("/mcp", cfg.MCP)
+	}
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
 	}
@@ -418,7 +427,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		base := s.withFederationSigning(s.baseHandler, true)
 		base = withProjectAuthorization(s.cfg.DB, s.cfg.HostAccess != nil, s.cfg.TrustCallerAuthentication,
 			s.authPolicy.SelfAuthenticatedRoutes, s.noProjectDataRoutes, base)
-		return base, nil
+		return withoutMCP(base), nil
 	}
 	base := s.baseHandler
 	if base == nil {
@@ -446,7 +455,26 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler, nil
+	if policy.Kind != ListenerSharedTCP || s.cfg.MCP == nil {
+		return withoutMCP(handler), nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Add("Vary", "Authorization")
+		}
+		handler.ServeHTTP(w, r)
+	}), nil
+}
+
+func withoutMCP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // API returns the underlying huma.API for handler registration in tests.
@@ -704,6 +732,7 @@ func isMutation(method string) bool {
 // contract around the Huma streaming route.
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
+	registerMCPHandlers(humaAPI, cfg)
 	registerDoctorHandlers(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
 	registerTokenHandlers(humaAPI, cfg)

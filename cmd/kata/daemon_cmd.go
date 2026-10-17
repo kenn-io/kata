@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonmcp"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
@@ -1116,6 +1117,18 @@ func runDaemonProcess(
 		}
 	}()
 
+	var srv *daemon.Server
+	mcpService, err := daemonmcp.New(ctx, dcfg, endpoint, insecureReadonly, store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv.Handler().ServeHTTP(w, r)
+	}))
+	if err != nil {
+		return err
+	}
+	var mcpHandler daemon.MCPService
+	if mcpService != nil {
+		mcpHandler = mcpService
+	}
+
 	rootSigning, err := daemon.LoadRootSigning(ctx, store, filepath.Join(ns.DataDir, "federation-root.key"))
 	if err != nil {
 		return fmt.Errorf("load root attribution signing key: %w", err)
@@ -1392,7 +1405,8 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
-	srv := daemon.NewServer(daemon.ServerConfig{
+	srv = daemon.NewServer(daemon.ServerConfig{
+		MCP:                       mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,

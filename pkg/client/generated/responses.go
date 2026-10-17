@@ -115,6 +115,10 @@ type ShowIssueByUIDResponse = ShowIssueResponseBody
 
 type ShowIssueByUIDErrorResponse = ErrorEnvelope
 
+type McpCapabilitiesResponse = McpCapabilitiesOutputBody
+
+type McpCapabilitiesErrorResponse = ErrorEnvelope
+
 type PingResponse = PingResponseBody
 
 type PingErrorResponse = ErrorEnvelope
@@ -763,6 +767,18 @@ type ShowIssueByUIDResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowIssueByUIDResponse
+}
+
+type McpCapabilitiesResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type McpCapabilitiesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpCapabilitiesResponse
+	Headers200   *McpCapabilitiesResp200Headers
 }
 
 type PingResp struct {

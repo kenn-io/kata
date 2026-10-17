@@ -177,7 +177,7 @@ func isBrowserRequest(r *http.Request) bool {
 			return true
 		}
 	}
-	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml"
+	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml" && r.URL.Path != "/mcp"
 }
 
 // ordinaryAPIBearerRequest classifies CLI, TUI and federation traffic, leaving

@@ -56,6 +56,41 @@ selected a local runtime can use `kata mcp serve --all --runtime-dir
 /path/to/runtime` to reach that daemon over stdio. This option ignores the
 working directory's server selection and never starts a missing daemon.
 
+## Hub daemon endpoint
+
+A server daemon can expose the same tools at `/mcp`, sharing its API listener
+and bearer authentication. Enable it in that daemon's `config.toml` and restart:
+
+```toml
+[mcp]
+enabled = true
+actor = "gateway-agent" # required for static daemon tokens
+# projects = ["example-project", "shared-project"] # omitted means all projects
+```
+
+Point the gateway at `https://daemon.example/mcp` with
+`Authorization: Bearer <daemon token>`. Identity-mode user tokens use their
+actor; explicitly configured trusted-proxy actor policy retains REST precedence.
+A missing required proxy actor never falls back to `mcp.actor`. Bootstrap and
+issue-scoped tokens cannot use this endpoint. Token and storage administration
+stay unavailable. Project allowlists pin startup UIDs, surviving renames without
+granting access to a replacement project with the old name.
+
+This endpoint is opt-in on authoritative hubs and standalone **server** daemons.
+Startup rejects enabled MCP on any spoke, including mixed hub/spoke daemons,
+disabled replicas and pending declarative spoke mappings. A runtime join also
+disables MCP. The API must bind non-loopback TCP or have a non-loopback
+`web.public_origin` for a proxy deployment. Plain local daemons, Unix sockets,
+dedicated browser listeners, federation ingress and read-only mode do not serve
+it. Existing daemon private-network trust, Host and Origin checks still apply.
+
+`GET /api/v1/mcp/capabilities` reports availability and the relative `/mcp` path
+without disclosing credentials. Daemon MCP uses stateless Streamable HTTP with
+JSON responses, an 8 MiB request cap and no reusable MCP sessions. All available
+tool sections are already loaded. The separate `kata mcp serve` transports
+below keep their existing behavior, including on local agents and spokes;
+`kata mcp status` continues to describe those separate listeners.
+
 ## Transport
 
 The default transport is stdio. Use `--http` to run a Streamable HTTP listener

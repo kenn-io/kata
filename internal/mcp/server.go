@@ -30,6 +30,10 @@ const (
 
 // Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
+	// PreloadTools exposes available sections immediately for stateless HTTP.
+	PreloadTools bool
+	// ToolAdmission shares one budget across request-local HTTP servers.
+	ToolAdmission     sdkmcp.Middleware
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope
@@ -92,14 +96,19 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
 	})
-	server.AddReceivingMiddleware(toolAdmissionMiddleware(
-		rate.NewLimiter(toolCallsPerSecond, toolCallBurst),
-		make(chan struct{}, toolCallConcurrency),
-		options.ObserveToolCall,
-	))
+	admission := options.ToolAdmission
+	if admission == nil {
+		admission = NewToolAdmissionMiddleware(options.ObserveToolCall)
+	}
+	server.AddReceivingMiddleware(admission)
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
 	registerSectionLoaders(server, options)
 	return server, nil
+}
+
+// NewToolAdmissionMiddleware creates a budget that may span multiple servers.
+func NewToolAdmissionMiddleware(observe func()) sdkmcp.Middleware {
+	return toolAdmissionMiddleware(rate.NewLimiter(toolCallsPerSecond, toolCallBurst), make(chan struct{}, toolCallConcurrency), observe)
 }
 
 func toolAdmissionMiddleware(limiter *rate.Limiter, concurrent chan struct{}, observe func()) sdkmcp.Middleware {

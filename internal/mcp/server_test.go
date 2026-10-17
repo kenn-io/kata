@@ -48,6 +48,23 @@ var sectionLoaderNames = []string{
 	"kata.load_tokens",
 }
 
+func TestServerPreloadsAvailableSections(t *testing.T) {
+	session := connectRawTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, Scope: NewAllScope(),
+		Actor: "example-agent", Version: "test-version", PreloadTools: true,
+	})
+	listed, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(listed.Tools))
+	for _, tool := range listed.Tools {
+		names = append(names, tool.Name)
+	}
+	require.Contains(t, names, "kata.create")
+	require.Contains(t, names, "kata.load_issue_mutation")
+	require.NotContains(t, names, "kata.token_create")
+	require.NotContains(t, names, "kata.storage_import")
+}
+
 func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
 		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",

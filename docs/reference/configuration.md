@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Configuration
@@ -530,6 +530,22 @@ Postgres DSNs may carry credentials. Runtime redaction strips userinfo and
 query parameters before a DSN appears in daemon metadata, health output, import
 output, errors, or per-database namespace hashing. Use environment variables or
 secret-managed configuration rather than committing a credential-bearing DSN.
+
+### Daemon MCP
+
+The optional `[mcp]` section belongs to the serving daemon. Changes require a
+restart; `kata mcp serve` does not read it.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Mount `/mcp` on an authoritative server's shared TCP API listener. |
+| `actor` | empty | Required actor for static tokens; attributed user tokens and trusted-proxy policy take precedence. |
+| `projects` | `[]` | All active projects, or a fixed list pinned by UID at startup. |
+
+Enabling MCP on a spoke or plain local daemon is a startup error. It requires
+bearer authentication and preserves the daemon's network trust policy. See the
+[hub daemon MCP setup](mcp.md#hub-daemon-endpoint) for eligible listener shapes,
+actor precedence and gateway configuration.
 
 ### Connector instances
 
