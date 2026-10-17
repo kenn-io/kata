@@ -25,6 +25,9 @@ const (
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.
 	apiVersionMCPServer = "0.11.0"
+	// Fixed MCP scopes require the daemon to enforce X-Kata-Project-Scope
+	// inside the request transaction before following historical issue refs.
+	apiVersionMCPProjectScope = "0.29.0"
 )
 
 type daemonAPIHealth struct {

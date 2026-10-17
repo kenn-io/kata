@@ -29,6 +29,11 @@ kata mcp serve --all
 kata mcp serve --all --enable-token-admin
 ```
 
+Workspace-bound and explicit project scopes require daemon API `0.29.0` or
+newer so the daemon enforces their project limits inside each request.
+`--all` retains the daemon API `0.11.0` minimum. Startup rejects an older
+daemon before resolving projects or serving tool calls.
+
 With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
 no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
