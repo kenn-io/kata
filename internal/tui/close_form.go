@@ -44,6 +44,12 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		var apiError *APIError
 		m.activeAuthRejected = errors.As(msg.err, &apiError) && apiError != nil && apiError.Status == http.StatusUnauthorized
 		m.input = inputState{}
+		if m.attentionVisible() && m.attention.capabilityPending {
+			m.attention.capabilityPending = false
+			m.attention.loading = false
+			m.attention.err = msg.err
+			return m, nil
+		}
 		if m.view == viewCredentials && m.credentials.capabilityPending {
 			m.credentials.capabilityPending = false
 			m.credentials.loading = false
@@ -79,6 +85,10 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	m.closeRequiresEvidence = msg.auth.CloseRequiresEvidence
 	if !m.inputMutationAllowed() {
 		m.input = inputState{}
+	}
+	if m.attentionVisible() && m.attention.capabilityPending {
+		next, cmd := m.reloadAttention()
+		return next, combineCmds(cmd, expiryCmd)
 	}
 	if m.view == viewCredentials && m.credentials.capabilityPending {
 		m.credentials.capabilityPending = false

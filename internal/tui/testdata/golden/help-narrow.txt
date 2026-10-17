@@ -8,6 +8,7 @@ I         inbox
 D         daemons
 F         federation
 C         credentials
+T         attention
 L         toggle layout
 
 Graph

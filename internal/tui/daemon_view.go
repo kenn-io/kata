@@ -171,6 +171,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.projectsGen = 0
 	m.federation = federationState{}
 	m.credentials = credentialAuditState{}
+	m.attention = attentionState{gen: m.attention.gen + 1}
 	m.pendingRefetch = false
 	m.projectsStale = false
 	m.projectsRefetchPending = false

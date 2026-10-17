@@ -8,23 +8,24 @@ I         inbox                        esc/backspace  back                      
 D         daemons                      e              edit body                          ctrl+u         clear prompt
 F         federation                   c              new comment
 C         credentials                  R              typed reply to selected comment    Filters
-L         toggle layout                ]              next comment link                  /       search
-                                       [              previous comment link              s       cycle status filter
-Graph                                  p              set parent                         f       filter (form)
-k           up                         b              add blocker                        c       clear filters
-j           down                       l              add related                        ctrl+r  reset filter form
-up/C-p      scroll up                  +              add label
-down/C-n    scroll down                -              remove label
-pgup/M-v    page up                    a              assign owner
-pgdown/C-v  page down                  A              clear owner
-g/C-M-<     first                      t              timed assignment
-G/C-M->     last                       !              set priority
-enter       open detail
-space       expand/collapse            Children
-right       expand                     N      new child
-left        collapse                   j/k    move child cursor
-E           expand/collapse all        ↑↓     scroll detail viewport
-n           new issue (form)           enter  open child
+T         attention                    ]              next comment link                  /       search
+L         toggle layout                [              previous comment link              s       cycle status filter
+                                       p              set parent                         f       filter (form)
+Graph                                  b              add blocker                        c       clear filters
+k           up                         l              add related                        ctrl+r  reset filter form
+j           down                       +              add label
+up/C-p      scroll up                  -              remove label
+down/C-n    scroll down                a              assign owner
+pgup/M-v    page up                    A              clear owner
+pgdown/C-v  page down                  t              timed assignment
+g/C-M-<     first                      !              set priority
+G/C-M->     last
+enter       open detail                Children
+space       expand/collapse            N      new child
+right       expand                     j/k    move child cursor
+left        collapse                   ↑↓     scroll detail viewport
+E           expand/collapse all        enter  open child
+n           new issue (form)
 v           toggle flat/nested view
 o           toggle graph order
 x           close

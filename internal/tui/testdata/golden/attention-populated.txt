@@ -1,0 +1,17 @@
+kata / attention
+for alex · example-project · 4 requests · 1 skipped
+
+  Ref       Title                                                                  From                      Work
+▶ abc4      issue abc4                                                             sam                       needs-human
+  def5      issue def5                                                             system                    stuck
+  ghi6      issue ghi6                                                             system / cron
+  jkl7      issue jkl7                                                             sam / worker
+
+Please review the retry behavior before the next run. Please review the retry behavior before the next run. Please revie
+w the retry behavior before the next run. Please review the retry behavior before the next run. Please review the retry
+behavior before the next run. Please review the retry behavior before the next run. Please review the retry behavior bef
+ore the next run. Please review the retry behavior before the next run. Please review the retry behavior before the next
+ run. Please review the retry behavior before the next run. Please review the retry behavior before the next run. Please
+ review the retry behavior before the next run.
+
+ ↑↓ move▕ ↵ open▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help▕ q quit

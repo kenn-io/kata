@@ -27,6 +27,7 @@ const (
 	viewDaemons
 	viewFederation
 	viewCredentials
+	viewAttention
 )
 
 // Model is the top-level Bubble Tea model. Sub-views are embedded by
@@ -157,6 +158,7 @@ type Model struct {
 	// federationState in federation_view.go.
 	federation  federationState
 	credentials credentialAuditState
+	attention   attentionState
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -569,6 +571,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if loaded, ok := msg.(attentionLoadedMsg); ok {
+		return m.handleAttentionLoaded(loaded)
+	}
 	if loaded, ok := msg.(credentialsLoadedMsg); ok {
 		return m.handleCredentialsLoaded(loaded)
 	}
@@ -870,6 +875,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		if m.view == viewFederation {
 			next, cmd := m.routeFederationViewKey(msg)
+			return next, cmd, true
+		}
+		if m.view == viewAttention {
+			next, cmd := m.routeAttentionViewKey(msg)
 			return next, cmd, true
 		}
 		if m.view == viewCredentials {
@@ -2212,16 +2221,19 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.keymap.Daemons.matches(msg) {
+		m = m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToDaemons()
 		return next, cmd, true
 	}
 	if m.keymap.Federation.matches(msg) {
+		m = m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToFederation()
 		return next, cmd, true
 	}
 	if m.keymap.Credentials.matches(msg) {
+		m = m.prepareAttentionGlobalExit()
 		next, cmd := m.transitionToCredentials()
 		return next, cmd, true
 	}
@@ -2232,17 +2244,26 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	}
+	if m.keymap.Attention.matches(msg) && m.view != viewEmpty && m.view != viewHelp {
+		if m.view == viewAttention {
+			return m.prepareAttentionGlobalExit(), nil, true
+		}
+		next, cmd := m.transitionToAttention()
+		return next, cmd, true
+	}
 	if m.keymap.Help.matches(msg) {
 		m = m.prepareCredentialsGlobalExit()
 		next, helpCmd := m.toggleHelp()
 		return next, helpCmd, true
 	}
 	if m.keymap.Inbox.matches(msg) {
+		m = m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.toggleInbox()
 		return next, cmd, true
 	}
 	if m.keymap.Projects.matches(msg) {
+		m = m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToProjects()
 		return next, cmd, true
@@ -3528,6 +3549,8 @@ func (m Model) viewBody() string {
 		return renderDaemons(m)
 	case viewFederation:
 		return renderFederation(m)
+	case viewAttention:
+		return renderAttention(m)
 	case viewCredentials:
 		return renderCredentials(m)
 	}
