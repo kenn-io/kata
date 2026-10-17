@@ -3,12 +3,14 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 type federationIngestClaimAuditIssue struct {
@@ -83,7 +85,8 @@ func federationIngestClaimAuditIssueUIDs(
 		seen[candidate.UID] = struct{}{}
 		output = append(output, candidate)
 	}
-	if claimWorkMutationRequiresClaim(event.Type) || event.Type == "issue.snapshot" {
+	if (claimWorkMutationRequiresClaim(event.Type) && !attentionOnlyMetadataEvent(event.Type, event.Payload)) ||
+		event.Type == "issue.snapshot" {
 		issueUID, err := payloadIssueUID(event, payload)
 		if err != nil {
 			return nil, err
@@ -249,6 +252,13 @@ func claimWorkMutationRequiresClaim(eventType string) bool {
 	default:
 		return false
 	}
+}
+
+// attentionOnlyMetadataEvent identifies notification-slot writes, including
+// the ones a typed reply makes in its comment transaction. Comments need no
+// lease, so the attention they raise must not count as uncovered work.
+func attentionOnlyMetadataEvent(eventType string, payload jsontext.Value) bool {
+	return eventType == "issue.metadata_updated" && notification.AttentionOnlyDiff(payload)
 }
 
 func claimWorkMutationRequiresPeerClaim(eventType string) bool {

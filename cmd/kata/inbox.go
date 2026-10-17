@@ -26,12 +26,15 @@ const (
 )
 
 type inboxRequest struct {
-	Ref      string `json:"ref"`
-	Project  string `json:"project,omitzero"`
-	Title    string `json:"title"`
-	From     string `json:"from"`
-	Teammate string `json:"teammate,omitempty"`
-	Message  string `json:"message"`
+	Ref       string `json:"ref"`
+	Project   string `json:"project,omitzero"`
+	Title     string `json:"title"`
+	From      string `json:"from"`
+	Teammate  string `json:"teammate,omitempty"`
+	Message   string `json:"message"`
+	Re        string `json:"re,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Broadcast bool   `json:"broadcast,omitzero"`
 }
 
 type inboxOutput struct {
@@ -52,7 +55,12 @@ func newInboxCmd() *cobra.Command {
 "coordinator/*". Bound project by default; --all reads every active project
 and prints qualified refs. --context emits bounded context for a harness.
 --context conflicts with --agent, --json, or --format; omit output selectors.
-Reading does not clear a request; clear it with kata notify --clear.`,
+Reading does not clear a request; clear it with kata notify --clear.
+
+A row with re=<comment> asks you to answer that comment; answering it with
+comment --reply, --confirm, --refute, or --supersede clears it. A row with
+kind= reports a reply to one of your comments or an answer to your request;
+broadcast=true marks a notify --broadcast.`,
 		Example: `  kata inbox --for coordinator/teammate-1 --agent
   kata inbox --for coordinator --all --agent
   kata inbox --for coordinator/teammate-1 --context`,
@@ -146,6 +154,7 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 	}
 	var list struct {
 		Issues []struct {
+			ProjectID   int64                     `json:"project_id"`
 			ShortID     string                    `json:"short_id"`
 			QualifiedID string                    `json:"qualified_id"`
 			ProjectName string                    `json:"project_name"`
@@ -167,9 +176,12 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 		// Decode optional attribution independently so a malformed teammate
 		// cannot hide an otherwise usable attention request.
 		var value struct {
-			From     string         `json:"from"`
-			Message  string         `json:"message"`
-			Teammate jsontext.Value `json:"teammate"`
+			From      string         `json:"from"`
+			Message   string         `json:"message"`
+			Teammate  jsontext.Value `json:"teammate"`
+			Re        jsontext.Value `json:"re"`
+			Kind      jsontext.Value `json:"kind"`
+			Broadcast jsontext.Value `json:"broadcast"`
 		}
 		raw, ok := issue.Metadata[key]
 		if !ok || json.Unmarshal(raw, &value) != nil ||
@@ -189,8 +201,55 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 				handle = ""
 			}
 		}
+		var re, kind string
+		var broadcast bool
+		_ = json.Unmarshal(value.Re, &re)
+		_ = json.Unmarshal(value.Kind, &kind)
+		_ = json.Unmarshal(value.Broadcast, &broadcast)
+		if kind != "" && re != "" && issue.ProjectID > 0 {
+			response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
+				PathParams: &generated.ShowIssuePath{ProjectID: issue.ProjectID, Ref: issue.ShortID},
+				Query:      &generated.ShowIssueQuery{Thread: new(re)},
+			})
+			currentHandle := re
+			var refreshErr error
+			if response == nil {
+				refreshErr = externalCLITransportError(response, callErr)
+			} else if response.StatusCode != 404 {
+				refreshErr = externalCLIResponseError(response.StatusCode, response.Body, callErr)
+				if refreshErr == nil {
+					var detail struct {
+						Comments []struct {
+							UID    string `json:"uid"`
+							Handle string `json:"handle"`
+						} `json:"comments"`
+					}
+					refreshErr = json.Unmarshal(response.Body, &detail)
+					if refreshErr == nil {
+						for _, comment := range detail.Comments {
+							if comment.UID == re && comment.Handle != "" {
+								currentHandle = comment.Handle
+								break
+							}
+						}
+					}
+				}
+			}
+			if refreshErr != nil && !flags.Quiet {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not refresh notification on %s; using comment UID\n", textsafe.Line(ref))
+			}
+			from := value.From
+			if handle != "" {
+				from += "/" + handle
+			}
+			note := "latest: " + kind + " " + currentHandle + " by " + from
+			if !strings.HasPrefix(value.Message, "latest: ") {
+				note += ": " + value.Message
+			}
+			value.Message = note
+		}
 		requests = append(requests, inboxRequest{
-			Ref: ref, Project: project, Title: issue.Title, From: value.From, Teammate: handle, Message: value.Message,
+			Ref: ref, Project: project, Title: issue.Title, From: value.From, Teammate: handle, Message: value.Message, Re: re, Kind: kind, Broadcast: broadcast,
 		})
 	}
 	sort.Slice(requests, func(i, j int) bool { return requests[i].Ref < requests[j].Ref })
@@ -222,6 +281,15 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 				fields = append(fields, agentRowField("teammate", request.Teammate))
 			}
 			fields = append(fields, agentRowField("message", request.Message))
+			if request.Re != "" {
+				fields = append(fields, agentRowField("re", request.Re))
+			}
+			if request.Kind != "" {
+				fields = append(fields, agentRowField("kind", request.Kind))
+			}
+			if request.Broadcast {
+				fields = append(fields, agentRowField("broadcast", "true"))
+			}
 			if err := writeAgentKVRow(cmd.OutOrStdout(), fields...); err != nil {
 				return err
 			}
@@ -241,9 +309,12 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest, a
 		if request.Teammate != "" {
 			from += " / " + request.Teammate
 		}
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n  from %s: %s\n",
-			textsafe.Line(request.Ref), textsafe.Line(request.Title),
-			textsafe.Line(from), textsafe.Line(request.Message)); err != nil {
+		message := inboxAttentionText(request)
+		if !request.Broadcast {
+			message = "from " + from + ": " + message
+		}
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n  %s\n",
+			textsafe.Line(request.Ref), textsafe.Line(request.Title), textsafe.Line(message)); err != nil {
 			return err
 		}
 	}
@@ -266,7 +337,7 @@ func renderInboxContext(recipient string, requests []inboxRequest, allProjects b
 		ref, cutRef := truncateInboxField(textsafe.Line(request.Ref), inboxContextRefLimit)
 		title, cutTitle := truncateInboxField(textsafe.Line(request.Title), inboxContextTitleLimit)
 		from, cutFrom := truncateInboxField(textsafe.Line(request.From), inboxContextFromLimit)
-		message, cutMessage := truncateInboxField(textsafe.Line(request.Message), inboxContextMsgLimit)
+		message, cutMessage := truncateInboxField(textsafe.Line(inboxAttentionText(request)), inboxContextMsgLimit)
 		truncated = truncated || cutRef || cutTitle || cutFrom || cutMessage
 		attribution := ""
 		if request.Teammate != "" {
@@ -333,4 +404,33 @@ func truncateInboxField(value string, limit int) (string, bool) {
 		end--
 	}
 	return value[:end] + "…", true
+}
+
+func inboxAttentionText(request inboxRequest) string {
+	from := request.From
+	if request.Teammate != "" {
+		from += "/" + request.Teammate
+	}
+	if request.Broadcast {
+		note := "broadcast from " + from
+		if request.Re != "" {
+			note += " re " + request.Re
+		}
+		return note + ": " + request.Message
+	}
+	if request.Re != "" {
+		handle := strings.ToLower(request.Re)
+		if len(handle) > 6 {
+			handle = handle[len(handle)-6:]
+		}
+		if request.Kind != "" {
+			note := "latest: " + request.Kind + " c:" + handle + " by " + from
+			if strings.HasPrefix(request.Message, "latest: ") {
+				return request.Message
+			}
+			return note + ": " + request.Message
+		}
+		return "re " + request.Re + ": " + request.Message
+	}
+	return request.Message
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -2162,6 +2163,49 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 	require.Len(t, violations, 2)
 	assert.Equal(t, expired.EventUID, violations[0].OffendingEventUID)
 	assert.Equal(t, "issue.assignment_expired", violations[0].OffendingEventType)
+
+	// A typed reply is a comment, which needs no lease. The attention slots
+	// it updates in the same transaction are communication too, so the
+	// reply's notification metadata must not count as uncovered work.
+	replyUID, err := uid.New()
+	if err != nil {
+		return err
+	}
+	reply := newRemoteEvent(t, hub, &issueUID, "issue.commented", "sync-agent", spokeUID, 306,
+		jsontext.Value(`{"comment_uid":"`+replyUID+`","author":"sync-agent","body":"answer","reply_to_uid":"`+commentUID+`","reply_kind":"reply","created_at":"2026-05-23T12:06:00.000Z"}`))
+	slot := `{"from":"sync-agent","message":"latest: reply by sync-agent","re":"` + replyUID + `","kind":"reply"}`
+	replyNotice := newRemoteEvent(t, hub, &issueUID, "issue.metadata_updated", "sync-agent", spokeUID, 307,
+		jsontext.Value(`{"diff":{"`+notification.MetadataKey("other-worker")+`":{"from":null,"to":`+slot+`}},"revision_new":7,"updated_at":"2026-05-23T12:06:00.000Z"}`))
+	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hub.ID, SpokeInstanceUID: spokeUID, BoundActor: "sync-agent",
+		Events: []db.FederationIngestEvent{{SourceEventID: 17, Event: reply}, {SourceEventID: 18, Event: replyNotice}},
+	})
+	if err != nil {
+		return fmt.Errorf("ingest reply notification under another holder's lease: %w", err)
+	}
+	_, violationCount, err = store.UnresolvedClaimViolationsForIssue(ctx, hub.ID, issueUID, 10)
+	if err != nil {
+		return fmt.Errorf("read claim violations after reply notification: %w", err)
+	}
+	assert.Equal(t, int64(2), violationCount, "reply notification slots are not leased work")
+
+	// Other metadata in the same diff is still work and still needs the lease.
+	mixed := newRemoteEvent(t, hub, &issueUID, "issue.metadata_updated", "sync-agent", spokeUID, 308,
+		jsontext.Value(`{"diff":{"`+notification.MetadataKey("third-worker")+`":{"from":null,"to":`+slot+`},"review.state":{"from":null,"to":"ready"}},"revision_new":8,"updated_at":"2026-05-23T12:07:00.000Z"}`))
+	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hub.ID, SpokeInstanceUID: spokeUID, BoundActor: "sync-agent",
+		Events: []db.FederationIngestEvent{{SourceEventID: 19, Event: mixed}},
+	})
+	if err != nil {
+		return fmt.Errorf("ingest mixed metadata update: %w", err)
+	}
+	violations, violationCount, err = store.UnresolvedClaimViolationsForIssue(ctx, hub.ID, issueUID, 10)
+	if err != nil {
+		return fmt.Errorf("read claim violations after mixed metadata update: %w", err)
+	}
+	assert.Equal(t, int64(3), violationCount)
+	require.NotEmpty(t, violations)
+	assert.Equal(t, mixed.EventUID, violations[0].OffendingEventUID)
 
 	zero, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: hub.ID})
 	if err != nil {

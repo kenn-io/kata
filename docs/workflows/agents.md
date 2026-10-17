@@ -631,8 +631,9 @@ Every linked comment notifies the target's author and teammate. Replies to your
 own comments do not notify you. Each issue has one `notify.<recipient>` slot
 per exact recipient; later link notifications replace earlier ones. The inbox
 shows the latest kind and comment handle. Its count, if present, is only a hint.
-A link never replaces a human request without a `re` comment pointer. The reply
-still appears in `show` when that request takes precedence.
+A link replaces only an earlier link notification. It never replaces a request,
+with or without a `re` comment pointer. The reply still appears in `show` when
+that request takes precedence.
 
 A `confirm` also reaches the issue owner, the parent owner's address for a
 child issue, and up to 8 earlier linkers of the same target, newest first. A
@@ -640,10 +641,14 @@ recipient already awaiting a link notification about that target is skipped.
 The parent owner's slot is written on the child issue; coordinators can find it
 with `kata inbox --for coordinator --all` without `--project` or `--workspace`.
 
-An inbox slot's `re` is the comment UID the recipient should open. Posting
-`--reply` to that comment clears the matching slot in the same transaction.
-Only slots with `re` auto-clear; ordinary human requests still require explicit
-`notify --clear` after handling. To point one worker at a specific comment:
+An inbox slot's `re` is the comment UID the recipient should open. Any typed
+answer to that comment (`--reply`, `--confirm`, `--refute`, or `--supersede`)
+clears the matching slot in the same transaction, on whichever issue it was
+requested. The answer can be posted on any issue in the project. The requester's
+slot on the requested issue then reports the answer, so a `wait --until reply`
+there wakes. Only slots with `re` auto-clear; ordinary human requests still
+require explicit `notify --clear` after handling. To point one worker at a
+specific comment:
 
 ```sh
 kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq \
@@ -708,8 +713,10 @@ kata inbox --for coordinator
 `--re <cref>` is optional. Broadcast reaches the issue owner and each distinct
 commenter, plus owners and commenters on open child issues one level deep,
 using local links. By default commenters are addressed as actors; add
-`--teammates` to include their teammate addresses. The sender, `system`, and
-integration authors are excluded. All recipient slots are written on the
+`--teammates` to include their teammate addresses. The sender's actor and exact
+address, `system`, and integration authors (`<provider>-sync` and
+`integration:<name>`) are excluded. With `--teammates`, the sender's other
+teammates are still included. All recipient slots are written on the
 broadcast issue in one metadata event. The inbox labels it as a broadcast.
 
 Broadcast refuses closed issues. More than 50 recipients is an error; Kata

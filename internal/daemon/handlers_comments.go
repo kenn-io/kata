@@ -107,6 +107,8 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.IdempotencyKey != "" {
 			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body, handle, replyUID, in.Body.Kind)
 		}
+		var committedEvents []db.Event
+		ctx = db.WithCommentMetadataHook(ctx, commentNotificationHook(), &committedEvents)
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:    issue.ID,
 			Author:     actor,
@@ -116,6 +118,10 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			IdempotencyKey:         in.IdempotencyKey,
 			IdempotencyFingerprint: fingerprint,
 		})
+		err = finishPeerFenceRejection(ctx, err)
+		for _, event := range committedEvents {
+			cfg.Publish().Event(event.ProjectID, event)
+		}
 		if err != nil {
 			if duplicate, ok := errors.AsType[*db.DuplicateCommentReplyError](err); ok {
 				data := map[string]any{}
@@ -156,7 +162,9 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
-		cfg.Publish().Event(in.ProjectID, evt)
+		if len(committedEvents) == 0 {
+			cfg.Publish().Event(evt.ProjectID, evt)
+		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -224,7 +232,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {

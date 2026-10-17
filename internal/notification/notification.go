@@ -35,9 +35,12 @@ const (
 
 // Value is the JSON payload stored in a notify.* metadata entry.
 type Value struct {
-	From     string `json:"from"`
-	Teammate string `json:"teammate,omitempty"`
-	Message  string `json:"message"`
+	From      string `json:"from"`
+	Teammate  string `json:"teammate,omitempty"`
+	Message   string `json:"message"`
+	Re        string `json:"re,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Broadcast bool   `json:"broadcast,omitzero"`
 }
 
 // Automatic describes a system-generated notification recognized from metadata.
@@ -139,4 +142,22 @@ func messagePrefix(kind Kind) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// AttentionOnlyDiff reports whether an issue.metadata_updated payload changes
+// only notification slots. Such a change asks someone to look at an issue; it
+// is communication like a comment, not leased work on the issue.
+func AttentionOnlyDiff(payload jsontext.Value) bool {
+	var decoded struct {
+		Diff map[string]jsontext.Value `json:"diff"`
+	}
+	if json.Unmarshal(payload, &decoded) != nil || len(decoded.Diff) == 0 {
+		return false
+	}
+	for key := range decoded.Diff {
+		if !strings.HasPrefix(key, KeyPrefix) {
+			return false
+		}
+	}
+	return true
 }
