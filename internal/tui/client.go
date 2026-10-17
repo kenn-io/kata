@@ -34,6 +34,19 @@ type Client struct {
 	mu                     sync.RWMutex
 }
 
+type suppressIssueActionTelemetryKey struct{}
+
+func suppressIssueActionTelemetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressIssueActionTelemetryKey{}, true)
+}
+
+func issueActionSurface(ctx context.Context) *string {
+	if ctx.Value(suppressIssueActionTelemetryKey{}) == true {
+		return nil
+	}
+	return new("tui")
+}
+
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
 // base is the daemon URL — "http://kata.invalid" for unix-socket transport.
 func NewClient(base string, hc *http.Client) *Client {
@@ -273,9 +286,9 @@ func (c *Client) CreateIssue(ctx context.Context, projectID int64, body CreateIs
 		}
 		payload.Links = append(payload.Links, item)
 	}
-	options := &generated.CreateIssueRequestOptions{PathParams: &generated.CreateIssuePath{ProjectID: fmt.Sprint(projectID)}, Body: payload}
+	options := &generated.CreateIssueRequestOptions{PathParams: &generated.CreateIssuePath{ProjectID: fmt.Sprint(projectID)}, Body: payload, Header: &generated.CreateIssueHeaders{XKataSurface: issueActionSurface(ctx)}}
 	if body.IdempotencyKey != "" {
-		options.Header = &generated.CreateIssueHeaders{IdempotencyKey: &body.IdempotencyKey}
+		options.Header.IdempotencyKey = &body.IdempotencyKey
 	}
 	apiClient, err := c.generatedClient()
 	if err != nil {
@@ -303,7 +316,7 @@ func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) 
 	if err != nil {
 		return nil, err
 	}
-	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
+	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Header: &generated.CloseIssueHeaders{XKataSurface: issueActionSurface(ctx)}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
 	if wire == nil {
 		return nil, callErr
 	}
@@ -337,6 +350,7 @@ func (c *Client) CloseWithEvidence(
 	}
 	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &payload,
+		Header: &generated.CloseIssueHeaders{XKataSurface: issueActionSurface(ctx)},
 	})
 	if wire == nil {
 		return nil, callErr

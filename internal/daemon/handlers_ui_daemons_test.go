@@ -179,6 +179,7 @@ func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t 
 
 func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "web", r.Header.Get("X-Kata-Surface"))
 		assert.Equal(t, "/api/v1/ui/snapshot", r.URL.Path)
 		assert.Equal(t, "view=all-open", r.URL.RawQuery)
 		assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
@@ -215,6 +216,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	request.Header.Set("X-Kata-Actor", "user-a")
 	request.Header.Set("X-Example-Proxy", "user-a")
 	request.Header.Set("Accept", "application/json")
+	request.Header.Set("X-Kata-Surface", "web")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()

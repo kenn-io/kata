@@ -6885,7 +6885,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.28.0
+  version: 0.29.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -9396,6 +9396,10 @@ paths:
     post:
       operationId: createIssue
       parameters:
+        - in: header
+          name: X-Kata-Surface
+          schema:
+            type: string
         - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
           in: path
           name: project_id
@@ -9633,6 +9637,10 @@ paths:
     post:
       operationId: closeIssue
       parameters:
+        - in: header
+          name: X-Kata-Surface
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true

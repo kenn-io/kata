@@ -140,3 +140,22 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 		}
 	}
 }
+
+func TestCoreActionSurfaceAllowlist(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		for _, surface := range []any{"web", "tui", "cli", "", "unsupported", nil, 1} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"surface": surface, "title": "private"})
+			if surface == "web" || surface == "tui" || surface == "cli" {
+				require.NoError(t, err)
+				assert.Equal(t, surface, props["surface"])
+				assert.NotContains(t, props, "title")
+			} else {
+				require.Error(t, err)
+			}
+		}
+		_, err := reporter.SanitizeProperties(event, nil)
+		require.Error(t, err)
+	}
+}

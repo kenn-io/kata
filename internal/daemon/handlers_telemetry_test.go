@@ -57,20 +57,32 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 }
 
 type fakeTelemetryReporter struct {
+	events   []string
 	failNext bool
 	captured []map[string]any
 }
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
 	event = strings.TrimSpace(event)
-	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
+	return event == "app_opened" || event == "session_ended" || event == "screen_viewed" || event == "issue_created" || event == "issue_closed"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
-func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
 	if f.failNext {
 		f.failNext = false
 		return errors.New("capture failed")
 	}
+	if event == "issue_created" || event == "issue_closed" {
+		reporter, err := telemetry.NewReporter(telemetry.Options{})
+		if err != nil {
+			return err
+		}
+		_, err = reporter.SanitizeProperties(event, properties)
+		if err != nil {
+			return err
+		}
+	}
+	f.events = append(f.events, event)
 	f.captured = append(f.captured, properties)
 	return nil
 }

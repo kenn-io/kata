@@ -209,6 +209,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if err == nil && changed {
 			cfg.Publish().Events(in.ProjectID, events)
+			if cfg.Telemetry != nil && issueScopeFromContext(ctx) == nil {
+				_ = cfg.Telemetry.Capture("issue_closed", map[string]any{"surface": in.Surface})
+			}
 		}
 		if err != nil {
 			// A connection can fail after the database commits. The keyed

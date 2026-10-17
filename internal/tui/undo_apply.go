@@ -83,9 +83,13 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 				out.err = errors.New("evidence-bearing done close is required")
 				return out
 			}
-			out.resp, out.err = closer.CloseWithEvidence(ctx, entry.projectID, entry.uid, *evidence)
+			out.resp, out.err = closer.CloseWithEvidence(
+				suppressIssueActionTelemetry(ctx), entry.projectID, entry.uid, *evidence,
+			)
 		} else {
-			out.resp, out.err = c.KataAPI.Close(ctx, entry.projectID, entry.uid, entry.actor)
+			out.resp, out.err = c.KataAPI.Close(
+				suppressIssueActionTelemetry(ctx), entry.projectID, entry.uid, entry.actor,
+			)
 		}
 	case "owner.assign":
 		if equalStringPtr(current.Owner, entry.before.Owner) {

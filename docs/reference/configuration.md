@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Configuration
@@ -1075,6 +1075,20 @@ a shared daemon counts that daemon's install. The daemon forwards one
 `app_opened` per surface per UTC day and forgets what it sent when it restarts,
 so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
+
+The daemon records completed issue creates and closes as `issue_created` and
+`issue_closed` with only `surface: web`, `tui`, or `cli`. Each committed mutation
+that changes the issue counts, including repeated actions in one day. Web issue
+removal counts as a close. Idempotent replays, reused creates, already-closed
+issues, failed writes, reopen operations, and TUI undo actions count nothing.
+
+Clients send their surface in the optional `X-Kata-Surface` mutation header.
+CLI actions follow the terminal and agent-mode rules above. Missing or
+unsupported surfaces drop the count and leave the mutation alone. Issue-scoped
+credentials count nothing. The daemon enqueues the event in memory after the
+write commits, so action telemetry adds no request or wait to a command, TUI
+exit, or web action. Delivery is best effort and follows the daemon's opt-out
+setting. Older daemons ignore the header and record no action count.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.

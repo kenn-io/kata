@@ -219,6 +219,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		cfg.Publish().Event(in.ProjectID, evt)
+		if cfg.Telemetry != nil && issueScopeFromContext(ctx) == nil {
+			_ = cfg.Telemetry.Capture("issue_created", map[string]any{"surface": in.Surface})
+		}
 		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
 		if err != nil {
 			return nil, err
