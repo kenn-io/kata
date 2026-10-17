@@ -364,6 +364,9 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
+	if err := db.RecordFederationCurrentProjectResets(ctx, tx, result.InsertedEventUIDs, nil); err != nil {
+		return db.FederationIngestResult{}, err
+	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err
 	}
