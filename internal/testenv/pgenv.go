@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -94,8 +95,15 @@ func newPostgresContainer(
 	baseDSN string,
 ) (string, func()) {
 	t.Helper()
+	return newIsolatedPostgresDatabase(ctx, t, postgresServerDSN(ctx, t, image, baseDSN), "")
+}
+
+// postgresServerDSN returns the explicit server DSN, or the shared container
+// for image, skipping the test when neither is available.
+func postgresServerDSN(ctx context.Context, t *testing.T, image, baseDSN string) string {
+	t.Helper()
 	if baseDSN != "" {
-		return newIsolatedPostgresDatabase(ctx, t, baseDSN)
+		return baseDSN
 	}
 	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN, os.Getenv(postgresAutoContainerEnv)) {
 		t.Skip("automatic PostgreSQL testcontainers are disabled; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
@@ -104,7 +112,136 @@ func newPostgresContainer(
 	if server.err != nil {
 		t.Skipf("postgres testcontainer unavailable (docker/podman not reachable?): %v", server.err)
 	}
-	return newIsolatedPostgresDatabase(ctx, t, server.dsn)
+	return server.dsn
+}
+
+// postgresTemplatePrefix names template databases so any test process can
+// find templates that a finished or crashed process left behind.
+const postgresTemplatePrefix = "kata_template_"
+
+// PostgresTemplate gives each test a clone of a database that prepare set up
+// once per server, so tests skip repeating expensive setup such as installing
+// a schema. Clones come from the same server as NewPostgresContainer.
+type PostgresTemplate struct {
+	prepare func(ctx context.Context, dsn string) error
+	mu      sync.Mutex
+	servers map[string]postgresTemplateServer
+}
+
+type postgresTemplateServer struct {
+	name string
+	err  error
+}
+
+// NewPostgresTemplate returns a template that prepare initializes through
+// the given DSN. prepare must close its connections before returning, because
+// PostgreSQL cannot clone a database that has open sessions.
+func NewPostgresTemplate(prepare func(ctx context.Context, dsn string) error) *PostgresTemplate {
+	return &PostgresTemplate{prepare: prepare, servers: map[string]postgresTemplateServer{}}
+}
+
+// NewDatabase returns a DSN for an isolated clone of the template and a
+// cleanup function that drops it. It skips like NewPostgresContainer.
+//
+//nolint:revive // t is the canonical first arg for testing helpers
+func (tmpl *PostgresTemplate) NewDatabase(t *testing.T, ctx context.Context) (string, func()) {
+	t.Helper()
+	baseDSN := postgresServerDSN(ctx, t, "pgvector/pgvector:pg17", os.Getenv("KATA_TEST_POSTGRES_DSN"))
+	server := tmpl.on(ctx, baseDSN)
+	if server.err != nil {
+		t.Fatalf("prepare PostgreSQL test template: %v", server.err)
+	}
+	return newIsolatedPostgresDatabase(ctx, t, baseDSN, server.name)
+}
+
+func (tmpl *PostgresTemplate) on(ctx context.Context, baseDSN string) postgresTemplateServer {
+	tmpl.mu.Lock()
+	defer tmpl.mu.Unlock()
+	if server, ok := tmpl.servers[baseDSN]; ok {
+		return server
+	}
+	name, err := createPostgresTemplate(context.WithoutCancel(ctx), baseDSN, tmpl.prepare)
+	server := postgresTemplateServer{name: name, err: err}
+	tmpl.servers[baseDSN] = server
+	return server
+}
+
+// createPostgresTemplate builds a template database. Its owner keeps a
+// session named after the template open until the process exits; templates
+// without such a session are abandoned and are dropped here first.
+func createPostgresTemplate(ctx context.Context, baseDSN string, prepare func(context.Context, string) error) (string, error) {
+	name := fmt.Sprintf("%s%d_%d", postgresTemplatePrefix, os.Getpid(), postgresDatabaseCounter.Add(1))
+	ownerDSN, err := postgresDatabaseDSN(baseDSN, "")
+	if err != nil {
+		return "", err
+	}
+	query := ownerDSN.Query()
+	query.Set("application_name", name)
+	ownerDSN.RawQuery = query.Encode()
+	pool, err := sql.Open("pgx", ownerDSN.String())
+	if err != nil {
+		return "", fmt.Errorf("open PostgreSQL test server: %w", err)
+	}
+	// The owner session is deliberately never closed.
+	owner, err := pool.Conn(ctx)
+	if err != nil {
+		_ = pool.Close()
+		return "", fmt.Errorf("connect PostgreSQL test server: %w", err)
+	}
+	if err := dropAbandonedPostgresTemplates(ctx, owner); err != nil {
+		return "", err
+	}
+	if _, err := owner.ExecContext(ctx, `CREATE DATABASE "`+name+`"`); err != nil {
+		return "", fmt.Errorf("create PostgreSQL test template: %w", err)
+	}
+	templateDSN, err := postgresDatabaseDSN(baseDSN, name)
+	if err != nil {
+		return "", err
+	}
+	if err := prepare(ctx, templateDSN.String()); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func dropAbandonedPostgresTemplates(ctx context.Context, owner *sql.Conn) error {
+	rows, err := owner.QueryContext(ctx, `SELECT datname FROM pg_database
+WHERE datname LIKE $1 AND datname NOT IN (
+	SELECT application_name FROM pg_stat_activity WHERE application_name IS NOT NULL
+)`, strings.ReplaceAll(postgresTemplatePrefix, "_", `\_`)+"%")
+	if err != nil {
+		return fmt.Errorf("list abandoned PostgreSQL test templates: %w", err)
+	}
+	var abandoned []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("list abandoned PostgreSQL test templates: %w", err)
+		}
+		abandoned = append(abandoned, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("list abandoned PostgreSQL test templates: %w", err)
+	}
+	for _, name := range abandoned {
+		if _, err := owner.ExecContext(ctx, `DROP DATABASE IF EXISTS "`+name+`" WITH (FORCE)`); err != nil {
+			return fmt.Errorf("drop abandoned PostgreSQL test template %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func postgresDatabaseDSN(baseDSN, database string) (*url.URL, error) {
+	u, err := url.Parse(baseDSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL test server DSN: %w", err)
+	}
+	if database != "" {
+		u.Path = "/" + database
+		u.RawPath = ""
+	}
+	return u, nil
 }
 
 // sharedPostgresContainer starts the image's container on first use and
@@ -120,12 +257,18 @@ func sharedPostgresContainer(ctx context.Context, image string) sharedPostgresSe
 	return server
 }
 
+// startPostgresContainer runs a server that trades durability for speed:
+// test databases are disposable, so the data directory lives in memory and
+// commits never wait for WAL flushes. The module already disables fsync.
 func startPostgresContainer(ctx context.Context, image string) sharedPostgresServer {
 	container, err := postgres.Run(ctx,
 		image,
 		postgres.WithDatabase("kata_test"),
 		postgres.WithUsername("kata"),
 		postgres.WithPassword("kata"),
+		testcontainers.WithTmpfs(map[string]string{"/pgdata": "rw"}),
+		testcontainers.WithEnv(map[string]string{"PGDATA": "/pgdata/data"}),
+		testcontainers.WithCmdArgs("-c", "synchronous_commit=off", "-c", "full_page_writes=off"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
@@ -163,13 +306,16 @@ func skipAutomaticPostgresContainer(goos, explicitDSN, autostart string) bool {
 // or the shared container, into one database per test. Unlike a container
 // that fails to start, an unusable server is fatal: CI must never report
 // success by skipping the Postgres suite.
-func newIsolatedPostgresDatabase(ctx context.Context, t *testing.T, baseDSN string) (string, func()) {
+//
+// A non-empty template names the database to clone; empty creates an empty
+// database.
+func newIsolatedPostgresDatabase(ctx context.Context, t *testing.T, baseDSN, template string) (string, func()) {
 	t.Helper()
-	u, err := url.Parse(baseDSN)
-	if err != nil {
-		t.Fatalf("parse PostgreSQL test server DSN: %v", err)
-	}
 	databaseName := fmt.Sprintf("kata_test_%d_%d", os.Getpid(), postgresDatabaseCounter.Add(1))
+	u, err := postgresDatabaseDSN(baseDSN, databaseName)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
 	admin, err := sql.Open("pgx", baseDSN)
 	if err != nil {
 		t.Fatalf("open PostgreSQL test server: %v", err)
@@ -178,12 +324,14 @@ func newIsolatedPostgresDatabase(ctx context.Context, t *testing.T, baseDSN stri
 		_ = admin.Close()
 		t.Fatalf("connect PostgreSQL test server: %v", err)
 	}
-	if _, err := admin.ExecContext(ctx, `CREATE DATABASE "`+databaseName+`"`); err != nil {
+	create := `CREATE DATABASE "` + databaseName + `"` //nolint:gosec // G202: generated test database name, not input.
+	if template != "" {
+		create += ` TEMPLATE "` + template + `"`
+	}
+	if _, err := admin.ExecContext(ctx, create); err != nil {
 		_ = admin.Close()
 		t.Fatalf("create isolated Postgres test database: %v", err)
 	}
-	u.Path = "/" + databaseName
-	u.RawPath = ""
 	cleanup := func() {
 		_, _ = admin.ExecContext(context.Background(), `DROP DATABASE "`+databaseName+`" WITH (FORCE)`)
 		_ = admin.Close()

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -19,7 +21,6 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T) {
@@ -28,7 +29,7 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 
 	claimStore, err := pgstore.Open(ctx, dsn)

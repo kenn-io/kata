@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // R5: creation proof survives edits, compacted source history and owner restore.
@@ -79,7 +80,7 @@ func TestProvenanceSurvivesSnapshotAndRestore(t *testing.T) {
 			}
 			require.NotContains(t, backup.String(), "private_key")
 			require.False(t, strings.Contains(backup.String(), base64.StdEncoding.EncodeToString(private.Seed())), "signing material must never enter an ordinary backup")
-			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+			dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 			t.Cleanup(cleanup)
 			postgres, err := pgstore.Open(ctx, dsn)
 			require.NoError(t, err)

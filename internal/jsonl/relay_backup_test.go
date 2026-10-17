@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // R4/A9: full owner backup retains the narrowed parent and immutable emitted
@@ -54,7 +55,7 @@ func TestRelayOwnerBackupRetainsDeliveryState(t *testing.T) {
 				err = Export(ctx, source, &backup, ExportOptions{})
 			}
 			require.NoError(t, err)
-			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+			dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 			t.Cleanup(cleanup)
 			postgres, err := pgstore.Open(ctx, dsn)
 			require.NoError(t, err)

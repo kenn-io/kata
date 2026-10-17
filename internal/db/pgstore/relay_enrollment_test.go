@@ -4,14 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRelayRootAcceptanceParent(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -20,7 +21,7 @@ func TestRelayRootAcceptanceParent(t *testing.T) {
 }
 
 func TestRelayFreshTargetPolicyEpoch(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -29,7 +30,7 @@ func TestRelayFreshTargetPolicyEpoch(t *testing.T) {
 }
 
 func TestRelayLegacyGrantIsolation(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -38,7 +39,7 @@ func TestRelayLegacyGrantIsolation(t *testing.T) {
 }
 
 func TestRelayIngressClaimLifecycle(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestRelayIngressClaimLifecycle(t *testing.T) {
 }
 
 func TestRelayDownstreamOrigin(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -56,7 +57,7 @@ func TestRelayDownstreamOrigin(t *testing.T) {
 }
 
 func TestRelayIngestValidatesCronReplay(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -65,7 +66,7 @@ func TestRelayIngestValidatesCronReplay(t *testing.T) {
 }
 
 func TestRelayUpstreamLocalAuthority(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestRelayUpstreamLocalAuthority(t *testing.T) {
 }
 
 func TestRelayAuthorityDepth(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -83,7 +84,7 @@ func TestRelayAuthorityDepth(t *testing.T) {
 }
 
 func TestRelayEnrollmentBootstrap(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -92,7 +93,7 @@ func TestRelayEnrollmentBootstrap(t *testing.T) {
 }
 
 func TestRelayEnrollmentBootstrapCompactedArtifacts(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -104,7 +105,7 @@ func TestRelayEnrollmentBootstrapCompactedArtifacts(t *testing.T) {
 }
 
 func TestRelayCrossProjectBoundary(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)

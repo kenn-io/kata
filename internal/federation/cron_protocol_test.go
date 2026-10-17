@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"go.kenn.io/kata/internal/config"
 
 	"github.com/stretchr/testify/require"
@@ -23,7 +25,6 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -34,7 +35,7 @@ func nativeStore(t *testing.T, backend string) db.Storage {
 	if backend == "sqlite" {
 		store, err = sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	} else {
-		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+		dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 		t.Cleanup(cleanup)
 		store, err = pgstore.Open(t.Context(), dsn)
 	}

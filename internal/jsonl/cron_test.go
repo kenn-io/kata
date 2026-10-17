@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/jsonl"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -82,7 +83,7 @@ func TestNativeCronJSONLRoundTrip(t *testing.T) {
 func TestNativeCronJSONLRoundTripAcrossPostgres(t *testing.T) {
 	fixture := buildNativeCronJSONLFixture(t)
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	postgres, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
