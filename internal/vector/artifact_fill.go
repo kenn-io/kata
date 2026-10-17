@@ -31,7 +31,7 @@ func (ix *Index) FillWithArtifactsDetailed(ctx context.Context, key string, sour
 		return stats, 0, err
 	}
 	exporter, _ := source.(db.EmbeddingArtifactExporter)
-	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}, ineligible: map[string]struct{}{}}
+	backing := &artifactCaptureStore{Store: ix.flowStore, index: ix, source: source, artifacts: artifacts, exporter: exporter, recipe: recipe, generation: key, pending: map[string]artifactPending{}, ineligible: map[string]struct{}{}, stale: map[string]struct{}{}}
 	if len(eligibility) > 0 {
 		backing.eligible = eligibility[0]
 	}
@@ -66,11 +66,16 @@ type artifactCaptureStore struct {
 	recipe      embedding.ArtifactIdentity
 	generation  string
 	pending     map[string]artifactPending
+	pageOrder   []string
 	prepared    map[string]preparedDocument
 	eligible    func(context.Context, string) (bool, error)
 	pageAllowed map[string]bool
+	pageChecked map[string]bool
 	deferred    map[string]bool
 	ineligible  map[string]struct{}
+	// stale mirrors kit's per-Fill set: a document whose save reported
+	// ErrStale is not prepared again during this Fill.
+	stale       map[string]struct{}
 	dispatchMu  sync.Mutex
 	dispatchErr error
 }
@@ -136,15 +141,28 @@ func (s *artifactCaptureStore) admitDispatch(ctx context.Context, texts []string
 	}
 	allowed := make(map[string]bool)
 	deferred := false
+	var admitted []string
 	for _, doc := range s.prepared {
 		if !slices.ContainsFunc(doc.texts, func(text string) bool { return inBatch[text] }) {
 			continue
 		}
-		ready, err := s.checkPending(ctx, doc.Pending, allowed)
+		ok, err := s.admitPending(ctx, doc.Doc, allowed)
 		if err != nil {
 			return err
 		}
-		deferred = deferred || !ready
+		if !ok {
+			deferred = true
+			continue
+		}
+		admitted = append(admitted, doc.Doc)
+	}
+	// Every project in this batch is authorized before any content is read,
+	// so bytes an eligibility check pulled are visible to the recheck.
+	if err := s.checkPendingContents(ctx, admitted); err != nil {
+		return err
+	}
+	for _, doc := range admitted {
+		deferred = deferred || s.deferred[doc]
 	}
 	if deferred {
 		return errDispatchDeferred
@@ -235,10 +253,13 @@ func (s *artifactCaptureStore) scanPending(ctx context.Context, key string, limi
 		return nil, err
 	}
 	s.pending = make(map[string]artifactPending, len(pending))
+	s.pageOrder = make([]string, 0, len(pending))
 	s.prepared = make(map[string]preparedDocument, len(pending))
 	s.pageAllowed = make(map[string]bool)
+	s.pageChecked = make(map[string]bool)
 	s.deferred = make(map[string]bool)
 	for _, doc := range pending {
+		s.pageOrder = append(s.pageOrder, doc.Doc)
 		var projectUID string
 		if s.index.pg != nil {
 			executor, leaseErr := s.index.pg.reconcilerExecutor()
@@ -263,10 +284,10 @@ func (s *artifactCaptureStore) scanPending(ctx context.Context, key string, limi
 // The existing fill flow treats these unstamped documents like a changed
 // eligibility snapshot, so later private documents are still scanned this run.
 // allowed caches project authorization for one page preparation or dispatch.
-func (s *artifactCaptureStore) checkPending(ctx context.Context, doc kitvec.Pending[string], allowed map[string]bool) (bool, error) {
-	scanned, ok := s.pending[doc.Doc]
-	if !ok || s.deferred[doc.Doc] {
-		s.deferred[doc.Doc] = true
+func (s *artifactCaptureStore) admitPending(ctx context.Context, doc string, allowed map[string]bool) (bool, error) {
+	scanned, ok := s.pending[doc]
+	if !ok || s.deferred[doc] {
+		s.deferred[doc] = true
 		return false, nil
 	}
 	if s.eligible != nil {
@@ -280,61 +301,118 @@ func (s *artifactCaptureStore) checkPending(ctx context.Context, doc kitvec.Pend
 			allowed[scanned.projectUID] = permitted
 		}
 		if !permitted {
-			s.deferred[doc.Doc] = true
-			s.ineligible[doc.Doc] = struct{}{}
+			s.deferred[doc] = true
+			s.ineligible[doc] = struct{}{}
 			return false, nil
 		}
 	}
-	return s.checkPendingContent(ctx, doc)
-}
-
-func (s *artifactCaptureStore) checkPendingContent(ctx context.Context, doc kitvec.Pending[string]) (bool, error) {
-	scanned, ok := s.pending[doc.Doc]
-	if !ok {
-		return false, kitvec.ErrStale
-	}
-	// Eligibility may pull new content after the mirror scan. Narrow the native
-	// read to the admitted project and defer stale input before paid dispatch.
-	if !db.ProjectAttributionVisible(ctx, scanned.projectUID) {
-		s.deferred[doc.Doc] = true
-		return false, nil
-	}
-	scope := db.WithAuthorizedProjects(ctx, []string{scanned.projectUID})
-	project, err := s.source.ProjectByUID(scope, scanned.projectUID)
-	if errors.Is(err, db.ErrNotFound) || (err == nil && project.DeletedAt != nil) {
-		s.deferred[doc.Doc] = true
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	current, err := s.source.IssueByUID(scope, doc.Doc, db.IncludeDeletedNo)
-	if errors.Is(err, db.ErrNotFound) || (err == nil && (current.ProjectID != project.ID || embedding.EmbedText(current.Title, current.Body) != scanned.Content)) {
-		s.deferred[doc.Doc] = true
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	// Eligibility can wait for an upstream sync. Recheck bytes that arrived
-	// during that check before handing this document to the paid encoder.
-	if err := s.reuseArtifacts(ctx, s.generation, doc.Doc); err != nil {
-		return false, err
-	}
-	if _, pending := s.pending[doc.Doc]; !pending {
-		// Preserve the imported chunks; the existing stale exclusion continues
-		// scanning without stamping this document with an empty prepared result.
-		s.deferred[doc.Doc] = true
-		return false, nil
-	}
-
 	return true, nil
 }
 
+// checkPendingContents rechecks admitted documents against canonical content
+// and retained artifacts, deferring each one that is no longer ready. Reads
+// are batched per project and the artifact recheck covers the whole batch.
+func (s *artifactCaptureStore) checkPendingContents(ctx context.Context, docs []string) error {
+	byProject := make(map[string][]string)
+	var projects []string
+	for _, doc := range docs {
+		scanned, ok := s.pending[doc]
+		if !ok {
+			return kitvec.ErrStale
+		}
+		if _, seen := byProject[scanned.projectUID]; !seen {
+			projects = append(projects, scanned.projectUID)
+		}
+		byProject[scanned.projectUID] = append(byProject[scanned.projectUID], doc)
+	}
+	var current []string
+	for _, projectUID := range projects {
+		projectDocs := byProject[projectUID]
+		deferAll := func() {
+			for _, doc := range projectDocs {
+				s.deferred[doc] = true
+			}
+		}
+		// Eligibility may pull new content after the mirror scan. Narrow the
+		// native read to the admitted project and defer stale input before
+		// paid dispatch.
+		if !db.ProjectAttributionVisible(ctx, projectUID) {
+			deferAll()
+			continue
+		}
+		scope := db.WithAuthorizedProjects(ctx, []string{projectUID})
+		project, err := s.source.ProjectByUID(scope, projectUID)
+		if errors.Is(err, db.ErrNotFound) || (err == nil && project.DeletedAt != nil) {
+			deferAll()
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		issues, err := s.source.IssuesByUIDs(scope, projectDocs, db.IncludeDeletedNo)
+		if err != nil {
+			return err
+		}
+		for _, doc := range projectDocs {
+			issue, found := issues[doc]
+			if !found || issue.ProjectID != project.ID || embedding.EmbedText(issue.Title, issue.Body) != s.pending[doc].Content {
+				s.deferred[doc] = true
+				continue
+			}
+			current = append(current, doc)
+		}
+	}
+	if len(current) == 0 {
+		return nil
+	}
+	// Eligibility can wait for an upstream sync. Recheck bytes that arrived
+	// during that check before handing these documents to the paid encoder.
+	if err := s.reuseArtifacts(ctx, s.generation, current...); err != nil {
+		return err
+	}
+	for _, doc := range current {
+		if _, pending := s.pending[doc]; !pending {
+			// Preserve the imported chunks; the existing stale exclusion
+			// continues scanning without stamping this document with an empty
+			// prepared result.
+			s.deferred[doc] = true
+		}
+	}
+	return nil
+}
+
+// checkPageDocument rechecks an admitted document's content together with
+// the unchecked documents in this page that share its already admitted
+// project and that kit will still prepare. The paid encoder boundary rechecks
+// each document again before dispatch.
+func (s *artifactCaptureStore) checkPageDocument(ctx context.Context, doc string) error {
+	projectUID := s.pending[doc].projectUID
+	docs := []string{doc}
+	s.pageChecked[doc] = true
+	for _, peer := range s.pageOrder {
+		scanned, ok := s.pending[peer]
+		_, stale := s.stale[peer]
+		if peer == doc || !ok || stale || scanned.projectUID != projectUID || s.deferred[peer] || s.pageChecked[peer] {
+			continue
+		}
+		s.pageChecked[peer] = true
+		docs = append(docs, peer)
+	}
+	return s.checkPendingContents(ctx, docs)
+}
+
 func (s *artifactCaptureStore) prepare(ctx context.Context, doc kitvec.Pending[string]) ([]kitvec.PreparedChunk, error) {
-	ready, err := s.checkPending(ctx, doc, s.pageAllowed)
-	if err != nil || !ready {
+	admitted, err := s.admitPending(ctx, doc.Doc, s.pageAllowed)
+	if err != nil || !admitted {
 		return nil, err
+	}
+	if !s.pageChecked[doc.Doc] {
+		if err := s.checkPageDocument(ctx, doc.Doc); err != nil {
+			return nil, err
+		}
+	}
+	if s.deferred[doc.Doc] {
+		return nil, nil
 	}
 	chunks := kitvec.Split(doc.Content, kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap})
 	prepared := make([]kitvec.PreparedChunk, len(chunks))
@@ -347,13 +425,18 @@ func (s *artifactCaptureStore) prepare(ctx context.Context, doc kitvec.Pending[s
 	return prepared, nil
 }
 
-func (s *artifactCaptureStore) SaveVectors(ctx context.Context, key, doc string, revision any, vectors []kitvec.ChunkVector) error {
+func (s *artifactCaptureStore) SaveVectors(ctx context.Context, key, doc string, revision any, vectors []kitvec.ChunkVector) (err error) {
 	// Kit serializes saves, but other chunk batches may still enter the
 	// encoder boundary. Keep retention, index save and page bookkeeping
 	// atomic with those checks so our own just-produced artifact is not
 	// mistaken for an asynchronously received artifact.
 	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
+	defer func() {
+		if errors.Is(err, kitvec.ErrStale) {
+			s.stale[doc] = struct{}{}
+		}
+		s.dispatchMu.Unlock()
+	}()
 	if s.deferred[doc] {
 		return kitvec.ErrStale
 	}
