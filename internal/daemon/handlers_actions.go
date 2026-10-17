@@ -595,6 +595,9 @@ func resolveEvidenceTargets(
 		default:
 			continue
 		}
+		// closeIssue requires complete AllProjects host authority before
+		// dispatch, including targets reached through historical references.
+		// The issue/token boundary still needs the per-issue check below.
 		target, err := resolveIssueRef(ctx, store, projectID, e.IssueRef, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, fmt.Errorf("evidence[%d] %s target %q does not exist in this project",

@@ -281,7 +281,7 @@ func resolveScopedTokenIssue(_ *cobra.Command, a daemonAPI, raw string) (tokenSc
 		return tokenScopeCLIOut{}, "", errors.New("daemon returned incomplete issue identity for scoped token creation")
 	}
 	displayRef := projectName + "#" + shown.Issue.ShortID
-	if currentOutputMode() != outputJSON && shown.Issue.ProjectID != 0 && shown.Issue.ProjectID != projectID {
+	if shown.Issue.ProjectID != 0 && shown.Issue.ProjectID != projectID {
 		displayRef, err = issueRefForOutput(a, projectID, projectName,
 			issueIdentityForOutput{ProjectID: shown.Issue.ProjectID, UID: shown.Issue.UID, ShortID: shown.Issue.ShortID})
 		if err != nil {
