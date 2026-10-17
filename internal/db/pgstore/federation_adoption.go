@@ -87,6 +87,11 @@ func (s *Store) AdoptProjectIntoFederation(
 			}
 		}
 
+		if project.UID != params.HubProjectUID {
+			if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project, `m.payload::jsonb->'snapshot'`); err != nil {
+				return err
+			}
+		}
 		cron, err := db.PrepareCronAdoption(ctx, tx, project, params.HubProjectUID, params.EmptyOnly)
 		if err != nil {
 			return err
