@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/x/ansi"
 	"go.kenn.io/kit/tui/helplayout"
 )
@@ -60,16 +62,14 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 	}
 	navWidth := listColumnWidths(width, false).nav
 	ownerWidth := min(24, width/5)
-	statusWidth := 11
-	titleWidth := max(width-navWidth-issueWidth-ownerWidth-statusWidth-6, 1)
-	columns := func(issue, title, owner, status string) string {
-		return padToWidth(truncate(issue, issueWidth), issueWidth) + "  " + padToWidth(truncate(title, titleWidth), titleWidth) + "  " + padToWidth(truncate(owner, ownerWidth), ownerWidth) + "  " + truncate(status, statusWidth)
-	}
-	out := []string{subtleStyle.Render(strings.Repeat(" ", navWidth) + columns("#", "title", "owner", "status"))}
+	attentionWidth := 11
+	titleWidth := max(width-navWidth-issueWidth-ownerWidth-attentionWidth-6, 1)
+	widths := []int{navWidth, issueWidth + 2, attentionWidth + 2, titleWidth + 2, ownerWidth}
 	start, end := windowBounds(len(s.rows), s.cursor, max(budget-panel-2, 1))
+	rows := make([][]string, 0, end-start)
 	for i := start; i < end; i++ {
 		r := s.rows[i]
-		ref := r.issue.ShortID
+		ref := "#" + r.issue.ShortID
 		if s.allProjects {
 			ref = r.issue.QualifiedID
 		}
@@ -77,15 +77,53 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 		if r.teammate != "" {
 			owner += " / " + sanitizeForLine(r.teammate)
 		}
-		text := columns(sanitizeForLine(ref), sanitizeForLine(r.issue.Title), owner, r.workAttention)
-		navCell := strings.Repeat(" ", navWidth)
-		if i == s.cursor {
-			navCell = padToWidth("▶", navWidth)
-			out = append(out, selectedStyle.Render(navCell+text))
-			continue
+		attention := r.workAttention
+		if attention == "" {
+			attention = "—"
 		}
-		out = append(out, navCell+text)
+		nav := ""
+		if i == s.cursor {
+			nav = "▶"
+		}
+		rows = append(rows, []string{nav, truncate(sanitizeForLine(ref), issueWidth), truncate(sanitizeForLine(attention), attentionWidth), truncate(sanitizeForLine(r.issue.Title), titleWidth), truncate(owner, ownerWidth)})
 	}
+	// Match the issue list's table cells, row backgrounds, and plain ref,
+	// title, and owner styling. Only attention has a semantic foreground.
+	t := table.New().
+		Border(lipgloss.HiddenBorder()).
+		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).
+		BorderColumn(false).BorderRow(false).BorderHeader(false).
+		Width(width).Wrap(false).
+		Headers("", "#", "attention", "title", "owner").Rows(rows...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			cell := lipgloss.NewStyle().Width(widths[col])
+			if col > 0 && col < 4 {
+				cell = cell.PaddingRight(2)
+			}
+			if row == table.HeaderRow {
+				return cell.Inherit(tableHeaderStyle)
+			}
+			rowStyle := normalRowStyle
+			index := start + row
+			if index == s.cursor {
+				rowStyle = cursorRowStyle
+			} else if index%2 == 1 {
+				rowStyle = altRowStyle
+			}
+			if col == 2 {
+				switch s.rows[index].workAttention {
+				case "stuck":
+					cell = cell.Inherit(errorStyle)
+				case "needs-human":
+					cell = cell.Inherit(chipActive)
+				default:
+					cell = cell.Inherit(subtleStyle)
+				}
+			}
+			return cell.Inherit(rowStyle)
+		})
+	out := strings.Split(t.Render(), "\n")
+
 	if panel > 0 {
 		out = append(out, "")
 		if len(message) > panel {

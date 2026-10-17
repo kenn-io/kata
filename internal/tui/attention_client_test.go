@@ -54,7 +54,8 @@ func TestAttentionClientDecode(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		rows := []map[string]any{}
 		for i, v := range values {
-			rows = append(rows, map[string]any{"short_id": fmt.Sprint(i), "status": "open", "metadata": map[string]any{key: jsontext.Value(v), "work.attention": "needs-human"}})
+			work := []string{"needs-human", "stuck", "ok", "unknown", "", ""}[i]
+			rows = append(rows, map[string]any{"short_id": fmt.Sprint(i), "status": "open", "metadata": map[string]any{key: jsontext.Value(v), "work.attention": work}})
 		}
 		respondJSON(t, w, map[string]any{"issues": rows})
 	})
@@ -65,6 +66,9 @@ func TestAttentionClientDecode(t *testing.T) {
 	require.Equal(t, "worker", rows[0].teammate)
 	require.Empty(t, rows[1].teammate)
 	require.Equal(t, "needs-human", rows[0].workAttention)
+	require.Equal(t, "stuck", rows[1].workAttention)
+	require.Equal(t, "ok", rows[2].workAttention)
+	require.Empty(t, rows[3].workAttention)
 	require.Equal(t, "cron", rows[3].teammate)
 	require.JSONEq(t, values[3], string(rows[3].raw))
 }

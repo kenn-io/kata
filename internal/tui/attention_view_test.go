@@ -1054,3 +1054,47 @@ func TestAttentionMouseReturnFlagClears(t *testing.T) {
 		require.False(t, m.attention.returnToAttention)
 	}
 }
+
+// Opening Attention must expose the ordinary detail actions and preserve the
+// windowed list on either back key, in both supported layouts.
+func TestAttentionDetailActionsAndScrollReturn(t *testing.T) {
+	for _, width := range []int{80, 160} {
+		for _, back := range []rune{tea.KeyEscape, tea.KeyBackspace} {
+			t.Run(fmt.Sprintf("%d/%d", width, back), func(t *testing.T) {
+				m, a := attentionFixture(t)
+				m = resizeModel(m, width, 24)
+				for i := 0; i < 50; i++ {
+					a.rows = append(a.rows, attentionRequest{issue: testIssue(fmt.Sprintf("row%d", i)), from: "sam", message: "Review"})
+				}
+				m, cmd := m.transitionToAttention()
+				m = loadAttention(m, cmd)
+				for i := 0; i < 30; i++ {
+					m = sendRune(m, 'j')
+				}
+				before := renderAttention(m)
+				uid := m.attention.selectedUID
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				require.Equal(t, viewDetail, m.view)
+				require.True(t, m.detailIsActive())
+				require.Equal(t, uid, m.detail.issue.UID)
+				for _, action := range []struct {
+					key  rune
+					kind inputKind
+				}{{'e', inputBodyEditForm}, {'c', inputCommentForm}} {
+					opened := sendRune(m, action.key)
+					require.Equal(t, action.kind, opened.input.kind)
+				}
+				m, cmd = updateModel(m, tea.KeyPressMsg{Code: back})
+				if m.view == viewDetail {
+					require.NotNil(t, cmd)
+					m, cmd = updateModel(m, cmd())
+				}
+				require.Equal(t, viewAttention, m.view)
+				m = loadAttention(m, cmd)
+				require.Equal(t, uid, m.attention.selectedUID)
+				require.Equal(t, 30, m.attention.cursor)
+				require.Equal(t, before, renderAttention(m))
+			})
+		}
+	}
+}

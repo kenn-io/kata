@@ -1,11 +1,11 @@
 kata / attention
 for alex · example-project · 4 requests · 1 skipped
 
-    #         title                                                                owner                     status
-▶   abc4      issue abc4                                                           sam                       needs-human
-    def5      issue def5                                                           system                    stuck
-    ghi6      issue ghi6                                                           system / cron
-    jkl7      issue jkl7                                                           sam / worker
+    #         attention    title                                                                owner
+▶   #abc4     needs-human  issue abc4                                                           sam
+    #def5     stuck        issue def5                                                           system
+    #ghi6     ok           issue ghi6                                                           system / cron
+    #jkl7     —            issue jkl7                                                           sam / worker
 
 Please review the retry behavior before the next run. Please review the retry behavior before the next run. Please revie
 w the retry behavior before the next run. Please review the retry behavior before the next run. Please review the retry

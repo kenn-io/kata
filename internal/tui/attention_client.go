@@ -85,7 +85,7 @@ func (c *Client) ListAttentionRequests(ctx context.Context, projectID *int64, re
 			handle = ""
 		}
 		_ = json.Unmarshal(row.Metadata["work.attention"], &work)
-		if work != "needs-human" && work != "stuck" {
+		if work != "needs-human" && work != "stuck" && work != "ok" {
 			work = ""
 		}
 		rows = append(rows, attentionRequest{issue: row.Issue, from: value.From, teammate: handle, message: value.Message, workAttention: work, key: key, raw: raw})
