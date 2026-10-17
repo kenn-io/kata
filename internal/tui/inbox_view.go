@@ -27,6 +27,7 @@ type inboxProjectLoadedMsg struct {
 }
 
 func (m Model) toggleInbox() (Model, tea.Cmd) {
+	m.attention.returnToAttention = false
 	if m.inboxReturn != nil {
 		return m.leaveInbox()
 	}

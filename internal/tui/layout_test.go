@@ -246,3 +246,19 @@ func TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal(t *testing.T) {
 		t.Errorf("layout=%v after L on too-narrow term, want splitlayout.Stacked", m.layout)
 	}
 }
+
+func TestLayoutFlipPreservesAuxiliaryView(t *testing.T) {
+	for _, view := range []viewID{viewProjects, viewDaemons, viewFederation, viewCredentials, viewAttention} {
+		m := newTestModel()
+		m = resizeModel(m, 160, 40)
+		m.view = view
+		m = resizeModel(m, 80, 24)
+		if m.view != view {
+			t.Fatalf("narrow: got %v, want %v", m.view, view)
+		}
+		m = resizeModel(m, 160, 40)
+		if m.view != view {
+			t.Fatalf("wide: got %v, want %v", m.view, view)
+		}
+	}
+}

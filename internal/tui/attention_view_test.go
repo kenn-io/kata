@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -201,4 +202,91 @@ func TestAttentionDaemonSwitch(t *testing.T) {
 	m, _ = m.installDaemonConnection(daemonConnection{api: &Client{}})
 	require.Empty(t, m.attention.rows)
 	require.Greater(t, m.attention.gen, gen)
+}
+
+func TestAttentionDetailReturn(t *testing.T) {
+	for _, width := range []int{80, 160} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m, a := attentionFixture(t)
+			m = resizeModel(m, width, 40)
+			m.scope.allProjects = true
+			m.view = viewProjects
+			m, cmd := m.transitionToAttention()
+			m = loadAttention(m, cmd)
+			m = sendRune(m, 'j')
+			selected := a.rows[1]
+			originalReturn := m.attention.returnView
+			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.Equal(t, viewDetail, m.view)
+			require.NotNil(t, cmd)
+			require.Equal(t, selected.issue.UID, m.detail.issue.UID)
+			require.Equal(t, selected.issue.ProjectID, m.detail.scopePID)
+			// A nested reference uses the ordinary detail navigation stack.
+			next, _ := m.handleJumpDetail(jumpDetailMsg{ref: "nested", projectID: 7})
+			m = next.(Model)
+			require.Len(t, m.detail.navStack, 1)
+			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			require.Empty(t, m.detail.navStack)
+			require.Equal(t, selected.issue.UID, m.detail.issue.UID)
+			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			if m.view == viewDetail {
+				require.NotNil(t, cmd)
+				m, cmd = updateModel(m, cmd())
+			}
+			require.Equal(t, viewAttention, m.view)
+			m = loadAttention(m, cmd)
+			require.Equal(t, selected.issue.UID, m.attention.selectedUID)
+			require.Equal(t, originalReturn, m.attention.returnView)
+			require.Equal(t, 2, a.listCalls)
+		})
+	}
+}
+func TestAttentionOpenIsSynchronous(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, viewDetail, m.view)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.view == viewDetail {
+		m, _ = updateModel(m, cmd())
+	}
+	require.Equal(t, viewAttention, m.view)
+}
+func TestAttentionReturnFlagClears(t *testing.T) {
+	for _, r := range []rune{'P', 'I', 'D', 'F', 'C'} {
+		m, _ := attentionFixture(t)
+		m.daemonTargets = []daemonTarget{{Local: true}}
+		m, cmd := m.transitionToAttention()
+		m = loadAttention(m, cmd)
+		m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.True(t, m.attention.returnToAttention)
+		m = sendRune(m, r)
+		require.False(t, m.attention.returnToAttention)
+	}
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = sendRune(m, '?')
+	m = sendRune(m, '?')
+	require.True(t, m.attention.returnToAttention)
+	m = sendKey(m, tea.KeyTab)
+	require.Equal(t, focusList, m.focus)
+	require.Equal(t, viewList, m.view)
+	require.False(t, m.attention.returnToAttention)
+}
+func TestAttentionEntryFencesDetailFollow(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	m.detail.issue = new(testIssue("abc4"))
+	m.nextDetailFollowGen = 4
+	m, _ = m.transitionToAttention()
+	_, cmd := m.handleDetailFollowTick(detailFollowTickMsg{gen: 4})
+	require.Nil(t, cmd)
+	// Split pane focus must not steal esc from the auxiliary view.
+	m.focus = focusDetail
+	m = sendKey(m, tea.KeyEscape)
+	require.Equal(t, viewList, m.view)
 }

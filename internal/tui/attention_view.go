@@ -99,6 +99,8 @@ func (m Model) prepareAttentionGlobalExit() Model {
 }
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
+	case "enter":
+		return m.openAttentionIssue()
 	case "esc":
 		return m.prepareAttentionGlobalExit(), nil
 	case "r":
@@ -161,4 +163,17 @@ func (m Model) handleAttentionLoaded(msg attentionLoadedMsg) (Model, tea.Cmd) {
 		m.attention.selectedUID = msg.rows[m.attention.cursor].issue.UID
 	}
 	return m, nil
+}
+
+func (m Model) openAttentionIssue() (Model, tea.Cmd) {
+	if len(m.attention.rows) == 0 {
+		return m, nil
+	}
+	row := m.attention.rows[m.attention.cursor]
+	m.attention.returnToAttention = true
+	m = m.seedOpenDetail(row.issue)
+	return m, m.fetchOpenDetail()
+}
+func (m Model) returnFromAttentionDetail() (Model, tea.Cmd) {
+	return m.transitionToAttention()
 }

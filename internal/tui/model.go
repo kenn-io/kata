@@ -923,6 +923,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.staleConnMsg(msg.connGen) {
 			return m, nil, true
 		}
+		if m.attention.returnToAttention {
+			next, cmd := m.returnFromAttentionDetail()
+			return next, cmd, true
+		}
 		m.view = viewList
 		m.focus = focusList
 		return m, nil, true
@@ -2313,16 +2317,26 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // In stacked layout the function is a no-op (the layout has only
 // one pane; tab/esc retain their per-view meanings).
 func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	if m.layout != splitlayout.Split {
+	if m.layout != splitlayout.Split || (m.view != viewList && m.view != viewDetail) {
 		return m, nil, false
 	}
 	if m.focus == focusList && msg.String() == "tab" && m.detail.issue != nil {
 		m.focus = focusDetail
 		return m, nil, true
 	}
+	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
+		m.attention.returnToAttention = false
+		m.focus = focusList
+		m.view = viewList
+		return m, nil, true
+	}
 	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {
 			return m, nil, false
+		}
+		if m.attention.returnToAttention {
+			next, cmd := m.returnFromAttentionDetail()
+			return next, cmd, true
 		}
 		m.focus = focusList
 		m.view = viewList

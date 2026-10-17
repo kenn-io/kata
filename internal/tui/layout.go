@@ -101,6 +101,9 @@ func (m Model) toggleLayout() (Model, tea.Cmd) {
 // touches. Other invariants (gen counters, formGen, modal state,
 // SSE state) live on Model and are likewise untouched.
 func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
+	if m.view != viewList && m.view != viewDetail {
+		return m, nil
+	}
 	if prev == splitlayout.Split && m.layout == splitlayout.Stacked {
 		// Coming back to the stacked layout: pick the view that
 		// matches the focused pane so the user keeps seeing the
