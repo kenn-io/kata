@@ -51,7 +51,7 @@ func TestAttentionClientList(t *testing.T) {
 func TestAttentionClientDecode(t *testing.T) {
 	key := notification.MetadataKey("alex")
 	values := []string{`{"from":"sam","message":"Review","teammate":"worker"}`, `{"from":"sam","message":"Review","teammate":42}`, `{"from":"system","message":"Deadline reached: 2026-10-17"}`, `{"from":"system","teammate":"cron","message":"Review","extra":true}`, `{"from":"sam","message":" "}`, `{"from":2,"message":"Review"}`}
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		rows := []map[string]any{}
 		for i, v := range values {
 			rows = append(rows, map[string]any{"short_id": fmt.Sprint(i), "status": "open", "metadata": map[string]any{key: jsontext.Value(v), "work.attention": "needs-human"}})
@@ -125,7 +125,7 @@ func TestAttentionClientClearConflict(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(409)
-		fmt.Fprint(w, `{"error":{"code":"metadata_guard_failed","message":"changed"}}`)
+		_, _ = fmt.Fprint(w, `{"error":{"code":"metadata_guard_failed","message":"changed"}}`)
 	})
 	err := c.ClearAttentionRequest(context.Background(), 7, "abc4", "key", jsontext.Value(`{}`), "writer")
 	var apiErr *APIError
@@ -169,7 +169,7 @@ func FuzzAttentionClientExactRecipient(f *testing.F) {
 		other := notification.MetadataKey(recipient + "/other")
 		raw, err := json.Marshal(map[string]string{"from": "sam", "message": message})
 		require.NoError(t, err)
-		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 			respondJSON(t, w, map[string]any{"issues": []any{map[string]any{"status": "open", "short_id": "abc4", "metadata": map[string]any{key: jsontext.Value(raw)}}, map[string]any{"status": "open", "metadata": map[string]any{other: jsontext.Value(raw)}}}})
 		})
 		rows, skipped, err := c.ListAttentionRequests(context.Background(), nil, recipient)

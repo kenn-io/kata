@@ -51,7 +51,7 @@ func TestAttentionRenderBounds(t *testing.T) {
 		out := renderAttention(m)
 		require.NotContains(t, out, "\x1b[2J")
 		require.LessOrEqual(t, len(strings.Split(out, "\n")), m.height)
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			require.LessOrEqual(t, ansi.StringWidth(line), m.width)
 		}
 		if m.height >= 24 {

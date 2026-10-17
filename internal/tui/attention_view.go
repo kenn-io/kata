@@ -233,7 +233,7 @@ func (m Model) handleAttentionCleared(msg attentionClearedMsg) (Model, tea.Cmd) 
 	var apiErr *APIError
 	var preflight *mutationPreflightError
 	isAPI := errors.As(msg.err, &apiErr)
-	conflict := isAPI && apiErr.Status == 409 && apiErr.Code == "metadata_guard_failed"
+	conflict := isAPI && apiErr != nil && apiErr.Status == 409 && apiErr.Code == "metadata_guard_failed"
 	text := sanitizeForLine(msg.err.Error())
 	if conflict {
 		text = "Request changed; review it before clearing"

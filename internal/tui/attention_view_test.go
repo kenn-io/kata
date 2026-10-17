@@ -61,7 +61,7 @@ func loadAttention(m Model, cmd tea.Cmd) Model {
 
 func TestAttentionViewToggle(t *testing.T) {
 	for _, origin := range []viewID{viewList, viewDetail, viewProjects, viewDaemons, viewFederation, viewCredentials} {
-		t.Run(string(rune('a'+origin)), func(t *testing.T) {
+		t.Run(fmt.Sprint(origin), func(t *testing.T) {
 			m, a := attentionFixture(t)
 			m.view = origin
 			original := m.scope
@@ -225,7 +225,7 @@ func TestAttentionDetailReturn(t *testing.T) {
 			next, _ := m.handleJumpDetail(jumpDetailMsg{ref: "nested", projectID: 7})
 			m = next.(Model)
 			require.Len(t, m.detail.navStack, 1)
-			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 			require.Empty(t, m.detail.navStack)
 			require.Equal(t, selected.issue.UID, m.detail.issue.UID)
 			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -405,9 +405,9 @@ func TestAttentionClearFencesEarlierRead(t *testing.T) {
 	m, cmd = updateModel(m, keyRune('r'))
 	oldRead := cmd()
 	m, cmd = updateModel(m, keyRune('c'))
-	clear := cmd()
+	cleared := cmd()
 	a.rows = a.rows[1:]
-	m, cmd = updateModel(m, clear)
+	m, cmd = updateModel(m, cleared)
 	m = loadAttention(m, cmd)
 	m, _ = updateModel(m, oldRead)
 	require.Len(t, m.attention.rows, 1)
@@ -419,10 +419,10 @@ func TestAttentionClearDetailReturn(t *testing.T) {
 	m, _ := attentionFixture(t)
 	m, cmd := m.transitionToAttention()
 	m = loadAttention(m, cmd)
-	m, clear := updateModel(m, keyRune('c'))
+	m, clearCmd := updateModel(m, keyRune('c'))
 	require.True(t, m.attention.clearing)
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	m, _ = updateModel(m, clear()) // completion is stale while detail owns the foreground.
+	m, _ = updateModel(m, clearCmd()) // completion is stale while detail owns the foreground.
 	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m, cmd = updateModel(m, cmd())
 	m = loadAttention(m, cmd)
@@ -457,4 +457,17 @@ func TestAttentionMouseReturnFlagClears(t *testing.T) {
 		require.Equal(t, focusList, m.focus)
 		require.False(t, m.attention.returnToAttention)
 	}
+}
+
+func TestAttentionClearWrappedNilAPIError(t *testing.T) {
+	m, a := attentionFixture(t)
+	var apiErr *APIError
+	a.clearErr = fmt.Errorf("request failed: %w", apiErr)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, cmd = updateModel(m, keyRune('c'))
+	require.NotPanics(t, func() { m, _ = updateModel(m, cmd()) })
+	require.NotNil(t, m.toast)
+	require.Len(t, m.attention.rows, 2)
+	require.False(t, m.attention.clearing)
 }

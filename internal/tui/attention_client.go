@@ -27,6 +27,8 @@ type attentionAPI interface {
 
 // ListAttentionRequests uses a separate projection so attention metadata never
 // enters the ordinary list cache. Filter again for older daemons ignoring queries.
+//
+//nolint:revive // The optional TUI-only interface deliberately keeps its request projection private.
 func (c *Client) ListAttentionRequests(ctx context.Context, projectID *int64, recipient string) ([]attentionRequest, int, error) {
 	apiClient, err := c.generatedClient()
 	if err != nil {
