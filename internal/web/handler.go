@@ -16,7 +16,9 @@ import (
 
 const (
 	defaultRoute = "/kata"
-	webCSP       = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
+	// Shiki's regex engine compiles WebAssembly. This permission keeps
+	// JavaScript eval and inline scripts blocked.
+	webCSP = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
 )
 
 var fixedContentTypes = map[string]string{
