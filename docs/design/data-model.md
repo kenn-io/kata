@@ -223,8 +223,11 @@ polling, so a long transaction that restarts immediately, such as federation
 materialization, can starve paced local writes, and the reverse.
 
 - Read-only transactions and autocommit reads never wait for the queue.
-- A write that waits longer than the 5-second busy timeout fails with busy
-  contention, and the store retries the whole transaction.
+- Queued writers keep their FIFO position until admitted or their context ends;
+  the in-process queue has no timer. Callers that need a bounded wait must
+  provide a context deadline.
+- Separate processes contend through SQLite's configurable `busy_timeout`; see
+  [SQLite writer waiting](../reference/configuration.md#sqlite-writer-waiting).
 - Federation push preparation is the one optimistic exception. It reads before
   joining the queue and retries when another write commits first; see
   [Push Replication](federation.md#push-replication).

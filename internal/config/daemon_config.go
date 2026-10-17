@@ -168,6 +168,7 @@ func (e EmbeddingsConfig) Enabled() bool {
 // default <KATA_HOME>/kata.db wins. See config.KataDSN.
 type StorageConfig struct {
 	DSN      string                `toml:"dsn"`
+	SQLite   SQLiteStorageConfig   `toml:"sqlite"`
 	Postgres PostgresStorageConfig `toml:"postgres"`
 }
 
@@ -475,6 +476,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	}
 	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
 		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")
+	}
+	if _, err := cfg.Storage.SQLite.BusyTimeoutDuration(); err != nil {
+		return nil, err
 	}
 	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
 		return nil, err
@@ -898,6 +902,7 @@ func applyDaemonConfigEnv(cfg *DaemonConfig, includeAuthCredentials bool) {
 		}
 	}
 	applyPostgresStorageEnv(&cfg.Storage.Postgres)
+	applySQLiteStorageEnv(&cfg.Storage.SQLite)
 }
 
 func applyPostgresStorageEnv(cfg *PostgresStorageConfig) {

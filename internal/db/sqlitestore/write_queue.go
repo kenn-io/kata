@@ -8,12 +8,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// sqliteBusyTimeout bounds how long one write waits for SQLite's writer,
-// both in the busy_timeout pragma and in the in-process write queue.
+// sqliteBusyTimeout is the default cross-process SQLite busy timeout.
+// In-process queue admission is bounded by the caller context instead.
 const sqliteBusyTimeout = 5 * time.Second
 
 // writeQueue admits one in-process SQLite writer at a time, in arrival order.
@@ -29,17 +27,17 @@ type writeQueue struct {
 	mu      sync.Mutex
 	held    bool
 	waiters []chan struct{}
-	maxWait time.Duration
 }
 
-func newWriteQueue(maxWait time.Duration) *writeQueue {
-	return &writeQueue{maxWait: maxWait}
-}
+func newWriteQueue() *writeQueue { return &writeQueue{} }
 
-// acquire waits for the writer slot. It gives up when ctx ends or after
-// maxWait, which reports busy contention so callers retry as they would for a
-// SQLite busy error.
+// acquire keeps its arrival order until admitted or ctx ends. A separate
+// busy timer would send a retrying writer to the back of the queue. Callers
+// that need a bounded admission wait must provide a context deadline.
 func (q *writeQueue) acquire(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	q.mu.Lock()
 	if !q.held {
 		q.held = true
@@ -50,29 +48,23 @@ func (q *writeQueue) acquire(ctx context.Context) error {
 	q.waiters = append(q.waiters, turn)
 	q.mu.Unlock()
 
-	timer := time.NewTimer(q.maxWait)
-	defer timer.Stop()
-	var err error
 	select {
 	case <-turn:
 		return nil
 	case <-ctx.Done():
-		err = ctx.Err()
-	case <-timer.C:
-		err = writeQueueBusyError{waited: q.maxWait}
 	}
 	q.mu.Lock()
 	for i, waiter := range q.waiters {
 		if waiter == turn {
 			q.waiters = append(q.waiters[:i], q.waiters[i+1:]...)
 			q.mu.Unlock()
-			return err
+			return ctx.Err()
 		}
 	}
 	q.mu.Unlock()
 	// release handed the slot over while this waiter gave up; pass it on.
 	q.release()
-	return err
+	return ctx.Err()
 }
 
 // release hands the writer slot to the oldest waiter, or frees it.
@@ -87,18 +79,6 @@ func (q *writeQueue) release() {
 	q.waiters = q.waiters[1:]
 	close(next)
 }
-
-// writeQueueBusyError reports a write that waited maxWait without reaching
-// the front of the queue. It carries SQLITE_BUSY so IsTransient retries it.
-type writeQueueBusyError struct {
-	waited time.Duration
-}
-
-func (e writeQueueBusyError) Error() string {
-	return fmt.Sprintf("database is locked: waited %s for the write queue", e.waited)
-}
-
-func (writeQueueBusyError) Code() int { return sqlite3.SQLITE_BUSY }
 
 type optimisticWriteKey struct{}
 
@@ -117,7 +97,7 @@ func openQueuedSQLite(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sql.OpenDB(queuedConnector{dsn: dsn, driver: drv, queue: newWriteQueue(sqliteBusyTimeout)}), nil
+	return sql.OpenDB(queuedConnector{dsn: dsn, driver: drv, queue: newWriteQueue()}), nil
 }
 
 // registeredSQLiteDriver returns the driver registered as "sqlite", keeping

@@ -83,8 +83,15 @@ var _ db.Storage = (*Store)(nil)
 // source DB before the destructive replace.
 func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, error) {
 	cfg := db.ApplyOpenOptions(opts...)
+	busyTimeout := cfg.SQLiteBusyTimeout
+	if busyTimeout == 0 {
+		busyTimeout = sqliteBusyTimeout
+	}
+	if busyTimeout < time.Millisecond || busyTimeout > 5*time.Minute || busyTimeout%time.Millisecond != 0 {
+		return nil, fmt.Errorf("storage.sqlite.busy_timeout must be a whole-millisecond duration between 1ms and 5m")
+	}
 	if cfg.ReadOnly {
-		return openReadOnly(ctx, path)
+		return openReadOnly(ctx, path, busyTimeout)
 	}
 	fast := sqliteconfig.FastTestMode()
 	synchronous := "NORMAL"
@@ -97,7 +104,7 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 	}
 	pragmas = append(pragmas,
 		fmt.Sprintf("_pragma=synchronous(%s)", synchronous),
-		fmt.Sprintf("_pragma=busy_timeout(%d)", sqliteBusyTimeout.Milliseconds()),
+		fmt.Sprintf("_pragma=busy_timeout(%d)", busyTimeout.Milliseconds()),
 	)
 	dsn := fmt.Sprintf("file:%s?%s", sqliteURIPath(path), strings.Join(pragmas, "&"))
 	// Writers on this handle take turns through one write queue; reads stay
@@ -301,10 +308,11 @@ func (d *Store) ensureInstanceUIDOnce(ctx context.Context) error {
 
 // openReadOnly opens an existing kata database without bootstrapping. It is the
 // implementation behind Open(..., db.ReadOnly()).
-func openReadOnly(ctx context.Context, path string) (*Store, error) {
+func openReadOnly(ctx context.Context, path string, busyTimeout time.Duration) (*Store, error) {
 	dsn := fmt.Sprintf(
-		"file:%s?mode=ro&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)",
+		"file:%s?mode=ro&_pragma=foreign_keys(1)&_pragma=busy_timeout(%d)",
 		sqliteURIPath(path),
+		busyTimeout.Milliseconds(),
 	)
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {

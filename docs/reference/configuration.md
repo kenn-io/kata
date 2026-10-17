@@ -104,6 +104,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
 | `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
+| `KATA_SQLITE_BUSY_TIMEOUT` | Overrides `[storage.sqlite].busy_timeout` for SQLite writer contention between processes. Default `5s`; whole milliseconds from `1ms` to `5m`. Restart the daemon to apply. |
 | `KATA_POSTGRES_SCHEMA` | Dedicated Postgres schema. Defaults to `kata`. |
 | `KATA_POSTGRES_SCHEMA_MODE` | Postgres startup policy: `bootstrap` or `validate`. Defaults to `bootstrap`. |
 | `KATA_POSTGRES_SCHEMA_OWNER` | Trusted owner role for the selected schema. Required in `validate` mode. |
@@ -164,6 +165,30 @@ dedicated `kata` schema, prepares it under an advisory lock, and never uses
 `public` for kata tables. `KATA_DB` stays ahead of `[storage].dsn` so existing
 shells and scripts keep using their explicit database path after the
 config-file key is introduced.
+
+### SQLite writer waiting
+
+When several clients write through one daemon, local writers keep their place
+in a first-come, first-served queue until admitted or their request context ends.
+The queue has no separate five-second timer. Canceling a request removes its
+waiter without blocking writers behind it. Callers that need a total wait limit
+must supply a context deadline; the transient retry loop's elapsed-time budget
+does not interrupt an in-flight queue wait.
+
+A writer waiting for another process or database handle still uses SQLite's
+busy handler. Configure that wait in `<KATA_HOME>/config.toml`:
+
+```toml
+[storage.sqlite]
+busy_timeout = "5s"
+```
+
+The default remains `5s`. Values must be whole milliseconds from `1ms` through
+`5m`; zero, negative, fractional-millisecond, and larger durations are rejected.
+`KATA_SQLITE_BUSY_TIMEOUT` overrides the file setting. Restart the daemon after
+changing it. This setting does not change PostgreSQL or the vector sidecar.
+
+### PostgreSQL connection policy
 
 For example:
 

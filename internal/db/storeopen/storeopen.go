@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -36,7 +37,9 @@ const (
 // Config carries backend-specific startup policy. Zero-value backend fields
 // are replaced with that backend's standalone defaults.
 type Config struct {
-	Postgres pgstore.Config
+	// SQLiteBusyTimeout overrides SQLite busy handlers; zero keeps 5s.
+	SQLiteBusyTimeout time.Duration
+	Postgres          pgstore.Config
 }
 
 // InstalledFreshPostgresSchema reports whether store's open created its
@@ -91,6 +94,16 @@ func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (db.Storage, e
 			storageConfig.AllowInsecure,
 		)
 	}
+	if backend == BackendSQLite {
+		storageConfig, err := config.KataSQLiteStorageConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		openConfig.SQLiteBusyTimeout, err = storageConfig.BusyTimeoutDuration()
+		if err != nil {
+			return nil, err
+		}
+	}
 	return OpenWithConfig(ctx, dsn, openConfig, opts...)
 }
 
@@ -117,6 +130,9 @@ func OpenWithConfig(ctx context.Context, dsn string, openConfig Config, opts ...
 	path := dsn
 	if hasScheme {
 		path = strings.TrimPrefix(dsn, "sqlite://")
+	}
+	if openConfig.SQLiteBusyTimeout != 0 {
+		opts = append([]db.OpenOption{db.WithSQLiteBusyTimeout(openConfig.SQLiteBusyTimeout)}, opts...)
 	}
 	return openSQLite(ctx, path, cfg, opts)
 }

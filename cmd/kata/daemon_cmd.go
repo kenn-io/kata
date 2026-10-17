@@ -887,6 +887,13 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 			return daemonStartupPreflight{}, err
 		}
 	}
+	if backend == storeopen.BackendSQLite {
+		storeConfig.SQLiteBusyTimeout, err = dcfg.Storage.SQLite.BusyTimeoutDuration()
+		if err != nil {
+			return daemonStartupPreflight{}, err
+		}
+	}
+
 	hookCfgPath, err := config.HookConfigPath()
 	if err != nil {
 		return daemonStartupPreflight{}, err

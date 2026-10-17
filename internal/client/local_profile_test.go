@@ -52,6 +52,15 @@ func TestLocalProfileStorageIdentityReadOnly(t *testing.T) {
 	assert.Equal(t, uid, store.InstanceUID())
 }
 
+func TestLocalProfileSQLiteInspectionIgnoresInvalidAmbientBusyTimeout(t *testing.T) {
+	profile, _ := localProfileFixture(t)
+	t.Setenv("KATA_SQLITE_BUSY_TIMEOUT", "invalid")
+
+	identity, err := InspectLocalProfileStorage(t.Context(), profile)
+	require.NoError(t, err)
+	assert.Equal(t, profile.InstanceUID, identity.InstanceUID)
+}
+
 func TestLocalProfileStorageMissingStaysMissing(t *testing.T) {
 	home := t.TempDir()
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01"})

@@ -80,7 +80,12 @@ func (Inspector) CurrentSchemaVersion() int { return db.CurrentSchemaVersion() }
 // preparation.
 func OpenProfileReadOnly(ctx context.Context, profile config.LocalProfileConfig) (db.Storage, error) {
 	if !isPostgres(profile.DSN) {
-		return storeopen.OpenReadOnly(ctx, profile.DSN)
+		sqlite := profile.Config.Storage.SQLite
+		busyTimeout, err := sqlite.BusyTimeoutDuration()
+		if err != nil {
+			return nil, err
+		}
+		return storeopen.OpenWithConfig(ctx, profile.DSN, storeopen.Config{SQLiteBusyTimeout: busyTimeout}, db.ReadOnly())
 	}
 	pg := profile.Config.Storage.Postgres
 	// OpenWithConfig plus ReadOnly preserves the selected schema and cannot
