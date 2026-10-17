@@ -2332,11 +2332,10 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
-		m.attention.returnToAttention = false
-		m.attention.returnContext = nil
+		m, cmd := m.prepareAttentionListNavigation()
 		m.focus = focusList
 		m.view = viewList
-		return m, nil, true
+		return m, cmd, true
 	}
 	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {

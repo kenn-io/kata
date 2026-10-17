@@ -67,6 +67,17 @@ func (a *attentionProjectsTestAPI) ListProjectsWithStats(context.Context) ([]Pro
 	}}, nil
 }
 
+type attentionBrowseTestAPI struct {
+	*attentionTestAPI
+	allIssues []Issue
+	allCalls  int
+}
+
+func (a *attentionBrowseTestAPI) ListAllIssues(context.Context, ListFilter) ([]Issue, error) {
+	a.allCalls++
+	return a.allIssues, nil
+}
+
 func attentionFixture(t *testing.T) (Model, *attentionTestAPI) {
 	t.Helper()
 	t.Setenv("KATA_INBOX_USER", "")
@@ -447,6 +458,105 @@ func TestAttentionRefreshesProjectsWhenReturning(t *testing.T) {
 	require.NoError(t, msg.err)
 	require.NotNil(t, msg.stats)
 	require.Equal(t, 1, projectsAPI.projectListCalls)
+}
+
+func TestAttentionProjectsOriginInitializesListBeforePaneNavigation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view viewID
+		act  func(Model) (Model, tea.Cmd)
+	}{
+		{
+			name: "tab to list",
+			view: viewList,
+			act: func(m Model) (Model, tea.Cmd) {
+				return updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+			},
+		},
+		{
+			name: "mouse click list pane",
+			view: viewDetail,
+			act: func(m Model) (Model, tea.Cmd) {
+				m.opts.Mouse = true
+				return updateModel(m, mouseLeftClick(4, 4))
+			},
+		},
+		{
+			name: "mouse wheel list pane",
+			view: viewDetail,
+			act: func(m Model) (Model, tea.Cmd) {
+				m.opts.Mouse = true
+				return updateModel(m, mouseWheelDownAt(4))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, attentionAPI := attentionFixture(t)
+			browseAPI := &attentionBrowseTestAPI{
+				attentionTestAPI: attentionAPI,
+				allIssues:        []Issue{attentionAPI.rows[0].issue},
+			}
+			m.api = browseAPI
+			m.scope = scope{}
+			m.view = viewProjects
+			m = resizeModel(m, 160, 40)
+
+			m, cmd := updateModel(m, keyRune('T'))
+			m = loadAttention(m, cmd)
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.Equal(t, viewDetail, m.view)
+			require.True(t, m.attention.returnToAttention)
+
+			m, cmd = tc.act(m)
+			require.Equal(t, tc.view, m.view)
+			require.Equal(t, focusList, m.focus)
+			require.True(t, m.scope.allProjects,
+				"leaving an unscoped Projects-origin detail must establish a usable all-projects list")
+			require.False(t, m.attention.returnToAttention)
+			require.Nil(t, m.attention.returnContext)
+			require.True(t, m.list.loading)
+			require.NotNil(t, cmd, "pane navigation must dispatch the list fetch")
+
+			loaded, ok := cmd().(initialFetchMsg)
+			require.True(t, ok, "pane navigation should fetch issues for the new scope")
+			require.True(t, loaded.dispatchKey.allProjects)
+			require.Equal(t, 1, browseAPI.allCalls)
+			m, _ = updateModel(m, loaded)
+			require.False(t, m.list.loading)
+			require.Equal(t, browseAPI.allIssues, m.list.issues)
+		})
+	}
+}
+
+func TestAttentionRestoresStackedDetailPaneFocusAfterAuxResize(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 100, 40)
+	origin := testIssue("origin")
+	m.list.issues = []Issue{testIssue("first"), testIssue("second")}
+	m.list.cursor = 0
+	m.list.selectedUID = m.list.issues[0].UID
+	m.view, m.prevView, m.focus = viewDetail, viewList, focusList
+	m.detail = detailModel{issue: &origin, scopePID: origin.ProjectID}
+	m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}
+
+	m = sendRune(m, 'D')
+	require.Equal(t, viewDaemons, m.view)
+	require.Equal(t, viewDetail, m.prevView)
+	m, cmd := updateModel(m, keyRune('T'))
+	m = loadAttention(m, cmd)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewDaemons, m.view)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view)
+	require.Equal(t, focusDetail, m.focus,
+		"restoring the auxiliary view's saved detail target into split layout must focus detail")
+	m = sendRune(m, 'j')
+	require.Zero(t, m.list.cursor,
+		"navigation after restoring stacked detail must not move the hidden issue list")
+	require.Equal(t, origin.UID, m.detail.issue.UID)
 }
 
 func TestAttentionCompletesPendingCredentialsCapabilities(t *testing.T) {

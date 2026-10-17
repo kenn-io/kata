@@ -164,6 +164,10 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 		previous.prevView == viewList && previous.focus == focusDetail && m.detail.issue != nil {
 		m.prevView = viewDetail
 	}
+	if m.layout == splitlayout.Split && attentionUsesSavedPreviousView(previous.view) &&
+		(previous.prevView == viewDetail || previous.focus == focusDetail) {
+		m.focus = focusDetail
+	}
 	if previous.view != viewHelp {
 		switch foreground {
 		case viewDetail:
@@ -203,6 +207,28 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 	}
 	return m, detailCmd
 }
+
+// prepareAttentionListNavigation clears the Attention detail return path
+// when the user moves into the split list pane. A Projects-origin Attention
+// view has no browsing scope, so initialize an all-projects list before
+// allowing that navigation to leave an empty list loading forever.
+func (m Model) prepareAttentionListNavigation() (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if m.attention.returnToAttention && m.scope.projectID == 0 && !m.scope.allProjects {
+		m.scopeGen++
+		m.scope = scope{allProjects: true, scopeGen: m.scopeGen}
+		actor := m.list.actor
+		m.list = newListModel()
+		m.list.actor = actor
+		m.cache.markStale()
+		m.detail.allProjects = true
+		cmd = m.fetchInitial()
+	}
+	m.attention.returnToAttention = false
+	m.attention.returnContext = nil
+	return m, cmd
+}
+
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
