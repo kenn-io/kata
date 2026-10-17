@@ -13,10 +13,11 @@ type federationHistoryQuery interface {
 }
 
 // ReadFederationMoveHistory fills a page after excluding local move history
-// covered by the first retained federation baseline. Later snapshots cannot
-// hide later deltas or invalid moves. Cutoffs are computed once per issue in
-// this read transaction, using bounded UID-indexed lookups rather than a scan
-// of the same subject history for every event.
+// covered by a retained federation baseline. Each standalone move waits for
+// its first covering snapshot; refreshes without another standalone move cannot
+// hide later deltas, and an uncovered trailing move remains visible. Cutoffs are
+// computed once per issue in this read transaction, using bounded UID-indexed
+// lookups rather than scanning the same subject history for every event.
 func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, limit int, snapshotExpression string, readPage func(int64, int) ([]Event, error)) ([]Event, error) {
 	events := []Event{}
 	cutoffs := map[string]int64{}
@@ -64,24 +65,27 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 		}
 		// Only generated placeholders and fixed backend JSON expressions enter the SQL; UIDs are bound parameters.
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
-		rows, err := tx.QueryContext(ctx, `SELECT history_baseline.issue_uid,history_baseline.baseline_id FROM (
- SELECT issue_uid,MIN(id) AS baseline_id FROM events
- WHERE issue_uid IN (`+strings.Join(slots, ",")+`) AND type='issue.snapshot'
- GROUP BY issue_uid) history_baseline
- WHERE EXISTS (
- SELECT 1 FROM events m WHERE m.issue_uid=history_baseline.issue_uid AND m.type='issue.moved'
- AND m.id<history_baseline.baseline_id AND `+snapshotExpression+` IS NULL)`, args...)
+		rows, err := tx.QueryContext(ctx, `SELECT m.issue_uid,m.id,m.type FROM events m
+ WHERE m.issue_uid IN (`+strings.Join(slots, ",")+`)
+ AND (m.type='issue.snapshot' OR (m.type='issue.moved' AND `+snapshotExpression+` IS NULL))
+ ORDER BY m.id`, args...)
 		if err != nil {
 			return err
 		}
+		uncovered := map[string]bool{}
 		for rows.Next() {
-			var uid string
-			var cutoff int64
-			if err := rows.Scan(&uid, &cutoff); err != nil {
+			var uid, eventType string
+			var eventID int64
+			if err := rows.Scan(&uid, &eventID, &eventType); err != nil {
 				_ = rows.Close()
 				return err
 			}
-			cutoffs[uid] = cutoff
+			if eventType == "issue.moved" {
+				uncovered[uid] = true
+			} else if uncovered[uid] {
+				cutoffs[uid] = eventID
+				uncovered[uid] = false
+			}
 		}
 		readErr, closeErr := rows.Err(), rows.Close()
 		if readErr != nil {

@@ -85,7 +85,9 @@ move history instead of applying a payload they cannot understand. Moves preserv
 stable UIDs, nesting, state, comments, and links. Old references resolve while
 move history and the original project identity remain. Purging that history or
 merging the former project can end compatibility; the move returns the current
-reference, and the stable issue UID stays unchanged.
+reference, and the stable issue UID stays unchanged. If a spoke previously
+assigned a longer short ID to avoid a local collision, that former reference
+also remains reserved while its move history remains.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without
@@ -101,9 +103,10 @@ left. Leave the dependent projects before removing the former identity;
 unrelated bindings and history covered by a standalone
 adoption baseline do not prevent ordinary cleanup.
 
-A local move made before federation starts is covered by the issue's first
-retained federation baseline. Spokes can receive later moves without joining
-the former local project; later edits and comments still synchronize normally.
+A standalone move is covered by the first retained federation baseline after
+that move, including after leaving and reenrolling in federation. Spokes can
+receive later moves without joining the former local project; later edits and
+comments still synchronize normally.
 
 The spoke sends the source project's existing enrollment credential with the
 move batch, alongside the destination credential, only to their shared hub

@@ -152,9 +152,11 @@ func MovedIssueUID(ctx context.Context, q interface {
 }, projectID int64, shortID string, postgres bool) (string, error) {
 	fromProject := "json_extract(e.payload, '$.from_project_uid')"
 	fromShort := "json_extract(e.payload, '$.from_short_id')"
+	moveEvent := "json_extract(e.payload, '$.move_event_uid')"
 	if postgres {
 		fromProject = "e.payload::jsonb->>'from_project_uid'"
 		fromShort = "e.payload::jsonb->>'from_short_id'"
+		moveEvent = "e.payload::jsonb->>'move_event_uid'"
 	}
 	// Historical short IDs are suffixes of the stable UID. First narrow the
 	// candidate issue identities; each correlated journal lookup can then use
@@ -167,7 +169,10 @@ func MovedIssueUID(ctx context.Context, q interface {
 	var uid string
 	err := q.QueryRowContext(ctx, `SELECT historical.uid FROM (
  SELECT i.uid, (
-  SELECT e.id FROM events e WHERE e.issue_uid=i.uid AND e.type='issue.moved'
+  SELECT e.id FROM events e WHERE e.issue_uid=i.uid
+   AND (e.type='issue.moved' OR (e.type='sync.reset_required'
+    AND EXISTS(SELECT 1 FROM events retained_move WHERE retained_move.uid=`+moveEvent+`
+     AND retained_move.type='issue.moved' AND retained_move.issue_uid=i.uid)))
    AND `+fromProject+`=(SELECT uid FROM projects WHERE id=$1)
    AND (`+fromShort+`=$2 OR e.issue_uid=$2)
   ORDER BY e.id DESC LIMIT 1
