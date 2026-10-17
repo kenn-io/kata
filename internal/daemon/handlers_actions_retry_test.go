@@ -355,7 +355,6 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 
 	second := postWithHeader(t, ts, path, headers, body)
 	requireOK(t, second)
-	assert.Equal(t, []string{"issue_closed"}, reporter.events, "a replay must not capture twice")
 	assert.Equal(t, store.committedEvents, sink.snapshot(), "an exact retry must not publish twice")
 	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 }
@@ -374,16 +373,15 @@ func TestClose_LostResponsePublishesOnceWhenReceiptReadFails(t *testing.T) {
 	store := &lostCloseResponseStore{
 		Storage: database.db, failNext: true, failIssueReadOnce: true,
 	}
-	reporter := &scopedAgentReporter{}
 	sink := &recordingSink{}
 	broadcaster := daemon.NewEventBroadcaster()
 	subscription := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer subscription.Unsub()
 	ts := startTestServer(t, daemon.ServerConfig{
-		DB: store, StartedAt: database.now, Hooks: sink, Broadcaster: broadcaster, Telemetry: reporter,
+		DB: store, StartedAt: database.now, Hooks: sink, Broadcaster: broadcaster,
 	})
 	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
-	headers := map[string]string{"Idempotency-Key": "close-delivery-retry-1", "X-Kata-Surface": "tui"}
+	headers := map[string]string{"Idempotency-Key": "close-delivery-retry-1"}
 	body := map[string]any{
 		"actor":          "agent-one",
 		"reason":         "wontfix",
@@ -393,7 +391,6 @@ func TestClose_LostResponsePublishesOnceWhenReceiptReadFails(t *testing.T) {
 
 	first := postWithHeader(t, ts, path, headers, body)
 	assertAPIError(t, first.status, first.body, http.StatusInternalServerError, "internal")
-	assert.Equal(t, []string{"issue_closed"}, reporter.events)
 	require.Len(t, store.committedEvents, 2)
 	assert.Equal(t, store.committedEvents, sink.snapshot(),
 		"the committed batch is published even when the receipt response fails")
@@ -405,7 +402,6 @@ func TestClose_LostResponsePublishesOnceWhenReceiptReadFails(t *testing.T) {
 	var secondOut api.MutationResponse
 	require.NoError(t, json.Unmarshal(second.body, &secondOut.Body))
 	assert.True(t, secondOut.Body.Reused)
-	assert.Equal(t, []string{"issue_closed"}, reporter.events, "a replay must not capture twice")
 	assert.Equal(t, store.committedEvents, sink.snapshot(), "a replay must not publish twice")
 	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 }

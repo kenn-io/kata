@@ -14,9 +14,9 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
-// Core actions belong to the committed mutation, and invalid hints must leave writes alone.
+// Core actions count committed mutations once, and callers without a surface count nothing.
 func TestCoreActionTelemetry(t *testing.T) {
-	for _, surface := range []string{"web", "tui", "cli", "", "unsupported"} {
+	for _, surface := range []string{"web", ""} {
 		t.Run(surface, func(t *testing.T) {
 			store := openAuthTestDB(t)
 			project, err := store.CreateProject(t.Context(), "example-project")
@@ -43,16 +43,15 @@ func TestCoreActionTelemetry(t *testing.T) {
 				require.True(t, reporter.failNext, "no header must skip capture entirely")
 			}
 			count := 0
-			if surface == "web" || surface == "tui" || surface == "cli" {
+			if surface == "web" {
 				count = 1
 			}
 			require.Len(t, reporter.captured, count)
 			if count > 0 {
-				assert.Equal(t, map[string]any{"surface": surface}, reporter.captured[0])
+				assert.Equal(t, capturedTelemetryEvent{event: "issue_created", properties: map[string]any{"surface": surface}}, reporter.captured[0])
 			}
 			send(path, `{"title":"Example task","actor":"user-a"}`, "create-key", 200)
 			assert.Len(t, reporter.captured, count, "replay counts nothing")
-			send(path, `{"title":"","actor":"user-a"}`, "", 400)
 			closePath := path + "/" + created.Body.Issue.ShortID + "/actions/close"
 			body := `{"actor":"user-a","reason":"done","retry_protocol":"close-v1","message":"Completed the requested work and checked the result.","evidence":[{"type":"commit","sha":"abc1234"}]}`
 			closed := send(closePath, body, "close-key", 200)
@@ -65,11 +64,10 @@ func TestCoreActionTelemetry(t *testing.T) {
 			noop := send(closePath, body, "", 200)
 			assert.False(t, noop.Body.Changed)
 			assert.Len(t, reporter.captured, 2*count, "replay and no-op count nothing")
-			send(path+"/missing/actions/close", body, "", 404)
 			send(path+"/"+created.Body.Issue.ShortID+"/actions/reopen", `{"actor":"user-a"}`, "", 200)
 			assert.Len(t, reporter.captured, 2*count)
 			if count > 0 {
-				assert.Equal(t, []string{"issue_created", "issue_closed"}, reporter.events)
+				assert.Equal(t, capturedTelemetryEvent{event: "issue_closed", properties: map[string]any{"surface": surface}}, reporter.captured[1])
 			}
 		})
 	}

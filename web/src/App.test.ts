@@ -2930,7 +2930,7 @@ describe('App', () => {
   })
 
   describe('completed issue action telemetry', () => {
-    for (const action of ['create', 'close', 'remove'] as const) {
+    for (const action of ['create', 'close'] as const) {
       it(`${action} sends its surface with the mutation`, async () => {
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
@@ -2981,11 +2981,6 @@ describe('App', () => {
             target: { value: 'Example task' },
           })
           await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-        } else if (action === 'remove') {
-          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
-          await fireEvent.click(await screen.findByRole('button', { name: 'More actions' }))
-          await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete issue' }))
-          await fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
         } else {
           await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
           await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))

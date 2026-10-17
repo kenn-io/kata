@@ -25,7 +25,7 @@ func TestCoreActionSurfaceHeaders(t *testing.T) {
 	assert.Equal(t, []string{"tui", "tui", "tui", ""}, surfaces)
 }
 
-func TestUndoReopenCloseDoesNotReportIssueClosed(t *testing.T) {
+func TestUndoCloseSuppressesSurface(t *testing.T) {
 	var surfaces []string
 	hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
