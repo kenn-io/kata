@@ -248,6 +248,15 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		if errors.Is(err, sql.ErrNoRows) {
 			if active {
 				projects[target] = true
+				// A cold replica can expose an empty projection at the append
+				// cursor before this fold creates the destination issue row.
+				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
+				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
+					return nil, err
+				}
+				if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, insertResetControl); err != nil {
+					return nil, err
+				}
 			} else {
 				delete(p.Issues, issue.UID)
 			}
