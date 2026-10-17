@@ -178,6 +178,12 @@ func (m Model) openAttentionIssue() (Model, tea.Cmd) {
 	row := m.attention.rows[m.attention.cursor]
 	m.attention.returnToAttention = true
 	m = m.seedOpenDetail(row.issue)
+	// An empty browsing scope (the Projects screen) also means all projects
+	// for Attention, even though the hidden list has no project selected.
+	if m.attention.allProjects {
+		m.detail.scopePID = row.issue.ProjectID
+		m.detail.allProjects = true
+	}
 	return m, m.fetchOpenDetail()
 }
 func (m Model) returnFromAttentionDetail() (Model, tea.Cmd) {

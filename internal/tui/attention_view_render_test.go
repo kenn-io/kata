@@ -69,3 +69,12 @@ func TestAttentionRenderBounds(t *testing.T) {
 	require.Contains(t, stripANSI(m.viewBody()), "attention") // full View supplies the common narrow hint.
 	require.Contains(t, stripANSI(m.View().Content), "needs more space")
 }
+
+func TestAttentionMessageTabs(t *testing.T) {
+	defer snapshotInit(t)()
+	m := attentionSnapshot(t)
+	m.attention.rows[0].message = "Review\tthis\trequest"
+	out := renderAttention(m)
+	require.NotContains(t, out, "\t")
+	require.Contains(t, stripANSI(out), "Review    this    request")
+}

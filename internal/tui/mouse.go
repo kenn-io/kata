@@ -64,6 +64,7 @@ func (m Model) mouseWheelAt(delta, x int) (Model, tea.Cmd) {
 			m.focus = focusDetail
 			return m.mouseDetailWheel(delta), nil
 		}
+		m.attention.returnToAttention = false
 		m.focus = focusList
 		return m.mouseListWheel(delta)
 	}
@@ -107,6 +108,7 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 	}
 	if m.layout == splitlayout.Split {
 		if x < splitConfig.ListWidth(m.width) {
+			m.attention.returnToAttention = false
 			m.focus = focusList
 			return m.mouseListClick(splitListRowY(y))
 		}

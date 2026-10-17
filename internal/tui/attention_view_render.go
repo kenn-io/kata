@@ -51,7 +51,7 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 		return nil
 	}
 	row := s.rows[min(s.cursor, len(s.rows)-1)]
-	message := wrapBody(sanitizeForDisplay(row.message), width)
+	message := wrapBody(strings.ReplaceAll(sanitizeForDisplay(row.message), "\t", "    "), width)
 	panel := min(len(message), max(3, budget/3))
 	panel = min(panel, max(budget-3, 0))
 	refWidth := 8

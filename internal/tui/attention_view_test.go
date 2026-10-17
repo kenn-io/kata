@@ -429,3 +429,32 @@ func TestAttentionClearDetailReturn(t *testing.T) {
 	require.Equal(t, viewAttention, m.view)
 	require.False(t, m.attention.clearing)
 }
+
+func TestAttentionDetailFromEmptyScope(t *testing.T) {
+	m, a := attentionFixture(t)
+	m.scope = scope{}
+	m.view = viewProjects
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, a.rows[0].issue.ProjectID, m.detail.scopePID)
+	require.True(t, m.detail.allProjects)
+}
+
+func TestAttentionMouseReturnFlagClears(t *testing.T) {
+	for _, click := range []bool{false, true} {
+		m, _ := attentionFixture(t)
+		m = resizeModel(m, 160, 40)
+		m, cmd := m.transitionToAttention()
+		m = loadAttention(m, cmd)
+		m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.True(t, m.attention.returnToAttention)
+		if click {
+			m, _ = m.mouseLeftClick(0, 4)
+		} else {
+			m, _ = m.mouseWheelAt(1, 0)
+		}
+		require.Equal(t, focusList, m.focus)
+		require.False(t, m.attention.returnToAttention)
+	}
+}
