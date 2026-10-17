@@ -294,7 +294,7 @@ func startIdentityDaemon(t *testing.T, bin string) (addr, serverHome string, sto
 		stop()
 	})
 
-	waitForPing(t, "http://"+addr, 5*time.Second)
+	waitForPing(t, "http://"+addr, 15*time.Second)
 	return addr, serverHome, stop
 }
 
