@@ -1,7 +1,10 @@
 package cron
 
 import (
+	"errors"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/robfig/cron/v3"
 )
@@ -52,5 +55,12 @@ func (t Trigger) Validate() error {
 // ParseCron preserves the shared five-field and descriptor grammar. Callers
 // evaluating schedules must use this parser rather than another cron dialect.
 func ParseCron(expression string) (cron.Schedule, error) {
+	trimmed := strings.TrimSpace(expression)
+	if strings.HasPrefix(trimmed, "TZ=") || strings.HasPrefix(trimmed, "CRON_TZ=") {
+		directive, _, ok := strings.Cut(trimmed, " ")
+		if !ok || strings.ContainsFunc(directive, unicode.IsSpace) {
+			return nil, errors.New("timezone directive must be followed by a space and a schedule")
+		}
+	}
 	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(expression)
 }
