@@ -3191,6 +3191,7 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if isDetailFetchMsg(msg) {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
+		m = m.syncAttentionReturnDetail(msg)
 		return m, withConnGen(cmd, m.connGen)
 	}
 	if _, isKey := msg.(tea.KeyPressMsg); isKey && m.view != viewList && m.view != viewDetail {

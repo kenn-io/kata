@@ -84,10 +84,36 @@ func (m Model) attentionForeground() viewID {
 	if m.view != viewList && m.view != viewDetail {
 		return m.view
 	}
-	if m.layout == splitlayout.Split && m.focus == focusDetail {
-		return viewDetail
+	if m.layout == splitlayout.Split {
+		if m.focus == focusDetail {
+			return viewDetail
+		}
+		return viewList
 	}
 	return m.view
+}
+
+func (m Model) syncAttentionReturnDetail(msg tea.Msg) Model {
+	if m.attention.returnContext == nil || !isDetailFetchMsg(msg) {
+		return m
+	}
+	updated, applied := m.attention.returnContext.detail.applyFetchedIfFresh(msg)
+	if !applied {
+		return m
+	}
+	context := *m.attention.returnContext
+	context.detail = cloneDetailModel(updated)
+	m.attention.returnContext = &context
+	return m
+}
+
+func attentionUsesSavedPreviousView(view viewID) bool {
+	switch view {
+	case viewDaemons, viewFederation, viewCredentials:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m Model) reloadAttention() (Model, tea.Cmd) {
@@ -134,6 +160,10 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 	m.detail = m.applyDetailViewportCache(cloneDetailModel(previous.detail))
 	m.view, m.prevView, m.focus = previous.view, previous.prevView, previous.focus
 	foreground := previous.foreground
+	if m.layout == splitlayout.Stacked && attentionUsesSavedPreviousView(previous.view) &&
+		previous.prevView == viewList && previous.focus == focusDetail && m.detail.issue != nil {
+		m.prevView = viewDetail
+	}
 	if previous.view != viewHelp {
 		switch foreground {
 		case viewDetail:

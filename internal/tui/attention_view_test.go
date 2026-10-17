@@ -656,6 +656,69 @@ func TestAttentionRestoresAuxiliaryListDetailAfterWiden(t *testing.T) {
 	require.Equal(t, issue.UID, m.detail.issue.UID)
 }
 
+func TestAttentionSyncsInFlightDetailIntoReturnContext(t *testing.T) {
+	m, _ := attentionFixture(t)
+	issue := testIssue("loading")
+	m.view, m.prevView, m.focus = viewDetail, viewList, focusDetail
+	m.detail = detailModel{gen: 42, loading: true, commentsLoading: true}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+
+	m, _ = updateModel(m, detailFetchedMsg{gen: 42, issue: &issue})
+	require.NotNil(t, m.detail.issue, "the live detail should accept its matching response")
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, issue.UID, m.detail.issue.UID)
+	require.False(t, m.detail.loading,
+		"a matching response received under Attention must not restore a stuck loading snapshot")
+}
+
+func TestAttentionRestoresListFocusFromSplitDetailView(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	issue := testIssue("focused-list")
+	m.view, m.focus = viewDetail, focusList
+	m.detail = detailModel{issue: &issue, scopePID: issue.ProjectID}
+
+	m, cmd := m.transitionToAttention()
+	require.Equal(t, viewList, m.attention.returnContext.foreground)
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, focusList, m.focus,
+		"Attention must restore list focus when the detail view was not focused")
+}
+
+func TestAttentionRestoresAuxiliaryFocusedDetailWhenResizedToStacked(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	origin := testIssue("origin")
+	prior := testIssue("prior")
+	m.view, m.prevView, m.focus = viewDaemons, viewList, focusDetail
+	m.detail = detailModel{
+		issue:    &origin,
+		scopePID: origin.ProjectID,
+		navStack: []detailModel{{issue: &prior, scopePID: prior.ProjectID}},
+	}
+	m.daemonTargets = []daemonTarget{{Local: true}}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m = resizeModel(m, 80, 24)
+
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewDaemons, m.view)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view,
+		"leaving Daemons after Attention must return to the previously focused detail")
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, origin.UID, m.detail.issue.UID)
+	require.Len(t, m.detail.navStack, 1)
+	require.Equal(t, prior.UID, m.detail.navStack[0].issue.UID)
+}
+
 func TestAttentionClear(t *testing.T) {
 	m, a := attentionFixture(t)
 	m.scope.allProjects = true
