@@ -1018,6 +1018,10 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+		return api.NewError(http.StatusConflict, "federation_project_identity_required", db.ErrFederationProjectIdentityRequired.Error(),
+			"leave the joined projects still replaying this history before adopting this former project under a different UID", nil)
+	}
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByDownstream) {
 		return api.NewError(http.StatusConflict, "federation_lifecycle_blocked", "federation change requires resolved deliveries and detached downstream enrollments", "sync retained work through root acceptance and explicitly revoke or detach descendants, then retry", nil)
 	}

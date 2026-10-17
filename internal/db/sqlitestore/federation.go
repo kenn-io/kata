@@ -2936,6 +2936,11 @@ func (d *Store) adoptProjectIntoFederation(
 		}
 	}
 
+	if project.UID != p.HubProjectUID {
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project, `json_type(m.payload,'$.snapshot')`); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+	}
 	cron, err := db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.EmptyOnly)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
