@@ -68,11 +68,11 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 			// Keep the static shell public; listener Host policy still wraps it.
 			if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api" &&
 				r.URL.Path != "/openapi.yaml" && r.URL.Path != "/openapi.json" &&
-				!strings.HasPrefix(r.URL.Path, "/debug/pprof/") {
+				!strings.HasPrefix(r.URL.Path, "/debug/pprof/") && r.URL.Path != "/mcp" {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if webSessionAuthenticated(r.Context()) {
+			if webSessionAuthenticated(r.Context()) && r.URL.Path != "/mcp" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -114,6 +114,10 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				return
 			}
 			if p.Token == "" {
+				if r.URL.Path == "/mcp" {
+					api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required", "MCP requires bearer authentication")
+					return
+				}
 				// Health changes from a public probe response to owner diagnostics
 				// when a principal is present. A keyless daemon cannot validate any
 				// explicit credential, so reject one here instead of silently
@@ -175,6 +179,10 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 	}
 	presented := strings.TrimPrefix(got, authBearerPrefix)
 	if p.Token != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(p.Token)) == 1 {
+		if r.URL.Path == "/mcp" {
+			api.WriteEnvelope(w, http.StatusForbidden, "bootstrap_token_write_forbidden", "MCP requires an attributed user token")
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), Principal{
 			Kind: PrincipalBootstrap,
 		})))

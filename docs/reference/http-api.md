@@ -174,6 +174,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.29.0` | Adds authenticated `GET /api/v1/mcp/capabilities` for the opt-in authoritative daemon MCP endpoint. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
@@ -579,6 +580,16 @@ the endpoint is unsupported or hidden from this principal.
 The optional `/health` embeddings block also includes `error_present` when the
 reconciler has an error, including failures without a provider HTTP status.
 This boolean does not disclose the provider's raw diagnostic text.
+
+## MCP endpoint
+
+An explicitly enabled authoritative server daemon serves Streamable HTTP
+JSON-RPC at `/mcp` on its shared API listener. It requires daemon bearer auth;
+browser sessions alone do not authorize it. `GET /api/v1/mcp/capabilities` is
+ordinary authenticated REST metadata, included in OpenAPI. The `/mcp` wire
+protocol itself is MCP rather than REST and is documented in the
+[MCP reference](mcp.md#hub-daemon-endpoint), including role restrictions,
+project scope and actor policy.
 
 ## Browser UI endpoints
 

@@ -4280,6 +4280,12 @@ func (m MapConnectorFieldRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(m))
 }
 
+type McpCapabilitiesOutputBody struct {
+	Enabled   bool    `json:"enabled"`
+	Endpoint  *string `json:"endpoint,omitempty"`
+	Transport *string `json:"transport,omitempty"`
+}
+
 type MergeProjectRequestBody struct {
 	Actor           *string `json:"actor,omitempty"`
 	SourceProjectID int64   `json:"source_project_id"`
