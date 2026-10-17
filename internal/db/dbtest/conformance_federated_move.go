@@ -382,7 +382,7 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	t.Run("source lifecycle awaits destination move", func(t *testing.T) {
-		for _, operation := range []string{"leave", "archive"} {
+		for _, operation := range []string{"leave", "archive", "prepare-fence"} {
 			t.Run(operation, func(t *testing.T) {
 				source, err := store.CreateProject(ctx, operation+"-lifecycle-source")
 				require.NoError(t, err)
@@ -403,6 +403,9 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				_, err = store.LeaveFederationReplica(ctx, unrelated.ID)
 				require.NoError(t, err, "unrelated pending moves must not block teardown")
 				teardown := func() error {
+					if operation == "prepare-fence" {
+						return store.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, source.ID)
+					}
 					if operation == "leave" {
 						_, err := store.LeaveFederationReplica(ctx, source.ID)
 						return err
@@ -420,12 +423,19 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				binding, err := store.FederationBindingByProject(ctx, source.ID)
 				require.NoError(t, err)
 				require.True(t, binding.Enabled)
+				require.True(t, binding.PushEnabled, "a rejected fence must not change source write authority")
 				project, err := store.ProjectByID(ctx, source.ID)
 				require.NoError(t, err)
 				require.Nil(t, project.DeletedAt)
 				require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
 				require.NoError(t, lifecycle.ValidateRelayLifecycle(ctx, source.ID))
 				require.NoError(t, teardown(), "acknowledgment releases the source for ordinary teardown")
+				if operation == "prepare-fence" {
+					binding, err := store.FederationBindingByProject(ctx, source.ID)
+					require.NoError(t, err)
+					require.True(t, binding.Enabled)
+					require.False(t, binding.PushEnabled, "a prepared native source retains a durable write fence")
+				}
 			})
 		}
 	})
