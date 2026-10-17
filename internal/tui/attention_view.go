@@ -81,6 +81,9 @@ func (m Model) attentionForeground() viewID {
 	if m.view == viewHelp {
 		return m.prevView
 	}
+	if m.view != viewList && m.view != viewDetail {
+		return m.view
+	}
 	if m.layout == splitlayout.Split && m.focus == focusDetail {
 		return viewDetail
 	}

@@ -335,6 +335,36 @@ func TestAttentionKeepsFocusedDetailVisibleWhenResizedToStacked(t *testing.T) {
 	require.Equal(t, prior.UID, m.detail.navStack[0].issue.UID)
 }
 
+func TestAttentionPreservesAuxiliaryViewWithDetailFocusAfterResize(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view viewID
+	}{
+		{"projects", viewProjects},
+		{"daemons", viewDaemons},
+		{"federation", viewFederation},
+		{"credentials", viewCredentials},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, api := attentionFixture(t)
+			m = resizeModel(m, 160, 40)
+			origin := testIssue("origin")
+			m.view, m.prevView, m.focus = tc.view, viewList, focusDetail
+			m.detail = detailModel{issue: &origin, scopePID: origin.ProjectID}
+
+			m, cmd := m.transitionToAttention()
+			m = loadAttention(m, cmd)
+			m = resizeModel(m, 80, 24)
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+			require.Equal(t, tc.view, m.view,
+				"Attention should restore the auxiliary foreground that it covered")
+			require.Equal(t, origin.UID, m.detail.issue.UID)
+			require.NotNil(t, api)
+		})
+	}
+}
+
 func TestAttentionRestoresDetailViewportAfterResize(t *testing.T) {
 	m, _ := attentionFixture(t)
 	m = resizeModel(m, 160, 40)

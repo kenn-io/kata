@@ -306,3 +306,25 @@ func TestLayoutFlipUnderOverlayBootstrapsSplitDetail(t *testing.T) {
 		})
 	}
 }
+
+func TestLayoutFlipUnderHelpPreservesFocusedDetailReturnTarget(t *testing.T) {
+	m, cleanup := layoutTestSetup(t)
+	defer cleanup()
+	m = resizeModel(m, 160, 40)
+	issue := m.list.issues[0]
+	m.detail.issue = &issue
+	m.focus = focusDetail
+	m = sendRune(m, '?')
+	if m.view != viewHelp || m.prevView != viewList {
+		t.Fatalf("setup failed: view=%v prevView=%v, want Help over list", m.view, m.prevView)
+	}
+
+	m = resizeModel(m, 100, 40)
+	if m.view != viewHelp {
+		t.Fatalf("narrowing changed foreground view to %v, want Help", m.view)
+	}
+	m = sendRune(m, '?')
+	if m.view != viewDetail {
+		t.Fatalf("leaving Help returned to %v, want the previously focused detail", m.view)
+	}
+}
