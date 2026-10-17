@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 type attentionState struct {
@@ -24,8 +25,16 @@ type attentionState struct {
 	skipped                     int
 	clearing, returnToAttention bool
 	returnView                  viewID
+	returnContext               *attentionReturnContext
 	gen                         uint64
 }
+
+type attentionReturnContext struct {
+	view, prevView viewID
+	detail         detailModel
+	focus          focusPane
+}
+
 type attentionLoadedMsg struct {
 	connGen, gen uint64
 	rows         []attentionRequest
@@ -45,8 +54,14 @@ func resolveAttentionRecipient(env string, auth AuthInfo, actor string) (string,
 }
 
 func (m Model) transitionToAttention() (Model, tea.Cmd) {
-	if m.view != viewAttention && !m.attention.returnToAttention {
+	if m.view != viewAttention && !m.attention.returnToAttention && m.attention.returnContext == nil {
 		m.attention.returnView = m.view
+		m.attention.returnContext = &attentionReturnContext{
+			view:     m.view,
+			prevView: m.prevView,
+			detail:   cloneDetailModel(m.detail),
+			focus:    m.focus,
+		}
 		m.attention.allProjects = m.scope.allProjects || m.scope.projectID == 0
 		m.attention.projectID = m.scope.projectID
 		m.attention.projectName = m.scope.projectName
@@ -85,25 +100,39 @@ func (m Model) leaveAttentionView() Model {
 	m.attention.returnToAttention = false
 	return m
 }
-func (m Model) prepareAttentionGlobalExit() Model {
+func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 	m.attention.returnToAttention = false
-	if m.view != viewAttention {
-		return m
+	if m.attention.returnContext == nil {
+		if m.view == viewAttention || (m.view == viewHelp && m.prevView == viewAttention) {
+			target := m.attention.returnView
+			m = m.leaveAttentionView()
+			if target == viewAttention {
+				target = viewList
+			}
+			m.view = target
+		}
+		return m, nil
 	}
-	target := m.attention.returnView
+	previous := *m.attention.returnContext
 	m = m.leaveAttentionView()
-	if target == viewAttention {
-		target = viewList
+	m.attention.returnContext = nil
+	m.detail = cloneDetailModel(previous.detail)
+	m.view, m.prevView, m.focus = previous.view, previous.prevView, previous.focus
+	foreground := previous.view
+	if previous.view == viewHelp {
+		foreground = previous.prevView
 	}
-	m.view = target
-	return m
+	if m.layout == splitlayout.Split && foreground == viewDetail {
+		m.focus = focusDetail
+	}
+	return m, m.restoredDetailRefetch()
 }
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		return m.openAttentionIssue()
 	case "esc":
-		return m.prepareAttentionGlobalExit(), nil
+		return m.prepareAttentionGlobalExit()
 	case "c":
 		return m.clearAttentionRequest()
 	case "r":

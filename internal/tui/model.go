@@ -600,7 +600,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) reconcileSplitDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
+	if m.attention.returnToAttention || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
 		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
@@ -1446,6 +1446,9 @@ func (m Model) markSearchSplitDetailOwned() Model {
 }
 
 func (m Model) followHighlightedIssueIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
+	if m.attention.returnToAttention {
+		return m, prior
+	}
 	iss, ok := pickHighlightedIssue(m.list)
 	if !ok {
 		return m, prior
@@ -2228,21 +2231,21 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.keymap.Daemons.matches(msg) {
-		m = m.prepareAttentionGlobalExit()
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToDaemons()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Federation.matches(msg) {
-		m = m.prepareAttentionGlobalExit()
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToFederation()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Credentials.matches(msg) {
-		m = m.prepareAttentionGlobalExit()
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		next, cmd := m.transitionToCredentials()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.view == viewEmpty {
 		if msg.String() == "esc" && m.prevView == viewDaemons {
@@ -2253,7 +2256,8 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	if m.keymap.Attention.matches(msg) && m.view != viewEmpty && m.view != viewHelp {
 		if m.view == viewAttention {
-			return m.prepareAttentionGlobalExit(), nil, true
+			next, cmd := m.prepareAttentionGlobalExit()
+			return next, cmd, true
 		}
 		next, cmd := m.transitionToAttention()
 		return next, cmd, true
@@ -2264,16 +2268,16 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return next, helpCmd, true
 	}
 	if m.keymap.Inbox.matches(msg) {
-		m = m.prepareAttentionGlobalExit()
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.toggleInbox()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Projects.matches(msg) {
-		m = m.prepareAttentionGlobalExit()
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToProjects()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.ToggleLayout.matches(msg) {
 		next, cmd := m.toggleLayout()
@@ -2329,6 +2333,7 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
 		m.attention.returnToAttention = false
+		m.attention.returnContext = nil
 		m.focus = focusList
 		m.view = viewList
 		return m, nil, true
@@ -3317,6 +3322,9 @@ func isDetailFetchMsg(msg tea.Msg) bool {
 // observe the detail pane following the cursor without standing up
 // an http server.
 func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
+	if m.attention.returnToAttention {
+		return m, nil
+	}
 	iss, ok := pickHighlightedIssue(m.list)
 	if !ok {
 		return m, nil
@@ -3361,7 +3369,7 @@ const detailFollowDebounce = 75 * time.Millisecond
 // cursor change can drop this one's response too via applyFetched's
 // gen check.
 func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) {
-	if msg.gen != m.nextDetailFollowGen {
+	if m.attention.returnToAttention || msg.gen != m.nextDetailFollowGen {
 		return m, nil
 	}
 	if m.api == nil || m.detail.issue == nil {

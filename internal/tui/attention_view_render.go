@@ -54,17 +54,17 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 	message := wrapBody(strings.ReplaceAll(sanitizeForDisplay(row.message), "\t", "    "), width)
 	panel := min(len(message), max(3, budget/3))
 	panel = min(panel, max(budget-3, 0))
-	refWidth := 8
+	issueWidth := 8
 	if s.allProjects {
-		refWidth = min(28, width/4)
+		issueWidth = min(28, width/4)
 	}
-	fromWidth := min(24, width/5)
-	workWidth := 11
-	titleWidth := max(width-refWidth-fromWidth-workWidth-8, 1)
-	columns := func(ref, title, from, work string) string {
-		return padToWidth(truncate(ref, refWidth), refWidth) + "  " + padToWidth(truncate(title, titleWidth), titleWidth) + "  " + padToWidth(truncate(from, fromWidth), fromWidth) + "  " + truncate(work, workWidth)
+	ownerWidth := min(24, width/5)
+	statusWidth := 11
+	titleWidth := max(width-issueWidth-ownerWidth-statusWidth-8, 1)
+	columns := func(issue, title, owner, status string) string {
+		return padToWidth(truncate(issue, issueWidth), issueWidth) + "  " + padToWidth(truncate(title, titleWidth), titleWidth) + "  " + padToWidth(truncate(owner, ownerWidth), ownerWidth) + "  " + truncate(status, statusWidth)
 	}
-	out := []string{subtleStyle.Render("  " + columns("Ref", "Title", "From", "Work"))}
+	out := []string{subtleStyle.Render("  " + columns("#", "title", "owner", "status"))}
 	start, end := windowBounds(len(s.rows), s.cursor, max(budget-panel-2, 1))
 	for i := start; i < end; i++ {
 		r := s.rows[i]
@@ -72,11 +72,11 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 		if s.allProjects {
 			ref = r.issue.QualifiedID
 		}
-		from := sanitizeForLine(r.from)
+		owner := sanitizeForLine(r.from)
 		if r.teammate != "" {
-			from += " / " + sanitizeForLine(r.teammate)
+			owner += " / " + sanitizeForLine(r.teammate)
 		}
-		text := columns(sanitizeForLine(ref), sanitizeForLine(r.issue.Title), from, r.workAttention)
+		text := columns(sanitizeForLine(ref), sanitizeForLine(r.issue.Title), owner, r.workAttention)
 		if i == s.cursor {
 			out = append(out, selectedStyle.Render("▶ "+text))
 		} else {

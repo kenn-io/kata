@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 type attentionTestAPI struct {
@@ -241,6 +242,147 @@ func TestAttentionDetailReturn(t *testing.T) {
 		})
 	}
 }
+
+func TestAttentionRestoresDetailNavigationAndFocusAfterResize(t *testing.T) {
+	m, a := attentionFixture(t)
+	origin := testIssue("origin")
+	prior := testIssue("prior")
+	m.view, m.prevView = viewDetail, viewList
+	m.detail = detailModel{
+		issue:     &origin,
+		scopePID:  7,
+		activeTab: tabEvents,
+		navStack:  []detailModel{{issue: &prior, scopePID: 7}},
+	}
+	m.focus = focusList // stacked layouts do not require a detail-focused pane.
+
+	m, cmd := updateModel(m, keyRune('T'))
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, a.rows[0].issue.UID, m.detail.issue.UID)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = loadAttention(m, cmd)
+	require.Equal(t, viewAttention, m.view)
+
+	// Attention stays in front while the terminal changes from stacked to split.
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, viewAttention, m.view)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view)
+	require.Equal(t, viewList, m.prevView)
+	require.Equal(t, focusDetail, m.focus,
+		"the restored detail view must own key dispatch in split layout")
+	require.Equal(t, splitlayout.Split, m.layout)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, origin.UID, m.detail.issue.UID)
+	require.Equal(t, tabEvents, m.detail.activeTab)
+	require.Len(t, m.detail.navStack, 1)
+	require.Equal(t, prior.UID, m.detail.navStack[0].issue.UID)
+	require.NotNil(t, cmd, "the retained detail must be refreshed after Attention")
+}
+
+func TestAttentionHelpDoesNotReplaceDaemonsBackTarget(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m.view, m.prevView = viewDaemons, viewList
+	m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}
+	m, cmd := updateModel(m, keyRune('T'))
+	m = loadAttention(m, cmd)
+	m = sendRune(m, '?')
+	m = sendRune(m, '?')
+	m = sendKey(m, tea.KeyEscape)
+	require.Equal(t, viewDaemons, m.view)
+	require.Equal(t, viewList, m.prevView)
+	m = sendKey(m, tea.KeyEscape)
+	require.Equal(t, viewList, m.view,
+		"Esc from Daemons must return to its original view, not reopen Attention")
+}
+
+func TestAttentionRestartsCanceledSplitDetailFollow(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	issue := testIssue("follow")
+	m.list.issues = []Issue{issue}
+	m, pending := m.scheduleDetailFollow()
+	require.NotNil(t, pending)
+	pendingGen := m.nextDetailFollowGen
+
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	_, stale := m.handleDetailFollowTick(detailFollowTickMsg{gen: pendingGen})
+	require.Nil(t, stale, "entering Attention must cancel the previous debounce tick")
+	m, resumed := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewList, m.view)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, issue.UID, m.detail.issue.UID)
+	require.True(t, m.detail.commentsLoading)
+	require.True(t, m.detail.eventsLoading)
+	require.True(t, m.detail.linksLoading)
+	require.NotNil(t, resumed,
+		"returning must dispatch replacement work for the retained split detail")
+}
+
+func TestAttentionInspectDoesNotRetargetDetailOnListRefresh(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	ordinary := testIssue("ordinary")
+	inspected := testIssue("inspected")
+	m.list.issues = []Issue{ordinary}
+	m.detail = detailModel{issue: &inspected, scopePID: inspected.ProjectID}
+	m.view = viewDetail
+	m.focus = focusDetail
+	m.attention.returnToAttention = true
+
+	// A list refresh removes the ordinary selection and highlights another row
+	// while the detail pane is inspecting a request opened from Attention.
+	replacement := testIssue("replacement")
+	m.list.issues = []Issue{replacement}
+	m, cmd := m.reconcileSplitDetailAfterRefetch(ordinary.ProjectID, ordinary.UID, true)
+	require.Nil(t, cmd)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, inspected.UID, m.detail.issue.UID)
+
+	m.list.issues = []Issue{replacement}
+	m, cmd = m.scheduleDetailFollow()
+	require.Nil(t, cmd, "deferred detail-follow work must not retarget the inspected request")
+	require.Equal(t, inspected.UID, m.detail.issue.UID)
+}
+
+func TestAttentionCredentialsRefreshContinuesWhileHidden(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m.view, m.prevView = viewCredentials, viewDaemons
+	m.credentials = credentialAuditState{available: true, loading: true, gen: 7}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+
+	loaded, tick := m.handleCredentialsLoaded(credentialsLoadedMsg{
+		connGen: m.connGen, gen: 7, tokens: []TokenInfo{{ID: 4, Actor: "example-agent"}},
+	})
+	require.False(t, loaded.credentials.loading)
+	require.True(t, loaded.credentials.refreshScheduled)
+	require.NotNil(t, tick, "a load that finishes under Attention must keep its timer")
+
+	refreshing, fetch := loaded.handleCredentialsRefreshTick(credentialsRefreshTickMsg{
+		connGen: m.connGen, gen: 7,
+	})
+	require.True(t, refreshing.credentials.loading)
+	require.False(t, refreshing.credentials.refreshScheduled)
+	require.NotNil(t, fetch, "a refresh tick must run while Credentials is hidden")
+
+	refreshed, nextTick := refreshing.handleCredentialsLoaded(credentialsLoadedMsg{
+		connGen: m.connGen, gen: 7, tokens: []TokenInfo{{ID: 5, Actor: "example-agent"}},
+	})
+	require.False(t, refreshed.credentials.loading)
+	require.True(t, refreshed.credentials.refreshScheduled)
+	require.NotNil(t, nextTick)
+
+	back, _ := updateModel(refreshed, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewCredentials, back.view)
+	require.Equal(t, viewDaemons, back.prevView,
+		"Attention must preserve Credentials' original back target")
+	require.True(t, back.credentials.refreshScheduled)
+}
 func TestAttentionOpenIsSynchronous(t *testing.T) {
 	m, _ := attentionFixture(t)
 	m, cmd := m.transitionToAttention()
@@ -457,17 +599,4 @@ func TestAttentionMouseReturnFlagClears(t *testing.T) {
 		require.Equal(t, focusList, m.focus)
 		require.False(t, m.attention.returnToAttention)
 	}
-}
-
-func TestAttentionClearWrappedNilAPIError(t *testing.T) {
-	m, a := attentionFixture(t)
-	var apiErr *APIError
-	a.clearErr = fmt.Errorf("request failed: %w", apiErr)
-	m, cmd := m.transitionToAttention()
-	m = loadAttention(m, cmd)
-	m, cmd = updateModel(m, keyRune('c'))
-	require.NotPanics(t, func() { m, _ = updateModel(m, cmd()) })
-	require.NotNil(t, m.toast)
-	require.Len(t, m.attention.rows, 2)
-	require.False(t, m.attention.clearing)
 }

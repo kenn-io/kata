@@ -1,7 +1,7 @@
 kata / attention
 for alex · example-project · 4 requests · 1 skipped
 
-  Ref       Title                                                                  From                      Work
+  #         title                                                                  owner                     status
 ▶ abc4      issue abc4                                                             sam                       needs-human
   def5      issue def5                                                             system                    stuck
   ghi6      issue ghi6                                                             system / cron
