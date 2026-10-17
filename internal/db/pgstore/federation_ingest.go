@@ -94,7 +94,7 @@ func (s *Store) IngestFederationEvents(
 		// Projection writes happen after validation; later moves can depend on
 		// fully validated creations earlier in this batch.
 		batchIssueProjects := map[string]int64{}
-		moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, `payload::jsonb->'snapshot'`, params.Events)
+		moveSnapshots := db.NewFederationMoveSnapshotValidator(tx)
 		freshSnapshotSeen := false
 		boundActor := strings.TrimSpace(params.BoundActor)
 		for _, input := range params.Events {
@@ -240,6 +240,7 @@ func (s *Store) IngestFederationEvents(
 			case "issue.moved":
 				batchIssueProjects[*event.IssueUID] = moveTo
 			}
+			moveSnapshots.ObservePrepared(event)
 			prepared = append(prepared, preparedFederationIngestEvent{
 				sourceEventID: input.SourceEventID, event: event,
 			})
@@ -922,7 +923,7 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			continue
 		}
 		event := input.event
-		canSeed, err := moveSnapshots.CanSeed(ctx, event)
+		referenceEvent, err := moveSnapshots.UnprovenReferences(ctx, event)
 		if err != nil {
 			return err
 		}
@@ -936,11 +937,9 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			if err != nil {
 				return err
 			}
-			if event.Type != "issue.moved" || canSeed {
-				refs, err = payloadReferencedIssueUIDs(event, payload)
-				if err != nil {
-					return err
-				}
+			refs, err = payloadReferencedIssueUIDs(referenceEvent, db.PayloadMap(referenceEvent.Payload))
+			if err != nil {
+				return err
 			}
 		case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
 			// A run's UID identifies the run, not its optional issue reference.
@@ -954,8 +953,8 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		default:
 			continue
 		}
-		if canSeed {
-			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, event)
+		if event.Type == "issue.moved" {
+			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, referenceEvent)
 			if err != nil {
 				return err
 			}

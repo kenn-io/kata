@@ -122,7 +122,7 @@ func (d *Store) ingestFederationEventsOnce(
 	// Projection writes happen after validation; later moves can depend on
 	// fully validated creations earlier in this batch.
 	batchIssueProjects := map[string]int64{}
-	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, `json_extract(payload,'$.snapshot')`, p.Events)
+	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx)
 	freshSnapshotSeen := false
 	boundActor := strings.TrimSpace(p.BoundActor)
 	for _, in := range p.Events {
@@ -267,6 +267,7 @@ func (d *Store) ingestFederationEventsOnce(
 		case "issue.moved":
 			batchIssueProjects[*ev.IssueUID] = moveTo
 		}
+		moveSnapshots.ObservePrepared(ev)
 		prepared = append(prepared, preparedFederationIngestEvent{
 			SourceEventID: in.SourceEventID,
 			Event:         ev,
@@ -1448,7 +1449,7 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			continue
 		}
 		event := input.Event
-		canSeed, err := moveSnapshots.CanSeed(ctx, event)
+		referenceEvent, err := moveSnapshots.UnprovenReferences(ctx, event)
 		if err != nil {
 			return err
 		}
@@ -1462,11 +1463,9 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 			if err != nil {
 				return err
 			}
-			if event.Type != "issue.moved" || canSeed {
-				refs, err = payloadReferencedIssueUIDs(event, payload)
-				if err != nil {
-					return err
-				}
+			refs, err = payloadReferencedIssueUIDs(referenceEvent, db.PayloadMap(referenceEvent.Payload))
+			if err != nil {
+				return err
 			}
 		case event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot":
 			// A run's UID identifies the run, not its optional issue reference.
@@ -1480,8 +1479,8 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		default:
 			continue
 		}
-		if canSeed {
-			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, event)
+		if event.Type == "issue.moved" {
+			replyIssues, err := db.FederationMoveSnapshotReplyIssues(ctx, tx, referenceEvent)
 			if err != nil {
 				return err
 			}

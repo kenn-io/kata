@@ -61,18 +61,29 @@ func checkFederatedMoveSnapshotAuthority(t *testing.T, store db.Storage) error {
 			case "fallback-link-author":
 				link["author"] = "forged-author"
 			}
+			if kind == "historical-authors" || kind == "fallback-later-historical" {
+				retained, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "historical-commenter", Body: "snapshot discussion"})
+				require.NoError(t, err)
+				comment["comment_uid"], comment["created_at"] = retained.UID, retained.CreatedAt.UTC().Format(time.RFC3339Nano)
+				_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "historical-linker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "historical-linker"})
+				require.NoError(t, err)
+			}
 			if archived {
 				if kind == "archived-link" {
+					link["author"] = author
 					_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: author}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: author})
 					require.NoError(t, err)
 				} else {
 					retained, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: author, Body: "retained reply", ReplyToUID: peerComment.UID, ReplyKind: "reply"})
 					require.NoError(t, err)
 					comment["comment_uid"], comment["author"], comment["body"] = retained.UID, retained.Author, retained.Body
+					comment["created_at"] = retained.CreatedAt.UTC().Format(time.RFC3339Nano)
 				}
 				_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: projects[2].ID, Actor: "worker", Force: true})
 				require.NoError(t, err)
 			}
+			issue, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
 			if fallback {
 				// A materialized issue may survive partial retained history. Its
 				// move snapshot will supply the fold's missing creation baseline.
@@ -121,7 +132,7 @@ func checkFederatedMoveSnapshotAuthority(t *testing.T, store db.Storage) error {
 			require.Equal(t, author, got.Author)
 			comments, err := store.CommentsByIssue(ctx, got.ID)
 			require.NoError(t, err)
-			if (fallback && kind != "fallback-later-historical") || kind == "archived-reply" {
+			if fallback || kind == "archived-reply" || kind == "historical-authors" {
 				require.Len(t, comments, 1)
 			} else {
 				require.Empty(t, comments, "an unused snapshot cannot introduce discussion")
