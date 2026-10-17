@@ -20,6 +20,7 @@ export interface MutationOptions<TDraft = unknown> {
   revision?: string
   createKey?: string
   draft?: TDraft
+  onChanged?: () => void
 }
 
 export type MutationState<TDraft = unknown> =
@@ -117,7 +118,11 @@ export class MutationController {
       return false
     }
 
-    if (options.createKey) this.#committedCreates.set(options.createKey, result.data)
+    const data = asObject(result.data)
+    if (data?.changed === true) options.onChanged?.()
+    if (options.createKey) {
+      this.#committedCreates.set(options.createKey, result.data)
+    }
     this.state = { kind: 'idle' }
     await this.#refreshAfterUncertainWrite()
     return result.data as T

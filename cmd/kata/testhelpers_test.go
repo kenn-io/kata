@@ -295,7 +295,7 @@ func runCmdOutput(t *testing.T, env *testenv.Env, args ...string) (string, error
 		ctx = contextWithBaseURL(ctx, env.URL)
 	}
 	cmd.SetContext(ctx)
-	err := cmd.Execute()
+	err := executeCLICommand(ctx, cmd)
 	return buf.String(), err
 }
 
@@ -313,7 +313,7 @@ func runCmdCapture(t *testing.T, env *testenv.Env, args ...string) (stdout, stde
 		ctx = contextWithBaseURL(ctx, env.URL)
 	}
 	cmd.SetContext(ctx)
-	err = cmd.Execute()
+	err = executeCLICommand(ctx, cmd)
 	return so.String(), se.String(), err
 }
 

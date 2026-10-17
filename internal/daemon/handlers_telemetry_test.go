@@ -58,20 +58,26 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 
 type fakeTelemetryReporter struct {
 	failNext bool
+	events   []string
 	captured []map[string]any
 }
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
-	event = strings.TrimSpace(event)
-	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
+	reporter, err := telemetry.NewReporter(telemetry.Options{})
+	return err == nil && reporter.EventAllowed(event)
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
-func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
 	if f.failNext {
 		f.failNext = false
 		return errors.New("capture failed")
 	}
-	f.captured = append(f.captured, properties)
+	safe, err := f.SanitizeProperties(event, properties)
+	if err != nil {
+		return err
+	}
+	f.events = append(f.events, event)
+	f.captured = append(f.captured, safe)
 	return nil
 }
 
@@ -186,12 +192,16 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
-	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+	require.Len(t, reporter.captured, 1)
+	assert.Subset(t, reporter.captured[0], map[string]any{"surface": "web"})
 	for range 2 {
 		response := server.post(t.Context(), t, `{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
-	assert.Equal(t, []map[string]any{{"surface": "web", "duration_bucket": "1_to_5m"}, {"surface": "web", "duration_bucket": "1_to_5m"}}, reporter.captured[1:])
+	require.Len(t, reporter.captured, 3)
+	for _, properties := range reporter.captured[1:] {
+		assert.Subset(t, properties, map[string]any{"surface": "web", "duration_bucket": "1_to_5m"})
+	}
 }
 
 // A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.
@@ -235,7 +245,8 @@ func TestCaptureTelemetryAcceptsBearerClientOnEitherListener(t *testing.T) {
 				handler.ServeHTTP(response, request)
 
 				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
-				assert.Equal(t, []map[string]any{{"surface": "tui"}}, reporter.captured)
+				require.Len(t, reporter.captured, 1)
+				assert.Subset(t, reporter.captured[0], map[string]any{"surface": "tui"})
 			})
 		}
 	}
@@ -323,8 +334,9 @@ func TestCaptureTelemetryEventCapturesOneAppOpenedPerSurfacePerDay(t *testing.T)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 		assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
 	}
-	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "web"}}, reporter.captured,
-		"a failed capture leaves the day open; later duplicates are dropped")
+	require.Len(t, reporter.captured, 2, "a failed capture leaves the day open; later duplicates are dropped")
+	assert.Subset(t, reporter.captured[0], map[string]any{"surface": "tui"})
+	assert.Subset(t, reporter.captured[1], map[string]any{"surface": "web"})
 }
 
 func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
@@ -382,4 +394,43 @@ func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[st
 		return nil, err
 	}
 	return reporter.SanitizeProperties(event, properties)
+}
+
+func TestCaptureCoreActionsUsesProductionAllowlist(t *testing.T) {
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		t.Run(event, func(t *testing.T) {
+			for _, surface := range []string{"web", ""} {
+				t.Run(surface, func(t *testing.T) {
+					reporter := &fakeTelemetryReporter{}
+					server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+					properties := map[string]any{"title": "Example task"}
+					if surface != "" {
+						properties["surface"] = surface
+					}
+					body, err := json.Marshal(map[string]any{"event": event, "properties": properties})
+					require.NoError(t, err)
+					for range 2 {
+						response := server.post(t.Context(), t, string(body))
+						if surface == "" {
+							require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+							assert.Equal(t, "invalid_telemetry_property", decodeErrorCode(t, response))
+							continue
+						}
+						require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+						assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+					}
+					if surface == "" {
+						assert.Empty(t, reporter.events)
+						assert.Empty(t, reporter.captured)
+						return
+					}
+					assert.Equal(t, []string{event, event}, reporter.events)
+					for _, captured := range reporter.captured {
+						assert.NotContains(t, captured, "title")
+						assert.Equal(t, surface, captured["surface"])
+					}
+				})
+			}
+		})
+	}
 }

@@ -546,6 +546,9 @@ func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *te
 	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) {
 		refreshed.Store(true)
 		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/api/v1/ui/telemetry" {
+				return &http.Response{StatusCode: http.StatusAccepted, Body: http.NoBody, Header: http.Header{}}, nil
+			}
 			gotKey = r.Header.Get("Idempotency-Key")
 			return jsonResponse(t, map[string]any{
 				"issue":   map[string]any{"short_id": "aaa1", "title": "created", "status": "open"},

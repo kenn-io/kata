@@ -202,6 +202,9 @@ readiness; --blocked-by does. --meta key=value stores a string.
 		if err := externalCLITransportError(response, callErr); err != nil {
 			return createRequestError(err, forceNew)
 		}
+		if response.JSON200 != nil {
+			startCLIIssueActionReport(cmd, "issue_created", response.JSON200.Changed)
+		}
 		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {
 			return createRequestError(err, forceNew)

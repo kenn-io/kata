@@ -23,6 +23,9 @@ const (
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 
+// ErrInvalidProperty is returned when a required event property is missing or invalid.
+var ErrInvalidProperty = posthog.ErrInvalidProperty
+
 // Client is the daemon-facing telemetry reporter contract. EventAllowed lets
 // the UI capture route reject events outside the allowlist.
 type Client interface {
@@ -71,7 +74,13 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("project_count", posthog.AllowNumber),
 		),
 		posthog.WithAllowedEvent("app_opened",
-			posthog.AllowProperty("surface", appOpenedSurfaces),
+			posthog.AllowProperty("surface", validSurfaces),
+		),
+		posthog.WithAllowedEvent("issue_created",
+			posthog.RequireProperty("surface", validSurfaces),
+		),
+		posthog.WithAllowedEvent("issue_closed",
+			posthog.RequireProperty("surface", validSurfaces),
 		),
 		posthog.WithAllowedEvent("session_ended",
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
@@ -106,16 +115,16 @@ func DurationBucket(elapsed time.Duration) string {
 
 var agentCallCountBuckets = posthog.AllowStringValues("1-10", "11-100", "over-100")
 
-// appOpenedSurfaces is the app_opened surface filter shared by the allowlist and the daemon's daily gate.
-var appOpenedSurfaces = posthog.AllowStringValues("web", "tui", "cli")
+// validSurfaces filters interface names shared by surface-attributed events.
+var validSurfaces = posthog.AllowStringValues("web", "tui", "cli")
 
-// AppOpenedSurface returns the surface the reporter would keep for app_opened, or "" when it would keep none.
-func AppOpenedSurface(properties map[string]any) string {
+// ValidSurface returns the allowed interface name, or "" when it would keep none.
+func ValidSurface(properties map[string]any) string {
 	for key, value := range properties {
 		if strings.TrimSpace(key) != "surface" {
 			continue
 		}
-		if kept, ok := appOpenedSurfaces(value); ok {
+		if kept, ok := validSurfaces(value); ok {
 			surface, _ := kept.(string)
 			return surface
 		}

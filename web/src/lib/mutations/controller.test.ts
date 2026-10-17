@@ -191,3 +191,32 @@ function failure(status: number, code: string, detail: string) {
     headers: new Headers(),
   }
 }
+
+describe('completed issue actions', () => {
+  it('reports each changed write before refresh, excluding cached creates, no-ops and failures', async () => {
+    const calls: string[] = []
+    const onChanged = () => {
+      calls.push('action')
+    }
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh: async () => {
+        calls.push('refresh')
+        throw new Error('refresh unavailable')
+      },
+    })
+    const create = { createKey: 'create-key', onChanged }
+    await controller.execute(create, async () => ok({ changed: true }))
+    expect(calls.slice(0, 2)).toEqual(['action', 'refresh'])
+    expect(calls.filter((call) => call === 'action')).toEqual(['action'])
+    calls.length = 0
+    await controller.execute(create, async () => ok({ changed: true }))
+    await controller.execute({ onChanged }, async () => ok({ changed: false }))
+    await controller.execute({ onChanged }, async () => failure(500, 'failed', 'Write failed'))
+    expect(calls.filter((call) => call === 'action')).toEqual([])
+    calls.length = 0
+    await controller.execute({ onChanged }, async () => ok({ changed: true }))
+    expect(calls.slice(0, 2)).toEqual(['action', 'refresh'])
+    expect(calls.filter((call) => call === 'action')).toEqual(['action'])
+  })
+})

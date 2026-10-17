@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,40 @@ var agentUseReportTimeout = 100 * time.Millisecond
 
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
 var cliUseNow = time.Now
+
+type cliActionReportSessionKey struct{}
+
+type cliActionReportSession struct {
+	pending sync.WaitGroup
+}
+
+func cliActionReportsFor(cmd *cobra.Command) *cliActionReportSession {
+	if cmd == nil || cmd.Context() == nil {
+		return nil
+	}
+	reports, _ := cmd.Context().Value(cliActionReportSessionKey{}).(*cliActionReportSession)
+	return reports
+}
+
+func newCLIActionReportSession(cmd *cobra.Command) *cliActionReportSession {
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	reports := &cliActionReportSession{}
+	ctx := context.WithValue(parent, cliActionReportSessionKey{}, reports)
+	cmd.SetContext(ctx)
+	if root := cmd.Root(); root != cmd {
+		root.SetContext(ctx)
+	}
+	return reports
+}
+
+func waitCLIActionReports(cmd *cobra.Command) {
+	if reports := cliActionReportsFor(cmd); reports != nil {
+		reports.pending.Wait()
+	}
+}
 
 // cliUseTarget is the resolved daemon this invocation built its own client from.
 var cliUseTarget atomic.Pointer[client.ResolvedDaemon]
@@ -84,6 +119,7 @@ func reportsAgentUse(cmd *cobra.Command) bool {
 
 // reportCLIUse discovers an existing target only for contract hooks.
 func reportCLIUse(cmd *cobra.Command) {
+	defer waitCLIActionReports(cmd)
 	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
@@ -115,24 +151,49 @@ func reportCLIUse(cmd *cobra.Command) {
 			return
 		}
 	}
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
-	if err != nil {
-		return
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
-	if err != nil {
-		return
-	}
 	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
 	if agent {
 		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
 	}
-	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: body,
-	})
-	if !agent && err == nil && resp.JSON202 != nil {
+	if captureCLIUsage(ctx, *target, timeout, body) && !agent {
 		recordCLIUseDay(marker, day)
 	}
+}
+
+func captureCLIUsage(ctx context.Context, target client.ResolvedDaemon, timeout time.Duration, body *generated.CaptureTelemetryEventBody) bool {
+	hc, err := client.NewHTTPClientForResolved(ctx, target, client.Opts{Timeout: timeout})
+	if err != nil {
+		return false
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
+	if err != nil {
+		return false
+	}
+	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
+	return err == nil && resp != nil && resp.JSON202 != nil
+}
+
+// startCLIIssueActionReport starts delivery at commit acknowledgement.
+func startCLIIssueActionReport(cmd *cobra.Command, event string, changed bool) {
+	target := cliUseTarget.Load()
+	if !changed || target == nil || !reportsCLIUse(cmd) {
+		return
+	}
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cliUseReportTimeout)
+	reports := cliActionReportsFor(cmd)
+	if reports == nil {
+		reports = newCLIActionReportSession(cmd)
+	}
+	reports.pending.Go(func() {
+		defer cancel()
+		captureCLIUsage(ctx, *target, cliUseReportTimeout, &generated.CaptureTelemetryEventBody{
+			Event: event, Properties: map[string]any{"surface": "cli"},
+		})
+	})
 }
 
 // cliUseMarkerPath names the file holding the last UTC day target accepted a

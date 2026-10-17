@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +34,7 @@ type cliUseTelemetry struct {
 }
 
 func (*cliUseTelemetry) EventAllowed(event string) bool {
-	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
+	return telemetry.NewReporterOrDisabled(telemetry.Options{}).EventAllowed(event)
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
 func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]any, error) {
@@ -53,6 +55,12 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]map[string]any(nil), c.captured...)
+}
+
+func (c *cliUseTelemetry) recordedEvents() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
 }
 
 var cliSurface = []map[string]any{{"surface": "cli"}}
@@ -412,4 +420,64 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
+}
+
+func TestCLIIssueActionBoundsReporting(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
+	var actions atomic.Int32
+	started := make(chan time.Time, 1)
+	finished := make(chan time.Time, 1)
+	handlerErrors := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ui/telemetry" {
+			handlerErrors <- fmt.Errorf("unexpected telemetry path %q", r.URL.Path)
+			return
+		}
+		var body struct {
+			Event string `json:"event"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			handlerErrors <- fmt.Errorf("decode telemetry request: %w", err)
+			return
+		}
+		if body.Event != "issue_created" {
+			handlerErrors <- fmt.Errorf("unexpected telemetry event %q", body.Event)
+			return
+		}
+		actions.Add(1)
+		started <- time.Now()
+		<-r.Context().Done()
+		finished <- time.Now()
+	}))
+	defer server.Close()
+	cmd := findCommand(t, "create")
+	cmd.SetContext(context.Background())
+	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
+	t.Cleanup(func() { cliUseTarget.Store(nil) })
+	start := time.Now()
+	startCLIIssueActionReport(cmd, "issue_created", true)
+	var requestStarted time.Time
+	select {
+	case requestStarted = <-started:
+	case err := <-handlerErrors:
+		t.Fatal(err)
+	case <-time.After(cliUseReportTimeout + time.Second):
+		t.Fatal("issue-action report did not start")
+	}
+	assert.Less(t, requestStarted.Sub(start), cliUseReportTimeout)
+	var requestFinished time.Time
+	select {
+	case requestFinished = <-finished:
+	case err := <-handlerErrors:
+		t.Fatal(err)
+	case <-time.After(cliUseReportTimeout + time.Second):
+		t.Fatal("issue-action report did not stop at its deadline")
+	}
+	elapsed := requestFinished.Sub(start)
+	assert.GreaterOrEqual(t, elapsed, cliUseReportTimeout)
+	assert.Less(t, elapsed, cliUseReportTimeout+time.Second)
+	assert.Equal(t, int32(1), actions.Load())
 }

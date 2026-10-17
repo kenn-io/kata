@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-16
 ---
 
 # Configuration
@@ -1048,7 +1048,8 @@ Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
 recorded the opening, including after switching the displayed daemon. Delivery
 is best effort and waits at most one second; a rejected authentication request
-drops the event.
+drops the event. TUI exit first waits up to one second for pending issue-action
+reports, then gives `session_ended` its separate one-second deadline.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
 daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
@@ -1075,6 +1076,25 @@ a shared daemon counts that daemon's install. The daemon forwards one
 `app_opened` per surface per UTC day and forgets what it sent when it restarts,
 so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
+
+Completed issue creates and closes report `issue_created` and `issue_closed`
+with only `surface: web`, `tui`, or `cli`. Web issue removal closes the issue
+and reports `issue_closed` when changed. Each successful mutation with
+`changed: true` counts, including repeated actions in one day. Ordinary retries
+that reuse a create, already-closed issues, failed writes, dry runs, and reopen
+operations send nothing. Creates without an acknowledged `changed: true`
+response remain uncounted across all interfaces. A close, reopen, close sequence
+counts two closes.
+
+CLI actions follow the same terminal and agent-mode rules above. Action reports
+start when the daemon confirms a changed mutation, before follow-up comments, so
+a comment failure still counts a completed close. On successful commands, the
+action report can run alongside post-run `app_opened` reporting; the command
+waits at most one second for reporting. Delivery is best effort and uses the
+daemon's opt-out setting.
+
+When telemetry is enabled, the daemon rejects action events with a missing or
+invalid `surface` with HTTP 400 and `invalid_telemetry_property`.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.

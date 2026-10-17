@@ -2929,6 +2929,130 @@ describe('App', () => {
     })
   })
 
+  describe('completed issue action telemetry', () => {
+    for (const { action, outcome } of [
+      { action: 'create', outcome: 'changed' },
+      { action: 'close', outcome: 'changed' },
+      { action: 'remove', outcome: 'changed' },
+      { action: 'create', outcome: 'telemetry failure' },
+      { action: 'create', outcome: 'concurrent request expires the session' },
+    ] as const) {
+      it(`${action} reports ${outcome} through the serving daemon`, async () => {
+        history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+        sessionStorage.setItem(
+          'kata.web.session.v1',
+          JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+        )
+        const base = snapshot()
+        base.catalog[0]!.project.metadata.role = 'inbox'
+        const accepted = {
+          ...base,
+          selected: {
+            state: 'available',
+            issue: base.collection[0],
+            comments: [],
+            labels: [],
+            links: [],
+            history: [],
+          },
+        }
+        const events: unknown[] = []
+        const actionRequests: Request[] = []
+        let writes = 0
+        let resolveMutation: ((response: Response) => void) | undefined
+        let resolveAppOpened: ((response: Response) => void) | undefined
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = requestOf(input, init)
+            const path = new URL(request.url).pathname
+            if (path === '/api/v1/ui/telemetry') {
+              const event = await request.json()
+              if (
+                event.event === 'app_opened' &&
+                outcome === 'concurrent request expires the session'
+              ) {
+                return new Promise<Response>((resolve) => {
+                  resolveAppOpened = resolve
+                })
+              }
+              if (event.event === 'issue_created' || event.event === 'issue_closed') {
+                events.push(event)
+                actionRequests.push(request)
+                if (outcome === 'telemetry failure') throw new Error('Telemetry unavailable')
+              }
+              return telemetryAccepted()
+            }
+            if (
+              request.method === 'POST' &&
+              (path.endsWith('/issues') || path.endsWith('/close'))
+            ) {
+              writes += 1
+              if (outcome === 'concurrent request expires the session') {
+                return new Promise<Response>((resolve) => {
+                  resolveMutation = resolve
+                })
+              }
+              return Response.json({ changed: true })
+            }
+            if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+            if (path.endsWith('/references'))
+              return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+            return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+          }),
+        )
+        render(App)
+        if (action === 'create') {
+          await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+          await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+            target: { value: 'Example task' },
+          })
+          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+          if (outcome === 'concurrent request expires the session') {
+            await waitFor(() => expect(resolveMutation).toBeTypeOf('function'))
+            await waitFor(() => expect(resolveAppOpened).toBeTypeOf('function'))
+            resolveAppOpened!(new Response('', { status: 401 }))
+            resolveAppOpened = undefined
+            await waitFor(() => expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull())
+            resolveMutation!(Response.json({ changed: true }))
+            resolveMutation = undefined
+          }
+        } else if (action === 'remove') {
+          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'More actions' }))
+          await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete issue' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+        } else {
+          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
+          await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
+            target: { value: 'go test ./example' },
+          })
+          await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
+            target: { value: 'Completed the requested work and checked the result.' },
+          })
+          const buttons = screen.getAllByRole('button', { name: 'Complete' })
+          await fireEvent.click(buttons[buttons.length - 1]!)
+        }
+        await waitFor(() => expect(writes).toBe(1))
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        for (const request of actionRequests) {
+          expect(request.keepalive).toBe(true)
+        }
+        expect(events).toEqual(
+          outcome === 'concurrent request expires the session'
+            ? []
+            : [
+                {
+                  event: action === 'create' ? 'issue_created' : 'issue_closed',
+                  properties: { surface: 'web' },
+                },
+              ],
+        )
+      })
+    }
+  })
+
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
     render(App)
 

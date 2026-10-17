@@ -32,6 +32,20 @@ type Client struct {
 	hc                     *http.Client
 	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
 	mu                     sync.RWMutex
+	actionReports          *actionReportSession
+}
+
+// actionReportSession joins reports from every daemon used during one TUI run.
+type actionReportSession struct {
+	mu      sync.Mutex
+	closed  bool
+	pending sync.WaitGroup
+}
+
+type suppressIssueActionTelemetryKey struct{}
+
+func suppressIssueActionTelemetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressIssueActionTelemetryKey{}, true)
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
@@ -41,6 +55,7 @@ func NewClient(base string, hc *http.Client) *Client {
 		base:                   base,
 		hc:                     hc,
 		refreshLocalHTTPClient: refreshLocalHTTPClientForTUI,
+		actionReports:          &actionReportSession{},
 	}
 }
 
@@ -132,6 +147,11 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 
 // ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
 func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
+	// Close admission before waiting so the first report cannot race shutdown.
+	c.actionReports.mu.Lock()
+	c.actionReports.closed = true
+	c.actionReports.mu.Unlock()
+	c.actionReports.pending.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
@@ -149,6 +169,22 @@ func (c *Client) reportUsage(ctx context.Context, event string, properties map[s
 		return callErr
 	}
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
+func (c *Client) reportChangedIssue(ctx context.Context, event string, changed bool) {
+	if !changed || (event == "issue_closed" && ctx.Value(suppressIssueActionTelemetryKey{}) == true) {
+		return
+	}
+	c.actionReports.mu.Lock()
+	defer c.actionReports.mu.Unlock()
+	if c.actionReports.closed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	c.actionReports.pending.Go(func() {
+		defer cancel()
+		_ = c.reportUsage(ctx, event, map[string]any{"surface": "tui"})
+	})
 }
 
 // ReportScreenViewed sends the visible screen to the connected daemon.
@@ -289,6 +325,7 @@ func (c *Client) CreateIssue(ctx context.Context, projectID int64, body CreateIs
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_created", resp.Changed)
 	return &resp, nil
 }
 
@@ -311,6 +348,7 @@ func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) 
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_closed", resp.Changed)
 	return &resp, nil
 }
 
@@ -345,6 +383,7 @@ func (c *Client) CloseWithEvidence(
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
+	c.reportChangedIssue(ctx, "issue_closed", resp.Changed)
 	return &resp, nil
 }
 
