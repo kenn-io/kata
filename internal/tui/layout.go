@@ -101,7 +101,13 @@ func (m Model) toggleLayout() (Model, tea.Cmd) {
 // touches. Other invariants (gen counters, formGen, modal state,
 // SSE state) live on Model and are likewise untouched.
 func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
-	if m.view != viewList && m.view != viewDetail {
+	// Attention owns its own saved browsing context and reconciles that
+	// context when it closes. Do not retarget its hidden detail pane here.
+	if m.attentionVisible() {
+		return m, nil
+	}
+	coveredView := m.view != viewList && m.view != viewDetail
+	if coveredView && !(prev == splitlayout.Stacked && m.layout == splitlayout.Split) {
 		return m, nil
 	}
 	if prev == splitlayout.Split && m.layout == splitlayout.Stacked {
@@ -116,11 +122,14 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if prev == splitlayout.Stacked && m.layout == splitlayout.Split {
-		// Entering split: derive focus from the view the user was
-		// looking at. viewHelp / viewEmpty fall through to focusList
-		// (the right-hand pane is informational; the list is what
-		// they should be navigating).
-		if m.view == viewDetail && m.detail.issue != nil {
+		// Entering split under a full-screen view: keep that view in
+		// front while updating the covered browsing pane. Its previous
+		// view records whether the user was looking at the list or detail.
+		foreground := m.view
+		if coveredView {
+			foreground = m.prevView
+		}
+		if foreground == viewDetail && m.detail.issue != nil {
 			m.focus = focusDetail
 		} else {
 			m.focus = focusList

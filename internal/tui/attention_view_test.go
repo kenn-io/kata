@@ -61,8 +61,9 @@ type attentionProjectsTestAPI struct {
 func (a *attentionProjectsTestAPI) ListProjectsWithStats(context.Context) ([]ProjectSummaryWithStats, error) {
 	a.projectListCalls++
 	return []ProjectSummaryWithStats{{
-		ProjectSummary: ProjectSummary{ID: 7, Name: "example-project"},
-		Stats:          &ProjectStatsSummary{Open: 3, Closed: 1},
+		ID:    7,
+		Name:  "example-project",
+		Stats: &ProjectStatsSummary{Open: 3, Closed: 1},
 	}}, nil
 }
 

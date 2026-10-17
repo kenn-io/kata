@@ -262,3 +262,47 @@ func TestLayoutFlipPreservesAuxiliaryView(t *testing.T) {
 		}
 	}
 }
+
+func TestLayoutFlipUnderOverlayBootstrapsSplitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view viewID
+	}{
+		{"help", viewHelp},
+		{"projects", viewProjects},
+		{"daemons", viewDaemons},
+		{"federation", viewFederation},
+		{"credentials", viewCredentials},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, cleanup := layoutTestSetup(t)
+			defer cleanup()
+			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+			m.view, m.prevView = tc.view, viewList
+
+			m, cmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
+			if m.view != tc.view {
+				t.Fatalf("layout flip changed foreground view to %v, want %v", m.view, tc.view)
+			}
+			if m.focus != focusList {
+				t.Errorf("focus=%v after stacked→split under %s, want focusList", m.focus, tc.name)
+			}
+			if cmd == nil {
+				t.Errorf("stacked→split under %s did not schedule detail bootstrap", tc.name)
+			}
+			if m.detail.issue == nil || m.detail.issue.UID != m.list.issues[0].UID {
+				t.Errorf("detail issue=%v after stacked→split under %s, want highlighted issue %s", m.detail.issue, tc.name, m.list.issues[0].UID)
+			}
+
+			if tc.view == viewHelp {
+				m = sendRune(m, '?')
+				if m.view != viewList {
+					t.Errorf("leaving Help returned to %v, want viewList", m.view)
+				}
+				if m.detail.issue == nil || m.detail.issue.UID != m.list.issues[0].UID {
+					t.Errorf("leaving Help revealed detail=%v, want highlighted issue %s", m.detail.issue, m.list.issues[0].UID)
+				}
+			}
+		})
+	}
+}
