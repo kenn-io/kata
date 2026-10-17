@@ -120,12 +120,18 @@ func sharedPostgresContainer(ctx context.Context, image string) sharedPostgresSe
 	return server
 }
 
+// startPostgresContainer runs a server that trades durability for speed:
+// test databases are disposable, so the data directory lives in memory and
+// commits never wait for WAL flushes. The module already disables fsync.
 func startPostgresContainer(ctx context.Context, image string) sharedPostgresServer {
 	container, err := postgres.Run(ctx,
 		image,
 		postgres.WithDatabase("kata_test"),
 		postgres.WithUsername("kata"),
 		postgres.WithPassword("kata"),
+		testcontainers.WithTmpfs(map[string]string{"/pgdata": "rw"}),
+		testcontainers.WithEnv(map[string]string{"PGDATA": "/pgdata/data"}),
+		testcontainers.WithCmdArgs("-c", "synchronous_commit=off", "-c", "full_page_writes=off"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
