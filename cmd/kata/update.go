@@ -101,6 +101,11 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 			}
+			// Keep the restart target stable if config changes during installation.
+			ns, err := daemon.NewNamespace()
+			if err != nil {
+				return err
+			}
 			if err := client.Install(cmd.Context(), info, selfupdate.InstallOptions{}); err != nil {
 				return &cliError{
 					Message:  "install update: " + err.Error(),
@@ -110,7 +115,7 @@ func newUpdateCmd() *cobra.Command {
 			}
 			// Restart output goes to stderr so JSON and agent stdout stay a
 			// single update record.
-			if err := restartDaemonAfterUpdate(cmd.Context(), cmd.ErrOrStderr()); err != nil {
+			if err := restartDaemonAfterUpdate(cmd.Context(), ns, cmd.ErrOrStderr()); err != nil {
 				return fmt.Errorf("installed kata %s, but the daemon was not restarted: %w", latestUpdateVersion(info), err)
 			}
 			return printUpdateInstallResult(cmd, info)
@@ -126,11 +131,7 @@ func newUpdateCmd() *cobra.Command {
 // re-execute itself through the newly installed binary. The daemon restarts
 // with its own arguments and environment, so the updater needs neither its
 // startup options nor its credentials. A stopped daemon stays stopped.
-func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
-	ns, err := daemon.NewNamespace()
-	if err != nil {
-		return err
-	}
+func restartDaemonAfterUpdate(ctx context.Context, ns *daemon.Namespace, stderr io.Writer) error {
 	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	records, err := store.List()
 	if err != nil {

@@ -995,7 +995,7 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", out.Address)
 }
 
-func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
+func TestDaemonStart_ExplicitListenMatchRejectsMalformedConfig(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
@@ -1003,10 +1003,8 @@ func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
 
 	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
 
-	require.NoError(t, err)
-	assert.Equal(t, "already_running", out.Action)
-	assert.Equal(t, os.Getpid(), out.PID)
-	assert.Equal(t, "100.64.0.5:7777", out.Address)
+	require.ErrorContains(t, err, "parse ")
+	assert.Empty(t, out)
 }
 
 func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {

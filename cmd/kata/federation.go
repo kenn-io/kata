@@ -408,7 +408,7 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 		}
 		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, auth, opts)
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadConfigSections("daemon")
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +450,7 @@ func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (cl
 	if os.Getenv("KATA_SERVER") != "" {
 		return targetAuth, nil
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadConfigSections("daemon")
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}

@@ -13,7 +13,7 @@ func reloadEmbeddingCredentials(initial config.EmbeddingsConfig, client *embeddi
 	if client == nil {
 		return nil
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadConfigSections("search")
 	if err != nil {
 		return err
 	}
