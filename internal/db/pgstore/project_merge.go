@@ -351,7 +351,12 @@ WHERE source.project_id = $1
     OR EXISTS(SELECT 1 FROM purge_log target WHERE target.project_id = $2 AND target.short_id = source.short_id)
     OR EXISTS(SELECT 1 FROM events e JOIN projects p
       ON p.uid=e.payload::jsonb->>'from_project_uid'
-      WHERE p.id=$2 AND e.type='issue.moved'
+      WHERE p.id=$2 AND (e.type='issue.moved' OR
+        (e.type='sync.reset_required'
+         AND EXISTS(SELECT 1 FROM issues referenced WHERE referenced.uid=e.issue_uid)
+         AND EXISTS(SELECT 1 FROM events retained_move
+           WHERE retained_move.uid=e.payload::jsonb->>'move_event_uid'
+             AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
         AND e.payload::jsonb->>'from_short_id'=source.short_id
         AND e.issue_uid<>source.uid)
   )
