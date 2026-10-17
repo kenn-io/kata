@@ -150,7 +150,9 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 	}
 
 	var detailCmd tea.Cmd
-	listOwnsDetail := foreground == viewList && previous.focus != focusDetail && len(m.detail.navStack) == 0
+	listOwnsDetail := (foreground == viewList ||
+		(foreground != viewDetail && previous.prevView == viewList)) &&
+		previous.focus != focusDetail && len(m.detail.navStack) == 0
 	if m.layout == splitlayout.Split && listOwnsDetail {
 		if issue, ok := pickHighlightedIssue(m.list); !ok {
 			m.nextDetailFollowGen++

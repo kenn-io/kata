@@ -613,18 +613,47 @@ func TestAttentionReturnFlagClears(t *testing.T) {
 	require.Equal(t, viewList, m.view)
 	require.False(t, m.attention.returnToAttention)
 }
-func TestAttentionEntryFencesDetailFollow(t *testing.T) {
+func TestAttentionExitRestoresDetailAndClearsReturnContext(t *testing.T) {
 	m, _ := attentionFixture(t)
 	m = resizeModel(m, 160, 40)
-	m.detail.issue = new(testIssue("abc4"))
-	m.nextDetailFollowGen = 4
-	m, _ = m.transitionToAttention()
-	_, cmd := m.handleDetailFollowTick(detailFollowTickMsg{gen: 4})
-	require.Nil(t, cmd)
-	// Split pane focus must not steal esc from the auxiliary view.
-	m.focus = focusDetail
-	m = sendKey(m, tea.KeyEscape)
+	issue := testIssue("detail")
+	m.view, m.prevView, m.focus = viewDetail, viewList, focusDetail
+	m.detail = detailModel{issue: &issue, scopePID: issue.ProjectID}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewDetail, m.view)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, issue.UID, m.detail.issue.UID)
+	require.Nil(t, m.attention.returnContext,
+		"leaving Attention must clear its saved return context")
+}
+
+func TestAttentionRestoresAuxiliaryListDetailAfterWiden(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 100, 40)
+	issue := testIssue("ordinary")
+	m.list.issues = []Issue{issue}
+	m.list.selectedUID = issue.UID
+	m.detail = newDetailModel()
+	m.daemonTargets = []daemonTarget{{Local: true}}
+	m = sendRune(m, 'D')
+	require.Equal(t, viewDaemons, m.view)
+	require.Equal(t, viewList, m.prevView)
+
+	m, cmd := updateModel(m, keyRune('T'))
+	m = loadAttention(m, cmd)
+	m = resizeModel(m, 160, 40)
+	// The resize happens while Attention covers Daemons, so the list's
+	// split detail still needs to be reconciled when that saved context returns.
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewDaemons, m.view)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
 	require.Equal(t, viewList, m.view)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, issue.UID, m.detail.issue.UID)
 }
 
 func TestAttentionClear(t *testing.T) {

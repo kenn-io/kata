@@ -118,7 +118,7 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 				m.prevView = viewList
 			}
 		}
-		if !(prev == splitlayout.Stacked && m.layout == splitlayout.Split) {
+		if prev != splitlayout.Stacked || m.layout != splitlayout.Split {
 			return m, nil
 		}
 	}

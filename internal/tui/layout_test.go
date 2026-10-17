@@ -323,6 +323,13 @@ func TestLayoutFlipUnderHelpPreservesFocusedDetailReturnTarget(t *testing.T) {
 	if m.view != viewHelp {
 		t.Fatalf("narrowing changed foreground view to %v, want Help", m.view)
 	}
+	m = resizeModel(m, 160, 40)
+	if m.view != viewHelp {
+		t.Fatalf("widening changed foreground view to %v, want Help", m.view)
+	}
+	if m.focus != focusDetail {
+		t.Fatalf("widening under Help restored focus %v, want focusDetail", m.focus)
+	}
 	m = sendRune(m, '?')
 	if m.view != viewDetail {
 		t.Fatalf("leaving Help returned to %v, want the previously focused detail", m.view)
