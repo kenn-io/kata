@@ -1290,7 +1290,7 @@ func (d *Store) annotateClaimWorkMutationTx(
 
 func claimWorkMutationRequiresClaim(eventType string) bool {
 	switch eventType {
-	case "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
 		"issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",

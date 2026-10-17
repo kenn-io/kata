@@ -99,12 +99,14 @@ func withFederationAuthorization(
 }
 
 func withFederationProjectAuthority(ctx context.Context, authorization federationAuthorization) context.Context {
+	projects := []string{authorization.projectUID}
 	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		projects = narrowProjectUIDs(projects, decision.fixedUIDs)
 		decision.Actor = authorization.principal.Actor
-		decision.ProjectUIDs = []string{authorization.projectUID}
-		decision.targets = []string{authorization.projectUID}
+		decision.ProjectUIDs = projects
+		decision.targets = projects
 	}
-	return db.WithAuthorizedProjects(ctx, []string{authorization.projectUID})
+	return db.WithAuthorizedProjects(ctx, projects)
 }
 
 func federationAuthorizationFromContext(
@@ -321,4 +323,64 @@ func sanitizeFederationTransactionFence(fence db.TransactionFence) db.Transactio
 func federationCredentialDenied() error {
 	return api.NewError(http.StatusForbidden, "auth_invalid",
 		"federation credential is not currently authorized", "", nil)
+}
+
+// authorizeFederationMoveSource preserves the request's fixed project limit and
+// applies the same host policy as the route. Storage has already proved and
+// fenced this enrollment; its temporary context does not widen the whole batch.
+func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transaction db.Transaction, enrollment db.FederationEnrollment, source db.Project) error {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, source.UID) {
+		return ErrHostAccessDenied
+	}
+	if cfg.HostFederationAccess == nil {
+		return nil
+	}
+	if projects, restricted := db.AuthorizedProjects(ctx); restricted {
+		ctx = db.WithAuthorizedProjects(ctx, append(slices.Clone(projects), source.UID))
+	}
+	decision, err := cfg.HostFederationAccess.AuthorizeFederation(ctx, HostFederationAccessRequest{
+		Enrollment: enrollment, Project: source, Capability: "push",
+		Operation: federationTransportOperation("ingestFederationProjectEvents"),
+	})
+	switch {
+	case errors.Is(err, ErrHostAccessDenied):
+		return ErrHostAccessDenied
+	case errors.Is(err, ErrHostFederationAdmissionLimited):
+		return ErrHostFederationAdmissionLimited
+	case err != nil:
+		return errors.Join(errHostFederationAccessUnavailable, err)
+	case decision.TransactionFence == nil:
+		return errHostFederationAccessUnavailable
+	}
+	return sanitizeFederationTransactionFence(decision.TransactionFence)(ctx, transaction)
+}
+
+// authenticateFederationMoveSources validates supplemental bearer possession.
+// Invalid supplemental proofs grant nothing. Storage requires a live exact
+// grant for fresh cross-project effects; acknowledged duplicates need no new
+// authority. The mandatory route bearer is authenticated independently.
+func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, principal federationPrincipal, tokens map[string]string) (map[string]int64, error) {
+	grants := make(map[string]int64, len(tokens))
+	lookupCtx := db.WithAuthorizedProjects(ctx, nil)
+	for projectUID, token := range tokens {
+		project, err := cfg.DB.ProjectByUID(lookupCtx, projectUID)
+		if errors.Is(err, db.ErrNotFound) || (err == nil && project.DeletedAt != nil) {
+			continue
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		grant, err := cfg.DB.AuthorizeFederationToken(lookupCtx, token, project.ID, "push")
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if grant.RelayProtocolVersion != 0 || grant.SpokeInstanceUID != principal.SpokeInstanceUID || grant.Actor != principal.Actor {
+			continue
+		}
+		grants[projectUID] = grant.ID
+	}
+	return grants, nil
 }

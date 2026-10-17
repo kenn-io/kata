@@ -63,15 +63,61 @@ Roles apply to a project, not to an entire daemon.
 
 ## Moving issues between projects
 
-Cross-project issue moves involving a federated project are unsupported on hubs
-and spokes. Federation replay cannot apply the move event. Disabling sync retains
-the federation binding and replica state, so it does not enable moves.
+Move an issue and its active descendants between projects on the same hub:
 
-`kata move <issue-ref> <project> --dry` validates this restriction through the
-daemon and returns the same `federated_move_unsupported` conflict as a real move.
-The preview does not change issues or refresh claims. It validates the current
-state without reserving a future move. See the [CLI reference](../reference/cli.md)
-for the other move restrictions.
+```sh
+kata move intake-project#abc4 repository-project --dry
+kata move intake-project#abc4 repository-project
+```
+
+Both projects must have active federation bindings. On a spoke, both must use
+that hub's HTTP(S) origin, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported, including hubs with
+active downstream relays. A preview
+checks the whole tree without changing issues, claims, or cursors. Use `--single`
+to move only the selected issue. The [CLI reference](../reference/cli.md) owns
+the per-issue restrictions.
+
+Spokes must join both projects before applying a move. Sync refuses the batch
+without partial writes when a project is missing; join it and retry sync. Upgrade
+both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+move history instead of applying a payload they cannot understand. Moves preserve
+stable UIDs, nesting, state, comments, and links. Established author and
+teammate attribution must match trusted history, and a spoke cannot change
+hub-owned recurrence provenance through a move snapshot. Old references
+resolve while move history and the original project identity remain. Purging that history or
+merging the former project can end compatibility; the move returns the current
+reference, and the stable issue UID stays unchanged. If a spoke previously
+assigned a longer short ID to avoid a local collision, that former reference
+also remains reserved while its move history remains.
+
+Destination sync recovers retained source history even when its cursor has
+already passed those events. This preserves missed changes and comments without
+replacing newer edits. Once the move is received, leaving the source does not
+discard that recovered history; its original project identity and move history
+must remain for historical references to keep resolving.
+
+Leaving or archiving a former project preserves its identity for delayed events.
+Purging, merging, or adopting it under a different project UID is refused while
+another joined project's retained move history still needs that identity.
+This includes source and transit streams even when the current destination has
+left. Leave the dependent projects before removing the former identity;
+unrelated bindings and history covered by a standalone
+adoption baseline do not prevent ordinary cleanup.
+
+A standalone move is covered by the first retained federation baseline after
+that move, including after leaving and reenrolling in federation. Spokes can
+receive later moves without joining the former local project; later edits and
+comments still synchronize normally.
+
+The spoke sends the source project's existing enrollment credential with the
+move batch, alongside the destination credential, only to their shared hub
+origin. Both grants must permit push for the same spoke and actor. Joining both
+projects supplies these credentials automatically; no additional setup is needed.
+
+Moves between different hubs, mixed local/federated projects, and paused bindings
+return `federated_move_unsupported`. Create an issue in the target project and link
+it to the original issue instead. Disabling sync retains the binding.
 
 ## Connect a project through the daemon catalog
 
@@ -1640,9 +1686,15 @@ credential changes while leave is cleaning it up, the API returns
 and retry `kata federation leave <project>`.
 
 After confirmation, the CLI asks the spoke daemon to prepare the leave before
-it contacts the hub. Preparation durably marks a config-managed reservation,
-blocks new reconciliation work for that mapping, and waits for earlier hub
-enrollment or rotation requests to finish. Any completed enrollment is recorded
+it contacts the hub. On a native spoke using local credentials, preparation
+refuses while another project still owes a locally authored move from this
+source; sync that destination and retry. Otherwise it atomically pauses writes
+on the leaving binding so a new move cannot race hub revocation. Preparation
+then durably marks a config-managed reservation, blocks new reconciliation
+work for that mapping,
+and waits for earlier hub enrollment or rotation requests to finish. If writing
+the credential marker fails, the binding stays paused; retry the same leave
+command to finish preparation. Any completed enrollment is recorded
 and revoked idempotently before local teardown. If the command or daemon stops
 midway, rerun the same leave command; the marker prevents automatic
 re-enrollment and carries the cleanup forward. A successful leave suppresses

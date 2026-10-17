@@ -305,7 +305,10 @@ func federationFoldEventsOfTypes(
 ) ([]db.FoldEvent, error) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
-FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1`
+FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
+ SELECT issue_uid FROM events WHERE project_id=$1
+ UNION SELECT uid FROM issues WHERE project_id=$1)
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid=e.issue_uid)))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
@@ -342,7 +345,7 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1`
 		event.CreatedAt = createdAt
 		output = append(output, event)
 	}
-	return output, mapSQLError(rows.Err(), nil)
+	return db.FederationMoveBaselineEvents(output), mapSQLError(rows.Err(), nil)
 }
 
 func federationGroupIssueIDs(

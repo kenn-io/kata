@@ -72,6 +72,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
 			return err
 		}
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source, `m.payload::jsonb->'snapshot'`); err != nil {
+			return err
+		}
 		if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {
 			return err
 		}
@@ -346,6 +349,16 @@ WHERE source.project_id = $1
   AND (
     EXISTS(SELECT 1 FROM issues target WHERE target.project_id = $2 AND target.short_id = source.short_id)
     OR EXISTS(SELECT 1 FROM purge_log target WHERE target.project_id = $2 AND target.short_id = source.short_id)
+    OR EXISTS(SELECT 1 FROM events e JOIN projects p
+      ON p.uid=e.payload::jsonb->>'from_project_uid'
+      WHERE p.id=$2 AND (e.type='issue.moved' OR
+        (e.type='sync.reset_required'
+         AND EXISTS(SELECT 1 FROM issues referenced WHERE referenced.uid=e.issue_uid)
+         AND EXISTS(SELECT 1 FROM events retained_move
+           WHERE retained_move.uid=e.payload::jsonb->>'move_event_uid'
+             AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
+        AND e.payload::jsonb->>'from_short_id'=source.short_id
+        AND e.issue_uid<>source.uid)
   )
 ORDER BY source.uid ASC`, sourceID, targetID)
 	if err != nil {
@@ -385,6 +398,18 @@ ORDER BY source.uid ASC`, sourceID, targetID)
   UNION ALL SELECT 1 FROM purge_log WHERE project_id IN ($1,$2) AND short_id = $3
 )`, sourceID, targetID, candidate).Scan(&exists); err != nil {
 				return nil, mapSQLError(err, nil)
+			}
+			if !exists {
+				for _, projectID := range []int64{sourceID, targetID} {
+					movedUID, err := db.MovedIssueUID(ctx, tx, projectID, candidate, true)
+					if err != nil && !errors.Is(err, db.ErrNotFound) {
+						return nil, err
+					}
+					if err == nil && movedUID != value.uid {
+						exists = true
+						break
+					}
+				}
 			}
 			if !exists {
 				replacement = candidate

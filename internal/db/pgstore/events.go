@@ -369,7 +369,7 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 		createdAt = nowStoredTimestamp()
 	}
 	actor := input.Actor
-	if input.ContentHash == "" && originInstanceUID == s.instanceUID {
+	if input.ContentHash == "" && originInstanceUID == s.instanceUID && input.Type != db.ProjectScopeResetEventType {
 		actor, err = effectiveLocalEventActorTx(ctx, tx, input.ProjectID, actor)
 		if err != nil {
 			return db.Event{}, err
@@ -421,14 +421,16 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	if err != nil {
 		return db.Event{}, err
 	}
-	if input.ContentHash == "" {
-		if err := s.recordNativeRootAttributionTx(ctx, tx, event); err != nil {
+	if input.Type != db.ProjectScopeResetEventType {
+		if input.ContentHash == "" {
+			if err := s.recordNativeRootAttributionTx(ctx, tx, event); err != nil {
+				return db.Event{}, err
+			}
+		} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
 			return db.Event{}, err
 		}
-	} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
-		return db.Event{}, err
 	}
-	if !input.SkipRelay {
+	if !input.SkipRelay && input.Type != db.ProjectScopeResetEventType {
 		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
 			return db.Event{}, err
 		}

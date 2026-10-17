@@ -282,6 +282,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_merge_archived_target",
 				"target project is archived", "", nil)
 		}
+		if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+			return nil, api.NewError(409, "federation_project_identity_required", err.Error(),
+				"leave the joined projects that still expose this move history before purging or merging the former project", nil)
+		}
 		if errors.Is(err, db.ErrProjectMergeFederationBinding) {
 			return nil, api.NewError(409, "project_merge_federation_binding",
 				"cannot merge federated projects", "", nil)
@@ -340,6 +344,8 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrProjectAlreadyArchived):
 			return nil, api.NewError(409, "project_already_archived",
 				"project is already archived", "", nil)
+		case errors.Is(err, db.ErrFederationResetBlockedByPendingPush), errors.Is(err, db.ErrFederationResetBlockedByDownstream):
+			return nil, federationReplicaAPIError(err)
 		}
 		if openErr, ok := errors.AsType[*db.ProjectHasOpenIssuesError](err); ok {
 			return nil, api.NewError(409, "project_has_open_issues",
@@ -393,6 +399,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_not_archived",
 				"project is not archived",
 				"run `kata projects remove "+project.Name+"` first", nil)
+		}
+		if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+			return nil, api.NewError(409, "federation_project_identity_required", err.Error(),
+				"leave the joined projects that still expose this move history before purging or merging the former project", nil)
 		}
 		if fedErr, ok := errors.AsType[*db.ProjectFederatedError](err); ok {
 			hint := "run `kata federation leave " + project.Name + "` first"

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -169,12 +170,18 @@ func (s *Store) insertRemoteEventTx(
 	createdAt string,
 	validator *db.CronReplayValidator,
 ) (bool, error) {
-	if db.EventRequiredFeatures(remote.Type) != "" {
+	var err error
+	projectID, err = db.RemoteIssueEventProject(ctx, tx, projectID, remote)
+	if err != nil {
+		return false, err
+	}
+
+	if strings.HasPrefix(remote.Type, "cron.") {
 		if err := db.ValidateAcceptedCronEvent(remote); err != nil {
 			return false, err
 		}
 		var targetUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
 			return false, err
 		}
 		if targetUID != remote.ProjectUID {
@@ -185,7 +192,7 @@ func (s *Store) insertRemoteEventTx(
 		}
 	}
 	var existingHash string
-	err := tx.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE uid=$1 FOR UPDATE`,
+	err = tx.QueryRowContext(ctx, `SELECT content_hash FROM events WHERE uid=$1 FOR UPDATE`,
 		remote.EventUID).Scan(&existingHash)
 	if err == nil {
 		if existingHash == remote.ContentHash {

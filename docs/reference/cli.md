@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-14
+last_edited: 2026-10-16
 ---
 
 # CLI reference
@@ -825,28 +825,43 @@ archived projects are rejected with a hint to unarchive the project first.
 Move between projects:
 
 ```sh
-kata move <issue-ref> <project> [--dry] [--comment TEXT]
+kata move <issue-ref> <project> [--single] [--dry] [--comment TEXT]
 ```
 
-`move` keeps the issue UID and history, then assigns the issue to the target
-project. The target project is resolved the same way as `kata projects show`.
+`move` moves the issue and all active descendants in one transaction, including
+closed descendants and children in other projects. It preserves their nesting,
+status, UIDs, comments, and history. Use `--single` to move only the selected
+issue. Old project-qualified short IDs resolve while their move history and
+original project identity remain. While retained, those IDs stay reserved so
+new issues cannot reuse them. Purging history or merging a former project ends
+that compatibility; use the current reference returned by the move. Stable issue
+UIDs remain unchanged. The target project is resolved the same way as `kata projects show`.
+When an old reference resolves a moved issue, human and agent output from
+`show`, `edit`, and label commands qualifies its current project.
 The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
 collision. `--dry` asks the daemon to validate the same move restrictions
-without changing the issue, claims, comments, or event cursor. It rejects
-recurrence-pinned issues, archived projects, federation bindings, active external
-root claims, and import mapping or issue-sync ownership conflicts just as a real
-move does. A preview validates the current state; a later move checks it again.
+without changing issues, claims, comments, or the event cursor. The preview lists
+every issue that would move. It rejects recurrence-pinned issues, archived
+projects, incompatible federation bindings, active external root claims, and
+import mapping or issue-sync ownership conflicts just as a real move does.
+Any descendant that fails a rule rejects the whole move. A preview validates
+the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
-by a preview. Previews require daemon API 0.23.0 or newer; the CLI checks before
-sending the `dry_run` request field.
+by a preview. Subtree moves require daemon API 0.29.0 or newer. With older
+daemons, `--single` preserves the legacy move request; `--single --dry` requires
+daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
+request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
-Moves involving any federated project are unsupported on both hubs and spokes,
-including projects whose sync is disabled. The daemon returns
-`federated_move_unsupported` rather than treating a hub as a read-only spoke.
-See [Federation](../operations/federation.md#moving-issues-between-projects).
+Federated moves require both projects to use the same active hub. Spokes require
+both projects to be joined, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported. Different hubs,
+paused bindings, and mixed local/federated projects return
+`federated_move_unsupported`; create an issue in the target project and link it to
+the original. See [Federation](../operations/federation.md#moving-issues-between-projects)
+for peer requirements.
 
 Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for

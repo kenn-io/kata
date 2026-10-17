@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,4 +66,61 @@ func TestMoveCLI_WithCommentAppendsToMovedIssue(t *testing.T) {
 	got := fetchIssueViaHTTPWithComments(t, env, target.ID, stored.ShortID)
 	require.Len(t, got.Comments, 1)
 	assert.Equal(t, "relocated to the target project", got.Comments[0].Body)
+}
+
+// Contract: the default CLI preview lists all descendants; --single opts out.
+func TestMoveCLI_Tree(t *testing.T) {
+	for _, single := range []bool{false, true} {
+		t.Run(map[bool]string{false: "tree", true: "single"}[single], func(t *testing.T) {
+			env, dir, source, target, root := setupMoveCLIProjects(t)
+			child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+			require.NoError(t, err)
+			args := []string{"--project", source.Name, "move", root.ShortID, target.Name}
+			if single {
+				args = append(args, "--single")
+			}
+			preview := runCLI(t, env, dir, append(args, "--dry")...)
+			if single {
+				assert.NotContains(t, preview, child.ShortID)
+			} else {
+				assert.Contains(t, preview, child.ShortID)
+			}
+			runCLI(t, env, dir, args...)
+			stored, err := env.DB.IssueByID(t.Context(), child.ID)
+			require.NoError(t, err)
+			expected := target.ID
+			if single {
+				expected = source.ID
+			}
+			assert.Equal(t, expected, stored.ProjectID)
+		})
+	}
+}
+
+func TestMoveCLI_OldReference(t *testing.T) {
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+	oldRef := source.Name + "#" + issue.ShortID
+	assert.Contains(t, runCLI(t, env, dir, "--project", source.Name, "show", issue.UID), "misfiled issue")
+	assert.Contains(t, runCLI(t, env, dir, "show", oldRef), "misfiled issue")
+	runCLI(t, env, dir, "edit", oldRef, "--title", "continued work")
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "continued work", got.Title)
+}
+
+func TestMoveCLI_FederatedOldReferenceUsesCurrentClaim(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "tester")
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	_, err := env.DB.EnableProjectFederation(t.Context(), source.ID, "tester")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), target.ID, "tester")
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{ProjectID: source.ID, IssueRef: issue.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "tester", ClientKind: "cli"}, ClaimKind: "hard", Now: time.Now().UTC()})
+	require.NoError(t, err)
+	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+	runCLI(t, env, dir, "edit", source.Name+"#"+issue.ShortID, "--title", "continued work")
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "continued work", got.Title)
 }

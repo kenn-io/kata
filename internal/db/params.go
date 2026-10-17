@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"time"
 
@@ -542,8 +543,15 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// AuthorizeProjects checks every source project discovered in the transaction.
+	AuthorizeProjects func([]int64) error
+	// ExpectedIssueIDs fences externally validated membership. Nil permits fresh
+	// discovery; a supplied set must match every issue affected by the move.
+	ExpectedIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
-	DryRun        bool
+	DryRun bool
+	// Single moves only the selected issue; the default includes descendants.
+	Single        bool
 	IssueID       int64
 	FromProjectID int64
 	ToProjectID   int64
@@ -553,6 +561,8 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
+	Issues      []Issue
+	Events      []Event
 	Issue       Issue
 	Event       *Event `json:"-"`
 	EventID     int64
@@ -804,6 +814,9 @@ type AdoptProjectIntoFederationResult struct {
 	Binding               FederationBinding
 	AdoptionSnapshotCount int64
 	CreatedEvent          *Event
+	// Committed stream invalidations are transient publisher inputs.
+	ResetProjectIDs   []int64 `json:"-"`
+	ResetAfterEventID int64   `json:"-"`
 }
 
 // LeaveFederationResult reports what LeaveFederationReplica removed. ProjectUID
@@ -824,6 +837,12 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
+	// A matching spoke/actor enrollment alone does not prove token possession.
+	MoveSourceEnrollmentIDs map[string]int64
+	// AuthorizeMove checks supplemental host authority for move sources and the
+	// current owners of fresh events, using a transactionally fenced native grant.
+	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
 	EventFeatures                    string
 	ProjectID                        int64
 	FederationEnrollmentID           int64
@@ -848,6 +867,7 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
+	Resets []FederationProjectReset `json:"-"`
 	// Events retains every committed event in transaction insertion order.
 	Events                []Event
 	RequiredEventFeatures string

@@ -130,3 +130,47 @@ func TestMoveIssue_PreviewDoesNotWidenScopedTokenAuthority(t *testing.T) {
 	raw := readClose(t, resp)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(raw))
 }
+
+func TestMoveIssue_TreePublishesEachEvent(t *testing.T) {
+	sink := &recordingSink{}
+	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.Hooks = sink })
+	source, target, root := seedMovePair(t, env)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, target.UID)
+	resp := doPostWithIfMatch(t, env, moveURL(env, source.ID, root.ShortID), body, `"rev-1"`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
+	events := sink.snapshot()
+	require.Len(t, events, 2)
+	require.Equal(t, root.UID, *events[0].IssueUID)
+	require.Equal(t, child.UID, *events[1].IssueUID)
+	for _, expected := range events {
+		select {
+		case msg := <-sub.Ch:
+			require.Equal(t, expected.ID, msg.Event.ID)
+		case <-time.After(time.Second):
+			t.Fatal("missing moved event")
+		}
+	}
+}
+
+// Contract: writes using an old reference publish in the current project.
+func TestMoveIssue_OldReferencePublishesToCurrentProject(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, issue := seedMovePair(t, env)
+	_, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: target.ID})
+	defer sub.Unsub()
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", env.URL, source.ID, issue.ShortID)
+	resp := doPostWithIfMatch(t, env, url, `{"actor":"tester","body":"continued work"}`, "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
+	select {
+	case msg := <-sub.Ch:
+		require.Equal(t, target.ID, msg.ProjectID)
+	case <-time.After(time.Second):
+		t.Fatal("old-reference write did not publish to current project")
+	}
+}

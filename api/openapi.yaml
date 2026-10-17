@@ -2582,6 +2582,11 @@ components:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"
           type: array
+        move_source_tokens:
+          additionalProperties:
+            type: string
+          description: Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
+          type: object
         schema_version:
           format: int64
           type: integer
@@ -4382,6 +4387,9 @@ components:
         dry_run:
           description: Validate without moving; If-Match may be omitted for a preview.
           type: boolean
+        single:
+          description: Move only this issue instead of its subtree.
+          type: boolean
         to_project_uid:
           type: string
       required:
@@ -4397,6 +4405,10 @@ components:
           type: integer
         issue:
           $ref: "#/components/schemas/Issue"
+        issues:
+          items:
+            $ref: "#/components/schemas/Issue"
+          type: array
         new_short_id:
           type: string
       required:
@@ -7088,7 +7100,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.28.0
+  version: 0.29.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -8933,6 +8945,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+          explode: false
+          in: query
+          name: issue_uid
+          schema:
+            description: Read retained history only for an issue currently owned by this project, independently of the project cursor.
+            type: string
         - explode: false
           in: query
           name: limit

@@ -677,10 +677,13 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		var projectUID string
 		if projectID > 0 {
-			if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
+			project, err := activeProjectByID(ctx, cfg.DB, projectID)
+			if err != nil {
 				return nil, err
 			}
+			projectUID = project.UID
 		}
 		if err := requireHostAccessLease(ctx); err != nil {
 			return nil, err
@@ -688,7 +691,7 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 
 		return &huma.StreamResponse{
 			Body: func(ctx huma.Context) {
-				runSSEStream(ctx, cfg, cursor, projectID)
+				runSSEStream(ctx, cfg, cursor, projectID, projectUID)
 			},
 		}, nil
 	})
@@ -717,7 +720,7 @@ func registerEventsStreamMethodGuards(mux *http.ServeMux) {
 // Steps 4–6 are Subscribe-first / check-second so a purge that fires between
 // cursor parse and Subscribe lands on sub.Ch via the live channel; one
 // committed before parse is captured by PurgeResetCheck. See spec §5.3.
-func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) {
+func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64, projectUID string) {
 	w, ok := hctx.BodyWriter().(http.ResponseWriter)
 	if !ok {
 		return
@@ -737,14 +740,13 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 
-	subscriptionProjectID := projectID
+	filter := SubFilter{ProjectID: projectID, ProjectUID: projectUID}
 	if issueScopeFromContext(ctx) != nil {
-		// Hidden blockers can live in another project. Scoped filtering still
-		// happens against the durable log; the global subscription is only the
-		// wakeup needed to notice an identity-free invalidation promptly.
-		subscriptionProjectID = 0
+		// Hidden blockers can affect issue-scoped streams across projects;
+		// their durable read still applies the issue authority filter.
+		filter = SubFilter{}
 	}
-	sub := cfg.Broadcaster.Subscribe(SubFilter{ProjectID: subscriptionProjectID})
+	sub := cfg.Broadcaster.Subscribe(filter)
 	defer sub.Unsub()
 
 	if projectID > 0 {
@@ -943,6 +945,9 @@ func runLivePhase(base context.Context, deps livePhaseDeps, projectID, lastSent 
 			}
 			switch msg.Kind {
 			case StreamKindReset:
+				if resetProjectID != 0 && msg.ProjectID != 0 && msg.ProjectID != resetProjectID {
+					continue
+				}
 				if _, err := revalidateEventStreamAuthority(base, deps.cfg.DB); err != nil {
 					return
 				}
@@ -1126,7 +1131,7 @@ func revalidateEventStreamFrameAuthority(ctx context.Context, store db.Storage) 
 }
 
 func revalidateEventStream(ctx context.Context, store db.Storage, adoptGained bool) (context.Context, error) {
-	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && !decision.owner {
+	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && (!decision.owner || decision.fixedUIDs != nil) {
 		gained, kept, _, err := decision.refresh(ctx)
 		if err != nil {
 			return ctx, err

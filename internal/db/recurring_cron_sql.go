@@ -334,8 +334,8 @@ func CheckRecurringSpokeEvent(ctx context.Context, tx *sql.Tx, event RemoteEvent
 	if err != nil {
 		return err
 	}
-	protected := RequireEventFeatures(CronEventFeature, features) != nil
-	if !protected && !strings.HasPrefix(event.Type, "cron.job.") {
+	protected := strings.Contains(","+features+",", ","+RecurringCronEventFeature+",")
+	if event.Type != "issue.moved" && !protected && !strings.HasPrefix(event.Type, "cron.job.") {
 		return nil
 	}
 	var existing bool
@@ -347,6 +347,9 @@ func CheckRecurringSpokeEvent(ctx context.Context, tx *sql.Tx, event RemoteEvent
 	}
 	if protected {
 		return fmt.Errorf("%w: native recurring definitions and delivery metadata are hub-owned", ErrFederationIngestValidation)
+	}
+	if event.Type == "issue.moved" {
+		return checkRecurringMoveSnapshot(ctx, tx, event)
 	}
 	if strings.HasPrefix(event.Type, "cron.job.") {
 		var body struct {
@@ -369,6 +372,46 @@ func CheckRecurringSpokeEvent(ctx context.Context, tx *sql.Tx, event RemoteEvent
 		}
 		if cron.IsRecurringIssueJob(definition) {
 			return fmt.Errorf("%w: native recurring job cannot change from a spoke", ErrFederationIngestValidation)
+		}
+	}
+	return nil
+}
+
+// A distributed move snapshot can become a cold replica's baseline even when
+// this hub already owns the issue. Preserve delivery provenance exactly rather
+// than accepting changes hidden inside the otherwise ordinary move document.
+func checkRecurringMoveSnapshot(ctx context.Context, tx *sql.Tx, event RemoteEvent) error {
+	var proposed map[string]jsontext.Value
+	raw := PayloadMap(FederationMoveSnapshotEvent(event).Payload)["metadata"]
+	if len(raw) != 0 {
+		if err := json.Unmarshal(raw, &proposed); err != nil {
+			return fmt.Errorf("%w: invalid move snapshot metadata", ErrFederationIngestValidation)
+		}
+	}
+	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	trustedRaw := "{}"
+	if err := tx.QueryRowContext(ctx, `SELECT metadata FROM issues WHERE uid=$1`, uid).Scan(&trustedRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var trusted map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(trustedRaw), &trusted); err != nil {
+		return err
+	}
+	for key, value := range trusted {
+		if !recurringMetadataKey(key) {
+			continue
+		}
+		other, present := proposed[key]
+		if !present || !jsonRawEqual(value, other) {
+			return fmt.Errorf("%w: move snapshot cannot rewrite hub-owned recurring metadata", ErrFederationIngestValidation)
+		}
+	}
+	for key := range proposed {
+		if !recurringMetadataKey(key) {
+			continue
+		}
+		if _, present := trusted[key]; !present {
+			return fmt.Errorf("%w: move snapshot cannot add hub-owned recurring metadata", ErrFederationIngestValidation)
 		}
 	}
 	return nil

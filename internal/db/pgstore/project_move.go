@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -14,11 +15,10 @@ import (
 // errMovePreview rolls back provisional validation updates on a successful preview.
 var errMovePreview = errors.New("move preview complete")
 
-// MoveIssueProject rehomes one active, non-recurring issue while preserving
-// stable UID relationships and allocating a fresh target-local short ID.
+// MoveIssueProject rehomes an active issue subtree while preserving
+// stable UID relationships and allocating fresh target-local short IDs.
 func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
 	var output db.MoveIssueProjectOut
-	var committedEvent *db.Event
 	if input.FromProjectID == input.ToProjectID {
 		return output, fmt.Errorf("source and target projects are the same")
 	}
@@ -26,6 +26,40 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
 			return err
 		}
+		output = db.MoveIssueProjectOut{}
+		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
+			return err
+		}
+		inputs, err := db.IssueMoveTreeInputs(ctx, tx, input)
+		if err != nil {
+			return err
+		}
+		for _, item := range inputs {
+			result, err := s.moveIssueProjectTx(ctx, tx, item)
+			if err != nil {
+				return err
+			}
+			if item.IssueID == input.IssueID {
+				output = result
+				output.Events = nil
+			}
+			output.Issues = append(output.Issues, result.Issue)
+			output.Events = append(output.Events, result.Events...)
+		}
+		if input.DryRun {
+			return errMovePreview
+		}
+		return nil
+	})
+	if errors.Is(err, errMovePreview) {
+		return output, nil
+	}
+	return output, err
+}
+
+func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	var output db.MoveIssueProjectOut
+	err := func() error {
 		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
 			return err
 		}
@@ -81,7 +115,7 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if input.DryRun {
 			output.Issue = current
 			output.NewRevision = current.Revision
-			return errMovePreview
+			return nil
 		}
 		newShortID, err := s.resolveShortIDTx(ctx, tx, target.ID, current.UID, "")
 		if err != nil {
@@ -125,14 +159,31 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return fmt.Errorf("rehome external root bindings: %w", mapSQLError(err, nil))
 		}
 
-		payload, err := json.Marshal(map[string]string{
+		payloadFields := map[string]any{
 			"issue_uid": current.UID, "from_project_uid": source.UID,
 			"from_short_id": current.ShortID, "to_project_uid": target.UID,
 			"to_short_id": newShortID, "updated_at": updatedAt,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal issue move event: %w", err)
 		}
+		var federated bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, source.ID).Scan(&federated); err != nil {
+			return err
+		}
+		if federated {
+			movedIssue, err := scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id=$1`, current.ID))
+			if err != nil {
+				return err
+			}
+			snapshot, err := federationIssueSnapshotPayload(ctx, tx, movedIssue)
+			if err != nil {
+				return err
+			}
+			payloadFields["snapshot"] = jsontext.Value(snapshot)
+		}
+		payload, err := json.Marshal(payloadFields)
+		if err != nil {
+			return err
+		}
+
 		event, err := s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: target.ID, ProjectUID: target.UID, ProjectName: target.Name,
 			IssueID: &current.ID, IssueUID: &current.UID,
@@ -142,23 +193,14 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return err
 		}
 		output.Issue, err = scanIssue(ctx, tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
-		if err != nil {
-			return err
-		}
-		committedEvent = &event
+		output.Event = &event
+		output.Events = []db.Event{event}
 		output.EventID = event.ID
 		output.NewShortID = newShortID
 		output.NewRevision = newRevision
-		return nil
-	})
-	if errors.Is(err, errMovePreview) {
-		return output, nil
-	}
-	if err != nil {
-		return db.MoveIssueProjectOut{}, err
-	}
-	output.Event = committedEvent
-	return output, nil
+		return err
+	}()
+	return output, err
 }
 
 func rejectIssueMoveExternalRootIssueSyncTx(

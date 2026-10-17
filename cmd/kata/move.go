@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -16,11 +17,12 @@ import (
 )
 
 func newMoveCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, single bool
 	cmd := &cobra.Command{
 		Use:   "move <issue-ref> <project>",
-		Short: "move an issue to another project",
-		Long: `Move an issue to another project.
+		Short: "move an issue subtree to another project",
+		Long: `Move an issue and all its descendants to another project.
+Use --single to move only the selected issue.
 
 The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
@@ -29,29 +31,34 @@ assigned in the target project.`,
 		Example: `  kata move abc4 example-project --dry --agent`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMove(cmd, args[0], args[1], dryRun)
+			return runMove(cmd, args[0], args[1], dryRun, single)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
+	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
 	addCommentFlag(cmd)
 	return cmd
 }
 
 type moveIssueWire struct {
-	ID        int64  `json:"id"`
-	ProjectID int64  `json:"project_id"`
-	ShortID   string `json:"short_id"`
-	Revision  int64  `json:"revision"`
+	ID         int64  `json:"id"`
+	ProjectID  int64  `json:"project_id"`
+	ShortID    string `json:"short_id"`
+	Revision   int64  `json:"revision"`
+	UID        string `json:"uid"`
+	Title      string `json:"title"`
+	ProjectUID string `json:"project_uid"`
 }
 
 type moveResponseWire struct {
-	Issue      moveIssueWire `json:"issue"`
-	EventID    int64         `json:"event_id"`
-	NewShortID string        `json:"new_short_id"`
-	Changed    bool          `json:"changed"`
+	Issue      moveIssueWire   `json:"issue"`
+	Issues     []moveIssueWire `json:"issues"`
+	EventID    int64           `json:"event_id"`
+	NewShortID string          `json:"new_short_id"`
+	Changed    bool            `json:"changed"`
 }
 
-func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) error {
+func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bool) error {
 	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
@@ -69,6 +76,18 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 			return err
 		}
 	}
+
+	// Older daemons move only the selected issue and reject the single field.
+	// Never silently turn the default subtree move into a single-issue move.
+	subtreeSupported := true
+	if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionMoveSubtree, "subtree move"); err != nil {
+		compatibility, oldDaemon := errors.AsType[*cliError](err)
+		if !single || !oldDaemon || compatibility.Code != "daemon_api_too_old" {
+			return err
+		}
+		subtreeSupported = false
+	}
+
 	target, err := resolveProjectSelector(
 		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, targetProject)
 	if err != nil {
@@ -83,9 +102,16 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 	}
 	// Showing an issue may refresh federation claims. Previews obtain the
 	// source issue from the validation response instead, without that GET.
+	sourceProject := ref.ProjectName
 	var sourceIssue moveIssueWire
 	if !dryRun {
 		sourceIssue, err = fetchMoveIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+		if err != nil {
+			return err
+		}
+	}
+	if !dryRun {
+		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, sourceIssue.ProjectID, sourceProject)
 		if err != nil {
 			return err
 		}
@@ -105,6 +131,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
 		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
 	}
+	if single && subtreeSupported {
+		request.Body.Single = &single
+	}
 	response, callErr := apiClient.MoveIssueWithResponse(ctx, request)
 	if response == nil {
 		return externalCLITransportError(response, callErr)
@@ -118,12 +147,27 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 		return err
 	}
 	if dryRun {
-		return printMovePreview(cmd, ref.ProjectName, moved.Issue.ShortID, target.Name)
+		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, sourceProject)
+		if err != nil {
+			return err
+		}
+		return printMovePreview(cmd, sourceProject, moved.Issue.ShortID, target.Name, moved.Issues)
 	}
 	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle); err != nil {
 		return err
 	}
-	return printMove(cmd, bs, ref.ProjectName, sourceIssue.ShortID, target.Name)
+	return printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+}
+
+func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {
+	if currentProjectID == 0 || currentProjectID == requestedProjectID {
+		return requestedName, nil
+	}
+	project, err := resolveProjectSelector(daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, strconv.FormatInt(currentProjectID, 10))
+	if err != nil {
+		return "", err
+	}
+	return project.Name, nil
 }
 
 func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, projectID int64, ref string) (moveIssueWire, error) {
@@ -175,7 +219,7 @@ func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetP
 	return err
 }
 
-func printMovePreview(cmd *cobra.Command, sourceProject, oldShortID, targetProject string) error {
+func printMovePreview(cmd *cobra.Command, sourceProject, oldShortID, targetProject string, issues []moveIssueWire) error {
 	if flags.Quiet {
 		return nil
 	}
@@ -189,6 +233,7 @@ func printMovePreview(cmd *cobra.Command, sourceProject, oldShortID, targetProje
 			"from":            oldRef,
 			"to_project":      targetProject,
 			"target_ref_note": "target short_id is assigned by the daemon during move",
+			"issues":          issues,
 		}
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
@@ -200,15 +245,25 @@ func printMovePreview(cmd *cobra.Command, sourceProject, oldShortID, targetProje
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK move %s changed=false dry_run=true\n", agentValue(oldRef)); err != nil {
 			return err
 		}
-		return writeAgentKVRow(cmd.OutOrStdout(),
-			agentRowField("from", oldRef),
-			agentRowField("to_project", targetProject),
-		)
+		for _, issue := range issues {
+			if err := writeAgentKVRow(cmd.OutOrStdout(), agentRowField("uid", issue.UID), agentRowField("short_id", issue.ShortID), agentRowField("project_uid", issue.ProjectUID), agentRowField("title", issue.Title)); err != nil {
+				return err
+			}
+		}
+		return writeAgentKVRow(cmd.OutOrStdout(), agentRowField("from", oldRef), agentRowField("to_project", targetProject))
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(),
 		"dry-run: would move %s to project %s; target short_id will be assigned by the daemon\n",
 		textsafe.Line(oldRef), textsafe.Line(targetProject))
-	return err
+	if err != nil {
+		return err
+	}
+	for _, issue := range issues {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", textsafe.Line(issue.ShortID), textsafe.Line(issue.Title)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func moveQualifiedID(projectName, shortID string) string {

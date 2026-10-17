@@ -8,18 +8,35 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// ValidateRelayLifecycle checks the project’s retained relay state before lifecycle changes.
+// ValidateRelayLifecycle checks retained federation work before lifecycle changes.
 func (d *Store) ValidateRelayLifecycle(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.relayReset(tx).ValidateLifecycle(ctx, projectID) })
+	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.validateRelayLifecycleTx(ctx, tx, projectID) })
 }
 
 // FenceRelayDisconnect validates retained relay work and disables writes in
 // one transaction so a concurrent local mutation cannot slip between the two.
 func (d *Store) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
-	return d.relayTx(ctx, func(tx *sql.Tx) error { return d.relayReset(tx).FenceDisconnect(ctx, projectID) })
+	// Match the local move lock order before applying a caller's policy fence;
+	// the pending-move check and durable write pause must be indivisible.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if err := lockProjectAccessExclusive(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
+	})
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+			return err
+		}
+		return d.relayReset(tx).FenceDisconnect(ctx, projectID)
+	})
 }
 
 func (d *Store) validateRelayLifecycleTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, projectID, d.InstanceUID()); err != nil {
+		return err
+	}
 	return d.relayReset(tx).ValidateLifecycle(ctx, projectID)
 }
 

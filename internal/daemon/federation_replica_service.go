@@ -103,6 +103,7 @@ type EnsureFederationReplicaParams struct {
 	CredentialRekey            *FederationReplicaCredentialRekeySource
 	ManagedReservation         *FederationReplicaManagedReservation
 	ProjectEventSink           func(db.Event)
+	ProjectResetSink           func(projectID, cursor int64)
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
 	Relay                      *api.RelayHandshake
@@ -261,6 +262,15 @@ func PrepareFederationReplicaLeave(
 }
 
 func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (PrepareFederationReplicaLeaveResult, error) {
+	// Refuse known source credential dependencies before marking leave pending
+	// or allowing the caller to revoke that credential at the hub.
+	if project.ID > 0 {
+		if lifecycle, ok := store.(db.RelayLifecycleStore); ok {
+			if err := lifecycle.ValidateRelayLifecycle(ctx, project.ID); err != nil {
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+		}
+	}
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()
@@ -277,18 +287,45 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	if found && match.Credential.Provider != nil {
 		key = federationReplicaOperationKey(store, project.Name, match.Credential)
 	}
+	// Native moves need the source credential at their destination. Fence both
+	// move endpoints in the DB before the durable credential marker can permit
+	// hub revocation; the earlier read-only preflight cannot close this race.
+	// Providers and relay hops retain their existing drain/teardown protocol.
+	nativeFenced := false
+	if project.ID > 0 && (!found || match.Credential.Provider == nil) {
+		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			ensureFederationReplicaMu.Unlock()
+			return PrepareFederationReplicaLeaveResult{}, bindingErr
+		}
+		if bindingErr == nil && binding.Role == db.FederationRoleSpoke && binding.RelayConfig == nil {
+			fencer, ok := store.(db.RelayDisconnectFenceStore)
+			if !ok {
+				ensureFederationReplicaMu.Unlock()
+				return PrepareFederationReplicaLeaveResult{}, fmt.Errorf("native federation leave fence is unavailable")
+			}
+			if err := fencer.FenceRelayDisconnect(ctx, project.ID); err != nil {
+				ensureFederationReplicaMu.Unlock()
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+			nativeFenced = true
+		}
+	}
 	if found && !match.Credential.LeavePending {
 		replacement := match
 		replacement.Credential.LeavePending = true
 		replacement.Credential.PendingEnrollmentID = 0
 		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
 			ensureFederationReplicaMu.Unlock()
-			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return PrepareFederationReplicaLeaveResult{}, err
+			if !errors.Is(err, config.ErrFederationCredentialConflict) {
+				err = credentialIOError("mark managed reservation for leave")
 			}
-			return PrepareFederationReplicaLeaveResult{}, credentialIOError(
-				"mark managed reservation for leave",
-			)
+			if nativeFenced {
+				// Keep the committed safe fence, including across restarts. A
+				// retry can finish preparation without restoring stale cursors.
+				err = fmt.Errorf("%w; native federation writes remain paused; retry leave preparation", err)
+			}
+			return PrepareFederationReplicaLeaveResult{}, err
 		}
 		match = replacement
 	}
@@ -543,6 +580,8 @@ type EnsureFederationReplicaResult struct {
 	CreatedEvent          *db.Event
 	Adopted               bool
 	AdoptionSnapshotCount int64
+	ResetProjectIDs       []int64 `json:"-"`
+	ResetAfterEventID     int64   `json:"-"`
 }
 
 // EnsureFederationReplica creates or reuses a local spoke binding, optionally
@@ -757,6 +796,11 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if p.ProjectResetSink != nil {
+		for _, projectID := range result.ResetProjectIDs {
+			p.ProjectResetSink(projectID, result.ResetAfterEventID)
+		}
+	}
 	if result.CreatedEvent != nil && p.ProjectEventSink != nil {
 		p.ProjectEventSink(*result.CreatedEvent)
 	}
@@ -1333,6 +1377,8 @@ func ensureReplicaBindingOrAdopt(
 				Adopted:               p.AdoptExisting,
 				AdoptionSnapshotCount: result.AdoptionSnapshotCount,
 				CreatedEvent:          result.CreatedEvent,
+				ResetProjectIDs:       result.ResetProjectIDs,
+				ResetAfterEventID:     result.ResetAfterEventID,
 			}, nil
 		}
 	}

@@ -462,7 +462,7 @@ func TestShowIssueClaimRefreshCallsHubAndReturnsFreshClaim(t *testing.T) {
 		calls++
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer claim-token", r.Header.Get("Authorization"))
-		assert.Equal(t, "/api/v1/projects/42/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		assert.Equal(t, "/api/v1/projects/42/issues/"+issue.UID+"/lease", r.URL.Path)
 		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
 			Held: true,
 			Holder: api.ClaimPrincipalOut{

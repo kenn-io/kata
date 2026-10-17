@@ -941,7 +941,15 @@ func (d *Store) IssueByShortID(ctx context.Context, projectID int64, shortID str
 	args := []any{projectID, shortID}
 	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	row := d.QueryRowContext(ctx, q, args...)
-	return scanIssue(ctx, row)
+	issue, err := scanIssue(ctx, row)
+	if !errors.Is(err, db.ErrNotFound) {
+		return issue, err
+	}
+	uid, err := db.MovedIssueUID(ctx, d, projectID, shortID, false)
+	if err != nil {
+		return db.Issue{}, err
+	}
+	return d.IssueByUID(ctx, uid, include)
 }
 
 // IssueByUID fetches an issue by stable UID. Soft-deleted rows are returned
@@ -2636,9 +2644,11 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	contentHash := in.ContentHash
 	eventActor := in.Actor
 	if contentHash == "" {
-		eventActor, err = d.effectiveLocalEventActorTx(ctx, tx, in.ProjectID, originInstanceUID, eventActor)
-		if err != nil {
-			return db.Event{}, err
+		if in.Type != db.ProjectScopeResetEventType {
+			eventActor, err = d.effectiveLocalEventActorTx(ctx, tx, in.ProjectID, originInstanceUID, eventActor)
+			if err != nil {
+				return db.Event{}, err
+			}
 		}
 		contentHash, err = db.EventContentHash(db.EventHashInput{
 			UID:               eventUID,
@@ -2682,14 +2692,16 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	if err != nil {
 		return db.Event{}, fmt.Errorf("read event: %w", err)
 	}
-	if in.ContentHash == "" {
-		if err := d.recordNativeRootAttributionTx(ctx, tx, e); err != nil {
+	if in.Type != db.ProjectScopeResetEventType {
+		if in.ContentHash == "" {
+			if err := d.recordNativeRootAttributionTx(ctx, tx, e); err != nil {
+				return db.Event{}, err
+			}
+		} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
 			return db.Event{}, err
 		}
-	} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
-		return db.Event{}, err
 	}
-	if !in.SkipRelay {
+	if !in.SkipRelay && in.Type != db.ProjectScopeResetEventType {
 		if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {
 			return db.Event{}, err
 		}

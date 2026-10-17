@@ -66,11 +66,16 @@ func (f outputFormatFlag) String() string {
 
 func (f outputFormatFlag) Type() string { return "string" }
 
-func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, extra func(io.Writer, agentIssueMutation) error) error {
+func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, requestedProject string, extra func(io.Writer, agentIssueMutation) error) error {
 	var m agentIssueMutation
 	if err := json.Unmarshal(bs, &m); err != nil {
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
+	m.Issue.ShortID = displayRef
 	return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, false, extra)
 }
 
@@ -82,7 +87,7 @@ func printAgentMutationDecoded(
 	extra func(io.Writer, agentIssueMutation) error,
 ) error {
 	if !flags.Quiet {
-		if _, err := fmt.Fprintf(w, "OK %s %s", verb, m.Issue.ShortID); err != nil {
+		if _, err := fmt.Fprintf(w, "OK %s %s", verb, agentValue(m.Issue.ShortID)); err != nil {
 			return err
 		}
 		if m.Reused {
@@ -100,7 +105,7 @@ func printAgentMutationDecoded(
 		}
 	}
 	if m.Issue.ShortID != "" && m.Issue.Title != "" {
-		if _, err := fmt.Fprintf(w, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+		if _, err := fmt.Fprintf(w, "Issue: %s %s\n", agentValue(m.Issue.ShortID), agentValue(m.Issue.Title)); err != nil {
 			return err
 		}
 	}

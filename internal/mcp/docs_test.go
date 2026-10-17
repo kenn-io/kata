@@ -6,13 +6,11 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
-
-	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestSearchAndReadBundledDocs(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	})
 

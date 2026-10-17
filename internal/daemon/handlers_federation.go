@@ -494,6 +494,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				ProjectEventSink: func(event db.Event) {
 					deliverProjectMutation(cfg, &event)
 				},
+				ProjectResetSink: cfg.Publish().Reset,
 			},
 		)
 		if result.CreatedEvent != nil {
@@ -812,7 +813,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, Limit: limit})
+		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
@@ -854,7 +855,15 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
+		moveSources, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
+		if err != nil {
+			return nil, err
+		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+			MoveSourceEnrollmentIDs: moveSources,
+			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
+				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
+			},
 			EventFeatures:                    in.EventFeatures,
 			ProjectID:                        in.ProjectID,
 			FederationEnrollmentID:           principal.EnrollmentID,
@@ -867,6 +876,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if err != nil {
 			return nil, federationIngestError(err)
+		}
+		for _, reset := range result.Resets {
+			cfg.Publish().Reset(reset.ProjectID, reset.EventID)
 		}
 		if err := federationFailpoint("after_federation_ingest_commit_before_broadcast"); err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
@@ -945,8 +957,14 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
+	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
+		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
+	case errors.Is(err, ErrHostFederationAdmissionLimited):
+		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)
+	case errors.Is(err, errHostFederationAccessUnavailable):
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation transaction access decision unavailable", "", nil)
 	case errors.Is(err, db.ErrRemoteEventConflict):
 		return api.NewError(http.StatusConflict, "remote_event_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventHashMismatch), errors.Is(err, db.ErrFederationIngestValidation):
@@ -1000,6 +1018,10 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+		return api.NewError(http.StatusConflict, "federation_project_identity_required", db.ErrFederationProjectIdentityRequired.Error(),
+			"leave the joined projects still replaying this history before adopting this former project under a different UID", nil)
+	}
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByDownstream) {
 		return api.NewError(http.StatusConflict, "federation_lifecycle_blocked", "federation change requires resolved deliveries and detached downstream enrollments", "sync retained work through root acceptance and explicitly revoke or detach descendants, then retry", nil)
 	}

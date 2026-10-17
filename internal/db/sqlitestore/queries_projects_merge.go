@@ -70,6 +70,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
+	if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source, `json_type(m.payload,'$.snapshot')`); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
@@ -375,8 +378,18 @@ func extendCollidingSourceShortIDs(
 		    OR
 		    EXISTS (SELECT 1 FROM purge_log p
 		             WHERE p.project_id = ? AND p.short_id = s.short_id)
+            OR EXISTS (SELECT 1 FROM events e JOIN projects p
+                       ON p.uid=json_extract(e.payload, '$.from_project_uid')
+                       WHERE p.id=? AND (e.type='issue.moved' OR
+                         (e.type='sync.reset_required'
+                          AND EXISTS(SELECT 1 FROM issues referenced WHERE referenced.uid=e.issue_uid)
+                          AND EXISTS(SELECT 1 FROM events retained_move
+                            WHERE retained_move.uid=json_extract(e.payload, '$.move_event_uid')
+                              AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
+                         AND json_extract(e.payload, '$.from_short_id')=s.short_id
+                         AND e.issue_uid<>s.uid)
 		  )
-		ORDER BY s.uid ASC`, sourceID, targetID, targetID)
+		ORDER BY s.uid ASC`, sourceID, targetID, targetID, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("scan source/target short_id collisions: %w", err)
 	}

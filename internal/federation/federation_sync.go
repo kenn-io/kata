@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 const federationPollLimit = 1000
@@ -72,14 +73,15 @@ func SyncFederationOnce(
 	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
+	credentialStores ...config.FederationCredentialStore,
 ) error {
-	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil)
+	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil, credentialStores...)
 }
 
 // SyncFederationOnceWithPulledEvents is SyncFederationOnce with a post-commit
-// callback for freshly inserted hub-origin events. The daemon uses this to
-// fan pulled events out to SSE subscribers and hooks without making this
-// package depend on daemon internals.
+// callback for freshly inserted hub-origin events and local materialization
+// reset controls. The daemon publishes resets without hooks and fans ordinary
+// pulled events out to SSE subscribers and hooks.
 func SyncFederationOnceWithPulledEvents(
 	ctx context.Context,
 	store db.Storage,
@@ -87,6 +89,7 @@ func SyncFederationOnceWithPulledEvents(
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
+	credentialStores ...config.FederationCredentialStore,
 ) error {
 	finish, err := federationcoord.BeginSync(
 		ctx,
@@ -99,7 +102,7 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	defer finish()
 	for {
-		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
+		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil, credentialStores...)
 		if err != nil || !remaining {
 			return err
 		}
@@ -125,6 +128,7 @@ func syncFederationOnceWithFence(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+	credentialStores ...config.FederationCredentialStore,
 ) (bool, error) {
 	if creds.RelayEnrollmentPending {
 		return false, ErrRelayEnrollmentPending
@@ -144,13 +148,24 @@ func syncFederationOnceWithFence(
 		if err := store.RecordFederationSyncPushStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return false, err
 		}
-	} else {
+	} else if binding.RelayConfig != nil {
 		if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return false, err
 		}
 	}
 	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
+		if !binding.PushEnabled && binding.RelayConfig == nil {
+			_, startedAt, startErr := startFederationPull(ctx, store, binding.ProjectID)
+			if startErr != nil {
+				return false, errors.Join(err, startErr)
+			}
+			at := time.Now().UTC()
+			if at.Before(startedAt) {
+				at = startedAt
+			}
+			return false, recordFederationSyncErrorAt(ctx, store, binding.ProjectID, err, at)
+		}
 		return false, recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	if binding.RelayConfig != nil {
@@ -164,7 +179,11 @@ func syncFederationOnceWithFence(
 		}
 		return turn.remaining, nil
 	}
-	return false, syncDirectSpoke(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease)
+	credentials := config.FederationCredentialStore(config.DefaultFederationCredentialStore())
+	if len(credentialStores) > 0 && credentialStores[0] != nil {
+		credentials = credentialStores[0]
+	}
+	return false, syncDirectSpoke(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
 }
 
 // syncDirectSpoke pushes and pulls one ordinary spoke binding to completion.
@@ -176,6 +195,8 @@ func syncDirectSpoke(
 	client *Client,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+	credentials config.FederationCredentialStore,
+	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
 	if binding.PushEnabled {
@@ -217,8 +238,13 @@ func syncDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, binding, client.baseURL, batch, opts)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
 				ack, err := client.IngestProjectEventsWithOptions(ctx, hubProjectID,
 					federationIngestEnvelopes(batch), IngestProjectEventsOptions{
+						MoveSourceTokens:           sourceTokens,
 						AdoptionBaseline:           adoptionBaseline,
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
 					})
@@ -255,59 +281,72 @@ func syncDirectSpoke(
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
-		if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
-			return err
+	}
+	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
+	if err != nil {
+		return err
+	}
+	recordPullError := func(pullErr error) error {
+		at := time.Now().UTC()
+		if at.Before(pullStartedAt) {
+			at = pullStartedAt
 		}
+		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
-		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+		return recordPullError(err)
 	}
 	if body.ResetRequired {
 		if binding.PushEnabled {
 			if _, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationResetBlockedByQuarantine)
+				return recordPullError(ErrFederationResetBlockedByQuarantine)
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				return recordPullError(err)
 			}
 			pending, err := store.PendingFederationPushEvents(
 				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, 1)
 			if err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				return recordPullError(err)
 			}
 			if len(pending) > 0 {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationResetBlockedByPendingPush)
+				return recordPullError(ErrFederationResetBlockedByPendingPush)
 			}
 		}
 		meta, err := client.ProjectFederation(ctx, hubProjectID)
 		if err != nil {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			return recordPullError(err)
 		}
 		cursor := max(meta.ReplayHorizonEventID-1, 0)
 		if binding.PushEnabled {
 			if err := store.ResetFederatedProjectIfNoPendingPush(
 				ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor, store.InstanceUID(), binding.PushCursorEventID); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				return recordPullError(err)
 			}
 		} else {
 			if err := store.ResetFederatedProject(ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				return recordPullError(err)
 			}
 		}
 		binding.ReplayHorizonEventID = meta.ReplayHorizonEventID
 		binding.PullCursorEventID = cursor
 		body, err = client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 		if err != nil {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			return recordPullError(err)
 		}
 		if body.ResetRequired {
-			return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationResetRequired)
+			return recordPullError(ErrFederationResetRequired)
 		}
 		if err := store.RecordFederationSyncReset(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
+	body.Events, err = backfillFederationMoveHistory(ctx, client, hubProjectID, body)
+	if err != nil {
+		return recordPullError(err)
+	}
 	var pulledEvents []db.Event
+	insertedThisPull := map[string]bool{}
 	if err := store.RetryTransient(ctx, func() error {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
@@ -317,6 +356,7 @@ func syncDirectSpoke(
 			return err
 		}
 		shouldDeliverPage := len(body.Events) > 0 && body.NextAfterID > currentBinding.PullCursorEventID
+		recovery := newPulledDuplicateRecovery(store, currentBinding, body.Events, resumePull)
 		localInstanceUID := store.InstanceUID()
 		// Local echoes are reconciled one at a time. Every other event in the
 		// page is inserted in one batch so cron run history is validated once
@@ -324,9 +364,21 @@ func syncDirectSpoke(
 		deliver := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
+		eventProjects := make([]int64, len(body.Events))
+		projectsByUID := map[string]int64{binding.HubProjectUID: binding.ProjectID}
 		for i, ev := range body.Events {
+			projectID, ok := projectsByUID[ev.ProjectUID]
+			if !ok {
+				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+				if err != nil {
+					return err
+				}
+				projectID = project.ID
+				projectsByUID[ev.ProjectUID] = projectID
+			}
+			eventProjects[i] = projectID
 			if ev.OriginInstanceUID == localInstanceUID {
-				exists, err := store.ReconcileLocalFederationEcho(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
+				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
 				if err != nil {
 					return err
 				}
@@ -349,50 +401,116 @@ func syncDirectSpoke(
 			for j, i := range pending {
 				deliver[i] = inserted[j]
 				duplicate[i] = !inserted[j]
+				insertedThisPull[body.Events[i].EventUID] = insertedThisPull[body.Events[i].EventUID] || inserted[j]
 			}
 		}
-		deliverUIDs := make([]string, 0, len(body.Events))
+		deliverUIDs := map[int64][]string{}
+		var deliverProjects []int64
+		var applyUIDs []string
 		for i, ev := range body.Events {
+			var invalidate bool
 			if duplicate[i] && shouldDeliverPage {
 				var err error
-				deliver[i], err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
+				if ev.OriginInstanceUID == localInstanceUID {
+					deliver[i], err = shouldDeliverDuplicateLocalEcho(ctx, store, currentBinding, runStartBinding, ev)
+				} else if insertedThisPull[ev.EventUID] {
+					deliver[i] = true
+				} else {
+					deliver[i], invalidate, err = recovery.recover(ctx, ev)
+				}
 				if err != nil {
 					return err
 				}
 			}
+			if deliver[i] || invalidate {
+				applyUIDs = append(applyUIDs, ev.EventUID)
+			}
 			if deliver[i] {
-				deliverUIDs = append(deliverUIDs, ev.EventUID)
+				project := eventProjects[i]
+				if _, ok := deliverUIDs[project]; !ok {
+					deliverProjects = append(deliverProjects, project)
+				}
+				deliverUIDs[project] = append(deliverUIDs[project], ev.EventUID)
 			}
 		}
 		if len(body.Events) > 0 {
 			if err := federationFailpoint("during_spoke_pull_apply_before_materialize"); err != nil {
 				return err
 			}
-			if err := store.MaterializeFederatedProject(ctx, binding.ProjectID); err != nil {
+			applyCtx, resets := db.WithFederationMoveResetCapture(ctx)
+			applyCtx = db.WithFederationPulledEventUIDs(applyCtx, applyUIDs)
+			if err := store.MaterializeFederatedProject(applyCtx, binding.ProjectID); err != nil {
 				return err
+			}
+			if onPulledEvents != nil {
+				for _, reset := range resets.Resets {
+					onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+				}
 			}
 		}
 		if shouldDeliverPage && len(deliverUIDs) > 0 {
-			events, err := store.EventsByUIDs(ctx, binding.ProjectID, deliverUIDs)
-			if err != nil {
-				return err
+			byUID := map[string]db.Event{}
+			for _, project := range deliverProjects {
+				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
+				if err != nil {
+					return err
+				}
+				for _, event := range events {
+					byUID[event.UID] = event
+				}
 			}
-			pulledEvents = events
+			pulledEvents = nil
+			for i, event := range body.Events {
+				if deliver[i] {
+					pulledEvents = append(pulledEvents, byUID[event.EventUID])
+				}
+			}
 		}
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
 		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
 	}); err != nil {
-		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+		return recordPullError(err)
 	}
 	if onPulledEvents != nil && len(pulledEvents) > 0 {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		onPulledEvents(binding.ProjectID, pulledEvents)
+		// Preserve page order while routing each contiguous group to its project.
+		for start := 0; start < len(pulledEvents); {
+			end := start + 1
+			for end < len(pulledEvents) && pulledEvents[end].ProjectID == pulledEvents[start].ProjectID {
+				end++
+			}
+			onPulledEvents(pulledEvents[start].ProjectID, pulledEvents[start:end])
+			start = end
+		}
 	}
-	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	if completedAt.Before(pullStartedAt) {
+		completedAt = pullStartedAt
+	}
+	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt)
+}
+
+func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
+	previousPull, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return false, time.Time{}, err
+	}
+	resumePull := previousPull.LastPullStartedAt != nil &&
+		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
+	startedAt := time.Now().UTC().Truncate(time.Millisecond)
+	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
+		if previous != nil && !startedAt.After(*previous) {
+			startedAt = previous.Truncate(time.Millisecond).Add(time.Millisecond)
+		}
+	}
+	if err := store.RecordFederationSyncPullStarted(ctx, projectID, startedAt); err != nil {
+		return false, time.Time{}, err
+	}
+	return resumePull, startedAt, nil
 }
 
 func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {
@@ -405,18 +523,22 @@ func validateFederationRunnerLease(ctx context.Context, validate func(context.Co
 	return nil
 }
 
-func shouldDeliverDuplicatePulledEvent(
+func shouldDeliverDuplicateLocalEcho(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
 	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
-	localInstanceUID string,
 ) (bool, error) {
-	if ev.OriginInstanceUID != localInstanceUID {
-		return true, nil
+	projectID := binding.ProjectID
+	if ev.ProjectUID != binding.HubProjectUID {
+		project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+		if err != nil {
+			return false, err
+		}
+		projectID = project.ID
 	}
-	events, err := store.EventsByUIDs(ctx, binding.ProjectID, []string{ev.EventUID})
+	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
 	if err != nil {
 		return false, err
 	}
@@ -424,6 +546,21 @@ func shouldDeliverDuplicatePulledEvent(
 		return false, nil
 	}
 	event := events[0]
+	// Duplicate local history uses its own stream's acknowledgement boundary.
+	// Its former source's cursor cannot tell whether the move was pushed.
+	if projectID != binding.ProjectID {
+		actualBinding, err := store.FederationBindingByProject(ctx, projectID)
+		if errors.Is(err, db.ErrNotFound) {
+			// This local event was already applied before its source left.
+			// Backfilling it through a destination needs no new delivery or
+			// acknowledgement from the retired source stream.
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		binding, runStartBinding = actualBinding, actualBinding
+	}
 	if event.ID > binding.PushCursorEventID {
 		return true, nil
 	}
@@ -981,7 +1118,7 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease)
+	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease, credentialStore)
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
 	}
@@ -1110,13 +1247,17 @@ func retryPendingClaimsOnceWithFence(
 }
 
 func recordFederationSyncError(ctx context.Context, store db.Storage, projectID int64, syncErr error) error {
+	return recordFederationSyncErrorAt(ctx, store, projectID, syncErr, time.Now().UTC())
+}
+
+func recordFederationSyncErrorAt(ctx context.Context, store db.Storage, projectID int64, syncErr error, at time.Time) error {
 	if syncErr == nil {
 		return nil
 	}
 	if errors.Is(syncErr, context.Canceled) || errors.Is(syncErr, errFederationRunnerLeaseInvalid) {
 		return syncErr
 	}
-	if err := store.RecordFederationSyncError(ctx, projectID, syncErr, time.Now().UTC()); err != nil {
+	if err := store.RecordFederationSyncError(ctx, projectID, syncErr, at); err != nil {
 		return errors.Join(syncErr, err)
 	}
 	return syncErr
@@ -1356,4 +1497,127 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			}
 		}
 	}
+}
+
+// Supplemental proofs use joined credentials without crossing their configured
+// hub origins. Offline events and concurrent moves can encounter an ownership
+// change the sender has not pulled, so proofs include eligible same-hub projects.
+func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
+	var tokens map[string]string
+	var projectUIDs []string
+	requiredSources := map[string]bool{}
+	issueWork := false
+	for _, event := range events {
+		if event.Type != "issue.moved" {
+			issueWork = issueWork || strings.HasPrefix(event.Type, "issue.")
+			if event.Type == "cron.run.observed" || event.Type == "cron.run.snapshot" {
+				issueUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["issue_uid"])
+				issueWork = issueWork || issueUID != ""
+			}
+			continue
+		}
+		issueWork = true
+		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
+		if fromUID == "" {
+			return nil, db.ErrFederationIngestValidation
+		}
+		projectUIDs = append(projectUIDs, fromUID)
+		requiredSources[fromUID] = true
+	}
+	if issueWork {
+		bindings, err := store.ListFederationBindings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+		if err != nil {
+			return nil, err
+		}
+		for _, binding := range bindings {
+			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil || !binding.Enabled || !binding.PushEnabled || binding.Actor != destination.Actor || binding.HubProjectUID == "" {
+				continue
+			}
+			origin, err := httpurl.CanonicalHTTPOrigin(binding.HubURL)
+			if err != nil || origin != destinationOrigin {
+				continue
+			}
+			project, err := store.ProjectByUID(ctx, binding.HubProjectUID)
+			if err != nil {
+				return nil, err
+			}
+			if project.DeletedAt == nil {
+				projectUIDs = append(projectUIDs, project.UID)
+			}
+		}
+	}
+	for _, fromUID := range projectUIDs {
+		if _, known := tokens[fromUID]; known {
+			continue
+		}
+		project, err := store.ProjectByUID(ctx, fromUID)
+		if err != nil {
+			return nil, err
+		}
+		source, err := store.FederationBindingByProject(ctx, project.ID)
+		if err != nil {
+			return nil, err
+		}
+		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || !source.Enabled || !source.PushEnabled || source.HubProjectUID != fromUID || source.Actor != destination.Actor {
+			return nil, db.ErrFederationMoveSourceUnauthorized
+		}
+		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+		if err != nil {
+			return nil, err
+		}
+		sourceURL, err := httpurl.CanonicalHTTPBaseURL(source.HubURL)
+		if err != nil {
+			return nil, errors.New("move source binding origin is invalid")
+		}
+		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(sourceURL)
+		if err != nil || sourceOrigin != destinationOrigin {
+			return nil, errors.New("move source binding origin differs from destination")
+		}
+		credential, found, err := credentials.FederationCredential(ctx, fromUID)
+		if err != nil {
+			return nil, err
+		}
+		if !found || credential.Token == "" {
+			continue
+		}
+		if credential.LeavePending || credential.RelayEnrollmentPending {
+			if requiredSources[fromUID] {
+				return nil, db.ErrFederationMoveSourceUnauthorized
+			}
+			continue
+		}
+		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
+			return nil, errors.New("move source credential project differs from binding")
+		}
+		if credential.Actor != "" && credential.Actor != source.Actor {
+			return nil, db.ErrFederationMoveSourceUnauthorized
+		}
+		credentialURL := credential.HubURL
+		if credentialURL == "" {
+			credentialURL = source.HubURL
+		}
+		credentialBase, err := httpurl.CanonicalHTTPBaseURL(credentialURL)
+		if err != nil {
+			return nil, errors.New("move source credential origin is invalid")
+		}
+		credentialOrigin, err := httpurl.CanonicalHTTPOrigin(credentialBase)
+		if err != nil || credentialOrigin != sourceOrigin {
+			return nil, errors.New("move source credential origin differs from binding")
+		}
+		// Validate the source's own plaintext policy before including its token.
+		// The destination credential's opt-in does not authorize source transport.
+		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
+		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+			return nil, err
+		}
+		if tokens == nil {
+			tokens = map[string]string{}
+		}
+		tokens[fromUID] = credential.Token
+	}
+	return tokens, nil
 }

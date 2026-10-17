@@ -39,7 +39,7 @@ var externalRootToolNames = []string{
 
 func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -65,7 +65,7 @@ func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 
 func TestExternalRootInputSchemasBoundEnumsAndCommentModes(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+		Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 	})
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestBridgeUnbindResolvesArchivedProjectWithinStartupScope(t *testing.T) {
 func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 	bound, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
 	require.NoError(t, err)
-	boundHandlers := toolHandlers{options: Options{Client: &kataclient.Client{}, Scope: bound, Actor: "example-agent"}}
+	boundHandlers := toolHandlers{options: Options{Client: inertTestClient(t), Scope: bound, Actor: "example-agent"}}
 
 	_, _, err = boundHandlers.connectorFieldMap(t.Context(), nil, ConnectorFieldMapInput{
 		Instance: "example-connector", KataField: "scheduled_on", ExternalField: "start-date",
@@ -275,7 +275,7 @@ func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 		ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
 	}})
 	require.NoError(t, err)
-	allowlistHandlers := toolHandlers{options: Options{Client: &kataclient.Client{}, Scope: allowlist, Actor: "example-agent"}}
+	allowlistHandlers := toolHandlers{options: Options{Client: inertTestClient(t), Scope: allowlist, Actor: "example-agent"}}
 	_, _, err = allowlistHandlers.bridgePause(t.Context(), nil, BridgePauseInput{Ref: "abc4"})
 	require.ErrorContains(t, err, "multi-project writes require project#ref")
 }

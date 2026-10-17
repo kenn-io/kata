@@ -105,7 +105,7 @@ issue and recipient; a new one replaces the old. Clear it after handling.`,
 			if callErr != nil {
 				return callErr
 			}
-			return printNotificationMutation(cmd, response.Body, verb, to)
+			return printNotificationMutation(cmd, response.Body, verb, to, ref.ProjectName)
 		},
 	}
 	cmd.Flags().StringVar(&recipient, "to", "", "teammate whose attention is requested (max 128 UTF-8 bytes)")
@@ -133,7 +133,7 @@ func notificationValidationError(message string) *cliError {
 	return &cliError{Message: message, Kind: kindValidation, ExitCode: ExitValidation}
 }
 
-func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipient string) error {
+func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipient, requestedProject string) error {
 	if currentOutputMode() == outputJSON {
 		var output bytes.Buffer
 		if err := emitJSON(&output, jsontext.Value(response)); err != nil {
@@ -146,6 +146,11 @@ func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipi
 	if err := json.Unmarshal(response, &decoded); err != nil {
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, response, requestedProject)
+	if err != nil {
+		return err
+	}
+	decoded.Issue.ShortID = displayRef
 	if currentOutputMode() == outputAgent {
 		if flags.Quiet {
 			return nil
@@ -157,7 +162,7 @@ func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipi
 	if flags.Quiet {
 		return nil
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s for %s\n",
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s %s for %s\n",
 		textsafe.Line(verb), textsafe.Line(decoded.Issue.ShortID), textsafe.Line(recipient))
 	return err
 }

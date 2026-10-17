@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -38,6 +39,37 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err := lockProjectAccess(ctx, tx); err != nil {
 		return out, err
 	}
+
+	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
+		return out, err
+	}
+	inputs, err := db.IssueMoveTreeInputs(ctx, tx, in)
+	if err != nil {
+		return out, err
+	}
+	for _, item := range inputs {
+		result, err := d.moveIssueProjectTx(ctx, tx, item)
+		if err != nil {
+			return db.MoveIssueProjectOut{}, err
+		}
+		if item.IssueID == in.IssueID {
+			out = result
+			out.Events = nil
+		}
+		out.Issues = append(out.Issues, result.Issue)
+		out.Events = append(out.Events, result.Events...)
+	}
+	if in.DryRun {
+		return out, tx.Rollback()
+	}
+	if err := tx.Commit(); err != nil {
+		return db.MoveIssueProjectOut{}, err
+	}
+	return out, nil
+}
+
+func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	var out db.MoveIssueProjectOut
 
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
@@ -117,8 +149,7 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		}
 		out.Issue = issue
 		out.NewRevision = curRev
-		// Validation may provisionally clear stale claims. Roll it all back.
-		return out, tx.Rollback()
+		return out, nil
 	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
@@ -177,14 +208,34 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, fmt.Errorf("rehome external root bindings: %w", err)
 	}
 
-	payload, _ := json.Marshal(map[string]string{
+	payloadFields := map[string]any{
 		"issue_uid":        issueUID,
 		"from_project_uid": fromProjectUID,
 		"from_short_id":    curShortID,
 		"to_project_uid":   toProjectUID,
 		"to_short_id":      newShortID,
 		"updated_at":       ts,
-	})
+	}
+	var federated bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, in.FromProjectID).Scan(&federated); err != nil {
+		return out, err
+	}
+	if federated {
+		movedIssue, err := issueByIDTx(ctx, tx, in.IssueID)
+		if err != nil {
+			return out, err
+		}
+		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue)
+		if err != nil {
+			return out, err
+		}
+		payloadFields["snapshot"] = jsontext.Value(snapshot)
+	}
+	payload, err := json.Marshal(payloadFields)
+	if err != nil {
+		return out, err
+	}
+
 	ev, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   in.ToProjectID,
 		ProjectName: toProjectName,
@@ -202,10 +253,8 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err != nil {
 		return out, err
 	}
-	if err := tx.Commit(); err != nil {
-		return out, err
-	}
 	committedEvent := ev
+	out.Events = []db.Event{ev}
 	out.Issue = issue
 	out.Event = &committedEvent
 	out.EventID = ev.ID

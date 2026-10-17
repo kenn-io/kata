@@ -136,6 +136,10 @@ var (
 	// project merge has a federation binding.
 	ErrProjectMergeFederationBinding = errors.New("project merge federation binding")
 
+	// ErrFederationProjectIdentityRequired prevents deleting a former identity
+	// that another joined project still needs for portable event envelopes.
+	ErrFederationProjectIdentityRequired = errors.New("project identity is required by federation history")
+
 	// ErrProjectMergeIssueSyncBinding is returned when either side of a
 	// project merge has an issue sync binding.
 	ErrProjectMergeIssueSyncBinding = errors.New("project merge issue sync binding")
@@ -239,6 +243,9 @@ var (
 	// ErrFederatedMoveUnsupported is returned when a move involves any federated
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")
+
+	// ErrFederationMoveSourceUnauthorized reports missing or invalid source credential proof.
+	ErrFederationMoveSourceUnauthorized = errors.New("federated move source authority missing")
 
 	// ErrFederationResetBlockedByPendingPush is returned when a federation reset
 	// is blocked because there are pending push events.

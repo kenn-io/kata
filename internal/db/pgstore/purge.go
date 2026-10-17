@@ -52,7 +52,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID,
+          WHERE issue_id = $1 OR issue_uid = $2 OR ((related_issue_id = $1 OR related_issue_uid = $2) AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID, issue.UID,
 		).Scan(&minEventID, &maxEventID); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -61,15 +61,23 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT COUNT(*) FROM comments WHERE issue_id = $1`,
 			`SELECT COUNT(*) FROM links WHERE from_issue_id = $1 OR to_issue_id = $1`,
 			`SELECT COUNT(*) FROM issue_labels WHERE issue_id = $1`,
-			`SELECT COUNT(*) FROM events WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`,
+			`SELECT COUNT(*) FROM events WHERE issue_id = $1 OR issue_uid = $2 OR ((related_issue_id = $1 OR related_issue_uid = $2) AND type NOT IN ('issue.links_changed', 'issue.commented'))`,
 		}
 		for index, query := range queries {
-			if err := tx.QueryRowContext(ctx, query, issue.ID).Scan(&counts[index]); err != nil {
+			args := []any{issue.ID}
+			if index == 3 {
+				args = append(args, issue.UID)
+			}
+			if err := tx.QueryRowContext(ctx, query, args...).Scan(&counts[index]); err != nil {
 				return mapSQLError(err, nil)
 			}
 		}
+		affectedProjects, err := db.FederationPurgeProjects(ctx, tx, issue)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID); err != nil {
+          WHERE issue_id = $1 OR issue_uid = $2 OR ((related_issue_id = $1 OR related_issue_uid = $2) AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID, issue.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
@@ -132,6 +140,9 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			return err
 		}
 		resetCursor := sql.NullInt64{Int64: value, Valid: true}
+		if err := db.RecordFederationPurgeResets(ctx, tx, affectedProjects, value); err != nil {
+			return err
+		}
 		purgeUID, err := katauid.New()
 		if err != nil {
 			return fmt.Errorf("generate purge uid: %w", err)
@@ -159,6 +170,12 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 			return mapSQLError(err, nil)
 		}
 		result, err = scanPurgeLog(tx.QueryRowContext(ctx, purgeLogSelect+` WHERE id = $1`, purgeID))
+		if err != nil {
+			return err
+		}
+		if result.PurgeResetAfterEventID != nil {
+			result.ResetProjectIDs, err = db.FederationPurgeResetProjectIDs(ctx, tx, result.ProjectID, *result.PurgeResetAfterEventID)
+		}
 		return err
 	})
 	return result, err
@@ -218,7 +235,11 @@ func (s *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 	if err != nil {
 		return 0, err
 	}
-	return max(value.Int64, attributionReset), nil
+	formerProjectReset, err := db.FederationPurgeResetAfter(ctx, s, afterID, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return max(value.Int64, attributionReset, formerProjectReset), nil
 }
 
 func scanPurgeLog(row rowScanner) (db.PurgeLog, error) {

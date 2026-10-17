@@ -38,7 +38,7 @@ type pathEscapingAPIClient struct {
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
 	if isNilRequestOptions(params.Options) {
 		params.Options = nil
-	} else {
+	} else if _, escaped := params.Options.(pathEscapingRequestOptions); !escaped {
 		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
 	}
 	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
@@ -4368,8 +4368,9 @@ func (c *Client) PollFederationProjectEvents(ctx context.Context, options *PollF
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"after_id": {Style: "form", Explode: &[]bool{false}[0]},
-		"limit":    {Style: "form", Explode: &[]bool{false}[0]},
+		"after_id":  {Style: "form", Explode: &[]bool{false}[0]},
+		"issue_uid": {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":     {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/events",

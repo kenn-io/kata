@@ -18,8 +18,11 @@ const CronEventFeature = "cron_v1"
 // RecurringCronEventFeature fences peers that cannot retain native delivery state.
 const RecurringCronEventFeature = "cron_notify_children_v1"
 
-// SupportedEventFeatures is the complete event format advertisement.
-const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+// IssueMoveEventFeature identifies support for moving issues between projects.
+const IssueMoveEventFeature = "issue_move_v1"
+
+// SupportedEventFeatures lists event capabilities understood by this daemon.
+const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -72,7 +75,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 		return "", err
 	}
 	if native {
-		required = MergeEventFeatures(required, SupportedEventFeatures)
+		required = MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature)
 	}
 	return required, nil
 }
@@ -142,6 +145,9 @@ func RequireEventFeatures(supported, required string) error {
 
 // EventRequiredFeatures returns the wire feature needed for an event type.
 func EventRequiredFeatures(kind string) string {
+	if kind == "issue.moved" {
+		return IssueMoveEventFeature
+	}
 	if strings.HasPrefix(kind, "cron.") {
 		return CronEventFeature
 	}
@@ -165,10 +171,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
+	if issueMoved {
+		required = MergeEventFeatures(required, IssueMoveEventFeature)
+	}
 	if cronPresent {
-		required = CronEventFeature
+		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	if !cronPresent && !issueMoved {
@@ -186,7 +195,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if native {
 			nativeProjectFeatureCache.Store(projectUID, struct{}{})
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	if issueMoved {
@@ -195,7 +204,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 			return "", err
 		}
 		if native {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature, RecurringCronEventFeature), nil
 		}
 	}
 	return required, nil
@@ -211,7 +220,7 @@ func projectRequiredEventFeaturesForAdoption(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	if errors.Is(RequireEventFeatures(CronEventFeature, features), ErrUnsupportedEventFeatures) {
+	if errors.Is(RequireEventFeatures(CronEventFeature+","+IssueMoveEventFeature, features), ErrUnsupportedEventFeatures) {
 		return features, nil
 	}
 	// Adoption is infrequent; inspect candidate issue documents here instead of
@@ -223,7 +232,7 @@ WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"
 		return "", err
 	}
 	if native {
-		features = MergeEventFeatures(features, SupportedEventFeatures)
+		features = MergeEventFeatures(features, CronEventFeature, RecurringCronEventFeature)
 	}
 	return features, nil
 }
@@ -266,6 +275,7 @@ type FederationReadParams struct {
 	Features  string
 	Metadata  bool
 	AfterID   int64
+	IssueUID  string
 	Limit     int
 }
 
@@ -292,6 +302,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	if err = RequireEventFeatures(in.Features, out.RequiredFeatures); err != nil {
 		return out, err
 	}
+	if in.IssueUID != "" {
+		var owned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, in.IssueUID, project.ID).Scan(&owned); err != nil {
+			return out, err
+		}
+		if !owned {
+			return out, ErrNotFound
+		}
+	}
 	after := in.AfterID
 	if in.Metadata {
 		after = binding.ReplayHorizonEventID
@@ -299,7 +318,8 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	var reset sql.NullInt64
 	err = tx.QueryRowContext(ctx, `SELECT MAX(cursor) FROM (
  SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
- UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2) resets`, project.ID, after).Scan(&reset)
+ UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_id=$1 AND purge_reset_after_event_id>$2
+ UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, FederationPurgeResetMetadataPrefix+project.UID).Scan(&reset)
 	if err != nil {
 		return out, err
 	}
@@ -317,7 +337,10 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
 		return out, err
 	}
-	if reset.Int64 > 0 {
+	// A retained issue's explicit history is independent of purge gaps for
+	// other issues in the destination stream. Ownership was checked above in
+	// this same read transaction; a purged subject cannot pass that check.
+	if reset.Int64 > 0 && in.IssueUID == "" {
 		out.ResetAfterID = reset.Int64
 		out.NextAfterID = reset.Int64
 		return out, nil

@@ -19,12 +19,12 @@ func TestFederationEventStreamPreservesPendingCrossProjectLink(t *testing.T) {
 	}
 
 	projectScoped := WithAuthorizedProjects(context.Background(), []string{event.ProjectUID})
-	reset, err := EventRequiresProjectScopeReset(projectScoped, event, issueByUID, nil)
+	reset, err := EventRequiresProjectScopeReset(projectScoped, event, issueByUID, nil, nil)
 	require.NoError(t, err)
 	require.True(t, reset, "ordinary project-scoped readers hide unresolved peer identities")
 
 	federationStream := WithFederationEventStream(projectScoped)
-	reset, err = EventRequiresProjectScopeReset(federationStream, event, issueByUID, nil)
+	reset, err = EventRequiresProjectScopeReset(federationStream, event, issueByUID, nil, nil)
 	require.NoError(t, err)
 	require.False(t, reset, "federation peers need the link UID before the peer issue reaches the hub")
 }

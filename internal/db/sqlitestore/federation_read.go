@@ -31,8 +31,9 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			}
 			return scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, project.ID))
 		}
-		readEvents := func() ([]db.Event, error) {
-			rows, err := tx.QueryContext(ctx, strings.TrimSuffix(eventSelectByID, " WHERE e.id = ?")+` WHERE e.project_id=$1 AND e.id>$2 ORDER BY e.id LIMIT $3`, project.ID, in.AfterID, in.Limit)
+		readPage := func(afterID int64, limit int) ([]db.Event, error) {
+			rows, err := tx.QueryContext(ctx, strings.TrimSuffix(eventSelectByID, " WHERE e.id = ?")+` WHERE (e.project_id=$1 OR e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ OR (e.type='issue.moved' AND json_extract(e.payload,'$.from_project_uid')=(SELECT uid FROM projects WHERE id=$1))) AND e.type<>'sync.reset_required' AND e.id>$2 AND ($4='' OR e.issue_uid=$4) ORDER BY e.id LIMIT $3`, project.ID, afterID, limit, in.IssueUID)
 			if err != nil {
 				return nil, err
 			}
@@ -46,6 +47,9 @@ func (d *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 				events = append(events, event)
 			}
 			return events, rows.Err()
+		}
+		readEvents := func() ([]db.Event, error) {
+			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, `json_type(m.payload,'$.snapshot')`, readPage)
 		}
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err

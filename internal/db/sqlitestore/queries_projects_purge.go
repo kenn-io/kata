@@ -56,6 +56,9 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	if role != "" {
 		return db.ProjectPurgeLog{}, &db.ProjectFederatedError{Role: db.FederationRole(role)}
 	}
+	if err := db.CheckFederationProjectIdentityRetirement(ctx, conn, project, `json_type(m.payload,'$.snapshot')`); err != nil {
+		return db.ProjectPurgeLog{}, err
+	}
 	if err := rejectActiveExternalRootProjectPurge(ctx, conn, project.ID); err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
