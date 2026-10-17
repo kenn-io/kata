@@ -41,7 +41,7 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 		const limit = 1000
 		rows, err := tx.QueryContext(ctx, `SELECT e.id,e.issue_uid,e.project_id,e.type,e.payload,i.project_id FROM events e
  JOIN issues i ON i.uid=e.issue_uid
- WHERE (e.project_id=$1 OR e.type='issue.moved') AND e.id>$2
+ WHERE (e.project_id=$1 OR e.type='issue.moved') AND e.type<>'sync.reset_required' AND e.id>$2
  ORDER BY e.id LIMIT $3`, project.ID, afterID, limit)
 		if err != nil {
 			return err

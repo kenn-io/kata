@@ -225,9 +225,11 @@ func MovedIssueUID(ctx context.Context, q interface {
 }, projectID int64, shortID string, postgres bool) (string, error) {
 	fromProject := "json_extract(e.payload, '$.from_project_uid')"
 	fromShort := "json_extract(e.payload, '$.from_short_id')"
+	moveEvent := "json_extract(e.payload, '$.move_event_uid')"
 	if postgres {
 		fromProject = "e.payload::jsonb->>'from_project_uid'"
 		fromShort = "e.payload::jsonb->>'from_short_id'"
+		moveEvent = "e.payload::jsonb->>'move_event_uid'"
 	}
 	// idx_events_moved_from finds a former short ID directly; a full UID uses
 	// the issue history index. Issue creation runs this reservation check, so
@@ -248,12 +250,15 @@ func MovedIssueUID(ctx context.Context, q interface {
 	}
 	var uid string
 	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
- WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+match+`
+ WHERE (e.type='issue.moved' OR (e.type='sync.reset_required'
+ AND EXISTS (SELECT 1 FROM events retained_move WHERE retained_move.uid=`+moveEvent+`
+ AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
+ AND `+fromProject+`=$3 AND `+match+`
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
  ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
-	if errors.Is(err, sql.ErrNoRows) {
+ if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	return uid, err

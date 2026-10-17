@@ -290,3 +290,55 @@ func TestSyncFederationConcurrentMoveRecoversMissedSourceHistory(t *testing.T) {
 	require.Len(t, comments, 1)
 	require.Equal(t, "missed source discussion", comments[0].Body)
 }
+
+func TestSyncFederationMoveUsesReenrollmentBaselineAfterLocalMove(t *testing.T) {
+	ctx := t.Context()
+	oldHub, original := newMoveDeliveryHub(t, "old-enrollment-source")
+	issue, _, err := oldHub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: original[0].ID, Title: "old enrollment title", Author: "worker"})
+	require.NoError(t, err)
+	_, _, err = oldHub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "old enrollment discussion"})
+	require.NoError(t, err)
+	_, _, err = oldHub.DB.RefreshProjectFederationBaseline(ctx, original[0].ID, "worker")
+	require.NoError(t, err)
+	newHub := newMoveDeliverySpoke(t, oldHub, original)
+	require.NoError(t, newHub.sync(t, 0))
+	_, err = newHub.env.DB.LeaveFederationReplica(ctx, newHub.projects[0].ID)
+	require.NoError(t, err)
+	projects := make([]db.Project, 2)
+	for i, name := range []string{"reenrollment-source", "reenrollment-target"} {
+		projects[i], err = newHub.env.DB.CreateProject(ctx, name)
+		require.NoError(t, err)
+	}
+	local, err := newHub.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = newHub.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: local.ProjectID, ToProjectID: projects[0].ID, IfMatchRev: local.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	for _, project := range projects {
+		_, err = newHub.env.DB.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+	}
+	title := "after reenrollment title"
+	_, _, _, err = newHub.env.DB.EditIssue(ctx, db.EditIssueParams{IssueID: local.ID, Title: &title, Actor: "worker"})
+	require.NoError(t, err)
+	_, _, err = newHub.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "after reenrollment discussion"})
+	require.NoError(t, err)
+	local, err = newHub.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = newHub.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: local.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	receiver := newMoveDeliverySpoke(t, newHub.env, projects)
+	require.NoError(t, receiver.sync(t, 1), "the later enrollment baseline covers the intervening snapshotless standalone move")
+	got, err := receiver.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, receiver.projects[1].ID, got.ProjectID)
+	require.Equal(t, title, got.Title, "post-baseline deltas remain visible")
+	comments, err := receiver.env.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	var bodies []string
+	for _, comment := range comments {
+		bodies = append(bodies, comment.Body)
+	}
+	require.ElementsMatch(t, []string{"old enrollment discussion", "after reenrollment discussion"}, bodies)
+	_, err = receiver.env.DB.ProjectByUID(ctx, original[0].UID)
+	require.ErrorIs(t, err, db.ErrNotFound, "covered prior enrollment identities need not be joined")
+}

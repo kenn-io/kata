@@ -204,7 +204,10 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			_, err = store.InsertRemoteEvents(ctx, local[1].ID, []db.RemoteEvent{makeMove(1, at)})
 			require.NoError(t, err)
 			require.NoError(t, store.MaterializeFederatedProject(ctx, local[1].ID))
-			_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{makeMove(2, at+1)})
+			departing, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			winner := makeMove(2, at+1)
+			_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{winner})
 			require.NoError(t, err)
 			if kind == "reattach" {
 				require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
@@ -234,8 +237,11 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			var subject, related sql.NullString
 			require.NoError(t, query.QueryRowContext(ctx, `SELECT uid,actor,payload,issue_uid,related_issue_uid FROM events WHERE id=$1`, reset).Scan(&controlUID, &actor, &payload, &subject, &related))
 			require.Equal(t, "system", actor)
-			require.JSONEq(t, `{}`, payload)
-			require.False(t, subject.Valid)
+			expectedReference, err := json.Marshal(map[string]string{"from_project_uid": local[1].UID, "from_short_id": departing.ShortID, "move_event_uid": winner.EventUID})
+			require.NoError(t, err)
+			require.JSONEq(t, string(expectedReference), payload, "local control retains the actual displaced reference")
+			require.True(t, subject.Valid)
+			require.Equal(t, issue.UID, subject.String, "local control follows subject history cleanup")
 			require.False(t, related.Valid)
 			var forwarding int
 			require.NoError(t, query.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM federation_event_provenance WHERE event_uid=$1)+(SELECT COUNT(*) FROM federation_relay_outbox WHERE source_uid=$1)`, controlUID).Scan(&forwarding))

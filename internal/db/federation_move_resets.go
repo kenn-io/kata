@@ -47,18 +47,40 @@ func CommitFederationMoveResets(ctx context.Context, resets []FederationProjectR
 	}
 }
 
-func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Project, targetUID string, winner FoldEvent, accepted []string, insertControl func(Project) (int64, error)) error {
+// FederationMovedReference retains a receiver-local departing reference when
+// it differs from the signed move. The corresponding real move must remain in
+// the journal for this local reset control to resolve or reserve the reference.
+type FederationMovedReference struct {
+	IssueUID       string `json:"-"`
+	FromProjectUID string `json:"from_project_uid"`
+	FromShortID    string `json:"from_short_id"`
+	MoveEventUID   string `json:"move_event_uid"`
+}
+
+func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Project, targetUID string, winner FoldEvent, accepted []string, reference *FederationMovedReference, insertControl func(Project, *FederationMovedReference) (int64, error)) error {
 	payload := PayloadMap(winner.Payload)
 	from, _ := StringValue(payload["from_project_uid"])
 	to, _ := StringValue(payload["to_project_uid"])
+	atomic := to == targetUID && slices.Contains(accepted, winner.UID)
+	if atomic && reference != nil {
+		cursor, err := insertControl(source, reference)
+		if err != nil {
+			return err
+		}
+		if source.UID == from {
+			if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
+				capture.add(FederationProjectReset{ProjectID: source.ID, EventID: cursor})
+			}
+		}
+	}
 	if source.UID == from {
-		if to == targetUID && slices.Contains(accepted, winner.UID) {
+		if atomic {
 			return nil // Atomic native ingest publishes the applied move itself.
 		}
 		// Pull appends before applying, so both project snapshots may already
 		// contain the move's cursor with their previous ownership. Invalidate
 		// them at a fresh local cursor without resetting portable history.
-		cursor, err := insertControl(source)
+		cursor, err := insertControl(source, reference)
 		if err != nil {
 			return err
 		}
@@ -75,14 +97,13 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 	}
 	var cursor int64
 	var err error
-	atomic := to == targetUID && slices.Contains(accepted, winner.UID)
 	if atomic {
 		err = tx.QueryRowContext(ctx, `SELECT id FROM events WHERE uid=$1`, winner.UID).Scan(&cursor)
 	} else {
 		// Trusted pull may already have exposed the retained move's cursor
 		// before materialization. A real local control advances the apply
 		// cursor, including when replay/reattachment causes a delayed rehome.
-		cursor, err = insertControl(source)
+		cursor, err = insertControl(source, reference)
 	}
 	if err != nil {
 		return err
