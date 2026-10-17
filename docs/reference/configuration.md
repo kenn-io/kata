@@ -1112,9 +1112,9 @@ names.
 
 The browser and TUI also report `screen_viewed` when a screen opens. The fixed
 names are `inbox`, `today`, `delegated`, `scheduled`, `issues`, `logbook`,
-`issue`, `graph`, `credentials`, `projects`, `daemons`, `federation`, `help`,
-and `empty`. Unknown names are dropped. `surface` is `web` or `tui`, whichever
-reaches that screen first that UTC day. One claim per screen in the database
+`issue`, `graph`, `attention`, `credentials`, `projects`, `daemons`, `federation`,
+`help`, and `empty`. Unknown names are dropped. `surface` is `web` or `tui`,
+whichever reaches that screen first that UTC day. One claim per screen in the database
 shares the daily count across interfaces, hosts, and daemon restarts. These `meta`
 rows appear in `kata export` output. A changed
 installation ID starts a fresh count. Later-day browser focus or terminal input

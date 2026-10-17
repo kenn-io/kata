@@ -138,5 +138,5 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 	return reporter
 }
 
-var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
+var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "attention", "credentials", "projects", "daemons", "federation", "help", "empty")
 var screenSurfaces = posthog.AllowStringValues("web", "tui")
