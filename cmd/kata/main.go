@@ -183,10 +183,16 @@ func main() {
 		stop()
 	}()
 	cmd := newRootCmd()
-	if err := cmd.ExecuteContext(ctx); err != nil {
+	if err := executeCLICommand(ctx, cmd); err != nil {
 		emitRootError(os.Stderr, cmd, os.Args[1:], err, runEEntered)
 		os.Exit(exitCodeForErr(err, runEEntered))
 	}
+}
+
+func executeCLICommand(ctx context.Context, cmd *cobra.Command) error {
+	err := cmd.ExecuteContext(ctx)
+	waitCLIActionReports(cmd)
+	return err
 }
 
 func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool) {

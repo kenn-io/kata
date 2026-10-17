@@ -42,6 +42,12 @@ type actionReportSession struct {
 	pending sync.WaitGroup
 }
 
+type suppressIssueActionTelemetryKey struct{}
+
+func suppressIssueActionTelemetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressIssueActionTelemetryKey{}, true)
+}
+
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
 // base is the daemon URL — "http://kata.invalid" for unix-socket transport.
 func NewClient(base string, hc *http.Client) *Client {
@@ -166,7 +172,7 @@ func (c *Client) reportUsage(ctx context.Context, event string, properties map[s
 }
 
 func (c *Client) reportChangedIssue(ctx context.Context, event string, changed bool) {
-	if !changed {
+	if !changed || (event == "issue_closed" && ctx.Value(suppressIssueActionTelemetryKey{}) == true) {
 		return
 	}
 	c.actionReports.mu.Lock()

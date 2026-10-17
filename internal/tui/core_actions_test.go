@@ -69,6 +69,69 @@ func TestCoreActionsReportChangedMutations(t *testing.T) {
 	}
 }
 
+func TestUndoReopenCloseDoesNotReportIssueClosed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var events []string
+		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/api/v1/instance":
+				return jsonResponse(t, map[string]any{"instance_uid": "instance-1"}), nil
+			case "/api/v1/projects/7/issues/issue-1":
+				return jsonResponse(t, map[string]any{"issue": map[string]any{
+					"uid": "issue-1", "project_id": 7, "status": "open", "revision": 5,
+				}}), nil
+			case "/api/v1/projects/7/issues/issue-1/actions/close":
+				return jsonResponse(t, map[string]any{
+					"issue":   map[string]any{"uid": "issue-1", "project_id": 7, "status": "closed", "revision": 6},
+					"changed": true,
+				}), nil
+			case "/api/v1/ui/telemetry":
+				var event struct {
+					Event string `json:"event"`
+				}
+				require.NoError(t, json.NewDecoder(req.Body).Decode(&event))
+				events = append(events, event.Event)
+				response := jsonResponse(t, map[string]any{"status": "queued"})
+				response.StatusCode = http.StatusAccepted
+				return response, nil
+			default:
+				t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+				return nil, nil
+			}
+		})}
+		client := NewClient("http://127.0.0.1:7777", hc)
+		undo := newUndoClient(client)
+		done := "done"
+		entry := undoEntry{
+			kind: "reopen", uid: "issue-1", projectID: 7, instanceUID: "instance-1", revision: 5,
+			actor: "user-a", before: Issue{Status: "closed", ClosedReason: &done, Revision: 4},
+			after: Issue{Status: "open", Revision: 5},
+		}
+		outcome := undo.undo(t.Context(), entry, false, nil)
+		require.NoError(t, outcome.err)
+		require.True(t, outcome.changed)
+		outcome.attempt.complete()
+		synctest.Wait()
+		assert.Empty(t, events, "undoing a reopen is not a user close action")
+
+		outcome = undo.undo(t.Context(), entry, true, &CloseInput{
+			Actor: "user-a", Reason: "done", Message: "Completed the requested work and checked the result.",
+		})
+		require.NoError(t, outcome.err)
+		require.True(t, outcome.changed)
+		outcome.attempt.complete()
+		synctest.Wait()
+		assert.Empty(t, events, "undoing a reopen is not a user close action")
+
+		_, err := client.CloseWithEvidence(t.Context(), 7, "issue-1", CloseInput{
+			Actor: "user-a", Reason: "done", Message: "Completed the requested work and checked the result.",
+		})
+		require.NoError(t, err)
+		synctest.Wait()
+		assert.Equal(t, []string{"issue_closed"}, events, "direct user closes still report")
+	})
+}
+
 func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	for _, tc := range []struct {

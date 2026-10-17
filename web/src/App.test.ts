@@ -2935,6 +2935,7 @@ describe('App', () => {
       { action: 'close', outcome: 'changed' },
       { action: 'remove', outcome: 'changed' },
       { action: 'create', outcome: 'telemetry failure' },
+      { action: 'create', outcome: 'concurrent request expires the session' },
     ] as const) {
       it(`${action} reports ${outcome} through the serving daemon`, async () => {
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
@@ -2959,6 +2960,8 @@ describe('App', () => {
         const actionRequests: Request[] = []
         let writes = 0
         let mutationBody: unknown
+        let resolveMutation: ((response: Response) => void) | undefined
+        let resolveAppOpened: ((response: Response) => void) | undefined
         vi.stubGlobal(
           'fetch',
           vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2966,6 +2969,14 @@ describe('App', () => {
             const path = new URL(request.url).pathname
             if (path === '/api/v1/ui/telemetry') {
               const event = await request.json()
+              if (
+                event.event === 'app_opened' &&
+                outcome === 'concurrent request expires the session'
+              ) {
+                return new Promise<Response>((resolve) => {
+                  resolveAppOpened = resolve
+                })
+              }
               if (event.event === 'issue_created' || event.event === 'issue_closed') {
                 events.push(event)
                 actionRequests.push(request)
@@ -2979,6 +2990,11 @@ describe('App', () => {
             ) {
               writes += 1
               mutationBody = await request.json()
+              if (outcome === 'concurrent request expires the session') {
+                return new Promise<Response>((resolve) => {
+                  resolveMutation = resolve
+                })
+              }
               return Response.json({ changed: true })
             }
             if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
@@ -2994,6 +3010,15 @@ describe('App', () => {
             target: { value: 'Example task' },
           })
           await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+          if (outcome === 'concurrent request expires the session') {
+            await waitFor(() => expect(resolveMutation).toBeTypeOf('function'))
+            await waitFor(() => expect(resolveAppOpened).toBeTypeOf('function'))
+            resolveAppOpened!(new Response('', { status: 401 }))
+            resolveAppOpened = undefined
+            await waitFor(() => expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull())
+            resolveMutation!(Response.json({ changed: true }))
+            resolveMutation = undefined
+          }
         } else if (action === 'remove') {
           await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
           await fireEvent.click(await screen.findByRole('button', { name: 'More actions' }))
@@ -3019,12 +3044,16 @@ describe('App', () => {
         for (const request of actionRequests) {
           expect(request.keepalive).toBe(true)
         }
-        expect(events).toEqual([
-          {
-            event: action === 'create' ? 'issue_created' : 'issue_closed',
-            properties: { surface: 'web' },
-          },
-        ])
+        expect(events).toEqual(
+          outcome === 'concurrent request expires the session'
+            ? []
+            : [
+                {
+                  event: action === 'create' ? 'issue_created' : 'issue_closed',
+                  properties: { surface: 'web' },
+                },
+              ],
+        )
       })
     }
   })

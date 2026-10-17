@@ -195,7 +195,7 @@
     reportAppOpened()
   }
   function reportIssueAction(event: 'issue_created' | 'issue_closed'): void {
-    if (destroyed) return
+    if (destroyed || loadSessionCredentials() === undefined) return
     void captureTelemetryEvent(
       { event, properties: { surface: 'web' } },
       { signal: AbortSignal.timeout(1000), keepalive: true },

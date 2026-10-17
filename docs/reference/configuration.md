@@ -1083,17 +1083,18 @@ and reports `issue_closed` when changed. Each successful mutation with
 `changed: true` counts, including repeated actions in one day. Ordinary retries
 that reuse a create, already-closed issues, failed writes, dry runs, and reopen
 operations send nothing. Creates without an acknowledged `changed: true`
-response remain uncounted across all interfaces.
+response remain uncounted across all interfaces. A close, reopen, close sequence
+counts two closes.
+
+CLI actions follow the same terminal and agent-mode rules above. Action reports
+start when the daemon confirms a changed mutation, before follow-up comments, so
+a comment failure still counts a completed close. On successful commands, the
+action report can run alongside post-run `app_opened` reporting; the command
+waits at most one second for reporting. Delivery is best effort and uses the
+daemon's opt-out setting.
+
 When telemetry is enabled, the daemon rejects action events with a missing or
 invalid `surface` with HTTP 400 and `invalid_telemetry_property`.
-A close, reopen, close sequence counts two closes;
-undoing a reopen in the TUI counts the resulting close too. CLI actions use the
-same terminal and agent-mode rules above. Reporting happens before follow-up
-comments, so a comment failure still counts a completed close. Action reporting
-has its own one-second deadline. The command waits for that attempt before
-post-run `app_opened` reporting starts its separate one-second deadline, so
-reporting can add two consecutive one-second waits. Delivery is
-best effort and uses the daemon's opt-out setting.
 
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.

@@ -203,7 +203,7 @@ readiness; --blocked-by does. --meta key=value stores a string.
 			return createRequestError(err, forceNew)
 		}
 		if response.JSON200 != nil {
-			defer reportCLIIssueAction(cmd, "issue_created", response.JSON200.Changed)()
+			startCLIIssueActionReport(cmd, "issue_created", response.JSON200.Changed)
 		}
 		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {

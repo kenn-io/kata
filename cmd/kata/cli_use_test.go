@@ -427,6 +427,8 @@ func TestCLIIssueActionBoundsReporting(t *testing.T) {
 	stubIsTTY(t, true)
 	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
 	var actions atomic.Int32
+	started := make(chan time.Time, 1)
+	finished := make(chan time.Time, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
 		var body struct {
@@ -435,7 +437,9 @@ func TestCLIIssueActionBoundsReporting(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		require.Equal(t, "issue_created", body.Event)
 		actions.Add(1)
+		started <- time.Now()
 		<-r.Context().Done()
+		finished <- time.Now()
 	}))
 	defer server.Close()
 	cmd := findCommand(t, "create")
@@ -443,9 +447,16 @@ func TestCLIIssueActionBoundsReporting(t *testing.T) {
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	start := time.Now()
-	wait := reportCLIIssueAction(cmd, "issue_created", true)
-	wait()
-	elapsed := time.Since(start)
+	startCLIIssueActionReport(cmd, "issue_created", true)
+	requestStarted := <-started
+	assert.Less(t, requestStarted.Sub(start), cliUseReportTimeout)
+	var requestFinished time.Time
+	select {
+	case requestFinished = <-finished:
+	case <-time.After(cliUseReportTimeout + time.Second):
+		t.Fatal("issue-action report did not stop at its deadline")
+	}
+	elapsed := requestFinished.Sub(start)
 	assert.GreaterOrEqual(t, elapsed, cliUseReportTimeout)
 	assert.Less(t, elapsed, cliUseReportTimeout+time.Second)
 	assert.Equal(t, int32(1), actions.Load())
