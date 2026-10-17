@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Federation
@@ -11,8 +11,8 @@ keeps a local daemon and local database. It is opt-in per project.
 
 For a new relay connection, start with
 [Share projects between hubs](../guide/project-relays.md). It explains the
-roles and walks through preview, connection and recovery. Project relays are
-available on `main`, after the 0.18.0 release. Direct-spoke enrollment remains
+roles and walks through preview, connection and recovery. Project relays
+require Kata 0.19.0 or later. Direct-spoke enrollment remains
 the bootstrap path for hubs using daemon-owner credentials outside identity mode.
 
 Use this page for operator details:
@@ -34,8 +34,10 @@ fresh online reads. Federation instead favors local availability and durable
 offline queues. Each participant may use SQLite or PostgreSQL independently;
 no backend-specific federation flags are needed.
 
-Workspace aliases and recurrence schedules stay local. Issues created by a
-recurrence synchronize as ordinary content. Local catalog, scheduling and claim
+Workspace aliases and per-issue recurrence schedules stay local. Issues created
+by a recurrence synchronize as ordinary content. [Native cron](../reference/cron.md)
+job and workflow definitions and run evidence do synchronize; only the owning
+hub delivers their recurring child issues. Local catalog, scheduling and claim
 audit records remain on their source daemon.
 
 ## Roles

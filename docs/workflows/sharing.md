@@ -42,7 +42,7 @@ can be delayed while a connection is offline.
 Leases provide optional coordination; sync and recovery have explicit limits.
 
 For selected projects shared through a personal or intermediate hub, use the
-[project relay guide](../guide/project-relays.md), available on `main`. It covers
+[project relay guide](../guide/project-relays.md). It covers
 connection, downstream devices and recovery. The
 [operator reference](../operations/federation.md) also covers direct-spoke
 enrollment, the bootstrap path for hubs using daemon-owner credentials outside
@@ -64,7 +64,7 @@ Render, Fly.io, Railway, App Engine, or similar platforms.
 | One developer, several worktrees or agents | Local shared project |
 | Trusted team needs immediate central reads/writes | Remote daemon |
 | Multiple local-first replicas with offline tolerance | Federation |
-| Receive selected projects and relay them to other devices | [Project relays](../guide/project-relays.md) (`main`) |
+| Receive selected projects and relay them to other devices | [Project relays](../guide/project-relays.md) |
 | PaaS process management with `$PORT` | Hosted mode |
 | Public multi-tenant SaaS authorization | Not implemented yet |
 

@@ -1,205 +1,210 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-10
+last_edited: 2026-10-17
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.19.0
+<small>2026-10-17</small>
 
-- Walk `kata --help` to find the agent workflow, issue conventions, and command
-  examples. Related commands are grouped, and subcommands list global flags
-  compactly. `kata label remove` aliases `kata label rm`.
+Kata 0.19.0 lets you share selected projects between hubs, sync tasks with
+Notion, Plane, Linear, Twenty, Todoist, and TickTick, and share cron jobs
+across devices. Agents can also reply to specific comments, hold timed claims,
+and diagnose their setup with `kata doctor`.
 
-- Read the daemon's next-step hint in human, agent, and JSON errors. Agent
-  errors put it on a separate `Hint:` line. Hints name CLI flags, such as
-  `--force-new` and `--force`, instead of HTTP request fields. Unknown flags
-  point to the command's help. `close` flag mistakes exit 2 and malformed
-  `--evidence` values exit 3, instead of 1.
+[Release downloads](https://github.com/kenn-io/kata/releases/tag/v0.19.0)
+· [Changes since 0.18.0](https://github.com/kenn-io/kata/compare/v0.18.0...v0.19.0)
 
-- Count browser and terminal screen visits with anonymous `screen_viewed` events.
-  Fixed `screen` names count once per installation per UTC day across interfaces
-  and daemon restarts; `surface` identifies the first interface. Daily claims
-  live in exported `meta` rows. `KATA_TELEMETRY_ENABLED=0` opts out.
+**Before upgrading**
 
-- Anonymous usage reporting includes browser and terminal session duration
-  buckets. Browser time excludes hidden tabs and authentication recovery.
+Follow the [0.19.0 upgrade guide](get-started/install.md#upgrading-to-0190).
+In short:
 
-- Diagnose setup with `kata doctor`: read-only checks, stable JSON findings,
-  suggested fixes, active hook availability and sampled hook failure counts.
-  Doctor never starts or repairs a daemon; a stopped local daemon is
-  informational. Failed checks use `checks_failed`; reaching the history scan
-  limit is informational.
+- Update scripts to use `kata agent-hook` instead of `kata agent-hooks`, `--all`
+  instead of `--all-projects`, and `--dry` instead of `--dry-run`. The old
+  spellings are no longer accepted. Reinstall hooks after the command rename.
+- Hook installation now enables available attention hooks by default. Pass
+  `--contract-only` to keep contract-only setup.
+- Upgrade federated hubs before their spokes. Project relays need 0.19.0 on
+  every participating daemon.
+- External-agent enrollment no longer sends the local `KATA_AUTH_TOKEN` to the
+  hub. Pass `--hub-token-env <env-name>` or configure a daemon catalog entry
+  matching `--hub-url`.
+- Upgrade remote daemons alongside the CLI and MCP server. Kata 0.19.0 includes
+  daemon API `0.28.0`; paginated lists require `0.27.0` and comment replies
+  require `0.28.0`.
+- PostgreSQL operators should stop the daemon and run
+  `kata storage postgres migrate` with schema-owner credentials.
+- Go programs that embed Kata and serve the browser application must pass
+  `webui.NewEmbeddedHandler()` in `kata.Config.WebHandler`.
 
-- Manage coding-agent hooks with `kata agent-hook`, matching Roborev and Forge.
-  **Breaking rename:** `kata agent-hooks` now fails as an unknown command;
-  there is no alias. Update scripts and reinstall user hooks with
-  `kata agent-hook install`. For workspace hooks, re-run
-  `kata agent-hook install <harness> --local` or the `kata init` hook option
-  that installed them. Reinstalling replaces hooks that still call the plural
-  command. See the [agent-hook reference](reference/cli.md#agent-hook).
+**New features**
 
-- Keep OpenClaw inbox context off by default. Reinstalling older managed
-  bundles that predate the opt-in turns sharing off. Enable it with the
-  single-target `kata agent-hook install openclaw --share-inbox` only when every
-  prompt handled by that plugin may receive the Gateway's `KATA_INBOX_USER`
-  inbox. Use `--share-inbox=false` to disable it without removing other hooks.
+- Share selected projects between federation hubs, which relay them to your
+  other devices. Team access controls limit project visibility, creation records
+  show the account used, and search embeddings travel with the project. Recovery
+  snapshots have a 64 MiB limit, and permanent creation receipts count toward
+  it. See [Share projects between hubs](guide/project-relays.md).
+- Import tasks from [Notion](operations/notion-sync.md),
+  [Plane](operations/plane-sync.md), [Linear](operations/linear-sync.md),
+  [Twenty](operations/twenty-sync.md), [Todoist](operations/todoist-sync.md),
+  and [TickTick](operations/ticktick-sync.md) with daemon-managed credentials
+  and scheduled sync.
+- Sync closes and reopens with GitHub, Notion, Plane, Linear, Twenty, and
+  Todoist through optional two-way status sync. New bindings default to one-way.
+  TickTick sends completion of ordinary tasks; reopening and recurring
+  completion still require action in TickTick.
+- Connect existing Forgejo issues with the built-in
+  [Forgejo connector](operations/forgejo-connector.md). It imports the issue and
+  comments posted after binding, publishes opted-in comments, and closes the
+  Forgejo issue after verified completion in Kata. Automatic field mappings are
+  not available for Forgejo.
+- Sign federation requests and restrict a separate listener to federation
+  operations. Existing deployments stay unsigned by default. See
+  [Federation request signing](operations/federation-signing.md).
+- Share cron job definitions, workflows, and attributed run history across
+  devices with `kata cron`. External schedulers run the jobs. See
+  [Native cron](reference/cron.md).
+- Create recurring child issues and inbox requests from the owning hub. Each
+  occurrence is an independent issue, and you choose how missed occurrences are
+  handled. The hub daemon must keep running.
+- Claim work temporarily with `kata claim <ref> --ttl 30m`. Claims last from one
+  minute to 24 hours, renew when claimed again, and return expired work to
+  `ready` and `next`. See [claiming](reference/cli.md#labels-ownership-and-claiming).
+- Reply to a specific comment as a reply, confirmation, refutation, or
+  replacement from the CLI, MCP, terminal UI, or web UI, and follow links back
+  to the original. Retry a comment safely with `--idempotency-key`. See
+  [Reply to a finding](workflows/agents.md#reply-to-a-finding).
+- Read one recipient's attention requests across projects with
+  `kata inbox --all`. In the terminal UI, press `I` to open tasks from the
+  designated Inbox project.
+- Undo recent issue changes with `u` in the terminal UI. Kata keeps up to 20
+  eligible actions per session and refuses an undo that conflicts with newer
+  changes.
+- Diagnose setup problems with [`kata doctor`](operations/doctor.md), a
+  read-only report with suggested fixes. [Local daemon profiles](operations/local-daemon-profiles.md)
+  add diagnosis and explicit recovery while checking the expected database and
+  project identities.
+- Assign work, read attention requests, inspect project details, and search
+  Kata's bundled documentation through new
+  [MCP tools](reference/mcp.md#progressive-tool-catalog).
+- Retrieve every matching issue through paginated lists and single-project
+  lexical searches. Results say whether retrieval is complete and return a
+  cursor when more pages remain. Use `--priority-unset` to find issues without a
+  priority. See [exhaustive issue discovery](reference/mcp.md#exhaustive-issue-discovery).
+- Copy a hub backup without its access using `kata import --as-standalone`. The
+  copy keeps content and historical authors but drops token authority,
+  federation credentials, connections, and active claims. See
+  [Make an independent copy](operations/backup-restore.md#make-an-independent-copy-of-a-federated-hub).
+- Set separate document and query prefixes for embedding models, with optional
+  dimension requests. Changing a prefix rebuilds embeddings while search falls
+  back to lexical results. Load embedding API keys from
+  `search.embeddings.api_key_file` and refresh them with `kata daemon reload`.
+  See [semantic search settings](reference/configuration.md#semantic-search).
+- Attach an optional Codex or Claude Code session reference to a close. The web
+  issue history shows the saved reference. This setting is off by default. See
+  [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
+- Install coding-agent instructions and attention hooks with
+  `kata agent-hook install`. Setup finds configured agents, supports
+  project-local installation with `--local`, and covers consumer Muse through an
+  instructions installer. OpenClaw inbox sharing requires explicit opt-in. See
+  [Agent hook](reference/cli.md#agent-hook).
+- Run the container image from environment variables, mounted credential files,
+  and persistent storage, including scheduled backups. See
+  [Containers](operations/containers.md).
 
-- Set up consumer Muse with standing instructions, a Kata skill, and a recurring
-  poll specification using `kata agent-hook instructions install muse --home <path>`.
-  Preview the files with `--dry --json`. Reinstall preserves file bytes;
-  uninstall keeps foreign content. This relies on instruction-following and
-  provides no native attention support. Choose CLI token-file or connector
-  authentication explicitly. See [Hookless harnesses](workflows/agents.md#hookless-harnesses).
+**Improvements**
 
-- Enroll external agents against login-mode federation hubs and run the returned
-  join command on the spoke. Join reads current hub metadata when it runs,
-  including after a hub purge. **Enrollment credential change:** callers that
-  used `KATA_AUTH_TOKEN` for the hub must now pass `--hub-token-env <env-name>`
-  or configure a
-  daemon catalog entry matching `--hub-url`. The local daemon token is no longer
-  sent to the hub. See the [enrollment runbook](operations/federation.md#external-agent-onboarding-without-hooks).
+- See open work across projects in the web Inbox. Future scheduled issues stay
+  hidden until their start date, and the Scheduled view groups start dates and
+  deadlines by day. See [Web UI](guide/web-ui.md#navigate-projects-and-collections).
+- Read descriptions and comments with proper Markdown spacing,
+  syntax-highlighted code, and clearer typography. Narrow issue lists avoid
+  horizontal scrolling, and issue links open their targets.
+- Move through the terminal UI with Emacs shortcuts, including `C-n`, `C-p`,
+  `C-v`, and `M-v`.
+- Find commands through expanded `kata --help` and examples, and use
+  `kata label remove` as an alias for `kata label rm`. Errors include a
+  next-step hint in human, agent, and JSON output. Invalid `close` flags exit 2
+  and malformed `--evidence` values exit 3, instead of 1.
+- Limit GitHub imports with `--since` and watch live sync progress. Incremental
+  sync no longer scans all issue history for parent relationships. See
+  [Limit imported history](operations/github-sync.md#limit-imported-history).
+- Keep SQLite available for local work during federation pushes, which hold the
+  database write lock for less of each sync.
+- See download progress in the shell installer, which retries stalled or failed
+  transfers and suggests other install options when it gives up.
+- Build Go integrations with daemon discovery, Unix-socket connections,
+  structured errors, and a test helper that runs a real service. Embedded
+  services can omit browser assets. See the [Go client](reference/go-client.md).
+- Anonymous usage reports now distinguish CLI, browser, and terminal use, and
+  count daily agent activity from hooks and MCP together. They include daily
+  screen views and session-duration buckets. `KATA_TELEMETRY_ENABLED=0` on the
+  daemon turns reporting off. See [Telemetry](reference/configuration.md#telemetry).
 
-- Set up configured coding agents with `kata agent-hook install`, or choose
-  names explicitly. Setup covers 18 native targets and now enables the contract
-  plus every available attention hook by default; scripts needing contract-only
-  setup should pass `--contract-only` or `--attention=false`. Default uninstall
-  removes the full owned bundle. Use `--local` for project scope or
-  `kata init --agent-hooks=codex,pi` during initialization. Project installs use
-  the portable `kata` command unless an executable override is supplied.
-  OpenCode selects its API from a bounded runtime version probe;
-  Muse asks for managed environment permission only during explicit interactive
-  user setup and otherwise reports partial setup. That user-wide allowlist is
-  forwarded to every managed hook, including `KATA_AUTH_TOKEN` when set.
-  Uninstall retains the allowlist; remove names from Muse settings to revoke it.
-  Existing generated commands, custom hooks and the older init flags remain
-  compatible; repeatable `--with-agent-hooks` also selects project bundles.
-  Native session ownership fences delayed cleanup; Hermes uses terminal
-  finalization and Codex init gains SessionEnd. See
-  [target coverage](workflows/agents.md#hook-target-coverage) for runtime limits.
+**Bug fixes**
 
-- Inspect both hook scopes with bare `kata agent-hook status`. JSON keeps user
-  rows in `harnesses` and project rows in `workspace.harnesses`, with project
-  details under `config`. An unreadable or malformed selected config now exits
-  nonzero and returns the partial report in `error.data`. See
-  [hook status](reference/cli.md#hook-status-and-output).
+- Keep federation pulls progressing during steady local SQLite writes. Queued
+  writes take turns instead of repeatedly losing access to the database.
+- Read local metadata without waiting on an unavailable hub. Optional lease
+  refreshes before local reads and edits have a 500 ms budget, and hub issue
+  reads no longer wait for a write lock to refresh claim status.
+- Avoid federation deadlocks between concurrent authorization checks and
+  incoming sync writes.
+- Run Kata in Windows checkouts reached through directory junctions.
+- Keep the terminal UI's split detail aligned with the selected issue after
+  closing a filtered result. Failed saves keep your input for retry, and form
+  text wraps within modal padding.
+- Read label names consistently from `.issue.labels` in `kata show --json`,
+  including an empty array for unlabeled issues.
+- Reject unsupported federated moves during `kata move --dry`, using the same
+  validation as a real move.
+- Preserve edited-content revision counters during SQLite upgrades. Owner and
+  status changes also advance issue revisions, so guarded metadata writes
+  detect intervening changes.
+- Keep a destination file that appears during `kata import --target` instead of
+  overwriting it.
+- See readable embedding credential errors in health checks and explicit
+  semantic searches. Keyless providers work without an `Authorization` header,
+  OpenAI-compatible servers that reject a `dimensions` field are supported, and
+  an issue too long for the embedding model no longer blocks indexing of later
+  issues.
+- Get initialization guidance when running remote project commands from an
+  unbound directory, instead of a filesystem error from the daemon's host.
 
-- Upgrade or remove unchanged generated agent extensions after Kata's templates
-  change. Stored digests distinguish installed code from local edits; edited
-  code, metadata and package manifests remain untouched. Reinstall also reuses
-  an owned OpenCode API selection when its runtime probe is unavailable.
-  Hook publication locks now live outside workspace configs, in the OS
-  temporary directory.
+**Acknowledgements**
 
-- Retry hook setup after an init publication failure without losing the project
-  result. Init errors now report whether the project was created and bound,
-  alongside the hook error. All Codex init selectors apply the same user-hook
-  deduplication and tracked-workspace policy. See the
-  [init reference](reference/cli.md#workspace-initialization).
-
-- Run `kata agent-contract-hook` directly to emit the built-in Codex briefing.
-  Optional `--source <path>` replaces the entire prompt with a local UTF-8 file;
-  missing files use the default and empty files supply an empty prompt. Native
-  contract commands share the option. Relative sources stay within the
-  invocation directory; parent traversal and symlink escapes fail. Default hook
-  installations use bare commands, preserve custom prompt hooks, and normalize
-  old generated source markers. The shipped
-  `--source kata-agent-contract-hook` marker still selects the built-in contract;
-  prefix that filename with `./` to select it as a file. Visible and native
-  attention commands accept only the
-  legacy source marker matching `start` or `end` for compatibility; rerun the
-  matching init option to normalize installed hooks to the bare form.
-  Codex user hooks suppress the workspace contract only when both native
-  command platforms are complete and no explicit timeout is below 10 seconds;
-  normalize an older incomplete entry with `kata agent-hook install codex`
-  before rerunning init.
-
-- The web UI reports an anonymous `app_opened` event through the daemon when it
-  loads and on the first focus of each later UTC day, so usage reports can
-  count installs where someone opened the UI. `KATA_TELEMETRY_ENABLED=0` turns
-  it off with the daemon heartbeat. Uses Kit v0.31.1.
-
-- `kata tui` reports an anonymous `app_opened` event through the daemon once per
-  launch, so usage reports count people who only use the terminal UI. The event
-  carries `surface` (`web` or `tui`) so reports can tell the two apart.
-  `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
-
-- CLI commands run in a terminal now report an anonymous `app_opened` event
-  with `surface: cli` through the daemon they used, so usage reports count
-  people who only use the command line. Each `KATA_HOME` reports once per UTC
-  day to each daemon, so later commands that day send nothing. Piped output
-  and ordinary agent-mode commands send nothing.
-  `KATA_TELEMETRY_ENABLED=0` on the daemon turns it off.
-
-- See daily hook and MCP activity separately from human use. Successful execution
-  hooks, daemon hook children, and admitted MCP calls now send `agent_active` once
-  per UTC day, plus `agent_call_count` at calls 11 and 101. The highest bucket
-  gives observed daily volume. MCP reports use a bounded queue without delaying
-  tools; hook exit reports wait at most 100 ms. Attention hooks and daemon hook
-  children require a daemon target from their operation. Version/help probes
-  without a target send nothing. Reports share the daemon's anonymous install ID
-  and `KATA_TELEMETRY_ENABLED` opt-out. See [telemetry](https://github.com/kenn-io/kata/blob/main/docs/reference/configuration.md#telemetry)
-  for delivery limits and restart behavior.
-
-- Use OpenAI-compatible embedding servers that reject a `dimensions` field.
-  Embedding requests no longer send `"dimensions": 0` unless dimensions are
-  requested, so servers no longer refuse the request or return empty vectors.
-  When the embedding server refuses every request, for example because the
-  model name is wrong or it rejects a field, Kata waits the full retry backoff
-  (5 minutes by default) instead of retrying quickly, and leaves documents
-  pending. Project activity cannot bypass this delay; `kata daemon reload`
-  retries immediately after reloading embedding credentials. Uses Kit v0.29.2.
-
-- Keep semantic search indexing past an issue that is too long for the
-  embedding model. The embedding server's error now decides the skip: an issue
-  it reports as too long or refused by policy is skipped and the rest keep
-  indexing, instead of every later index pass stopping at that issue.
-
-- Hand work between agents over MCP: `kata.load_coordination` adds
-  `kata.assign`, `kata.unassign` with an `expected_owner` guard, `kata.inbox`,
-  and `kata.status`. `kata.project_show` reads one project with its aliases,
-  and `kata.load_docs` adds `kata.search_docs` and `kata.read_doc` over the
-  documentation bundled in the binary. The server now uses MCP Go SDK 1.8.0;
-  clients on older protocol versions keep working. See the
-  [MCP reference](reference/mcp.md#progressive-tool-catalog).
-
-- Find every-session contract setup in `kata init --help`,
-  `kata quickstart --help`, the quickstart guide, and the README. Install it
-  with `kata agent-hook install --all`; Codex requires trust through `/hooks`.
-  See [Contract in every session](workflows/agents.md#contract-in-every-session).
-
-- Load the contract in every coding-agent session with
-  `kata agent-hook install --all`, remove user hooks with `uninstall`, and
-  inspect user/workspace registrations with daemon-free `status`. Repeated
-  canonical installs preserve file bytes and hook indexes. Codex hooks still
-  require `/hooks` trust; Hermes injects on its first `pre_llm_call` turn.
-  See [Contract in every session](workflows/agents.md#contract-in-every-session).
-
-- Run discoverable contract and attention hooks with
-  [`kata agent-hook`](reference/cli.md#agent-hook). Contract responses use
-  each supported harness's native format, including Cursor SessionStart
-  context and Hermes's first `pre_llm_call` turn. Claude Code and Codex can
-  use the visible workspace attention commands. The canonical contract text
-  stays unchanged.
-
-- Remove an untracked duplicate Codex contract hook by re-running
-  `kata init --with-codex-hooks` when the selected user config already supplies
-  the contract. Attention hooks keep their positions when unchanged, and init
-  reports any surviving hooks that move and require re-trust. Init installs or
-  updates both hooks in tracked files for teammates without a user hook. See the
-  [init reference](reference/cli.md#workspace-initialization).
-
-- Diagnose missing embedding credentials and provider access failures through
-  health and search. Explicit semantic/hybrid searches report readable errors;
-  default search labels its lexical fallback. Keyless local providers continue
-  to work without a placeholder key or an `Authorization` header.
-- Load embedding keys through `search.embeddings.api_key_file` and refresh them
-  with `kata daemon reload`. Credentials resolve inline > file > environment;
-  a failed selected source blocks provider requests and preserves the backlog.
-  See the [configuration reference](reference/configuration.md#semantic-search)
-  for file requirements.
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for project
+  relays, federation request signing, native cron and recurring child issues,
+  the Notion, Plane, Linear, Twenty, Todoist, TickTick, and Forgejo
+  integrations, two-way status sync, comment replies, timed claims, the global
+  inbox, terminal UI undo and Emacs shortcuts, the web Inbox and Scheduled
+  views, `kata doctor`, local daemon profiles, coding-agent hook setup, new MCP
+  tools, pagination, container deployment, embedding prefixes, closing-session
+  references, CLI help and hints, and federation reliability fixes.
+- Thanks to [Rod Boev](https://github.com/rodboev) for usage reporting, the
+  terminal UI's shared Markdown renderer, preserved revisions across SQLite
+  upgrades, client error handling, dependency security updates, and Windows and
+  test reliability improvements.
+- Thanks to [Wes McKinney](https://github.com/wesm) for the web UI restyle,
+  optional browser assets for embedded services, standalone hub copies,
+  terminal UI layout fixes, project relay documentation, and release
+  documentation.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for Go
+  client improvements, embedding and search updates, fairer SQLite write
+  queuing, and safer `kata import --target`.
+- Thanks to [Phillip Cloud](https://github.com/cpcloud) for shell installer
+  progress and retries, reliable hook file replacement on Windows, and test
+  reliability fixes.
+- Thanks to [Steve Francia](https://github.com/spf13) for Windows directory
+  junction support.
+- Thanks to [Eran Sandler](https://github.com/erans) for fixing a federation
+  deadlock.
+- Thanks to [Sloane Ortel](https://github.com/srvo) for federation writer-lock
+  test coverage.
 
 ## 0.18.0
 <small>2026-09-17</small>

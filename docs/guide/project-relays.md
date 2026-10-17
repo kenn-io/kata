@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Share projects between hubs
@@ -11,8 +11,8 @@ project on to your other devices. Each daemon keeps its own database. You can
 read and edit locally while disconnected; changes synchronize when the daemons
 can reach each other again.
 
-**Availability:** project relays are on `main`, after the 0.18.0 release. Use
-builds that support `kata federation bridge` on every participating daemon.
+**Availability:** project relays require Kata 0.19.0 or later on every
+participating daemon.
 The connection preview checks the upstream daemon's protocol support.
 
 ## Choose the shape you need

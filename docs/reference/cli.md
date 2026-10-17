@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # CLI reference
@@ -196,7 +196,7 @@ the other output modes.
 
 ## Agent hook
 
-These commands are available on `main`; they are not included in 0.18.0.
+These commands require Kata 0.19.0 or later.
 
 The command group has been renamed from `kata agent-hooks` to
 `kata agent-hook`. This is a breaking change: the plural spelling fails as an
@@ -922,8 +922,12 @@ kata close <ref> --done --message <text> \
   [--reviewed <path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
-  [--if-match <revision>]
+  [--if-match <revision>] \
+  [--dry]
 ```
+
+`--dry` validates the close without changing the issue and reports the close
+event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
 
 `-m` is short for `--message`, and `--body` is accepted as an alias, matching
 `kata comment`. `--comment` still posts a separate follow-up comment.
@@ -1375,7 +1379,7 @@ permissions, pending intent, and recovery.
 
 ```sh
 kata sync github enable [--repo example-org/example-repo] [--host github.com] [--interval 5m]
-    [--title-prefix=false] [--status-sync=one-way|two-way]
+    [--since YYYY-MM-DD] [--title-prefix=false] [--status-sync=one-way|two-way]
 kata sync github disable
 kata sync github status
 kata sync github once
@@ -1395,6 +1399,10 @@ prefixed as `[GitHub #123] Original title` by default; pass
 label. Omission on re-enable preserves the saved choice; explicit true restores
 prefixing. Presentation refreshes preserve local title edits and local labels,
 retain upstream labels, and deduplicate matching normalized `github` labels.
+`--since` imports only issues updated after a UTC date or an RFC 3339 time
+with whole seconds. Omission on re-enable keeps the saved cutoff, and
+`--since=` clears it. See
+[Limit imported history](../operations/github-sync.md#limit-imported-history).
 
 GitHub sync is daemon-side. The daemon resolves credentials from a matching
 `[[github_sync.app]]` entry, then `[github_sync].token_env` (default
@@ -1417,8 +1425,9 @@ can be overwritten by newer GitHub state. Only the first GitHub assignee maps
 to the kata owner.
 
 `disable` stops polling but preserves the binding and import mappings.
-`status` reports the current binding and last sync outcome. `once` runs an
-immediate sync through the daemon and requires an enabled binding.
+`status` reports the current binding, import cutoff, live progress, and last
+sync outcome; see [Run and inspect](../operations/github-sync.md#run-and-inspect).
+`once` runs an immediate sync through the daemon and requires an enabled binding.
 
 Two-way mode writes only explicit close/reopen status changes to existing
 GitHub issues. Kata does not create GitHub issues, import timeline events or
@@ -1449,7 +1458,10 @@ kata connector field unmap <instance> <kata-field>
 `kata connector list` reports the configured instances, `status` shows one
 instance's safe status without credentials, and the `field` subcommands
 inspect and manage bidirectional field mappings. Kata planning-field mappings
-are limited to `scheduled_on` and `deadline_on`.
+are limited to `scheduled_on` and `deadline_on`. `field map` requires a
+connector that advertises `conditional_fields`; the Forgejo connector does not,
+so Kata refuses mappings for it. See
+[Forgejo field support](../operations/forgejo-connector.md#field-support-and-current-limits).
 
 ```sh
 kata bridge bind <issue> --connector <instance> --external <locator> [--publish-comments]
@@ -1864,7 +1876,7 @@ older or unknown schema version, and orphan sidecars, are refused without
 upgrade. Use a fresh destination or explicitly upgrade the existing target
 before retrying. A destination that appears during import is not overwritten.
 
-Development feature: `--as-standalone` creates an independent copy with a new
+`--as-standalone` creates an independent copy with a new
 instance identity and no source federation or API-token authority. It keeps
 content and cross-project links from a full export. It requires a fresh target
 and cannot be combined with `--force` or `--merge`. Ordinary restore, including
@@ -1886,7 +1898,7 @@ Beads](../guide/migrating-from-beads.md).
 
 ## Teams and project visibility
 
-Available on `main`; not included in 0.18.0.
+Requires Kata 0.19.0 or later.
 
 ```sh
 kata teams create <name>
@@ -1985,8 +1997,8 @@ The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation
 
-Account-token bridges and root-key recovery are available on `main`, after
-0.18.0. Existing direct-spoke enrollment is a separate workflow. Start with
+Account-token bridges and root-key recovery require Kata 0.19.0 or later.
+Existing direct-spoke enrollment is a separate workflow. Start with
 [Share projects between hubs](../guide/project-relays.md) for relay setup.
 
 ```sh

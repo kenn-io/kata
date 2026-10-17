@@ -44,7 +44,7 @@ for machine readers.
 - [Sharing models](https://katatracker.com/docs/workflows/sharing.md): local,
   private network, federation, hosted
 - [Share projects between hubs](https://katatracker.com/docs/guide/project-relays.md):
-  relay setup on main, daemon selection, credentials, sync status and recovery
+  relay setup, daemon selection, credentials, sync status and recovery
 - [Federation](https://katatracker.com/docs/operations/federation.md):
   operator reference for replication, account credentials, team access and recovery
 - [HTTP API](https://katatracker.com/docs/reference/http-api.md):
@@ -54,9 +54,11 @@ for machine readers.
 - [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
   mirror upstream issues into kata
 - [Notion sync](https://katatracker.com/docs/operations/notion-sync.md):
-  mirror one task data source with read-only daemon polling and explicit completion mappings
+  mirror one task data source with daemon polling and optional two-way status sync
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
+- [Native cron](https://katatracker.com/docs/reference/cron.md):
+  shared job definitions, run evidence, and recurring child issues
 - [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):
   read-only configuration, daemon, project and hook diagnostics with `kata doctor`
 - [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):
@@ -77,7 +79,7 @@ for machine readers.
 - [Local daemon profiles](https://katatracker.com/docs/operations/local-daemon-profiles.md):
   Pin personal/work homes and recover existing spokes without changing routing.
 
-- [Plane sync](https://katatracker.com/docs/operations/plane-sync.md): Mirror a Plane project using daemon-owned read-only API credentials.
+- [Plane sync](https://katatracker.com/docs/operations/plane-sync.md): Mirror a Plane project with daemon-owned API credentials and optional two-way status sync.
 - [Linear sync](https://katatracker.com/docs/operations/linear-sync.md): Scope, credentials, field ownership, status synchronization, and recovery.
 - [Twenty sync](https://katatracker.com/docs/operations/twenty-sync.md): Mirror Twenty workspace tasks with self-hosted support and optional two-way status sync.
 - [Todoist sync](https://katatracker.com/docs/operations/todoist-sync.md): Scoped task import, status writeback, field ownership, and recovery.

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Backup and restore
@@ -49,7 +49,7 @@ For an online backup on the same host:
 kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
 ```
 
-Current main (schema 34) preserves hub-local teams, memberships and project
+Kata 0.19.0 (schema 34) preserves hub-local teams, memberships and project
 visibility policies in a full backup. Project-scoped exports omit those local
 access rules. Both forms retain signed attribution receipts, entity creation
 references and public root keys, including retired verification keys. Restore
@@ -177,7 +177,7 @@ operations](postgres.md).
 
 ## Make an independent copy of a federated hub
 
-Development feature: `--as-standalone` is not in a released version yet.
+`--as-standalone` requires Kata 0.19.0 or later.
 Use it to copy a hub's data for a rehearsal or a move to a different hub.
 Ordinary restore recreates the source's federation bindings, enrollments, and
 database-managed API tokens. `--new-instance` changes the instance identity

@@ -33,14 +33,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.18.0
+## New in 0.19.0
 
-Request a teammate's attention, read an inbox, and delegate an issue with
-expiring credentials. The [0.18.0 release notes](changelog.md#0180) cover
-these workflows, planning-date notifications, search filters, oldest-first
-lists, and contributor credits. Read the
-[upgrade guidance](get-started/install.md#upgrading-to-0180) when updating
-remote or federated daemons.
+Share selected projects between hubs, sync tasks with Notion, Plane, Linear,
+Twenty, Todoist, and TickTick, and share cron jobs across devices. The
+[0.19.0 release notes](changelog.md#0190) also cover comment replies, timed
+claims, `kata doctor`, and contributor credits. Some commands and flags were
+renamed; read the [upgrade guidance](get-started/install.md#upgrading-to-0190)
+before updating.
 
 ## Quickstart
 
@@ -124,13 +124,17 @@ is a local ledger for the work itself. They coexist. See
     stdio or Streamable HTTP to the workspace project, a fixed allowlist, or
     the whole daemon.
 -   [__Share projects between hubs__](guide/project-relays.md). Connect a selected
-    project to your hub and devices (available on `main`).
+    project to your hub and devices.
 -   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
     with opt-in embeddings.
 -   [__Local daemon profiles__](operations/local-daemon-profiles.md). Keep personal
     and work spokes separate and recover their existing data.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
+-   [__Notion sync__](operations/notion-sync.md). Mirror a Notion task data source with optional two-way status.
+-   [__Twenty sync__](operations/twenty-sync.md). Mirror Twenty workspace tasks with optional two-way status.
 -   [__TickTick sync__](operations/ticktick-sync.md). Import a task project and send completion back.
+-   [__Forgejo connector__](operations/forgejo-connector.md). Bind a Forgejo issue to Kata.
+-   [__Native cron__](reference/cron.md). Share job definitions and create recurring child issues.
 -   [__Plane sync__](operations/plane-sync.md). Mirror a Plane project into native issues.
 -   [__Linear sync__](operations/linear-sync.md). Import a selected team and synchronize completion and reopen.
 -   [__Todoist sync__](operations/todoist-sync.md). Mirror a Todoist project and sync task completion.

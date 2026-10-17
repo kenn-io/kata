@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-09-28
+last_edited: 2026-10-17
 ---
 
 # Local daemon profiles
@@ -9,7 +9,8 @@ last_edited: 2026-09-28
 Use a local daemon profile to select an existing Kata home on this machine.
 The profile pins the database's instance UID, so a stopped work daemon can
 restart against its existing data while a personal daemon continues running.
-This feature is available on main; older releases accept URL overrides only.
+This feature requires Kata 0.19.0 or later; older releases accept URL
+overrides only.
 
 A **spoke** is a local project replica joined to a federation hub. Personal
 and work spokes can join different hubs and contain projects with the same

@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Web UI
@@ -102,6 +102,10 @@ project, and **Done editing** returns to the read-only view. The editor also sup
   blocking, blocked-by, and related links;
 - completing, reopening, moving, and deleting issues; and
 - creating, editing, or deleting the issue's recurrence.
+
+When a close saved a
+[closing-session reference](../reference/configuration.md#closing-session-transcripts),
+the issue's events show the agent and session ID, linked when a URL was saved.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue
