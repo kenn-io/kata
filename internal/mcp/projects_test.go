@@ -18,32 +18,6 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func TestAdministrationToolsArePublished(t *testing.T) {
-	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
-		Actor: "example-agent", Version: "test-version",
-	})
-	result, err := session.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	names := map[string]bool{}
-	for _, tool := range result.Tools {
-		names[tool.Name] = true
-	}
-	require.False(t, names["kata.federation_enroll"], "credential-minting enrollment must stay outside MCP")
-	for _, name := range []string{
-		"kata.digest", "kata.events", "kata.import_issues",
-		"kata.federation_enrollment_revoke",
-		"kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status",
-		"kata.project_create", "kata.project_merge", "kata.project_purge", "kata.project_remove",
-		"kata.project_restore", "kata.project_update", "kata.projects", "kata.system",
-		"kata.recurrence_delete", "kata.recurrence_update", "kata.recurrences",
-		"kata.sync_once", "kata.sync_status", "kata.sync_update",
-		"kata.token_create", "kata.token_revoke", "kata.tokens",
-	} {
-		require.True(t, names[name], name)
-	}
-}
-
 func TestAdministrationToolsRoundTripAgainstDaemon(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)

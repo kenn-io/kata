@@ -32,7 +32,7 @@ func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) {
 	workers := newDaemonWorkerGroup()
 	var health func() api.FederationConfigHealth
 	require.NotPanics(t, func() {
-		health = startFederationConfigReconciler(ctx, workers, nil, &config.DaemonConfig{}, env.DB, nil, nil, nil)
+		health = startFederationConfigReconciler(ctx, workers, nil, &config.DaemonConfig{}, env.DB, nil, nil, nil, nil)
 	})
 	require.NotNil(t, health)
 	waitCtx, stopWaiting := context.WithTimeout(t.Context(), 3*time.Second)
@@ -138,7 +138,7 @@ func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	workers := newDaemonWorkerGroup()
-	health := startFederationConfigReconciler(ctx, workers, nil, &config.DaemonConfig{}, env.DB, cancel, nil, nil)
+	health := startFederationConfigReconciler(ctx, workers, nil, &config.DaemonConfig{}, env.DB, cancel, nil, nil, nil)
 	require.NotNil(t, health)
 	waitCtx, waitCancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer waitCancel()

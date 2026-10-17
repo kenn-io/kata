@@ -28,6 +28,7 @@ type ProjectAccessDecision struct {
 	targets        []string
 	store          db.Storage
 	owner          bool
+	fixedUIDs      []string
 	// streamCursor is the last event id an event stream has processed, starting
 	// at the high-water mark read before admission. A project whose lifecycle
 	// event follows it is new to the stream and still has that event to deliver.
@@ -70,7 +71,7 @@ func projectAccessDenied() error {
 
 func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
-	if decision == nil || decision.owner {
+	if decision == nil || decision.owner && decision.fixedUIDs == nil {
 		return nil
 	}
 	if !slices.Contains(decision.ProjectUIDs, projectUID) {
@@ -86,7 +87,7 @@ func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 // restored so later steps of the same request can address it.
 func recordProjectAccessCatalogMutation(ctx context.Context, projectUID string) {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
-	if decision == nil || decision.owner {
+	if decision == nil || decision.owner || decision.fixedUIDs != nil {
 		return
 	}
 	if projectUID != "" && !slices.Contains(decision.ProjectUIDs, projectUID) {
@@ -124,7 +125,7 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 // two reads surfaces on the next refresh instead of hiding behind the newer
 // revision.
 func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, kept, changed bool, err error) {
-	if d.owner {
+	if d.owner && d.fixedUIDs == nil {
 		return nil, true, false, nil
 	}
 	revision, err := d.store.ProjectAccessRevision(ctx)
@@ -134,9 +135,13 @@ func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, k
 	if revision == d.PolicyRevision {
 		return nil, true, false, nil
 	}
-	accessible, err := accessibleProjectUIDs(ctx, d.store, d.Actor)
-	if err != nil {
-		return nil, false, true, err
+	accessible := slices.Clone(d.fixedUIDs)
+	if !d.owner {
+		accessible, err = accessibleProjectUIDs(ctx, d.store, d.Actor)
+		if err != nil {
+			return nil, false, true, err
+		}
+		accessible = narrowProjectUIDs(accessible, d.fixedUIDs)
 	}
 	for _, projectUID := range d.ProjectUIDs {
 		if slices.Contains(accessible, projectUID) {
@@ -176,8 +181,13 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			api.WriteEnvelope(w, http.StatusNotFound, "not_found", "resource not found")
 			return
 		}
+		fixedUIDs, scopeErr := requestProjectScope(r.Context(), store, r.Header)
+		if scopeErr != nil {
+			api.WriteEnvelope(w, scopeErr.Status, scopeErr.Code, scopeErr.Message)
+			return
+		}
 		owner := projectOwnerAuthority(r.Context())
-		if owner && !transportRoutes.matches(r) {
+		if owner && fixedUIDs == nil && !transportRoutes.matches(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -189,7 +199,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			next.ServeHTTP(w, r)
 			return
 		}
-		decision := &ProjectAccessDecision{Actor: principal.Actor, store: store, owner: owner}
+		decision := &ProjectAccessDecision{Actor: principal.Actor, store: store, owner: owner, fixedUIDs: fixedUIDs}
 		var err error
 		eventStream := eventStreamRequest(r)
 		if eventStream && !owner {
@@ -219,6 +229,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			api.WriteEnvelope(w, 500, "internal", "internal error")
 			return
 		}
+		decision.ProjectUIDs = narrowProjectUIDs(decision.ProjectUIDs, fixedUIDs)
 		ctx := context.WithValue(r.Context(), projectAccessContextKey{}, decision)
 		ctx = db.WithAuthorizedProjects(ctx, decision.ProjectUIDs)
 		if unauthenticatedPrivateNetworkRequest(ctx) {
@@ -243,6 +254,9 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 		ctx = db.WithProjectAccessTransactionCheck(ctx, func(
 			checkCtx context.Context, tx db.Transaction, projectUID string,
 		) error {
+			if decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, projectUID) {
+				return projectAccessDenied()
+			}
 			if decision.owner {
 				return nil
 			}
@@ -290,7 +304,7 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 }
 
 func (d *ProjectAccessDecision) revalidateRelease(ctx context.Context) error {
-	if d.owner {
+	if d.owner && d.fixedUIDs == nil {
 		return nil
 	}
 	_, kept, changed, err := d.refresh(ctx)
@@ -389,7 +403,7 @@ func projectPolicyHidesProjects(ctx context.Context) (bool, error) {
 		_, restricted := db.AuthorizedProjects(ctx)
 		return restricted, nil
 	}
-	if decision.owner {
+	if decision.owner && decision.fixedUIDs == nil {
 		return false, nil
 	}
 	if principal, _ := PrincipalFromContext(ctx); principal.Scope != nil {
