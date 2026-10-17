@@ -58,13 +58,14 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 	if s.allProjects {
 		issueWidth = min(28, width/4)
 	}
+	navWidth := listColumnWidths(width, false).nav
 	ownerWidth := min(24, width/5)
 	statusWidth := 11
-	titleWidth := max(width-issueWidth-ownerWidth-statusWidth-8, 1)
+	titleWidth := max(width-navWidth-issueWidth-ownerWidth-statusWidth-6, 1)
 	columns := func(issue, title, owner, status string) string {
 		return padToWidth(truncate(issue, issueWidth), issueWidth) + "  " + padToWidth(truncate(title, titleWidth), titleWidth) + "  " + padToWidth(truncate(owner, ownerWidth), ownerWidth) + "  " + truncate(status, statusWidth)
 	}
-	out := []string{subtleStyle.Render("  " + columns("#", "title", "owner", "status"))}
+	out := []string{subtleStyle.Render(strings.Repeat(" ", navWidth) + columns("#", "title", "owner", "status"))}
 	start, end := windowBounds(len(s.rows), s.cursor, max(budget-panel-2, 1))
 	for i := start; i < end; i++ {
 		r := s.rows[i]
@@ -77,11 +78,13 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 			owner += " / " + sanitizeForLine(r.teammate)
 		}
 		text := columns(sanitizeForLine(ref), sanitizeForLine(r.issue.Title), owner, r.workAttention)
+		navCell := strings.Repeat(" ", navWidth)
 		if i == s.cursor {
-			out = append(out, selectedStyle.Render("▶ "+text))
-		} else {
-			out = append(out, "  "+text)
+			navCell = padToWidth("▶", navWidth)
+			out = append(out, selectedStyle.Render(navCell+text))
+			continue
 		}
+		out = append(out, navCell+text)
 	}
 	if panel > 0 {
 		out = append(out, "")

@@ -35,6 +35,45 @@ func TestSnapshot_Attention_Empty(t *testing.T) {
 	m.attention.allProjects = true
 	assertGolden(t, "attention-empty", renderAttention(m))
 }
+
+func TestAttentionColumnsAlignSelectionMarker(t *testing.T) {
+	defer snapshotInit(t)()
+	m := attentionSnapshot(t)
+	m.attention.allProjects = false
+	rows := renderAttentionRows(m.attention, m.width, 30)
+
+	selectedID := m.attention.rows[0].issue.ShortID
+	unselectedID := m.attention.rows[1].issue.ShortID
+	selectedLine, unselectedLine := "", ""
+	for _, line := range rows {
+		plain := stripANSI(line)
+		if strings.Contains(plain, selectedID) {
+			selectedLine = line
+		}
+		if strings.Contains(plain, unselectedID) {
+			unselectedLine = line
+		}
+	}
+	require.NotEmpty(t, selectedLine)
+	require.NotEmpty(t, unselectedLine)
+	selectedCells := []string{selectedID, "issue " + selectedID, "sam", "needs-human"}
+	unselectedCells := []string{unselectedID, "issue " + unselectedID, "system", "stuck"}
+	for i := range selectedCells {
+		selectedIndex := strings.Index(selectedLine, selectedCells[i])
+		unselectedIndex := strings.Index(unselectedLine, unselectedCells[i])
+		require.NotEqual(t, -1, selectedIndex)
+		require.NotEqual(t, -1, unselectedIndex)
+		selectedOffset := ansi.StringWidth(selectedLine[:selectedIndex])
+		unselectedOffset := ansi.StringWidth(unselectedLine[:unselectedIndex])
+		require.Equal(t, unselectedOffset, selectedOffset,
+			"selected and unselected cells must start in the same column")
+		if i == 0 {
+			require.Equal(t, listColumnWidths(m.width, false).nav, selectedOffset,
+				"attention rows must reserve the same navigation gutter as kata tui's issue list")
+		}
+	}
+}
+
 func TestSnapshot_Attention_Error(t *testing.T) {
 	defer snapshotInit(t)()
 	m := attentionSnapshot(t)
