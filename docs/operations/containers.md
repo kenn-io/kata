@@ -1,7 +1,7 @@
 ---
 title: Containers
 description: Run the stock Kata image using environment settings, mounted secrets, and persistent storage.
-last_edited: 2026-10-08
+last_edited: 2026-10-17
 ---
 
 # Containers
@@ -11,9 +11,10 @@ amd64 and arm64. The image runs the `kata` binary directly as UID/GID `1000`,
 with `KATA_HOME=/data` and `daemon start --foreground` as its default command.
 It needs no pre-start hook, entrypoint script, config seed, or `.env` rewriting.
 
-These deployment features are unreleased. The external release publisher must
-publish a matching version before you use the image commands below. Replace
-`<version>` with that published version; older images do not gain these settings.
+Kata 0.19.0 and later include these deployment settings. The image commands
+below need a published `ghcr.io/kenn-io/kata:<version>` tag for that release.
+Replace `<version>` with that published version; older images do not gain these
+settings.
 
 ## Start a persistent service
 

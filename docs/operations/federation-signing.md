@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 # Federation request signing
@@ -9,8 +9,8 @@ last_edited: 2026-10-12
 Native signing adds an independent HMAC secret to each scoped federation
 enrollment. The spoke signs its requests; the hub verifies signatures before
 decoding federation payloads. The enrollment bearer, project scope, actor and
-capabilities still control access. Native signing is unreleased.
-Operators need a release containing it before deploying it.
+capabilities still control access. Native signing requires Kata 0.19.0 or
+later on the hub and its spokes.
 
 Existing private deployments stay unsigned unless the hub enables required
 signing. Optional mode rejects invalid supplied signatures. Required mode

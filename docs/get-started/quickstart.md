@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-07
+last_edited: 2026-10-17
 ---
 
 # Quickstart
@@ -146,15 +146,14 @@ specification. Preview the bundle before installing it:
 kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
 ```
 
-This unreleased support relies on instruction-following and has no native
+This support relies on instruction-following and has no native
 attention hooks. Choose authentication explicitly and create the task in Muse.
 Follow [Hookless harnesses](../workflows/agents.md#hookless-harnesses) for installation
 and both authentication options.
 
 ## Load the contract in every session
 
-With a build from `main`, load Kata's contract in every coding-agent session
-on this machine:
+Load Kata's contract in every coding-agent session on this machine:
 
 ```sh
 kata agent-hook install
@@ -165,7 +164,7 @@ For Codex, open Codex and run `/hooks` to trust the new hook. See
 for harness selection, Hermes's first-turn behavior, and additional Codex
 homes. Available attention hooks are included by default; use `--contract-only`
 to opt out, `--local` for this workspace, or `kata init --agent-hooks=codex,pi`
-when initializing it. These commands are not included in 0.18.0.
+when initializing it. These commands require Kata 0.19.0 or later.
 
 ## External agents without session hooks
 

@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Agent workflows
@@ -9,7 +9,7 @@ compaction, multiple workers, incomplete attempts, and close discipline.
 
 ## Choose the daemon and project
 
-Project bridges and team visibility are available on `main`, after 0.18.0.
+Project bridges and team visibility require Kata 0.19.0 or later.
 
 Select the daemon and project before reading or changing work. `--daemon <name>`
 sends commands to a configured daemon; it does not copy a project. A federation
@@ -32,7 +32,7 @@ A connected bridge may still have pending work. Reads use the local copy;
 ## Hookless harnesses
 
 For consumer Muse, generate standing instructions, a Kata skill, and a recurring
-poll specification. This support is unreleased.
+poll specification. This support requires Kata 0.19.0 or later.
 
 ```sh
 kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
@@ -114,7 +114,7 @@ Load Kata's contract in every coding-agent session on this machine:
 kata agent-hook install
 ```
 
-These commands are available on `main`; they are not included in 0.18.0.
+These commands require Kata 0.19.0 or later.
 User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do
@@ -513,10 +513,9 @@ installers do not install a runtime scheduler or wakeup adapter.
 Point workers at the comment they need to answer. A typed link records whether
 an agent builds on, reproduces, contradicts, or replaces that finding. The log
 stays chronological; Kata stores a reference without copying the target's body.
-Comment replies and the notification commands below are unreleased. These
-examples describe planned behavior; the current released CLI does not accept
-the new options yet. Until the feature ships, use ordinary comments and
-supported targeted `kata notify --to` requests.
+Comment replies require Kata 0.19.0 or later and daemon API `0.28.0`. Reply
+notifications, broadcasts, and `wait --until reply`, described from
+[How replies reach the inbox](#how-replies-reach-the-inbox) onward, are planned.
 
 ### Find and use comment handles
 
@@ -623,6 +622,11 @@ older confirmation. Kata records the edit without claiming to verify content.
 
 ### How replies reach the inbox
 
+Planned: Kata 0.19.0 does not write reply notifications to the inbox or accept
+the `notify --re`, `notify --broadcast`, or `wait --until reply` options shown
+in this section. Use `kata show --inbound` and targeted `kata notify --to`
+requests until they ship.
+
 Every linked comment notifies the target's author and teammate. Replies to your
 own comments do not notify you. Each issue has one `notify.<recipient>` slot
 per exact recipient; later link notifications replace earlier ones. The inbox
@@ -651,6 +655,10 @@ revision. Writers using `meta set --if-match` can see more `412` conflicts.
 Read the current revision before retrying a guarded write.
 
 ### Coordinate a group
+
+Planned: this workflow depends on the reply notifications described in
+[How replies reach the inbox](#how-replies-reach-the-inbox), which Kata 0.19.0
+does not include.
 
 Post a finding, copy its handle from `show`, and request the relevant worker's
 attention with `--to ... --re`. The worker responds with one of the four kinds.
@@ -683,6 +691,10 @@ record findings and replies; child issues record accountable work. Parent links
 group that work without gating readiness.
 
 ### Broadcast only when the group needs it
+
+Planned: this workflow depends on the reply notifications described in
+[How replies reach the inbox](#how-replies-reach-the-inbox), which Kata 0.19.0
+does not include.
 
 A coordinator can request attention from everyone working on an issue:
 

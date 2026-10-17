@@ -52,6 +52,10 @@ They verify the downloaded archive against `SHA256SUMS` before installing it.
 For v0.14.x and newer versions, they also ask the extracted binary to validate
 its embedded Web UI before replacement. The installer remains able to install
 canonical older releases that predate that embedded-asset check.
+The shell installer shows a download progress line when run in a terminal.
+It aborts a transfer that stalls for 30 seconds and tries each download up to
+three times. If every attempt fails, it suggests running the
+installer again, installing with Homebrew, or downloading the release manually.
 The shell installer places `kata` in `/usr/local/bin` or `~/.local/bin`.
 The PowerShell installer places `kata.exe` in `%USERPROFILE%\.kata\bin` by
 default and adds that directory to the user `Path`. Review the installers at
@@ -91,12 +95,59 @@ command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon restart` with the daemon's
 original startup options.
 
+The daemon sends limited anonymous usage reports by default. Set
+`KATA_TELEMETRY_ENABLED=0` in the daemon's environment to turn them off; see
+[Telemetry](../reference/configuration.md#telemetry) for what is collected.
+
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the
 owning package manager. Packagers can read the complete
 [packaging contract](../development/packaging.md). Installing with `go install`
 remains supported, and building from a clone is still useful for development
 builds.
+
+## Upgrading to 0.19.0
+
+Upgrade the daemon as well as the CLI and MCP server. Kata 0.19.0 includes
+daemon API `0.28.0`; release and API versions are separate. Timed claims
+require API `0.22.0`, `move --dry` previews `0.23.0`, close session references
+`0.26.0`, paginated lists `0.27.0`, and comment replies `0.28.0`. See the
+[API version history](../reference/http-api.md#version-history).
+
+Update scripts that call renamed commands and flags. The old spellings are no
+longer accepted:
+
+| Before 0.19.0 | 0.19.0 and later |
+| --- | --- |
+| `kata agent-hooks ...` | `kata agent-hook ...` |
+| `digest`, `events`, and `mcp serve` with `--all-projects` | `--all` |
+| `close` and `move` with `--dry-run` | `--dry` |
+
+Reinstall user hooks with `kata agent-hook install`. For workspace hooks, re-run
+`kata agent-hook install <harness> --local` or the `kata init` hook option that
+installed them. Reinstalling replaces hooks that still call the plural command.
+Hook installation now enables available attention hooks by default; pass
+`--contract-only` to keep contract-only setup. See the
+[agent-hook reference](../reference/cli.md#agent-hook).
+
+For federation, upgrade hubs before their spokes. A hub rejects pushes from a
+spoke with a newer storage schema until the hub is upgraded; the spoke retries
+automatically. Project relays need 0.19.0 on every participating daemon. See
+[rolling upgrades](../operations/federation.md#compatibility-and-rolling-upgrades).
+External-agent enrollment no longer sends the local `KATA_AUTH_TOKEN` to the
+hub; pass `--hub-token-env <env-name>` or configure a daemon catalog entry that
+matches `--hub-url`.
+
+PostgreSQL operators should stop the daemon and run
+`kata storage postgres migrate` with schema-owner credentials before starting
+the new release. Follow the [upgrade ceremony](../operations/postgres.md#upgrade-ceremony).
+
+Go programs that embed Kata and serve the browser application must now pass
+`webui.NewEmbeddedHandler()` in `kata.Config.WebHandler`. See
+[Serve the browser application](../development/embedding.md#serve-the-browser-application).
+
+For feature details, see the [0.19.0 release notes](../changelog.md#0190).
+If upgrading from before 0.18.0, also follow the guidance below.
 
 ## Upgrading to 0.18.0
 

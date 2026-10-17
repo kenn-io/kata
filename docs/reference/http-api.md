@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # HTTP API schema
@@ -155,10 +155,15 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-The current main-branch contract is API `0.28.0`. Kata 0.18.0 includes the changes from
-`0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
-credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
-oldest-first lists require `0.21.0`.
+Kata 0.19.0 includes API `0.28.0`, the changes from `0.22.0` through `0.28.0`
+below. Timed claims require API `0.22.0`, move previews `0.23.0`, close session
+references `0.26.0`, paginated issue lists `0.27.0`, and comment replies
+`0.28.0`.
+
+Kata 0.18.0 included the changes from `0.18.0` through `0.21.0`. Teammate
+comments require API `0.18.0`, issue-scoped credentials use `0.19.0`,
+status-filtered search requires `0.20.0`, and oldest-first lists require
+`0.21.0`.
 
 Kata 0.17.0 included API changes `0.15.0` through `0.17.0`. Custom clients
 upgrading from earlier releases must send array fields as `[]` (or omit
@@ -248,8 +253,8 @@ key that does not match the pin returns `409 root_signing_key_mismatch`. An
 
 ## Project access
 
-Team visibility and credential-bound relay enrollment are available on `main`,
-after 0.18.0.
+Team visibility and credential-bound relay enrollment require Kata 0.19.0 or
+later.
 
 ### Project visibility
 

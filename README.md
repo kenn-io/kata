@@ -25,14 +25,12 @@ Zensical at <https://katatracker.com/>.
 > **Stable:** Since v0.14.0, kata releases preserve backward compatibility
 > across upgrades.
 
-Project relays are available on `main`: share selected projects through your
-own hub and devices. See [Share projects between hubs](docs/guide/project-relays.md)
-for setup and recovery limits.
-
-The latest release is [0.18.0](docs/changelog.md#0180). It adds teammate
-attention requests, issue-scoped worker credentials, and more ways to find
-work. See the [upgrade guidance](docs/get-started/install.md#upgrading-to-0180)
-when updating remote or federated daemons.
+The latest release is [0.19.0](docs/changelog.md#0190). It adds
+[project relays between hubs](docs/guide/project-relays.md), task sync with
+Notion, Plane, Linear, Twenty, Todoist, and TickTick, shared cron jobs, comment
+replies, and `kata doctor`. Some commands and flags were renamed; read the
+[upgrade guidance](docs/get-started/install.md#upgrading-to-0190) before
+updating.
 
 ## Install
 
@@ -142,14 +140,11 @@ kata close abc4 --done \
   --commit <sha>
 ```
 
-Comment relations and their notification commands are unreleased. These
-examples describe planned behavior; the current released CLI does not accept
-the options yet. Use ordinary comments and supported targeted notifications
-until the feature ships:
+Reply to a specific comment, then read the thread it belongs to:
 
 ```sh
 kata comment abc4 --reply c:xbzxrq -m "This builds on the finding."
-kata wait abc4 --until reply --timeout 5m
+kata show abc4 --thread c:xbzxrq
 ```
 
 The TUI and Web UI show nonzero counts for authorized direct relations on
@@ -161,8 +156,9 @@ together without scores, automatic resolution, or hiding. Pending, removed,
 moved, and edited targets remain visible.
 
 Use `--confirm`, `--refute`, or `--supersede` when the response has that meaning.
-See [planned reply and coordinator workflows](docs/workflows/agents.md#reply-to-a-finding)
-for handles, inbox behavior, and rate-limited broadcasts. For work that needs
+See [Reply to a finding](docs/workflows/agents.md#reply-to-a-finding)
+for handles and retries. Reply notifications and coordinator broadcasts are
+planned. For work that needs
 ownership or tracked completion, a comment-sized task becomes a child issue.
 
 For agent-heavy workspaces, `kata init --with-agents` also writes a managed kata
@@ -239,6 +235,7 @@ The [docs site](docs/) is the definitive reference:
   [Twenty sync](docs/operations/twenty-sync.md) ·
   [Todoist sync](docs/operations/todoist-sync.md) ·
   [TickTick sync](docs/operations/ticktick-sync.md) ·
+  [Forgejo connector](docs/operations/forgejo-connector.md) ·
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·
@@ -268,7 +265,8 @@ For Codex, open Codex and run `/hooks` to trust the new hook. See
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;
 use `--contract-only` to opt out of attention, or
-`kata init --agent-hooks=codex,pi` for project setup. These commands are not included in 0.18.0.
+`kata init --agent-hooks=codex,pi` for project setup. These commands require
+Kata 0.19.0 or later.
 
 Print the shorter managed briefing without changing the repository:
 

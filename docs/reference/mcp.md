@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Model Context Protocol server
@@ -398,7 +398,7 @@ with an accessible parent. The file belongs to the MCP host. See the
 for consuming it and the [scope guide](../design/issue-scoped-credentials.md)
 for membership and revocation rules.
 
-Project bridges are available on `main`, after 0.18.0. Use
+Project bridges require Kata 0.19.0 or later. Use
 [Share projects between hubs](../guide/project-relays.md) for setup and target
 selection. The
 [operator reference](../operations/federation.md#connect-a-project-through-the-daemon-catalog)
