@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"slices"
+	"strconv"
 )
 
 // FederationProjectReset invalidates one local project without exposing issue
@@ -49,10 +50,34 @@ func CommitFederationMoveResets(ctx context.Context, resets []FederationProjectR
 func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Project, targetUID string, winner FoldEvent, accepted []string, insertControl func(Project) (int64, error)) error {
 	payload := PayloadMap(winner.Payload)
 	from, _ := StringValue(payload["from_project_uid"])
-	if source.UID == from {
-		return nil // The ordinary move envelope already names its departure.
-	}
 	to, _ := StringValue(payload["to_project_uid"])
+	if source.UID == from {
+		if to == targetUID && slices.Contains(accepted, winner.UID) {
+			return nil // Atomic native ingest publishes the applied move itself.
+		}
+		// Pull appends before applying, so both project snapshots may already
+		// contain the move's cursor with their previous ownership. Invalidate
+		// them at a fresh local cursor without resetting portable history.
+		cursor, err := insertControl(source)
+		if err != nil {
+			return err
+		}
+		var target Project
+		if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, targetUID).Scan(&target.ID, &target.UID, &target.Name); err != nil {
+			return err
+		}
+		for _, project := range []Project{source, target} {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
+ ON CONFLICT(key) DO UPDATE SET value=excluded.value
+ WHERE CAST(meta.value AS BIGINT)<CAST(excluded.value AS BIGINT)`, AttributionUIResetMetadataPrefix+project.UID, strconv.FormatInt(cursor, 10)); err != nil {
+				return err
+			}
+			if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
+				capture.add(FederationProjectReset{ProjectID: project.ID, EventID: cursor})
+			}
+		}
+		return nil
+	}
 	var cursor int64
 	var err error
 	if to == targetUID && slices.Contains(accepted, winner.UID) {
