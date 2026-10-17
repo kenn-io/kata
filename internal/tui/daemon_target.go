@@ -42,7 +42,7 @@ const (
 )
 
 var (
-	readDaemonConfigForTUI         = config.ReadDaemonConfig
+	readDaemonConfigForTUI         = config.ReadDaemonCatalogAndAuthPolicy
 	ensureResolvedForTUI           = client.EnsureResolvedInWorkspaceForTUI
 	ensureLocalRunningTargetForTUI = client.EnsureLocalRunningTarget
 	ensureResolvedNamedForTUI      = client.EnsureResolvedNamed

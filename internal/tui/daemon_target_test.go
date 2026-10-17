@@ -304,6 +304,28 @@ allow_insecure = true
 	require.NotNil(t, conn.sseHC)
 }
 
+func TestBootDaemonConnectionIgnoresUnusedInvalidWebConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+	server := startTUIPingServer(t)
+	t.Setenv("KATA_SERVER", server.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[web]\npublic_origin = \"http://daemon.example\"\n"), 0600))
+
+	conn, err := bootDaemonConnection(t.Context(), Options{ProjectName: "example-project"})
+
+	require.NoError(t, err)
+	assert.Equal(t, server.URL, conn.endpoint)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, conn.endpoint+"/api/v1/ping", nil)
+	require.NoError(t, err)
+	response, err := conn.sseHC.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusOK, response.StatusCode)
+}
+
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureResolvedForTUI

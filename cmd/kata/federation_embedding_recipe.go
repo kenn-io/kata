@@ -16,7 +16,7 @@ func federationEmbeddingRecipeCmd() *cobra.Command {
 		Example: "  kata federation embedding-recipe",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.ReadDaemonConfig()
+			cfg, err := config.ReadConfigSections("search")
 			if err != nil {
 				return err
 			}

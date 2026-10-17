@@ -60,7 +60,7 @@ func ResolveLocalProfile(entry CatalogDaemonConfig) (LocalProfileConfig, error) 
 	if !entry.Local || entry.Home == "" {
 		return LocalProfileConfig{}, fmt.Errorf("daemon %q is not an explicit local profile", entry.Name)
 	}
-	cfg, err := ReadDaemonConfigForHome(entry.Home)
+	cfg, err := readConfigSections(filepath.Join(entry.Home, "config.toml"), false, true, []string{"auth", "storage"}, nil)
 	if err != nil {
 		return LocalProfileConfig{}, err
 	}
@@ -168,12 +168,12 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 			profile.Config.Auth.TokenEnv,
 			profile.Config.Search.Embeddings.APIKeyEnv,
 			profile.Config.GitHubSync.TokenEnvName(),
-			profile.Config.NotionSync.TokenEnv,
-			profile.Config.PlaneSync.TokenEnv,
-			profile.Config.LinearSync.TokenEnv,
-			profile.Config.TwentySync.TokenEnv,
-			profile.Config.TodoistSync.TokenEnv,
-			profile.Config.TickTickSync.TokenEnv,
+			profileTokenEnv(profile.Config.NotionSync.TokenEnv, "KATA_NOTION_TOKEN"),
+			profileTokenEnv(profile.Config.PlaneSync.TokenEnv, "KATA_PLANE_TOKEN"),
+			profileTokenEnv(profile.Config.LinearSync.TokenEnv, "KATA_LINEAR_TOKEN"),
+			profileTokenEnv(profile.Config.TwentySync.TokenEnv, "KATA_TWENTY_TOKEN"),
+			profileTokenEnv(profile.Config.TodoistSync.TokenEnv, "KATA_TODOIST_TOKEN"),
+			profileTokenEnv(profile.Config.TickTickSync.TokenEnv, "KATA_TICKTICK_TOKEN"),
 		)
 		for _, entry := range profile.Config.Daemons {
 			references = append(references, entry.TokenEnv)
@@ -245,4 +245,13 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		result = append(result, key+"="+values[key])
 	}
 	return result, nil
+}
+
+// Profile discovery does not validate integrations. Preserve their default
+// credential references so a subsequently started daemon can resolve them.
+func profileTokenEnv(configured, fallback string) string {
+	if value := strings.TrimSpace(configured); value != "" {
+		return value
+	}
+	return fallback
 }

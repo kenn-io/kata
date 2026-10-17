@@ -422,6 +422,58 @@ func TestLocalProfileEnsureSelectionKeepsSnapshot(t *testing.T) {
 	assert.Equal(t, profile.InstanceUID, resolved.LocalProfile.InstanceUID)
 }
 
+func TestLocalProfileInvalidStartupConfigKeepsRunningDaemon(t *testing.T) {
+	for _, compatible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("compatible=%v", compatible), func(t *testing.T) {
+			profile, root := localProfileFixture(t)
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			// Ambient server trust is not passed to a selected profile's child.
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+			require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("[web]\npublic_origin = \"http://daemon.example\"\n"), 0600))
+			v := "earlier-test-version"
+			if compatible {
+				v = version.Version
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, v, os.Getpid())
+			}))
+			t.Cleanup(server.Close)
+			ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+			require.NoError(t, err)
+			oldStop, oldStart := stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure
+			t.Cleanup(func() { stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure = oldStop, oldStart })
+			stopRunningDaemonsForEnsure = func(context.Context, string, string) error {
+				server.Close()
+				return nil
+			}
+			startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+				return errors.New("unexpected replacement startup")
+			}
+
+			_, err = EnsureResolvedInWorkspace(t.Context(), root)
+
+			if compatible {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, "web.public_origin")
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ping", nil)
+			require.NoError(t, err)
+			response, err := server.Client().Do(req)
+			require.NoError(t, err, "existing daemon must remain available")
+			defer func() { _ = response.Body.Close() }()
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+		})
+	}
+}
+
 func TestLocalProfileWrongLiveUIDCannotReplace(t *testing.T) {
 	profile, root := localProfileFixture(t)
 	observed := "01HZZZZZZZZZZZZZZZZZZZZZ01"

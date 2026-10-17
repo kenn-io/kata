@@ -76,7 +76,7 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 }
 
 func resolveTUIConfig(cmd *cobra.Command, flagValue bool) (config.TUIConfig, error) {
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadConfigSections("tui")
 	if err != nil {
 		return config.TUIConfig{}, err
 	}
