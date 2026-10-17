@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/jsonl"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
@@ -190,7 +191,7 @@ func TestStandaloneCopyPreservesContentWithoutRestoringAuthority(t *testing.T) {
 				if testing.Short() {
 					t.Skip("requires postgres testcontainer")
 				}
-				dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+				dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 				t.Cleanup(cleanup)
 				pg, err := pgstore.Open(ctx, dsn)
 				require.NoError(t, err)

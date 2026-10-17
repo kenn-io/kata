@@ -18,6 +18,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/stretchr/testify/assert"
@@ -28,7 +30,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 const projectAccessCanary = "relay-private-canary"
@@ -43,7 +44,7 @@ func projectAccessBackends(t *testing.T, check func(*testing.T, db.Storage)) {
 				require.NoError(t, err)
 				store = s
 			} else {
-				dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+				dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 				t.Cleanup(cleanup)
 				s, err := pgstore.Open(t.Context(), dsn)
 				require.NoError(t, err)

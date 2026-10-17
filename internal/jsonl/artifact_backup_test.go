@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func artifactBackupStore(t *testing.T, backend string) db.Storage {
@@ -23,7 +24,7 @@ func artifactBackupStore(t *testing.T, backend string) db.Storage {
 	if backend == "sqlite" {
 		store, err = sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "backup.db"))
 	} else {
-		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+		dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 		t.Cleanup(cleanup)
 		store, err = pgstore.Open(t.Context(), dsn)
 	}

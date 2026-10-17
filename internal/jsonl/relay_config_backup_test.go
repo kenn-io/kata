@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // R3/R4/A9: owner backups preserve negotiated upstream configuration and the
@@ -46,7 +47,7 @@ func TestRelayConfigurationOwnerBackup(t *testing.T) {
 				err = Export(ctx, source, &backup, ExportOptions{})
 			}
 			require.NoError(t, err)
-			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+			dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 			t.Cleanup(cleanup)
 			postgres, err := pgstore.Open(ctx, dsn)
 			require.NoError(t, err)

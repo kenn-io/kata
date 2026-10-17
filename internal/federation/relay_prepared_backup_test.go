@@ -10,13 +10,14 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRelayPreparedArtifactBackupRoundTrip(t *testing.T) {
@@ -205,7 +206,7 @@ func newRelayBackupRestoreStore(t *testing.T, backend string) db.Storage {
 		require.NoError(t, err)
 		store = opened
 	} else {
-		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+		dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 		t.Cleanup(cleanup)
 		opened, err := pgstore.Open(t.Context(), dsn)
 		require.NoError(t, err)

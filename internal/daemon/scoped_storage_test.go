@@ -4,11 +4,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestScopedStorageCollectionAndRecurrenceContracts(t *testing.T) {
@@ -20,7 +21,7 @@ func TestScopedStorageCollectionAndRecurrenceContracts(t *testing.T) {
 				if testing.Short() {
 					t.Skip("requires postgres testcontainer")
 				}
-				dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+				dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 				t.Cleanup(cleanup)
 				store, err = pgstore.Open(t.Context(), dsn)
 			} else {

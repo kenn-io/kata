@@ -4,15 +4,16 @@ import (
 	"context"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestEmbeddingArtifactStorage(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -21,7 +22,7 @@ func TestEmbeddingArtifactStorage(t *testing.T) {
 }
 
 func TestArtifactIssuePurgeAfterMove(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -30,7 +31,7 @@ func TestArtifactIssuePurgeAfterMove(t *testing.T) {
 }
 
 func TestArtifactIssueMovePreservesPortableBytes(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -39,7 +40,7 @@ func TestArtifactIssueMovePreservesPortableBytes(t *testing.T) {
 }
 
 func TestArtifactStagingExpiryRetry(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -57,7 +58,7 @@ func TestArtifactStagingExpiryRetry(t *testing.T) {
 }
 
 func TestArtifactStagingByteBudget(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -66,7 +67,7 @@ func TestArtifactStagingByteBudget(t *testing.T) {
 }
 
 func TestArtifactRelayOutbox(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -75,7 +76,7 @@ func TestArtifactRelayOutbox(t *testing.T) {
 }
 
 func TestArtifactManifestAcknowledgedPrefix(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -84,7 +85,7 @@ func TestArtifactManifestAcknowledgedPrefix(t *testing.T) {
 }
 
 func TestArtifactManifestStaging(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -93,7 +94,7 @@ func TestArtifactManifestStaging(t *testing.T) {
 }
 
 func TestArtifactManifestDownload(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -102,7 +103,7 @@ func TestArtifactManifestDownload(t *testing.T) {
 }
 
 func TestArtifactManifestOfferBounds(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -111,7 +112,7 @@ func TestArtifactManifestOfferBounds(t *testing.T) {
 }
 
 func TestArtifactManifestBootstrap(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -120,7 +121,7 @@ func TestArtifactManifestBootstrap(t *testing.T) {
 }
 
 func TestArtifactManifestOutgoingBootstrap(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -129,7 +130,7 @@ func TestArtifactManifestOutgoingBootstrap(t *testing.T) {
 }
 
 func TestArtifactSignedResetManifests(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -141,7 +142,7 @@ func TestArtifactSignedResetManifests(t *testing.T) {
 }
 
 func TestArtifactResetInstallation(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -150,7 +151,7 @@ func TestArtifactResetInstallation(t *testing.T) {
 }
 
 func TestArtifactPopulatedAdoption(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestArtifactPopulatedAdoption(t *testing.T) {
 }
 
 func TestArtifactIssuePurge(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -168,7 +169,7 @@ func TestArtifactIssuePurge(t *testing.T) {
 }
 
 func TestEmbeddingProducerRootOwnership(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -176,7 +177,7 @@ func TestEmbeddingProducerRootOwnership(t *testing.T) {
 	dbtest.RunEmbeddingProducerRootOwnership(t, store)
 }
 func TestEmbeddingProducerIngressOwnership(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -185,7 +186,7 @@ func TestEmbeddingProducerIngressOwnership(t *testing.T) {
 }
 
 func TestDownstreamCannotForgeRootEmbeddingProducer(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -194,7 +195,7 @@ func TestDownstreamCannotForgeRootEmbeddingProducer(t *testing.T) {
 }
 
 func TestEmbeddingProducerRootPropagation(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -202,7 +203,7 @@ func TestEmbeddingProducerRootPropagation(t *testing.T) {
 	dbtest.RunEmbeddingProducerRootPropagation(t, store)
 }
 func TestEmbeddingProducerConfigurationValidation(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -211,7 +212,7 @@ func TestEmbeddingProducerConfigurationValidation(t *testing.T) {
 }
 
 func TestEmbeddingArtifactPruning(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)

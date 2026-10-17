@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // R3/R4: revocation cannot commit while an admitted transaction retains the
@@ -16,7 +17,7 @@ import (
 // without assuming a delay means the revoker has reached the database.
 func TestRelayParentRevocationWaitsForTransaction(t *testing.T) {
 	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

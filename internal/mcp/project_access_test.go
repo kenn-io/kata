@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -14,7 +16,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -27,7 +28,7 @@ func TestProjectAccessMCPScopeRefresh(t *testing.T) {
 				require.NoError(t, err)
 				store = s
 			} else {
-				dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+				dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 				t.Cleanup(cleanup)
 				s, err := pgstore.Open(t.Context(), dsn)
 				require.NoError(t, err)
