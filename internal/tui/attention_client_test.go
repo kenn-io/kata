@@ -135,17 +135,35 @@ func TestAttentionClientClearConflict(t *testing.T) {
 }
 
 func TestAttentionUndoClientForwarding(t *testing.T) {
+	var listRequests, clearRequests int
+	key := notification.MetadataKey("alex")
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			respondJSON(t, w, map[string]any{"api_schema_version": "0.13.0"})
+		} else if r.Method == http.MethodGet {
+			listRequests++
+			require.Equal(t, "/api/v1/issues", r.URL.Path)
+			respondJSON(t, w, map[string]any{"issues": []any{map[string]any{
+				"uid": "01TEST-abc4", "short_id": "abc4", "status": "open",
+				"metadata": map[string]any{key: map[string]any{"from": "sam", "message": "Review"}},
+			}}})
 		} else {
-			respondJSON(t, w, map[string]any{"issues": []any{}})
+			clearRequests++
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "/api/v1/projects/7/issues/abc4/metadata", r.URL.Path)
+			respondJSON(t, w, map[string]any{})
 		}
 	})
 	wrapped := newUndoClient(c)
-	_, _, err := wrapped.ListAttentionRequests(context.Background(), nil, "alex")
+	rows, skipped, err := wrapped.ListAttentionRequests(context.Background(), nil, "alex")
 	require.NoError(t, err)
+	require.Zero(t, skipped)
+	require.Len(t, rows, 1)
+	require.Equal(t, "abc4", rows[0].issue.ShortID)
+	require.Equal(t, "Review", rows[0].message)
+	require.Equal(t, 1, listRequests, "list must reach the wrapped client")
 	require.NoError(t, wrapped.ClearAttentionRequest(context.Background(), 7, "abc4", "key", jsontext.Value(`{}`), "writer"))
+	require.Equal(t, 1, clearRequests, "clear must reach the wrapped client")
 	require.Empty(t, wrapped.pending)
 	unavailable := newUndoClient(&struct{ KataAPI }{})
 	_, _, err = unavailable.ListAttentionRequests(context.Background(), nil, "alex")

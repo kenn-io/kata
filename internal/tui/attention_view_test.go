@@ -5,7 +5,9 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
@@ -39,6 +41,29 @@ func (a *attentionTestAPI) ClearAttentionRequest(_ context.Context, pid int64, r
 	a.clearIfValue = raw
 	a.clearActor = actor
 	return a.clearErr
+}
+
+type attentionCapabilitiesTestAPI struct {
+	*attentionTestAPI
+	tokenListCalls int
+}
+
+func (a *attentionCapabilitiesTestAPI) ListTokens(context.Context) ([]TokenInfo, time.Time, error) {
+	a.tokenListCalls++
+	return []TokenInfo{{ID: 42, Actor: "member"}}, time.Time{}, nil
+}
+
+type attentionProjectsTestAPI struct {
+	*attentionTestAPI
+	projectListCalls int
+}
+
+func (a *attentionProjectsTestAPI) ListProjectsWithStats(context.Context) ([]ProjectSummaryWithStats, error) {
+	a.projectListCalls++
+	return []ProjectSummaryWithStats{{
+		ProjectSummary: ProjectSummary{ID: 7, Name: "example-project"},
+		Stats:          &ProjectStatsSummary{Open: 3, Closed: 1},
+	}}, nil
 }
 
 func attentionFixture(t *testing.T) (Model, *attentionTestAPI) {
@@ -282,6 +307,156 @@ func TestAttentionRestoresDetailNavigationAndFocusAfterResize(t *testing.T) {
 	require.NotNil(t, cmd, "the retained detail must be refreshed after Attention")
 }
 
+func TestAttentionKeepsFocusedDetailVisibleWhenResizedToStacked(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	require.Equal(t, splitlayout.Split, m.layout)
+	origin := testIssue("origin")
+	prior := testIssue("prior")
+	m.view, m.prevView, m.focus = viewList, viewList, focusDetail
+	m.detail = detailModel{
+		issue:    &origin,
+		scopePID: origin.ProjectID,
+		navStack: []detailModel{{issue: &prior, scopePID: prior.ProjectID}},
+	}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m = resizeModel(m, 80, 24)
+	require.Equal(t, splitlayout.Stacked, m.layout)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view,
+		"the pane that had detail focus must remain visible in stacked layout")
+	require.Equal(t, focusDetail, m.focus)
+	require.NotNil(t, m.detail.issue)
+	require.Equal(t, origin.UID, m.detail.issue.UID)
+	require.Len(t, m.detail.navStack, 1)
+	require.Equal(t, prior.UID, m.detail.navStack[0].issue.UID)
+}
+
+func TestAttentionRestoresDetailViewportAfterResize(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 160, 40)
+	origin := testIssue("origin")
+	origin.Body = strings.Repeat("Long detail text for viewport wrapping. ", 400)
+	m.view, m.prevView, m.focus = viewDetail, viewList, focusDetail
+	m.detail = detailModel{issue: &origin, scopePID: origin.ProjectID}
+	m.detail = m.applyDetailViewportCache(m.detail)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m = resizeModel(m, 200, 50)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	expected := m.applyDetailViewportCache(m.detail)
+	require.Equal(t, expected.lastTermWidth, m.detail.lastTermWidth)
+	require.Equal(t, expected.lastTermHeight, m.detail.lastTermHeight)
+	require.Equal(t, expected.lastDetailWidth, m.detail.lastDetailWidth)
+	require.Equal(t, expected.lastDetailHeight, m.detail.lastDetailHeight)
+	width, visible, ok := expected.viewportDims()
+	require.True(t, ok)
+	docLines, _ := expected.detailDocumentLines(width, expected.scrollChrome())
+	require.Equal(t, viewportMaxStart(len(docLines), visible), m.detail.scrollViewportToEnd().scroll,
+		"scroll-to-end must use the resized detail viewport")
+}
+
+func TestAttentionReconcilesListFocusedSplitDetailOnReturn(t *testing.T) {
+	t.Run("changed highlight", func(t *testing.T) {
+		m, _ := attentionFixture(t)
+		m = resizeModel(m, 160, 40)
+		original := testIssue("original")
+		current := testIssue("current")
+		m.view, m.focus = viewList, focusList
+		m.list.issues = []Issue{original}
+		m.detail = detailModel{issue: &original, scopePID: original.ProjectID}
+		m.detail = m.applyDetailViewportCache(m.detail)
+		m, cmd := m.transitionToAttention()
+		m = loadAttention(m, cmd)
+		m.list.issues = []Issue{current}
+		m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+		require.Equal(t, viewList, m.view)
+		require.NotNil(t, m.detail.issue)
+		require.Equal(t, current.UID, m.detail.issue.UID,
+			"list-focused browsing must follow the current highlight after Attention")
+		require.NotNil(t, cmd)
+	})
+
+	t.Run("widened while Attention is open", func(t *testing.T) {
+		m, _ := attentionFixture(t)
+		current := testIssue("current")
+		m.view, m.focus = viewList, focusList
+		m.list.issues = []Issue{current}
+		m.detail = newDetailModel()
+		m, cmd := m.transitionToAttention()
+		m = loadAttention(m, cmd)
+		m = resizeModel(m, 160, 40)
+		require.Equal(t, splitlayout.Split, m.layout)
+		m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+		require.Equal(t, viewList, m.view)
+		require.NotNil(t, m.detail.issue,
+			"widening while Attention is open must populate the split detail pane")
+		require.Equal(t, current.UID, m.detail.issue.UID)
+		require.NotNil(t, cmd)
+	})
+}
+
+func TestAttentionRefreshesProjectsWhenReturning(t *testing.T) {
+	m, a := attentionFixture(t)
+	projectsAPI := &attentionProjectsTestAPI{attentionTestAPI: a}
+	m.api = projectsAPI
+	m.view = viewProjects
+	m.projectStats = map[int64]ProjectStatsSummary{7: {Open: 1}}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewProjects, m.view)
+	require.NotNil(t, cmd, "returning to Projects must fetch current project statistics")
+	msg, ok := cmd().(projectsLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, msg.err)
+	require.NotNil(t, msg.stats)
+	require.Equal(t, 1, projectsAPI.projectListCalls)
+}
+
+func TestAttentionCompletesPendingCredentialsCapabilities(t *testing.T) {
+	m, a := attentionFixture(t)
+	credentialsAPI := &attentionCapabilitiesTestAPI{attentionTestAPI: a}
+	m.api = credentialsAPI
+	m.view, m.prevView = viewCredentials, viewDaemons
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = false
+	m.credentials = credentialAuditState{capabilityPending: true, loading: true, gen: 7}
+	m, cmd := m.transitionToAttention()
+	require.True(t, m.attention.capabilityPending)
+	require.NotNil(t, cmd)
+
+	m, cmd = m.handleAuthCapabilities(authCapabilitiesMsg{
+		connGen: m.connGen,
+		auth:    AuthInfo{Actor: "member", TokenAuditRead: true},
+	})
+	require.False(t, m.credentials.capabilityPending)
+	require.True(t, m.credentials.available)
+	require.True(t, m.credentials.loading)
+	require.NotNil(t, cmd)
+
+	batch, ok := cmd().(tea.BatchMsg)
+	require.True(t, ok, "the capability response must continue both hidden view requests")
+	var gotCredentialResponse, gotAttentionResponse bool
+	for _, child := range batch {
+		switch child().(type) {
+		case credentialsLoadedMsg:
+			gotCredentialResponse = true
+		case attentionLoadedMsg:
+			gotAttentionResponse = true
+		}
+	}
+	require.True(t, gotCredentialResponse)
+	require.True(t, gotAttentionResponse)
+	require.Equal(t, 1, credentialsAPI.tokenListCalls)
+	require.Equal(t, 1, a.listCalls)
+}
+
 func TestAttentionHelpDoesNotReplaceDaemonsBackTarget(t *testing.T) {
 	m, _ := attentionFixture(t)
 	m.view, m.prevView = viewDaemons, viewList
@@ -382,18 +557,6 @@ func TestAttentionCredentialsRefreshContinuesWhileHidden(t *testing.T) {
 	require.Equal(t, viewDaemons, back.prevView,
 		"Attention must preserve Credentials' original back target")
 	require.True(t, back.credentials.refreshScheduled)
-}
-func TestAttentionOpenIsSynchronous(t *testing.T) {
-	m, _ := attentionFixture(t)
-	m, cmd := m.transitionToAttention()
-	m = loadAttention(m, cmd)
-	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, viewDetail, m.view)
-	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	if m.view == viewDetail {
-		m, _ = updateModel(m, cmd())
-	}
-	require.Equal(t, viewAttention, m.view)
 }
 func TestAttentionReturnFlagClears(t *testing.T) {
 	for _, r := range []rune{'P', 'I', 'D', 'F', 'C'} {

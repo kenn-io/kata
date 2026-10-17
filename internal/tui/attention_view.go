@@ -30,9 +30,9 @@ type attentionState struct {
 }
 
 type attentionReturnContext struct {
-	view, prevView viewID
-	detail         detailModel
-	focus          focusPane
+	view, prevView, foreground viewID
+	detail                     detailModel
+	focus                      focusPane
 }
 
 type attentionLoadedMsg struct {
@@ -57,10 +57,11 @@ func (m Model) transitionToAttention() (Model, tea.Cmd) {
 	if m.view != viewAttention && !m.attention.returnToAttention && m.attention.returnContext == nil {
 		m.attention.returnView = m.view
 		m.attention.returnContext = &attentionReturnContext{
-			view:     m.view,
-			prevView: m.prevView,
-			detail:   cloneDetailModel(m.detail),
-			focus:    m.focus,
+			view:       m.view,
+			prevView:   m.prevView,
+			foreground: m.attentionForeground(),
+			detail:     cloneDetailModel(m.detail),
+			focus:      m.focus,
 		}
 		m.attention.allProjects = m.scope.allProjects || m.scope.projectID == 0
 		m.attention.projectID = m.scope.projectID
@@ -75,6 +76,17 @@ func (m Model) transitionToAttention() (Model, tea.Cmd) {
 	m.nextDetailFollowGen++
 	return m.reloadAttention()
 }
+
+func (m Model) attentionForeground() viewID {
+	if m.view == viewHelp {
+		return m.prevView
+	}
+	if m.layout == splitlayout.Split && m.focus == focusDetail {
+		return viewDetail
+	}
+	return m.view
+}
+
 func (m Model) reloadAttention() (Model, tea.Cmd) {
 	m.attention.gen++
 	m.attention.loading = true
@@ -116,16 +128,45 @@ func (m Model) prepareAttentionGlobalExit() (Model, tea.Cmd) {
 	previous := *m.attention.returnContext
 	m = m.leaveAttentionView()
 	m.attention.returnContext = nil
-	m.detail = cloneDetailModel(previous.detail)
+	m.detail = m.applyDetailViewportCache(cloneDetailModel(previous.detail))
 	m.view, m.prevView, m.focus = previous.view, previous.prevView, previous.focus
-	foreground := previous.view
-	if previous.view == viewHelp {
-		foreground = previous.prevView
+	foreground := previous.foreground
+	if previous.view != viewHelp {
+		switch foreground {
+		case viewDetail:
+			m.focus = focusDetail
+			if m.layout == splitlayout.Stacked {
+				m.view = viewDetail
+			}
+		case viewList:
+			m.focus = focusList
+			if m.layout == splitlayout.Stacked {
+				m.view = viewList
+			}
+		}
 	}
-	if m.layout == splitlayout.Split && foreground == viewDetail {
-		m.focus = focusDetail
+
+	var detailCmd tea.Cmd
+	listOwnsDetail := foreground == viewList && previous.focus != focusDetail && len(m.detail.navStack) == 0
+	if m.layout == splitlayout.Split && listOwnsDetail {
+		if issue, ok := pickHighlightedIssue(m.list); !ok {
+			m.nextDetailFollowGen++
+			m.detail = m.applyDetailViewportCache(newDetailModel())
+		} else {
+			pid := detailProjectID(issue, m.scope)
+			if !detailModelMatches(&m.detail, issue.UID, pid) {
+				m, detailCmd = m.scheduleDetailFollow()
+			} else {
+				detailCmd = m.restoredDetailRefetch()
+			}
+		}
+	} else {
+		detailCmd = m.restoredDetailRefetch()
 	}
-	return m, m.restoredDetailRefetch()
+	if m.view == viewProjects {
+		detailCmd = combineCmds(detailCmd, m.fetchProjectsWithStats())
+	}
+	return m, detailCmd
 }
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
