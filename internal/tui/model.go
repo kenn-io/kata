@@ -571,6 +571,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if cleared, ok := msg.(attentionClearedMsg); ok {
+		return m.handleAttentionCleared(cleared)
+	}
 	if loaded, ok := msg.(attentionLoadedMsg); ok {
 		return m.handleAttentionLoaded(loaded)
 	}

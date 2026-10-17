@@ -95,5 +95,5 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 }
 
 func attentionHelpRows(_ Model) [][]helplayout.HelpItem {
-	return [][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "↵", Description: "open"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}
+	return [][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "↵", Description: "open"}, {Key: "c", Description: "clear"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}
 }

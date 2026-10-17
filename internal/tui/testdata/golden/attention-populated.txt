@@ -14,4 +14,4 @@ ore the next run. Please review the retry behavior before the next run. Please r
  run. Please review the retry behavior before the next run. Please review the retry behavior before the next run. Please
  review the retry behavior before the next run.
 
- ↑↓ move▕ ↵ open▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help▕ q quit
+ ↑↓ move▕ ↵ open▕ c clear▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help▕ q quit

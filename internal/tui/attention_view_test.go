@@ -290,3 +290,142 @@ func TestAttentionEntryFencesDetailFollow(t *testing.T) {
 	m = sendKey(m, tea.KeyEscape)
 	require.Equal(t, viewList, m.view)
 }
+
+func TestAttentionClear(t *testing.T) {
+	m, a := attentionFixture(t)
+	m.scope.allProjects = true
+	t.Setenv("KATA_INBOX_USER", "alex/reviewer")
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m = sendRune(m, 'j')
+	selected := a.rows[1]
+	m, cmd = updateModel(m, keyRune('c'))
+	require.True(t, m.attention.clearing)
+	require.Len(t, m.attention.rows, 2)
+	_, again := updateModel(m, keyRune('c'))
+	require.Nil(t, again)
+	_, refresh := updateModel(m, keyRune('r'))
+	require.Nil(t, refresh)
+	msg := cmd()
+	require.Equal(t, 1, a.clearCalls)
+	require.Equal(t, int64(9), a.clearProjectID)
+	require.Equal(t, selected.issue.UID, a.clearRef)
+	require.Equal(t, selected.key, a.clearKey)
+	require.Equal(t, string(selected.raw), string(a.clearIfValue))
+	require.Equal(t, m.list.actor, a.clearActor)
+	a.rows = a.rows[:1]
+	m, cmd = updateModel(m, msg)
+	m = loadAttention(m, cmd)
+	require.False(t, m.attention.clearing)
+	require.Len(t, m.attention.rows, 1)
+	require.Zero(t, m.attention.cursor)
+	require.Equal(t, 2, a.listCalls)
+}
+func TestAttentionClearConflict(t *testing.T) {
+	m, a := attentionFixture(t)
+	a.clearErr = &APIError{Status: 409, Code: "metadata_guard_failed"}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, cmd = updateModel(m, keyRune('c'))
+	m, cmd = updateModel(m, cmd())
+	require.Equal(t, "Request changed; review it before clearing", m.toast.text)
+	require.False(t, m.attention.clearing)
+	batch := cmd().(tea.BatchMsg)
+	m = loadAttention(m, batch[0])
+	require.Equal(t, 2, a.listCalls)
+	require.Equal(t, 1, a.clearCalls)
+	require.Len(t, m.attention.rows, 2)
+}
+func TestAttentionClearFailure(t *testing.T) {
+	for _, err := range []error{&mutationPreflightError{errors.New("requires 0.13.0")}, &APIError{Status: 403, Code: "forbidden"}, errors.New("connection lost")} {
+		t.Run(err.Error(), func(t *testing.T) {
+			m, a := attentionFixture(t)
+			a.clearErr = err
+			m, cmd := m.transitionToAttention()
+			m = loadAttention(m, cmd)
+			m, cmd = updateModel(m, keyRune('c'))
+			m, cmd = updateModel(m, cmd())
+			require.NotNil(t, m.toast)
+			require.Len(t, m.attention.rows, 2)
+			require.False(t, m.attention.clearing)
+			if err.Error() == "connection lost" {
+				batch := cmd().(tea.BatchMsg)
+				m = loadAttention(m, batch[0])
+				require.Equal(t, 2, a.listCalls)
+			} else {
+				require.Equal(t, 1, a.listCalls)
+			}
+		})
+	}
+}
+func TestAttentionClearGate(t *testing.T) {
+	m, a := attentionFixture(t)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = false
+	m, cmd = updateModel(m, keyRune('c'))
+	require.NotNil(t, cmd)
+	require.Contains(t, m.toast.text, "Checking daemon permissions")
+	require.Zero(t, a.clearCalls)
+	m.authCapabilitiesReady = true
+	m.issueScoped = true
+	m.scopedWritable = false
+	_, cmd = updateModel(m, keyRune('c'))
+	require.Nil(t, cmd)
+	m.issueScoped = false
+	m.attention.err = errors.New("refresh failed")
+	m, cmd = updateModel(m, keyRune('c'))
+	require.NotNil(t, cmd)
+	_ = cmd()
+	require.Equal(t, 1, a.clearCalls)
+	m.attention.clearing = false
+	m.attention.rows = nil
+	_, cmd = updateModel(m, keyRune('c'))
+	require.Nil(t, cmd)
+}
+func TestAttentionClearStaleCompletion(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m.connGen = 3
+	m.attention.gen = 7
+	m.attention.clearing = true
+	for _, msg := range []attentionClearedMsg{{connGen: 2, gen: 7}, {connGen: 3, gen: 6}} {
+		next, cmd := m.handleAttentionCleared(msg)
+		require.Nil(t, cmd)
+		require.True(t, next.attention.clearing)
+		require.Equal(t, m.attention.rows, next.attention.rows)
+	}
+}
+func TestAttentionClearFencesEarlierRead(t *testing.T) {
+	m, a := attentionFixture(t)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, cmd = updateModel(m, keyRune('r'))
+	oldRead := cmd()
+	m, cmd = updateModel(m, keyRune('c'))
+	clear := cmd()
+	a.rows = a.rows[1:]
+	m, cmd = updateModel(m, clear)
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, oldRead)
+	require.Len(t, m.attention.rows, 1)
+	require.Equal(t, a.rows[0].issue.UID, m.attention.rows[0].issue.UID)
+	require.Equal(t, 3, a.listCalls)
+}
+
+func TestAttentionClearDetailReturn(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, clear := updateModel(m, keyRune('c'))
+	require.True(t, m.attention.clearing)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = updateModel(m, clear()) // completion is stale while detail owns the foreground.
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, cmd = updateModel(m, cmd())
+	m = loadAttention(m, cmd)
+	require.Equal(t, viewAttention, m.view)
+	require.False(t, m.attention.clearing)
+}
