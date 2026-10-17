@@ -83,6 +83,7 @@ var storageScenarios = []scenario{
 	{name: "comment reply federation", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject"}, run: checkCommentReplyFederation},
 	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
 	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
+	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "creation pagination precision", methods: []string{"ListIssues", "ListAllIssues", "SearchFTS"}, run: checkCreationPaginationPrecision},
 	{name: "list pagination", methods: []string{"ListIssues", "ListAllIssues", "CountIssues", "CountAllIssues"}, run: checkListPagination},

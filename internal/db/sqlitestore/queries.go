@@ -958,6 +958,44 @@ func (d *Store) IssueByUID(ctx context.Context, issueUID string, include db.Incl
 	return scanIssue(ctx, row)
 }
 
+// IssuesByUIDs applies IssueByUID's filters to a batch, keyed by UID.
+func (d *Store) IssuesByUIDs(ctx context.Context, issueUIDs []string, include db.IncludeDeleted) (map[string]db.Issue, error) {
+	out := make(map[string]db.Issue, len(issueUIDs))
+	const chunk = 500
+	for start := 0; start < len(issueUIDs); start += chunk {
+		slice := issueUIDs[start:min(start+chunk, len(issueUIDs))]
+		args := make([]any, 0, len(slice))
+		for _, uid := range slice {
+			args = append(args, uid)
+		}
+		q := issueSelect + ` WHERE i.uid IN (` + strings.TrimSuffix(strings.Repeat("?,", len(slice)), ",") + `)`
+		if include == db.IncludeDeletedNo {
+			q += ` AND i.deleted_at IS NULL`
+		}
+		q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
+		if err := d.scanIssuesByUID(ctx, out, q, args); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (d *Store) scanIssuesByUID(ctx context.Context, out map[string]db.Issue, q string, args []any) error {
+	rows, err := d.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("issues by uids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		issue, err := scanIssue(ctx, rows)
+		if err != nil {
+			return err
+		}
+		out[issue.UID] = issue
+	}
+	return rows.Err()
+}
+
 // IssueQualifiersByUIDs resolves each requested issue UID to its current
 // project (id + name) and short_id, across ALL projects — UIDs are
 // globally unique, so no project scope is applied. UIDs that don't

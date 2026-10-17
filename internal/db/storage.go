@@ -120,6 +120,9 @@ type Storage interface {
 	IssueByID(ctx context.Context, id int64) (Issue, error)
 	IssueByShortID(ctx context.Context, projectID int64, shortID string, include IncludeDeleted) (Issue, error)
 	IssueByUID(ctx context.Context, issueUID string, include IncludeDeleted) (Issue, error)
+	// IssuesByUIDs applies IssueByUID's filters to a batch, keyed by UID.
+	// Unknown, deleted (unless included) and out-of-scope UIDs are omitted.
+	IssuesByUIDs(ctx context.Context, issueUIDs []string, include IncludeDeleted) (map[string]Issue, error)
 	IssueUIDPrefixMatch(ctx context.Context, prefix string, limit int, include IncludeDeleted) ([]Issue, error)
 	ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error)
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)

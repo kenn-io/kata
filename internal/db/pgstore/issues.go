@@ -271,6 +271,33 @@ func (s *Store) IssueByUID(ctx context.Context, uid string, include db.IncludeDe
 	return scanIssue(ctx, s.QueryRowContext(ctx, query, args...))
 }
 
+// IssuesByUIDs applies IssueByUID's filters to a batch, keyed by UID.
+func (s *Store) IssuesByUIDs(ctx context.Context, uids []string, include db.IncludeDeleted) (map[string]db.Issue, error) {
+	issues := make(map[string]db.Issue, len(uids))
+	if len(uids) == 0 {
+		return issues, nil
+	}
+	query := issueSelect + ` WHERE i.uid = ANY($1::text[])`
+	if include == db.IncludeDeletedNo {
+		query += ` AND i.deleted_at IS NULL`
+	}
+	args := []any{uids}
+	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
+	rows, err := s.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		issue, err := scanIssue(ctx, rows)
+		if err != nil {
+			return nil, err
+		}
+		issues[issue.UID] = issue
+	}
+	return issues, mapSQLError(rows.Err(), nil)
+}
+
 // IssueUIDPrefixMatch returns deterministic UID-prefix matches.
 func (s *Store) IssueUIDPrefixMatch(
 	ctx context.Context,
