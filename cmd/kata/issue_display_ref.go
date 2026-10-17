@@ -26,19 +26,31 @@ func issueOutputFallback(issue issueIdentityForOutput, err error) (string, error
 // issueRefForOutput keeps references usable in the requested project context.
 // Display lookup failures after a committed write fall back to stable identity.
 func issueRefForOutput(a daemonAPI, requestedID int64, requestedName string, issue issueIdentityForOutput) (string, error) {
+	ref, _, err := issueRefAndProjectForOutput(a, requestedID, requestedName, issue)
+	return ref, err
+}
+
+// issueRefAndProjectForOutput also returns the current display project for
+// clients which compose their own identity fields. A stable UID fallback
+// leaves the project unknown rather than reporting the former project.
+func issueRefAndProjectForOutput(a daemonAPI, requestedID int64, requestedName string, issue issueIdentityForOutput) (string, string, error) {
 	if issue.ProjectID == 0 || issue.ProjectID == requestedID {
-		return textsafe.Line(issue.ShortID), nil
+		return textsafe.Line(issue.ShortID), requestedName, nil
+	}
+	fallback := func(err error) (string, string, error) {
+		ref, err := issueOutputFallback(issue, err)
+		return ref, "", err
 	}
 	c, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
-		return issueOutputFallback(issue, err)
+		return fallback(err)
 	}
 	response, callErr := c.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: issue.ProjectID}})
 	if response == nil {
-		return issueOutputFallback(issue, externalCLITransportError(response, callErr))
+		return fallback(externalCLITransportError(response, callErr))
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-		return issueOutputFallback(issue, err)
+		return fallback(err)
 	}
 	var body struct {
 		Project struct {
@@ -46,15 +58,15 @@ func issueRefForOutput(a daemonAPI, requestedID int64, requestedName string, iss
 		} `json:"project"`
 	}
 	if err := json.Unmarshal(response.Body, &body); err != nil {
-		return issueOutputFallback(issue, err)
+		return fallback(err)
 	}
 	if body.Project.Name == "" {
-		return issueOutputFallback(issue, fmt.Errorf("project display lookup returned no name"))
+		return fallback(fmt.Errorf("project display lookup returned no name"))
 	}
 	if body.Project.Name == requestedName {
-		return textsafe.Line(issue.ShortID), nil
+		return textsafe.Line(issue.ShortID), body.Project.Name, nil
 	}
-	return textsafe.Line(body.Project.Name + "#" + issue.ShortID), nil
+	return textsafe.Line(body.Project.Name + "#" + issue.ShortID), body.Project.Name, nil
 }
 
 func mutationIssueRefForOutput(cmd *cobra.Command, data []byte, requestedProject string) (string, error) {
