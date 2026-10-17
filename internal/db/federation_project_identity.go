@@ -79,7 +79,8 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 			nativeMove := event.Type == "issue.moved" && payload["snapshot"] != nil
 			// Match the ordinary native feed: current ownership, original
 			// envelope, or an outbound move from a still-joined source/transit.
-			if !joinedIDs[owners[*event.IssueUID]] && !joinedIDs[event.ProjectID] && !(nativeMove && joinedUIDs[from]) {
+			exposed := joinedIDs[owners[*event.IssueUID]] || joinedIDs[event.ProjectID] || (nativeMove && joinedUIDs[from])
+			if !exposed {
 				continue
 			}
 			if event.ProjectID == project.ID {
