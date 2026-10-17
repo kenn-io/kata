@@ -1083,6 +1083,8 @@ and reports `issue_closed` when changed. Each successful mutation with
 that reuse a create, already-closed issues, failed writes, dry runs, and reopen
 operations send nothing. Creates without an acknowledged `changed: true`
 response remain uncounted across all interfaces.
+The daemon rejects action events with a missing or invalid `surface` with
+HTTP 400 and `invalid_telemetry_property`.
 A close, reopen, close sequence counts two closes;
 undoing a reopen in the TUI counts the resulting close too. CLI actions use the
 same terminal and agent-mode rules above. Reporting happens before follow-up

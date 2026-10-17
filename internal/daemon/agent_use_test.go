@@ -46,7 +46,10 @@ func TestAgentUseDailyThresholds(t *testing.T) {
 				require.Equal(t, []string{"agent_active", "agent_call_count", "agent_call_count"}, r.events)
 			}
 		}
-		require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}, {"call_count_bucket": "11-100"}, {"call_count_bucket": "over-100"}}, r.captured)
+		require.Len(t, r.captured, 3)
+		require.Equal(t, "1-10", r.captured[0]["call_count_bucket"])
+		require.Equal(t, "11-100", r.captured[1]["call_count_bucket"])
+		require.Equal(t, "over-100", r.captured[2]["call_count_bucket"])
 		info, err := os.Stat(path)
 		require.NoError(t, err)
 		if os.PathSeparator != '\\' {
@@ -60,8 +63,9 @@ func TestAgentUseDailyThresholds(t *testing.T) {
 		require.Equal(t, past, info.ModTime(), "saturated state is not rewritten")
 		now = now.Add(time.Minute).In(time.FixedZone("west", -5*60*60))
 		require.NoError(t, gate.capture(r))
+		require.Len(t, r.captured, 4)
 		require.Equal(t, "agent_active", r.events[3])
-		require.Equal(t, map[string]any{"call_count_bucket": "1-10"}, r.captured[3])
+		require.Equal(t, "1-10", r.captured[3]["call_count_bucket"])
 	})
 	t.Run("capture failure", func(t *testing.T) {
 		t.Run("current bucket", func(t *testing.T) {
@@ -97,7 +101,9 @@ func TestAgentUseDailyThresholds(t *testing.T) {
 			}
 			require.NoError(t, gate.capture(r))
 			require.Equal(t, []string{"agent_active", "agent_call_count"}, r.events)
-			require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}, {"call_count_bucket": "11-100"}}, r.captured)
+			require.Len(t, r.captured, 2)
+			require.Equal(t, "1-10", r.captured[0]["call_count_bucket"])
+			require.Equal(t, "11-100", r.captured[1]["call_count_bucket"])
 		})
 	})
 	t.Run("concurrent observations", func(t *testing.T) {

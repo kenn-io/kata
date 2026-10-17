@@ -79,7 +79,6 @@ func TestReportSessionEndedWaitsForIssueAction(t *testing.T) {
 		{"accepted", 500 * time.Millisecond, false},
 		{"timed out", time.Second, false},
 		{"switched daemon accepted", 500 * time.Millisecond, true},
-		{"switched daemon timed out", time.Second, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

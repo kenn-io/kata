@@ -114,6 +114,12 @@ func TestValidSurfaceAllowlist(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContainsf(t, props, "surface", "surface %#v must be dropped", surface)
 	}
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		for _, properties := range []map[string]any{nil, {"surface": ""}, {"surface": "desktop"}, {"surface": 1}} {
+			_, err := reporter.SanitizeProperties(event, properties)
+			assert.ErrorIs(t, err, ErrInvalidProperty, "%s with %#v must be rejected", event, properties)
+		}
+	}
 	for _, bucket := range []string{"under_1m", "1_to_5m", "5_to_30m", "over_30m"} {
 		props, err := reporter.SanitizeProperties("session_ended", map[string]any{"surface": "tui", "duration_bucket": bucket, "seconds": 120})
 		require.NoError(t, err)

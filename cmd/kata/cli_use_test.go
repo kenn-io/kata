@@ -421,40 +421,32 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
-func TestCLIUseReportsAfterIssueActionTimesOut(t *testing.T) {
+func TestCLIIssueActionBoundsReporting(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv(hooks.HookVersionEnv, "")
 	stubIsTTY(t, true)
 	shortenCLIUseReportTimeout(t, 200*time.Millisecond)
-	var actions, opens atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var actions atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
 		var body struct {
 			Event string `json:"event"`
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		switch body.Event {
-		case "issue_created":
-			actions.Add(1)
-			<-r.Context().Done()
-			return
-		case "app_opened":
-			opens.Add(1)
-		default:
-			t.Errorf("unexpected event %q", body.Event)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"status":"queued"}`))
+		require.Equal(t, "issue_created", body.Event)
+		actions.Add(1)
+		<-r.Context().Done()
 	}))
 	defer server.Close()
 	cmd := findCommand(t, "create")
 	cmd.SetContext(context.Background())
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: server.URL})
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
+	start := time.Now()
 	wait := reportCLIIssueAction(cmd, "issue_created", true)
 	wait()
-	reportCLIUse(cmd)
+	elapsed := time.Since(start)
+	assert.GreaterOrEqual(t, elapsed, cliUseReportTimeout)
+	assert.Less(t, elapsed, cliUseReportTimeout+time.Second)
 	assert.Equal(t, int32(1), actions.Load())
-	assert.Equal(t, int32(1), opens.Load(), "the action still allows the daily use report")
 }

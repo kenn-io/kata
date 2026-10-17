@@ -23,6 +23,9 @@ const (
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 
+// ErrInvalidProperty is returned when a required event property is missing or invalid.
+var ErrInvalidProperty = posthog.ErrInvalidProperty
+
 // Client is the daemon-facing telemetry reporter contract. EventAllowed lets
 // the UI capture route reject events outside the allowlist.
 type Client interface {
@@ -74,10 +77,10 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("surface", validSurfaces),
 		),
 		posthog.WithAllowedEvent("issue_created",
-			posthog.AllowProperty("surface", validSurfaces),
+			posthog.RequireProperty("surface", validSurfaces),
 		),
 		posthog.WithAllowedEvent("issue_closed",
-			posthog.AllowProperty("surface", validSurfaces),
+			posthog.RequireProperty("surface", validSurfaces),
 		),
 		posthog.WithAllowedEvent("session_ended",
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),

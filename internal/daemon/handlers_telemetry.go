@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -182,6 +183,10 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			capture()
 		}
 		if err != nil {
+			if errors.Is(err, telemetry.ErrInvalidProperty) {
+				return nil, api.NewError(http.StatusBadRequest, "invalid_telemetry_property",
+					"invalid telemetry property", "", nil)
+			}
 			return nil, api.NewError(http.StatusInternalServerError, "telemetry_capture_failed",
 				"capture telemetry event failed", "", nil)
 		}

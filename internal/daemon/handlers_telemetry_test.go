@@ -399,7 +399,7 @@ func (*fakeTelemetryReporter) SanitizeProperties(event string, properties map[st
 func TestCaptureCoreActionsUsesProductionAllowlist(t *testing.T) {
 	for _, event := range []string{"issue_created", "issue_closed"} {
 		t.Run(event, func(t *testing.T) {
-			for _, surface := range []string{"web", "tui", "cli", "off-list", ""} {
+			for _, surface := range []string{"web", "tui", "cli", ""} {
 				t.Run(surface, func(t *testing.T) {
 					reporter := &fakeTelemetryReporter{}
 					server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
@@ -411,17 +411,23 @@ func TestCaptureCoreActionsUsesProductionAllowlist(t *testing.T) {
 					require.NoError(t, err)
 					for range 2 {
 						response := server.post(t.Context(), t, string(body))
+						if surface == "" {
+							require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+							assert.Equal(t, "invalid_telemetry_property", decodeErrorCode(t, response))
+							continue
+						}
 						require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 						assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+					}
+					if surface == "" {
+						assert.Empty(t, reporter.events)
+						assert.Empty(t, reporter.captured)
+						return
 					}
 					assert.Equal(t, []string{event, event}, reporter.events)
 					for _, captured := range reporter.captured {
 						assert.NotContains(t, captured, "title")
-						if surface == "" || surface == "off-list" {
-							assert.NotContains(t, captured, "surface")
-						} else {
-							assert.Equal(t, surface, captured["surface"])
-						}
+						assert.Equal(t, surface, captured["surface"])
 					}
 				})
 			}
