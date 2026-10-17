@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # Configuration
@@ -111,7 +111,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
 | `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`codex` or `claude`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override Claude Code and Codex environment context. |
-| `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
+| `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_AUTH_TOKEN_FILE` | Overrides `[auth].token_file`. A nonempty `KATA_AUTH_TOKEN` continues to win. A selected file failure stops startup and client construction. |

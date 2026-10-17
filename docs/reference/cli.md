@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-14
+last_edited: 2026-10-17
 ---
 
 # CLI reference
@@ -1762,6 +1762,15 @@ Esc from the Inbox list restores the browsing context and its filters. If no
 project is designated, the TUI shows a notice. [Choose the Inbox project](metadata.md#project-inbox-designation)
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
+
+Press `T` to open Attention: the requests `kata notify` addressed to you, read
+from open issues in the current project or across all projects when the TUI is
+in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticated
+actor, else the TUI actor. Rows show the issue, the sender and any
+`work.attention` state; the panel below shows the message. Enter opens the issue
+and Esc returns; `c` clears the selected request (daemon API `0.13.0` or newer,
+guarded against a concurrent replacement); `r` refreshes. Press `T` or Esc to
+return to the previous view.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
