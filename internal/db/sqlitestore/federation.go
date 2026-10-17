@@ -1191,6 +1191,12 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil); err != nil {
 		return err
 	}
+	if err := db.RecordFederationCurrentProjectResets(ctx, tx, db.FederationPulledEventUIDs(ctx), func(project db.Project) (int64, error) {
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
+		return event.ID, err
+	}); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit federated materialization: %w", err)
 	}

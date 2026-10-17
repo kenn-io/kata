@@ -407,7 +407,13 @@ func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var applyCtx context.Context
 		applyCtx, resets = db.WithFederationMoveResetCapture(ctx)
-		return s.materializeFederatedProjectTx(applyCtx, tx, projectID, true, nil, nil)
+		if err := s.materializeFederatedProjectTx(applyCtx, tx, projectID, true, nil, nil); err != nil {
+			return err
+		}
+		return db.RecordFederationCurrentProjectResets(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx), func(project db.Project) (int64, error) {
+			event, err := s.insertEventTx(applyCtx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
+			return event.ID, err
+		})
 	})
 	if err == nil && resets != nil {
 		db.CommitFederationMoveResets(ctx, resets.Resets)

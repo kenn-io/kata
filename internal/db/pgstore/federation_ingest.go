@@ -315,6 +315,9 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
+		if err := db.RecordFederationCurrentProjectResets(ctx, tx, result.InsertedEventUIDs, nil); err != nil {
+			return err
+		}
 		result.Resets = resets.Resets
 		return nil
 	})
