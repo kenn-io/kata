@@ -36,6 +36,8 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	if msg.connGen != m.connGen {
 		return m, nil
 	}
+	attentionPending := m.attentionVisible() && m.attention.capabilityPending
+	credentialsPending := m.credentialsActive() && m.credentials.capabilityPending
 	m.authCapabilitiesRequired = true
 	if msg.err != nil {
 		m.authCapabilitiesReady = false
@@ -44,10 +46,17 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 		var apiError *APIError
 		m.activeAuthRejected = errors.As(msg.err, &apiError) && apiError != nil && apiError.Status == http.StatusUnauthorized
 		m.input = inputState{}
-		if m.view == viewCredentials && m.credentials.capabilityPending {
+		if attentionPending {
+			m.attention.capabilityPending = false
+			m.attention.loading = false
+			m.attention.err = msg.err
+		}
+		if credentialsPending {
 			m.credentials.capabilityPending = false
 			m.credentials.loading = false
 			m.credentials.err = msg.err
+		}
+		if attentionPending || credentialsPending {
 			return m, nil
 		}
 		m.toast = &toast{
@@ -80,15 +89,21 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	if !m.inputMutationAllowed() {
 		m.input = inputState{}
 	}
-	if m.view == viewCredentials && m.credentials.capabilityPending {
+	var viewCmd tea.Cmd
+	if credentialsPending {
 		m.credentials.capabilityPending = false
 		m.credentials.available = m.tokenAuditRead
 		m.credentials.loading = m.credentials.available
 		if m.credentials.available {
-			return m, combineCmds(m.fetchCredentials(m.credentials.gen), expiryCmd)
+			viewCmd = combineCmds(viewCmd, m.fetchCredentials(m.credentials.gen))
 		}
 	}
-	return m, expiryCmd
+	if attentionPending {
+		next, cmd := m.reloadAttention()
+		m = next
+		viewCmd = combineCmds(viewCmd, cmd)
+	}
+	return m, combineCmds(viewCmd, expiryCmd)
 }
 
 func (m Model) inputMutationAllowed() bool {

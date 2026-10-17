@@ -147,7 +147,7 @@ func (m Model) fetchCredentials(gen uint64) tea.Cmd {
 }
 
 func (m Model) handleCredentialsLoaded(msg credentialsLoadedMsg) (Model, tea.Cmd) {
-	if m.view != viewCredentials || m.staleConnMsg(msg.connGen) || msg.gen != m.credentials.gen {
+	if !m.credentialsActive() || m.staleConnMsg(msg.connGen) || msg.gen != m.credentials.gen {
 		return m, nil
 	}
 	m.credentials.loading = false
@@ -178,11 +178,31 @@ func (m Model) scheduleCredentialsRefresh(gen uint64) tea.Cmd {
 }
 
 func (m Model) handleCredentialsRefreshTick(msg credentialsRefreshTickMsg) (Model, tea.Cmd) {
-	if m.view != viewCredentials || m.staleConnMsg(msg.connGen) ||
+	if !m.credentialsActive() || m.staleConnMsg(msg.connGen) ||
 		msg.gen != m.credentials.gen || !m.credentials.available {
 		return m, nil
 	}
 	m.credentials.refreshScheduled = false
 	m.credentials.loading = true
 	return m, m.fetchCredentials(msg.gen)
+}
+
+func (m Model) credentialsActive() bool {
+	if m.view == viewCredentials {
+		return true
+	}
+	context := m.attention.returnContext
+	if context == nil || context.view != viewCredentials {
+		return false
+	}
+	switch m.view {
+	case viewAttention:
+		return true
+	case viewDetail:
+		return m.attention.returnToAttention
+	case viewHelp:
+		return m.prevView == viewAttention || m.attention.returnToAttention
+	default:
+		return false
+	}
 }

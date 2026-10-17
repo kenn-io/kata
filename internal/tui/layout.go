@@ -101,6 +101,27 @@ func (m Model) toggleLayout() (Model, tea.Cmd) {
 // touches. Other invariants (gen counters, formGen, modal state,
 // SSE state) live on Model and are likewise untouched.
 func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
+	// Attention owns its own saved browsing context and reconciles that
+	// context when it closes. Do not retarget its hidden detail pane here.
+	if m.attentionVisible() {
+		return m, nil
+	}
+	coveredView := m.view != viewList && m.view != viewDetail
+	if coveredView {
+		if prev == splitlayout.Split && m.layout == splitlayout.Stacked &&
+			(m.prevView == viewList || m.prevView == viewDetail) {
+			// Keep the overlay visible, but make its return target match
+			// the pane that was focused before the layout narrowed.
+			if m.focus == focusDetail && m.detail.issue != nil {
+				m.prevView = viewDetail
+			} else {
+				m.prevView = viewList
+			}
+		}
+		if prev != splitlayout.Stacked || m.layout != splitlayout.Split {
+			return m, nil
+		}
+	}
 	if prev == splitlayout.Split && m.layout == splitlayout.Stacked {
 		// Coming back to the stacked layout: pick the view that
 		// matches the focused pane so the user keeps seeing the
@@ -113,11 +134,14 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if prev == splitlayout.Stacked && m.layout == splitlayout.Split {
-		// Entering split: derive focus from the view the user was
-		// looking at. viewHelp / viewEmpty fall through to focusList
-		// (the right-hand pane is informational; the list is what
-		// they should be navigating).
-		if m.view == viewDetail && m.detail.issue != nil {
+		// Entering split under a full-screen view: keep that view in
+		// front while updating the covered browsing pane. Its previous
+		// view records whether the user was looking at the list or detail.
+		foreground := m.view
+		if coveredView {
+			foreground = m.prevView
+		}
+		if foreground == viewDetail && m.detail.issue != nil {
 			m.focus = focusDetail
 		} else {
 			m.focus = focusList

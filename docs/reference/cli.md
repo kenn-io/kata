@@ -1775,6 +1775,18 @@ project is designated, the TUI shows a notice. [Choose the Inbox project](metada
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
 
+Press `T` to open Attention: the requests `kata notify` addressed to you, read
+from open issues in the current project or across all projects when the TUI is
+in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticated
+actor, else the TUI actor. The table headings are `#`, `attention`, `title`, and
+`owner`: attention shows `work.attention` (`needs-human`, `stuck`, `ok`, or a
+dim dash when empty), and owner shows the notification sender. The panel below
+shows the message. Enter opens the ordinary issue detail with its editing and
+comment actions. Esc or Backspace returns to the same request and scroll
+position; `c` clears the selected request
+(daemon API `0.13.0` or newer, guarded against a concurrent replacement);
+`r` refreshes. Press `T` or Esc to return to the previous view.
+
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
 including close, reopen, owner, priority, label, body, and newly added parent,

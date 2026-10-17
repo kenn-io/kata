@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"slices"
 	"sync"
@@ -311,4 +312,19 @@ func (c *undoClient) AddCommentReply(ctx context.Context, pid int64, ref, body, 
 	return c.boundaryWrite(ctx, "comment addition cannot be undone", func() (*MutationResp, error) {
 		return client.AddCommentReply(ctx, pid, ref, body, actor, target, kind, force, key)
 	})
+}
+
+func (c *undoClient) ListAttentionRequests(ctx context.Context, projectID *int64, recipient string) ([]attentionRequest, int, error) {
+	api, ok := c.KataAPI.(attentionAPI)
+	if !ok {
+		return nil, 0, errors.New("attention client unavailable")
+	}
+	return api.ListAttentionRequests(ctx, projectID, recipient)
+}
+func (c *undoClient) ClearAttentionRequest(ctx context.Context, projectID int64, ref, key string, raw jsontext.Value, actor string) error {
+	api, ok := c.KataAPI.(attentionAPI)
+	if !ok {
+		return errors.New("attention client unavailable")
+	}
+	return api.ClearAttentionRequest(ctx, projectID, ref, key, raw, actor)
 }

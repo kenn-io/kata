@@ -64,8 +64,10 @@ func (m Model) mouseWheelAt(delta, x int) (Model, tea.Cmd) {
 			m.focus = focusDetail
 			return m.mouseDetailWheel(delta), nil
 		}
+		m, browseCmd := m.prepareAttentionListNavigation()
 		m.focus = focusList
-		return m.mouseListWheel(delta)
+		next, listCmd := m.mouseListWheel(delta)
+		return next, combineCmds(browseCmd, listCmd)
 	}
 	if m.view == viewDetail {
 		return m.mouseDetailWheel(delta), nil
@@ -107,8 +109,10 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 	}
 	if m.layout == splitlayout.Split {
 		if x < splitConfig.ListWidth(m.width) {
+			m, browseCmd := m.prepareAttentionListNavigation()
 			m.focus = focusList
-			return m.mouseListClick(splitListRowY(y))
+			next, listCmd := m.mouseListClick(splitListRowY(y))
+			return next, combineCmds(browseCmd, listCmd)
 		}
 		m.focus = focusDetail
 		return m, nil

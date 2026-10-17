@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -152,6 +153,25 @@ func TestScreenViewsThroughModelAndDaemon(t *testing.T) {
 	defer recorder.mu.Unlock()
 	require.Len(t, recorder.captured, 1)
 	assert.Subset(t, recorder.captured[0], map[string]any{"screen": "inbox", "surface": "tui"})
+}
+
+func TestAttentionScreenViewsThroughModelAndDaemon(t *testing.T) {
+	for _, layout := range []splitlayout.Mode{splitlayout.Stacked, splitlayout.Split} {
+		t.Run(fmt.Sprint(layout), func(t *testing.T) {
+			recorder := &recordingTelemetry{}
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+			m := initialModel(Options{})
+			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.width, m.view, m.layout = 160, viewAttention, layout
+			m.focus = focusDetail
+			_, cmd := m.Update(nil)
+			runCmd(cmd)
+			recorder.mu.Lock()
+			defer recorder.mu.Unlock()
+			require.Len(t, recorder.captured, 1)
+			assert.Subset(t, recorder.captured[0], map[string]any{"screen": "attention", "surface": "tui"})
+		})
+	}
 }
 
 func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
