@@ -926,9 +926,9 @@ func TestAttentionClearStaleCompletion(t *testing.T) {
 	m, cmd := m.transitionToAttention()
 	m = loadAttention(m, cmd)
 	m.connGen = 3
-	m.attention.gen = 7
+	m.attention.clearGen = 7
 	m.attention.clearing = true
-	for _, msg := range []attentionClearedMsg{{connGen: 2, gen: 7}, {connGen: 3, gen: 6}} {
+	for _, msg := range []attentionClearedMsg{{connGen: 2, clearGen: 7}, {connGen: 3, clearGen: 6}} {
 		next, cmd := m.handleAttentionCleared(msg)
 		require.Nil(t, cmd)
 		require.True(t, next.attention.clearing)
@@ -965,6 +965,65 @@ func TestAttentionClearDetailReturn(t *testing.T) {
 	m = loadAttention(m, cmd)
 	require.Equal(t, viewAttention, m.view)
 	require.False(t, m.attention.clearing)
+}
+
+func TestAttentionClearCompletionSurvivesReturnFetch(t *testing.T) {
+	m, a := attentionFixture(t)
+	m.layout = splitlayout.Stacked
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, clearCmd := updateModel(m, keyRune('c'))
+	require.True(t, m.attention.clearing)
+
+	// Return to Attention and let its fresh read finish before the write.
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, viewDetail, m.view)
+	require.True(t, m.attention.returnToAttention)
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.NotNil(t, cmd, "stacked detail back should dispatch the pop event")
+	m, cmd = updateModel(m, cmd())
+	require.Equal(t, viewAttention, m.view)
+	m = loadAttention(m, cmd)
+	require.Len(t, m.attention.rows, 2)
+
+	// The daemon commits the clear after the return read captured the old row.
+	a.rows = a.rows[1:]
+	m, cmd = updateModel(m, clearCmd())
+	require.False(t, m.attention.clearing)
+	require.NotNil(t, cmd, "a successful hidden clear must refresh the visible Attention view")
+	m = loadAttention(m, cmd)
+
+	require.Len(t, m.attention.rows, 1)
+	require.Equal(t, a.rows[0].issue.UID, m.attention.rows[0].issue.UID)
+}
+
+func TestAttentionReturnContextReceivesMutationFailure(t *testing.T) {
+	m, _ := attentionFixture(t)
+	issue := testIssue("issue1")
+	m.view = viewDetail
+	m.detail = detailModel{issue: &issue, gen: 7, scopePID: issue.ProjectID}
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+
+	failed := mutationDoneMsg{
+		connGen: m.connGen,
+		origin:  "detail",
+		gen:     m.detail.gen,
+		kind:    "reopen",
+		err:     errors.New("permission denied"),
+	}
+	stale := failed
+	stale.connGen++
+	m, _ = updateModel(m, stale)
+	require.Empty(t, m.attention.returnContext.detail.status,
+		"a completion from another connection must not update the saved detail")
+
+	m, _ = updateModel(m, failed)
+	require.Contains(t, stripANSI(m.attention.returnContext.detail.status), "reopen failed: permission denied")
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, viewDetail, m.view)
+	require.Contains(t, stripANSI(m.detail.status), "reopen failed: permission denied",
+		"returning from Attention must preserve a matching mutation failure")
 }
 
 func TestAttentionDetailFromEmptyScope(t *testing.T) {

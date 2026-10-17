@@ -26,7 +26,7 @@ type attentionState struct {
 	clearing, returnToAttention bool
 	returnView                  viewID
 	returnContext               *attentionReturnContext
-	gen                         uint64
+	gen, clearGen               uint64
 }
 
 type attentionReturnContext struct {
@@ -71,7 +71,6 @@ func (m Model) transitionToAttention() (Model, tea.Cmd) {
 		m.attention.selectedUID = ""
 	}
 	m.attention.returnToAttention = false
-	m.attention.clearing = false
 	m.view = viewAttention
 	m.nextDetailFollowGen++
 	return m.reloadAttention()
@@ -98,6 +97,20 @@ func (m Model) syncAttentionReturnDetail(msg tea.Msg) Model {
 		return m
 	}
 	updated, applied := m.attention.returnContext.detail.applyFetchedIfFresh(msg)
+	if !applied {
+		return m
+	}
+	context := *m.attention.returnContext
+	context.detail = cloneDetailModel(updated)
+	m.attention.returnContext = &context
+	return m
+}
+
+func (m Model) syncAttentionReturnMutation(mut mutationDoneMsg) Model {
+	if m.attention.returnContext == nil || m.staleConnMsg(mut.connGen) {
+		return m
+	}
+	updated, applied := m.attention.returnContext.detail.applyMutationState(mut)
 	if !applied {
 		return m
 	}
@@ -137,7 +150,6 @@ func (m Model) leaveAttentionView() Model {
 	m.attention.gen++
 	m.attention.loading = false
 	m.attention.capabilityPending = false
-	m.attention.clearing = false
 	m.attention.returnToAttention = false
 	return m
 }
@@ -322,9 +334,9 @@ func (m Model) returnFromAttentionDetail() (Model, tea.Cmd) {
 }
 
 type attentionClearedMsg struct {
-	connGen, gen uint64
-	uid          string
-	err          error
+	connGen, clearGen uint64
+	uid               string
+	err               error
 }
 
 func (m Model) clearAttentionRequest() (Model, tea.Cmd) {
@@ -340,26 +352,30 @@ func (m Model) clearAttentionRequest() (Model, tea.Cmd) {
 	}
 	row := m.attention.rows[m.attention.cursor]
 	m.attention.gen++
+	m.attention.clearGen++
 	m.attention.clearing = true
 	api, ok := m.api.(attentionAPI)
-	connGen, gen, actor := m.connGen, m.attention.gen, m.list.actor
+	connGen, clearGen, actor := m.connGen, m.attention.clearGen, m.list.actor
 	return m, func() tea.Msg {
 		if !ok || api == nil {
-			return attentionClearedMsg{connGen: connGen, gen: gen, uid: row.issue.UID, err: &mutationPreflightError{errors.New("attention client unavailable")}}
+			return attentionClearedMsg{connGen: connGen, clearGen: clearGen, uid: row.issue.UID, err: &mutationPreflightError{errors.New("attention client unavailable")}}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err := api.ClearAttentionRequest(ctx, row.issue.ProjectID, row.issue.UID, row.key, row.raw, actor)
-		return attentionClearedMsg{connGen: connGen, gen: gen, uid: row.issue.UID, err: err}
+		return attentionClearedMsg{connGen: connGen, clearGen: clearGen, uid: row.issue.UID, err: err}
 	}
 }
 func (m Model) handleAttentionCleared(msg attentionClearedMsg) (Model, tea.Cmd) {
-	if !m.attentionVisible() || m.staleConnMsg(msg.connGen) || msg.gen != m.attention.gen {
+	if m.staleConnMsg(msg.connGen) || !m.attention.clearing || msg.clearGen != m.attention.clearGen {
 		return m, nil
 	}
 	m.attention.clearing = false
 	if msg.err == nil {
-		return m.reloadAttention()
+		if m.attentionVisible() {
+			return m.reloadAttention()
+		}
+		return m, nil
 	}
 	var apiErr *APIError
 	var preflight *mutationPreflightError
@@ -373,8 +389,10 @@ func (m Model) handleAttentionCleared(msg attentionClearedMsg) (Model, tea.Cmd) 
 	// A transport failure may have happened after commit. Reconcile, without
 	// retrying a write whose outcome is unknown or claiming it succeeded.
 	if conflict || (!isAPI && !errors.As(msg.err, &preflight)) {
-		next, cmd := m.reloadAttention()
-		return next, tea.Batch(cmd, toastExpireCmd(3*time.Second))
+		if m.attentionVisible() {
+			next, cmd := m.reloadAttention()
+			return next, tea.Batch(cmd, toastExpireCmd(3*time.Second))
+		}
 	}
 	return m, toastExpireCmd(3 * time.Second)
 }

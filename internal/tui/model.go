@@ -419,6 +419,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m = m.syncSearchDetailSnapshot(msg)
+	if mut, ok := msg.(mutationDoneMsg); ok {
+		m = m.syncAttentionReturnMutation(mut)
+	}
 	if next, cmd, ok := m.routeTopLevel(msg); ok {
 		return next, cmd
 	}
