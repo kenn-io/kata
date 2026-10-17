@@ -236,6 +236,7 @@ var storageScenarios = []scenario{
 	{name: "issue status archive fence", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "RemoveProject", "RestoreProject"}, run: checkIssueStatusArchiveFence},
 	{name: "issue status locator", methods: []string{"CreateIssue", "CreateProject", "CloseIssue", "ClaimIssueSyncBinding", "SoftDeleteIssue", "UpsertIssueSyncBinding", "UpsertImportMapping"}, runWithBackend: checkIssueStatusLocator},
 	{name: "federated move guards", methods: []string{"IngestFederationEvents"}, run: checkFederatedMoveGuards},
+	{name: "federated former project identity cleanup", methods: []string{"PurgeProject", "MergeProjects", "LeaveFederationReplica", "RemoveProject"}, run: checkFederatedFormerProjectIdentityCleanup},
 	{name: "federated moved issue current project reset", methods: []string{"IngestFederationEvents", "ReadFederation", "PurgeResetCheck"}, runWithBackend: checkFederatedMovedIssueCurrentProjectReset},
 	{name: "federated move author baseline", methods: []string{"RewriteAuthorIdentity", "MoveIssueProject", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedMoveAuthorBaseline},
 	{name: "federated move delivery", methods: []string{"IngestFederationEvents"}, run: checkFederatedMoveDelivery},

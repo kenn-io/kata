@@ -269,6 +269,9 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		if !errors.Is(err, sql.ErrNoRows) {
 			return mapSQLError(err, nil)
 		}
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project, `m.payload::jsonb->'snapshot'`); err != nil {
+			return err
+		}
 		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {
 			return err
 		}

@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+type federationHistoryQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 // ReadFederationMoveHistory fills a page after excluding local move history
 // covered by the first retained federation baseline. Later snapshots cannot
 // hide later deltas or invalid moves. Cutoffs are computed once per issue in
@@ -42,7 +46,7 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 	return events, nil
 }
 
-func loadFederationMoveHistoryCutoffs(ctx context.Context, tx *sql.Tx, page []Event, cutoffs map[string]int64, snapshotExpression string) error {
+func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQuery, page []Event, cutoffs map[string]int64, snapshotExpression string) error {
 	var pending []string
 	for _, event := range page {
 		if event.IssueUID == nil {
