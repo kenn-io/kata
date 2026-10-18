@@ -45,6 +45,7 @@ import (
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -780,7 +781,13 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		return err == nil
 	}, 3*time.Second, 10*time.Millisecond)
 
-	body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
+	// Read the way kata's runtime-record readers do. On Windows os.ReadFile
+	// does not share delete access, so it fails while the atomic rename that
+	// published the record still holds its handle.
+	file, err := safefileio.OpenCurrentUserFile(runtimePath)
+	require.NoError(t, err)
+	defer func() { _ = file.Close() }()
+	body, err := io.ReadAll(file)
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
