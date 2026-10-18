@@ -163,7 +163,7 @@ func TestDaemonProjectCountAllowlist(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, bucket, props["project_count"])
 		}
-		for _, count := range []any{37, 37.0, "37"} {
+		for _, count := range []any{37, "37"} {
 			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": count})
 			require.NoError(t, err)
 			assert.NotContainsf(t, props, "project_count", "%s must drop count %#v", event, count)

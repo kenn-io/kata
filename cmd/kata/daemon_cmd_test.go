@@ -2070,25 +2070,7 @@ func TestNewDaemonTelemetryReporterSendsWithoutAgeWhenCreationTimeUnreadable(t *
 	assert.True(t, got.InstalledAt.IsZero(), "unreadable creation time passed %v", got.InstalledAt)
 }
 
-func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
-	tmp := t.TempDir()
-	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
-	defer func() { _ = store.Close() }()
-	for i := range 6 {
-		_, err := store.CreateProject(t.Context(), fmt.Sprintf("example-project-%d", i))
-		require.NoError(t, err)
-	}
-
-	reporter := &fakeTelemetryReporter{}
-	captureDaemonStartedTelemetry(t.Context(), store, reporter)
-
-	require.Equal(t, 1, reporter.eventCount())
-	event := reporter.eventAt(0)
-	assert.Equal(t, "daemon_started", event.event)
-	assert.Equal(t, "6-20", event.properties["project_count"])
-}
-
-func TestStartDaemonTelemetryHeartbeatIncludesProjectCount(t *testing.T) {
+func TestDaemonTelemetryProducersIncludeProjectCount(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
 		defer func() { _ = store.Close() }()
@@ -2104,13 +2086,16 @@ func TestStartDaemonTelemetryHeartbeatIncludesProjectCount(t *testing.T) {
 			require.True(t, workers.Wait(context.Background()))
 		}()
 		reporter := &fakeTelemetryReporter{}
+		captureDaemonStartedTelemetry(ctx, store, reporter)
 		startDaemonTelemetryHeartbeat(ctx, workers, store, reporter)
 
 		synctest.Wait()
-		require.Equal(t, 1, reporter.eventCount())
-		event := reporter.eventAt(0)
-		assert.Equal(t, "daemon_active", event.event)
-		assert.Equal(t, "21-100", event.properties["project_count"])
+		require.Equal(t, 2, reporter.eventCount())
+		for i, name := range []string{"daemon_started", "daemon_active"} {
+			event := reporter.eventAt(i)
+			assert.Equal(t, name, event.event)
+			assert.Equal(t, "21-100", event.properties["project_count"])
+		}
 	})
 }
 
