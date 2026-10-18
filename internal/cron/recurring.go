@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	robfig "github.com/robfig/cron/v3"
+	"github.com/netresearch/go-cron"
 )
 
 // IsRecurringIssueJob recognizes native ownership even for disabled definitions.
@@ -67,7 +67,7 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 }
 
 // recurringSpec returns the raw parsed calendar fields before any stepping rules.
-func recurringSpec(t Trigger) (robfig.Schedule, error) {
+func recurringSpec(t Trigger) (cron.Schedule, error) {
 	expression := strings.TrimSpace(t.Cron)
 	zone := t.Timezone
 	if zone == "" {
@@ -94,13 +94,13 @@ func recurringSpec(t Trigger) (robfig.Schedule, error) {
 	return schedule, nil
 }
 
-// cronStarBit is robfig's wildcard marker, retained for *, ?, and steps of one.
+// cronStarBit is go-cron's wildcard marker, retained for *, ?, and steps of one.
 const cronStarBit uint64 = 1 << 63
 
 // A wildcard minute in a restricted window creates a child issue every minute.
 // Writes must choose a minute or explicitly request 0-59; stored jobs keep running.
-func rejectWildcardMinute(schedule robfig.Schedule) error {
-	spec, ok := schedule.(*robfig.SpecSchedule)
+func rejectWildcardMinute(schedule cron.Schedule) error {
+	spec, ok := schedule.(*cron.SpecSchedule)
 	if !ok || spec.Minute&cronStarBit == 0 {
 		return nil
 	}
