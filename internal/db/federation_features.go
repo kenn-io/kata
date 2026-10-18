@@ -18,8 +18,22 @@ const CronEventFeature = "cron_v1"
 // RecurringCronEventFeature fences peers that cannot retain native delivery state.
 const RecurringCronEventFeature = "cron_notify_children_v1"
 
+// DayMatchEventFeature fences peers whose strict decoder lacks trigger.day_match.
+const DayMatchEventFeature = "cron_day_match_v1"
+
+const nativeRecurringEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+
 // SupportedEventFeatures is the complete event format advertisement.
-const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+const SupportedEventFeatures = nativeRecurringEventFeatures + "," + DayMatchEventFeature
+
+// Optional definition members need a wire feature even when their value is
+// empty/null, the definition is an adapter job, or the event is a tombstone.
+var optionalJobMemberFeatures = []struct {
+	feature, prefilter string
+	path               []string
+}{
+	{DayMatchEventFeature, "day_match", []string{"trigger", "day_match"}},
+}
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -72,9 +86,50 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 		return "", err
 	}
 	if native {
-		required = MergeEventFeatures(required, SupportedEventFeatures)
+		required = MergeEventFeatures(required, nativeRecurringEventFeatures)
+	}
+	if jobDefinition {
+		optional, err := optionalJobDefinitionFeatures(body["definition"])
+		if err != nil {
+			return "", err
+		}
+		required = MergeEventFeatures(required, optional)
 	}
 	return required, nil
+}
+
+func optionalJobDefinitionFeatures(raw jsontext.Value) (string, error) {
+	required := ""
+	for _, member := range optionalJobMemberFeatures {
+		value := raw
+		for index, key := range member.path {
+			if len(value) == 0 {
+				break
+			}
+			var object map[string]jsontext.Value
+			if err := json.Unmarshal(value, &object); err != nil {
+				return "", err
+			}
+			var present bool
+			value, present = object[key]
+			if !present {
+				break
+			}
+			if index == len(member.path)-1 {
+				required = MergeEventFeatures(required, member.feature)
+			}
+		}
+	}
+	return required, nil
+}
+
+func requiresFeature(features, name string) bool {
+	for feature := range strings.SplitSeq(features, ",") {
+		if strings.TrimSpace(feature) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func nativeIssueMetadata(body map[string]jsontext.Value) (bool, error) {
@@ -167,8 +222,17 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	required := ""
 	if cronPresent {
 		required = CronEventFeature
+		// History can retain a removed member, and replacement can remove it.
+		// Always scan optional members before consulting the native-only cache.
+		for _, member := range optionalJobMemberFeatures {
+			features, err := projectOptionalJobFeatures(ctx, q, projectUID, member.prefilter)
+			if err != nil {
+				return "", err
+			}
+			required = MergeEventFeatures(required, features)
+		}
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, nativeRecurringEventFeatures), nil
 		}
 	}
 	if !cronPresent && !issueMoved {
@@ -186,7 +250,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if native {
 			nativeProjectFeatureCache.Store(projectUID, struct{}{})
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, nativeRecurringEventFeatures), nil
 		}
 	}
 	if issueMoved {
@@ -195,10 +259,47 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 			return "", err
 		}
 		if native {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, nativeRecurringEventFeatures), nil
 		}
 	}
 	return required, nil
+}
+
+func projectOptionalJobFeatures(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID, prefilter string) (string, error) {
+	// The LIKE terms only narrow candidates; decoded member presence decides.
+	// Escaped keys must reach the decoder on both SQLite and PostgreSQL.
+	const query = `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id
+WHERE p.uid=$1 AND (j.definition_json LIKE $2 OR j.definition_json LIKE '%\u%' ESCAPE '!')
+UNION ALL SELECT e.type,e.payload FROM events e JOIN projects p ON p.id=e.project_id
+WHERE p.uid=$1 AND e.type LIKE 'cron.job.%' AND (e.payload LIKE $2 OR e.payload LIKE '%\u%' ESCAPE '!')`
+	rows, err := q.QueryContext(ctx, query, projectUID, "%"+prefilter+"%")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	required := ""
+	for rows.Next() {
+		var kind, payload string
+		if err := rows.Scan(&kind, &payload); err != nil {
+			return "", err
+		}
+		raw := jsontext.Value(payload)
+		if kind != "projection.job" {
+			var body map[string]jsontext.Value
+			if err := json.Unmarshal(raw, &body); err != nil {
+				return "", err
+			}
+			raw = body["definition"]
+		}
+		features, err := optionalJobDefinitionFeatures(raw)
+		if err != nil {
+			return "", err
+		}
+		required = MergeEventFeatures(required, features)
+	}
+	return required, rows.Err()
 }
 
 // projectRequiredEventFeaturesForAdoption also checks current issue metadata,
@@ -211,7 +312,7 @@ func projectRequiredEventFeaturesForAdoption(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	if errors.Is(RequireEventFeatures(CronEventFeature, features), ErrUnsupportedEventFeatures) {
+	if requiresFeature(features, RecurringCronEventFeature) {
 		return features, nil
 	}
 	// Adoption is infrequent; inspect candidate issue documents here instead of
@@ -223,7 +324,7 @@ WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"
 		return "", err
 	}
 	if native {
-		features = MergeEventFeatures(features, SupportedEventFeatures)
+		features = MergeEventFeatures(features, nativeRecurringEventFeatures)
 	}
 	return features, nil
 }
@@ -250,7 +351,7 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 		if err != nil {
 			return false, err
 		}
-		if RequireEventFeatures(CronEventFeature, feature) != nil {
+		if requiresFeature(feature, RecurringCronEventFeature) {
 			return true, nil
 		}
 	}

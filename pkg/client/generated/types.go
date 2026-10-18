@@ -6604,6 +6604,7 @@ func (t Transcript) Validate() error {
 type Trigger struct {
 	At              *string `json:"at,omitempty"`
 	Cron            *string `json:"cron,omitempty"`
+	DayMatch        *string `json:"day_match,omitempty"`
 	IntervalSeconds *int64  `json:"interval_seconds,omitempty"`
 	IssueUID        *string `json:"issue_uid,omitempty"`
 	Kind            string  `json:"kind" validate:"required"`
@@ -6618,6 +6619,7 @@ func (t Trigger) Validate() error {
 type TriggerResponse struct {
 	At              *string `json:"at,omitempty"`
 	Cron            *string `json:"cron,omitempty"`
+	DayMatch        *string `json:"day_match,omitempty"`
 	IntervalSeconds *int64  `json:"interval_seconds,omitempty"`
 	IssueUID        *string `json:"issue_uid,omitempty"`
 	Kind            string  `json:"kind" validate:"required"`

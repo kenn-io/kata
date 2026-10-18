@@ -15,6 +15,7 @@ type Trigger struct {
 	Kind            string `json:"kind"`
 	Timezone        string `json:"timezone,omitempty"`
 	Cron            string `json:"cron,omitempty"`
+	DayMatch        string `json:"day_match,omitempty"`
 	IntervalSeconds int64  `json:"interval_seconds,omitzero"`
 	At              string `json:"at,omitempty"`
 	IssueUID        string `json:"issue_uid,omitempty"`

@@ -5,6 +5,7 @@
 export interface TriggerResponse {
   at?: string
   cron?: string
+  day_match?: string
   interval_seconds?: number
   issue_uid?: string
   kind: string

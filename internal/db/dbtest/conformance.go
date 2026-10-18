@@ -50,6 +50,9 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "day match features", runWithBackend: checkDayMatchFeatures},
+	{name: "day match adapter adoption", run: checkDayMatchAdapterAdoption},
+	{name: "day match stored delivery", run: checkDayMatchStoredDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},

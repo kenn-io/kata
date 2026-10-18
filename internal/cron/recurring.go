@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/robfig/cron/v3"
 )
 
 // IsRecurringIssueJob recognizes native ownership even for disabled definitions.
@@ -15,7 +17,7 @@ func IsRecurringIssueJob(j JobDefinition) bool {
 // recurringTitleSuffix is the longest occurrence suffix a child title gains.
 const recurringTitleSuffix = " — 2006-01-02T15:04:05.999999999Z"
 
-func validateRecurring(j JobDefinition) error {
+func validateRecurring(j JobDefinition, writeRules bool) error {
 	p := j.Issue
 	if !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || utf8.RuneCountInString(p.Title+recurringTitleSuffix) > 1024 {
 		return invalid("native recurring issues require a parent UID and a bounded title")
@@ -40,11 +42,64 @@ func validateRecurring(j JobDefinition) error {
 	if j.Trigger.Kind == "interval" && j.Trigger.IntervalSeconds < 60 {
 		return invalid("native recurring intervals must be at least 60 seconds")
 	}
-	_, err := recurringSchedule(j.Trigger)
-	return err
+	spec, err := recurringSpec(j.Trigger)
+	if err != nil {
+		return err
+	}
+	return validateDayMatch(j.Trigger, spec, writeRules)
+}
+
+// cronStarBit is robfig/cron's starBit in spec.go and parser.go. Its presence
+// selects AND day matching; */1 retains it, while steps above one clear it.
+const cronStarBit uint64 = 1 << 63
+
+func validateDayMatch(t Trigger, schedule cron.Schedule, writeRules bool) error {
+	spec, ok := schedule.(*cron.SpecSchedule)
+	if !ok {
+		return nil // Intervals have no day fields.
+	}
+	bothRestricted := spec.Dom&cronStarBit == 0 && spec.Dow&cronStarBit == 0
+	if t.DayMatch != "" && !bothRestricted {
+		return invalid("trigger.day_match applies only when the cron expression restricts both day of month and day of week")
+	}
+	if !writeRules {
+		return nil
+	}
+	if bothRestricted && t.DayMatch == "" {
+		return invalid(`native cron restricts both day of month and day of week; set trigger.day_match to "all" to require both (for example the first Tuesday) or "any" to fire when either matches`)
+	}
+	if t.DayMatch == "all" {
+		next, err := recurringSchedule(t)
+		if err != nil {
+			return err
+		}
+		for year := 2026; year <= 2053; year++ {
+			start := time.Date(year, 1, 1, 0, 0, 0, 0, spec.Location)
+			due := next(start.Add(-time.Nanosecond))
+			if due.IsZero() || due.In(spec.Location).Year() != year {
+				return invalid(`trigger.day_match "all" must give a deliverable occurrence every year; this day of month, month, day of week and time rarely coincide or fall in a daylight-saving gap`)
+			}
+		}
+	}
+	return nil
 }
 
 func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
+	schedule, err := recurringSpec(t)
+	if err != nil || schedule == nil {
+		return nil, err
+	}
+	if t.DayMatch == "all" {
+		if spec, ok := schedule.(*cron.SpecSchedule); ok {
+			andSpec := *spec
+			andSpec.Dom |= cronStarBit
+			schedule = &andSpec
+		}
+	}
+	return schedule.Next, nil
+}
+
+func recurringSpec(t Trigger) (cron.Schedule, error) {
 	if t.Kind == "interval" {
 		return nil, nil
 	}
@@ -71,7 +126,7 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	if err != nil {
 		return nil, invalid("invalid native cron expression")
 	}
-	return schedule.Next, nil
+	return schedule, nil
 }
 
 // RecurringProgress is replayable system metadata on a job's parent issue.
@@ -113,7 +168,7 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if !IsRecurringIssueJob(j) || !validUID(definitionEventUID) {
 		return out, invalid("native job and definition revision required")
 	}
-	if err := j.Validate(); err != nil {
+	if err := j.validateStored(); err != nil {
 		return out, err
 	}
 	if err := p.Validate(); err != nil {

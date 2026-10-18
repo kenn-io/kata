@@ -64,14 +64,24 @@ func portableKey(value string) bool {
 
 // Validate checks the portable job contract without granting execution.
 func (j JobDefinition) Validate() error {
+	return j.validate(true)
+}
+
+// Stored definitions retain their delivery semantics when write rules tighten.
+func (j JobDefinition) validateStored() error { return j.validate(false) }
+
+func (j JobDefinition) validate(writeRules bool) error {
 	if j.Version != 1 {
 		return invalid("unsupported job version")
 	}
 	if j.Kind != "job" {
 		return invalid("unknown job kind")
 	}
-	if err := j.Trigger.Validate(); err != nil {
+	if err := j.Trigger.validate(); err != nil {
 		return err
+	}
+	if j.Trigger.DayMatch != "" && !IsRecurringIssueJob(j) {
+		return invalid("trigger.day_match is only supported for native recurring issue jobs")
 	}
 	if j.CheckoutKey != "" && !portableKey(j.CheckoutKey) {
 		return invalid("checkout key must be a portable name")
@@ -106,7 +116,7 @@ func (j JobDefinition) Validate() error {
 			return invalid("notify requires an issue target")
 		}
 		if IsRecurringIssueJob(j) {
-			if err := validateRecurring(j); err != nil {
+			if err := validateRecurring(j, writeRules); err != nil {
 				return err
 			}
 		} else if j.Issue != nil && (j.Issue.ParentUID != "" || j.Issue.Kind != "existing" || !validUID(j.Issue.UID) || j.Issue.Title != "" || j.Issue.Body != "" || j.Issue.ScheduledOffsetSeconds != nil || j.Issue.DeadlineOffsetSeconds != nil) {

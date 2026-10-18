@@ -16,6 +16,20 @@ import (
 
 // Progress and occurrence state must fence old peers even outside cron events.
 func TestRecurringPayloadFeatures(t *testing.T) {
+	oldNative := db.MergeEventFeatures(db.CronEventFeature, db.RecurringCronEventFeature)
+	for _, tc := range []struct{ kind, definition string }{
+		{"cron.job.created", `{"trigger":{"day_match":"all"},"action":{"kind":"notify"},"issue":{"kind":"per-run"}}`},
+		{"cron.job.updated", `{"trigger":{"day_match":""}}`},
+		{"cron.job.updated", `{"trigger":{"day_match":null}}`},
+		{"cron.job.created", `{"trigger":{"day\u005fmatch":"all"}}`},
+		{"cron.job.created", `{"trigger":{"day_match":"all"},"action":{"kind":"execute"},"issue":{"kind":"per-run"}}`},
+		{"cron.job.deleted", `{"trigger":{"day_match":"all"}}`},
+	} {
+		features, err := db.PayloadRequiredFeatures(tc.kind, `{"definition":`+tc.definition+`}`)
+		require.NoError(t, err)
+		require.ErrorIs(t, db.RequireEventFeatures(oldNative, features), db.ErrUnsupportedEventFeatures, tc.definition)
+		require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, features))
+	}
 	for _, tc := range []struct {
 		kind, payload string
 		native        bool
@@ -31,6 +45,7 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		features, e := db.PayloadRequiredFeatures(tc.kind, tc.payload)
 		require.NoError(t, e)
 		if tc.native {
+			require.Equal(t, oldNative, features)
 			require.ErrorIs(t, db.RequireEventFeatures(db.CronEventFeature, features), db.ErrUnsupportedEventFeatures)
 			require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, features))
 		} else {
@@ -50,7 +65,7 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	for range 2 {
 		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID)
 		require.NoError(t, err)
-		require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
+		require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.RecurringCronEventFeature), features)
 	}
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
 }
@@ -81,6 +96,9 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "LIKE $2") {
+		return &featureProbeRows{empty: true}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
@@ -88,7 +106,7 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen bool }
+type featureProbeRows struct{ presence, seen, empty bool }
 
 func (r *featureProbeRows) Columns() []string {
 	if r.presence {
@@ -98,6 +116,9 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
+	if r.empty {
+		return io.EOF
+	}
 	if r.seen {
 		if r.presence {
 			return io.EOF

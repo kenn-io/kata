@@ -594,7 +594,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
-	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
+	require.Equal(t, []int{0, 0}, probe.candidates, "ordinary jobs must not reach optional-member or native JSON decoding")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
 	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Native review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
@@ -609,8 +609,8 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.candidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
-	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
+	require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.RecurringCronEventFeature), features)
+	require.Equal(t, []int{1, 1}, probe.candidates, "escaped native definition remains the only candidate in either scan")
 	return nil
 }
 

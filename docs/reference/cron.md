@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-18
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -118,11 +118,14 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `kind` | Required fields |
 | --- | --- |
 | `manual` | None. |
-| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. |
+| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. Optional `day_match` (`any` or `all`), for native recurring issue jobs only. |
 | `interval` | `interval_seconds`: a positive integer. |
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+
+When both day fields are restricted, either match fires under crontab's rule;
+native jobs must set [`day_match`](#day-of-month-and-day-of-week) explicitly.
 
 ### Actions
 
@@ -214,6 +217,42 @@ An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 binding time plus one interval. Calendar schedules start strictly after that
 binding time, without historical backfill.
 
+#### Day of month and day of week
+
+Crontab matches either restricted day field: `0 9 1-7 * 2` fires on days 1–7
+and every Tuesday, about ten times a month. New or updated native jobs with
+both fields restricted must set `trigger.day_match`: `"any"` keeps that rule;
+`"all"` requires both matches, making this expression the first Tuesday.
+`*`, `?`, `*/1` and `*,5` are unrestricted; steps such as `*/2` and full
+ranges such as `1-31` or `0-6` count as restricted. The field is valid only
+when both fields are restricted, and only for native recurring issue jobs.
+
+`"all"` requires a deliverable occurrence in every year from 2026 through
+2053, evaluated in the trigger's timezone. Rare combinations such as a Monday
+February 29, and schedules whose matches all fall in daylight-saving gaps,
+are rejected. Jobs stored before this rule keep `"any"` behavior until edited.
+Any edit, including disabling or restoring a legacy job, needs an explicit
+`"any"` or `"all"`; deletion remains available without changing the definition.
+
+For a first-Tuesday review, save this as another request file and create it
+with `kata cron job create --parent example-project#abc4 --file first-tuesday.json`:
+
+```json
+{
+  "name": "First Tuesday review",
+  "definition": {
+    "version": 1,
+    "kind": "job",
+    "enabled": true,
+    "trigger": {"kind": "cron", "cron": "0 9 1-7 * 2", "timezone": "UTC", "day_match": "all"},
+    "action": {"kind": "notify", "recipient": "current-owner-or-author"},
+    "issue": {"kind": "per-run", "title": "Review service"},
+    "overlap": "allow",
+    "catchup": "all"
+  }
+}
+```
+
 | `catchup` | After downtime or a pause |
 | --- | --- |
 | `all` | Create every missed child, at most 1000 per job per sweep. Later sweeps continue from durable progress. |
@@ -225,7 +264,9 @@ for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver, even with push
 writes enabled, and cannot create or edit native recurring definitions. An old
 peer that lacks `cron_notify_children_v1` cannot receive a project containing
-native recurring state. Capability refusal happens before a baseline or cursor
+native recurring state. A project whose job definitions or history contain
+`day_match` also requires `cron_day_match_v1`, even if a later edit removes
+the member. Capability refusal happens before a baseline or cursor
 change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
 local authority and history.
@@ -291,8 +332,8 @@ options). Each step has these fields:
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises `cron_v1` and
-`cron_notify_children_v1`. Missing, unknown, or
+`X-Kata-Event-Features` header advertises `cron_v1`,
+`cron_notify_children_v1` and `cron_day_match_v1`. Missing, unknown, or
 failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -381,6 +422,12 @@ readiness or persisted state. Normal project and issue-subtree read policy appli
 Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
 schedulers; those jobs belong to the native hub. Existing strict decoders reject
 the new `parent_uid` shape instead of scheduling it.
+
+Native jobs can also carry trigger fields adapters do not use, such as
+`trigger.day_match`. Decide whether a job is native before strictly decoding
+its trigger, or tolerate unknown trigger members on native jobs. Adapters
+read job lists through the API, outside the federation feature gate;
+`kata cron capabilities` lists `cron_day_match_v1` support.
 
 Shared `enabled` configuration does not activate an adapter installation. Each
 adapter owns its local activation, scheduler, overlap and catchup handling,

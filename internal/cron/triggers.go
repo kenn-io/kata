@@ -8,6 +8,10 @@ import (
 
 // Validate checks the selected trigger and its kind-specific fields.
 func (t Trigger) Validate() error {
+	return t.validate()
+}
+
+func (t Trigger) validate() error {
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
 			return invalid("invalid timezone")
@@ -18,6 +22,9 @@ func (t Trigger) Validate() error {
 	}
 	if t.LeadSeconds > maxDurationSeconds {
 		return invalid("deadline lead exceeds supported duration")
+	}
+	if t.DayMatch != "" && t.DayMatch != "any" && t.DayMatch != "all" {
+		return invalid(`trigger.day_match must be "any" or "all"`)
 	}
 	switch t.Kind {
 	case "manual":
@@ -43,7 +50,7 @@ func (t Trigger) Validate() error {
 	default:
 		return invalid("unknown trigger")
 	}
-	if t.Kind != "cron" && t.Cron != "" || t.Kind != "interval" && t.IntervalSeconds != 0 || t.Kind != "once" && t.At != "" || t.Kind != "issue-scheduled" && t.Kind != "issue-deadline" && t.IssueUID != "" || t.Kind != "issue-deadline" && t.LeadSeconds != 0 {
+	if t.Kind != "cron" && (t.Cron != "" || t.DayMatch != "") || t.Kind != "interval" && t.IntervalSeconds != 0 || t.Kind != "once" && t.At != "" || t.Kind != "issue-scheduled" && t.Kind != "issue-deadline" && t.IssueUID != "" || t.Kind != "issue-deadline" && t.LeadSeconds != 0 {
 		return invalid("trigger carries fields for another kind")
 	}
 	return nil

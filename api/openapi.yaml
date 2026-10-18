@@ -6626,6 +6626,8 @@ components:
           type: string
         cron:
           type: string
+        day_match:
+          type: string
         interval_seconds:
           format: int64
           type: integer
@@ -6647,6 +6649,8 @@ components:
         at:
           type: string
         cron:
+          type: string
+        day_match:
           type: string
         interval_seconds:
           format: int64

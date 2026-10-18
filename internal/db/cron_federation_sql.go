@@ -126,7 +126,7 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 	if err != nil {
 		return nil, err
 	}
-	if RequireEventFeatures(CronEventFeature, features) != nil {
+	if requiresFeature(features, RecurringCronEventFeature) {
 		return nil, fmt.Errorf("%w: native recurring delivery history must remain on its owning hub", ErrFederatedSpokeUnsupported)
 	}
 	events, err := CronDefinitionSnapshots(ctx, tx, project)
