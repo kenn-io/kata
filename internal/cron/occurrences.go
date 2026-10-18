@@ -20,7 +20,7 @@ func recurringNext(t Trigger, anchor time.Time) (func(time.Time) time.Time, erro
 }
 
 // RecurringLocation is the zone the native stepping actually evaluates in.
-// Robfig's Local sentinel uses the cursor's zone; native cursors are UTC.
+// go-cron's Local sentinel uses the cursor's zone; native cursors are UTC.
 func RecurringLocation(t Trigger) (*time.Location, error) {
 	if t.Timezone == "" || t.Timezone == "Local" {
 		return time.UTC, nil

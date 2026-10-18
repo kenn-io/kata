@@ -45,6 +45,31 @@ func TestRecurringOccurrencesMatchesPlanRecurring(t *testing.T) {
 	}
 }
 
+// Preview reports the documented daylight-saving results.
+func TestRecurringOccurrencesDST(t *testing.T) {
+	for _, tc := range []struct {
+		cron, from string
+		want       []string
+	}{
+		// A time inside the spring-forward gap runs that day at 03:30 EDT.
+		{"30 2 * * *", "2026-03-07T08:00:00Z", []string{"2026-03-08T07:30:00Z", "2026-03-09T06:30:00Z"}},
+		// A time inside the repeated fall-back hour runs on both passes.
+		{"30 1 * * *", "2026-11-01T04:00:00Z", []string{"2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z"}},
+		// Hourly schedules run once per elapsed hour through the repeat.
+		{"0 * * * *", "2026-11-01T04:59:00Z", []string{"2026-11-01T05:00:00Z", "2026-11-01T06:00:00Z", "2026-11-01T07:00:00Z"}},
+	} {
+		trigger := Trigger{Kind: "cron", Cron: tc.cron, Timezone: "America/New_York"}
+		from := at(t, tc.from)
+		got, err := RecurringOccurrences(trigger, from, from, len(tc.want))
+		require.NoError(t, err)
+		var want []time.Time
+		for _, s := range tc.want {
+			want = append(want, at(t, s))
+		}
+		require.Equal(t, want, got, tc.cron)
+	}
+}
+
 func TestRecurringOccurrencesAnchorFloor(t *testing.T) {
 	anchor := at(t, "2026-01-01T12:00:00Z")
 	for _, trigger := range []Trigger{{Kind: "interval", IntervalSeconds: 3600}, {Kind: "cron", Cron: "0 * * * *"}} {
