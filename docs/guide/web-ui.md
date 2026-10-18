@@ -117,8 +117,10 @@ validation and handle syntax.
 
 Fenced code blocks in descriptions and comments use the fence's language tag
 for syntax highlighting, including aliases such as `ts` for TypeScript. Token
-colors follow the light or dark theme. Untagged blocks and unsupported languages
-remain readable as escaped text; inline code keeps its normal inline formatting.
+colors follow the light or dark theme. Highlighting is limited to 20 fenced
+blocks, 8 distinct languages, and 100 KB per document. Remaining fences, untagged
+blocks, and unsupported languages render as plain escaped text. Inline code
+keeps its normal formatting.
 
 When the editor pane is narrower than 640 pixels, the title appears above the
 actions so it remains readable.

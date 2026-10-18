@@ -329,7 +329,9 @@ authorization service. Review browser changes against these boundaries:
   `kata ui` opens that validated origin directly. Cookie-only ambient state is ignored; a session header still
   opts into the cookie-plus-header authentication path.
 - **CSP keeps code strict while allowing required layout state.** Production
-  scripts remain same-origin-only. Dynamic component positioning and CSS custom
+  scripts remain same-origin-only, with `script-src 'wasm-unsafe-eval'` allowed
+  for Shiki's regex engine. JavaScript eval and inline scripts stay blocked.
+  Dynamic component positioning and CSS custom
   properties require the narrow `style-src-attr 'unsafe-inline'` allowance;
   never extend that exception to scripts.
 - **Snapshot consistency is a security and correctness boundary.** Matching

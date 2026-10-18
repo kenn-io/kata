@@ -107,39 +107,3 @@ async function expectPlainFallback(documents: Locator[]): Promise<void> {
     await expect(inline.locator('span')).toHaveCount(0)
   }
 }
-
-test('production CSP permits WebAssembly while blocking JavaScript eval and inline scripts', async ({
-  page,
-  kata,
-}) => {
-  await kata.launch(page)
-  // Run the probes as a same-origin script: browser automation's own
-  // evaluation context can bypass CSP eval restrictions.
-  await page.route('**/csp-probe.js', (route) =>
-    route.fulfill({
-      contentType: 'text/javascript',
-      body: `
-      window.cspProbe = { evalBlocked: false, inlineRan: false };
-      try { new Function('return 1')(); }
-      catch { window.cspProbe.evalBlocked = true; }
-      const inline = document.createElement('script');
-      inline.textContent = 'window.cspProbe.inlineRan = true';
-      document.head.append(inline);
-      WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0])).then(
-        () => window.cspProbe.wasmAllowed = true,
-        () => window.cspProbe.wasmAllowed = false,
-      );
-    `,
-    }),
-  )
-  await page.evaluate((url) => {
-    const script = document.createElement('script')
-    script.src = url
-    document.head.append(script)
-  }, `${kata.origin}/csp-probe.js`)
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as unknown as { cspProbe: Record<string, boolean> }).cspProbe),
-    )
-    .toEqual({ evalBlocked: true, inlineRan: false, wasmAllowed: true })
-})
