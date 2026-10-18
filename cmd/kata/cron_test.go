@@ -482,6 +482,11 @@ func TestCronCLIRequestValidationLeavesStateUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Definition: cronCLIJob(t).Definition.Native(), Actor: "worker"})
 	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Recurring review", Author: "worker"})
+	require.NoError(t, err)
+	impossible := cronCLIRecurringJob(t)
+	impossible.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	impossible.Definition.Issue.ParentUID = parent.UID
 	createWithEvent := cronCLIJob(t)
 	createWithEvent.ExpectedEventUID = job.DefinitionEventUID
 	observe := api.ObserveCronRunBody{JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "running", Summary: cron.Summary{Version: 1}}
@@ -495,6 +500,12 @@ func TestCronCLIRequestValidationLeavesStateUnchanged(t *testing.T) {
 		body string
 		want string
 	}{
+		{
+			name: "schedule that never fires",
+			args: []string{"job", "create", "--file", "-"},
+			body: string(mustCronJSON(t, impossible)),
+			want: "never fires",
+		},
 		{
 			name: "create with expected event",
 			args: []string{"job", "create", "--file", "-"},

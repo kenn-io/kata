@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -118,7 +118,7 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `kind` | Required fields |
 | --- | --- |
 | `manual` | None. |
-| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. |
+| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. Kata rejects a schedule that can never fire, such as `0 0 30 2 *` or `0 0 31 4 *`; `0 0 29 2 *` is accepted and fires in leap years. |
 | `interval` | `interval_seconds`: a positive integer. |
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
@@ -230,6 +230,15 @@ change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
 local authority and history.
 
+Upgrade federated projects in one window. Some releases reject cron
+definitions that older releases accepted, or accept syntax older releases
+reject. A hub that rejects an event a spoke pushes quarantines that spoke's
+whole relay batch, up to 1024 events. To avoid that, stop creating and
+editing cron definitions, and let every spoke drain its relay queue until
+the hub has acknowledged it, including offline spokes and pending retries.
+Then upgrade the hub and all its spokes in the same window. Only after that,
+use newly accepted syntax.
+
 Create, update, delete, and restore retain ordinary authorization and expected
 revision checks. Once bound, a job's parent cannot change and the job cannot
 become an adapter job. Edits preserve committed progress and the original
@@ -255,6 +264,9 @@ missing or malformed; ordinary issue writes and spoke ingest cannot change or
 delete progress or occurrence provenance. Recurrence templates also reject these
 system keys, including when older templates are materialized. Inspect that state before recovery;
 there is no implicit reset that could recreate already delivered children.
+A job stored by an older release with a schedule that never fires keeps
+failing each sweep with the validation error; update its schedule or delete
+it.
 Native jobs reject execution timeouts, secrets, adapter options, checkout keys,
 and issue date offsets.
 
