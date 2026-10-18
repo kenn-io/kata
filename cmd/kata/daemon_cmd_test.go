@@ -2074,8 +2074,10 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	tmp := t.TempDir()
 	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
 	defer func() { _ = store.Close() }()
-	_, err := store.CreateProject(t.Context(), "alpha")
-	require.NoError(t, err)
+	for i := range 6 {
+		_, err := store.CreateProject(t.Context(), fmt.Sprintf("example-project-%d", i))
+		require.NoError(t, err)
+	}
 
 	reporter := &fakeTelemetryReporter{}
 	captureDaemonStartedTelemetry(t.Context(), store, reporter)
@@ -2083,7 +2085,7 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	require.Equal(t, 1, reporter.eventCount())
 	event := reporter.eventAt(0)
 	assert.Equal(t, "daemon_started", event.event)
-	assert.Equal(t, "0-5", event.properties["project_count"])
+	assert.Equal(t, "6-20", event.properties["project_count"])
 }
 
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
