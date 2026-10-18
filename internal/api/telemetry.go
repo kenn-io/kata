@@ -13,7 +13,7 @@ type CaptureTelemetryEventRequestBody struct {
 }
 
 // CaptureTelemetryEventResponse reports whether the event was queued for
-// delivery or accepted while telemetry is disabled.
+// delivery, accepted while telemetry is disabled, or full for the UTC day.
 type CaptureTelemetryEventResponse struct {
 	Status int
 	Body   CaptureTelemetryEventResponseBody
@@ -21,5 +21,5 @@ type CaptureTelemetryEventResponse struct {
 
 // CaptureTelemetryEventResponseBody is the 202 body.
 type CaptureTelemetryEventResponseBody struct {
-	Status string `json:"status" enum:"queued,disabled"`
+	Status string `json:"status" enum:"queued,disabled,full"`
 }

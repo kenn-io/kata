@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -318,17 +321,19 @@ func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	assert.Equal(t, cliSurface, capture.recorded())
 }
 
-// cliUseDaemon is a daemon stand-in that counts app_opened posts and answers with status.
+// cliUseDaemon counts telemetry posts and returns the configured status and receipt.
 type cliUseDaemon struct {
-	url    string
-	status atomic.Int32
-	posts  atomic.Int32
+	url     string
+	status  atomic.Int32
+	posts   atomic.Int32
+	receipt atomic.Value
 }
 
 func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 	t.Helper()
 	d := &cliUseDaemon{}
 	d.status.Store(http.StatusAccepted)
+	d.receipt.Store("queued")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/ui/telemetry" {
 			http.NotFound(w, r)
@@ -337,7 +342,7 @@ func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 		d.posts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(int(d.status.Load()))
-		_, _ = w.Write([]byte(`{"status":"queued"}`))
+		_, _ = fmt.Fprintf(w, `{"status":%q}`, d.receipt.Load())
 	}))
 	t.Cleanup(server.Close)
 	d.url = server.URL
@@ -412,4 +417,46 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
+}
+
+func TestAgentUseFullDay(t *testing.T) {
+	for _, test := range []struct {
+		name, receipt string
+		want          int32
+	}{
+		{"full", "full", 1},
+		{"older daemon queued", "queued", 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(hooks.HookVersionEnv, "1")
+			setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
+			target := newCLIUseDaemon(t)
+			target.receipt.Store(test.receipt)
+			reportCLIUseTo(t, target.url)
+			reportCLIUseTo(t, target.url)
+			require.Equal(t, test.want, target.posts.Load())
+			if test.want == 1 {
+				// A fresh hook process must reuse the target's marker.
+				process := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestAgentUseFullDayProcess$") //nolint:gosec // Current test executable with fixed fixture arguments.
+				process.Env = append(os.Environ(), "KATA_AGENT_USE_TEST_SERVER="+target.url)
+				output, err := process.CombinedOutput()
+				require.NoError(t, err, "%s", output)
+				require.EqualValues(t, 1, target.posts.Load())
+			}
+			setCLIUseClock(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
+			reportCLIUseTo(t, target.url)
+			require.Equal(t, test.want+1, target.posts.Load(), "UTC rollover resumes reporting")
+		})
+	}
+}
+
+func TestAgentUseFullDayProcess(t *testing.T) {
+	url := os.Getenv("KATA_AGENT_USE_TEST_SERVER")
+	if url == "" {
+		return
+	}
+	setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
+	reportCLIUseTo(t, url)
 }

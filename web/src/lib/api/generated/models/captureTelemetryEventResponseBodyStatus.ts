@@ -8,4 +8,5 @@ export type CaptureTelemetryEventResponseBodyStatus =
 export const CaptureTelemetryEventResponseBodyStatus = {
   queued: 'queued',
   disabled: 'disabled',
+  full: 'full',
 } as const

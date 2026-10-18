@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kit/atomicfile"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -108,12 +109,13 @@ func reportCLIUse(cmd *cobra.Command) {
 		}
 		target = &resolved
 	}
-	marker := ""
-	if !agent {
-		marker = cliUseMarkerPath(*target)
-		if readCLIUseDay(marker) == day {
-			return
-		}
+	prefix := "cli-opened-"
+	if agent {
+		prefix = "agent-full-"
+	}
+	marker := telemetryDayMarkerPath(*target, prefix)
+	if readTelemetryDayMarker(marker) == day {
+		return
 	}
 	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 	if err != nil {
@@ -130,23 +132,25 @@ func reportCLIUse(cmd *cobra.Command) {
 	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
 		Body: body,
 	})
-	if !agent && err == nil && resp.JSON202 != nil {
-		recordCLIUseDay(marker, day)
+	if err != nil {
+		return
 	}
+	if agent && resp.JSON202.Status != "full" {
+		return
+	}
+	recordTelemetryDayMarker(marker, day)
 }
 
-// cliUseMarkerPath names the file holding the last UTC day target accepted a
-// report from this KATA_HOME, or "" when there is no home to keep it in.
-func cliUseMarkerPath(target client.ResolvedDaemon) string {
+func telemetryDayMarkerPath(target client.ResolvedDaemon, prefix string) string {
 	home, err := config.KataHome()
 	if err != nil {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(target.BaseURL + "\n" + target.UnixSocket))
-	return filepath.Join(home, "telemetry", "cli-opened-"+hex.EncodeToString(sum[:8]))
+	return filepath.Join(home, "telemetry", prefix+hex.EncodeToString(sum[:8]))
 }
 
-func readCLIUseDay(path string) string {
+func readTelemetryDayMarker(path string) string {
 	if path == "" {
 		return ""
 	}
@@ -157,13 +161,13 @@ func readCLIUseDay(path string) string {
 	return string(day)
 }
 
-// recordCLIUseDay is best effort: without the marker the next command reports again.
-func recordCLIUseDay(path, day string) {
+// recordTelemetryDayMarker is best effort: without the marker the next command reports again.
+func recordTelemetryDayMarker(path, day string) {
 	if path == "" {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return
 	}
-	_ = os.WriteFile(path, []byte(day), 0o600)
+	_ = atomicfile.WriteFile(path, []byte(day), atomicfile.WithPerm(0o600))
 }

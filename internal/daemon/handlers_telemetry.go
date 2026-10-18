@@ -84,7 +84,7 @@ func newAgentUseGate(path string, now func() time.Time) *agentUseGate {
 	return g
 }
 
-func (g *agentUseGate) capture(reporter TelemetryReporter) error {
+func (g *agentUseGate) capture(reporter TelemetryReporter) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	previous := g.state
@@ -120,7 +120,7 @@ func (g *agentUseGate) capture(reporter TelemetryReporter) error {
 			}
 		}
 	}
-	return err
+	return err == nil && g.state.Sent == 101, err
 }
 
 // registerTelemetryHandlers lets UI clients report allowlisted events through
@@ -159,13 +159,14 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return out, nil
 		}
 		var err error
+		var full bool
 		capture := func() bool {
 			err = reporter.Capture(in.Body.Event, in.Body.Properties)
 			return err == nil
 		}
 		switch event {
 		case "agent_active":
-			err = agentGate.capture(reporter)
+			full, err = agentGate.capture(reporter)
 		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
 		case "screen_viewed":
@@ -193,6 +194,9 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"capture telemetry event failed", "", nil)
 		}
 		out.Body.Status = "queued"
+		if full {
+			out.Body.Status = "full"
+		}
 		return out, nil
 	})
 }

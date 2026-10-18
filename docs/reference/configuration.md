@@ -1125,6 +1125,15 @@ currently reached companion bucket. Reports share the daemon's install ID and
 opt-out and send buckets rather than exact counts, paths, tool names, or actor
 names.
 
+With daemon API `0.30.0` or newer, a successful observation at the top bucket
+returns `full`. Hooks use this receipt within their existing 100 ms request
+deadline. MCP and hooks save an `agent-full-*` marker under
+`<KATA_HOME>/telemetry/` and share it across process restarts to stop posting
+until the next UTC day. The marker key uses the daemon URL or Unix socket, so a
+replacement daemon at the same target inherits that day's marker until UTC
+rollover. Older daemons keep returning `queued`, so clients continue reporting
+as before.
+
 The browser and TUI also report `screen_viewed` when a screen opens. The fixed
 names are `inbox`, `today`, `delegated`, `scheduled`, `issues`, `logbook`,
 `issue`, `graph`, `credentials`, `projects`, `daemons`, `federation`, `help`,
