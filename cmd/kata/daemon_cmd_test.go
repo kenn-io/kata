@@ -2083,7 +2083,7 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	require.Equal(t, 1, reporter.eventCount())
 	event := reporter.eventAt(0)
 	assert.Equal(t, "daemon_started", event.event)
-	assert.Equal(t, "1", event.properties["project_count"])
+	assert.Equal(t, "0-5", event.properties["project_count"])
 }
 
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {

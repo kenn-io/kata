@@ -113,12 +113,8 @@ func DurationBucket(elapsed time.Duration) string {
 // ProjectCountBucket groups project totals without sending an exact count.
 func ProjectCountBucket(count int) string {
 	switch {
-	case count == 0:
-		return "0"
-	case count == 1:
-		return "1"
 	case count <= 5:
-		return "2-5"
+		return "0-5"
 	case count <= 20:
 		return "6-20"
 	case count <= 100:
@@ -128,7 +124,7 @@ func ProjectCountBucket(count int) string {
 	}
 }
 
-var projectCountBuckets = posthog.AllowStringValues("0", "1", "2-5", "6-20", "21-100", "over-100")
+var projectCountBuckets = posthog.AllowStringValues("0-5", "6-20", "21-100", "over-100")
 
 var agentCallCountBuckets = posthog.AllowStringValues("1-10", "11-100", "over-100")
 

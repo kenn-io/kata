@@ -146,7 +146,7 @@ func TestProjectCountBucket(t *testing.T) {
 		count  int
 		bucket string
 	}{
-		{0, "0"}, {1, "1"}, {2, "2-5"}, {5, "2-5"},
+		{0, "0-5"}, {1, "0-5"}, {2, "0-5"}, {5, "0-5"},
 		{6, "6-20"}, {20, "6-20"}, {21, "21-100"},
 		{37, "21-100"}, {100, "21-100"}, {101, "over-100"},
 	} {
@@ -158,7 +158,8 @@ func TestDaemonProjectCountAllowlist(t *testing.T) {
 	reporter, err := NewReporter(Options{})
 	require.NoError(t, err)
 	for _, event := range []string{"daemon_started", "daemon_active"} {
-		for _, bucket := range []string{"0", "1", "2-5", "6-20", "21-100", "over-100"} {
+		for _, count := range []int{0, 1, 2, 5, 6, 20, 21, 37, 100, 101} {
+			bucket := ProjectCountBucket(count)
 			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": bucket})
 			require.NoError(t, err)
 			assert.Equal(t, bucket, props["project_count"])

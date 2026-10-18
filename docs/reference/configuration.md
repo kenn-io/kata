@@ -1022,8 +1022,7 @@ daemon keeps running. Restarting the daemon may send another heartbeat; kata
 does not store heartbeat state in the database.
 
 The events are `daemon_started` and `daemon_active` with `project_count`,
-reported as one of `0`, `1`, `2-5`, `6-20`, `21-100`, or `over-100`. New
-events carry this range instead of the exact project total. They also carry
+reported as one of `0-5`, `6-20`, `21-100`, or `over-100`. They also carry
 `application=kata`, build version, commit, OS/arch, source, and the database's
 stable anonymous `instance_uid` as the distinct ID. They do not send project
 names, issue refs, issue content, comments, labels, paths, or actor names. GeoIP

@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0`, `1`, `2-5`, `6-20`, `21-100`, and `over-100`. See [Telemetry](reference/configuration.md#telemetry).
+- Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. See [Telemetry](reference/configuration.md#telemetry).
 
 - Count completed issue creates and closes from the web UI, TUI, and human CLI commands with anonymous `issue_created` and `issue_closed` events. The daemon records each changed mutation with its client's `surface`, without a separate action report or wait. `KATA_TELEMETRY_ENABLED=0` opts out. Web issue removal counts as a close.
 
