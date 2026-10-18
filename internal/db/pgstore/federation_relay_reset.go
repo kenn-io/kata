@@ -47,7 +47,7 @@ func (b relayResetBackend) ValidateRelayResetEvents(projectUID string, events []
 		rememberIngestIssueUIDs(event, known)
 	}
 	for _, event := range events {
-		if err := validateFederationProjectEvent(projectUID, event.OriginInstanceUID, event, known, true); err != nil {
+		if err := validateFederationProjectEvent(projectUID, event.OriginInstanceUID, event, known, federationProjectEventValidationOptions{allowLocalLifecycle: true, acceptStoredCronHistory: true}); err != nil {
 			return err
 		}
 	}

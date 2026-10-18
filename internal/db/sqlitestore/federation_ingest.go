@@ -880,12 +880,21 @@ func federationEventHashByUID(ctx context.Context, tx *sql.Tx, eventUID string) 
 	return hash, nil
 }
 
+type federationProjectEventValidationOptions struct {
+	allowLocalLifecycle     bool
+	acceptStoredCronHistory bool
+}
+
 func validateFederationProjectEvent(
 	projectUID, spokeInstanceUID string,
 	ev db.RemoteEvent,
 	knownIssueUIDs map[string]struct{},
-	allowLocalLifecycle ...bool,
+	options ...federationProjectEventValidationOptions,
 ) error {
+	var validation federationProjectEventValidationOptions
+	if len(options) > 0 {
+		validation = options[0]
+	}
 	if ev.ProjectUID != projectUID {
 		return fmt.Errorf("%w: event %s targets project %s", db.ErrFederationIngestValidation, ev.EventUID, ev.ProjectUID)
 	}
@@ -899,13 +908,16 @@ func validateFederationProjectEvent(
 		return fmt.Errorf("%w: event type %s unsupported in phase 2", db.ErrFederationIngestValidation, ev.Type)
 	}
 	if strings.HasPrefix(ev.Type, "cron.") {
+		if validation.acceptStoredCronHistory {
+			return db.ValidateAcceptedCronEvent(ev)
+		}
 		return db.ValidateCronFederationEvent(ev)
 	}
 	payload := db.PayloadMap(ev.Payload)
 	// Relay lifecycle records audit one instance's local archive/restore.
 	// The issue fold never applies them to another node's project catalog.
 	// Legacy direct-spoke ingress retains its original strict allowlist.
-	if len(allowLocalLifecycle) > 0 && allowLocalLifecycle[0] && (ev.Type == "project.removed" || ev.Type == "project.restored") {
+	if validation.allowLocalLifecycle && (ev.Type == "project.removed" || ev.Type == "project.restored") {
 		if ev.IssueUID != nil || ev.RelatedIssueUID != nil {
 			return db.ErrFederationIngestValidation
 		}

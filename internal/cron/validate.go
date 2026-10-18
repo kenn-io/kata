@@ -63,14 +63,19 @@ func portableKey(value string) bool {
 }
 
 // Validate checks the portable job contract without granting execution.
-func (j JobDefinition) Validate() error {
+func (j JobDefinition) Validate() error { return j.validate(true) }
+
+// validateStored preserves the meaning of definitions accepted by older rules.
+func (j JobDefinition) validateStored() error { return j.validate(false) }
+
+func (j JobDefinition) validate(writeRules bool) error {
 	if j.Version != 1 {
 		return invalid("unsupported job version")
 	}
 	if j.Kind != "job" {
 		return invalid("unknown job kind")
 	}
-	if err := j.Trigger.Validate(); err != nil {
+	if err := j.Trigger.validate(writeRules); err != nil {
 		return err
 	}
 	if j.CheckoutKey != "" && !portableKey(j.CheckoutKey) {

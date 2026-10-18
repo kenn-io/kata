@@ -30,6 +30,10 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	jobDefinition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review open work"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := root.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Nightly review", Definition: jobDefinition, Actor: "worker"})
 	require.NoError(t, err)
+	// Simulate a live definition accepted by an older release. A signed reset
+	// carries accepted history and must not apply today's write rules to it.
+	job = storeLegacyLocalTimezone(t, root, job, true)
+	storeLegacyLocalTimezoneEvent(t, root, job)
 	workflowDefinition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}
 	workflow, _, err := root.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Release checks", Definition: workflowDefinition, Actor: "worker"})
 	require.NoError(t, err)
@@ -74,7 +78,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	require.Equal(t, "Nightly review", installedJob.Name)
 	require.Equal(t, job.DefinitionEventUID, installedJob.DefinitionEventUID)
-	require.Equal(t, jobDefinition, installedJob.Definition)
+	require.Equal(t, job.Definition, installedJob.Definition)
 	installedWorkflow, err := downstream.CronWorkflow(ctx, replica.ID, workflow.UID)
 	require.NoError(t, err)
 	require.Equal(t, "Release checks", installedWorkflow.Name)

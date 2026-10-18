@@ -97,3 +97,22 @@ func TestCronDeleteDeletedDefinitionConflicts(t *testing.T) {
 		})
 	}
 }
+
+func TestCronRestoreNonPortableTimezoneReturnsValidation(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	tc := cronTombstoneCases()[0]
+	path, live := cronTombstoneDefinition(t, env, tc)
+	definition := cronHTTPDefinition(t)
+	definition.Trigger.Timezone = "Local"
+	raw, err := json.Marshal(definition)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), live.UID)
+	require.NoError(t, err)
+	status, body := cronHTTP(t, env, http.MethodDelete, path, map[string]any{"actor": "worker", "expected_event_uid": live.DefinitionEventUID})
+	require.Equalf(t, http.StatusOK, status, "%s", body)
+	deleted := decodeCronTombstone(t, tc, body)
+	status, body = cronHTTP(t, env, http.MethodPost, path+"/restore", map[string]any{"actor": "worker", "expected_event_uid": deleted.DefinitionEventUID})
+	require.Equalf(t, http.StatusBadRequest, status, "%s", body)
+	require.Contains(t, string(body), `"code":"validation"`)
+	require.Contains(t, string(body), "Local")
+}

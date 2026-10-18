@@ -35,6 +35,8 @@ func TestRecurringDefinition(t *testing.T) {
 		"cron tz directive every descriptor": func(j *JobDefinition) {
 			j.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=UTC @every 2h"}
 		},
+		"local timezone":        func(j *JobDefinition) { j.Trigger = Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"} },
+		"fixed-offset timezone": func(j *JobDefinition) { j.Trigger = Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "EST"} },
 		"conflicting timezone": func(j *JobDefinition) {
 			j.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 9 * * *", Timezone: "UTC"}
 		},
@@ -235,4 +237,35 @@ func TestRecurringSkipIdleSweepsKeepProgress(t *testing.T) {
 	require.Empty(t, missed.Due, "an occurrence older than grace is discarded")
 	require.Equal(t, at(t, "2026-10-02T09:05:00Z"), missed.Progress.Through,
 		"discarding an occurrence records progress past it")
+}
+
+func nonPortableStoredTriggers() []Trigger {
+	return []Trigger{
+		{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"},
+		{Kind: "cron", Cron: "0 9 * * *", Timezone: "EST"},
+		{Kind: "cron", Cron: "CRON_TZ=Local 0 9 * * *", Timezone: "Local"},
+		{Kind: "cron", Cron: "TZ=EST 0 9 * * *", Timezone: "EST"},
+	}
+}
+
+func TestPlanRecurringKeepsStoredNonPortableTimezones(t *testing.T) {
+	local, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = local
+	t.Cleanup(func() { time.Local = previous })
+	anchor := at(t, "2026-01-15T00:00:00Z")
+	for _, trigger := range nonPortableStoredTriggers() {
+		t.Run(trigger.Cron+"/"+trigger.Timezone, func(t *testing.T) {
+			job := nativeJob(t)
+			job.Trigger = trigger
+			batch, err := PlanRecurring(job, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, at(t, "2026-01-16T00:00:00Z"))
+			require.NoError(t, err)
+			want := "2026-01-15T09:00:00Z"
+			if trigger.Timezone == "EST" {
+				want = "2026-01-15T14:00:00Z"
+			}
+			require.Equal(t, []time.Time{at(t, want)}, batch.Due)
+		})
+	}
 }

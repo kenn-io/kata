@@ -217,3 +217,19 @@ func FuzzCronFoldConvergence(f *testing.F) {
 		}
 	})
 }
+
+func TestCronFederationRejectsNonPortableTimezoneWrites(t *testing.T) {
+	folded := cronFoldEvent(t, "job", 1, false)
+	var payload db.CronDefinitionEvent
+	require.NoError(t, json.Unmarshal(folded.Payload, &payload))
+	definition, err := cron.DecodeJob(payload.Definition)
+	require.NoError(t, err)
+	definition.Trigger.Timezone = "EST"
+	payload.Definition, err = json.Marshal(definition)
+	require.NoError(t, err)
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+	event := db.RemoteEvent{EventUID: folded.UID, OriginInstanceUID: folded.OriginInstanceUID, ProjectUID: folded.ProjectUID, Type: folded.Type, Actor: folded.Actor, HLCPhysicalMS: folded.HLCPhysicalMS, CreatedAt: time.Date(2026, 10, 3, 12, 0, 1, 0, time.UTC), Payload: raw}
+	require.ErrorIs(t, db.ValidateCronFederationEvent(event), db.ErrFederationIngestValidation)
+	require.NoError(t, db.ValidateAcceptedCronEvent(event), "accepted history must remain readable")
+}

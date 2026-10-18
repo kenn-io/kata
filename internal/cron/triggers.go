@@ -7,8 +7,14 @@ import (
 )
 
 // Validate checks the selected trigger and its kind-specific fields.
-func (t Trigger) Validate() error {
-	if t.Timezone != "" {
+func (t Trigger) Validate() error { return t.validate(true) }
+
+func (t Trigger) validate(writeRules bool) error {
+	if writeRules {
+		if err := portableTimezone(t.Timezone); err != nil {
+			return err
+		}
+	} else if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
 			return invalid("invalid timezone")
 		}
@@ -22,6 +28,13 @@ func (t Trigger) Validate() error {
 	switch t.Kind {
 	case "manual":
 	case "cron":
+		if writeRules {
+			if zone, ok := cronDirectiveZone(t.Cron); ok {
+				if err := portableTimezone(zone); err != nil {
+					return err
+				}
+			}
+		}
 		if _, err := ParseCron(t.Cron); err != nil {
 			return invalid("invalid cron expression")
 		}

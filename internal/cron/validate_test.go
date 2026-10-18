@@ -297,3 +297,18 @@ func TestDurationSecondsAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestTriggerRejectsNonPortableCronDirective(t *testing.T) {
+	for _, expression := range []string{"CRON_TZ=Local 0 9 * * *", "TZ=EST 0 9 * * *"} {
+		t.Run(expression, func(t *testing.T) {
+			job, err := ParseJob([]byte(executeJSON))
+			require.NoError(t, err)
+			job.Trigger = Trigger{Kind: "cron", Cron: expression}
+			require.ErrorIs(t, job.Validate(), ErrInvalid)
+		})
+	}
+	job, err := ParseJob([]byte(executeJSON))
+	require.NoError(t, err)
+	job.Trigger = Trigger{Kind: "cron", Cron: "CRON_TZ=UTC 0 9 * * *"}
+	require.NoError(t, job.Validate())
+}

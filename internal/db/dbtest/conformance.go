@@ -52,6 +52,7 @@ type scenario struct {
 var storageScenarios = []scenario{
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
+	{name: "recurring adoption rejects nonportable timezone", methods: []string{"AdoptProjectIntoFederation", "CreateProject", "CronJob", "FederationBindingByProject", "MaxEventID", "ProjectByID", "PutCronJob"}, run: checkCronAdoptionRejectsNonportableTimezone},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},
 	{name: "recurring template protection", run: checkRecurringTemplateProtection},
 	{name: "recurring feature probe candidates", run: checkRecurringFeatureProbeCandidates},
@@ -170,6 +171,8 @@ var storageScenarios = []scenario{
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},
 	{name: "run actor survives push enablement", methods: []string{"ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush"}, run: checkRunActorSurvivesPushEnablement},
 	{name: "hub accepts known run actor", methods: []string{"ObserveCronRun", "IngestFederationEvents"}, run: checkHubAcceptsKnownRunActor},
+	{name: "recurring cron stored nonportable timezone keeps delivering", methods: []string{"PutCronJob", "DispatchRecurringCron"}, run: checkRecurringCronStoredNonPortableTimezoneKeepsDelivering},
+	{name: "recurring cron nonportable timezone writes rejected", methods: []string{"PutCronJob"}, run: checkRecurringCronNonPortableTimezoneWritesRejected},
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},

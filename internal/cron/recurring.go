@@ -54,11 +54,11 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 		zone = "UTC"
 	}
 	if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
-		directive, rest, ok := strings.Cut(expression, " ")
+		embedded, ok := cronDirectiveZone(expression)
 		if !ok {
 			return nil, invalid("invalid timezone directive")
 		}
-		_, embedded, _ := strings.Cut(directive, "=")
+		_, rest, _ := strings.Cut(expression, " ")
 		if embedded != zone {
 			return nil, invalid("conflicting cron timezone")
 		}
@@ -113,7 +113,7 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if !IsRecurringIssueJob(j) || !validUID(definitionEventUID) {
 		return out, invalid("native job and definition revision required")
 	}
-	if err := j.Validate(); err != nil {
+	if err := j.validateStored(); err != nil {
 		return out, err
 	}
 	if err := p.Validate(); err != nil {

@@ -7,9 +7,10 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// CronDefinitionSnapshots captures portable definitions and run history
+// CronDefinitionSnapshots captures stored definitions and run history
 // in the federation boundary transaction without execution coordination.
 func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) ([]CronEvent, error) {
 	result := []CronEvent{}
@@ -136,6 +137,9 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 	if emptyOnly && len(events) > 0 {
 		return nil, ErrFederationProjectNotEmpty
 	}
+	if err := validateCronAdoptionSnapshots(events); err != nil {
+		return nil, err
+	}
 	projectUID, err := json.Marshal(targetUID)
 	if err != nil {
 		return nil, err
@@ -157,4 +161,21 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 		events[i].ProjectUID = targetUID
 	}
 	return events, nil
+}
+
+func validateCronAdoptionSnapshots(events []CronEvent) error {
+	for _, event := range events {
+		if !strings.HasPrefix(event.Type, "cron.job.") && !strings.HasPrefix(event.Type, "cron.workflow.") {
+			continue
+		}
+		var definition CronDefinitionEvent
+		if err := json.Unmarshal([]byte(event.Payload), &definition); err != nil {
+			return fmt.Errorf("decode cron adoption snapshot: %w", err)
+		}
+		job := strings.HasPrefix(event.Type, "cron.job.")
+		if err := validateCronDefinitionDocument(job, definition.DeletedAt != nil, definition.Definition); err != nil {
+			return fmt.Errorf("validate cron adoption snapshot: %w", err)
+		}
+	}
+	return nil
 }

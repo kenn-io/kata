@@ -136,7 +136,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				}
 				// The project/event validator is reused after the hop authenticates origin;
 				// the legacy direct-spoke actor/origin contract remains unchanged.
-				if err := validateFederationProjectEvent(projectUID, source.OriginInstanceUID, source, known, true); err != nil {
+				if err := validateFederationProjectEvent(projectUID, source.OriginInstanceUID, source, known, federationProjectEventValidationOptions{allowLocalLifecycle: true}); err != nil {
 					return err
 				}
 				if err := validateRelayLinkEndpointsInProject(ctx, tx, projectID, source); err != nil {

@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-18
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -112,8 +112,30 @@ case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
 
 ### Triggers
 
-Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
-`America/New_York`. A trigger cannot carry fields that belong to another kind.
+Every trigger has a `kind`. Its optional `timezone` is `UTC` (the default),
+`Etc/UTC`, or an IANA Area/Location name spelled exactly as in the bundled tz
+database, such as `America/New_York` or `Europe/Paris`. `Local` (which depends
+on the host) and legacy, alias or fixed-offset spellings such as `US/Eastern`,
+`EST5EDT`, `EST` and `Etc/GMT+5` are rejected so a name reads the same everywhere.
+`EST`, `MST` and `HST` are fixed offsets without daylight saving; the error
+names a replacement when Kata knows one. Geographic backward links such as
+`Asia/Calcutta` remain accepted. This rule fixes spelling portability; timezone
+rules can still change with tzdata updates. A trigger cannot carry fields
+that belong to another kind.
+
+Before upgrading a federated project, stop writing adapter definitions with
+these rejected zones. Let every spoke drain its relay queue and have the old
+hub acknowledge it, including offline spokes and pending retries. Upgrade the
+hub and its spokes in the same window, then resume writes. An unacknowledged
+old definition can otherwise cause the hub to quarantine the spoke's whole
+relay batch.
+
+Stored definitions remain readable and deletable. Existing native jobs keep
+delivering at their previous instants: `Local` already meant UTC for native
+delivery, and `EST` keeps its fixed -05:00 offset. Any edit, including disabling,
+re-enabling or restoring a tombstoned job, requires a portable zone. Edit a
+stored `Local` job to `UTC` to keep its schedule. Backup restore and accepted
+federation history still retain the original definition.
 
 | `kind` | Required fields |
 | --- | --- |
@@ -208,7 +230,8 @@ observation; a consumer may record its own execution evidence separately.
 Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
 UTC as the default. They follow that timezone's daylight-saving transitions.
-An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
+An embedded `TZ=` or `CRON_TZ=` follows the same portable-name rule and must
+agree with `timezone`. Use
 `{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence; intervals must be at least 60 seconds;
 `@every` is not supported for native delivery. Intervals start at the first
 binding time plus one interval. Calendar schedules start strictly after that
