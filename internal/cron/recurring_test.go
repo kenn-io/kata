@@ -2,6 +2,7 @@ package cron
 
 import (
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -240,4 +241,59 @@ func TestRecurringSkipIdleSweepsKeepProgress(t *testing.T) {
 	require.Empty(t, missed.Due, "an occurrence older than grace is discarded")
 	require.Equal(t, at(t, "2026-10-02T09:05:00Z"), missed.Progress.Through,
 		"discarding an occurrence records progress past it")
+}
+
+// Each minute is a child issue: a wildcard inside a restricted window is likely accidental.
+func TestRecurringRejectsWildcardMinuteUnderRestrictedField(t *testing.T) {
+	for _, expression := range []string{"* 0 * * *", "* 9 * * *", "? 9 * * *", "*/1 9 * * *", "?/1 9 * * *", "*,5 9 * * *", "5,* 9 * * *", "* * * * 1-5", "* * 1 * *", "* * * 1 *", "* 0-23 * * *", "* * * * 0-6", "TZ=UTC * 9 * * *", "CRON_TZ=UTC * 9 * * *"} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/enabled=%t", expression, enabled), func(t *testing.T) {
+				j := nativeJob(t)
+				j.Enabled = enabled
+				j.Trigger = Trigger{Kind: "cron", Cron: expression, Timezone: "UTC"}
+				err := j.Validate()
+				require.ErrorIs(t, err, ErrInvalid)
+				require.ErrorContains(t, err, "minute is a wildcard")
+			})
+		}
+	}
+}
+
+// Passes on the base: explicit minutes and a universal wildcard schedule express intent.
+func TestRecurringAcceptsChosenOrUniversalMinute(t *testing.T) {
+	for _, expression := range []string{"0-59 9 * * *", "*/5 9 * * *", "0,30 9 * * *", "0 9 * * *", "* * * * *", "? ? ? ? ?", "* *,9 * * *", "@hourly", "@daily"} {
+		t.Run(expression, func(t *testing.T) {
+			j := nativeJob(t)
+			j.Trigger = Trigger{Kind: "cron", Cron: expression, Timezone: "UTC"}
+			require.NoError(t, j.Validate())
+		})
+	}
+}
+
+// Passes on the base: adapter monitors do not create native child issues each minute.
+func TestAdapterCronKeepsWildcardMinute(t *testing.T) {
+	j, err := ParseJob([]byte(executeJSON))
+	require.NoError(t, err)
+	j.Trigger = Trigger{Kind: "cron", Cron: "* 9-17 * * 1-5", Timezone: "UTC"}
+	require.NoError(t, j.Validate())
+}
+
+// Passes on the base: a stored definition keeps its old meaning. This catches
+// putting the guard in recurringSchedule or leaving the planner on write validation.
+func TestPlanRecurringDeliversStoredWildcardMinute(t *testing.T) {
+	j := JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: Trigger{Kind: "cron", Cron: "* 9 * * *", Timezone: "UTC"}, Action: Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &IssuePolicy{Kind: "per-run", ParentUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Title: "Review service"}, Overlap: "allow", Catchup: "all"}
+	anchor := at(t, "2026-10-19T08:00:00Z")
+	now := at(t, "2026-10-19T10:00:00Z")
+	first, err := PlanRecurring(j, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, now)
+	require.NoError(t, err)
+	require.Len(t, first.Due, 50)
+	require.True(t, first.More)
+	second, err := PlanRecurring(j, definitionUID, first.Progress, now)
+	require.NoError(t, err)
+	require.Len(t, second.Due, 10)
+	require.False(t, second.More)
+	start := at(t, "2026-10-19T09:00:00Z")
+	for i, due := range append(first.Due, second.Due...) {
+		require.Equal(t, start.Add(time.Duration(i)*time.Minute), due)
+	}
 }

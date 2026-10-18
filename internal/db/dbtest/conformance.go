@@ -64,6 +64,8 @@ var storageScenarios = []scenario{
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},
 	{name: "recurring metadata protection", run: checkRecurringMetadataProtection},
 	{name: "recurring project metadata keys", run: checkRecurringProjectMetadataKeys},
+	{name: "recurring stored wildcard minute keeps delivering", methods: []string{"PutCronJob", "DispatchRecurringCron", "ChildrenOfIssue"}, run: checkRecurringStoredWildcardMinuteKeepsDelivering},
+	{name: "recurring update keeping wildcard minute rejected", methods: []string{"PutCronJob", "CronJob"}, run: checkRecurringUpdateKeepingWildcardMinuteRejected},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "comment graph deleted source", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphDeletedSource},

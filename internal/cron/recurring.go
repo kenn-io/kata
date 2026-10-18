@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	robfig "github.com/robfig/cron/v3"
 )
 
 // IsRecurringIssueJob recognizes native ownership even for disabled definitions.
@@ -15,7 +17,7 @@ func IsRecurringIssueJob(j JobDefinition) bool {
 // recurringTitleSuffix is the longest occurrence suffix a child title gains.
 const recurringTitleSuffix = " — 2006-01-02T15:04:05.999999999Z"
 
-func validateRecurring(j JobDefinition) error {
+func validateRecurring(j JobDefinition, writeRules bool) error {
 	p := j.Issue
 	if !validUID(p.ParentUID) || p.UID != "" || strings.TrimSpace(p.Title) == "" || utf8.RuneCountInString(p.Title+recurringTitleSuffix) > 1024 {
 		return invalid("native recurring issues require a parent UID and a bounded title")
@@ -40,14 +42,32 @@ func validateRecurring(j JobDefinition) error {
 	if j.Trigger.Kind == "interval" && j.Trigger.IntervalSeconds < 60 {
 		return invalid("native recurring intervals must be at least 60 seconds")
 	}
-	_, err := recurringSchedule(j.Trigger)
-	return err
+	if _, err := recurringSchedule(j.Trigger); err != nil {
+		return err
+	}
+	if writeRules && j.Trigger.Kind == "cron" {
+		spec, err := recurringSpec(j.Trigger)
+		if err != nil {
+			return err
+		}
+		return rejectWildcardMinute(spec)
+	}
+	return nil
 }
 
 func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	if t.Kind == "interval" {
 		return nil, nil
 	}
+	schedule, err := recurringSpec(t)
+	if err != nil {
+		return nil, err
+	}
+	return schedule.Next, nil
+}
+
+// recurringSpec returns the raw parsed calendar fields before any stepping rules.
+func recurringSpec(t Trigger) (robfig.Schedule, error) {
 	expression := strings.TrimSpace(t.Cron)
 	zone := t.Timezone
 	if zone == "" {
@@ -71,7 +91,23 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	if err != nil {
 		return nil, invalid("invalid native cron expression")
 	}
-	return schedule.Next, nil
+	return schedule, nil
+}
+
+// cronStarBit is robfig's wildcard marker, retained for *, ?, and steps of one.
+const cronStarBit uint64 = 1 << 63
+
+// A wildcard minute in a restricted window creates a child issue every minute.
+// Writes must choose a minute or explicitly request 0-59; stored jobs keep running.
+func rejectWildcardMinute(schedule robfig.Schedule) error {
+	spec, ok := schedule.(*robfig.SpecSchedule)
+	if !ok || spec.Minute&cronStarBit == 0 {
+		return nil
+	}
+	if spec.Hour&cronStarBit == 0 || spec.Dom&cronStarBit == 0 || spec.Month&cronStarBit == 0 || spec.Dow&cronStarBit == 0 {
+		return invalid("native cron minute is a wildcard while hour, day or month is restricted, which creates a child every minute; set a minute such as 0, or write 0-59 for every minute")
+	}
+	return nil
 }
 
 // RecurringProgress is replayable system metadata on a job's parent issue.
@@ -113,7 +149,7 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if !IsRecurringIssueJob(j) || !validUID(definitionEventUID) {
 		return out, invalid("native job and definition revision required")
 	}
-	if err := j.Validate(); err != nil {
+	if err := j.validateStored(); err != nil {
 		return out, err
 	}
 	if err := p.Validate(); err != nil {

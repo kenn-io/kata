@@ -191,3 +191,23 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 		})
 	}
 }
+
+// Each minute is a child issue; native writes return an actionable validation error.
+func TestCronNativeWildcardMinuteValidation(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "cron-example")
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "worker"})
+	require.NoError(t, err)
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "* 9 * * *", Timezone: "UTC"}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "all"}
+	status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID), map[string]any{"actor": "worker", "name": "Review", "definition": definition})
+	require.Equalf(t, http.StatusBadRequest, status, "%s", raw)
+	var response struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, "validation", response.Error.Code)
+	require.Contains(t, response.Error.Message, "minute is a wildcard")
+}

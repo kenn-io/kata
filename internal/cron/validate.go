@@ -64,6 +64,15 @@ func portableKey(value string) bool {
 
 // Validate checks the portable job contract without granting execution.
 func (j JobDefinition) Validate() error {
+	return j.validate(true)
+}
+
+// Stored definitions keep delivering under the rules they were written with.
+func (j JobDefinition) validateStored() error {
+	return j.validate(false)
+}
+
+func (j JobDefinition) validate(writeRules bool) error {
 	if j.Version != 1 {
 		return invalid("unsupported job version")
 	}
@@ -106,7 +115,7 @@ func (j JobDefinition) Validate() error {
 			return invalid("notify requires an issue target")
 		}
 		if IsRecurringIssueJob(j) {
-			if err := validateRecurring(j); err != nil {
+			if err := validateRecurring(j, writeRules); err != nil {
 				return err
 			}
 		} else if j.Issue != nil && (j.Issue.ParentUID != "" || j.Issue.Kind != "existing" || !validUID(j.Issue.UID) || j.Issue.Title != "" || j.Issue.Body != "" || j.Issue.ScheduledOffsetSeconds != nil || j.Issue.DeadlineOffsetSeconds != nil) {

@@ -252,6 +252,14 @@ An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 binding time plus one interval. Calendar schedules start strictly after that
 binding time, without historical backfill.
 
+A native calendar expression cannot leave the minute as `*` (or `?`) while
+restricting the hour, day or month: `* 9 * * *` would create a child every
+minute from 09:00 to 09:59. A step of one (`*/1`) and a list containing a
+wildcard (`*,5`) count as `*` too. Use `0 9 * * *` for once at 09:00, or
+`0-59 9 * * *` if every minute is intended. `* * * * *` is allowed. A job
+stored by an earlier release keeps delivering as written; any update to it,
+including disabling or re-enabling it, must fix the minute.
+
 | `catchup` | After downtime or a pause |
 | --- | --- |
 | `all` | Create every missed child, at most 1000 per job per sweep. Later sweeps continue from durable progress. |
