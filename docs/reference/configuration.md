@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-17
+last_edited: 2026-10-18
 ---
 
 # Configuration
@@ -132,6 +132,8 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION` | Set to `1` to let database-backed identity tokens administer connectors and external-root bridges. Off by default. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0`, `false`, `no`, or `off` to disable anonymous PostHog telemetry. Values are case-insensitive and trimmed. |
+| `TELEMETRY_ENABLED` | Global telemetry switch with the same opt-out values as `KATA_TELEMETRY_ENABLED`. Passed to registered local profile daemons Kata autostarts. Set before startup. |
+| `DO_NOT_TRACK` | Passed to local profile daemons. The pinned Kit version does not currently use it to disable telemetry. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
@@ -1142,8 +1144,8 @@ export KATA_TELEMETRY_ENABLED=0
 ```
 
 `false`, `no`, and `off` also disable telemetry, ignoring surrounding
-whitespace and letter case. The global `TELEMETRY_ENABLED` switch and
-`kit_posthog_disabled` build tag retain their existing behavior.
+whitespace and letter case. The `kit_posthog_disabled` build tag also disables
+telemetry.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

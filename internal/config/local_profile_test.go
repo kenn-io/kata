@@ -243,14 +243,23 @@ func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 	assert.Equal(t, "personal-token", os.Getenv("KATA_AUTH_TOKEN"))
 }
 
-func TestLocalProfileEnvironmentPreservesTelemetryOptOut(t *testing.T) {
-	t.Setenv("KATA_TELEMETRY_ENABLED", "0")
-	profile := config.LocalProfileConfig{Home: t.TempDir()}
-
-	env, err := config.LocalProfileEnvironment(profile, true)
-
-	require.NoError(t, err)
-	assert.Contains(t, env, "KATA_TELEMETRY_ENABLED=0")
+func TestLocalProfileEnvironmentPassesThroughTelemetrySettings(t *testing.T) {
+	for _, tc := range []struct{ key, value string }{
+		{"KATA_TELEMETRY_ENABLED", "0"},
+		{"TELEMETRY_ENABLED", "0"},
+		{"DO_NOT_TRACK", "1"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			for _, key := range []string{"KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK"} {
+				t.Setenv(key, "")
+				require.NoError(t, os.Unsetenv(key))
+			}
+			t.Setenv(tc.key, tc.value)
+			env, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir()}, true)
+			require.NoError(t, err)
+			require.Contains(t, env, tc.key+"="+tc.value)
+		})
+	}
 }
 
 func TestLocalProfileEnvironmentIncludesDefaultGitHubTokenEnv(t *testing.T) {
@@ -318,11 +327,15 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 }
 
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
-	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH"} {
+	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK"} {
 		t.Run(key, func(t *testing.T) {
+			if key == "TELEMETRY_ENABLED" || key == "DO_NOT_TRACK" {
+				t.Setenv(key, "")
+				require.NoError(t, os.Unsetenv(key))
+			}
 			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: key}}}}
 			_, err := config.LocalProfileEnvironment(profile, false)
-			require.Error(t, err)
+			require.ErrorContains(t, err, "names a reserved environment key")
 		})
 	}
 }

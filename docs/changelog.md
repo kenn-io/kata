@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-17
+last_edited: 2026-10-18
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.
 - Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
 
 - Count completed issue creates and closes from the web UI, TUI, and human CLI commands with anonymous `issue_created` and `issue_closed` events. The daemon records each changed mutation with its client's `surface`, without a separate action report or wait. `KATA_TELEMETRY_ENABLED=0` opts out. Web issue removal counts as a close.
