@@ -3,8 +3,8 @@ package daemon
 func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskRead, Capability: hostCapabilityRead}, "getCronCapabilities", "showCronRun", "listCronRuns")
 	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskMutation, Capability: hostCapabilityWrite, Mutation: true}, "observeCronRun")
-	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskRead, Capability: hostCapabilityRead}, "showCronJob", "listCronJobs", "showCronWorkflow", "listCronWorkflows")
-	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskMutation, Capability: hostCapabilityWrite, Mutation: true}, "createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob", "createCronWorkflow", "replaceCronWorkflow", "archiveCronWorkflow", "restoreCronWorkflow")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskRead, Capability: hostCapabilityRead}, "previewCronJob", "showCronJob", "listCronJobs", "showCronWorkflow", "listCronWorkflows")
+	registerHostOperations(policies, HostOperationPolicy{Kind: hostOperationTaskMutation, Capability: hostCapabilityWrite, Mutation: true}, "previewCronDefinition", "createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob", "createCronWorkflow", "replaceCronWorkflow", "archiveCronWorkflow", "restoreCronWorkflow")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskRead, Capability: hostCapabilityRead,

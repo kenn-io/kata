@@ -84,6 +84,12 @@ func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int6
 	}
 	return p, deleted, err
 }
+
+// RecurringProgressOf reads and validates a job checkpoint from its parent.
+func RecurringProgressOf(parent Issue, jobUID string) (cron.RecurringProgress, error) {
+	return readRecurringProgress(parent, jobUID)
+}
+
 func readRecurringProgress(parent Issue, jobUID string) (cron.RecurringProgress, error) {
 	var values map[string]jsontext.Value
 	var p cron.RecurringProgress

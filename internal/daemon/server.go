@@ -57,6 +57,9 @@ type ServerConfig struct {
 	// UIClock supplies the current time for browser readiness.
 	// Nil uses time.Now. Tests inject it to verify timed schedule transitions.
 	UIClock func() time.Time
+
+	// CronClock supplies the preview clock; nil uses time.Now.
+	CronClock func() time.Time
 	// DefaultTimezone applies to civil schedules without an issue-level
 	// timezone. Empty preserves the UTC default.
 	DefaultTimezone string

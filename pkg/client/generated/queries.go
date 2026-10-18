@@ -150,6 +150,11 @@ type ListCronJobsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type PreviewCronJobQuery struct {
+	Count *string `json:"count,omitempty"`
+	From  *string `json:"from,omitempty"`
+}
+
 type ListCronRunsQuery struct {
 	JobUID    *string `json:"job_uid,omitempty"`
 	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`

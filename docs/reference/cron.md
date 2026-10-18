@@ -296,6 +296,46 @@ there is no implicit reset that could recreate already delivered children.
 Native jobs reject execution timeouts, secrets, adapter options, checkout keys,
 and issue date offsets.
 
+#### Preview a schedule
+
+Before creating a job, preview the same request file. For a stored job, pass its UID:
+
+```sh
+kata cron job preview --parent example-project#abc4 --file job.json --count 4 --from 2026-03-06T00:00:00Z --json
+kata cron job preview <job-uid> --count 10 --json
+```
+
+Preview requires a daemon with API 0.29.0 or newer. `--count` defaults to 10
+and accepts 1–100. `--from` is an optional RFC3339 instant. Results show UTC
+`at` times and `local` times with the trigger zone's offset, including DST.
+Occurrences are strictly after `from` and the native binding anchor. A stored
+legacy `Local` zone is evaluated as UTC and reported as `configured_timezone`.
+Preview changes no job, progress, event or child.
+
+For a stored native job, `next_sweep` shows the first planner batch at the
+captured daemon clock, using its stored checkpoint and catch-up policy. It is
+at most 50 due occurrences, with `more` indicating additional work. It assumes
+eligibility; `active` and `inactive_reason` report whether the answering daemon
+can deliver. A disabled job shows a hypothetical backlog as if enabled with a
+new definition revision. Re-enabling a legacy job may require editing its
+definition to satisfy current write rules first.
+
+An occurrence becomes due at `at`. Its child appears on the first eligible
+sweep that reaches the job after that time. Sweeps run every 30 seconds, page
+through 100 jobs and drain backlogs in bounded batches, so a busy daemon can
+lag further. This preview is neither a full sweep nor a delivery-time guarantee.
+On a federated spoke it uses the spoke's rules and reports `not_owning_hub`;
+the hub's version determines actual delivery.
+
+For an unsaved interval, the anchor is `from`, or the daemon clock when omitted.
+Its times shift by however long you wait before creating the job, because the
+real anchor is its creation time. A successful preview does not guarantee
+creation succeeds: parent eligibility and hub authority are reported here but
+checked again when creating the job. Stored evaluation failures appear in
+`error`, with no occurrences. For native jobs, `next_sweep.error` reports
+checkpoint or planner failures at the captured clock. An unsupported future
+enumeration window does not replace a valid planner batch.
+
 ### Workflow definitions
 
 A workflow definition has `version` `1` and a non-empty `steps` array. It may
@@ -416,6 +456,12 @@ readiness or persisted state. Normal project and issue-subtree read policy appli
 
 ## Adapter responsibilities
 
+Preview shows Kata's reading of a cron, interval (anchored at `from`), or once
+trigger. It says nothing about adapter overlap, catch-up or activation; adapter
+responses omit `active` and `next_sweep`. A once preview returns its single
+instant even when it is in the past. Manual and issue-date triggers cannot be
+previewed.
+
 Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
 schedulers; those jobs belong to the native hub. Existing strict decoders reject
 the new `parent_uid` shape instead of scheduling it.
@@ -469,6 +515,13 @@ ordinary identity, revision and credential guards. See
 migration, backup, runtime grants, and rollback requirements.
 
 ## Routes, events, and records
+
+`GET /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/preview` previews a
+stored job with optional `count` and `from` query parameters. It is available
+under `--insecure-readonly`. `POST /api/v1/projects/{project_id}/cron/preview`
+previews an unsaved body containing `definition` and optional `count` and
+`from`; it requires create's authorization despite being read-only. Both
+return a `preview` object and refuse issue-scoped tokens.
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use

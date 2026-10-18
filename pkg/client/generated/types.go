@@ -1439,6 +1439,108 @@ func (c CronJobResponseBody) Validate() error {
 	return errors
 }
 
+type CronNextSweep struct {
+	Anchor    *time.Time       `json:"anchor,omitempty"`
+	Due       []CronOccurrence `json:"due,omitempty"`
+	ErrorData *string          `json:"error,omitempty"`
+	More      bool             `json:"more"`
+	Now       time.Time        `json:"now" validate:"required"`
+	Through   *time.Time       `json:"through,omitempty"`
+}
+
+func (c CronNextSweep) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range c.Due {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Due[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.Now, "required"); err != nil {
+		errors = errors.Append("Now", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronOccurrence struct {
+	At    time.Time `json:"at" validate:"required"`
+	Local string    `json:"local" validate:"required"`
+}
+
+func (c CronOccurrence) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronPreview struct {
+	Active             *bool            `json:"active,omitempty"`
+	Anchor             *time.Time       `json:"anchor,omitempty"`
+	AnchorSource       *string          `json:"anchor_source,omitempty"`
+	ConfiguredTimezone *string          `json:"configured_timezone,omitempty"`
+	Count              int64            `json:"count"`
+	ErrorData          *string          `json:"error,omitempty"`
+	Exhausted          bool             `json:"exhausted"`
+	From               time.Time        `json:"from" validate:"required"`
+	InactiveReason     *string          `json:"inactive_reason,omitempty"`
+	JobUID             *string          `json:"job_uid,omitempty"`
+	NextSweep          *CronNextSweep   `json:"next_sweep,omitempty"`
+	Note               *string          `json:"note,omitempty"`
+	Occurrences        []CronOccurrence `json:"occurrences" validate:"required"`
+	ScheduledBy        string           `json:"scheduled_by" validate:"required"`
+	Timezone           string           `json:"timezone" validate:"required"`
+}
+
+func (c CronPreview) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.From, "required"); err != nil {
+		errors = errors.Append("From", err)
+	}
+	if c.NextSweep != nil {
+		if v, ok := any(c.NextSweep).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("NextSweep", err)
+			}
+		}
+	}
+	for i, item := range c.Occurrences {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Occurrences[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.ScheduledBy, "required"); err != nil {
+		errors = errors.Append("ScheduledBy", err)
+	}
+	if err := typesValidator.Var(c.Timezone, "required"); err != nil {
+		errors = errors.Append("Timezone", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronPreviewResponseBody struct {
+	Preview CronPreview `json:"preview"`
+}
+
+func (c CronPreviewResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Preview).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Preview", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronRun struct {
 	Actor                      string          `json:"actor" validate:"required"`
 	CreatedAt                  time.Time       `json:"created_at" validate:"required"`
@@ -4667,6 +4769,25 @@ func (p PollEventsBody) Validate() error {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
 			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type PreviewCronDefinitionBody struct {
+	Count      *int64            `json:"count,omitempty"`
+	Definition CronJobDefinition `json:"definition"`
+	From       *string           `json:"from,omitempty"`
+}
+
+func (p PreviewCronDefinitionBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(p.Definition).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Definition", err)
 		}
 	}
 	if len(errors) == 0 {

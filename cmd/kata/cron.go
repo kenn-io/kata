@@ -40,6 +40,7 @@ The request-file formats are in the Native cron reference (docs/reference/cron.m
 	for _, resource := range []string{"job", "workflow"} {
 		group := &cobra.Command{Use: resource, Short: "manage native " + resource + " definitions"}
 		if resource == "job" {
+			group.AddCommand(newCronPreviewCmd())
 			group.Short = "manage recurring issue and adapter job definitions"
 			group.Long = "Manage shared jobs. Enabled notify jobs with a per-run parent issue are delivered by the owning daemon; other jobs require an external adapter."
 		}

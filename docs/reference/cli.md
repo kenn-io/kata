@@ -1973,6 +1973,8 @@ Commands return JSON; external adapters schedule and launch their own work.
 See [Native cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
+kata cron job preview <job-uid> --count 10 --json
+kata cron job preview --file job.json --parent example-project#abc4 --json
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json

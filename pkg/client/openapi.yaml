@@ -1171,6 +1171,96 @@ components:
       required:
         - job
       type: object
+    CronNextSweep:
+      properties:
+        anchor:
+          format: date-time
+          nullable: true
+          type: string
+        due:
+          items:
+            $ref: "#/components/schemas/CronOccurrence"
+          type: array
+        error:
+          type: string
+        more:
+          type: boolean
+        now:
+          format: date-time
+          type: string
+        through:
+          format: date-time
+          nullable: true
+          type: string
+      required:
+        - now
+        - more
+      type: object
+    CronOccurrence:
+      properties:
+        at:
+          format: date-time
+          type: string
+        local:
+          type: string
+      required:
+        - at
+        - local
+      type: object
+    CronPreview:
+      properties:
+        active:
+          nullable: true
+          type: boolean
+        anchor:
+          format: date-time
+          nullable: true
+          type: string
+        anchor_source:
+          type: string
+        configured_timezone:
+          type: string
+        count:
+          format: int64
+          type: integer
+        error:
+          type: string
+        exhausted:
+          type: boolean
+        from:
+          format: date-time
+          type: string
+        inactive_reason:
+          type: string
+        job_uid:
+          type: string
+        next_sweep:
+          $ref: "#/components/schemas/CronNextSweep"
+        note:
+          type: string
+        occurrences:
+          items:
+            $ref: "#/components/schemas/CronOccurrence"
+          type: array
+        scheduled_by:
+          type: string
+        timezone:
+          type: string
+      required:
+        - scheduled_by
+        - timezone
+        - from
+        - count
+        - occurrences
+        - exhausted
+      type: object
+    CronPreviewResponseBody:
+      properties:
+        preview:
+          $ref: "#/components/schemas/CronPreview"
+      required:
+        - preview
+      type: object
     CronRun:
       properties:
         actor:
@@ -4525,6 +4615,19 @@ components:
         - events
         - next_after_id
       type: object
+    PreviewCronDefinitionBody:
+      additionalProperties: false
+      properties:
+        count:
+          format: int64
+          type: integer
+        definition:
+          $ref: "#/components/schemas/CronJobDefinition"
+        from:
+          type: string
+      required:
+        - definition
+      type: object
     PriorityRequestBody:
       additionalProperties: false
       properties:
@@ -6885,7 +6988,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.28.0
+  version: 0.29.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8237,6 +8340,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/preview:
+    get:
+      operationId: previewCronJob
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: count
+          schema:
+            default: "10"
+            type: string
+        - explode: false
+          in: query
+          name: from
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronPreviewResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore:
     post:
       operationId: restoreCronJob
@@ -8264,6 +8406,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronJobResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/preview:
+    post:
+      operationId: previewCronDefinition
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreviewCronDefinitionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronPreviewResponseBody"
           description: OK
         default:
           content:

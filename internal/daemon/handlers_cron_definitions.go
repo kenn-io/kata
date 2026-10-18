@@ -12,6 +12,7 @@ import (
 )
 
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
+	registerCronPreviewHandlers(h, cfg)
 	registerCronJobHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
 }

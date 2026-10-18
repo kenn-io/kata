@@ -57,6 +57,7 @@ import type {
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
   CronJobResponseBody,
+  CronPreviewResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
   CronWorkflowResponseBody,
@@ -190,6 +191,10 @@ import type {
   PollFederationProjectEventsPathParameters,
   PollProjectEventsParams,
   PollProjectEventsPathParameters,
+  PreviewCronDefinitionBody,
+  PreviewCronDefinitionPathParameters,
+  PreviewCronJobParams,
+  PreviewCronJobPathParameters,
   PriorityRequestBody,
   ProjectAccessResponseBody,
   ProjectFederationBody,
@@ -2290,6 +2295,55 @@ export const replaceCronJob = async (
   })
 }
 
+export type previewCronJobResponse200 = {
+  data: CronPreviewResponseBody
+  status: 200
+}
+
+export type previewCronJobResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type previewCronJobResponseSuccess = previewCronJobResponse200 & {
+  headers: Headers
+}
+export type previewCronJobResponseError = previewCronJobResponseDefault & {
+  headers: Headers
+}
+
+export type previewCronJobResponse = previewCronJobResponseSuccess | previewCronJobResponseError
+
+export const getPreviewCronJobUrl = (
+  { projectId, cronUid }: PreviewCronJobPathParameters,
+  params?: PreviewCronJobParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/preview?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/preview`
+}
+
+export const previewCronJob = async (
+  { projectId, cronUid }: PreviewCronJobPathParameters,
+  params?: PreviewCronJobParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<previewCronJobResponse> => {
+  return orvalFetch<previewCronJobResponse>(getPreviewCronJobUrl({ projectId, cronUid }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
 export type restoreCronJobResponse200 = {
   data: CronJobResponseBody
   status: 200
@@ -2331,6 +2385,52 @@ export const restoreCronJob = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(cronDefinitionActionBody),
+  })
+}
+
+export type previewCronDefinitionResponse200 = {
+  data: CronPreviewResponseBody
+  status: 200
+}
+
+export type previewCronDefinitionResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type previewCronDefinitionResponseSuccess = previewCronDefinitionResponse200 & {
+  headers: Headers
+}
+export type previewCronDefinitionResponseError = previewCronDefinitionResponseDefault & {
+  headers: Headers
+}
+
+export type previewCronDefinitionResponse =
+  | previewCronDefinitionResponseSuccess
+  | previewCronDefinitionResponseError
+
+export const getPreviewCronDefinitionUrl = ({ projectId }: PreviewCronDefinitionPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/preview`
+}
+
+export const previewCronDefinition = async (
+  { projectId }: PreviewCronDefinitionPathParameters,
+  previewCronDefinitionBody: PreviewCronDefinitionBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<previewCronDefinitionResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<previewCronDefinitionResponse>(getPreviewCronDefinitionUrl({ projectId }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(previewCronDefinitionBody),
   })
 }
 

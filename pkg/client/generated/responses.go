@@ -187,9 +187,17 @@ type ReplaceCronJobResponse = CronJobResponseBody
 
 type ReplaceCronJobErrorResponse = ErrorEnvelope
 
+type PreviewCronJobResponse = CronPreviewResponseBody
+
+type PreviewCronJobErrorResponse = ErrorEnvelope
+
 type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
+
+type PreviewCronDefinitionResponse = CronPreviewResponseBody
+
+type PreviewCronDefinitionErrorResponse = ErrorEnvelope
 
 type ListCronRunsResponse = CronRunsResponseBody
 
@@ -896,11 +904,25 @@ type ReplaceCronJobResp struct {
 	JSON200      *ReplaceCronJobResponse
 }
 
+type PreviewCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PreviewCronJobResponse
+}
+
 type RestoreCronJobResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreCronJobResponse
+}
+
+type PreviewCronDefinitionResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PreviewCronDefinitionResponse
 }
 
 type ListCronRunsResp struct {
