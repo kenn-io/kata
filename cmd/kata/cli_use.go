@@ -135,10 +135,17 @@ func reportCLIUse(cmd *cobra.Command) {
 	if err != nil {
 		return
 	}
-	if agent && resp.JSON202.Status != "full" {
+	if agent && !agentUseDoneForDay(resp.JSON202.Status) {
 		return
 	}
 	recordTelemetryDayMarker(marker, day)
+}
+
+// agentUseDoneForDay reports whether a receipt ends agent reporting until the
+// next UTC day. A full day cannot count further calls, and a daemon with
+// telemetry turned off records none.
+func agentUseDoneForDay(status generated.CaptureTelemetryEventResponseBodyStatus) bool {
+	return status == generated.Full || status == generated.Disabled
 }
 
 func telemetryDayMarkerPath(target client.ResolvedDaemon, prefix string) string {

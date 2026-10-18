@@ -425,6 +425,7 @@ func TestAgentUseFullDay(t *testing.T) {
 		want          int32
 	}{
 		{"full", "full", 1},
+		{"telemetry disabled", "disabled", 1},
 		{"older daemon queued", "queued", 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {

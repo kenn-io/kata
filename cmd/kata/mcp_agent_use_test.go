@@ -171,9 +171,11 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 func TestMCPAgentUseFullDay(t *testing.T) {
 	for _, test := range []struct {
 		name, receipt string
+		stops         bool
 	}{
-		{"older daemon queued", "queued"},
-		{"full", "full"},
+		{"older daemon queued", "queued", false},
+		{"full", "full", true},
+		{"telemetry disabled", "disabled", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
@@ -193,7 +195,7 @@ func TestMCPAgentUseFullDay(t *testing.T) {
 				}
 				synctest.Wait()
 				want := int32(3)
-				if test.receipt == "full" {
+				if test.stops {
 					want = 1
 				}
 				require.Equal(t, want, calls.Load())
@@ -202,11 +204,11 @@ func TestMCPAgentUseFullDay(t *testing.T) {
 				defer stop()
 				observe()
 				synctest.Wait()
-				if test.receipt != "full" {
+				if !test.stops {
 					want++
 				}
 				require.Equal(t, want, calls.Load(), "a fresh reporter reuses the marker")
-				if test.receipt == "full" {
+				if test.stops {
 					setCLIUseClock(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
 					observe()
 					synctest.Wait()

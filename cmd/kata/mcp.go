@@ -233,7 +233,7 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 					Body: &generated.CaptureTelemetryEventBody{Event: "agent_active"},
 				})
 				stop()
-				if err == nil && resp.JSON202.Status == "full" {
+				if err == nil && agentUseDoneForDay(resp.JSON202.Status) {
 					fullDay = day
 					recordTelemetryDayMarker(marker, day)
 				}
