@@ -141,6 +141,36 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 	}
 }
 
+func TestProjectCountBucket(t *testing.T) {
+	for _, tc := range []struct {
+		count  int
+		bucket string
+	}{
+		{0, "0"}, {1, "1"}, {2, "2-5"}, {5, "2-5"},
+		{6, "6-20"}, {20, "6-20"}, {21, "21-100"},
+		{37, "21-100"}, {100, "21-100"}, {101, "over-100"},
+	} {
+		assert.Equal(t, tc.bucket, ProjectCountBucket(tc.count))
+	}
+}
+
+func TestDaemonProjectCountAllowlist(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, event := range []string{"daemon_started", "daemon_active"} {
+		for _, bucket := range []string{"0", "1", "2-5", "6-20", "21-100", "over-100"} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": bucket})
+			require.NoError(t, err)
+			assert.Equal(t, bucket, props["project_count"])
+		}
+		for _, count := range []any{37, 37.0, "37"} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": count})
+			require.NoError(t, err)
+			assert.NotContainsf(t, props, "project_count", "%s must drop count %#v", event, count)
+		}
+	}
+}
+
 func TestCoreActionSurfaceAllowlist(t *testing.T) {
 	reporter, err := NewReporter(Options{})
 	require.NoError(t, err)
