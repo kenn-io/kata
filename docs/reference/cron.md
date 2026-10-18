@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -207,7 +207,24 @@ observation; a consumer may record its own execution evidence separately.
 
 Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
-UTC as the default. They follow that timezone's daylight-saving transitions.
+UTC as the default.
+
+On daylight-saving days, a schedule whose hour field is restricted runs
+once per local occurrence. If its time falls in a skipped interval
+(spring forward), the child is due at the first instant after the jump,
+once, however many matching times were skipped. If its time falls in a
+repeated interval (fall back), only the first pass creates a child. A
+schedule that matches every hour, such as `0 * * * *` or `*/15 * * * *`,
+follows the wall clock instead. It skips times that don't exist and runs
+both passes of a repeated hour, which keeps its real spacing. In zones with
+a 30-minute shift, an every-hour schedule whose minute falls in the gap
+skips that one run. Interval triggers count elapsed time and are unaffected.
+
+Stored calendar jobs adopt these rules when the owning hub upgrades. Nothing
+at or before the saved `through` checkpoint is created again. If an older
+hub left its checkpoint before a gap, `all` or `latest` catchup can deliver
+one late child for that gap; `skip` drops it after its grace window.
+
 An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 `{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence; intervals must be at least 60 seconds;
 `@every` is not supported for native delivery. Intervals start at the first

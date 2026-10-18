@@ -134,8 +134,8 @@ func TestCalendarAndCatchup(t *testing.T) {
 		cron, start, end string
 		want             []string
 	}{
-		{"30 2 * * *", "2026-03-07T08:00:00Z", "2026-03-09T07:00:00Z", []string{"2026-03-09T06:30:00Z"}},
-		{"30 1 * * *", "2026-11-01T04:00:00Z", "2026-11-01T07:00:00Z", []string{"2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z"}},
+		{"30 2 * * *", "2026-03-07T08:00:00Z", "2026-03-09T07:00:00Z", []string{"2026-03-08T07:00:00Z", "2026-03-09T06:30:00Z"}},
+		{"30 1 * * *", "2026-11-01T04:00:00Z", "2026-11-01T07:00:00Z", []string{"2026-11-01T05:30:00Z"}},
 	} {
 		j.Trigger = Trigger{Kind: "cron", Cron: tc.cron, Timezone: "America/New_York"}
 		a := at(t, tc.start)

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	robcron "github.com/robfig/cron/v3"
 )
 
 // IsRecurringIssueJob recognizes native ownership even for disabled definitions.
@@ -71,7 +73,11 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	if err != nil {
 		return nil, invalid("invalid native cron expression")
 	}
-	return schedule.Next, nil
+	spec, ok := schedule.(*robcron.SpecSchedule)
+	if !ok {
+		return nil, invalid("invalid native cron expression")
+	}
+	return dstNext(spec), nil
 }
 
 // RecurringProgress is replayable system metadata on a job's parent issue.
@@ -177,6 +183,11 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	until := now
 	if j.Catchup == "latest" && p.Scan != nil {
 		cursor = p.Scan.Cursor
+		// An older planner (or restored backup) may have saved a second-pass
+		// DST occurrence. Restart that scan under the current calendar rules.
+		if cursor.After(p.Through) && !next(cursor.Add(-time.Nanosecond)).Equal(cursor) {
+			cursor = p.Through
+		}
 		until = p.Scan.Until
 		if now.Before(until) {
 			out.More = true
