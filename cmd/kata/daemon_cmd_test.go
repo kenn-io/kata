@@ -2088,6 +2088,32 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	assert.Equal(t, "6-20", event.properties["project_count"])
 }
 
+func TestStartDaemonTelemetryHeartbeatIncludesProjectCount(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		for i := range 6 {
+			_, err := store.CreateProject(t.Context(), fmt.Sprintf("example-project-%d", i))
+			require.NoError(t, err)
+		}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
+		reporter := &fakeTelemetryReporter{}
+		startDaemonTelemetryHeartbeat(ctx, workers, store, reporter)
+
+		synctest.Wait()
+		require.Equal(t, 1, reporter.eventCount())
+		event := reporter.eventAt(0)
+		assert.Equal(t, "daemon_active", event.event)
+		assert.Equal(t, "6-20", event.properties["project_count"])
+	})
+}
+
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
