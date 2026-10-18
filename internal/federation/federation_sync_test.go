@@ -1596,15 +1596,18 @@ func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) 
 		Enabled:              true,
 	})
 	require.NoError(t, err)
-	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+	localIssue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: spokeProject.ID,
 		Title:     "from spoke",
 		Author:    "tester",
 	})
 	require.NoError(t, err)
+	_, err = spoke.DB.ExecContext(ctx, `UPDATE issues SET title='projection-only' WHERE id=?`, localIssue.ID)
+	require.NoError(t, err)
 	var delivered []db.Event
 
-	err = SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{
+	observed := &pullMaterializationCounter{Store: spoke.DB}
+	err = SyncFederationOnceWithPulledEvents(ctx, observed, binding, config.FederationCredential{
 		HubURL:       hub.URL,
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
@@ -1617,6 +1620,10 @@ func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) 
 		assert.NotEqual(t, localEvent.UID, event.UID, "push echo should not redeliver local-origin event")
 	}
 	assert.Empty(t, delivered, "push echo was the only unadvanced pull event")
+	assert.Zero(t, observed.fullFolds, "ordinary local echoes must not refold the project")
+	retained, err := spoke.DB.IssueByID(ctx, localIssue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "projection-only", retained.Title, "an echo must not run a fold inside the fast path either")
 }
 
 func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
@@ -1683,7 +1690,7 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 		Author:    "historical-author",
 	})
 	require.NoError(t, err)
-	adopted, err := spoke.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+	_, err = spoke.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 		ProjectID:            project.ID,
 		HubURL:               "http://127.0.0.1:1",
 		HubProjectID:         42,
@@ -1719,14 +1726,25 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 		}
 	}))
 	t.Cleanup(hub.Close)
-	binding := adopted.Binding
+	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, snapshot.ID))
+	binding, err := spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
 	binding.PushEnabled = false
 
-	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
-		HubURL:       hub.URL,
-		HubProjectID: 42,
-		Token:        "token",
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}
+	// The previous implementation could commit the canonical payload/hash,
+	// then stop at this failpoint before repairing its projection.
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
+	require.Error(t, SyncFederationOnce(ctx, spoke.DB, binding, creds))
+	// Seed the retained projection state from before the interrupted repair.
+	_, err = spoke.DB.ExecContext(ctx, `UPDATE issues SET author='historical-author' WHERE id=?`, issue.ID)
+	require.NoError(t, err)
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	var delivered []db.Event
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
 	}))
+	assert.Empty(t, delivered, "repairing an acknowledged snapshot must not repeat notifications")
 
 	events, err = spoke.DB.EventsByUIDs(ctx, project.ID, []string{snapshot.UID})
 	require.NoError(t, err)
@@ -1830,6 +1848,15 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testing.T) {
+	testResetRetryLocalProjectEvent(t, false)
+}
+
+func TestSyncFederationOnceResetRetryRepairsAcknowledgedLocalProjectEvent(t *testing.T) {
+	testResetRetryLocalProjectEvent(t, true)
+}
+
+func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
+	t.Helper()
 	ctx := context.Background()
 	spoke := testenv.New(t)
 	project, err := spoke.DB.CreateProject(ctx, "hub")
@@ -1910,6 +1937,16 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	assert.Empty(t, delivered)
 	// Replay delivery needs the reset to land after the event at millisecond precision, and Windows clocks can tick slower than that.
 	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
+	if acknowledged {
+		replayed, err := spoke.DB.EventsByUIDs(ctx, project.ID, []string{localEvent.UID})
+		require.NoError(t, err)
+		require.Len(t, replayed, 1)
+		// A subsequent interrupted turn may acknowledge the replayed event's new
+		// local ID before projecting this still-unadvanced pull page.
+		require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, project.ID, replayed[0].ID))
+		_, err = spoke.DB.ExecContext(ctx, `UPDATE projects SET metadata='{}' WHERE id=?`, project.ID)
+		require.NoError(t, err)
+	}
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
@@ -1918,9 +1955,16 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 		delivered = append(delivered, events...)
 	}))
 
-	require.NotEmpty(t, delivered)
-	assert.Equal(t, localEvent.UID, delivered[0].UID)
-	assert.Greater(t, delivered[0].ID, localEvent.ID)
+	if acknowledged {
+		require.Empty(t, delivered, "acknowledged replay repairs must not repeat notifications")
+	} else {
+		require.NotEmpty(t, delivered)
+		assert.Equal(t, localEvent.UID, delivered[0].UID)
+		assert.Greater(t, delivered[0].ID, localEvent.ID)
+	}
+	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))
 }
 
 func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *testing.T) {
@@ -4630,4 +4674,84 @@ func TestSyncFederationOnceReplyPushToOlderHubDoesNotQuarantine(t *testing.T) {
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), binding.PushCursorEventID, "the reply stays pending until the hub upgrades")
+}
+
+// Forward the real SQLite behavior while observing the full-fold boundary.
+type pullMaterializationCounter struct {
+	*sqlitestore.Store
+	fullFolds int
+}
+
+func (s *pullMaterializationCounter) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	s.fullFolds++
+	return s.Store.MaterializeFederatedProject(ctx, projectID)
+}
+
+func TestSyncFederationOnceMaterializesOnlyTouchedIssue(t *testing.T) {
+	ctx := context.Background()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	p, err := hub.DB.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	first, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "first", Author: "tester"})
+	require.NoError(t, err)
+	other, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "other", Author: "tester", Labels: []string{"retained"}})
+	require.NoError(t, err)
+	_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained note"})
+	require.NoError(t, err)
+	meta, err := hub.DB.EnableProjectFederation(ctx, p.ID, "tester")
+	require.NoError(t, err)
+	enrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "pull-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &p.ID, Capabilities: "pull", Actor: "tester"})
+	require.NoError(t, err)
+	replica, err := spoke.DB.CreateProjectWithUID(ctx, "spoke-project", p.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: p.ID, HubProjectUID: p.UID, ReplayHorizonEventID: meta.ReplayHorizonEventID, PullCursorEventID: meta.ReplayHorizonEventID - 1, Enabled: true})
+	require.NoError(t, err)
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: p.ID, Token: enrollment.Token}
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, creds))
+	// A full fold would repair this unrelated projection. Scoped pulls must
+	// leave it alone, including its comments and labels.
+	_, err = spoke.DB.ExecContext(ctx, `UPDATE issues SET title='local projection' WHERE uid=?`, other.UID)
+	require.NoError(t, err)
+	_, _, _, err = hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: first.ID, Title: new("updated"), Actor: "tester"})
+	require.NoError(t, err)
+	_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: first.ID, Author: "tester", Body: "new note"})
+	require.NoError(t, err)
+	_, _, err = hub.DB.AddLabelAndEvent(ctx, first.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "new-label", Actor: "tester"})
+	require.NoError(t, err)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, replica.ID)
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, creds))
+	got, err := spoke.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "updated", got.Title)
+	untouched, err := spoke.DB.IssueByUID(ctx, other.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "local projection", untouched.Title, "unrelated issue must not be refolded")
+	retainedComments, err := spoke.DB.CommentsByIssue(ctx, untouched.ID)
+	require.NoError(t, err)
+	require.Len(t, retainedComments, 1)
+	require.Equal(t, "retained note", retainedComments[0].Body)
+	retainedLabels, err := spoke.DB.LabelsByIssue(ctx, untouched.ID)
+	require.NoError(t, err)
+	require.Len(t, retainedLabels, 1)
+	require.Equal(t, "retained", retainedLabels[0].Label)
+	comments, err := spoke.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "new note", comments[0].Body)
+	labels, err := spoke.DB.LabelsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	require.Equal(t, "new-label", labels[0].Label)
+	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, replica.ID))
+	fullComments, err := spoke.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Equal(t, comments, fullComments)
+	fullLabels, err := spoke.DB.LabelsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Equal(t, labels, fullLabels)
+	folded, err := spoke.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, got, folded, "incremental issue state must match a full fold")
+	assertFoldedIssuesMatch(t, hub.DB, spoke.DB, p.ID, replica.ID, meta.ReplayHorizonEventID-1)
 }
