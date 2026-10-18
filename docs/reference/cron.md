@@ -262,9 +262,9 @@ The existing daemon sweep runs at startup and every 30 seconds by default. Keep 
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver, even with push
 writes enabled, and cannot create or edit native recurring definitions. An old
-peer that lacks `cron_notify_children_v1` cannot receive a project containing
-native recurring state. Capability refusal happens before a baseline or cursor
-change. Projects with native recurring delivery history cannot be adopted into
+peer that lacks `cron_v1` cannot receive a project containing cron state,
+including native recurring metadata on ordinary issue events. Capability refusal
+happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
 local authority and history.
 
@@ -329,11 +329,17 @@ options). Each step has these fields:
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises `cron_v1` and
-`cron_notify_children_v1`. Missing, unknown, or
-failed advertisements remain distinct outcomes. This is an ordinary project
+`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
+definitions, run observations, and native recurring child delivery. Missing,
+unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
+
+Upgrade connected hubs, spokes, and adapters together when moving from released
+0.19.0, which advertised two cron capability names. All cron support now uses
+`cron_v1`; the former recurring-delivery capability is removed with no alias.
+This deliberate protocol change does not support mixed-version rolling upgrades.
+Existing stored definitions, events, and schema stay unchanged.
 
 ## Independent run evidence
 

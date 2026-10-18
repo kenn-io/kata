@@ -12,14 +12,11 @@ import (
 	"sync"
 )
 
-// CronEventFeature identifies support for portable definitions and run observations.
+// CronEventFeature identifies support for all cron definitions, runs and native delivery state.
 const CronEventFeature = "cron_v1"
 
-// RecurringCronEventFeature fences peers that cannot retain native delivery state.
-const RecurringCronEventFeature = "cron_notify_children_v1"
-
 // SupportedEventFeatures is the complete event format advertisement.
-const SupportedEventFeatures = CronEventFeature + "," + RecurringCronEventFeature
+const SupportedEventFeatures = CronEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -47,19 +44,32 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	native, err := payloadHasNativeRecurringState(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if native {
+		required = MergeEventFeatures(required, CronEventFeature)
+	}
+	return required, nil
+}
+
+// payloadHasNativeRecurringState identifies hub-owned state independently of
+// the wire capability shared with portable cron.
+func payloadHasNativeRecurringState(kind, payload string) (bool, error) {
 	issueState := kind == "projection.issue" || strings.HasPrefix(kind, "issue.")
 	jobDefinition := kind == "projection.job" || strings.HasPrefix(kind, "cron.job.")
 	// Delivery state lives only in issue metadata and native job definitions;
 	// other payloads, such as project metadata, may reuse those key names freely.
 	if !issueState && !jobDefinition {
-		return required, nil
+		return false, nil
 	}
 	if payload == "" {
 		payload = "{}"
 	}
 	var body map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return "", err
+		return false, err
 	}
 	var native bool
 	var err error
@@ -68,13 +78,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	} else {
 		native, err = nativeJobDefinition(body["definition"])
 	}
-	if err != nil {
-		return "", err
-	}
-	if native {
-		required = MergeEventFeatures(required, SupportedEventFeatures)
-	}
-	return required, nil
+	return native, err
 }
 
 func nativeIssueMetadata(body map[string]jsontext.Value) (bool, error) {
@@ -180,7 +184,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	// in a project without its job projection. Probe those moved issues directly.
 	// An explicit escape keeps backslash literal on both SQLite and PostgreSQL.
 	if cronPresent {
-		native, err := nativeProjectionRequired(ctx, q, `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`, projectUID)
+		native, err := nativeProjectionRequired(ctx, q, nativeCronJobsQuery, projectUID)
 		if err != nil {
 			return "", err
 		}
@@ -201,31 +205,22 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	return required, nil
 }
 
-// projectRequiredEventFeaturesForAdoption also checks current issue metadata,
-// because adoption replaces local event history before establishing the spoke.
-func projectRequiredEventFeaturesForAdoption(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+const nativeCronJobsQuery = `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`
+
+// projectHasNativeStateForAdoption also checks current issue metadata, because
+// adoption replaces local event history before establishing the spoke.
+func projectHasNativeStateForAdoption(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) (string, error) {
-	features, err := ProjectRequiredEventFeatures(ctx, q, projectUID)
-	if err != nil {
-		return "", err
-	}
-	if errors.Is(RequireEventFeatures(CronEventFeature, features), ErrUnsupportedEventFeatures) {
-		return features, nil
+}, projectUID string) (bool, error) {
+	native, err := nativeProjectionRequired(ctx, q, nativeCronJobsQuery, projectUID)
+	if err != nil || native {
+		return native, err
 	}
 	// Adoption is infrequent; inspect candidate issue documents here instead of
 	// adding an issue-table scan to every federation poll.
 	const query = `SELECT 'projection.issue',i.metadata FROM issues i JOIN projects p ON p.id=i.project_id
 WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"cron.progress.%' OR i.metadata LIKE '%\u%' ESCAPE '!')`
-	native, err := nativeProjectionRequired(ctx, q, query, projectUID)
-	if err != nil {
-		return "", err
-	}
-	if native {
-		features = MergeEventFeatures(features, SupportedEventFeatures)
-	}
-	return features, nil
+	return nativeProjectionRequired(ctx, q, query, projectUID)
 }
 
 func nativeProjectionRequired(ctx context.Context, q interface {
@@ -246,11 +241,11 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 		} else {
 			payload = `{"metadata":` + payload + `}`
 		}
-		feature, err := PayloadRequiredFeatures(kind, payload)
+		native, err := payloadHasNativeRecurringState(kind, payload)
 		if err != nil {
 			return false, err
 		}
-		if RequireEventFeatures(CronEventFeature, feature) != nil {
+		if native {
 			return true, nil
 		}
 	}

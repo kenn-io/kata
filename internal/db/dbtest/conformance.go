@@ -51,6 +51,8 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
+	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
+	{name: "recurring tombstone adoption", run: checkRecurringTombstoneAdoption},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},
 	{name: "recurring template protection", run: checkRecurringTemplateProtection},
@@ -59,6 +61,7 @@ var storageScenarios = []scenario{
 	{name: "recurring parent project move", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "CronJob", "MaxEventID", "MoveIssueProject"}, run: checkRecurringParentProjectMove},
 	{name: "recurring metadata attachment", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "DispatchRecurringCron", "CreateRecurrenceForIssue"}, runWithBackend: checkRecurringMetadataAttachment},
 	{name: "recurring owner race and fence", runWithBackend: checkRecurringOwnerRaceAndFence},
+	{name: "recurring spoke authority", run: checkRecurringSpokeAuthority},
 	{name: "recurring federation", runWithBackend: checkRecurringFederation},
 	{name: "recurring atomic rollback", runWithBackend: checkRecurringAtomicRollback},
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},

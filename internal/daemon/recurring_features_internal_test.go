@@ -9,13 +9,13 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// A peer that already supports portable cron needs an actionable native-format hint.
+// A peer without cron support needs an actionable upgrade hint.
 func TestRecurringFederationFeatureRecoveryHint(t *testing.T) {
-	err := federationFeatureError(db.RequireEventFeatures(db.CronEventFeature, db.SupportedEventFeatures))
+	err := federationFeatureError(db.RequireEventFeatures("", "cron_v1"))
 	var response *api.APIError
 	require.ErrorAs(t, err, &response)
 	require.Equal(t, http.StatusConflict, response.Status)
 	require.Equal(t, "unsupported_event_features", response.Code)
-	require.Contains(t, response.Message, db.RecurringCronEventFeature)
+	require.Contains(t, response.Message, "cron_v1")
 	require.Contains(t, response.Hint, "required event features")
 }

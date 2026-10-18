@@ -352,14 +352,29 @@ func checkRecurringFederation(t *testing.T, hub db.Storage, b Backend) error {
 	p, _, job, progress := recurringFixture(t, hub, "latest")
 	binding, e := hub.EnableProjectFederation(ctx, p.ID, "operator")
 	require.NoError(t, e)
-	_, e = hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, Metadata: true, Features: db.CronEventFeature})
+	_, e = hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, Metadata: true})
 	require.ErrorIs(t, e, db.ErrUnsupportedEventFeatures)
-	metadata, e := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, Metadata: true, Features: db.SupportedEventFeatures})
+	metadata, e := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, Metadata: true, Features: "cron_v1"})
 	require.NoError(t, e)
-	require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, metadata.RequiredFeatures))
-	page, e := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: db.SupportedEventFeatures, Limit: 100})
+	require.NoError(t, db.RequireEventFeatures("cron_v1", metadata.RequiredFeatures))
+	page, e := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: "cron_v1", Limit: 100})
 	require.NoError(t, e)
-	require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, page.RequiredFeatures))
+	require.NoError(t, db.RequireEventFeatures("cron_v1", page.RequiredFeatures))
+	require.Equal(t, "cron_v1", metadata.RequiredFeatures)
+	require.Equal(t, "cron_v1", page.RequiredFeatures)
+	require.NotEmpty(t, page.Events)
+	beforeRead, e := hub.MaxEventID(ctx)
+	require.NoError(t, e)
+	for _, features := range []string{"", "cron_notify_children_v1"} {
+		for _, metadata := range []bool{false, true} {
+			refused, err := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, Metadata: metadata, Features: features, Limit: 100})
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			require.Zero(t, refused.NextAfterID)
+		}
+	}
+	afterRead, e := hub.MaxEventID(ctx)
+	require.NoError(t, e)
+	require.Equal(t, beforeRead, afterRead, "unsupported reads create no baseline")
 	peer := b.Open(t)
 	t.Cleanup(func() { require.NoError(t, peer.Close()) })
 	local, e := peer.CreateProject(ctx, "spoke-project")
@@ -572,7 +587,7 @@ func checkRecurringMovedChildAdoptionRefusal(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	beforeRead, err := s.MaxEventID(ctx)
 	require.NoError(t, err)
-	_, err = s.ReadFederation(ctx, db.FederationReadParams{ProjectID: destination.ID, Features: db.CronEventFeature, Metadata: true})
+	_, err = s.ReadFederation(ctx, db.FederationReadParams{ProjectID: destination.ID, Metadata: true})
 	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 	afterRead, err := s.MaxEventID(ctx)
 	require.NoError(t, err)
@@ -705,5 +720,126 @@ func checkRecurringProjectMetadataKeys(t *testing.T, s db.Storage) error {
 	})
 	require.NoError(t, e, "a spoke can push ordinary project metadata")
 	require.Equal(t, 1, result.Accepted)
+	return nil
+}
+
+// Native authority cannot depend on the capability shared with portable jobs.
+func checkRecurringSpokeAuthority(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	p, parent, job, _ := recurringFixture(t, s, "latest")
+	_, err := s.EnableProjectFederation(ctx, p.ID, "operator")
+	require.NoError(t, err)
+	spokeUID, err := uid.New()
+	require.NoError(t, err)
+	ingest := func(event db.RemoteEvent) (db.FederationIngestResult, error) {
+		return s.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: spokeUID, BoundActor: "operator", EventFeatures: "cron_v1", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+	}
+	definition, err := json.Marshal(job.Definition)
+	require.NoError(t, err)
+	for _, tc := range []struct{ kind, payload string }{
+		{"cron.job.created", `{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","definition":` + string(definition) + `}`},
+		{"cron.job.updated", `{"uid":"` + job.UID + `","definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`},
+		{"cron.job.deleted", `{"uid":"` + job.UID + `"}`},
+		{"issue.metadata_updated", `{"diff":{"cr\u006fn.progress.` + job.UID + `":{"to":null}}}`},
+	} {
+		event := newRemoteEvent(t, p, &parent.UID, tc.kind, "operator", spokeUID, 999, jsontext.Value(tc.payload))
+		before, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		_, err = ingest(event)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		require.ErrorContains(t, err, "native recurring")
+		after, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	}
+	retained, err := s.CronJob(ctx, p.ID, job.UID)
+	require.NoError(t, err)
+	require.Equal(t, job.DefinitionEventUID, retained.DefinitionEventUID)
+	// A previously accepted event is retried, never treated as a new mutation.
+	accepted := newRemoteEvent(t, p, &parent.UID, "issue.metadata_updated", "operator", spokeUID, 999, jsontext.Value(`{"diff":{"cron.progress.`+job.UID+`":{"to":null}},"revision_new":99}`))
+	_, err = s.InsertRemoteEvent(ctx, p.ID, accepted)
+	require.NoError(t, err)
+	before, err := s.MaxEventID(ctx)
+	require.NoError(t, err)
+	result, err := ingest(accepted)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Duplicates)
+	require.Zero(t, result.Accepted)
+	after, err := s.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	return nil
+}
+
+// Imported issue snapshots may retain delivery history without a job or move event.
+func checkRecurringAdoptionSnapshots(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	q := s.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for i, metadata := range []string{
+		`{"cron.occurrence":{"version":1}}`,
+		`{"cr\u006fn.occurrence":{"version":1}}`,
+		`{"cr\u006fn.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1}}`,
+	} {
+		p, err := s.CreateProject(ctx, fmt.Sprintf("snapshot-project-%d", i))
+		require.NoError(t, err)
+		issue, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Retained delivery", Author: "operator"})
+		require.NoError(t, err)
+		_, err = q.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, metadata, issue.ID)
+		require.NoError(t, err)
+		if i == 2 {
+			destination, err := s.CreateProject(ctx, "moved-progress-project")
+			require.NoError(t, err)
+			_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: p.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "operator"})
+			require.NoError(t, err)
+			p = destination
+		}
+		before, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		_, err = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 999, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", ReplayHorizonEventID: 1, Actor: "operator"})
+		require.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported)
+		after, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		retained, err := s.ProjectByUID(ctx, p.UID)
+		require.NoError(t, err)
+		require.Equal(t, p.ID, retained.ID)
+		binding, err := s.EnableProjectFederation(ctx, p.ID, "operator")
+		require.NoError(t, err)
+		beforeRead, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		_, err = s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "ordinary issue snapshots still need cron support")
+		afterRead, err := s.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, beforeRead, afterRead)
+		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: "cron_v1", Limit: 100})
+		require.NoError(t, err)
+		require.Equal(t, "cron_v1", page.RequiredFeatures)
+	}
+	return nil
+}
+
+// Deleted jobs still carry hub-owned delivery history even without issue metadata.
+func checkRecurringTombstoneAdoption(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	p, parent, job, _ := recurringFixture(t, s, "latest")
+	_, _, err := s.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: p.ID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator", Deleted: true})
+	require.NoError(t, err)
+	_, err = s.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}).ExecContext(ctx, `UPDATE issues SET metadata='{}' WHERE id=$1`, parent.ID)
+	require.NoError(t, err)
+	before, err := s.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 999, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", ReplayHorizonEventID: 1, Actor: "operator"})
+	require.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported)
+	after, err := s.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	retained, err := s.CronJob(ctx, p.ID, job.UID)
+	require.NoError(t, err)
+	require.NotNil(t, retained.DeletedAt)
 	return nil
 }

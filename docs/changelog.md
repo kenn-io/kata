@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-17
+last_edited: 2026-10-18
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,6 +10,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
+
+- Negotiate all [cron features](reference/cron.md#capabilities), including recurring child delivery, with one `cron_v1` capability. Upgrade connected hubs, spokes, and adapters together from 0.19.0; the separate recurring capability is removed with no alias or mixed-version rolling-upgrade support. Native delivery remains hub-owned.
 
 - Count completed issue creates and closes from the web UI, TUI, and human CLI commands with anonymous `issue_created` and `issue_closed` events. The daemon records each changed mutation with its client's `surface`, without a separate action report or wait. `KATA_TELEMETRY_ENABLED=0` opts out. Web issue removal counts as a close.
 
