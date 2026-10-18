@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -123,6 +123,16 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+
+Not supported:
+
+- A seconds or year field. Kata uses exactly five fields. Removing a 0 seconds field or a `*` year keeps the schedule; nonzero seconds or a year restriction have no equivalent.
+- `@reboot`: use a descriptor, a five-field schedule, or an interval trigger.
+- `L`, `W`, `#`: no five-field equivalent; `28-31` fires on each of those days, and a day-of-month range plus a weekday fires on either.
+- A step of 0: steps must be one positive number, as in `*/15`.
+- `H` (Jenkins hashed value): choose a fixed value.
+
+Errors name the field and the value that failed.
 
 ### Actions
 

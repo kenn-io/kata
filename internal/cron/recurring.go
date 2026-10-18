@@ -56,7 +56,7 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {
 		directive, rest, ok := strings.Cut(expression, " ")
 		if !ok {
-			return nil, invalid("invalid timezone directive")
+			return nil, invalidCronDirective()
 		}
 		_, embedded, _ := strings.Cut(directive, "=")
 		if embedded != zone {
@@ -69,7 +69,7 @@ func recurringSchedule(t Trigger) (func(time.Time) time.Time, error) {
 	}
 	schedule, err := ParseCron("CRON_TZ=" + zone + " " + expression)
 	if err != nil {
-		return nil, invalid("invalid native cron expression")
+		return nil, err
 	}
 	return schedule.Next, nil
 }

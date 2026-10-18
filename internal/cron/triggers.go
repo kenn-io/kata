@@ -1,7 +1,6 @@
 package cron
 
 import (
-	"errors"
 	"strings"
 	"time"
 	"unicode"
@@ -13,7 +12,7 @@ import (
 func (t Trigger) Validate() error {
 	if t.Timezone != "" {
 		if _, err := time.LoadLocation(t.Timezone); err != nil {
-			return invalid("invalid timezone")
+			return unknownTimezone(t.Timezone)
 		}
 	}
 	if t.LeadSeconds < 0 {
@@ -26,7 +25,7 @@ func (t Trigger) Validate() error {
 	case "manual":
 	case "cron":
 		if _, err := ParseCron(t.Cron); err != nil {
-			return invalid("invalid cron expression")
+			return err
 		}
 	case "interval":
 		if t.IntervalSeconds <= 0 {
@@ -59,8 +58,16 @@ func ParseCron(expression string) (cron.Schedule, error) {
 	if strings.HasPrefix(trimmed, "TZ=") || strings.HasPrefix(trimmed, "CRON_TZ=") {
 		directive, _, ok := strings.Cut(trimmed, " ")
 		if !ok || strings.ContainsFunc(directive, unicode.IsSpace) {
-			return nil, errors.New("timezone directive must be followed by a space and a schedule")
+			return nil, invalidCronDirective()
 		}
 	}
+	schedule, err := parseCronSpec(expression)
+	if err != nil {
+		return nil, explainCron(expression, err)
+	}
+	return schedule, nil
+}
+
+func parseCronSpec(expression string) (cron.Schedule, error) {
 	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(expression)
 }

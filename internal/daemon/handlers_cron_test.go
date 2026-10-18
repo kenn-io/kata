@@ -36,6 +36,32 @@ func cronHTTPDefinition(_ *testing.T) cron.JobDefinition {
 	return cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspection result"}, Overlap: "forbid", Catchup: "all", Options: []byte(`{"model":"example"}`)}
 }
 
+func TestCronJobCreateExplainsUnsupportedCron(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "cron-errors")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
+	for _, tc := range []struct{ expression, want string }{
+		{"0 9 L * *", "last-day syntax"},
+		{"TZ=UTC", "TZ= and CRON_TZ= must be followed by a space and a schedule"},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			definition := cronHTTPDefinition(t)
+			definition.Trigger = cron.Trigger{Kind: "cron", Cron: tc.expression}
+			status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "worker", "name": "Invalid schedule", "definition": definition})
+			require.Equalf(t, http.StatusBadRequest, status, "%s", raw)
+			var response struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &response))
+			require.Equal(t, "validation", response.Error.Code)
+			require.Contains(t, response.Error.Message, tc.want)
+		})
+	}
+}
+
 func TestCronDefinitionAPI(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "cron-example")
