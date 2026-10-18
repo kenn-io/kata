@@ -119,6 +119,10 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 // cronOperationHelp returns Long and Example text for one generated command.
 func cronOperationHelp(resource, action string) (string, string) {
 	cmd := "kata cron " + resource + " " + action
+	deliveryHelp := ""
+	if resource == "job" {
+		deliveryHelp = "\n\nNative recurring jobs include a delivery object: state (active, behind, paused, error), how far delivery has reached, the next due time, and the newest child. On a spoke it is evaluated locally from replicated progress."
+	}
 	switch resource + " " + action {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
@@ -141,10 +145,10 @@ never changes an issue's owner, dates, lease, or status.`,
 	switch action {
 	case "list":
 		return "List the project's " + resource + ` definitions. --include-deleted also lists
-deleted (tombstoned) ones.`, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
+deleted (tombstoned) ones.` + deliveryHelp, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
 	case "show":
 		return "Show one " + resource + ` definition. Its definition_event_uid is the value
-update, delete, and restore require as --expected-event-uid.`, "  " + cmd + " <" + resource + "-uid> --json"
+update, delete, and restore require as --expected-event-uid.` + deliveryHelp, "  " + cmd + " <" + resource + "-uid> --json"
 	case "create":
 		long := "Create a " + resource + ` definition from a JSON request file (--file, or -
 for stdin) holding a name and a definition. Pass --uid to choose its ULID;
@@ -578,15 +582,16 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 }
 
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
+	include := "delivery"
 	switch {
 	case o.resource == "job" && o.action == "list":
-		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
+		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted, Include: &include}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}
 		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "job" && o.action == "show":
-		response, err := c.ShowCronJobWithResponse(a.ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: o.identity}})
+		response, err := c.ShowCronJobWithResponse(a.ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: o.identity}, Query: &generated.ShowCronJobQuery{Include: &include}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

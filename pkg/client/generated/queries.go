@@ -147,7 +147,12 @@ func (d DetachProjectAliasQuery) Validate() error {
 }
 
 type ListCronJobsQuery struct {
-	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+	IncludeDeleted *bool   `json:"include_deleted,omitempty"`
+	Include        *string `json:"include,omitempty"`
+}
+
+type ShowCronJobQuery struct {
+	Include *string `json:"include,omitempty"`
 }
 
 type ListCronRunsQuery struct {

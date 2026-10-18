@@ -753,3 +753,36 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronJobShowPrintsDelivery(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Recurring parent", Author: "worker"})
+	require.NoError(t, err)
+	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Check service", Actor: "worker", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Check service"}, Overlap: "allow", Catchup: "latest"}})
+	require.NoError(t, err)
+	for _, args := range [][]string{{"job", "show", j.UID}, {"job", "list"}} {
+		out, _, err := executeCronCLI(t, env.URL, nil, args...)
+		require.NoError(t, err)
+		type jobView struct {
+			Delivery *struct {
+				State string `json:"state"`
+			} `json:"delivery"`
+		}
+		var response struct {
+			Job  jobView   `json:"job"`
+			Jobs []jobView `json:"jobs"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &response))
+		if len(args) == 3 {
+			require.NotNil(t, response.Job.Delivery)
+			require.Equal(t, "active", response.Job.Delivery.State)
+		} else {
+			require.Len(t, response.Jobs, 1)
+			require.NotNil(t, response.Jobs[0].Delivery)
+			require.Equal(t, "active", response.Jobs[0].Delivery.State)
+		}
+	}
+}

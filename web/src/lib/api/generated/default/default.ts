@@ -272,6 +272,7 @@ import type {
   SetIssuePriorityPathParameters,
   SetProjectAccessPathParameters,
   SetProjectAccessRequestBody,
+  ShowCronJobParams,
   ShowCronJobPathParameters,
   ShowCronRunPathParameters,
   ShowCronWorkflowPathParameters,
@@ -2232,15 +2233,31 @@ export type showCronJobResponseError = showCronJobResponseDefault & {
 
 export type showCronJobResponse = showCronJobResponseSuccess | showCronJobResponseError
 
-export const getShowCronJobUrl = ({ projectId, cronUid }: ShowCronJobPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}`
+export const getShowCronJobUrl = (
+  { projectId, cronUid }: ShowCronJobPathParameters,
+  params?: ShowCronJobParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}`
 }
 
 export const showCronJob = async (
   { projectId, cronUid }: ShowCronJobPathParameters,
+  params?: ShowCronJobParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<showCronJobResponse> => {
-  return orvalFetch<showCronJobResponse>(getShowCronJobUrl({ projectId, cronUid }), {
+  return orvalFetch<showCronJobResponse>(getShowCronJobUrl({ projectId, cronUid }, params), {
     ...options,
     method: 'GET',
   })

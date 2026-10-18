@@ -1073,6 +1073,8 @@ components:
         deleted_at:
           format: date-time
           type: string
+        delivery:
+          $ref: "#/components/schemas/CronJobDelivery"
         id:
           format: int64
           type: integer
@@ -1189,6 +1191,43 @@ components:
         - action
         - overlap
         - catchup
+      type: object
+    CronJobDelivery:
+      additionalProperties: true
+      properties:
+        anchor:
+          format: date-time
+          type: string
+        authority:
+          type: string
+        delivers_here:
+          type: boolean
+        error:
+          type: string
+        evaluated_at:
+          format: date-time
+          type: string
+        last_child:
+          $ref: "#/components/schemas/RecurringChild"
+        next_due_at:
+          format: date-time
+          type: string
+        pending:
+          $ref: "#/components/schemas/RecurringDeliveryPending"
+        reason:
+          type: string
+        scan:
+          $ref: "#/components/schemas/RecurringDeliveryScan"
+        state:
+          type: string
+        through:
+          format: date-time
+          type: string
+      required:
+        - state
+        - authority
+        - delivers_here
+        - evaluated_at
       type: object
     CronJobResponseBody:
       additionalProperties: true
@@ -5512,6 +5551,46 @@ components:
         title:
           type: string
       type: object
+    RecurringChild:
+      additionalProperties: true
+      properties:
+        scheduled_at:
+          format: date-time
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - scheduled_at
+      type: object
+    RecurringDeliveryPending:
+      additionalProperties: true
+      properties:
+        count:
+          format: int64
+          type: integer
+        more:
+          type: boolean
+        oldest:
+          format: date-time
+          type: string
+      required:
+        - count
+        - more
+      type: object
+    RecurringDeliveryScan:
+      additionalProperties: true
+      properties:
+        cursor:
+          format: date-time
+          type: string
+        until:
+          format: date-time
+          type: string
+      required:
+        - until
+        - cursor
+      type: object
     RelayAcceptance:
       additionalProperties: true
       properties:
@@ -7088,7 +7167,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.28.0
+  version: 0.29.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -8305,6 +8384,11 @@ paths:
           name: include_deleted
           schema:
             type: boolean
+        - explode: false
+          in: query
+          name: include
+          schema:
+            type: string
       responses:
         "200":
           content:
@@ -8392,6 +8476,11 @@ paths:
         - in: path
           name: cron_uid
           required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: include
           schema:
             type: string
       responses:

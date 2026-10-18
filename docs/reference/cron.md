@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-17
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -203,7 +203,7 @@ most 991 characters, so the child title stays within 1024 characters. Children c
 `cron.occurrence` provenance and no `scheduled_on`, so the ordinary date sweeper
 does not request the same occurrence again. Clearing a request, closing a child,
 or restarting the daemon never rewinds delivery. Native delivery creates no run
-observation; a consumer may record its own execution evidence separately.
+observation; use [delivery status](#delivery-status) to check its progress. A consumer may record its own execution evidence separately.
 
 Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
@@ -257,6 +257,53 @@ system keys, including when older templates are materialized. Inspect that state
 there is no implicit reset that could recreate already delivered children.
 Native jobs reject execution timeouts, secrets, adapter options, checkout keys,
 and issue date offsets.
+
+### Delivery status
+
+`kata cron job show` and `kata cron job list` include a `delivery` object for
+native recurring jobs. Native delivery records no run observation; this view
+shows how far delivery has reached and whether it has caught up. API clients
+opt in with `?include=delivery` on job show/list. Adapter jobs omit the object
+and keep using their run evidence. Reads change no progress, revisions or events.
+
+| State | Meaning |
+| --- | --- |
+| `active` | The next undelivered occurrence is less than two minutes overdue, or is still in the future. |
+| `behind` | The next undelivered occurrence is at least two minutes overdue. Delivery has not caught up. |
+| `paused` | Delivery is paused for the first applicable reason below. |
+| `error` | Progress, schedule evaluation or the resolved notification recipient is invalid; `error` gives the evaluation failure. |
+
+Paused reasons, in precedence order: `not_owning_hub` (a disabled hub binding),
+`job_deleted`, `disabled`, `parent_missing`, `parent_deleted`,
+`parent_not_open`. An evaluation error is included even while paused, so a
+problem that would prevent resuming remains visible.
+
+`evaluated_at` is the serving daemon's UTC clock. `anchor` is the original
+binding time; `through` is the durable checkpoint. Idle sweeps do not rewrite it.
+`next_due_at` is the first occurrence strictly after `through`, using the same
+schedule stepping as delivery. A past time means work remains undelivered.
+`pending.count` is the next bounded planner batch (at most 50 children),
+`pending.more` says another step is needed, and `pending.oldest` is its first
+retained occurrence. Catch-up policy applies: `latest` retains only the newest
+occurrence and `skip` retains only those within its grace window.
+
+`behind` means **not caught up**, not that the hub is dead. A busy `latest`
+calendar scan can show `pending.count: 0`, `pending.more: true` and a durable
+`scan` with `until` and `cursor`. Compare two reads to see whether `scan.cursor`
+or `through` is advancing. On a paused job, pending work is hypothetical: what
+resuming would create if the resume succeeds. Re-enabling is a write and may
+first require fixing a definition rejected by current write rules.
+
+`last_child` gives the UID and occurrence time of the latest live child still
+linked to this parent with this job's provenance. It considers only readable,
+non-archived child projects. It orders by occurrence time, then UID for ties,
+so moved children, restore and replication do not change the ordering.
+
+`authority` is `local`, `hub`, `hub_disabled` or `spoke`; `delivers_here` is true
+only for local projects and enabled hubs. On a spoke, status is evaluated locally
+from replicated delivery evidence. It trails the hub by replication lag; the
+spoke's version or clock may differ, and it cannot see the hub's pause state.
+An active spoke view does not confirm that the hub is running or enabled.
 
 ### Workflow definitions
 

@@ -1256,6 +1256,7 @@ type CronJob struct {
 	DefinitionEventUID string                    `json:"definition_event_uid" validate:"required"`
 	DefinitionHlc      HLC                       `json:"definition_hlc"`
 	DeletedAt          *time.Time                `json:"deleted_at,omitempty"`
+	Delivery           *CronJobDelivery          `json:"delivery,omitempty"`
 	ID                 int64                     `json:"id"`
 	Name               string                    `json:"name" validate:"required"`
 	ProjectID          int64                     `json:"project_id"`
@@ -1283,6 +1284,13 @@ func (c CronJob) Validate() error {
 	if v, ok := any(c.DefinitionHlc).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("DefinitionHlc", err)
+		}
+	}
+	if c.Delivery != nil {
+		if v, ok := any(c.Delivery).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Delivery", err)
+			}
 		}
 	}
 	if err := typesValidator.Var(c.Name, "required"); err != nil {
@@ -1407,6 +1415,59 @@ func (c CronJobDefinitionResponse) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Trigger", err)
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronJobDelivery struct {
+	Anchor       *time.Time                `json:"anchor,omitempty"`
+	Authority    string                    `json:"authority" validate:"required"`
+	DeliversHere bool                      `json:"delivers_here"`
+	ErrorData    *string                   `json:"error,omitempty"`
+	EvaluatedAt  time.Time                 `json:"evaluated_at" validate:"required"`
+	LastChild    *RecurringChild           `json:"last_child,omitempty"`
+	NextDueAt    *time.Time                `json:"next_due_at,omitempty"`
+	Pending      *RecurringDeliveryPending `json:"pending,omitempty"`
+	Reason       *string                   `json:"reason,omitempty"`
+	Scan         *RecurringDeliveryScan    `json:"scan,omitempty"`
+	State        string                    `json:"state" validate:"required"`
+	Through      *time.Time                `json:"through,omitempty"`
+}
+
+func (c CronJobDelivery) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Authority, "required"); err != nil {
+		errors = errors.Append("Authority", err)
+	}
+	if err := typesValidator.Var(c.EvaluatedAt, "required"); err != nil {
+		errors = errors.Append("EvaluatedAt", err)
+	}
+	if c.LastChild != nil {
+		if v, ok := any(c.LastChild).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("LastChild", err)
+			}
+		}
+	}
+	if c.Pending != nil {
+		if v, ok := any(c.Pending).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Pending", err)
+			}
+		}
+	}
+	if c.Scan != nil {
+		if v, ok := any(c.Scan).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scan", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.State, "required"); err != nil {
+		errors = errors.Append("State", err)
 	}
 	if len(errors) == 0 {
 		return nil
@@ -5442,6 +5503,30 @@ type RecurrenceTemplateUpdateInput struct {
 	Owner         *string         `json:"owner,omitempty"`
 	Priority      *int64          `json:"priority,omitempty"`
 	Title         *string         `json:"title,omitempty"`
+}
+
+type RecurringChild struct {
+	ScheduledAt time.Time `json:"scheduled_at" validate:"required"`
+	UID         string    `json:"uid" validate:"required"`
+}
+
+func (r RecurringChild) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RecurringDeliveryPending struct {
+	Count  int64      `json:"count"`
+	More   bool       `json:"more"`
+	Oldest *time.Time `json:"oldest,omitempty"`
+}
+
+type RecurringDeliveryScan struct {
+	Cursor time.Time `json:"cursor" validate:"required"`
+	Until  time.Time `json:"until" validate:"required"`
+}
+
+func (r RecurringDeliveryScan) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type RelayAcceptance struct {

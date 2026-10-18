@@ -25,6 +25,7 @@ type Storage interface {
 	CronJob(context.Context, int64, string) (CronJob, error)
 	CronWorkflow(context.Context, int64, string) (CronWorkflow, error)
 	ListCronJobs(context.Context, CronList) ([]CronJob, error)
+	RecurringCronDelivery(context.Context, int64, []CronJob, time.Time) ([]*RecurringDelivery, error)
 	ListRecurringCronJobs(context.Context, string, int) ([]RecurringCronCandidate, error)
 	DispatchRecurringCron(context.Context, DispatchRecurringCronIn) (DispatchRecurringCronOut, error)
 	ListCronWorkflows(context.Context, CronList) ([]CronWorkflow, error)

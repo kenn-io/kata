@@ -265,14 +265,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if err != nil {
 			return err
 		}
-		recipient := job.Definition.Action.Recipient
-		if recipient == "current-owner-or-author" {
-			recipient = parent.Author
-			if parent.Owner != nil && *parent.Owner != "" {
-				recipient = *parent.Owner
-			}
-		}
-		recipient, err = notification.NormalizeRecipient(recipient)
+		recipient, err := recurringRecipient(job.Definition, parent)
 		if err != nil {
 			return err
 		}

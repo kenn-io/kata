@@ -76,6 +76,7 @@ func CronWorkflowDefinitionFrom(value cron.WorkflowDefinition) CronWorkflowDefin
 type CronJob struct {
 	db.CronDefinition
 	Definition CronJobDefinition `json:"definition"`
+	Delivery   *CronJobDelivery  `json:"delivery,omitempty"`
 }
 
 // CronWorkflow combines workflow identity and revision with its portable definition.
@@ -86,7 +87,7 @@ type CronWorkflow struct {
 
 // CronJobFrom converts a storage value to its API representation.
 func CronJobFrom(value db.CronJob) CronJob {
-	return CronJob{value.CronDefinition, CronJobDefinitionFrom(value.Definition)}
+	return CronJob{CronDefinition: value.CronDefinition, Definition: CronJobDefinitionFrom(value.Definition)}
 }
 
 // CronWorkflowFrom converts a storage value to its API representation.
@@ -186,4 +187,19 @@ type ListCronWorkflowsResponse struct {
 	Body struct {
 		Workflows []CronWorkflow `json:"workflows"`
 	}
+}
+
+// CronJobDelivery is an opt-in, locally evaluated native delivery view.
+type CronJobDelivery db.RecurringDelivery
+
+// ShowCronJobRequest includes optional projections only on job reads.
+type ShowCronJobRequest struct {
+	CronDefinitionRequest
+	Include string `query:"include"`
+}
+
+// ListCronJobsRequest includes optional projections only on job reads.
+type ListCronJobsRequest struct {
+	ListCronDefinitionsRequest
+	Include string `query:"include"`
 }

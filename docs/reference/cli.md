@@ -1986,6 +1986,9 @@ kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
 
+Native job list/show include [delivery status](cron.md#delivery-status), with the next due time and latest visible child.
+
+
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.
 Workflow commands use the same definition actions and revision flags. Retain a

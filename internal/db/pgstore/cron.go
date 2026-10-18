@@ -3,12 +3,13 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
 
 func (s *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	return db.CronSQL{RecurringChildren: s.recurringChildren, CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 		return s.patchIssueMetadata(ctx, in, func(_ context.Context, run transactionFunc) error { return run(tx) })
 	}, Postgres: true, InstanceUID: s.InstanceUID(), Query: s, Transact: func(ctx context.Context, run func(*sql.Tx) error) error { return s.withSerializableTx(ctx, run) }, WriteGate: func(ctx context.Context, tx *sql.Tx, id int64) error { return ensureProjectWritableTx(ctx, tx, id) }, EffectiveActor: func(ctx context.Context, tx *sql.Tx, projectID int64, actor string) (string, error) {
 		return effectiveLocalMutationActorTx(ctx, tx, projectID, actor)
@@ -55,4 +56,32 @@ func (s *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return s.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// RecurringCronDelivery reads status without changing delivery evidence.
+func (s *Store) RecurringCronDelivery(ctx context.Context, projectID int64, jobs []db.CronJob, now time.Time) ([]*db.RecurringDelivery, error) {
+	return s.cronSQL().RecurringDelivery(ctx, projectID, jobs, now)
+}
+
+func (s *Store) recurringChildren(ctx context.Context, parentID int64, jobUID string) ([]db.RecurringChild, error) {
+	args := []any{parentID, jobUID}
+	query := `SELECT i.uid, i.metadata::jsonb -> 'cron.occurrence' FROM issues i JOIN projects p ON p.id=i.project_id JOIN links l ON l.from_issue_id=i.id WHERE l.type='parent' AND l.to_issue_id=$1 AND i.metadata::jsonb -> 'cron.occurrence' ->> 'job_uid'=$2 AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args)
+	rows, err := s.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []db.RecurringChild
+	for rows.Next() {
+		var uid, occurrence string
+		if err := rows.Scan(&uid, &occurrence); err != nil {
+			return nil, err
+		}
+		child, err := db.RecurringChildFrom(uid, occurrence)
+		// Corrupt provenance is not proof of a delivered occurrence.
+		if err == nil {
+			out = append(out, child)
+		}
+	}
+	return out, rows.Err()
 }

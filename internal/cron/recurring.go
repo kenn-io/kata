@@ -130,21 +130,12 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 		p.Scan = nil
 		out.Progress = p
 	}
-	next, err := recurringSchedule(j.Trigger)
+	next, err := recurringNext(j.Trigger, p.Anchor)
 	if err != nil {
 		return out, err
 	}
 	if j.Trigger.Kind == "interval" {
 		step := time.Duration(j.Trigger.IntervalSeconds) * time.Second
-		next = func(cursor time.Time) time.Time {
-			elapsed := cursor.Sub(p.Anchor)
-			// Saturating time.Sub must never masquerade as a different occurrence.
-			if elapsed == time.Duration(1<<63-1) {
-				return time.Time{}
-			}
-			remaining := step - elapsed%step
-			return cursor.Add(remaining).UTC()
-		}
 		if j.Catchup == "latest" {
 			elapsed := now.Sub(p.Anchor)
 			if elapsed == time.Duration(1<<63-1) {
@@ -233,4 +224,23 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	}
 	out.Progress = p
 	return out, nil
+}
+
+// recurringNext is the shared anchored stepping used by delivery and its reads.
+func recurringNext(t Trigger, anchor time.Time) (func(time.Time) time.Time, error) {
+	if t.Kind != "interval" {
+		return recurringSchedule(t)
+	}
+	if anchor.IsZero() || t.IntervalSeconds < 60 || t.IntervalSeconds > maxDurationSeconds {
+		return nil, invalid("invalid recurring interval")
+	}
+	step := time.Duration(t.IntervalSeconds) * time.Second
+	return func(cursor time.Time) time.Time {
+		elapsed := cursor.Sub(anchor)
+		if elapsed == time.Duration(1<<63-1) {
+			return time.Time{}
+		}
+		remaining := step - elapsed%step
+		return cursor.Add(remaining).UTC()
+	}, nil
 }

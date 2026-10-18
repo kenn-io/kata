@@ -51,6 +51,11 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
+	{name: "recurring delivery bare directive", run: checkRecurringDeliveryBareDirective},
+	{name: "recurring delivery status", methods: []string{"RecurringCronDelivery"}, run: checkRecurringDeliveryStatus},
+	{name: "recurring delivery last child", runWithBackend: checkRecurringDeliveryLastChild},
+	{name: "recurring delivery replica", runWithBackend: checkRecurringDeliveryReplica},
+	{name: "recurring delivery legacy jobs", run: checkRecurringDeliveryLegacyJobs},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},
 	{name: "recurring template protection", run: checkRecurringTemplateProtection},
