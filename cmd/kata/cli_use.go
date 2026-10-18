@@ -169,6 +169,8 @@ func readTelemetryDayMarker(path string) string {
 }
 
 // recordTelemetryDayMarker is best effort: without the marker the next command reports again.
+// It skips fsync because a lost marker costs only one more report, while a sync would delay
+// the command's exit.
 func recordTelemetryDayMarker(path, day string) {
 	if path == "" {
 		return
@@ -176,5 +178,5 @@ func recordTelemetryDayMarker(path, day string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return
 	}
-	_ = atomicfile.WriteFile(path, []byte(day), atomicfile.WithPerm(0o600))
+	_ = atomicfile.WriteFile(path, []byte(day), atomicfile.WithPerm(0o600), atomicfile.WithoutSync())
 }
