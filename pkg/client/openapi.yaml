@@ -6885,7 +6885,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.28.0
+  version: 0.29.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8649,6 +8649,16 @@ paths:
           required: true
           schema:
             format: int64
+            type: integer
+        - description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+          explode: false
+          in: query
+          name: relay_protocol_version
+          schema:
+            description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+            format: int64
+            maximum: 1
+            minimum: 1
             type: integer
       responses:
         "200":

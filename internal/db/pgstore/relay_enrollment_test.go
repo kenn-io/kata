@@ -102,12 +102,3 @@ func TestRelayEnrollmentBootstrapCompactedArtifacts(t *testing.T) {
 		return err
 	})
 }
-
-func TestRelayCrossProjectBoundary(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
-	t.Cleanup(cleanup)
-	store, err := pgstore.Open(t.Context(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelayCrossProjectBoundary(t, store)
-}

@@ -105,7 +105,22 @@ The preview returns the hub instance, selected project, upstream account,
 local account and bidirectional direction. It rejects read-only hub accounts,
 unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
-before enrollment. Set `preflight` to `false` to connect. `serve_downstream`
+before enrollment. With hub API `0.29.0` or newer, it also rejects existing
+cross-project issue links with `409 relay_cross_project_links`. Remove the
+project's cross-project related, blocks and parent links on the hub before
+retrying; ask a hub operator to remove links to projects you cannot access.
+The check includes incoming links and closed issues. Historical links that
+have already been removed do not block enrollment. Older hubs still perform
+their enrollment-time check but cannot report this blocker during preflight.
+
+Direct callers can request the same read-only check with
+`GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.
+Omitting the parameter preserves ordinary federation metadata behavior.
+Rejected enrollment attempts check links before creating a root key pin;
+the enrollment transaction repeats the check to catch concurrent changes.
+A pin that already exists is retained.
+
+Set `preflight` to `false` to connect. `serve_downstream`
 defaults to `false`. Set it to `true` only when this daemon will relay the
 project to downstream daemons. Each root-to-leaf path supports up to eight
 hubs, including the root, plus one final leaf that does not serve downstream.

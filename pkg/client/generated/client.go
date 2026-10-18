@@ -4241,10 +4241,15 @@ func (c *Client) PollProjectEvents(ctx context.Context, options *PollProjectEven
 
 func (c *Client) GetProjectFederation(ctx context.Context, options *GetProjectFederationRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"relay_protocol_version": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation",
-		Method:     "GET",
-		Options:    options,
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

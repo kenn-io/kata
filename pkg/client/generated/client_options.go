@@ -2576,6 +2576,7 @@ func (o *PollProjectEventsRequestOptions) GetHeader() (map[string]string, error)
 // GetProjectFederationRequestOptions is the options needed to make a request to GetProjectFederation.
 type GetProjectFederationRequestOptions struct {
 	PathParams *GetProjectFederationPath
+	Query      *GetProjectFederationQuery
 }
 
 // Validate validates all the fields in the options.
@@ -2587,6 +2588,14 @@ func (o *GetProjectFederationRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
 			}
 		}
 	}
@@ -2604,7 +2613,7 @@ func (o *GetProjectFederationRequestOptions) GetPathParams() (map[string]any, er
 
 // GetQuery returns the query params as a map.
 func (o *GetProjectFederationRequestOptions) GetQuery() (map[string]any, error) {
-	return nil, nil
+	return runtime.AsMap[any](o.Query)
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.

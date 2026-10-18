@@ -118,6 +118,7 @@ import type {
   GetIssueMetadataResponseBody,
   GetIssueSyncStatusPathParameters,
   GetProjectAccessPathParameters,
+  GetProjectFederationParams,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
@@ -2878,18 +2879,37 @@ export type getProjectFederationResponse =
   | getProjectFederationResponseSuccess
   | getProjectFederationResponseError
 
-export const getGetProjectFederationUrl = ({ projectId }: GetProjectFederationPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation`
+export const getGetProjectFederationUrl = (
+  { projectId }: GetProjectFederationPathParameters,
+  params?: GetProjectFederationParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation`
 }
 
 export const getProjectFederation = async (
   { projectId }: GetProjectFederationPathParameters,
+  params?: GetProjectFederationParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<getProjectFederationResponse> => {
-  return orvalFetch<getProjectFederationResponse>(getGetProjectFederationUrl({ projectId }), {
-    ...options,
-    method: 'GET',
-  })
+  return orvalFetch<getProjectFederationResponse>(
+    getGetProjectFederationUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type enableProjectFederationResponse200 = {

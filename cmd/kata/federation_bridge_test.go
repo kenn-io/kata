@@ -101,3 +101,22 @@ func TestFederationBridgeAgentOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "OK federation-bridge-disconnect project=shared-replica status=disconnected warning=\"the hub grant was not revoked\"\n", out)
 }
+
+func TestFederationBridgeConnectCrossProjectError(t *testing.T) {
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, err := w.Write([]byte(`{"status":409,"error":{"code":"relay_cross_project_links","message":"project has cross-project links","hint":"remove cross-project links before retrying"}}`))
+		require.NoError(t, err)
+	})
+	for _, mode := range []string{"--agent", "--json"} {
+		_, err := runFederationRebindAgainstServer(t, server.URL, mode, "--project", "spoke-project", "federation", "bridge", "connect", "--hub-daemon", "example-hub", "--hub-project", "hub-project", "--preflight")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cross-project links")
+		// The CLI's typed error retains the remedy for its output renderer.
+		classified := cliErrorForErr(err, true)
+		require.Equal(t, http.StatusConflict, classified.HTTPStatus)
+		require.Equal(t, "relay_cross_project_links", classified.Code)
+		require.Contains(t, classified.Hint, "remove cross-project links")
+	}
+}

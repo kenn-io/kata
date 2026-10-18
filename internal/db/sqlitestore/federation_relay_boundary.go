@@ -33,6 +33,24 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	return nil
 }
 
+// CheckRelayProjectLinks uses the same native boundary check as enrollment.
+// Check visibility before reading links, including links to hidden projects.
+func (d *Store) CheckRelayProjectLinks(ctx context.Context, projectID int64) error {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL`, projectID).Scan(&projectUID); err != nil {
+		return db.RelayProjectLookupError(err)
+	}
+	if !db.ProjectAttributionVisible(ctx, projectUID) {
+		return db.ErrNotFound
+	}
+	return rejectRelayProjectLinksTx(ctx, tx, projectID)
+}
+
 // Reject before new relay admission. Never silently strip existing hashed links.
 func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	var crossing bool
