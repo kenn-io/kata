@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-18
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -118,11 +118,87 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `kind` | Required fields |
 | --- | --- |
 | `manual` | None. |
-| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. |
+| `cron` | `cron`: a five-field expression or a lowercase descriptor such as `@daily`; see [cron expression grammar](#cron-expression-grammar). |
 | `interval` | `interval_seconds`: a positive integer. |
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+
+### Cron expression grammar
+
+A `cron` trigger holds five fields separated by spaces, or one descriptor.
+Kata validates every job's cron trigger with this grammar, and the daemon uses
+it to schedule native recurring jobs. Adapters that schedule jobs should
+follow it too. Times are wall-clock times in the trigger's `timezone`.
+
+| Field | Values | Names |
+| --- | --- | --- |
+| Minute | 0–59 | |
+| Hour | 0–23 | |
+| Day of month | 1–31 | |
+| Month | 1–12 | `jan`–`dec` |
+| Day of week | 0–6; Sunday is 0 | `sun`–`sat` |
+
+Names are three letters and ignore case. They work as single values, in lists,
+and as range ends, such as `mon-fri`.
+
+| Syntax | Meaning | Example |
+| --- | --- | --- |
+| `*` | Every value in the field. | `*` in hour: every hour |
+| `?` | The same as `*`. | `0 9 ? * *`: 09:00 daily |
+| `a,b` | A list of values or ranges. | `1,15` in day of month |
+| `a-b` | An inclusive range. | `9-17` in hour |
+| `*/n`, `a-b/n` | Every `n`th value of the range, starting at its first value. | `*/15` in minute: :00, :15, :30, :45 |
+| `a/n` | From `a` to the end of the field's range, every `n`. | `5/15` in minute: :05, :20, :35, :50 |
+
+A step selects values from its field: `a-b/n` selects `a`, `a+n`, and so on
+up to `b`, and `*/n` does the same over the whole field. Steps restart at the
+range's first value every hour (minute field), day (hour), month (day of
+month), week (day of week), or year (month). `*/7 * * * *` runs at :00, :07, …,
+:49, :56 and then again at :00, four minutes later.
+
+- In UTC, full-field steps smaller than the minute or hour field's size run
+  evenly only when `n` divides 60 or 24: minutes 1, 2, 3, 4, 5, 6, 10, 12, 15, 20,
+  30; hours 1, 2, 3, 4, 6, 8, 12. A bounded range follows its own values:
+  `0-29/15` runs at :00 and :15, then waits 45 minutes.
+- In the day-of-month and month fields, steps count calendar numbers, not
+  elapsed time. `0 0 */2 * *` runs on days 1, 3, …, 29, 31 and then on the 1st,
+  the day after the 31st. `0 0 1 */2 *` runs every other month, 59 to 62 days
+  apart.
+- In the day-of-week field, `0 0 * * */2` runs Sunday, Tuesday, Thursday,
+  Saturday and then Sunday, the next day.
+- A step larger than its range selects only the range's first value: `*/60` in
+  the minute field is :00. Other fields can still rule that value out:
+  `0 0 31/31 * *` runs only in months with a 31st.
+
+For a fixed elapsed cadence, such as every 7 minutes or every 36 hours, use an
+`interval` trigger instead: `{"kind":"interval","interval_seconds":420}`.
+Native intervals require at least 60 seconds, count elapsed time from the
+job's first native binding, and ignore the wall clock; see
+[recurring child issues](#recurring-child-issues).
+Adapters schedule their own intervals.
+
+| Descriptor | Same as |
+| --- | --- |
+| `@yearly`, `@annually` | `0 0 1 1 *` |
+| `@monthly` | `0 0 1 * *` |
+| `@weekly` | `0 0 * * 0` |
+| `@daily`, `@midnight` | `0 0 * * *` |
+| `@hourly` | `0 * * * *` |
+
+Descriptors are lowercase. `@every <duration>` passes validation for adapter
+jobs only; native recurring jobs reject it, so use an `interval` trigger.
+On native jobs, an embedded `TZ=` or `CRON_TZ=` prefix is optional and must
+agree with `timezone` (UTC when unset); see
+[recurring child issues](#recurring-child-issues).
+
+Not supported:
+
+- A seconds field or a year field: exactly five fields.
+- `7` for Sunday.
+- `@reboot`.
+- `L`, `W`, and `#` in the day fields.
+- A step of 0.
 
 ### Actions
 

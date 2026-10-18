@@ -41,6 +41,26 @@ func TestSearchAndReadBundledDocs(t *testing.T) {
 	require.Empty(t, none["matches"])
 }
 
+func TestSearchDocsFindsCronExpressionGrammar(t *testing.T) {
+	session := connectTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
+
+	found := callAdministrationTool(t, session, "kata.search_docs", map[string]any{"query": "cron step restart", "limit": 3})
+	matches := found["matches"].([]any)
+	require.NotEmpty(t, matches)
+	first := matches[0].(map[string]any)
+	require.Equal(t, "reference/cron.md#cron-expression-grammar", first["id"])
+	require.Equal(t, "Cron expression grammar", first["heading"])
+
+	read := callAdministrationTool(t, session, "kata.read_doc", map[string]any{"id": first["id"]})
+	content := read["content"].(string)
+	require.True(t, strings.HasPrefix(content, "### Cron expression grammar"), content)
+	require.Contains(t, content, "interval_seconds")
+	require.NotContains(t, content, "### Actions", "a section ends at the next heading")
+}
+
 func TestBundledDocSectionsHaveUniqueIDsAndStaySmall(t *testing.T) {
 	sections, err := docSections()
 	require.NoError(t, err)

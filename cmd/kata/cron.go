@@ -153,6 +153,11 @@ retrying: a repeated create never becomes an update.`
 		if resource == "job" {
 			long += "\nCreating or enabling a native recurring issue job activates daemon delivery. Kata never launches a process."
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid from an issue ref."
+			long += `
+Cron triggers use five fields or a lowercase descriptor; a step such as */7
+selects field values and starts over each hour, day, week, month, or year.
+See Cron expression grammar in docs/reference/cron.md, and use an interval
+trigger for a fixed elapsed cadence.`
 		}
 		return long, "  " + cmd + " --uid <" + resource + "-uid> --file " + resource + ".json --json"
 	case "update":
@@ -161,6 +166,11 @@ definition_event_uid from kata cron ` + resource + ` show as --expected-event-ui
 (or as expected_event_uid in the file); a stale value fails with a conflict.`
 		if resource == "job" {
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid; an existing native parent binding cannot change."
+			long += `
+Cron triggers use five fields or a lowercase descriptor; a step such as */7
+selects field values and starts over each hour, day, week, month, or year.
+See Cron expression grammar in docs/reference/cron.md, and use an interval
+trigger for a fixed elapsed cadence.`
 		}
 		return long, "  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --file " + resource + ".json --json"
 	case "delete":
