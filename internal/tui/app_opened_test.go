@@ -23,13 +23,23 @@ import (
 type recordingTelemetry struct {
 	mu       sync.Mutex
 	captured []map[string]any
+	opened   chan struct{}
+	ended    chan map[string]any
+	release  <-chan struct{}
 }
 
 func (*recordingTelemetry) EventAllowed(event string) bool {
 	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*recordingTelemetry) Enabled() bool { return true }
-func (r *recordingTelemetry) Capture(_ string, properties map[string]any) error {
+func (r *recordingTelemetry) Capture(event string, properties map[string]any) error {
+	if event == "app_opened" && r.opened != nil {
+		close(r.opened)
+	}
+	if event == "session_ended" && r.ended != nil {
+		r.ended <- properties
+		<-r.release
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.captured = append(r.captured, properties)

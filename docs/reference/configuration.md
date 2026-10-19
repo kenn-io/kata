@@ -1051,7 +1051,8 @@ Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
 recorded the opening, including after switching the displayed daemon.
 Delivery is best effort.
-TUI exit waits at most 50 ms, with a separate one-second request deadline; a rejected authentication request drops the event.
+TUI exit waits at most 50 ms, with a separate one-second request deadline.
+A rejected authentication request drops the event.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
 daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
@@ -1066,7 +1067,7 @@ to each daemon: once the daemon accepts the report, kata records the day under
 that fails is retried by the next command. The report never starts a daemon,
 waits at most 50 ms at exit, and prints nothing.
 Its request has a separate one-second deadline.
-Exiting before acceptance leaves the next command free to retry.
+Slow remote transports may drop the report when the process exits.
 
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
@@ -1108,7 +1109,9 @@ Ordinary piped commands send nothing.
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
 has a separate one-second deadline. Shutdown cancels and joins the worker.
-CLI hook reports wait at most 50 ms after successful execution, with a separate 100 ms request deadline; slow remote transports may drop observations.
+CLI hook reports wait at most 50 ms after successful execution, with a
+separate 100 ms request deadline.
+Slow remote transports may drop observations.
 Delivery is best effort and preserves command output, results, and exit status.
 
 The daemon counts these observations for each install and UTC day. It sends one
@@ -1131,8 +1134,11 @@ names.
 With daemon API `0.30.0` or newer, a successful observation at the top bucket
 returns `full`. Hooks and MCP stop posting until the next UTC day after a `full`
 receipt, or after the `disabled` receipt any daemon returns with telemetry off.
-Hook receipts update the daily marker when handled before the 50 ms exit wait ends; requests retain a separate 100 ms deadline.
-To share the stop across processes, clients save a private `agent-full-*` marker under `<KATA_HOME>/telemetry/`.
+Hooks write the daily marker only after handling a `full` or `disabled` receipt.
+Requests retain a separate 100 ms deadline, but exiting after the 50 ms wait
+can prevent receipt handling and leave the next hook free to retry.
+To share the stop across processes, clients save a private `agent-full-*`
+marker under `<KATA_HOME>/telemetry/`.
 The marker holds only the UTC date and is never sent
 anywhere. Its name derives from the daemon URL or Unix socket, so a replacement
 daemon at the same target inherits that day's marker. A daemon that turns

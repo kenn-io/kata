@@ -5,14 +5,79 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/creack/pty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestRunQuitReportsSessionWhileDeliveryIsStalled(t *testing.T) {
+	terminal, tty, err := pty.Open()
+	if errors.Is(err, pty.ErrUnsupported) {
+		t.Skip("PTYs are unsupported on this platform")
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tty.Close()
+		_ = terminal.Close()
+	})
+	require.NoError(t, pty.Setsize(terminal, &pty.Winsize{Rows: 24, Cols: 100}))
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, terminal)
+		close(drained)
+	}()
+	t.Cleanup(func() {
+		_ = tty.Close()
+		<-drained
+	})
+	stdin := os.Stdin
+	os.Stdin = tty
+	t.Cleanup(func() { os.Stdin = stdin })
+	t.Setenv("TERM", "xterm-256color")
+	release := make(chan struct{})
+	recorder := &recordingTelemetry{
+		opened: make(chan struct{}), ended: make(chan map[string]any, 1), release: release,
+	}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	t.Cleanup(func() { close(release) })
+	t.Setenv("KATA_SERVER", env.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	workspace := t.TempDir()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Stdout: tty, SkipQuitConfirm: true, Workspace: workspace})
+	}()
+	select {
+	case <-recorder.opened:
+	case <-ctx.Done():
+		t.Fatal("TUI did not report app_opened")
+	}
+	_, err = terminal.Write([]byte("q"))
+	require.NoError(t, err)
+	select {
+	case properties := <-recorder.ended:
+		assert.Equal(t, map[string]any{"surface": "tui", "duration_bucket": "under_1m"}, properties)
+	case <-ctx.Done():
+		t.Fatal("TUI quit did not report session_ended")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("TUI quit waited for the held telemetry response")
+	}
+}
 
 // TestBoot_ResolvesProject covers §4.2 case 1: cwd is bound to a registered
 // project. bootResolveScope should return single-project scope, and the

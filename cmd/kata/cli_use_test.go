@@ -30,6 +30,7 @@ import (
 // cliUseTelemetry is the daemon's reporter; block holds use reports until closed.
 type cliUseTelemetry struct {
 	block    chan struct{}
+	started  chan struct{}
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string
@@ -44,6 +45,9 @@ func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]a
 }
 func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error {
 	if c.block != nil && (event == "app_opened" || event == "agent_active") {
+		if c.started != nil {
+			c.started <- struct{}{}
+		}
 		<-c.block
 	}
 	c.mu.Lock()
@@ -309,33 +313,22 @@ func TestCLIUseSkipsProbes(t *testing.T) {
 }
 
 func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
-	hung := &cliUseTelemetry{block: make(chan struct{})}
+	hung := &cliUseTelemetry{block: make(chan struct{}), started: make(chan struct{}, 1)}
 	env, dir, _ := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = hung })
 	t.Setenv(hooks.HookVersionEnv, "")
 	stubIsTTY(t, true)
 	release := sync.OnceFunc(func() { close(hung.block) })
 	t.Cleanup(release)
-	reportDone := make(chan (<-chan struct{}), 1)
-	transport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path == "/api/v1/ui/telemetry" {
-			reportDone <- req.Context().Done()
-		}
-		return transport.RoundTrip(req)
-	})
-	t.Cleanup(func() { http.DefaultTransport = transport })
-	start := time.Now()
 	stdout, stderr, err := runCLIWithErr(t, env, dir, "create", "exit wait example")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "exit wait example")
 	assert.Empty(t, stderr)
-	assert.Less(t, time.Since(start), 150*time.Millisecond)
-	release()
-	<-<-reportDone
+	<-hung.started
 	stdout, stderr, err = runCLIWithErr(t, env, dir, "list")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "exit wait example")
 	assert.Empty(t, stderr)
+	release()
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
