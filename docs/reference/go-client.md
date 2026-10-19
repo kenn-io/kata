@@ -59,6 +59,14 @@ storage and identity pass the recovery checks.
 Discover does not probe configured remotes. The first request reports whether
 a remote is reachable.
 
+Discover finds a PostgreSQL-backed default local daemon from its storage DSN.
+Client-only programs do not include the PostgreSQL driver, so they cannot
+resolve DSN routing options: the `host`, `port`, `dbname`, `service`, or
+`servicefile` query options, or `PGHOST`, `PGPORT`, `PGDATABASE`, or
+`PGSERVICE` filling in a part the URL leaves out. Discover then returns an
+error. Set `KATA_SERVER` to the daemon's endpoint, which `kata daemon locate`
+prints.
+
 Discover returns an error matching `client.ErrDaemonUnavailable` when no
 daemon is selected or a selected local daemon has no reachable runtime. A
 local profile whose storage or instance identity cannot be verified returns

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,8 +76,16 @@ func DBHash(dbPath string) string {
 // independent databases from Kata's point of view even when they share a DSN,
 // so their runtime sockets and control files must not collide.
 func StorageHash(dsn, postgresSchema string) string {
+	hash, _ := storageHash(dsn, postgresSchema)
+	return hash
+}
+
+// storageHash also reports ErrPostgresRoutingUnavailable. Like any other
+// unparsable DSN, the hash then falls back to the redacted DSN, which does not
+// match the daemon's runtime namespace.
+func storageHash(dsn, postgresSchema string) (string, error) {
 	if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") {
-		return DBHash(dsn)
+		return DBHash(dsn), nil
 	}
 	schema := strings.TrimSpace(postgresSchema)
 	if schema == "" {
@@ -87,7 +96,11 @@ func StorageHash(dsn, postgresSchema string) string {
 		identity = RedactDSN(dsn)
 	}
 	sum := sha256.Sum256([]byte(identity + "\x00schema=" + schema))
-	return hex.EncodeToString(sum[:])[:12]
+	hash := hex.EncodeToString(sum[:])[:12]
+	if errors.Is(err, ErrPostgresRoutingUnavailable) {
+		return hash, err
+	}
+	return hash, nil
 }
 
 // RuntimeDir returns <KataHome>/runtime/<dbhash>. The directory is not created.
@@ -104,7 +117,11 @@ func RuntimeDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "runtime", StorageHash(db, pgConfig.Schema)), nil
+	hash, err := storageHash(db, pgConfig.Schema)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "runtime", hash), nil
 }
 
 // HookConfigPath returns <KataHome>/hooks.toml. The file is not created here.

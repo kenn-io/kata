@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db/pgstore"
 )
 
 // setupTestHome creates an isolated KATA_HOME for the test and returns its
@@ -244,6 +245,48 @@ func TestStorageHashPostgresIgnoresAmbientRoutingOverriddenByURL(t *testing.T) {
 	t.Setenv("PGDATABASE", "other_database")
 	assert.Equal(t, want, config.StorageHash(dsn, "kata"),
 		"irrelevant ambient settings must not split an explicit PostgreSQL target")
+}
+
+// Client-only programs do not link the PostgreSQL driver. When the URL alone
+// selects the target, they must still find the daemon's runtime namespace.
+func TestStorageHashPostgresWithoutDriverMatchesDaemonNamespace(t *testing.T) {
+	clearPostgresRoutingEnv(t)
+	dsns := []string{
+		"postgres://user:secret@db.example.com:5432/kata?sslmode=verify-full", //nolint:gosec // fixture credential
+		"postgres://user@db.example.com/team%23blue?sslmode=verify-full",
+		"postgres://user@db.example.com/team%3Fblue?sslmode=verify-full",
+		"postgresql://user@[2001:db8::1]:5433/kata?application_name=worker",
+		"postgres://user@primary.example:5432,standby.example:5433/kata",
+		"postgres:///kata",
+	}
+	daemonHashes := make([]string, len(dsns))
+	for i, dsn := range dsns {
+		daemonHashes[i] = config.StorageHash(dsn, "kata")
+	}
+
+	config.UsePostgresTargetParser(nil)
+	t.Cleanup(func() { config.UsePostgresTargetParser(pgstore.ParseTargets) })
+	for i, dsn := range dsns {
+		assert.Equal(t, daemonHashes[i], config.StorageHash(dsn, "kata"), dsn)
+	}
+}
+
+// A routing option needs the driver's view of the targets. Without it the
+// runtime directory is unknown, so callers get an error instead of a guess.
+func TestRuntimeDirPostgresRoutingWithoutDriverFails(t *testing.T) {
+	setupTestHome(t)
+	clearPostgresRoutingEnv(t)
+	config.UsePostgresTargetParser(nil)
+	t.Cleanup(func() { config.UsePostgresTargetParser(pgstore.ParseTargets) })
+
+	t.Setenv("KATA_DSN", "postgres://user@/kata?host=/var/run/postgresql")
+	_, err := config.RuntimeDir()
+	require.ErrorIs(t, err, config.ErrPostgresRoutingUnavailable)
+
+	t.Setenv("KATA_DSN", "postgres:///kata")
+	t.Setenv("PGHOST", "/var/run/postgresql")
+	_, err = config.RuntimeDir()
+	require.ErrorIs(t, err, config.ErrPostgresRoutingUnavailable)
 }
 
 func clearPostgresRoutingEnv(t *testing.T) {

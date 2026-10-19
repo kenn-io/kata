@@ -7,9 +7,8 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // CanonicalDSNIdentity returns a stable, credential-free identity for a database
@@ -54,6 +53,35 @@ func CanonicalDSNIdentity(dsn string) (string, error) {
 	}
 }
 
+// PostgresTarget is one host and port that a PostgreSQL DSN can connect to.
+type PostgresTarget struct {
+	Host string
+	Port uint16
+}
+
+// PostgresTargetParser returns the database and the connection targets,
+// primary first, that the PostgreSQL driver selects for dsn.
+type PostgresTargetParser func(dsn string) (database string, targets []PostgresTarget, err error)
+
+var postgresTargetParser PostgresTargetParser
+
+// UsePostgresTargetParser installs the driver-backed parser that resolves
+// PostgreSQL routing options. The PostgreSQL storage package installs it, so
+// every program that can open PostgreSQL storage has it. Programs without it
+// still identify DSNs whose URL alone selects the target.
+func UsePostgresTargetParser(parser PostgresTargetParser) {
+	postgresTargetParser = parser
+}
+
+// ErrPostgresRoutingUnavailable reports a PostgreSQL DSN whose targets depend
+// on routing options or PG* environment settings that this program cannot
+// resolve because it does not include the PostgreSQL driver.
+var ErrPostgresRoutingUnavailable = errors.New("resolve PostgreSQL routing options in the storage DSN: this program does not include the PostgreSQL driver")
+
+// postgresRoutingQueryKeys are the URL query options that let the driver
+// choose a host, port, or database other than the URL's authority and path.
+var postgresRoutingQueryKeys = []string{"host", "port", "dbname", "database", "service", "servicefile"}
+
 type postgresConnectionTarget struct {
 	Host string `json:"host"`
 	Port uint16 `json:"port"`
@@ -65,7 +93,7 @@ type postgresConnectionTargetIdentity struct {
 }
 
 // postgresTargetIdentity returns the effective credential-free PostgreSQL
-// connection targets selected by pgx. Unlike CanonicalDSNIdentity, which is a
+// connection targets selected by the PostgreSQL driver. Unlike CanonicalDSNIdentity, which is a
 // display-safe database label, this identity retains routing overrides and HA
 // fallbacks so two different servers cannot share daemon runtime state.
 func postgresTargetIdentity(dsn string) (string, error) {
@@ -73,11 +101,17 @@ func postgresTargetIdentity(dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	identity, err := parsePostgresConnectionTargetIdentity(dsn)
+	ambientRouting, err := postgresTargetUsesAmbientRouting(dsn)
 	if err != nil {
 		return "", err
 	}
-	ambientRouting, err := postgresTargetUsesAmbientRouting(dsn)
+	if !ambientRouting && !postgresURLHasRoutingOptions(dsn) {
+		// The URL's authority and path alone select the targets, so the driver
+		// would report the canonical targets. Skipping the driver lets
+		// client-only programs find the same runtime namespace as the daemon.
+		return canonical, nil
+	}
+	identity, err := parsePostgresConnectionTargetIdentity(dsn)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +122,7 @@ func postgresTargetIdentity(dsn string) (string, error) {
 		}
 		if samePostgresConnectionTargetIdentity(identity, canonicalIdentity) {
 			// Preserve the original runtime namespace for ordinary DSNs. Only
-			// routing overrides that change pgx's effective targets need the new
+			// routing overrides that change the driver's effective targets need the new
 			// expanded identity.
 			return canonical, nil
 		}
@@ -100,7 +134,7 @@ func postgresTargetIdentity(dsn string) (string, error) {
 	return string(body), nil
 }
 
-// postgresTargetUsesAmbientRouting reports whether pgx can fill a missing URL
+// postgresTargetUsesAmbientRouting reports whether the driver can fill a missing URL
 // target field from libpq environment settings. Such targets must retain the
 // expanded effective identity: the same URL can otherwise address different
 // servers in two shells while sharing one daemon namespace.
@@ -120,6 +154,16 @@ func postgresTargetUsesAmbientRouting(dsn string) (bool, error) {
 	return os.Getenv("PGHOST") != "" && !hostExplicit ||
 		os.Getenv("PGPORT") != "" && !portExplicit ||
 		os.Getenv("PGDATABASE") != "" && !databaseExplicit, nil
+}
+
+// postgresURLHasRoutingOptions reports whether dsn's query overrides the
+// targets that its authority and path select.
+func postgresURLHasRoutingOptions(dsn string) bool {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return true
+	}
+	return slices.ContainsFunc(postgresRoutingQueryKeys, u.Query().Has)
 }
 
 // parsePostgresCanonicalTargetIdentity derives the ordinary URL target from
@@ -142,12 +186,15 @@ func parsePostgresCanonicalTargetIdentity(dsn string) (postgresConnectionTargetI
 }
 
 func parsePostgresConnectionTargetIdentity(dsn string) (postgresConnectionTargetIdentity, error) {
-	cfg, err := pgx.ParseConfig(dsn)
+	if postgresTargetParser == nil {
+		return postgresConnectionTargetIdentity{}, ErrPostgresRoutingUnavailable
+	}
+	database, targets, err := postgresTargetParser(dsn)
 	if err != nil {
-		// pgx parse errors may echo credentials from the input.
+		// Driver parse errors may echo credentials from the input.
 		return postgresConnectionTargetIdentity{}, errors.New("parse postgres target identity: invalid dsn")
 	}
-	identity := postgresConnectionTargetIdentity{Database: cfg.Database}
+	identity := postgresConnectionTargetIdentity{Database: database}
 	seen := map[postgresConnectionTarget]struct{}{}
 	appendTarget := func(host string, port uint16) {
 		target := postgresConnectionTarget{Host: host, Port: port}
@@ -157,9 +204,8 @@ func parsePostgresConnectionTargetIdentity(dsn string) (postgresConnectionTarget
 		seen[target] = struct{}{}
 		identity.Targets = append(identity.Targets, target)
 	}
-	appendTarget(cfg.Host, cfg.Port)
-	for _, fallback := range cfg.Fallbacks {
-		appendTarget(fallback.Host, fallback.Port)
+	for _, target := range targets {
+		appendTarget(target.Host, target.Port)
 	}
 	return identity, nil
 }
