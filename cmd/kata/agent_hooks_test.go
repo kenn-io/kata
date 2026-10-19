@@ -127,9 +127,12 @@ func TestAgentHooksContractHermesSessionStartIsNeutral(t *testing.T) {
 	assert.JSONEq(t, `{}`, stdout)
 }
 
-func TestAgentHooksContractNativeResponses(t *testing.T) {
+func TestAgentHooksContractKitManagedProfilesNativeResponses(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, profile := range agenthook.Profiles() {
+		if !agentHookUsesKit(string(profile.Agent)) {
+			continue
+		}
 		if !slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) {
 			continue
 		}
