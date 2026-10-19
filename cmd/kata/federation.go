@@ -24,7 +24,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federation/joincommand"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -1289,21 +1289,21 @@ func federationStatusCmd() *cobra.Command {
 }
 
 type federationJoinBundle struct {
-	HubURL                 string                    `json:"hub_url"`
-	HubProjectID           int64                     `json:"hub_project_id"`
-	HubProjectUID          string                    `json:"hub_project_uid"`
-	ProjectName            string                    `json:"project_name"`
-	ReplayHorizonEventID   int64                     `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64                     `json:"baseline_through_event_id"`
-	Token                  string                    `json:"token"`
-	Capabilities           string                    `json:"capabilities,omitempty"`
-	DisplayCapabilities    string                    `json:"-"`
-	JoinCommand            string                    `json:"join_command"`
-	Actor                  string                    `json:"actor,omitempty"`
-	AllowInsecure          bool                      `json:"allow_insecure,omitzero"`
-	PushEnabled            bool                      `json:"push_enabled,omitzero"`
-	AdoptExisting          bool                      `json:"adopt_existing,omitzero"`
-	Signing                *federationsigning.Source `json:"-"`
+	HubURL                 string                `json:"hub_url"`
+	HubProjectID           int64                 `json:"hub_project_id"`
+	HubProjectUID          string                `json:"hub_project_uid"`
+	ProjectName            string                `json:"project_name"`
+	ReplayHorizonEventID   int64                 `json:"replay_horizon_event_id"`
+	BaselineThroughEventID int64                 `json:"baseline_through_event_id"`
+	Token                  string                `json:"token"`
+	Capabilities           string                `json:"capabilities,omitempty"`
+	DisplayCapabilities    string                `json:"-"`
+	JoinCommand            string                `json:"join_command"`
+	Actor                  string                `json:"actor,omitempty"`
+	AllowInsecure          bool                  `json:"allow_insecure,omitzero"`
+	PushEnabled            bool                  `json:"push_enabled,omitzero"`
+	AdoptExisting          bool                  `json:"adopt_existing,omitzero"`
+	Signing                *signingpolicy.Source `json:"-"`
 }
 
 var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {

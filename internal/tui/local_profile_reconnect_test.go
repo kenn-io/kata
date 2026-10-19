@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -47,7 +47,7 @@ func TestLocalProfileReconnectAcrossRuntimeEndpoints(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname=\"work\"\nlocal=true\nhome=%q\ninstance_uid=%q\n", work, uid)), 0600))
 			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: work, InstanceUID: uid})
 			require.NoError(t, err)
-			ns, err := daemon.NewNamespaceForHome(work, profile.StorageID)
+			ns, err := daemonruntime.NewNamespaceForHome(work, profile.StorageID)
 			require.NoError(t, err)
 			require.NoError(t, ns.EnsureDirs())
 			sockets, err := os.MkdirTemp("", "review-socket-")
@@ -139,7 +139,7 @@ func TestActiveLegacyLocalRetainsCatalogCredential(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ01"}`)
 	}))
 	defer s.Close()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(s.URL, "http://")})
@@ -161,7 +161,7 @@ func TestActiveLegacyLocalReconnectRetainsCatalogCredential(t *testing.T) {
 	t.Setenv("KATA_WORK_TOKEN", "identity-token")
 	t.Chdir(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("active_daemon=\"work\"\n[auth]\ntoken=\"bootstrap-token\"\n[[daemon]]\nname=\"work\"\nlocal=true\ntoken_env=\"KATA_WORK_TOKEN\"\n"), 0600))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	socketDir, err := os.MkdirTemp("", "legacy-daemon-socket-")
@@ -235,7 +235,7 @@ func TestLocalProfileConcurrentRefreshHonorsRequestDeadline(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname=\"work\"\nlocal=true\nhome=%q\ninstance_uid=%q\n", work, uid)), 0600))
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: work, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(work, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(work, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	release, started := make(chan struct{}), make(chan struct{}, 1)

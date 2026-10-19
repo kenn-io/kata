@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/federation/joincommand"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -17,7 +18,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -449,7 +449,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/replicas",
 	}, func(ctx context.Context, in *api.CreateFederationReplicaRequest) (*api.CreateFederationReplicaResponse, error) {
-		var signing *federationsigning.Source
+		var signing *signingpolicy.Source
 		if in.Body.SigningKeyID != "" || in.Body.SigningKeyFile != "" || in.Body.SigningKeyEnv != "" {
 			if err := requireSigningSourceAuthority(ctx); err != nil {
 				return nil, err
@@ -458,8 +458,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, api.NewError(400, "validation", "invalid signing hub URL", "", nil)
 			}
-			source := federationsigning.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: canonical}
-			if err := federationsigning.ValidatePolicy(source.HubURL, []federationsigning.Key{{Source: source, EnrollmentID: 1}}); err != nil {
+			source := signingpolicy.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: canonical}
+			if err := signingpolicy.ValidatePolicy(source.HubURL, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}); err != nil {
 				return nil, api.NewError(400, "validation", "invalid or unavailable federation signing source", "", nil)
 			}
 			signing = &source

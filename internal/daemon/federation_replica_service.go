@@ -8,13 +8,13 @@ import (
 	"sync"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 
 	"go.kenn.io/kata/internal/httpurl"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
-	"go.kenn.io/kata/internal/federationsigning"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
@@ -1087,7 +1087,7 @@ func normalizeFederationReplicaParams(
 		if canonicalSource.HubURL != "" {
 			canonicalSource.HubURL, err = normalizeFederationHubBaseURL(canonicalSource.HubURL)
 		}
-		if err != nil || (canonicalSource.HubURL != "" && canonicalSource.HubURL != hubBaseURL) || federationsigning.ValidatePolicy(hubBaseURL, []federationsigning.Key{{Source: canonicalSource, EnrollmentID: 1}}) != nil {
+		if err != nil || (canonicalSource.HubURL != "" && canonicalSource.HubURL != hubBaseURL) || signingpolicy.ValidatePolicy(hubBaseURL, []signingpolicy.Key{{Source: canonicalSource, EnrollmentID: 1}}) != nil {
 			return EnsureFederationReplicaParams{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid or unavailable federation signing source", "")
 		}
 		p.Credential.Signing = &canonicalSource

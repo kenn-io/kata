@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -25,12 +25,12 @@ func TestConfigureFederationSigningUsesDaemonStore(t *testing.T) {
 			current := config.FederationCredential{
 				HubURL: "https://old-hub.example/mount", HubProjectID: 42,
 				Token: "enrollment-secret", Actor: "example-actor", ManagedByConfig: true,
-				HubCatalog: "hub-daemon", Signing: &federationsigning.Source{KeyID: "retired-key"},
+				HubCatalog: "hub-daemon", Signing: &signingpolicy.Source{KeyID: "retired-key"},
 			}
 			credentials.put(replicaHubProjectUID, current)
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationCredentials = credentials })
 			body := map[string]any{"key_id": "key-a"}
-			selected := federationsigning.Source{KeyID: "key-a", HubURL: current.HubURL}
+			selected := signingpolicy.Source{KeyID: "key-a", HubURL: current.HubURL}
 			if source == "env" {
 				t.Setenv("TEST_DAEMON_SIGNING_KEY", strings.Repeat("k", 64))
 				body["key_env"] = "TEST_DAEMON_SIGNING_KEY"

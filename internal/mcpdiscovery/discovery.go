@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 )
@@ -81,7 +81,7 @@ func List(directory string) ([]Endpoint, error) {
 		return nil, fmt.Errorf("read MCP listener status: %w", err)
 	}
 	for _, rec := range records {
-		if rec.Service != service || !daemon.RuntimeProcessAlive(rec) {
+		if rec.Service != service || !daemonruntime.RuntimeProcessAlive(rec) {
 			continue
 		}
 		endpoints = append(endpoints, Endpoint{PID: rec.PID, Transport: "http", URL: rec.Metadata["url"], BackendURL: rec.Metadata["backend_url"], TokenPath: rec.Metadata["token_path"]})

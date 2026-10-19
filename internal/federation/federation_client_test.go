@@ -17,6 +17,7 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestFederationClientPollProjectEvents(t *testing.T) {
@@ -64,7 +65,7 @@ func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 	previousTransport := http.DefaultTransport
 	http.DefaultTransport = hub.Client().Transport
 	t.Cleanup(func() { http.DefaultTransport = previousTransport })
-	source := federationsigning.Source{
+	source := signingpolicy.Source{
 		KeyID: "relay-batch-key", KeyEnv: "TEST_RELAY_BATCH_SIGNING_KEY", HubURL: hub.URL,
 	}
 	client, err := NewClient(context.Background(), hub.URL, "relay-enrollment-token", clientpkg.Opts{

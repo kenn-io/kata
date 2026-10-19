@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // Windows has no SIGTERM/SIGHUP that can be sent across processes the way
@@ -27,7 +27,7 @@ import (
 // spawns a goroutine that waits on it. When the event fires (and we are
 // not already cleaning up) it cancels the daemon's context.
 func installStopWatcher(dbhash string, cancel context.CancelFunc) daemonPlatformCleanup {
-	namePtr, err := windows.UTF16PtrFromString(daemon.StopEventName(dbhash, os.Getpid()))
+	namePtr, err := windows.UTF16PtrFromString(daemonruntime.StopEventName(dbhash, os.Getpid()))
 	if err != nil {
 		return func(context.Context) bool { return true }
 	}
@@ -69,12 +69,12 @@ func (syntheticSignal) Signal()          {}
 // signal onto the returned channel each time it fires, so the existing
 // runReloadLoop machinery works unchanged.
 func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, daemonPlatformCleanup) {
-	return installNamedEventSource(ctx, daemon.ReloadEventName(dbhash, os.Getpid()), syntheticSignal("reload"))
+	return installNamedEventSource(ctx, daemonruntime.ReloadEventName(dbhash, os.Getpid()), syntheticSignal("reload"))
 }
 
 // installRestartSource creates the restart event set by `kata update`.
 func installRestartSource(ctx context.Context, dbhash string) (<-chan os.Signal, daemonPlatformCleanup) {
-	return installNamedEventSource(ctx, daemon.RestartEventName(dbhash, os.Getpid()), syntheticSignal("restart"))
+	return installNamedEventSource(ctx, daemonruntime.RestartEventName(dbhash, os.Getpid()), syntheticSignal("restart"))
 }
 
 // installNamedEventSource creates a manual-reset named event and pumps sig

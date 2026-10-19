@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,19 +18,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
-func testSource(t *testing.T) Source {
+func testSource(t *testing.T) signingpolicy.Source {
 	t.Helper()
 	t.Setenv("KATA_TEST_SIGNING_KEY", strings.Repeat("a", 64))
-	return Source{KeyID: "spoke-key", KeyEnv: "KATA_TEST_SIGNING_KEY"}
+	return signingpolicy.Source{KeyID: "spoke-key", KeyEnv: "KATA_TEST_SIGNING_KEY"}
 }
 
-func testVerifier(t *testing.T, base string, source Source) *Verifier {
+func testVerifier(t *testing.T, base string, source signingpolicy.Source) *Verifier {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, InitializeReplayState(p))
-	v, err := NewVerifier(base, []Key{{Source: source, EnrollmentID: 7}}, p)
+	v, err := NewVerifier(base, []signingpolicy.Key{{Source: source, EnrollmentID: 7}}, p)
 	t.Cleanup(func() {
 		if v != nil {
 			_ = v.Close()
@@ -42,38 +42,7 @@ func testVerifier(t *testing.T, base string, source Source) *Verifier {
 	return v
 }
 
-func TestSourceLoadsOwnerOnlyKeyFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "signing.key")
-	secret := strings.Repeat("k", 64)
-	require.NoError(t, os.WriteFile(path, []byte(secret), 0600))
-
-	got, err := (Source{KeyID: "key-a", KeyFile: path}).Load()
-	require.NoError(t, err)
-	require.Equal(t, []byte(secret), got)
-}
-
-func TestSourceRejectsNonRegularKeyFile(t *testing.T) {
-	dir := t.TempDir()
-
-	got, err := (Source{KeyID: "key-a", KeyFile: dir}).Load()
-	require.ErrorIs(t, err, ErrKey)
-	require.Nil(t, got)
-}
-
-func TestSourceRejectsKeyFileReadableByOthersOnUnix(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix file permission contract")
-	}
-	path := filepath.Join(t.TempDir(), "signing.key")
-	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("k", 64)), 0600))
-	require.NoError(t, os.Chmod(path, 0644)) // #nosec G302 -- intentionally makes the test key readable to prove rejection.
-
-	got, err := (Source{KeyID: "key-a", KeyFile: path}).Load()
-	require.ErrorIs(t, err, ErrKey)
-	require.Nil(t, got)
-}
-
-func signed(t *testing.T, source Source) *http.Request {
+func signed(t *testing.T, source signingpolicy.Source) *http.Request {
 	t.Helper()
 	r, err := http.NewRequest(http.MethodPost, "https://hub.example/federation/api/v1/projects/1/federation/events:ingest?limit=2", strings.NewReader(`{"events":[]}`))
 	require.NoError(t, err)
@@ -148,7 +117,7 @@ func TestReplayConcurrencyRestartAndPressure(t *testing.T) {
 	require.Equal(t, 1, successes)
 	p := filepath.Join(t.TempDir(), "restart.state")
 	require.NoError(t, InitializeReplayState(p))
-	restarted, err := NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, p)
+	restarted, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	t.Cleanup(func() {
 		if restarted != nil {
 			_ = restarted.Close()
@@ -179,7 +148,7 @@ func TestVerifierPreservesRequestBodyLimitError(t *testing.T) {
 	req.Body = http.MaxBytesReader(nil, req.Body, 1)
 
 	err := v.Verify(req, 7)
-	require.ErrorIs(t, err, ErrInvalid)
+	require.ErrorIs(t, err, signingpolicy.ErrInvalid)
 	var limitErr *http.MaxBytesError
 	require.ErrorAs(t, err, &limitErr)
 	require.EqualValues(t, 1, limitErr.Limit)
@@ -189,7 +158,7 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 	for _, mode := range []string{"missing environment", "missing file", "short key", "nonregular file"} {
 		t.Run(mode, func(t *testing.T) {
 			source := testSource(t)
-			other := Source{KeyID: "other-key", KeyEnv: "KATA_TEST_OTHER_SIGNING_KEY"}
+			other := signingpolicy.Source{KeyID: "other-key", KeyEnv: "KATA_TEST_OTHER_SIGNING_KEY"}
 			t.Setenv(other.KeyEnv, strings.Repeat("b", 64))
 			rejected := signed(t, source)
 			if mode == "missing environment" {
@@ -204,7 +173,7 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 					require.NoError(t, os.Mkdir(source.KeyFile, 0700))
 				}
 			}
-			keys := []Key{{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8}}
+			keys := []signingpolicy.Key{{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8}}
 			state := filepath.Join(t.TempDir(), "replay.state")
 			require.NoError(t, InitializeReplayState(state))
 			v, err := NewVerifier("https://hub.example", keys, state)
@@ -214,7 +183,7 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 
 			require.Error(t, v.Verify(rejected, 7), "unavailable source must reject its signed requests")
 			require.NoError(t, v.Verify(signed(t, other), 8), "another enrollment remains available")
-			require.Error(t, ValidatePolicy("https://hub.example", keys), "explicit configuration stays strict")
+			require.Error(t, signingpolicy.ValidatePolicy("https://hub.example", keys), "explicit configuration stays strict")
 			if source.KeyEnv != "" {
 				t.Setenv(source.KeyEnv, strings.Repeat("a", 64))
 			} else {
@@ -231,17 +200,17 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 func TestVerifierStartsAfterRetiredSourceRemoval(t *testing.T) {
 	source := testSource(t)
 	retiredRequest := signed(t, source)
-	retired := Key{Source: source, EnrollmentID: 7, NotAfter: time.Now().Add(-time.Minute).Unix()}
+	retired := signingpolicy.Key{Source: source, EnrollmentID: 7, NotAfter: time.Now().Add(-time.Minute).Unix()}
 	t.Setenv(source.KeyEnv, "")
 	state := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, InitializeReplayState(state))
-	v, err := NewVerifier("https://hub.example", []Key{retired}, state)
+	v, err := NewVerifier("https://hub.example", []signingpolicy.Key{retired}, state)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = v.Close() })
 	v.started = time.Now().Add(-Quarantine)
-	require.ErrorIs(t, v.Verify(retiredRequest, 7), ErrKeyRejected)
+	require.ErrorIs(t, v.Verify(retiredRequest, 7), signingpolicy.ErrKeyRejected)
 	t.Setenv(source.KeyEnv, strings.Repeat("a", 64))
-	require.ErrorIs(t, v.Verify(signed(t, source), 7), ErrKeyRejected)
+	require.ErrorIs(t, v.Verify(signed(t, source), 7), signingpolicy.ErrKeyRejected)
 }
 
 func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
@@ -250,10 +219,10 @@ func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
 	other.KeyID = "other-key"
 	state := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, InitializeReplayState(state))
-	_, err := NewVerifier("https://hub.example", []Key{
+	_, err := NewVerifier("https://hub.example", []signingpolicy.Key{
 		{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8},
 	}, state)
-	require.ErrorIs(t, err, ErrKey)
+	require.ErrorIs(t, err, signingpolicy.ErrKey)
 }
 
 func signedWithoutKey(t *testing.T) *http.Request {
@@ -291,17 +260,17 @@ func TestDurableReplayWatermarkAndRollback(t *testing.T) {
 	s := testSource(t)
 	p := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, InitializeReplayState(p))
-	v, err := NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, p)
+	v, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	require.NoError(t, err)
 	v.started = time.Now().Add(-Quarantine)
 	require.NoError(t, v.Verify(signed(t, s), 7))
-	_, err = NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, p)
+	_, err = NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	require.Error(t, err, "one process lock protects all verifier instances")
 	watermark, err := os.ReadFile(p) //nolint:gosec // G304: replay evidence in t.TempDir.
 	require.NoError(t, err)
 	require.NotEqual(t, "0\n", string(watermark))
 	require.NoError(t, v.Close())
-	restarted, err := NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, p)
+	restarted, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = restarted.Close() })
 	restarted.started = time.Now().Add(-Quarantine)
@@ -350,7 +319,7 @@ func TestBodyVerificationRespectsUploadBudgetAndExpiry(t *testing.T) {
 		want    error
 	}{
 		{name: "full request budget", elapsed: 60 * time.Second},
-		{name: "expired signature", elapsed: 91 * time.Second, want: ErrInvalid},
+		{name: "expired signature", elapsed: 91 * time.Second, want: signingpolicy.ErrInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testSource(t)
@@ -396,7 +365,7 @@ func FuzzSignatureInput(f *testing.F) {
 		r.Header.Set("Signature-Input", input)
 		r.Header.Set("Signature", "sig1=:AA==:")
 		r.Header.Set("Content-Digest", "sha-256=:AA==:")
-		v := &Verifier{now: time.Now, started: time.Now().Add(-Quarantine), keys: map[string]Key{}, seen: map[string]time.Time{}, capacity: 1}
+		v := &Verifier{now: time.Now, started: time.Now().Add(-Quarantine), keys: map[string]signingpolicy.Key{}, seen: map[string]time.Time{}, capacity: 1}
 		require.Error(t, v.Verify(r, 7))
 	})
 }
@@ -445,9 +414,9 @@ func TestFreshnessRotationAndBodyCancellation(t *testing.T) {
 			case "rollback":
 				v.last = time.Now().Add(time.Second)
 			}
-			want := ErrInvalid
+			want := signingpolicy.ErrInvalid
 			if mode == "rotation" || mode == "removed" {
-				want = ErrKeyRejected
+				want = signingpolicy.ErrKeyRejected
 			}
 			if mode == "rollback" {
 				want = ErrWarming
@@ -463,17 +432,17 @@ func TestReplayStateMissingCorruptOrOversizedFailsClosed(t *testing.T) {
 	for _, data := range []string{"", "invalid\n", strings.Repeat("0", 128), "-1\n"} {
 		p := filepath.Join(t.TempDir(), "state")
 		require.NoError(t, os.WriteFile(p, []byte(data), 0600))
-		_, err := NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, p)
+		_, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 		require.ErrorIs(t, err, ErrState)
 	}
-	_, err := NewVerifier("https://hub.example", []Key{{Source: s, EnrollmentID: 7}}, filepath.Join(t.TempDir(), "missing"))
+	_, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, filepath.Join(t.TempDir(), "missing"))
 	require.ErrorIs(t, err, ErrState)
 }
 
 func TestConfiguredSigningRejectsBearerAsSecret(t *testing.T) {
 	source := testSource(t)
 	client := &http.Client{}
-	require.ErrorIs(t, ConfigureClient(client, "https://hub.example", strings.Repeat("a", 64), source), ErrKey)
+	require.ErrorIs(t, ConfigureClient(client, "https://hub.example", strings.Repeat("a", 64), source), signingpolicy.ErrKey)
 	require.Nil(t, client.Transport, "invalid independent key must not install a transport")
 }
 
@@ -492,7 +461,7 @@ func TestClientClosesBodyOnSigningTransportRejection(t *testing.T) {
 			body := &closeRecordingBody{Reader: strings.NewReader(`{}`)}
 			req, err := http.NewRequest(http.MethodPost, hub.URL, body)
 			require.NoError(t, err)
-			want := ErrInvalid
+			want := signingpolicy.ErrInvalid
 			switch mode {
 			case "origin":
 				req.URL.Scheme = "http"
@@ -500,7 +469,7 @@ func TestClientClosesBodyOnSigningTransportRejection(t *testing.T) {
 				req.Host = "other.example"
 			case "removed key":
 				t.Setenv(source.KeyEnv, "")
-				want = ErrKeyRejected
+				want = signingpolicy.ErrKeyRejected
 			}
 			resp, err := client.Do(req)
 			if resp != nil {
@@ -518,7 +487,7 @@ func TestExternalBasesUseNativeCanonicalAuthority(t *testing.T) {
 	source.HubURL = "https://HUB.EXAMPLE:443/federation"
 	client := &http.Client{}
 	require.NoError(t, ConfigureClient(client, "https://hub.example/federation", "enrollment", source))
-	base, err := externalBase(source.HubURL)
+	base, err := signingpolicy.ExternalBase(source.HubURL)
 	require.NoError(t, err)
 	require.Equal(t, "https://hub.example/federation", base.String())
 }

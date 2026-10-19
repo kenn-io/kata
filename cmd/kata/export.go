@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
@@ -171,7 +171,7 @@ func refuseRunningDaemon(ctx context.Context) error {
 }
 
 func refuseRunningDaemonWithMessage(ctx context.Context, message string) error {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
 	}

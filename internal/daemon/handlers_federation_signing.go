@@ -10,7 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 )
 
@@ -65,11 +65,11 @@ func registerFederationSigningHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusBadRequest, "validation",
 				"key_file must be an absolute path on the daemon", "", nil)
 		}
-		source := federationsigning.Source{
+		source := signingpolicy.Source{
 			KeyID: in.Body.KeyID, KeyFile: in.Body.KeyFile, KeyEnv: in.Body.KeyEnv, HubURL: canonical,
 		}
-		if err := federationsigning.ValidatePolicy(canonical,
-			[]federationsigning.Key{{Source: source, EnrollmentID: 1}}); err != nil {
+		if err := signingpolicy.ValidatePolicy(canonical,
+			[]signingpolicy.Key{{Source: source, EnrollmentID: 1}}); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation",
 				"invalid or unavailable federation signing source on the daemon", "", nil)
 		}

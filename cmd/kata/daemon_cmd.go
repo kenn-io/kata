@@ -25,6 +25,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
@@ -307,7 +308,7 @@ func daemonStartCmd() *cobra.Command {
 }
 
 func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
@@ -330,7 +331,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
 			return daemonStartOutputFromRecord("already_running", rec), nil
 		}
-		if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
+		if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
 			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
 		}
 		if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
@@ -490,7 +491,7 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 		if pid != 0 && rec.PID != pid {
 			continue
 		}
-		if daemon.RuntimeProcessAlive(rec) {
+		if daemonruntime.RuntimeProcessAlive(rec) {
 			return rec, true
 		}
 	}
@@ -522,7 +523,7 @@ func daemonStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "report whether a daemon is running",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
 			}
@@ -548,7 +549,7 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out.Selected = &selected
 			for _, r := range recs {
-				if daemon.RuntimeProcessAlive(r) {
+				if daemonruntime.RuntimeProcessAlive(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
 						Version:       daemonRuntimeVersion(r),
@@ -666,7 +667,7 @@ func daemonStopCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
 			}
@@ -677,12 +678,12 @@ func daemonStopCmd() *cobra.Command {
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
-				if !daemon.RuntimeProcessAlive(r) {
+				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
 				}
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
 				// a named stop event on Windows.
-				if err := daemon.SignalDaemonStop(r, ns.DBHash); err != nil {
+				if err := daemonruntime.SignalDaemonStop(r, ns.DBHash); err != nil {
 					return &cliError{
 						Kind: kindInternal, ExitCode: ExitInternal,
 						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
@@ -746,10 +747,10 @@ func daemonRestartCmd() *cobra.Command {
 			}
 			pids := make([]int, 0, len(recs))
 			for _, rec := range recs {
-				if !daemon.RuntimeProcessAlive(rec) {
+				if !daemonruntime.RuntimeProcessAlive(rec) {
 					continue
 				}
-				if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
+				if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
 					return fmt.Errorf("restart: stop pid %d: %w", rec.PID, err)
 				}
 				pids = append(pids, rec.PID)
@@ -806,7 +807,7 @@ type daemonStartupPreflight struct {
 	Config         *config.DaemonConfig
 	Web            config.WebConfig
 	Listen         string
-	Namespace      *daemon.Namespace
+	Namespace      *daemonruntime.Namespace
 	Endpoint       kitdaemon.Endpoint
 	DBPath         string
 	StoreConfig    storeopen.Config
@@ -836,7 +837,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
@@ -961,7 +962,7 @@ func daemonReloadCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
 			}
@@ -970,12 +971,12 @@ func daemonReloadCmd() *cobra.Command {
 				return err
 			}
 			for _, r := range recs {
-				if !daemon.RuntimeProcessAlive(r) {
+				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
 				}
 				// SignalDaemonReload is platform-specific: SIGHUP on Unix,
 				// a named reload event on Windows.
-				if err := daemon.SignalDaemonReload(r, ns.DBHash); err != nil {
+				if err := daemonruntime.SignalDaemonReload(r, ns.DBHash); err != nil {
 					return &cliError{
 						Kind: kindInternal, ExitCode: ExitInternal,
 						Message: fmt.Sprintf("reload pid %d: %v", r.PID, err),
@@ -1150,7 +1151,7 @@ func runDaemonProcess(
 	}
 	idleController, idleIneligible, err := newAutostartIdleController(
 		*dcfg,
-		os.Getenv(daemon.AutoStartMarkerEnv) == "1",
+		os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1",
 		runtimeEndpoint,
 		webEndpoint,
 		func(timeout time.Duration) {
@@ -1174,7 +1175,7 @@ func runDaemonProcess(
 
 	disp, daemonLog, err := setupHooks(
 		store, ns.DBHash, startup.KataHome, startup.HookConfig, acquireHookDrain,
-		withoutEnvironmentKey(os.Environ(), daemon.AutoStartMarkerEnv),
+		withoutEnvironmentKey(os.Environ(), daemonruntime.AutoStartMarkerEnv),
 	)
 	if err != nil {
 		return err
@@ -1243,7 +1244,7 @@ func runDaemonProcess(
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	if restart != nil {
-		rec.Metadata[daemon.RuntimeRestartMetadataKey] = "1"
+		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
@@ -2204,24 +2205,24 @@ func githubSyncRunnerInterval() time.Duration {
 // race with another process or, with port 0, lose the bound port.
 // The actual bind happens once in runDaemonWithListen, before the runtime file
 // is published, so port 0 can be recorded as its concrete bound port.
-func chooseEndpoint(ns *daemon.Namespace, listen string) (kitdaemon.Endpoint, error) {
+func chooseEndpoint(ns *daemonruntime.Namespace, listen string) (kitdaemon.Endpoint, error) {
 	if listen == "" {
 		return defaultEndpoint(ns), nil
 	}
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return kitdaemon.Endpoint{}, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
 	}
-	if err := daemon.ValidateNonPublicAddress(listen); err != nil {
+	if err := daemonruntime.ValidateNonPublicAddress(listen); err != nil {
 		return kitdaemon.Endpoint{}, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
 	}
 	return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: listen}, nil
 }
 
-func defaultEndpoint(ns *daemon.Namespace) kitdaemon.Endpoint {
+func defaultEndpoint(ns *daemonruntime.Namespace) kitdaemon.Endpoint {
 	return defaultEndpointForOS(ns, runtime.GOOS)
 }
 
-func defaultEndpointForOS(ns *daemon.Namespace, goos string) kitdaemon.Endpoint {
+func defaultEndpointForOS(ns *daemonruntime.Namespace, goos string) kitdaemon.Endpoint {
 	if goos == "windows" {
 		return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	}
@@ -2257,10 +2258,10 @@ func runtimeEndpointForListener(endpoint kitdaemon.Endpoint, listener net.Listen
 // The auto-start child inherits the parent environment, so a stray PORT
 // in a developer's shell would otherwise hijack every implicit daemon
 // onto wildcard TCP. We refuse to act on PORT when the auto-start marker
-// (daemon.AutoStartMarkerEnv) is set on the process; daemonclient stamps
+// (daemonruntime.AutoStartMarkerEnv) is set on the process; daemonclient stamps
 // it on the child to identify itself.
 func listenFromPortEnv() (string, bool) {
-	if os.Getenv(daemon.AutoStartMarkerEnv) == "1" {
+	if os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1" {
 		return "", false
 	}
 	port := strings.TrimSpace(os.Getenv("PORT"))

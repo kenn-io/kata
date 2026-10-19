@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/pkg/client/generated"
 
@@ -539,7 +540,7 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 		return resolved
 	}
 	if parsed.Scheme == "http" && !d.AllowInsecure {
-		if err := ValidateNonPublicAddress(net.JoinHostPort(parsed.Hostname(), "1")); err != nil {
+		if err := daemonruntime.ValidateNonPublicAddress(net.JoinHostPort(parsed.Hostname(), "1")); err != nil {
 			return resolved
 		}
 	}
@@ -668,8 +669,8 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 		ModifyResponse: func(response *http.Response) error {
 			response.Header.Del("Set-Cookie")
-			response.Header.Del(WebOriginHeader)
-			response.Header.Del(WebAuthenticationHeader)
+			response.Header.Del(daemonruntime.WebOriginHeader)
+			response.Header.Del(daemonruntime.WebAuthenticationHeader)
 			if response.StatusCode >= http.StatusMultipleChoices &&
 				response.StatusCode < http.StatusBadRequest && response.StatusCode != http.StatusNotModified {
 				return errWebDaemonRedirectForbidden

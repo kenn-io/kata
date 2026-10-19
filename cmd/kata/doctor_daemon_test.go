@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
@@ -233,7 +234,7 @@ func setupDoctorLocalProfileTarget(t *testing.T, instanceHandler func(string, ht
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(profileConfig), 0600))
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "example-local", Local: true, Home: profileHome, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -357,7 +358,7 @@ func TestDoctorBoundsNamedDaemonResolutionPingResponse(t *testing.T) {
 
 func TestDoctorNamedLocalDiscoveryDoesNotRepairRuntimePermissions(t *testing.T) {
 	home, workspace := doctorTestEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[[daemon]]\nname='example-local'\nlocal=true\n"), 0600))
@@ -375,7 +376,7 @@ func TestDoctorFailsForLocalProfileDirectoryWithLoosePermissions(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(profileConfig), 0600))
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "example-local", Local: true, Home: profileHome, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 	flags = globalFlags{Workspace: workspace, Daemon: "example-local"}
@@ -391,7 +392,7 @@ func TestDoctorFailsForLocalProfileDirectoryWithLoosePermissions(t *testing.T) {
 
 func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{

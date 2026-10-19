@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -45,7 +45,7 @@ func TestLocalProfileIdentityProbeHonorsTimeout(t *testing.T) {
 
 func TestNamedReadOnlyProfileDiscoveryDefersIdentityProbe(t *testing.T) {
 	profile, _ := localProfileFixture(t)
-	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 

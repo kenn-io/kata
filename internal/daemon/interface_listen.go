@@ -5,6 +5,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // ResolveInterfaceListen resolves iface:<name>:<port> to one concrete private
@@ -47,7 +49,7 @@ func resolveInterfaceListen(listen string, lookup func(string) (net.Flags, []net
 			continue
 		}
 		candidate := net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if ValidateNonPublicAddress(candidate) == nil {
+		if daemonruntime.ValidateNonPublicAddress(candidate) == nil {
 			candidates[candidate] = struct{}{}
 			selected = candidate
 		}

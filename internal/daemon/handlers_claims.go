@@ -21,9 +21,11 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -721,7 +723,7 @@ func newClaimHubClient(
 	ctx context.Context,
 	baseURL, token string,
 	allowInsecure bool,
-	signing *federationsigning.Source,
+	signing *signingpolicy.Source,
 ) (*claimHubClient, error) {
 	httpClient, err := newClaimHubHTTPClient(ctx, baseURL)
 	if err != nil {
@@ -763,7 +765,7 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 	if !strings.HasPrefix(baseURL, "http://kata.invalid") {
 		return &http.Client{Timeout: 10 * time.Second}, nil
 	}
-	ns, err := NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +774,7 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 		return nil, fmt.Errorf("%w: %v", errClaimHubTransportUnavailable, err)
 	}
 	for _, rec := range recs {
-		if !RuntimeProcessAlive(rec) {
+		if !daemonruntime.RuntimeProcessAlive(rec) {
 			continue
 		}
 		ep := rec.Endpoint()

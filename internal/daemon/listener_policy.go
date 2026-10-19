@@ -9,6 +9,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // ListenerKind identifies which trust boundary accepted a request.
@@ -194,7 +195,7 @@ func ordinaryAPIBearerRequest(r *http.Request) bool {
 // and accepts a tokenless listener only when its trusted-proxy session is
 // configured on an explicitly trusted private network.
 func CheckWebStartup(listen string, auth config.AuthConfig, insecureReadonly, trustedProxySession bool) error {
-	if err := ValidateNonPublicAddress(listen); err != nil {
+	if err := daemonruntime.ValidateNonPublicAddress(listen); err != nil {
 		return err
 	}
 	return checkAuthStartup(listen, authPolicy{

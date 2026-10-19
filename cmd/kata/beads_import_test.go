@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/importlabels"
 	"go.kenn.io/kata/internal/shortid"
@@ -231,7 +231,7 @@ func TestImportBeadsInitializesWithSelectedProfileCredential(t *testing.T) {
 		Name: "work", Local: true, Home: env.Home, InstanceUID: uid,
 	})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(env.Home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(env.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{

@@ -1,11 +1,11 @@
-package daemon_test
+package daemonruntime_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 func TestValidateNonPublicAddress(t *testing.T) {
@@ -21,7 +21,7 @@ func TestValidateNonPublicAddress(t *testing.T) {
 		"0.0.0.0:0",
 		"[::]:0",
 	} {
-		assert.NoError(t, daemon.ValidateNonPublicAddress(addr), addr)
+		assert.NoError(t, daemonruntime.ValidateNonPublicAddress(addr), addr)
 	}
 }
 
@@ -32,6 +32,6 @@ func TestValidateNonPublicAddressRejectsPublicAndHostnames(t *testing.T) {
 		"example.com:0",
 		"localhost:0",
 	} {
-		require.Error(t, daemon.ValidateNonPublicAddress(addr), addr)
+		require.Error(t, daemonruntime.ValidateNonPublicAddress(addr), addr)
 	}
 }

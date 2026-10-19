@@ -9,15 +9,15 @@ import (
 	"strconv"
 	"time"
 
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 // FederationSigningConfig applies hub-controlled policy on every listener.
 type FederationSigningConfig struct {
-	Required        bool                    `toml:"required"`
-	ExternalURL     string                  `toml:"external_url"`
-	ReplayStateFile string                  `toml:"replay_state_file"`
-	Keys            []federationsigning.Key `toml:"key"`
+	Required        bool                `toml:"required"`
+	ExternalURL     string              `toml:"external_url"`
+	ReplayStateFile string              `toml:"replay_state_file"`
+	Keys            []signingpolicy.Key `toml:"key"`
 }
 
 // FederationIngressConfig enables the separate private federation listener.
@@ -37,7 +37,7 @@ func normalizeFederationSigning(cfg *DaemonConfig, home string) error {
 		if len(s.Keys) == 0 {
 			return errors.New("federation.signing.key entries are required when federation signing is configured")
 		}
-		if err := federationsigning.ValidatePolicyShape(s.ExternalURL, s.Keys); err != nil {
+		if err := signingpolicy.ValidatePolicyShape(s.ExternalURL, s.Keys); err != nil {
 			return err
 		}
 		if s.ReplayStateFile == "" {

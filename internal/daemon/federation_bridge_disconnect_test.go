@@ -19,7 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 type bridgeDisconnectPartialSetupStore struct {
@@ -316,7 +316,7 @@ func TestFederationBridgeDisconnectLifecycle(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, found)
 				if mode == "signed_disconnect" {
-					credential.Signing = &federationsigning.Source{
+					credential.Signing = &signingpolicy.Source{
 						KeyID: "bridge-signing-key", KeyEnv: "KATA_BRIDGE_SIGNING_KEY", HubURL: remote.URL,
 					}
 					require.NoError(t, config.DefaultFederationCredentialStore().StoreFederationCredential(t.Context(), root.private.UID, credential))

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/diagnostics"
 )
 
@@ -145,7 +145,7 @@ func TestDoctorStoppedDaemonReportsWithoutCreatingFiles(t *testing.T) {
 
 func TestDoctorDoesNotRepairRuntimeDirectoryPermissions(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 

@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -243,7 +243,7 @@ func federationBridgePendingCredentialCollision(
 	return nil
 }
 
-func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, body api.FederationBridgeBody, allowInsecure bool, signing *federationsigning.Source) (config.FederationCredential, error) {
+func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, body api.FederationBridgeBody, allowInsecure bool, signing *signingpolicy.Source) (config.FederationCredential, error) {
 	if credentials == nil {
 		return config.FederationCredential{}, api.NewError(503, "federation_credentials_unavailable", "federation credential storage is unavailable", "", nil)
 	}
@@ -300,8 +300,8 @@ func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, cr
 // already retained for the hub project. The hub registers that key by the
 // bridge's enrollment ID. A hub that requires signing refuses a bridge without
 // a source before any credential is saved.
-func federationBridgeSigningSource(ctx context.Context, cfg ServerConfig, in *api.ConnectFederationBridgeRequest, hubURL, hubProjectUID string, hubRequiresSigning bool) (*federationsigning.Source, error) {
-	var requested *federationsigning.Source
+func federationBridgeSigningSource(ctx context.Context, cfg ServerConfig, in *api.ConnectFederationBridgeRequest, hubURL, hubProjectUID string, hubRequiresSigning bool) (*signingpolicy.Source, error) {
+	var requested *signingpolicy.Source
 	if in.Body.SigningKeyID != "" || in.Body.SigningKeyFile != "" || in.Body.SigningKeyEnv != "" {
 		if err := requireSigningSourceAuthority(ctx); err != nil {
 			return nil, err
@@ -309,13 +309,13 @@ func federationBridgeSigningSource(ctx context.Context, cfg ServerConfig, in *ap
 		if in.Body.SigningKeyFile != "" && !filepath.IsAbs(in.Body.SigningKeyFile) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "signing_key_file must be an absolute path on the daemon", "", nil)
 		}
-		source := federationsigning.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: hubURL}
-		if err := federationsigning.ValidatePolicy(hubURL, []federationsigning.Key{{Source: source, EnrollmentID: 1}}); err != nil {
+		source := signingpolicy.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: hubURL}
+		if err := signingpolicy.ValidatePolicy(hubURL, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "invalid or unavailable federation signing source on the daemon", "signing needs an HTTPS hub and a readable secret of at least 64 bytes in the daemon's environment or an owner-only file", nil)
 		}
 		requested = &source
 	}
-	var retained *federationsigning.Source
+	var retained *signingpolicy.Source
 	if credentials := cfg.federationCredentialStore(); credentials != nil {
 		current, found, err := credentials.FederationCredential(ctx, hubProjectUID)
 		if err != nil {

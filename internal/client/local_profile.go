@@ -5,15 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/oklog/ulid/v2"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/safefileio"
 )
@@ -24,48 +20,43 @@ type LocalProfileStorageIdentity struct {
 	SchemaVersion int
 }
 
-// OpenLocalProfileReadOnly opens an existing selected target without preparation.
-func OpenLocalProfileReadOnly(ctx context.Context, profile config.LocalProfileConfig) (db.Storage, error) {
-	if !strings.HasPrefix(profile.DSN, "postgres://") && !strings.HasPrefix(profile.DSN, "postgresql://") {
-		return storeopen.OpenReadOnly(ctx, profile.DSN)
-	}
-	pg := profile.Config.Storage.Postgres
-	// OpenWithConfig plus ReadOnly preserves the selected schema and cannot
-	// bootstrap it. OpenReadOnly's default PostgreSQL dispatch uses current-home
-	// configuration, so it is deliberately not used for a selected PG profile.
-	return storeopen.OpenWithConfig(ctx, profile.DSN, storeopen.Config{Postgres: pgstore.ConfigFromValues(pg.Schema, pg.Mode, pg.SchemaOwner, pg.AllowInsecure)}, db.ReadOnly())
+// LocalProfileStorage reads a selected local profile's existing storage
+// without bootstrap, migration, or cutover. Implementations live outside this
+// package so programs that only discover daemons do not link storage engines.
+type LocalProfileStorage interface {
+	// ReadIdentity returns the stored instance UID and schema version. It may
+	// return the UID alongside an error when only the schema read failed.
+	ReadIdentity(ctx context.Context, profile config.LocalProfileConfig) (instanceUID string, schemaVersion int, err error)
+	// CurrentSchemaVersion is the schema version a daemon started by this
+	// program serves.
+	CurrentSchemaVersion() int
 }
+
+var localProfileStorage LocalProfileStorage
+
+// UseLocalProfileStorage installs the storage reader that local profile
+// inspection and startup require. Call it during program initialization,
+// before any client resolution. Without it, starting or inspecting a local
+// profile fails with ErrProfileStorageUnavailable; discovery is unaffected.
+func UseLocalProfileStorage(storage LocalProfileStorage) {
+	localProfileStorage = storage
+}
+
+var errLocalProfileStorageNotInstalled = errors.New("this program cannot read local profile storage")
 
 // InspectLocalProfileStorage reads existing metadata without bootstrap,
 // migration, or cutover. Callers must check the schema before starting a daemon.
 func InspectLocalProfileStorage(ctx context.Context, profile config.LocalProfileConfig) (LocalProfileStorageIdentity, error) {
+	if localProfileStorage == nil {
+		return LocalProfileStorageIdentity{}, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, errLocalProfileStorageNotInstalled)
+	}
 	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if strings.HasPrefix(profile.DSN, "postgres://") || strings.HasPrefix(profile.DSN, "postgresql://") {
-		pg := profile.Config.Storage.Postgres
-		uid, version, err := pgstore.InspectMetadataWithConfig(ctx, profile.DSN, pgstore.ConfigFromValues(pg.Schema, pg.Mode, pg.SchemaOwner, pg.AllowInsecure))
-		if err != nil {
-			return LocalProfileStorageIdentity{}, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
-		}
-		identity := LocalProfileStorageIdentity{InstanceUID: uid, SchemaVersion: version}
-		if uid != profile.InstanceUID {
-			return identity, &LocalProfileIdentityError{Expected: profile.InstanceUID, Observed: uid}
-		}
-		return identity, nil
-	}
-	store, err := OpenLocalProfileReadOnly(ctx, profile)
+	uid, version, err := localProfileStorage.ReadIdentity(ctx, profile)
+	identity := LocalProfileStorageIdentity{InstanceUID: uid, SchemaVersion: version}
 	if err != nil {
-		return LocalProfileStorageIdentity{}, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
-	}
-	defer func() { _ = store.Close() }()
-	if err = store.RefreshInstanceUID(ctx); err != nil {
-		return LocalProfileStorageIdentity{}, fmt.Errorf("%w: read instance identity: %w", ErrProfileStorageUnavailable, err)
-	}
-	identity := LocalProfileStorageIdentity{InstanceUID: store.InstanceUID()}
-	identity.SchemaVersion, err = store.SchemaVersion(ctx)
-	if err != nil {
-		return identity, fmt.Errorf("%w: read schema version: %w", ErrProfileStorageUnavailable, err)
+		return identity, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
 	}
 	if identity.InstanceUID != profile.InstanceUID {
 		return identity, &LocalProfileIdentityError{Expected: profile.InstanceUID, Observed: identity.InstanceUID}
@@ -190,7 +181,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	}
 	// A process is never stopped or started against unsupported storage. This
 	// check precedes version replacement, including a newer live daemon.
-	if identity.SchemaVersion != db.CurrentSchemaVersion() {
+	if identity.SchemaVersion != localProfileStorage.CurrentSchemaVersion() {
 		return selection.Resolved, ErrProfileSchemaMismatch
 	}
 	resolved := selection.Resolved

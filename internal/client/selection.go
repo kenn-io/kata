@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // LocalProfileIdentity carries the exact namespace and persisted identity.
@@ -132,7 +132,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			if err != nil {
 				return DaemonSelection{}, err
 			}
-			ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 			if err != nil {
 				return DaemonSelection{}, err
 			}

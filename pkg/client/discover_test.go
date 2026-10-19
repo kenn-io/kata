@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kitdaemon "go.kenn.io/kit/daemon"
 
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kata/pkg/katatest"
@@ -32,7 +32,7 @@ func isolateKataHome(t *testing.T) string {
 
 func publishLocalRuntime(t *testing.T, home, address string) {
 	t.Helper()
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, namespace.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -83,7 +83,7 @@ func TestDiscoverReportsNoDaemonWithoutStartingOne(t *testing.T) {
 	_, err := client.Discover(t.Context(), client.DiscoverOptions{})
 	require.ErrorIs(t, err, client.ErrDaemonUnavailable)
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	records, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).List()
 	require.NoError(t, err)

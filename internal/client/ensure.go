@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
@@ -94,7 +94,7 @@ var (
 	startDaemonForEnsure         = autoStart
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
-	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
+	signalDaemonStopForEnsure    = daemonruntime.SignalDaemonStop
 	discoverDaemonForAutoStart   = discoverForEnsure
 	checkDaemonStateForEnsure    = func(dataDir string) error {
 		return (kitdaemon.RuntimeStore{Dir: dataDir}).CheckWritable()
@@ -176,7 +176,7 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 }
 
 func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return RunningDaemon{}, err
 	}
@@ -391,7 +391,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		// soon as the real daemon closes its listener.
 		running := false
 		for _, record := range targets {
-			if !daemon.RuntimeProcessAlive(record) {
+			if !daemonruntime.RuntimeProcessAlive(record) {
 				continue
 			}
 			if _, err := os.Stat(record.SourcePath); errors.Is(err, os.ErrNotExist) {
@@ -414,7 +414,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
-	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"))
+	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"))
 }
 
 func autoStartWithEnvironment(ctx context.Context, dataDir string, env []string) (RunningDaemon, error) {

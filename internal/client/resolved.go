@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -315,7 +315,7 @@ func discoverResolvedInWorkspace(ctx context.Context, workspaceStart string, sca
 	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, remoteRequestTarget); err != nil || ok {
 		return resolved, ok, err
 	}
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return ResolvedDaemon{}, false, err
 	}

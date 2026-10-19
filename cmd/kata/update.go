@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
@@ -127,7 +127,7 @@ func newUpdateCmd() *cobra.Command {
 // with its own arguments and environment, so the updater needs neither its
 // startup options nor its credentials. A stopped daemon stays stopped.
 func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
 	}
@@ -137,13 +137,13 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 		return err
 	}
 	for _, record := range records {
-		if !daemon.RuntimeProcessAlive(record) {
+		if !daemonruntime.RuntimeProcessAlive(record) {
 			continue
 		}
-		if !daemon.RuntimeRecordRestartable(record) {
+		if !daemonruntime.RuntimeRecordRestartable(record) {
 			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
 		}
-		if err := daemon.SignalDaemonRestart(record, ns.DBHash); err != nil {
+		if err := daemonruntime.SignalDaemonRestart(record, ns.DBHash); err != nil {
 			return fmt.Errorf("signal daemon pid %d: %w", record.PID, err)
 		}
 		replacement, err := waitForDaemonReplacement(ctx, store, record)
@@ -179,7 +179,7 @@ func waitForDaemonReplacement(
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		for _, record := range records {
-			if record.StartedAt.After(previous.StartedAt) && daemon.RuntimeProcessAlive(record) {
+			if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
 				return record, nil
 			}
 		}

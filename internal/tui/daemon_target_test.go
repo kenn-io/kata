@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -1168,7 +1168,7 @@ func TestLocalProfileAPIAndSSEUseSameSocketAndCredentialAfterReconnect(t *testin
 	t.Cleanup(func() { _ = srv.Close() })
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: work, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(work, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(work, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "unix", Address: socket})

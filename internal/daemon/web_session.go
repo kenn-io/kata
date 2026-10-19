@@ -19,6 +19,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -26,10 +27,6 @@ const (
 	webSessionHeader = "X-Kata-Web-Session"
 	webCSRFHeader    = "X-Kata-CSRF"
 	webSessionTTL    = 24 * time.Hour
-	// WebOriginHeader advertises the canonical browser origin on session errors.
-	WebOriginHeader = "X-Kata-Web-Origin"
-	// WebAuthenticationHeader advertises how the canonical browser origin authenticates.
-	WebAuthenticationHeader = "X-Kata-Web-Authentication"
 )
 
 var (
@@ -635,14 +632,14 @@ func directBackendRequest(r *http.Request, policy ListenerPolicy, allowPrivateNe
 
 func writeWebSessionError(w http.ResponseWriter, status int, code, origin string, policy ListenerPolicy) {
 	if origin != "" {
-		w.Header().Set(WebOriginHeader, origin)
+		w.Header().Set(daemonruntime.WebOriginHeader, origin)
 	}
 	authentication := policy.WebAuthentication
 	if authentication == "" && policy.AllowLocalSession {
 		authentication = "loopback"
 	}
 	if authentication != "" {
-		w.Header().Set(WebAuthenticationHeader, authentication)
+		w.Header().Set(daemonruntime.WebAuthenticationHeader, authentication)
 	}
 	api.WriteEnvelope(w, status, code, "browser session authorization failed")
 }

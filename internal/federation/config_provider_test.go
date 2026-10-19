@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
@@ -352,7 +352,7 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 			if tc.signed {
 				t.Setenv("TEST_PROVIDER_SIGNING_KEY", strings.Repeat("k", 64))
 				replacement := pending
-				replacement.Credential.Signing = &federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_PROVIDER_SIGNING_KEY", HubURL: catalog.URL}
+				replacement.Credential.Signing = &signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_PROVIDER_SIGNING_KEY", HubURL: catalog.URL}
 				require.NoError(t, credentials.ReplaceManagedFederationCredential(t.Context(), pending, replacement))
 				pending = replacement
 			}

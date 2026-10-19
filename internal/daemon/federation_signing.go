@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
@@ -150,7 +151,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
 			if err != nil {
 				status := http.StatusUnauthorized
-				if errors.Is(err, federationsigning.ErrWarming) || errors.Is(err, federationsigning.ErrKey) || errors.Is(err, federationsigning.ErrState) {
+				if errors.Is(err, federationsigning.ErrWarming) || errors.Is(err, signingpolicy.ErrKey) || errors.Is(err, federationsigning.ErrState) {
 					status = http.StatusServiceUnavailable
 				}
 				if errors.Is(err, federationsigning.ErrCapacity) {

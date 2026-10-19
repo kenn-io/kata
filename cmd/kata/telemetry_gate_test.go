@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/hooks"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -56,16 +56,16 @@ func TestContractHookQuietPreflight(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nurl = %q\n", server.URL)), 0600))
 				t.Setenv("KATA_AGENT_USE_TEST_DAEMON", "work")
 			case "local profile", "default local":
-				var ns *daemon.Namespace
+				var ns *daemonruntime.Namespace
 				var err error
 				if selection == "local profile" {
 					profileHome := t.TempDir()
 					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf("active_daemon = \"work\"\n[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", profileHome, uid)), 0600))
 					profile, resolveErr := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
 					require.NoError(t, resolveErr)
-					ns, err = daemon.NewNamespaceForHome(profileHome, profile.StorageID)
+					ns, err = daemonruntime.NewNamespaceForHome(profileHome, profile.StorageID)
 				} else {
-					ns, err = daemon.NewNamespace()
+					ns, err = daemonruntime.NewNamespace()
 				}
 				require.NoError(t, err)
 				require.NoError(t, ns.EnsureDirs())

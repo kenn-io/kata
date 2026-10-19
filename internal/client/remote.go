@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kit/pathresolve"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
 )
 
@@ -279,8 +279,8 @@ func buildNamedDaemonTarget(
 			if mode == namedEnsureRunning || mode == namedRequestTarget {
 				running, err = EnsureLocalRunningTarget(ctx)
 			} else {
-				var ns *daemon.Namespace
-				ns, err = daemon.NewNamespace()
+				var ns *daemonruntime.Namespace
+				ns, err = daemonruntime.NewNamespace()
 				if err == nil {
 					var ok bool
 					var resolved ResolvedDaemon
@@ -836,7 +836,7 @@ func requireSecureOrPrivate(u *url.URL, allowInsecure bool) error {
 		return nil
 	}
 	host := u.Hostname()
-	if err := daemon.ValidateNonPublicAddress(net.JoinHostPort(host, "1")); err != nil {
+	if err := daemonruntime.ValidateNonPublicAddress(net.JoinHostPort(host, "1")); err != nil {
 		return fmt.Errorf("plain http to %q is not allowed: %w; use https or set allow_insecure (env KATA_ALLOW_INSECURE=1, or [server].allow_insecure=true in .kata.local.toml)", host, err)
 	}
 	return nil

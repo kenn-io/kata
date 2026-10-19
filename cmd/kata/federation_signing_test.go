@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -55,7 +55,7 @@ func TestFederationSigningCLIUsesSelectedDaemon(t *testing.T) {
 			all, err := config.ReadFederationCredentials()
 			require.NoError(t, err)
 			expected := credential
-			expected.Signing = &federationsigning.Source{
+			expected.Signing = &signingpolicy.Source{
 				KeyID: "key-a", KeyEnv: "TEST_DAEMON_SIGNING_KEY", HubURL: credential.HubURL,
 			}
 			require.Equal(t, expected, all.Projects[uid])

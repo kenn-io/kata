@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestFederationSigningConfigAndCredentialRoundTrip(t *testing.T) {
@@ -32,7 +33,7 @@ enabled = true
 	require.NoError(t, err)
 	require.True(t, c.Federation.Signing.Required)
 	require.Equal(t, "127.0.0.1:0", c.Federation.Ingress.Listen)
-	s := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_SIGNING_KEY", HubURL: "https://hub.example/federation"}
+	s := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_SIGNING_KEY", HubURL: "https://hub.example/federation"}
 	credential := config.FederationCredential{HubURL: s.HubURL, HubProjectID: 1, Token: "enrollment", Signing: &s}
 	require.NoError(t, config.WriteFederationCredential("01EXAMPLEPROJECT0000000000", credential))
 	all, err := config.ReadFederationCredentials()
@@ -94,7 +95,7 @@ enrollment_id = 1
 key_id = "key-b"
 key_env = "TEST_DUPLICATE_SIGNING_KEY"
 enrollment_id = 2`,
-			want: federationsigning.ErrKey,
+			want: signingpolicy.ErrKey,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

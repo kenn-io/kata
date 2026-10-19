@@ -7,12 +7,13 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func signingSource(base, id, file, env string) (*federationsigning.Source, error) {
+func signingSource(base, id, file, env string) (*signingpolicy.Source, error) {
 	if id == "" && file == "" && env == "" {
 		return nil, nil
 	}
@@ -26,8 +27,8 @@ func signingSource(base, id, file, env string) (*federationsigning.Source, error
 			return nil, fmt.Errorf("resolve federation signing key file: %w", err)
 		}
 	}
-	source := federationsigning.Source{KeyID: id, KeyFile: file, KeyEnv: env, HubURL: canonical}
-	if err := federationsigning.ValidatePolicy(source.HubURL, []federationsigning.Key{{Source: source, EnrollmentID: 1}}); err != nil {
+	source := signingpolicy.Source{KeyID: id, KeyFile: file, KeyEnv: env, HubURL: canonical}
+	if err := signingpolicy.ValidatePolicy(source.HubURL, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}); err != nil {
 		return nil, err
 	}
 	return &source, nil

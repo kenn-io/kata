@@ -13,6 +13,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/pkg/client/generated"
 
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"go.kenn.io/kata/internal/api"
@@ -502,7 +503,7 @@ func fetchFederationRebindMetadata(
 	hubURL string,
 	token string,
 	hubProjectID int64,
-	signing *federationsigning.Source,
+	signing *signingpolicy.Source,
 ) (api.ProjectFederationBody, error) {
 	httpClient, err := newFederationRebindHTTPClient(ctx, hubURL, token)
 	if err != nil {

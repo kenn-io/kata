@@ -1,4 +1,4 @@
-package daemon_test
+package daemonruntime_test
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -88,5 +88,5 @@ func TestRuntimeProcessAliveRejectsReusedPID(t *testing.T) {
 		ProcessIdentityV2: kitdaemon.ProcessIdentity(encoded[:len(encoded)-1] + string(replacement)),
 	}
 
-	assert.False(t, daemon.RuntimeProcessAlive(record))
+	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
 }

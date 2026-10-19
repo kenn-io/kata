@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-10-09
+last_edited: 2026-10-19
 ---
 
 # Go client
@@ -10,6 +10,11 @@ Go programs talk to a Kata daemon through `go.kenn.io/kata/pkg/client`. The
 client is generated from the [HTTP API schema](http-api.md) and uses the same
 daemon selection, transports, and bearer-token rules as the Kata CLI, so an
 integration does not have to reimplement them.
+
+Importing `pkg/client` does not link the daemon, its storage engines,
+telemetry, or sync connectors, so client-only programs stay small. The
+[test server](#test-against-a-real-daemon) in `pkg/katatest` runs a real
+daemon and links all of them; import it only from tests.
 
 ```sh
 go get go.kenn.io/kata

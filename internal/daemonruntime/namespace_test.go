@@ -1,4 +1,4 @@
-package daemon_test
+package daemonruntime_test
 
 import (
 	"os"
@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // setupMockEnv creates a temp dir and points $KATA_HOME and $KATA_DB at it
 // for the test's lifetime. Returns the temp dir so callers can construct
 // dbhash-derived paths or layer additional env vars on top before calling
-// daemon.NewNamespace().
+// daemonruntime.NewNamespace().
 func setupMockEnv(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -26,7 +26,7 @@ func setupMockEnv(t *testing.T) string {
 func TestNamespace_DataDirIsKataHomeRuntime(t *testing.T) {
 	tmp := setupMockEnv(t)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	hash := config.DBHash(filepath.Join(tmp, "kata.db"))
 	assert.Equal(t, filepath.Join(tmp, "runtime", hash), ns.DataDir)
@@ -38,7 +38,7 @@ func TestNamespace_SocketDirHonorsXDGRuntimeDir(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", xdg)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(xdg, "kata", ns.DBHash), ns.SocketDir)
 }
@@ -47,11 +47,11 @@ func TestNamespaceSeparatesPostgresSchemas(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
 	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
-	alpha, err := daemon.NewNamespace()
+	alpha, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	t.Setenv("KATA_POSTGRES_SCHEMA", "beta")
-	beta, err := daemon.NewNamespace()
+	beta, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	assert.NotEqual(t, alpha.DBHash, beta.DBHash)
@@ -64,7 +64,7 @@ func TestNamespace_SocketDirFallsBackToTmpDir(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	t.Setenv("TMPDIR", "/var/folders/xy")
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	assert.Contains(t, ns.SocketDir, "kata-")
 	assert.Contains(t, ns.SocketDir, ns.DBHash)
@@ -74,14 +74,14 @@ func TestNamespaceForHomeUsesSelectedHomeWithoutCreatingDirs(t *testing.T) {
 	setupMockEnv(t)
 	home := t.TempDir()
 	hash := config.DBHash(filepath.Join(home, "kata.db"))
-	ns, err := daemon.NewNamespaceForHome(home, hash)
+	ns, err := daemonruntime.NewNamespaceForHome(home, hash)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "runtime", hash), ns.DataDir)
 	assert.Equal(t, hash, ns.DBHash)
 	_, err = os.Stat(ns.DataDir)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	for _, invalid := range []string{"../outside", "", "ABCDEF123456"} {
-		_, err = daemon.NewNamespaceForHome(home, invalid)
+		_, err = daemonruntime.NewNamespaceForHome(home, invalid)
 		require.Error(t, err)
 	}
 }

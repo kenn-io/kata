@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 func TestNativeLeaseAndRebindClientsSignEveryAttempt(t *testing.T) {
 	t.Setenv("TEST_NATIVE_SIGNING_KEY", strings.Repeat("k", 64))
-	s := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_NATIVE_SIGNING_KEY"}
+	s := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_NATIVE_SIGNING_KEY"}
 	inputs := map[string]bool{}
 	hub := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NotEmpty(t, r.Header.Get("Signature"))
