@@ -63,6 +63,22 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 	return append([]map[string]any(nil), c.captured...)
 }
 
+func (c *cliUseTelemetry) waitForCapture(t *testing.T) {
+	t.Helper()
+	//nolint:kennlint // Real daemon delivery can finish after the command's exit wait.
+	require.Eventually(t, func() bool { return len(c.recorded()) > 0 }, 5*time.Second, time.Millisecond)
+}
+
+func waitCLIUseMarker(t *testing.T, prefix string) {
+	t.Helper()
+	target := cliUseTarget.Load()
+	require.NotNil(t, target)
+	marker := telemetryDayMarkerPath(*target, prefix)
+	day := cliUseNow().UTC().Format(time.DateOnly)
+	//nolint:kennlint // The daily marker signals that the real HTTP response was handled.
+	require.Eventually(t, func() bool { return readTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
+}
+
 var cliSurface = []map[string]any{{"surface": "cli"}}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
@@ -112,6 +128,7 @@ func TestCLIUseReportsOnceThroughDaemon(t *testing.T) {
 	require.NotNil(t, target, "the command's own resolution records its target")
 	assert.Equal(t, env.URL, target.BaseURL)
 	assert.Equal(t, client.DaemonSourceInjected, target.Source)
+	waitCLIUseMarker(t, "cli-opened-")
 	second, err := runCmdOutput(t, env, "projects", "list")
 	require.NoError(t, err)
 
@@ -142,6 +159,7 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, cliUseTarget.Load(), "the command resolved a daemon")
 				if test.hook != "" {
+					capture.waitForCapture(t)
 					assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 				} else {
 					assert.Empty(t, capture.recorded())
@@ -181,6 +199,7 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 			require.NoError(t, runAttnHook(t, env, dir, args...))
 
 			require.NotNil(t, cliUseTarget.Load(), "the hook resolved a daemon")
+			capture.waitForCapture(t)
 			assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 		})
 	}
@@ -369,6 +388,7 @@ func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	cmd.SetContext(ctx)
 
 	reportCLIUse(cmd)
+	waitCLIUseMarker(t, "cli-opened-")
 
 	assert.Equal(t, cliSurface, capture.recorded())
 }
@@ -391,14 +411,21 @@ func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 			http.NotFound(w, r)
 			return
 		}
-		d.posts.Add(1)
+		status, receipt := int(d.status.Load()), d.receipt.Load()
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(int(d.status.Load()))
-		_, _ = fmt.Fprintf(w, `{"status":%q}`, d.receipt.Load())
+		w.WriteHeader(status)
+		_, _ = fmt.Fprintf(w, `{"status":%q}`, receipt)
+		d.posts.Add(1)
 	}))
 	t.Cleanup(server.Close)
 	d.url = server.URL
 	return d
+}
+
+func (d *cliUseDaemon) waitForPosts(t *testing.T, want int32) {
+	t.Helper()
+	//nolint:kennlint // Wait for real HTTP handlers before asserting counts or changing their response.
+	require.Eventually(t, func() bool { return d.posts.Load() == want }, 5*time.Second, time.Millisecond)
 }
 
 func setCLIUseClock(t *testing.T, now time.Time) {
@@ -426,13 +453,16 @@ func TestCLIUseReportsOncePerDayPerDaemon(t *testing.T) {
 	setCLIUseClock(t, time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC))
 
 	reportCLIUseTo(t, first.url)
+	waitCLIUseMarker(t, "cli-opened-")
 	reportCLIUseTo(t, first.url)
 	reportCLIUseTo(t, second.url)
+	waitCLIUseMarker(t, "cli-opened-")
 	assert.Equal(t, int32(1), first.posts.Load(), "a later command the same day sends nothing")
 	assert.Equal(t, int32(1), second.posts.Load(), "each daemon counts its own day")
 
 	setCLIUseClock(t, time.Date(2026, 10, 3, 0, 1, 0, 0, time.UTC))
 	reportCLIUseTo(t, first.url)
+	waitCLIUseMarker(t, "cli-opened-")
 	assert.Equal(t, int32(2), first.posts.Load(), "the next UTC day reports again")
 }
 
@@ -444,8 +474,10 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 	target.status.Store(http.StatusServiceUnavailable)
 
 	reportCLIUseTo(t, target.url)
+	target.waitForPosts(t, 1)
 	target.status.Store(http.StatusAccepted)
 	reportCLIUseTo(t, target.url)
+	waitCLIUseMarker(t, "cli-opened-")
 	reportCLIUseTo(t, target.url)
 
 	assert.Equal(t, int32(2), target.posts.Load(), "only an accepted report ends the day's reporting")
@@ -527,6 +559,7 @@ func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
+	capture.waitForCapture(t)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
@@ -547,7 +580,14 @@ func TestAgentUseFullDay(t *testing.T) {
 			target := newCLIUseDaemon(t)
 			target.receipt.Store(test.receipt)
 			reportCLIUseTo(t, target.url)
+			target.waitForPosts(t, 1)
+			if test.want == 1 {
+				waitCLIUseMarker(t, "agent-full-")
+			}
 			reportCLIUseTo(t, target.url)
+			if test.want == 2 {
+				target.waitForPosts(t, 2)
+			}
 			require.Equal(t, test.want, target.posts.Load())
 			if test.want == 1 {
 				// A fresh hook process must reuse the target's marker.
@@ -559,6 +599,10 @@ func TestAgentUseFullDay(t *testing.T) {
 			}
 			setCLIUseClock(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
 			reportCLIUseTo(t, target.url)
+			target.waitForPosts(t, test.want+1)
+			if test.want == 1 {
+				waitCLIUseMarker(t, "agent-full-")
+			}
 			require.Equal(t, test.want+1, target.posts.Load(), "UTC rollover resumes reporting")
 		})
 	}

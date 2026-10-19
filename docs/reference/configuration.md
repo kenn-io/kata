@@ -1061,15 +1061,16 @@ more.
 
 CLI commands such as `kata create` or `kata list` that a person runs in a
 terminal report `app_opened` with `surface: cli` to the daemon they used,
-after the command succeeds. Each `KATA_HOME` reports at most once per UTC day
-to each daemon: once the daemon accepts the report, kata records the day under
-`<KATA_HOME>/telemetry/` and later commands that day send nothing. A report
-that fails is retried by the next command. The report never starts a daemon,
-waits at most 50 ms at exit, and prints nothing.
+after the command succeeds.
+After handling an accepted response, kata records the UTC day under
+`<KATA_HOME>/telemetry/`, so later commands using that `KATA_HOME` and daemon
+send nothing that day.
+The report never starts a daemon, waits at most 50 ms at exit, and prints nothing.
 Its request has a separate one-second deadline.
 A slow remote report can miss the 50 ms exit wait and leave its daily marker
 unwritten if the process exits before handling the response.
-A later eligible command can retry the report.
+A later eligible command can retry, even if the daemon already accepted the report.
+The daemon separately deduplicates `app_opened` per surface per UTC day.
 
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
@@ -1139,16 +1140,14 @@ receipt, or after the `disabled` receipt any daemon returns with telemetry off.
 Hooks write the daily marker only after handling a `full` or `disabled` receipt.
 Requests retain a separate 100 ms deadline.
 A slow remote report can miss the 50 ms exit wait; exiting before receipt
-handling leaves its marker unwritten, so a later hook can retry.
-To share the stop across processes, clients save a private `agent-full-*`
-marker under `<KATA_HOME>/telemetry/`.
-The marker holds only the UTC date and is never sent anywhere.
-Its name derives from the daemon URL or Unix socket, so a replacement daemon
-at the same target inherits that day's marker.
-A daemon that turns telemetry back on during the day receives no agent
-reports from these clients until the next UTC day.
-Older daemons never return `full`, so clients keep reporting to them while
-their telemetry is on.
+handling leaves its marker unwritten, so a later hook can retry. To share
+the stop across processes, clients save a private `agent-full-*` marker under
+`<KATA_HOME>/telemetry/`. The marker holds only the UTC date and is never sent
+anywhere. Its name derives from the daemon URL or Unix socket, so a replacement
+daemon at the same target inherits that day's marker. A daemon that turns
+telemetry back on during the day receives no agent reports from these clients
+until the next UTC day. Older daemons never return `full`, so clients keep
+reporting to them while their telemetry is on.
 
 The browser and TUI also report `screen_viewed` when a screen opens. The fixed
 names are `inbox`, `today`, `delegated`, `scheduled`, `issues`, `logbook`,
