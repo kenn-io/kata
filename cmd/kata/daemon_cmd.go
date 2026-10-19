@@ -1262,6 +1262,7 @@ func runDaemonProcess(
 
 	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
 	startDaemonTelemetryHeartbeat(ctx, workers, store, telemetryReporter)
+	startSetupFinished(ctx, workers, store, telemetryReporter)
 	stopCleanup := installStopWatcher(ns.DBHash, shutdownTrigger.Call)
 	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
 	// a named reload event pumped onto the channel on Windows. See

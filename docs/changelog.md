@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Count installations that have their first visible issue with one anonymous
+  `setup_finished` event, including issues already stored at startup. The count
+  retries interrupted delivery across daemon restarts with the same event identity
+  and installation age. `KATA_TELEMETRY_ENABLED=0` opts out.
+
 - Return from successful commands, agent hooks, and TUI quit after waiting at most 50 ms for usage reports. A human CLI report that fails retries on the next command; one still unanswered at exit backs off for 15 minutes or until the next UTC day. See [Telemetry](reference/configuration.md#telemetry).
 - Stop sending the PostHog SDK's `$os`, `$os_version`, `$os_distro`, and `$go_version` properties with telemetry events. Events still carry `goos` and `goarch`; update PostHog insights that group by `$os` to group by `goos`. See [Telemetry](reference/configuration.md#telemetry).
 - Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.

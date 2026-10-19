@@ -46,6 +46,7 @@ import (
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
+	"go.kenn.io/kit/telemetry/posthog"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -2644,13 +2645,15 @@ func TestWebAuthenticationModeAdvertisesOnlyUsableSessionIssuers(t *testing.T) {
 }
 
 type fakeTelemetryReporter struct {
-	mu     sync.Mutex
-	events []fakeTelemetryEvent
+	mu          sync.Mutex
+	events      []fakeTelemetryEvent
+	onConfirmed func(context.Context, posthog.Delivery) (posthog.Status, error)
 }
 
 type fakeTelemetryEvent struct {
 	event      string
 	properties map[string]any
+	delivery   posthog.Delivery
 }
 
 func (f *fakeTelemetryReporter) Enabled() bool { return true }
@@ -2666,6 +2669,16 @@ func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any)
 	defer f.mu.Unlock()
 	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties})
 	return nil
+}
+
+func (f *fakeTelemetryReporter) CaptureConfirmed(ctx context.Context, event string, properties map[string]any, delivery posthog.Delivery) (posthog.Status, error) {
+	f.mu.Lock()
+	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties, delivery: delivery})
+	f.mu.Unlock()
+	if f.onConfirmed != nil {
+		return f.onConfirmed(ctx, delivery)
+	}
+	return posthog.StatusDelivered, nil
 }
 
 func (f *fakeTelemetryReporter) Close() error { return nil }
@@ -3836,4 +3849,52 @@ func waitRuntimeNotionRecord(t *testing.T, recorded <-chan db.IssueSyncStatus) d
 		require.FailNow(t, "scheduled Notion worker did not record durable completion")
 	}
 	return db.IssueSyncStatus{}
+}
+
+func TestDaemonWiresSetupFinished(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "First issue", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	captured := make(chan bool, 1)
+	reporter := &fakeTelemetryReporter{}
+	reporter.onConfirmed = func(context.Context, posthog.Delivery) (posthog.Status, error) {
+		reporter.mu.Lock()
+		defer reporter.mu.Unlock()
+		found := false
+		for _, event := range reporter.events {
+			found = found || event.event == "setup_finished"
+		}
+		captured <- found
+		return posthog.StatusDelivered, nil
+	}
+	original := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return reporter }
+	t.Cleanup(func() { newTelemetryReporter = original })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after cancellation")
+		}
+	})
+	select {
+	case got := <-captured:
+		require.True(t, got, "daemon reports setup_finished")
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not report setup_finished")
+	}
 }

@@ -186,3 +186,12 @@ func TestCoreActionSurfaceAllowlist(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestSetupFinishedProperties(t *testing.T) {
+	reporter, err := NewReporter(Options{DistinctID: "anonymous-install"})
+	require.NoError(t, err)
+	require.True(t, reporter.EventAllowed("setup_finished"))
+	properties, err := reporter.SanitizeProperties("setup_finished", map[string]any{"project_count": 1})
+	require.NoError(t, err)
+	require.NotContains(t, properties, "project_count")
+}

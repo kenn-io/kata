@@ -1041,6 +1041,19 @@ A new database records when it created its `instance_uid` in the `meta` key
 installs from established ones. Databases created before kata recorded this
 time send events without it.
 
+The daemon sends `setup_finished` once per installation when it finds the first
+visible issue, including one already stored at startup. Open and closed issues
+count, including imported, synced, and agent-created issues. Deleted issues and
+issues in deleted or system projects don't count. The event has no product
+properties. The daemon saves the event identity and observation time before
+sending, then marks the milestone complete after PostHog confirms delivery.
+An interrupted send retries with that same identity and installation age, even
+if the issue is later removed. Pending delivery survives restarts and
+export/import; a new installation ID starts its own milestone. A one-minute
+check catches issues created after startup, including writes by another daemon.
+Browser clients can't send this event. Opting out leaves pending delivery
+available for a later enabled start.
+
 The web UI reports an anonymous `app_opened` event to the daemon serving it
 when the page loads, and again on the first window focus of each later UTC day.
 Background refreshes of an open tab do not count. The daemon sends the event to

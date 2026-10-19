@@ -2,6 +2,7 @@
 package telemetry
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -30,6 +31,7 @@ var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 // the UI capture route reject events outside the allowlist.
 type Client interface {
 	posthog.Client
+	CaptureConfirmed(context.Context, string, map[string]any, posthog.Delivery) (posthog.Status, error)
 	EventAllowed(event string) bool
 	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 }
@@ -67,6 +69,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Commit:      opts.Commit,
 		Source:      "daemon",
 	},
+		posthog.WithAllowedEvent("setup_finished"),
 		posthog.WithAllowedEvent("daemon_active",
 			posthog.AllowProperty("project_count", projectCountBuckets),
 		),

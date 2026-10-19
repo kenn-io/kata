@@ -46,6 +46,9 @@ var alreadyImplemented = map[string]bool{
 	"DispatchRecurringCron": true, // cron.go
 	"ListRecurringCronJobs": true, // cron.go
 
+	"PrepareSetupFinished":  true, // setup_finished.go
+	"CompleteSetupFinished": true, // setup_finished.go
+
 	"ClaimScreenView":     true, // store.go
 	"ReleaseScreenView":   true, // store.go
 	"ObserveCronRun":      true,

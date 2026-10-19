@@ -876,6 +876,7 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	require.NotNil(t, deleteEvent)
 	_, err = store.IssueByShortID(ctx, project.ID, issue.ShortID, db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound)
+
 	restored, restoreEvent, changed, err := store.RestoreIssue(ctx, issue.ID, "conformance-agent")
 	if err != nil {
 		return fmt.Errorf("restore issue: %w", err)

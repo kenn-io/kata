@@ -25,6 +25,8 @@ func contractHookPayload(agent agenthook.Agent) string {
 		return `{"hook_event_name":"sessionStart","session_id":"example-session","source":"startup"}`
 	case agenthook.AgentHermes:
 		return `{"hook_event_name":"pre_llm_call","session_id":"example-session","extra":{"user_message":"example prompt","is_first_turn":true}}`
+	case agenthook.AgentMuse:
+		return `{"hook_event_name":"SessionStart","session_id":"example-session","source":"startup","cwd":"."}`
 	default:
 		return `{"hook_event_name":"SessionStart","session_id":"example-session","source":"startup"}`
 	}
