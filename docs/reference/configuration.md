@@ -1133,8 +1133,9 @@ names.
 With daemon API `0.30.0` or newer, a successful observation at the top bucket
 returns `full`. Hooks and MCP stop posting until the next UTC day after a `full`
 receipt, or after the `disabled` receipt any daemon returns with telemetry off.
-Hooks act on these receipts within their existing 100 ms request deadline. To share
-the stop across processes, clients save a private `agent-full-*` marker under
+Hook receipts update the daily marker when handled before the 50 ms exit wait
+ends; requests retain a separate 100 ms deadline. To share the stop across
+processes, clients save a private `agent-full-*` marker under
 `<KATA_HOME>/telemetry/`. The marker holds only the UTC date and is never sent
 anywhere. Its name derives from the daemon URL or Unix socket, so a replacement
 daemon at the same target inherits that day's marker. A daemon that turns

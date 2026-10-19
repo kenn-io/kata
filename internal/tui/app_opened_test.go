@@ -42,7 +42,7 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 
 	c := NewClient(env.URL, env.HTTP)
 	require.NoError(t, c.ReportAppOpened(t.Context()))
-	require.NoError(t, c.ReportSessionEnded(2*time.Minute))
+	c.ReportSessionEnded(2 * time.Minute)
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
@@ -57,7 +57,7 @@ func TestReportSessionEndedBoundsDelivery(t *testing.T) {
 		})}
 		c := NewClient("http://127.0.0.1:7777", hc)
 		started := time.Now()
-		assert.NoError(t, c.ReportSessionEnded(time.Minute))
+		c.ReportSessionEnded(time.Minute)
 		assert.Equal(t, 50*time.Millisecond, time.Since(started))
 		time.Sleep(time.Second)
 		synctest.Wait()

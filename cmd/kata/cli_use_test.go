@@ -431,11 +431,21 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 }
 
 func TestCLIUseBoundsExitWaitAndRetries(t *testing.T) {
-	for _, hook := range []string{"", "1"} {
-		t.Run("hook="+hook, func(t *testing.T) {
+	for _, test := range []struct {
+		name, hook string
+		contract   bool
+	}{
+		{name: "cli"},
+		{name: "hook", hook: "1"},
+		{name: "contract hook discovers target", contract: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			t.Setenv("KATA_AUTH_TOKEN", "")
-			t.Setenv(hooks.HookVersionEnv, hook)
+			t.Setenv(hooks.HookVersionEnv, test.hook)
+			if test.contract {
+				t.Setenv("KATA_SERVER", "http://127.0.0.1:7777")
+			}
 			stubIsTTY(t, true)
 			synctest.Test(t, func(t *testing.T) {
 				var posts int
@@ -453,14 +463,26 @@ func TestCLIUseBoundsExitWaitAndRetries(t *testing.T) {
 				saved := http.DefaultTransport
 				http.DefaultTransport = server.Client().Transport
 				defer func() { http.DefaultTransport = saved }()
+				report := func() {
+					if test.contract {
+						cliUseTarget.Store(nil)
+						stdout, stderr, err := runCmdCapture(t, nil, "agent-contract-hook")
+						require.NoError(t, err)
+						assert.Contains(t, stdout, "SessionStart")
+						assert.Empty(t, stderr)
+						assert.Nil(t, cliUseTarget.Load())
+						return
+					}
+					reportCLIUseTo(t, "http://127.0.0.1:7777")
+				}
 				start := time.Now()
-				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				report()
 				assert.Equal(t, 50*time.Millisecond, time.Since(start))
 				// Let the unaccepted request finish before the next invocation.
 				time.Sleep(2 * time.Second)
 				synctest.Wait()
-				reportCLIUseTo(t, "http://127.0.0.1:7777")
-				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				report()
+				report()
 				assert.Equal(t, 2, posts, "an unaccepted report retries, then the daily marker suppresses reports")
 			})
 		})

@@ -122,7 +122,7 @@ func Run(ctx context.Context, opts Options) error {
 	started := time.Now()
 	_, err = tea.NewProgram(m, programOpts(ctx, opts)...).Run()
 	elapsed := time.Since(started)
-	_ = c.ReportSessionEnded(elapsed)
+	c.ReportSessionEnded(elapsed)
 	return err
 }
 

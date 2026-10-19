@@ -146,21 +146,14 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 
 // ReportSessionEnded queues the terminal lifetime with a one-second request deadline
 // and waits at most ExitWait for delivery.
-func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
+func (c *Client) ReportSessionEnded(elapsed time.Duration) {
 	var sends posthog.SendGroup
-	result := make(chan error, 1)
 	sends.Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		result <- c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+		_ = c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
 	})
 	sends.Wait(telemetry.ExitWait)
-	select {
-	case err := <-result:
-		return err
-	default:
-		return nil
-	}
 }
 
 func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {
