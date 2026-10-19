@@ -260,6 +260,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		t.Setenv("KATA_HOME", t.TempDir())
 		t.Setenv("KATA_SERVER", "")
 		t.Setenv(hooks.HookVersionEnv, "")
+		stubIsTTY(t, true)
 		cmd := findCommand(t, "projects", "list")
 		cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: "http://" + closedLoopbackAddr(t)})
 		t.Cleanup(func() { cliUseTarget.Store(nil) })
@@ -268,7 +269,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		cmd.SetErr(&stderr)
 		cmd.SetContext(context.Background())
 
-		reportCLIUse(cmd)
+		settledCLIUse(t, func(*testing.T) { reportCLIUse(cmd) })
 
 		assert.Empty(t, stdout.String())
 		assert.Empty(t, stderr.String())
