@@ -22,10 +22,11 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// cliUseReportTimeout bounds the use request; var so tests can shorten it.
+// cliUseReportTimeout bounds the use request if the process outlives the exit wait;
+// var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
-// agentUseReportTimeout bounds hook requests separately from the exit wait.
+// agentUseReportTimeout bounds hook requests if the process outlives the exit wait.
 var agentUseReportTimeout = 100 * time.Millisecond
 
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.

@@ -1029,8 +1029,11 @@ range: `0-5`, `6-20`, `21-100`, or `over-100`. Both events also carry
 stable anonymous `instance_uid` as the distinct ID. They do not send project
 names, issue refs, issue content, comments, labels, paths, or actor names. GeoIP
 collection is disabled and PostHog person-profile processing is explicitly
-turned off. Use distinct `daemon_active` counts for active-install reporting;
-`daemon_started` is only for startup-volume diagnostics.
+turned off. Every event reports OS and architecture as `goos` and `goarch`;
+kata removes the `$os`, `$os_version`, `$os_distro`, and `$go_version`
+properties the PostHog SDK would add. Use distinct `daemon_active` counts for
+active-install reporting; `daemon_started` is only for startup-volume
+diagnostics.
 
 A new database records when it created its `instance_uid` in the `meta` key
 `instance_created_at`. Events from a database with this time carry
@@ -1051,7 +1054,8 @@ Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
 recorded the opening, including after switching the displayed daemon.
 Delivery is best effort.
-TUI exit waits at most 50 ms, with a separate one-second request deadline.
+TUI exit waits at most 50 ms; a report still in flight when `kata tui` exits
+is dropped.
 A rejected authentication request drops the event.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
@@ -1066,7 +1070,6 @@ After handling an accepted response, kata records the UTC day under
 `<KATA_HOME>/telemetry/`, so later commands using that `KATA_HOME` and daemon
 send nothing that day.
 The report never starts a daemon, waits at most 50 ms at exit, and prints nothing.
-Its request has a separate one-second deadline.
 A slow remote report can miss the 50 ms exit wait and leave its daily marker
 unwritten if the process exits before handling the response.
 Human CLI reports save a separate attempt timestamp before sending.
@@ -1119,9 +1122,8 @@ Ordinary piped commands send nothing.
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
 has a separate one-second deadline. Shutdown cancels and joins the worker.
-CLI hook reports wait at most 50 ms after successful execution, with a
-separate 100 ms request deadline.
-Slow remote transports may drop observations.
+CLI hook reports wait at most 50 ms after successful execution; the hook
+process then exits, so slow remote transports may drop observations.
 Delivery is best effort and preserves command output, results, and exit status.
 
 The daemon counts these observations for each install and UTC day. It sends one
@@ -1145,7 +1147,6 @@ With daemon API `0.30.0` or newer, a successful observation at the top bucket
 returns `full`. Hooks and MCP stop posting until the next UTC day after a `full`
 receipt, or after the `disabled` receipt any daemon returns with telemetry off.
 Hooks write the daily marker only after handling a `full` or `disabled` receipt.
-Requests retain a separate 100 ms deadline.
 A slow remote report can miss the 50 ms exit wait; exiting before receipt
 handling leaves its marker unwritten, so a later hook can retry. To share
 the stop across processes, clients save a private `agent-full-*` marker under
