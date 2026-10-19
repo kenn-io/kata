@@ -34,6 +34,11 @@ func AutoCutover(ctx context.Context, path string) error {
 	if version >= db.CurrentSchemaVersion() {
 		return nil
 	}
+	// The swap renames only the main file. Fold the WAL in first so the
+	// backup is complete and no old WAL pages are left beside the new DB.
+	if err := sqlitestore.CheckpointForCutover(ctx, path); err != nil {
+		return err
+	}
 
 	report, err := PreflightSourceFKs(ctx, path)
 	if err != nil {

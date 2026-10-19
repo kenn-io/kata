@@ -413,6 +413,35 @@ func PeekSchemaVersion(ctx context.Context, path string) (int, error) {
 	return d.currentVersion(ctx)
 }
 
+// CheckpointForCutover writes every committed WAL page of an existing
+// database into its main file and truncates the WAL. Cutover renames only the
+// main file, so pages left in the WAL would be missing from the backup and
+// replayed into the replacement database. The handle skips bootstrap, so any
+// schema version is accepted.
+func CheckpointForCutover(ctx context.Context, path string) error {
+	dsn := fmt.Sprintf("file:%s?mode=rw&_pragma=busy_timeout(%d)",
+		sqliteURIPath(path), sqliteBusyTimeout.Milliseconds())
+	sdb, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("open %s for checkpoint: %w", path, err)
+	}
+	sdb.SetMaxOpenConns(1)
+	var busy, logFrames, checkpointedFrames int
+	if err := sdb.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+		_ = sdb.Close()
+		return fmt.Errorf("checkpoint %s: %w", path, err)
+	}
+	if busy != 0 {
+		_ = sdb.Close()
+		return fmt.Errorf("checkpoint %s: database is in use; stop other kata processes and retry", path)
+	}
+	if err := sdb.Close(); err != nil {
+		return fmt.Errorf("close %s after checkpoint: %w", path, err)
+	}
+	return nil
+}
+
 // HasUserTables reports whether an existing SQLite database contains any
 // application/user tables. A zero schema_version plus user tables means
 // "legacy or corrupt existing DB", not "fresh file"; storeopen uses this to
