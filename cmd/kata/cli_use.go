@@ -92,13 +92,13 @@ func reportCLIUse(cmd *cobra.Command) {
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
+	day := cliUseNow().UTC().Format(time.DateOnly)
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
 	var sends posthog.SendGroup
 	sends.Go(func() {
-		day := cliUseNow().UTC().Format(time.DateOnly)
-		parent := cmd.Context()
-		if parent == nil {
-			parent = context.Background()
-		}
 		// Detached so a command that ends by cancelling its own context still reports.
 		timeout := cliUseReportTimeout
 		if agent {
