@@ -11,7 +11,10 @@ in Kata. All three providers use the same delivery and recovery rules.
 
 The requested scope is open/closed status. Existing incoming imports remain;
 outbound title, body, assignment, labels, comments, dates, relationships, and
-issue creation are excluded. Kata gains no in-progress state. GitHub Projects
+issue creation are excluded from status sync. Explicit initial title/body
+publication is implemented separately through
+[issue publishing](../reference/cli.md#publish-a-native-issue); it preserves this
+status-sync mode. Kata gains no in-progress state. GitHub Projects
 board fields and Notion task-database/schema creation are excluded.
 
 Notion's existing workflow groups define completion. Operators should not have

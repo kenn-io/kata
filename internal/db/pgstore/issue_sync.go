@@ -62,6 +62,11 @@ func (s *Store) UpsertIssueSyncBinding(
 			}
 		}
 		if err == nil {
+			if existing.Provider != params.Provider || existing.RemoteID != params.RemoteID || existing.SourceKey != params.SourceKey {
+				if err := ensureNoPendingIssuePublicationTx(ctx, tx, params.ProjectID, 0); err != nil {
+					return err
+				}
+			}
 			if existing.Provider != params.Provider || existing.RemoteID != params.RemoteID {
 				return db.ErrIssueSyncProjectAlreadyBound
 			}
@@ -79,6 +84,9 @@ func (s *Store) UpsertIssueSyncBinding(
 			}
 			if oldMode == "two-way" && nextMode == "one-way" {
 				if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=NULL WHERE project_id=$1 AND source=$2`, existing.ProjectID, existing.SourceKey); err != nil {
+					return err
+				}
+				if err := clearPublicationStatusIntentTx(ctx, tx, existing); err != nil {
 					return err
 				}
 			}

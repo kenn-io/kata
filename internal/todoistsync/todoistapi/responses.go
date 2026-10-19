@@ -21,6 +21,10 @@ type GetSectionAPIV1SectionsSectionIDGetResponse = SectionSyncView
 // clients in a sync (or sync-like) response.
 type GetTaskAPIV1TasksTaskIDGetResponse = ItemSyncView
 
+// CreateTaskAPIV1TasksPostResponse A class with fields representing an ItemView which will be returned to
+// clients in a sync (or sync-like) response.
+type CreateTaskAPIV1TasksPostResponse = ItemSyncView
+
 type GetTasksAPIV1TasksGetResponse = PaginatedListItemSyncView
 
 // UserInfoAPIV1UserGetResponse A model for the user objects returned by the sync/REST API.
@@ -69,6 +73,13 @@ type GetTaskAPIV1TasksTaskIDGetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetTaskAPIV1TasksTaskIDGetResponse
+}
+
+type CreateTaskAPIV1TasksPostResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *CreateTaskAPIV1TasksPostResponse
 }
 
 type GetTasksAPIV1TasksGetResp struct {

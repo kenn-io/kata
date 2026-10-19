@@ -44,6 +44,11 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if source.ID != params.SourceProjectID {
 			source, target = target, source
 		}
+		for _, projectID := range []int64{source.ID, target.ID} {
+			if err := ensureNoPendingIssuePublicationTx(ctx, tx, projectID, 0); err != nil {
+				return err
+			}
+		}
 		if source.Name == db.SystemProjectName || source.UID == db.SystemProjectUID ||
 			target.Name == db.SystemProjectName || target.UID == db.SystemProjectUID {
 			return db.ErrNotFound

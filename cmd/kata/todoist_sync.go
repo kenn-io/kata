@@ -13,7 +13,7 @@ import (
 
 func newTodoistSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "todoist", Short: "mirror Todoist tasks into this project"}
-	cmd.AddCommand(newTodoistSyncEnableCmd(), newIssueSyncDisableCmd("todoist"), newIssueSyncStatusCmd("todoist"), newIssueSyncOnceCmd("todoist"))
+	cmd.AddCommand(newTodoistSyncEnableCmd(), newIssueSyncDisableCmd("todoist"), newIssueSyncStatusCmd("todoist"), newIssueSyncOnceCmd("todoist"), newIssuePublishCmd("todoist"))
 	return cmd
 }
 

@@ -34,6 +34,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 	if err != nil {
 		return db.Project{}, nil, err
 	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, project.ID, 0); err != nil {
+		return db.Project{}, nil, err
+	}
 	if isSystemProject(project) {
 		return db.Project{}, nil, db.ErrNotFound
 	}

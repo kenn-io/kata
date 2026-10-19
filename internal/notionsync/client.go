@@ -142,13 +142,13 @@ func (c *Client) deferRequests(delay time.Duration, cause error) {
 }
 
 // request bounds decoded bytes before parsing and never reports raw remote data.
-// POST is used exclusively for the idempotent data-source query operation.
+// Query POSTs remain retryable; page creation is a separately admitted mutation.
 func (s *clientSession) request(ctx context.Context, method, path string, body any, out any) error {
 	return s.requestWithAdmission(ctx, method, path, body, out, nil)
 }
 
 func (s *clientSession) requestWithAdmission(ctx context.Context, method, path string, body any, out any, admission func() error) error {
-	mutating := method == http.MethodPatch
+	mutating := method == http.MethodPatch || (method == http.MethodPost && path == "/v1/pages")
 	if mutating && admission == nil {
 		return fmt.Errorf("notion status writes require delivery admission")
 	}

@@ -1,7 +1,7 @@
 ---
 title: Todoist sync
 description: Import one Todoist project and optionally synchronize standalone task completion and reopening.
-last_edited: 2026-10-08
+last_edited: 2026-10-19
 ---
 
 # Todoist sync
@@ -10,6 +10,34 @@ Mirror one Todoist project into one Kata project. The daemon imports active
 tasks and completion history every five minutes by default. Enable two-way
 status sync to send explicit Kata close/reopen changes back to standalone,
 non-recurring Todoist tasks. Other fields remain incoming-only.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing Todoist binding to publish one open, native Kata issue:
+
+```sh
+kata sync todoist publish abc4
+kata sync todoist status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. Todoist then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon token needs task-create access to the bound account and project. The project must be active.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+Todoist before acting. To attach a confirmed object without creating another,
+use `kata sync todoist publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the task ID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Configure the daemon
 

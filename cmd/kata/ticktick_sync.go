@@ -13,7 +13,7 @@ import (
 
 func newTickTickSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "ticktick", Short: "mirror TickTick tasks into this project"}
-	cmd.AddCommand(newTickTickSyncEnableCmd(), newIssueSyncDisableCmd("ticktick"), newIssueSyncStatusCmd("ticktick"), newIssueSyncOnceCmd("ticktick"))
+	cmd.AddCommand(newTickTickSyncEnableCmd(), newIssueSyncDisableCmd("ticktick"), newIssueSyncStatusCmd("ticktick"), newIssueSyncOnceCmd("ticktick"), newIssuePublishCmd("ticktick"))
 	return cmd
 }
 

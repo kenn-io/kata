@@ -88,7 +88,7 @@ func (c *Client) ForRun(ctx context.Context, input Config) (Session, error) {
 		return nil, err
 	}
 	if input.APIOrigin != c.cfg.Daemon.APIOrigin {
-		return nil, fmt.Errorf("plane binding origin differs from daemon plane_sync.api_origin")
+		return nil, fmt.Errorf("plane binding origin differs from daemon plane_sync.api_origin: %w", issuesync.NewPublicationValidationError(issuesync.PublicationBindingInvalid))
 	}
 	token, ok := c.cfg.LookupEnv(c.cfg.Daemon.TokenEnv)
 	token = strings.TrimSpace(token)
@@ -265,7 +265,7 @@ func (s *clientSession) Project(ctx context.Context, input Config) (Project, err
 	}
 	id, err := CanonicalID(wire.ID)
 	if err != nil || id != s.config.ProjectID || strings.TrimSpace(wire.Identifier) == "" || wire.ArchivedAt != nil {
-		return Project{}, fmt.Errorf("plane project identity or availability does not match")
+		return Project{}, fmt.Errorf("plane project identity or availability does not match: %w", issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 	}
 	return Project{ID: id, Name: wire.Name, Identifier: wire.Identifier}, nil
 }
@@ -355,7 +355,7 @@ func (s *clientSession) States(ctx context.Context, input Config) ([]State, erro
 		states = append(states, State{ID: id, Group: row.Group, Sequence: row.Sequence})
 	}
 	if _, err := stateGroups(states); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: %w", err, issuesync.NewPublicationValidationError(issuesync.PublicationSchemaInvalid))
 	}
 	return states, nil
 }

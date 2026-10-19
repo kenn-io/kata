@@ -88,23 +88,24 @@ type IssueSyncBindingOut struct {
 
 // IssueSyncStatusOut summarizes current sync state.
 type IssueSyncStatusOut struct {
-	StatusSync    string                `json:"status_sync"`
-	PendingCount  int                   `json:"pending_count"`
-	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
-	BindingID     int64                 `json:"binding_id"`
-	ProjectID     int64                 `json:"project_id"`
-	Provider      string                `json:"provider"`
-	Enabled       bool                  `json:"enabled"`
-	State         string                `json:"state"`
-	SyncStartedAt *time.Time            `json:"sync_started_at,omitempty"`
-	LastAttemptAt *time.Time            `json:"last_attempt_at,omitempty"`
-	LastSuccessAt *time.Time            `json:"last_success_at,omitempty"`
-	LastErrorAt   *time.Time            `json:"last_error_at,omitempty"`
-	LastError     string                `json:"last_error,omitempty"`
-	LastCreated   int                   `json:"last_created"`
-	LastUpdated   int                   `json:"last_updated"`
-	LastUnchanged int                   `json:"last_unchanged"`
-	LastComments  int                   `json:"last_comments"`
+	PendingPublication *PendingIssuePublicationOut `json:"pending_publication,omitempty"`
+	StatusSync         string                      `json:"status_sync"`
+	PendingCount       int                         `json:"pending_count"`
+	Progress           *IssueSyncProgressOut       `json:"progress,omitempty"`
+	BindingID          int64                       `json:"binding_id"`
+	ProjectID          int64                       `json:"project_id"`
+	Provider           string                      `json:"provider"`
+	Enabled            bool                        `json:"enabled"`
+	State              string                      `json:"state"`
+	SyncStartedAt      *time.Time                  `json:"sync_started_at,omitempty"`
+	LastAttemptAt      *time.Time                  `json:"last_attempt_at,omitempty"`
+	LastSuccessAt      *time.Time                  `json:"last_success_at,omitempty"`
+	LastErrorAt        *time.Time                  `json:"last_error_at,omitempty"`
+	LastError          string                      `json:"last_error,omitempty"`
+	LastCreated        int                         `json:"last_created"`
+	LastUpdated        int                         `json:"last_updated"`
+	LastUnchanged      int                         `json:"last_unchanged"`
+	LastComments       int                         `json:"last_comments"`
 }
 
 // IssueSyncBody is the shared response envelope for enable, disable, and status.

@@ -30,6 +30,9 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if err != nil {
 			return err
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, project.ID, 0); err != nil {
+			return err
+		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {
 			return db.ErrNotFound
 		}
@@ -260,6 +263,9 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		if err != nil {
 			return err
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, project.ID, 0); err != nil {
+			return err
+		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {
 			return db.ErrNotFound
 		}
@@ -406,6 +412,9 @@ func (s *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 		project, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id = $1 FOR UPDATE`, projectID))
 		if err != nil {
+			return err
+		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, project.ID, 0); err != nil {
 			return err
 		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {

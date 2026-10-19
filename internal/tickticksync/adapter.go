@@ -334,10 +334,10 @@ func (a *Adapter) openMissingTasks(ctx context.Context, b db.IssueSyncBinding, v
 	return missing, nil
 }
 
-// closedMissingTaskCandidates keeps locally closed tasks that TickTick last
-// showed open eligible for bounded reads. The read records the completion
-// before sync stops tracking the task, so a later TickTick reopen is a real
-// status change, and it imports the task's final content.
+// closedMissingTaskCandidates keeps locally closed tasks eligible for their
+// first import or while TickTick last showed them open. The bounded read records
+// completion before sync stops tracking the task, so a later TickTick reopen is
+// a real status change, and it imports the task's final content.
 func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyncBinding, visible map[string]bool, checkpoint Checkpoint) (map[string]bool, error) {
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
 	if err != nil {
@@ -357,10 +357,12 @@ func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyn
 			continue
 		}
 		version, ok := checkpoint.Versions[id]
-		if !ok {
+		// Publication has no content checkpoint or source timestamp until the
+		// first ordinary import, even if the native issue has already closed.
+		if !ok && mapping.SourceUpdatedAt != nil {
 			continue
 		}
-		if !version.PendingRecovery && version.Status != 0 {
+		if ok && !version.PendingRecovery && version.Status != 0 {
 			continue
 		}
 		taskByIssue[*mapping.IssueID] = id

@@ -1,7 +1,7 @@
 ---
 title: GitHub sync
 description: Configure GitHub issue synchronization, optional two-way status, credentials, mappings, and operational recovery.
-last_edited: 2026-09-29
+last_edited: 2026-10-19
 ---
 
 # GitHub sync
@@ -10,11 +10,41 @@ GitHub sync mirrors GitHub issues, issue comments, and supported sub-issue paren
 relationships into native kata issues, comments, and parent links. Status sync
 defaults to one-way. Opt into two-way status to send explicit local close and
 reopen actions back to GitHub; titles, bodies, comments, and relationships still
-flow inward. Kata does not create GitHub issues.
+flow inward during ordinary sync. Explicit initial publication is available
+on unreleased builds as described below.
 
 Use GitHub sync when GitHub Issues is the public or upstream issue tracker, but
 you want kata issues for agent planning, local triage, offline review, or a
 federation hub that fans GitHub-origin work out to spokes.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing GitHub binding to publish one open, native Kata issue:
+
+```sh
+kata sync github publish abc4
+kata sync github status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. GitHub then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon credential needs **Issues: write** permission in the bound
+repository. The repository must allow issues and must not be archived.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+GitHub before acting. To attach a confirmed object without creating another,
+use `kata sync github publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the issue number, such as `7`. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Requirements
 

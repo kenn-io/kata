@@ -13,7 +13,7 @@ import (
 
 func newLinearSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "linear", Short: "mirror Linear tasks into this project"}
-	cmd.AddCommand(newLinearSyncEnableCmd(), newIssueSyncDisableCmd("linear"), newIssueSyncStatusCmd("linear"), newIssueSyncOnceCmd("linear"))
+	cmd.AddCommand(newLinearSyncEnableCmd(), newIssueSyncDisableCmd("linear"), newIssueSyncStatusCmd("linear"), newIssueSyncOnceCmd("linear"), newIssuePublishCmd("linear"))
 	return cmd
 }
 

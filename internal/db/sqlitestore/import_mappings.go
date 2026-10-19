@@ -18,6 +18,9 @@ func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParam
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		if err := ensurePublicationMappingAllowedTx(ctx, tx, p); err != nil {
+			return db.ImportMapping{}, err
+		}
 		mapping, err := upsertImportMapping(ctx, tx, p)
 		if err != nil {
 			return db.ImportMapping{}, err

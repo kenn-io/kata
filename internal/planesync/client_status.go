@@ -145,44 +145,9 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	if err != nil {
 		return zero, err
 	}
-	if err := s.client.admit(ctx); err != nil {
-		return zero, err
-	}
-	if err := admission(); err != nil {
-		return zero, err
-	}
-	if err := ctx.Err(); err != nil {
-		return zero, err
-	}
-	traced, sent := issuesync.TrackRequestWrite(ctx)
-	req, err := http.NewRequestWithContext(traced, http.MethodPatch, s.config.APIOrigin+s.path()+"work-items/"+id+"/", bytes.NewReader(payload))
+	raw, err := s.mutate(ctx, http.MethodPatch, s.path()+"work-items/"+id+"/", payload, admission)
 	if err != nil {
 		return zero, err
-	}
-	req.Header.Set("X-API-Key", s.token)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	response, err := s.client.http.Do(req)
-	if err != nil && !sent() {
-		return zero, &issuesync.StatusError{Message: "Plane status write could not connect"}
-	}
-	if err != nil {
-		return zero, &issuesync.StatusError{Message: "Plane status write response was lost", Ambiguous: true}
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == 429 || response.StatusCode >= 500 {
-		s.client.deferRequests(response.Header.Get("Retry-After"), 0)
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		delivery := &issuesync.StatusError{Message: fmt.Sprintf("Plane status write failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Ambiguous: response.StatusCode >= 500, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 429 && response.StatusCode != 409}
-		if response.StatusCode == 429 {
-			delivery.RetryAfter = s.client.cooldownRemaining()
-		}
-		return zero, delivery
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(raw) > maxResponseBytes {
-		return zero, &issuesync.StatusError{Message: "Plane status write response was incomplete", Ambiguous: true}
 	}
 	var identity struct {
 		ID      string `json:"id"`
@@ -201,4 +166,51 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 		return zero, &issuesync.StatusError{Message: "Plane status write could not be verified", Ambiguous: true}
 	}
 	return observed, nil
+}
+
+// mutate shares the pinned client and pacing without retrying a mutation.
+func (s *clientSession) mutate(ctx context.Context, method, path string, payload []byte, admission func() error) ([]byte, error) {
+	if admission == nil {
+		return nil, blockedStatus("Plane mutation requires admission")
+	}
+	if err := s.client.admit(ctx); err != nil {
+		return nil, err
+	}
+	if err := admission(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	traced, sent := issuesync.TrackRequestWrite(ctx)
+	req, err := http.NewRequestWithContext(traced, method, s.config.APIOrigin+path, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", s.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	response, err := s.client.http.Do(req)
+	if err != nil && !sent() {
+		return nil, &issuesync.StatusError{Message: "Plane status write could not connect"}
+	}
+	if err != nil {
+		return nil, &issuesync.StatusError{Message: "Plane status write response was lost", Ambiguous: true}
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == 429 || response.StatusCode >= 500 {
+		s.client.deferRequests(response.Header.Get("Retry-After"), 0)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		delivery := &issuesync.StatusError{Message: fmt.Sprintf("Plane status write failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Ambiguous: response.StatusCode >= 500, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 429 && response.StatusCode != 409}
+		if response.StatusCode == 429 {
+			delivery.RetryAfter = s.client.cooldownRemaining()
+		}
+		return nil, delivery
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil || len(raw) > maxResponseBytes {
+		return nil, &issuesync.StatusError{Message: "Plane status write response was incomplete", Ambiguous: true}
+	}
+	return raw, nil
 }

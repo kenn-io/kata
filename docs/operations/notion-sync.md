@@ -1,7 +1,7 @@
 ---
 title: Notion sync
 description: Mirror a Notion task data source into Kata with workflow groups, optional two-way status, and bounded polling.
-last_edited: 2026-09-29
+last_edited: 2026-10-19
 ---
 
 # Notion sync
@@ -10,6 +10,34 @@ Notion sync mirrors one task data source into one Kata project. The daemon reads
 Notion and imports native issues. Status sync defaults to one-way; opt into
 two-way status to send explicit Kata close and reopen actions back to the task.
 Other local edits remain local. Polling defaults to five minutes.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing Notion binding to publish one open, native Kata issue:
+
+```sh
+kata sync notion publish abc4
+kata sync notion status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. Notion then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The shared database must grant the daemon connection read-content and insert-content capabilities. Two-way status still requires update-content. Publishing uses the configured title property and synchronous Markdown content; the live workflow must supply a known open status. Legacy bindings without a live workflow-group mapping cannot publish.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+Notion before acting. To attach a confirmed object without creating another,
+use `kata sync notion publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the page UUID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Configure the daemon
 

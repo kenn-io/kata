@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const workspaceQuery = `query KataTwentyWorkspace { currentWorkspace { id displayName } }`
@@ -33,7 +35,7 @@ func (s *clientSession) Workspace(ctx context.Context, c Config) (Workspace, err
 	}
 	id, err := CanonicalID(envelope.Workspace.ID)
 	if err != nil || (s.config.WorkspaceID != "" && id != s.config.WorkspaceID) {
-		return Workspace{}, fmt.Errorf("twenty API key workspace does not match binding")
+		return Workspace{}, fmt.Errorf("twenty API key workspace does not match binding: %w", issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 	}
 	name := *envelope.Workspace.DisplayName
 	if !utf8.ValidString(name) || strings.ContainsRune(name, '\x00') {
@@ -54,6 +56,9 @@ type metadataNode struct {
 	Type         string         `json:"type"`
 	Active       *bool          `json:"isActive"`
 	Options      jsontext.Value `json:"options"`
+	IsSystem     *bool          `json:"isSystem"`
+	IsNullable   *bool          `json:"isNullable"`
+	DefaultValue jsontext.Value `json:"defaultValue"`
 }
 type metadataConnection struct {
 	Edges *[]struct {
@@ -197,13 +202,17 @@ func (s *clientSession) taskObjectID(ctx context.Context, total *int) (string, e
 		cursor = next
 	}
 	if objectID == "" {
-		return "", fmt.Errorf("twenty task object is unavailable")
+		return "", fmt.Errorf("twenty task object is unavailable: %w", issuesync.NewPublicationValidationError(issuesync.PublicationSchemaInvalid))
 	}
 	return objectID, nil
 }
 
 // taskFields returns the task object's active fields by name.
 func (s *clientSession) taskFields(ctx context.Context, objectID string, total *int) (map[string]metadataNode, error) {
+	return s.taskFieldsWithQuery(ctx, objectID, total, fieldsQuery)
+}
+
+func (s *clientSession) taskFieldsWithQuery(ctx context.Context, objectID string, total *int, query string) (map[string]metadataNode, error) {
 	seenIDs := map[string]bool{}
 	seenCursors := map[string]bool{}
 	cursor := ""
@@ -216,7 +225,7 @@ func (s *clientSession) taskFields(ctx context.Context, objectID string, total *
 		if cursor != "" {
 			after = cursor
 		}
-		raw, err := s.graphqlBounded(ctx, fieldsQuery, map[string]any{"id": objectID, "after": after}, total)
+		raw, err := s.graphqlBounded(ctx, query, map[string]any{"id": objectID, "after": after}, total)
 		if err != nil {
 			return nil, err
 		}

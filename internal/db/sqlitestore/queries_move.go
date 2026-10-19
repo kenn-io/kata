@@ -92,6 +92,9 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		}
 		return out, err
 	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, in.FromProjectID, in.IssueID); err != nil {
+		return out, err
+	}
 	if err := ensureProjectWritableTx(ctx, tx, in.FromProjectID); err != nil {
 		return out, err
 	}
@@ -129,6 +132,9 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 	if err := rejectIssueMoveExternalRootIssueSyncTx(
 		ctx, tx, in.IssueID, in.FromProjectID, in.ToProjectID,
 	); err != nil {
+		return out, err
+	}
+	if err := ensurePublicationMoveAllowedTx(ctx, tx, in.IssueID, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
 	}
 	mappingCollisions, err := issueMoveImportMappingCollisions(

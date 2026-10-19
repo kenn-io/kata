@@ -311,6 +311,10 @@ type RunIssueSyncOnceResponse = RunIssueSyncOnceResponseBody
 
 type RunIssueSyncOnceErrorResponse = ErrorEnvelope
 
+type PublishIssueResponse = PublishIssueResponseBody
+
+type PublishIssueErrorResponse = ErrorEnvelope
+
 type GetIssueSyncStatusResponse = IssueSyncBody
 
 type GetIssueSyncStatusErrorResponse = ErrorEnvelope
@@ -1253,6 +1257,13 @@ type RunIssueSyncOnceResp struct {
 	StatusCode   int
 	JSON200      *RunIssueSyncOnceResponse
 	JSONDefault  *RunIssueSyncOnceErrorResponse
+}
+
+type PublishIssueResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PublishIssueResponse
 }
 
 type GetIssueSyncStatusResp struct {
