@@ -99,6 +99,7 @@ func reportCLIUse(cmd *cobra.Command) {
 	}
 	var sends posthog.SendGroup
 	sends.Go(func() {
+		target := target
 		// Detached so a command that ends by cancelling its own context still reports.
 		timeout := cliUseReportTimeout
 		if agent {

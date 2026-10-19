@@ -26,6 +26,7 @@ type recordingTelemetry struct {
 	opened   chan struct{}
 	ended    chan map[string]any
 	release  <-chan struct{}
+	finished chan struct{}
 }
 
 func (*recordingTelemetry) EventAllowed(event string) bool {
@@ -43,6 +44,9 @@ func (r *recordingTelemetry) Capture(event string, properties map[string]any) er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.captured = append(r.captured, properties)
+	if event == "session_ended" && r.finished != nil {
+		close(r.finished)
+	}
 	return nil
 }
 

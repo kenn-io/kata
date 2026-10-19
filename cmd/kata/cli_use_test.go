@@ -319,16 +319,44 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 	stubIsTTY(t, true)
 	release := sync.OnceFunc(func() { close(hung.block) })
 	t.Cleanup(release)
-	stdout, stderr, err := runCLIWithErr(t, env, dir, "create", "exit wait example")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "exit wait example")
-	assert.Empty(t, stderr)
-	<-hung.started
-	stdout, stderr, err = runCLIWithErr(t, env, dir, "list")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "exit wait example")
-	assert.Empty(t, stderr)
+	type commandResult struct {
+		stdout, stderr string
+		err            error
+	}
+	done := make(chan commandResult, 1)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		stdout, stderr, err := runCLIWithErr(t, env, dir, "create", "exit wait example")
+		done <- commandResult{stdout: stdout, stderr: stderr, err: err}
+	}()
+	t.Cleanup(func() {
+		release()
+		<-joined
+	})
+	select {
+	case <-hung.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("create did not reach the held telemetry handler")
+	}
+	watchdog := time.NewTimer(500 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay command exit.
+	defer watchdog.Stop()
+	select {
+	case result := <-done:
+		require.NoError(t, result.err)
+		assert.Contains(t, result.stdout, "exit wait example")
+		assert.Empty(t, result.stderr)
+	case <-watchdog.C:
+		t.Fatal("create waited for the held telemetry response")
+	}
 	release()
+	marker := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-")
+	//nolint:kennlint // The real HTTP send publishes completion through its daily marker.
+	require.Eventually(t, func() bool { return readTelemetryDayMarker(marker) != "" }, time.Second, time.Millisecond)
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "exit wait example")
+	assert.Empty(t, stderr)
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {

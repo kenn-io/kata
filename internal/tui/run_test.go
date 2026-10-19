@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,18 +47,27 @@ func TestRunQuitReportsSessionWhileDeliveryIsStalled(t *testing.T) {
 	release := make(chan struct{})
 	recorder := &recordingTelemetry{
 		opened: make(chan struct{}), ended: make(chan map[string]any, 1), release: release,
+		finished: make(chan struct{}),
 	}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	t.Cleanup(func() { close(release) })
+	releaseReport := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseReport)
 	t.Setenv("KATA_SERVER", env.URL)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	t.Cleanup(cancel)
 	workspace := t.TempDir()
 	done := make(chan error, 1)
+	joined := make(chan struct{})
 	go func() {
+		defer close(joined)
 		done <- Run(ctx, Options{Stdout: tty, SkipQuitConfirm: true, Workspace: workspace})
 	}()
+	t.Cleanup(func() {
+		releaseReport()
+		cancel()
+		<-joined
+	})
 	select {
 	case <-recorder.opened:
 	case <-ctx.Done():
@@ -71,11 +81,19 @@ func TestRunQuitReportsSessionWhileDeliveryIsStalled(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("TUI quit did not report session_ended")
 	}
+	watchdog := time.NewTimer(500 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay terminal quit.
+	defer watchdog.Stop()
 	select {
 	case err := <-done:
 		require.NoError(t, err)
-	case <-ctx.Done():
+	case <-watchdog.C:
 		t.Fatal("TUI quit waited for the held telemetry response")
+	}
+	releaseReport()
+	select {
+	case <-recorder.finished:
+	case <-ctx.Done():
+		t.Fatal("released telemetry capture did not finish")
 	}
 }
 
