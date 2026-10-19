@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Return from successful commands, agent hooks, and TUI quit after waiting at most 50 ms for usage reports. Requests keep their separate deadlines, and unaccepted reports leave the next command free to retry. See [Telemetry](reference/configuration.md#telemetry).
+- Return from successful commands, agent hooks, and TUI quit after waiting at most 50 ms for usage reports. Requests keep their separate deadlines. Human CLI reports retry observed failures on the next command; an outcome unseen at process exit backs off for 15 minutes or until the next UTC day. See [Telemetry](reference/configuration.md#telemetry).
 - Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.
 - Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
 

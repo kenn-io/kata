@@ -475,12 +475,83 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 
 	reportCLIUseTo(t, target.url)
 	target.waitForPosts(t, 1)
+	attempt := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
+	//nolint:kennlint // Observe the handled failure before invoking the next command.
+	require.Eventually(t, func() bool { return readTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 	target.status.Store(http.StatusAccepted)
 	reportCLIUseTo(t, target.url)
 	waitCLIUseMarker(t, "cli-opened-")
 	reportCLIUseTo(t, target.url)
 
 	assert.Equal(t, int32(2), target.posts.Load(), "only an accepted report ends the day's reporting")
+}
+
+func TestCLIUseBacksOffUnobservedReports(t *testing.T) {
+	for _, test := range []struct{ first, second, retry string }{
+		{"2026-10-02T12:00:00Z", "2026-10-02T12:01:00Z", "2026-10-02T12:16:00Z"},
+		{"2026-10-02T23:59:00Z", "2026-10-02T23:59:30Z", "2026-10-03T00:00:00Z"},
+	} {
+		t.Run(test.retry, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			held, started := make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(held) })
+			var posts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+				if posts.Add(1) == 1 {
+					close(started)
+					<-held
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"status":"queued"}`))
+			}))
+			t.Cleanup(server.Close)
+			t.Cleanup(release)
+			run := func(now, mode string) *exec.Cmd {
+				process := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCLIUseBackoffProcess$") //nolint:gosec // Current test executable with fixed fixture arguments.
+				process.Env = append(os.Environ(), "KATA_CLI_USE_TEST_SERVER="+server.URL, "KATA_CLI_USE_TEST_NOW="+now, "KATA_CLI_USE_TEST_MODE="+mode, "GORACE=atexit_sleep_ms=0")
+				return process
+			}
+			first := run(test.first, "exit")
+			var output bytes.Buffer
+			first.Stdout, first.Stderr = &output, &output
+			require.NoError(t, first.Start())
+			select {
+			case <-started:
+			case <-time.After(10 * time.Second):
+				release()
+				_ = first.Wait()
+				t.Fatal("first process did not reach the held telemetry response")
+			}
+			require.NoError(t, first.Wait(), "%s", output.String())
+			release()
+
+			outputBytes, err := run(test.second, "exit").CombinedOutput()
+			require.NoError(t, err, "%s", outputBytes)
+			require.EqualValues(t, 1, posts.Load(), "a new process skips a report whose unseen outcome is still in backoff")
+
+			outputBytes, err = run(test.retry, "accepted").CombinedOutput()
+			require.NoError(t, err, "%s", outputBytes)
+			require.EqualValues(t, 2, posts.Load(), "backoff expiry or a new UTC day permits a retry")
+		})
+	}
+}
+
+func TestCLIUseBackoffProcess(t *testing.T) {
+	url := os.Getenv("KATA_CLI_USE_TEST_SERVER")
+	if url == "" {
+		return
+	}
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	now, err := time.Parse(time.RFC3339, os.Getenv("KATA_CLI_USE_TEST_NOW"))
+	require.NoError(t, err)
+	setCLIUseClock(t, now)
+	reportCLIUseTo(t, url)
+	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "accepted" {
+		waitCLIUseMarker(t, "cli-opened-")
+	}
 }
 
 func TestCLIUseBoundsExitWaitAndRetries(t *testing.T) {

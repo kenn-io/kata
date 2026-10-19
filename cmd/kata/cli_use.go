@@ -31,6 +31,9 @@ var agentUseReportTimeout = 100 * time.Millisecond
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
 var cliUseNow = time.Now
 
+// cliUseRetryBackoff spaces attempts whose outcome the process never observed.
+const cliUseRetryBackoff = 15 * time.Minute
+
 // cliUseTarget is the resolved daemon this invocation built its own client from.
 var cliUseTarget atomic.Pointer[client.ResolvedDaemon]
 
@@ -92,7 +95,8 @@ func reportCLIUse(cmd *cobra.Command) {
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
-	day := cliUseNow().UTC().Format(time.DateOnly)
+	now := cliUseNow().UTC()
+	day := now.Format(time.DateOnly)
 	parent := cmd.Context()
 	if parent == nil {
 		parent = context.Background()
@@ -114,14 +118,11 @@ func reportCLIUse(cmd *cobra.Command) {
 			}
 			target = &resolved
 		}
-		prefix := "cli-opened-"
-		if agent {
-			prefix = "agent-full-"
-		}
-		marker := telemetryDayMarkerPath(*target, prefix)
-		if readTelemetryDayMarker(marker) == day {
+		marker, finish, report := beginCLIUseReport(*target, agent, now)
+		if !report {
 			return
 		}
+		defer finish()
 		hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 		if err != nil {
 			return
@@ -146,6 +147,30 @@ func reportCLIUse(cmd *cobra.Command) {
 		recordTelemetryDayMarker(marker, day)
 	})
 	sends.Wait(telemetry.ExitWait)
+}
+
+// beginCLIUseReport keeps successful days separate from unfinished CLI attempts.
+func beginCLIUseReport(target client.ResolvedDaemon, agent bool, now time.Time) (string, func(), bool) {
+	prefix := "cli-opened-"
+	if agent {
+		prefix = "agent-full-"
+	}
+	marker := telemetryDayMarkerPath(target, prefix)
+	day := now.Format(time.DateOnly)
+	if readTelemetryDayMarker(marker) == day {
+		return "", nil, false
+	}
+	finish := func() {}
+	if !agent {
+		attempt := telemetryDayMarkerPath(target, "cli-opened-try-")
+		previous, err := time.Parse(time.RFC3339, readTelemetryDayMarker(attempt))
+		if err == nil && previous.UTC().Format(time.DateOnly) == day && now.Sub(previous) < cliUseRetryBackoff {
+			return "", nil, false
+		}
+		recordTelemetryDayMarker(attempt, now.Format(time.RFC3339))
+		finish = func() { _ = os.Remove(attempt) }
+	}
+	return marker, finish, true
 }
 
 // agentUseDoneForDay reports whether a receipt ends agent reporting until the

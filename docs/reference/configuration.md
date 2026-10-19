@@ -1069,9 +1069,13 @@ The report never starts a daemon, waits at most 50 ms at exit, and prints nothin
 Its request has a separate one-second deadline.
 A slow remote report can miss the 50 ms exit wait and leave its daily marker
 unwritten if the process exits before handling the response.
-Until a response is handled and the marker is written, every later eligible
-command may issue another POST and wait up to 50 ms, even if the daemon already
-accepted the report.
+Human CLI reports save a separate attempt timestamp before sending.
+If the process exits before observing the outcome, commands using the same
+`KATA_HOME` and daemon skip reports for 15 minutes, then a later eligible
+command retries; a new UTC day permits a retry sooner.
+This can delay a retry even if the daemon never accepted the report.
+An outcome the process observes clears the attempt timestamp, so an observed
+failure retries on the next eligible command.
 The daemon separately deduplicates `app_opened` per surface per UTC day until
 it restarts.
 
