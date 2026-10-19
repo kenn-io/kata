@@ -101,6 +101,11 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		}
 		m.links = db.FoldEvents(linkEvents)
 	}
+	// Check the full projection before prepareRows removes unchanged rows.
+	// The same snapshot is fenced by the writer upgrade (BUSY_SNAPSHOT retries).
+	if err := ensurePublicationProjectionTx(ctx, tx, projectID, m.projection); err != nil {
+		return federationMaterialization{}, err
+	}
 	if err := m.prepareRows(ctx, tx, projectID); err != nil {
 		return federationMaterialization{}, err
 	}

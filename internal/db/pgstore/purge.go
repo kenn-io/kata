@@ -24,6 +24,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		if err != nil {
 			return err
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, issue.ProjectID, issue.ID); err != nil {
+			return err
+		}
 		var projectName string
 		if err := tx.QueryRowContext(ctx,
 			`SELECT name FROM projects WHERE id = $1`, issue.ProjectID).Scan(&projectName); err != nil {

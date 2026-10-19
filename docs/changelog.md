@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Publish an open native issue to GitHub, Notion, Linear, Plane, TickTick, Todoist, or Twenty with `kata sync <provider> publish <issue-ref>`. The initial title and body become an upstream object attached to the same Kata issue; ordinary imports then maintain it. Recover uncertain creates with explicit adoption or inspected attempt resolution. See [publishing and recovery](reference/cli.md#publish-a-native-issue) and [restore reconciliation](operations/backup-restore.md#restore-with-published-issues).
+
 - Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.
 - Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
 

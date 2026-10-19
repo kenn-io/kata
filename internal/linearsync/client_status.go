@@ -130,26 +130,52 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	if err != nil {
 		return zero, blockedStatus("cannot encode Linear status write")
 	}
-	if err := s.client.admit(ctx); err != nil {
+	raw, err := s.mutate(ctx, payload, admission)
+	if err != nil {
 		return zero, err
+	}
+	var data struct {
+		Update *struct {
+			Success *bool     `json:"success"`
+			Issue   *identity `json:"issue"`
+		} `json:"issueUpdate"`
+	}
+	if json.Unmarshal(raw, &data) != nil || data.Update == nil || data.Update.Success == nil || !*data.Update.Success || data.Update.Issue == nil || data.Update.Issue.ID != id {
+		return zero, &issuesync.StatusError{Message: "Linear status write payload is unproven", Ambiguous: true}
+	}
+	obs, _, err = s.readStatusCached(ctx, c, id, &schema)
+	if err != nil || obs.Status != desired || obs.RawStatus == nil || *obs.RawStatus != target {
+		return zero, &issuesync.StatusError{Message: "Linear status write could not be verified", Ambiguous: true}
+	}
+	return obs, nil
+}
+
+// mutate is the shared one-send GraphQL mutation transport. It never uses the
+// retrying query helper, even though both operations use HTTP POST.
+func (s *clientSession) mutate(ctx context.Context, payload []byte, admission func() error) (jsontext.Value, error) {
+	if admission == nil {
+		return nil, blockedStatus("Linear mutation requires admission")
+	}
+	if err := s.client.admit(ctx); err != nil {
+		return nil, err
 	}
 	if err := admission(); err != nil {
-		return zero, err
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return zero, err
+		return nil, err
 	}
 	traced, sent := issuesync.TrackRequestWrite(ctx)
 	req, err := http.NewRequestWithContext(traced, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return zero, blockedStatus("cannot build Linear status write")
+		return nil, blockedStatus("cannot build Linear status write")
 	}
 	req.Header.Set("Authorization", s.authorization)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	res, err := s.client.http.Do(req)
 	if err != nil {
-		return zero, &issuesync.StatusError{Message: "Linear status write response unavailable", Ambiguous: sent()}
+		return nil, &issuesync.StatusError{Message: "Linear status write response unavailable", Ambiguous: sent()}
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	_ = res.Body.Close()
@@ -164,23 +190,10 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	// A rejection is definitive only when no mutation data accompanies it.
 	hasData := len(envelope.Data) > 0 && string(envelope.Data) != "null" && string(envelope.Data) != "{}"
 	if !hasData && (limited || auth || res.StatusCode == 401 || res.StatusCode == 403 || res.StatusCode >= 300 && res.StatusCode < 400) {
-		return zero, &issuesync.StatusError{Message: "Linear status write rejected", HTTPStatus: res.StatusCode, Blocked: !limited, RetryAfter: s.client.cooldownRemaining()}
+		return nil, &issuesync.StatusError{Message: "Linear status write rejected", HTTPStatus: res.StatusCode, Blocked: !limited, RetryAfter: s.client.cooldownRemaining()}
 	}
 	if res.StatusCode != 200 || readErr != nil || len(raw) > maxResponseBytes || decodeErr != nil || len(envelope.Errors) > 0 {
-		return zero, &issuesync.StatusError{Message: "Linear status write outcome is unproven", HTTPStatus: res.StatusCode, Ambiguous: true}
+		return envelope.Data, &issuesync.StatusError{Message: "Linear status write outcome is unproven", HTTPStatus: res.StatusCode, Ambiguous: true}
 	}
-	var data struct {
-		Update *struct {
-			Success *bool     `json:"success"`
-			Issue   *identity `json:"issue"`
-		} `json:"issueUpdate"`
-	}
-	if json.Unmarshal(envelope.Data, &data) != nil || data.Update == nil || data.Update.Success == nil || !*data.Update.Success || data.Update.Issue == nil || data.Update.Issue.ID != id {
-		return zero, &issuesync.StatusError{Message: "Linear status write payload is unproven", Ambiguous: true}
-	}
-	obs, _, err = s.readStatusCached(ctx, c, id, &schema)
-	if err != nil || obs.Status != desired || obs.RawStatus == nil || *obs.RawStatus != target {
-		return zero, &issuesync.StatusError{Message: "Linear status write could not be verified", Ambiguous: true}
-	}
-	return obs, nil
+	return envelope.Data, nil
 }

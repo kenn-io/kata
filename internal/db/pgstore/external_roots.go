@@ -416,6 +416,9 @@ func (d *Store) CreateExternalRootBinding(
 		if err := lockExternalRootConnectorTx(ctx, tx, params.ConnectorInstance); err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, params.ProjectID, issue.ID); err != nil {
+			return db.ExternalRootBinding{}, db.Event{}, err
+		}
 		if err := rejectIssueSyncManagedExternalRootTx(ctx, tx, params.ProjectID, issue.ID); err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}

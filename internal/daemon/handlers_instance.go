@@ -44,6 +44,7 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
 		out.Body.IssueSubtreeTokens = true
 		out.Body.IssueStatusSync = true
+		out.Body.IssuePublish = true
 		out.Body.FederationSigningRequired = cfg.FederationSigningRequired
 		out.Body.Auth = instanceAuthInfo(ctx, cfg)
 		return out, nil

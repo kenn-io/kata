@@ -141,7 +141,10 @@ WHERE issue_id=$2 AND project_id=$3 AND object_type='issue'
  AND EXISTS (SELECT 1 FROM issue_sync_bindings b WHERE b.project_id=import_mappings.project_id AND b.source_key=import_mappings.source
   AND b.provider IN ('notion','github','plane','linear','twenty','todoist','ticktick') AND b.config_json::jsonb->>'status_sync'='two-way')
  AND NOT EXISTS (SELECT 1 FROM federation_bindings f WHERE f.project_id=import_mappings.project_id AND f.role='spoke' AND f.enabled=1)`, event.UID, event.IssueID, event.ProjectID)
-	return err
+	if err != nil {
+		return err
+	}
+	return publicationStatusIntentTx(ctx, tx, event)
 }
 
 // Only newly accepted, effective status intent can enqueue a provider write.
@@ -189,11 +192,24 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 	if len(accepted) == 0 {
 		return nil
 	}
+	publication, err := projectPublicationTx(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
 	previous := db.FoldEvents(history)
 	for _, issue := range current.SortedIssues() {
 		incoming := accepted[issue.UID]
 		if len(incoming) == 0 {
 			continue
+		}
+		if publication != nil && publication.IssueUID == issue.UID {
+			next := db.ReconcileFoldStatusIntent(previous.Issues[issue.UID], issue, publication.PendingEventUID, incoming)
+			if next != publication.PendingEventUID {
+				publication.PendingEventUID = next
+				if err := savePublicationIntentTx(ctx, tx, publication); err != nil {
+					return err
+				}
+			}
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT m.id,m.pending_event_uid FROM import_mappings m JOIN issues i ON i.id=m.issue_id
  WHERE m.project_id=$1 AND m.source=$2 AND m.object_type='issue' AND i.uid=$3 ORDER BY m.id`, projectID, binding.SourceKey, issue.UID)

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-17
+last_edited: 2026-10-19
 ---
 
 # CLI reference
@@ -1223,6 +1223,73 @@ with the same detail and sections as `kata show`. An empty `next --full` result
 uses the same successful empty output as compact mode.
 
 ## External sync
+
+### Publish a native issue
+
+Publishing requires a daemon advertising `issue_publish: true`. Upgrade
+the selected daemon if the CLI reports `issue_publish_unsupported`.
+
+```sh
+kata sync <provider> publish abc4
+kata sync <provider> publish example-project#abc4 --json
+kata sync <provider> status
+kata sync <provider> publish abc4 --adopt <remote-id>
+kata sync <provider> publish abc4 --resolve-not-created --attempt <attempt-uid> --message "Inspected the source and confirmed no object was created."
+```
+
+`<provider>` is `github`, `notion`, `linear`, `plane`, `ticktick`, `todoist`,
+or `twenty`. Publish sends only the initial title and body of an open native
+issue through that project's existing enabled binding. Archived projects,
+federation spokes, conflicting external ownership, and a mismatched provider
+are rejected. The daemon keeps credentials; browser local-web authority cannot
+administer integrations or publish issues.
+
+The command attaches the remote identity to the original Kata UID. Ordinary
+imports then manage its content using that provider's existing formatting and
+source-newer rules. Publishing does not change the status-sync mode, add a
+binding, or enable later outbound title/body edits. Assignees, labels, comments,
+parents, dates, and custom fields are not copied.
+
+A completed mapping returns `already_published` without another remote create,
+including when the issue is now closed or the binding is disabled. JSON output
+contains `provider`, `issue_uid`, `issue_ref`, `source_key`, `external_id`,
+optional `url`, and `result` (`created`, `already_published`, or `recovered`).
+Resolution returns `resolved_not_created` without a remote identity. Human
+and `--agent` output report the outcome and remote identity when present.
+
+During setup and preflight, locally validated publication failures return a
+specific error code and remedy for content limits, invalid bindings, unavailable destinations,
+missing write permission, and incompatible fields or workflow targets. These
+checks cover all seven providers. Correct the reported setting or content and
+publish again. Provider response diagnostics remain private; an unclassified
+setup or preflight failure reports a generic binding/access hint.
+
+#### Recover an uncertain result
+
+Kata records an attempt before sending a create. Once dispatch begins, it never
+automatically repeats the create, even after a timeout, restart, malformed
+response, or server error. An unresolved attempt blocks ordinary import and
+identity-changing operations until recovery. `status` exposes only the attempt
+UID, issue UID, provider, and phase (`prepared`, `dispatching`, or `created`),
+without the saved content.
+
+1. Inspect the provider for the object. Allow an in-flight request to finish;
+   a retained claim can require waiting up to 30 minutes before recovery.
+2. If Kata retained a confirmed remote identity, rerun the plain publish command
+   to read it and finish attachment. If the identity is unknown, use `--adopt`
+   with the confirmed remote identity. GitHub takes an issue number; Notion,
+   Linear, Plane, and Twenty take UUIDs; TickTick and Todoist take task IDs.
+   Kata verifies the object belongs to the same bound source and never creates
+   an object during adoption.
+3. Only after confirming no remote object exists, use `--resolve-not-created`
+   with the exact pending `--attempt` and a nonempty inspection `--message`.
+   This records an audit event and clears the attempt. It does not publish;
+   a later plain publish command authorizes a fresh create.
+
+`--adopt` and `--resolve-not-created` are mutually exclusive. Recovery can run
+while the binding is disabled. Adoption without a pending attempt is allowed
+only on a disabled matching binding, for [restore reconciliation](../operations/backup-restore.md#restore-with-published-issues).
+There is no force-create or dry-run flag.
 
 ### Notion
 

@@ -1,7 +1,7 @@
 ---
 title: Plane sync
 description: Mirror a Plane project into native Kata issues with daemon-owned API credentials and optional two-way status sync.
-last_edited: 2026-10-01
+last_edited: 2026-10-19
 ---
 
 # Plane sync
@@ -10,6 +10,34 @@ Plane sync mirrors one Plane project into one Kata project. The daemon reads
 Plane and imports native issues every five minutes by default. Local issue edits,
 stay in Kata. Enable `--status-sync=two-way` to send explicit Kata close/reopen
 changes back to Plane. Other fields remain incoming-only.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing Plane binding to publish one open, native Kata issue:
+
+```sh
+kata sync plane publish abc4
+kata sync plane status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. Plane then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon API key needs work-item create access to the bound project. Publishing selects an open workflow state and sends the Markdown body as escaped readable HTML; it does not execute embedded HTML.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+Plane before acting. To attach a confirmed object without creating another,
+use `kata sync plane publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the work-item UUID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Configure the daemon
 

@@ -43,6 +43,9 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	if err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, conn, project.ID, 0); err != nil {
+		return db.ProjectPurgeLog{}, err
+	}
 	if isSystemProject(project) {
 		return db.ProjectPurgeLog{}, db.ErrNotFound
 	}
@@ -306,6 +309,9 @@ func (d *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 
 	project, err := scanProject(conn.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, projectID))
 	if err != nil {
+		return 0, err
+	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, conn, project.ID, 0); err != nil {
 		return 0, err
 	}
 	if isSystemProject(project) {

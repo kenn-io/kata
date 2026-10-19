@@ -58,6 +58,9 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}
+	if err := ensurePublicationImportAllowedTx(ctx, tx, projectUID, p.Source); err != nil {
+		return db.ImportBatchResult{}, nil, err
+	}
 	if err := validateIssueSyncImportGuardTx(ctx, tx, p); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}

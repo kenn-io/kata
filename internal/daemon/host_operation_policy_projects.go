@@ -27,7 +27,7 @@ func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
 		Mutation: true, restricted: true,
-	}, "enableIssueSync", "disableIssueSync", "runIssueSyncOnce")
+	}, "enableIssueSync", "disableIssueSync", "runIssueSyncOnce", "publishIssue")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,

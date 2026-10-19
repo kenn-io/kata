@@ -511,6 +511,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	defer func() { _ = tx.Rollback() }()
 
 	if b.Role == db.FederationRoleSpoke {
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, b.ProjectID, 0); err != nil {
+			return db.FederationBinding{}, err
+		}
 		if err := rejectIssueSyncedFederationProject(ctx, tx, b.ProjectID); err != nil {
 			return db.FederationBinding{}, err
 		}
@@ -1242,6 +1245,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	if err := ensurePublicationProjectionTx(ctx, tx, projectID, projection); err != nil {
+		return err
+	}
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
 		if validator == nil {
 			validator = db.NewCronReplayValidator(tx, false)
@@ -1812,6 +1818,9 @@ func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, err
 // Reset removes replica evidence with its event provenance after ordinary
 // pending-publication and integration guards succeed.
 func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, projectID, 0); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
 		return err
 	}
@@ -2845,6 +2854,9 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("project %d already has %q federation binding", p.ProjectID, existing.Role)
 	}
 	if !errors.Is(err, db.ErrNotFound) {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, p.ProjectID, 0); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	if err := rejectIssueSyncedFederationProject(ctx, tx, p.ProjectID); err != nil {

@@ -65,6 +65,79 @@ func (a *AnyProjectSyncViewResponse) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type Body37565102 struct {
+	// Content Task content.
+	Content string `json:"content" validate:"required,min=1"`
+
+	// Description Task description.
+	Description *string `json:"description,omitempty"`
+
+	// ProjectID ID of the project to add the task to. If omitted or null, the task will be added to the user's Inbox.
+	ProjectID *string `json:"project_id,omitempty"`
+
+	// SectionID ID of the section to add the task to
+	SectionID *string `json:"section_id,omitempty"`
+
+	// ParentID ID of the parent task
+	ParentID *string `json:"parent_id,omitempty"`
+
+	// Order Position of the task in the project or section
+	Order *int `json:"order,omitempty"`
+
+	// Labels List of label names.
+	Labels []string `json:"labels,omitempty"`
+
+	// Priority Task priority (1-4, where 1 is highest)
+	Priority *int `json:"priority,omitempty"`
+
+	// AssigneeID ID of the user to assign the task to. To find User IDs, use [Get user](#operation/user_info_api_v1_user_get) for your own ID or [Get all collaborators](#operation/get_project_collaborators_api_v1_projects__project_id__collaborators_get) for project members.
+	AssigneeID *int `json:"assignee_id,omitempty"`
+
+	// DueString Human-readable representation of the due date. See the [Due dates](#tag/Due-dates) section for more details.
+	DueString *string `json:"due_string,omitempty"`
+
+	// DueDate Due date in RFC 3339 format or similar. See the [Due dates](#tag/Due-dates) section for more details.
+	DueDate *string `json:"due_date,omitempty"`
+
+	// DueDatetime Due date and time. See the [Due dates](#tag/Due-dates) section for more details.
+	DueDatetime *string `json:"due_datetime,omitempty"`
+
+	// DueLang Due date language code. See the [Due dates](#tag/Due-dates) section for more details.
+	DueLang *string `json:"due_lang,omitempty"`
+
+	// Duration Task duration, as a positive whole number of minutes or days. The API accepts durations longer than 24 hours, but the Todoist web and desktop date picker limits duration edits to 24 hours. Only used if `duration_unit` is also provided.
+	Duration *int `json:"duration,omitempty"`
+
+	// DurationUnit Unit of time for duration.
+	DurationUnit *Body37565102DurationUnitAnyOf `json:"duration_unit,omitempty"`
+
+	// DeadlineDate Deadline date in YYYY-MM-DD format
+	DeadlineDate *string `json:"deadline_date,omitempty"`
+}
+
+func (b Body37565102) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(b.Content, "required,min=1"); err != nil {
+		errors = errors.Append("Content", err)
+	}
+	if b.DurationUnit != nil {
+		if v, ok := any(b.DurationUnit).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("DurationUnit", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type EffectScope struct {
+	// Mode Where the effect applies. Always `all` for now.
+	Mode *string `json:"mode,omitempty"`
+}
+
 // ItemSyncView A class with fields representing an ItemView which will be returned to
 // clients in a sync (or sync-like) response.
 type ItemSyncView struct {
@@ -209,6 +282,44 @@ func (p PaginatedListItemSyncView) Validate() error {
 	return errors
 }
 
+type PauseActivityEffect struct {
+	Scope *EffectScope `json:"scope,omitempty"`
+}
+
+func (p PauseActivityEffect) Validate() error {
+	var errors runtime.ValidationErrors
+	if p.Scope != nil {
+		if v, ok := any(p.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type PauseNotificationsEffect struct {
+	Scope *EffectScope `json:"scope,omitempty"`
+}
+
+func (p PauseNotificationsEffect) Validate() error {
+	var errors runtime.ValidationErrors
+	if p.Scope != nil {
+		if v, ok := any(p.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 // PersonalProjectSyncView A representation of a Personal Project Sync View, extending the base ProjectSync
 // View, to be returned to clients in a sync (or sync-like) response.
 type PersonalProjectSyncView struct {
@@ -232,6 +343,9 @@ type PersonalProjectSyncView struct {
 
 	// Color Project color name.
 	Color string `json:"color" validate:"required"`
+
+	// Icon Project icon name, or `null` for the default icon. More icons will be added over time, so clients should fall back to the default icon for names they don't recognize.
+	Icon *string `json:"icon,omitempty"`
 
 	// CreatorUID String ID of the user who created the project.
 	CreatorUID string `json:"creator_uid"`
@@ -599,6 +713,9 @@ type UserJSON struct {
 	// UrgentReminderDevice The device that should ring urgent reminders. Contains device_id, device_token, device_platform (ios or android), and optionally device_name.
 	UrgentReminderDevice *UrgentReminderDeviceView `json:"urgent_reminder_device,omitempty"`
 
+	// Status The user's status, shared across Todoist and Comms. `null` when the user has none or it has expired. Set or clear it with `user_update`.
+	Status *UserStatus `json:"status,omitempty"`
+
 	// StartPage The user's default view on Todoist. The start page can be one of the following: inbox, teaminbox, today, next7days, upcoming, assigned_to_me, project?id=1234 to open a project, label?name=abc to open a label, filter?id=1234 to open a filter, or workspace_filter?id=1234 to open a workspace filter
 	StartPage string `json:"start_page" validate:"required"`
 
@@ -778,6 +895,13 @@ func (u UserJSON) Validate() error {
 			}
 		}
 	}
+	if u.Status != nil {
+		if v, ok := any(u.Status).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Status", err)
+			}
+		}
+	}
 	if err := typesValidator.Var(u.StartPage, "required"); err != nil {
 		errors = errors.Append("StartPage", err)
 	}
@@ -836,6 +960,72 @@ func (u UserJSON) Validate() error {
 	return errors
 }
 
+// UserStatus A user's status, as sent by clients and stored in the `status` user property.
+type UserStatus struct {
+	// Message The status text. Surrounding whitespace is trimmed.
+	Message string `json:"message" validate:"required,max=80,min=1"`
+
+	// Emoji An optional single emoji.
+	Emoji *string `json:"emoji,omitempty"`
+
+	// ActiveUntil When the status and its effects expire, in UTC. `null` or omitted means it stays until cleared.
+	ActiveUntil *time.Time `json:"active_until,omitempty"`
+
+	// Effects The optional behaviors a status enables. Empty for an informational status.
+	// Each effect is independent: a status may carry either, both, or neither.
+	Effects *UserStatusEffects `json:"effects,omitempty"`
+}
+
+func (u UserStatus) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(u.Message, "required,max=80,min=1"); err != nil {
+		errors = errors.Append("Message", err)
+	}
+	if u.Effects != nil {
+		if v, ok := any(u.Effects).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Effects", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+// UserStatusEffects The optional behaviors a status enables. Empty for an informational status.
+// Each effect is independent: a status may carry either, both, or neither.
+type UserStatusEffects struct {
+	// PauseNotifications Pauses the user's notifications, in products that support it, while the status is active.
+	PauseNotifications *PauseNotificationsEffect `json:"pause_notifications,omitempty"`
+
+	// PauseActivity Pauses the user's productivity metrics (Karma and streaks) in Todoist while the status is active, as Vacation Mode does.
+	PauseActivity *PauseActivityEffect `json:"pause_activity,omitempty"`
+}
+
+func (u UserStatusEffects) Validate() error {
+	var errors runtime.ValidationErrors
+	if u.PauseNotifications != nil {
+		if v, ok := any(u.PauseNotifications).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PauseNotifications", err)
+			}
+		}
+	}
+	if u.PauseActivity != nil {
+		if v, ok := any(u.PauseActivity).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PauseActivity", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 // WorkspaceProjectSyncView A representation of a Workspace Project Sync View, extending the base ProjectSync
 // View, to be returned to clients in a sync (or sync-like) response.
 type WorkspaceProjectSyncView struct {
@@ -859,6 +1049,9 @@ type WorkspaceProjectSyncView struct {
 
 	// Color Project color name.
 	Color string `json:"color" validate:"required"`
+
+	// Icon Project icon name, or `null` for the default icon. More icons will be added over time, so clients should fall back to the default icon for names they don't recognize.
+	Icon *string `json:"icon,omitempty"`
 
 	// CreatorUID String ID of the user who created the project.
 	CreatorUID string `json:"creator_uid"`

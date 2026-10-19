@@ -59,6 +59,13 @@ func issueSyncPrintStatus(w io.Writer, provider, action string, status generated
 		}
 		fmt.Fprintf(&out, "%s sync %s\nStatus sync: %s\nPending status changes: %d\n", issueSyncLabel(provider), textsafe.Line(label), textsafe.Line(issueStatusSyncDisplayMode(status.StatusSync)), status.PendingCount)
 	}
+	if pending := status.PendingPublication; pending != nil {
+		if agent {
+			fmt.Fprintf(&out, " publication_attempt=%s publication_issue=%s publication_phase=%s", agentValue(pending.AttemptUID), agentValue(pending.IssueUID), agentValue(pending.Phase))
+		} else {
+			fmt.Fprintf(&out, "Pending publication: %s (%s), issue %s\n", textsafe.Line(pending.AttemptUID), textsafe.Line(pending.Phase), textsafe.Line(pending.IssueUID))
+		}
+	}
 	if binding != nil {
 		if agent {
 			fmt.Fprintf(&out, " source=%s interval_seconds=%d", agentValue(binding.DisplayName), binding.IntervalSeconds)

@@ -527,6 +527,11 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		if err != nil {
 			return err
 		}
+		if deleteIssue {
+			if err := ensureNoPendingIssuePublicationTx(ctx, tx, current.ProjectID, current.ID); err != nil {
+				return err
+			}
+		}
 		if deleteIssue && current.DeletedAt != nil || !deleteIssue && current.Status == "open" {
 			issue = current
 			return nil

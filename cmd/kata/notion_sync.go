@@ -12,7 +12,7 @@ import (
 
 func newNotionSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "notion", Short: "mirror Notion tasks into this project"}
-	cmd.AddCommand(newNotionSyncEnableCmd(), newIssueSyncDisableCmd("notion"), newIssueSyncStatusCmd("notion"), newIssueSyncOnceCmd("notion"))
+	cmd.AddCommand(newNotionSyncEnableCmd(), newIssueSyncDisableCmd("notion"), newIssueSyncStatusCmd("notion"), newIssueSyncOnceCmd("notion"), newIssuePublishCmd("notion"))
 	return cmd
 }
 

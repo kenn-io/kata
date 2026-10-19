@@ -162,7 +162,10 @@ WHERE issue_id=$2 AND project_id=$3 AND object_type='issue'
  AND EXISTS (SELECT 1 FROM issue_sync_bindings b WHERE b.project_id=import_mappings.project_id AND b.source_key=import_mappings.source
   AND b.provider IN ('notion','github','plane','linear','twenty','todoist','ticktick') AND json_extract(b.config_json,'$.status_sync')='two-way')
  AND NOT EXISTS (SELECT 1 FROM federation_bindings f WHERE f.project_id=import_mappings.project_id AND f.role='spoke' AND f.enabled=1)`, event.UID, event.IssueID, event.ProjectID)
-	return err
+	if err != nil {
+		return err
+	}
+	return publicationStatusIntentTx(ctx, tx, event)
 }
 
 // Only newly accepted, effective status intent can enqueue a provider write.
@@ -177,8 +180,9 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 }
 
 type federatedStatusIntentUpdate struct {
-	id       int64
-	eventUID string
+	publication *db.IssuePublication
+	id          int64
+	eventUID    string
 }
 
 func prepareFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, acceptedUIDs []string, current db.FoldProjection) ([]federatedStatusIntentUpdate, error) {
@@ -223,12 +227,23 @@ func prepareFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID i
 	if len(accepted) == 0 {
 		return nil, nil
 	}
+	publication, err := projectPublicationTx(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	var updates []federatedStatusIntentUpdate
 	previous := db.FoldEvents(history)
 	for _, issue := range current.SortedIssues() {
 		incoming := accepted[issue.UID]
 		if len(incoming) == 0 {
 			continue
+		}
+		if publication != nil && publication.IssueUID == issue.UID {
+			next := db.ReconcileFoldStatusIntent(previous.Issues[issue.UID], issue, publication.PendingEventUID, incoming)
+			if next != publication.PendingEventUID {
+				publication.PendingEventUID = next
+				updates = append(updates, federatedStatusIntentUpdate{publication: publication})
+			}
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT m.id,m.pending_event_uid FROM import_mappings m JOIN issues i ON i.id=m.issue_id
  WHERE m.project_id=$1 AND m.source=$2 AND m.object_type='issue' AND i.uid=$3 ORDER BY m.id`, projectID, binding.SourceKey, issue.UID)
@@ -264,6 +279,12 @@ func prepareFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID i
 
 func applyFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, updates []federatedStatusIntentUpdate) error {
 	for _, update := range updates {
+		if update.publication != nil {
+			if err := savePublicationIntentTx(ctx, tx, update.publication); err != nil {
+				return err
+			}
+			continue
+		}
 		var value any
 		if update.eventUID != "" {
 			value = update.eventUID

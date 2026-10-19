@@ -1,7 +1,7 @@
 ---
 title: Twenty sync
 description: Mirror Twenty workspace tasks into native Kata issues with self-hosted support and optional two-way status sync.
-last_edited: 2026-10-08
+last_edited: 2026-10-19
 ---
 
 # Twenty sync
@@ -10,6 +10,34 @@ Twenty sync mirrors the built-in tasks in one Twenty workspace into one Kata
 project. The daemon polls every five minutes by default. Imports remain native
 issues: local comments, evidence, relationships, and edits use ordinary Kata
 commands. Status is incoming-only until you enable `--status-sync=two-way`.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing Twenty binding to publish one open, native Kata issue:
+
+```sh
+kata sync twenty publish abc4
+kata sync twenty status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. Twenty then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon API key needs task-create access in the bound workspace. The live task schema must accept the configured open status and `bodyV2` Markdown. Required custom fields without defaults prevent publishing because this command does not supply custom fields.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+Twenty before acting. To attach a confirmed object without creating another,
+use `kata sync twenty publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the task UUID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Credentials and instances
 
