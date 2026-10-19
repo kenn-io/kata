@@ -509,6 +509,8 @@ func TestCLIUseBacksOffUnobservedReports(t *testing.T) {
 			outputBytes, err := run(test.second, "exit").CombinedOutput()
 			require.NoError(t, err, "%s", outputBytes)
 			require.EqualValues(t, 1, posts.Load(), "a new process skips a report whose unseen outcome is still in backoff")
+			attempt := telemetryDayMarkerPath(client.ResolvedDaemon{BaseURL: server.URL}, "cli-opened-try-")
+			require.Equal(t, test.first, readTelemetryDayMarker(attempt), "a skipped report leaves the unseen attempt in place")
 
 			outputBytes, err = run(test.retry, "accepted").CombinedOutput()
 			require.NoError(t, err, "%s", outputBytes)
