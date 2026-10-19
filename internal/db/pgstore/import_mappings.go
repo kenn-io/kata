@@ -18,6 +18,9 @@ const importMappingSelect = `SELECT id, source, external_id, object_type, projec
 func (s *Store) UpsertImportMapping(ctx context.Context, params db.ImportMappingParams) (db.ImportMapping, error) {
 	var mapping db.ImportMapping
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := ensurePublicationMappingAllowedTx(ctx, tx, params); err != nil {
+			return err
+		}
 		var err error
 		mapping, err = upsertImportMappingTx(ctx, tx, params)
 		return err

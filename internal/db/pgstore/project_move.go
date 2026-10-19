@@ -33,6 +33,9 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if err != nil {
 			return err
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, current.ProjectID, current.ID); err != nil {
+			return err
+		}
 		if current.ProjectID != input.FromProjectID {
 			return db.ErrNotFound
 		}
@@ -67,6 +70,9 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if err := rejectIssueMoveExternalRootIssueSyncTx(
 			ctx, tx, current.ID, source.ID, target.ID,
 		); err != nil {
+			return err
+		}
+		if err := ensurePublicationMoveAllowedTx(ctx, tx, current.ID, source.ID, target.ID); err != nil {
 			return err
 		}
 		mappingCollisions, err := issueMoveImportMappingCollisionsTx(

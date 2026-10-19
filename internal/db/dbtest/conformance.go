@@ -50,6 +50,43 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "IssuePublishCapacityRecovery", runWithBackend: checkIssuePublishCapacityRecovery},
+	{name: "IssuePublishStatusReadDuringWrite", runWithBackend: checkIssuePublishStatusReadDuringWrite},
+	{name: "IssuePublishFederatedLifecycle", runWithBackend: checkIssuePublishFederatedLifecycle},
+	{name: "IssuePublishKnownRemoteMappingFence", runWithBackend: checkIssuePublishKnownRemoteMappingFence},
+
+	{name: "IssuePublishLifecycleFence", runWithBackend: checkIssuePublishLifecycleFence},
+	{name: "IssuePublishLifecycleRace", runWithBackend: checkIssuePublishLifecycleRace},
+	{name: "IssuePublishLifecycleAllowsRecovery", runWithBackend: checkIssuePublishLifecycleAllowsRecovery},
+	{name: "IssuePublishExportIsolation", runWithBackend: checkIssuePublishExportIsolation},
+	{name: "IssuePublishReplayAuthority", runWithBackend: checkIssuePublishReplayAuthority},
+
+	{name: "IssuePublishMappedDuringPending", runWithBackend: checkIssuePublishMappedDuringPending},
+	{name: "IssuePublishOneWayAndBody", runWithBackend: checkIssuePublishOneWayAndBody},
+	{name: "IssuePublishOwnership", runWithBackend: checkIssuePublishOwnership},
+
+	{name: "IssuePublishPreparedRecovery", runWithBackend: checkIssuePublishPreparedRecovery},
+	{name: "IssuePublishConfigRecovery", runWithBackend: checkIssuePublishConfigRecovery},
+	{name: "IssuePublishModeChangeDiscardsIntent", runWithBackend: checkIssuePublishModeChangeDiscardsIntent},
+	{name: "IssuePublishFederationAdoption", runWithBackend: checkIssuePublishFederationAdoption},
+	{name: "IssuePublishMoveDestination", runWithBackend: checkIssuePublishMoveDestination},
+	{name: "IssuePublishPreflightContent", runWithBackend: checkIssuePublishPreflightContent},
+	{name: "IssuePublishTickTickRecoveryStatus", runWithBackend: checkIssuePublishTickTickRecoveryStatus},
+	{name: "IssuePublishInputFences", runWithBackend: checkIssuePublishInputFences},
+	{name: "IssuePublishConcurrentClaim", runWithBackend: checkIssuePublishConcurrentClaim},
+
+	{name: "IssuePublishResolve", runWithBackend: checkIssuePublishResolve},
+	{name: "IssuePublishDisabledAdoption", runWithBackend: checkIssuePublishDisabledAdoption},
+
+	{name: "IssuePublishAttach", runWithBackend: checkIssuePublishAttach},
+	{name: "IssuePublishLegacyAliasCollision", runWithBackend: checkIssuePublishLegacyAliasCollision},
+	{name: "IssuePublishImportFence", runWithBackend: checkIssuePublishImportFence},
+	{name: "IssuePublishConflict", runWithBackend: checkIssuePublishConflict},
+	{name: "IssuePublishDisableRecovery", runWithBackend: checkIssuePublishDisableRecovery},
+
+	{name: "IssuePublishFederatedIntent", runWithBackend: checkIssuePublishFederatedIntent},
+	{name: "IssuePublishPartialIdentity", runWithBackend: checkIssuePublishPartialIdentity},
+	{name: "IssuePublishTransitions", runWithBackend: checkIssuePublishTransitions},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},

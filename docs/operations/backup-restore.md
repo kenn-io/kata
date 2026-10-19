@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-17
+last_edited: 2026-10-19
 ---
 
 # Backup and restore
@@ -332,3 +332,33 @@ a file or build a separate database: it drives the `bd` CLI and merges issues
 into the current kata project. See
 [Migrating from Beads](../guide/migrating-from-beads.md) for prerequisites and
 the field mapping.
+
+## Restore with published issues
+
+Issue publication adds a local recovery journal. JSONL exports
+omit this journal and imports ignore injected journal records. Exported mappings
+still identify publications attached before the backup. A raw database snapshot
+contains only the state present when that snapshot was taken.
+
+Restoring older data cannot undo remote creations. Kata cannot universally
+prevent duplicates after a rollback that erased a publication or its mapping.
+
+1. Stop every daemon using the target database before raw database replacement.
+   Keep provider credentials unavailable during the first restored startup so
+   scheduled sync cannot run before reconciliation.
+2. Disable each restored provider binding with
+   `kata sync <provider> disable` in its project. Restore credential access
+   only after the bindings are disabled.
+3. Inspect upstream objects created since the backup. For each confirmed
+   publication whose native issue exists in the restored project, attach its
+   identity with `kata sync <provider> publish <issue-ref> --adopt <remote-id>`.
+   Adoption requires the same source and does not create another object. If the
+   native issue is absent or ownership conflicts, reconcile the records before
+   continuing.
+4. Resolve any retained pending attempts using the
+   [publication recovery commands](../reference/cli.md#recover-an-uncertain-result).
+   Re-enable bindings only after reconciliation, then resume ordinary sync and
+   new publications.
+
+A live unresolved attempt also blocks destructive in-place JSONL replay.
+Resolve that attempt before replay; do not discard the journal to bypass it.

@@ -350,6 +350,9 @@ type ClientInterface interface {
 	RunIssueSyncOnce(ctx context.Context, options *RunIssueSyncOnceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RunIssueSyncOnceResponse, error)
 	RunIssueSyncOnceWithResponse(ctx context.Context, options *RunIssueSyncOnceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RunIssueSyncOnceResp, error)
 
+	PublishIssue(ctx context.Context, options *PublishIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PublishIssueResponse, error)
+	PublishIssueWithResponse(ctx context.Context, options *PublishIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PublishIssueResp, error)
+
 	GetIssueSyncStatus(ctx context.Context, options *GetIssueSyncStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetIssueSyncStatusResponse, error)
 	GetIssueSyncStatusWithResponse(ctx context.Context, options *GetIssueSyncStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetIssueSyncStatusResp, error)
 
@@ -5312,6 +5315,69 @@ func (c *Client) RunIssueSyncOnce(ctx context.Context, options *RunIssueSyncOnce
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/once")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) PublishIssue(ctx context.Context, options *PublishIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PublishIssueResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issue-sync/{provider}/publish",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*PublishIssueResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(PublishIssueErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "PublishIssueErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(PublishIssueResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "PublishIssueResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/publish")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

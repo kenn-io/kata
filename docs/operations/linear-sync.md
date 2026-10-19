@@ -1,7 +1,7 @@
 ---
 title: Linear sync
 description: "Mirror one Linear team or project into Kata and optionally synchronize completion and reopen."
-last_edited: 2026-10-07
+last_edited: 2026-10-19
 ---
 
 # Linear sync
@@ -9,6 +9,34 @@ last_edited: 2026-10-07
 Linear sync brings issues from one Linear team into one Kata project. You can
 restrict that team to one Linear project. Enable two-way status to close or
 reopen the same Linear issue from Kata. The daemon performs all provider calls.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing Linear binding to publish one open, native Kata issue:
+
+```sh
+kata sync linear publish abc4
+kata sync linear status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. Linear then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon API key needs issue-create access to the bound team and optional project. The team must expose an active open workflow state.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+Linear before acting. To attach a confirmed object without creating another,
+use `kata sync linear publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the issue UUID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Configure the daemon
 

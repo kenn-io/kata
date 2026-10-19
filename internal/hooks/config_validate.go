@@ -21,6 +21,7 @@ var knownEventTypes = map[string]struct{}{
 	"issue.priority_set": {}, "issue.priority_cleared": {},
 	"issue.soft_deleted": {}, "issue.restored": {},
 	"issue.links_changed":             {},
+	"issue.publication_resolved":      {},
 	"issue.metadata_updated":          {},
 	"issue.external_root_bound":       {},
 	"issue.external_root_paused":      {},

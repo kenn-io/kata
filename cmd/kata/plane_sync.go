@@ -12,7 +12,7 @@ import (
 
 func newPlaneSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "plane", Short: "mirror Plane tasks into this project"}
-	cmd.AddCommand(newPlaneSyncEnableCmd(), newIssueSyncDisableCmd("plane"), newIssueSyncStatusCmd("plane"), newIssueSyncOnceCmd("plane"))
+	cmd.AddCommand(newPlaneSyncEnableCmd(), newIssueSyncDisableCmd("plane"), newIssueSyncStatusCmd("plane"), newIssueSyncOnceCmd("plane"), newIssuePublishCmd("plane"))
 	return cmd
 }
 

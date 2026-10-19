@@ -55,6 +55,10 @@ type ClientInterface interface {
 	GetTaskAPIV1TasksTaskIDGet(ctx context.Context, options *GetTaskAPIV1TasksTaskIDGetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetTaskAPIV1TasksTaskIDGetResponse, error)
 	GetTaskAPIV1TasksTaskIDGetWithResponse(ctx context.Context, options *GetTaskAPIV1TasksTaskIDGetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetTaskAPIV1TasksTaskIDGetResp, error)
 
+	// CreateTaskAPIV1TasksPost Create Task
+	CreateTaskAPIV1TasksPost(ctx context.Context, options *CreateTaskAPIV1TasksPostRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateTaskAPIV1TasksPostResponse, error)
+	CreateTaskAPIV1TasksPostWithResponse(ctx context.Context, options *CreateTaskAPIV1TasksPostRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateTaskAPIV1TasksPostResp, error)
+
 	// GetTasksAPIV1TasksGet Get Tasks
 	GetTasksAPIV1TasksGet(ctx context.Context, options *GetTasksAPIV1TasksGetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetTasksAPIV1TasksGetResponse, error)
 	GetTasksAPIV1TasksGetWithResponse(ctx context.Context, options *GetTasksAPIV1TasksGetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetTasksAPIV1TasksGetResp, error)
@@ -328,6 +332,52 @@ func (c *Client) GetTaskAPIV1TasksTaskIDGet(ctx context.Context, options *GetTas
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/tasks/{task_id}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// CreateTaskAPIV1TasksPost Create Task
+func (c *Client) CreateTaskAPIV1TasksPost(ctx context.Context, options *CreateTaskAPIV1TasksPostRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateTaskAPIV1TasksPostResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/tasks",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*CreateTaskAPIV1TasksPostResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			return nil, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(CreateTaskAPIV1TasksPostResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "CreateTaskAPIV1TasksPostResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/tasks")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

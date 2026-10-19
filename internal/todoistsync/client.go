@@ -111,7 +111,7 @@ func (s *clientSession) account(ctx context.Context) (string, error) {
 		return "", emptyResponse("read Todoist account")
 	}
 	if s.config.AccountID != "" && resp.JSON200.ID != s.config.AccountID {
-		return "", blocked("Todoist credential account differs from the saved binding")
+		return "", fmt.Errorf("%w: %w", blocked("Todoist credential account differs from the saved binding"), issuesync.NewPublicationValidationError(issuesync.PublicationBindingInvalid))
 	}
 	return resp.JSON200.ID, nil
 }
@@ -123,7 +123,7 @@ func (c *Client) ForRun(ctx context.Context, input Config) (Session, error) {
 		return nil, err
 	}
 	if input.APIOrigin != c.cfg.Daemon.APIOrigin {
-		return nil, blocked("Todoist binding origin differs from daemon origin")
+		return nil, fmt.Errorf("%w: %w", blocked("Todoist binding origin differs from daemon origin"), issuesync.NewPublicationValidationError(issuesync.PublicationBindingInvalid))
 	}
 	s, err := c.session(ctx)
 	if err != nil {
@@ -154,7 +154,7 @@ func (s *clientSession) Project(ctx context.Context, c Config) (Project, error) 
 		p = Project{ID: v.B.ID, Name: v.B.Name, Archived: v.B.IsArchived, Deleted: v.B.IsDeleted}
 	}
 	if p.ID != c.ProjectID || p.Archived || p.Deleted {
-		return Project{}, blocked("Todoist project is unavailable")
+		return Project{}, fmt.Errorf("%w: %w", blocked("Todoist project is unavailable"), issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 	}
 	return p, nil
 }

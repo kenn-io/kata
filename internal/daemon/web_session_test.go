@@ -102,6 +102,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},
 		{name: "project purge", method: http.MethodPost, path: "/api/v1/projects/7/actions/purge", want: http.StatusForbidden},
 		{name: "issue purge", method: http.MethodPost, path: "/api/v1/projects/7/issues/abc4/actions/purge", want: http.StatusForbidden},
+		{name: "issue publication", method: http.MethodPost, path: "/api/v1/projects/7/issue-sync/github/publish", want: http.StatusForbidden},
 		{name: "integration", method: http.MethodPost, path: "/api/v1/projects/7/issue-sync/github/enable", want: http.StatusForbidden},
 		{name: "path resolution", method: http.MethodPost, path: "/api/v1/projects/resolve", want: http.StatusForbidden},
 	} {

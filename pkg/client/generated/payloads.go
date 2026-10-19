@@ -74,6 +74,8 @@ type EnableIssueSyncBody = EnableIssueSyncRequestBody
 
 type RunIssueSyncOnceBody = RunIssueSyncOnceRequestBody
 
+type PublishIssueBody = PublishIssueRequestBody
+
 type CreateIssueBody = CreateIssueRequestBody
 
 type EditIssueBody = EditIssueRequestBody

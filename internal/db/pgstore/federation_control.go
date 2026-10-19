@@ -119,6 +119,9 @@ func (s *Store) UpsertFederationBinding(ctx context.Context, input db.Federation
 			return err
 		}
 		if input.Role == db.FederationRoleSpoke {
+			if err := ensureNoPendingIssuePublicationTx(ctx, tx, input.ProjectID, 0); err != nil {
+				return err
+			}
 			var issueSyncProjectID int64
 			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issue_sync_bindings
 WHERE project_id=$1 AND enabled=1`, input.ProjectID).Scan(&issueSyncProjectID)

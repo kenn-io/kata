@@ -340,6 +340,15 @@ func (r RunIssueSyncOncePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type PublishIssuePath struct {
+	ProjectID int64  `json:"project_id"`
+	Provider  string `json:"provider" validate:"required"`
+}
+
+func (p PublishIssuePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
 type GetIssueSyncStatusPath struct {
 	ProjectID int64  `json:"project_id"`
 	Provider  string `json:"provider" validate:"required"`

@@ -292,6 +292,54 @@ func (c *Client) GetTaskAPIV1TasksTaskIDGetWithResponse(ctx context.Context, opt
 	}
 }
 
+// CreateTaskAPIV1TasksPost Create Task
+func (c *Client) CreateTaskAPIV1TasksPostWithResponse(ctx context.Context, options *CreateTaskAPIV1TasksPostRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateTaskAPIV1TasksPostResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/tasks",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/tasks")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &CreateTaskAPIV1TasksPostResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(CreateTaskAPIV1TasksPostResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "CreateTaskAPIV1TasksPostResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 // GetTasksAPIV1TasksGet Get Tasks
 func (c *Client) GetTasksAPIV1TasksGetWithResponse(ctx context.Context, options *GetTasksAPIV1TasksGetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetTasksAPIV1TasksGetResp, error) {
 	var err error

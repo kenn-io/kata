@@ -1,7 +1,7 @@
 ---
 title: TickTick sync
 description: Import a scoped TickTick task project into Kata and send ordinary task completion back through the public API.
-last_edited: 2026-10-10
+last_edited: 2026-10-19
 ---
 
 # TickTick sync
@@ -12,6 +12,34 @@ explicit Kata completion events back to TickTick and receive upstream status
 changes. Titles, descriptions, priorities, and assignments remain incoming-only.
 This feature requires a build containing TickTick sync; it is not part of older
 releases.
+
+## Publish a native issue
+
+The CLI and selected daemon must support issue publishing.
+
+Use the existing TickTick binding to publish one open, native Kata issue:
+
+```sh
+kata sync ticktick publish abc4
+kata sync ticktick status
+```
+
+The binding must be enabled for a new publication. Only the initial title and
+body are sent. TickTick then owns the imported content: the next ordinary sync
+updates the same Kata issue UID, with the existing source formatting and
+source-newer rules. Later local content edits stay local. Publishing preserves
+the binding's one-way or two-way status setting and adds no second binding.
+
+The daemon token needs write access to the bound TASK project. NOTE projects, closed projects, and read-only or comment-only projects cannot receive publications.
+
+If the result is uncertain, inspect the pending attempt in `status` and inspect
+TickTick before acting. To attach a confirmed object without creating another,
+use `kata sync ticktick publish abc4 --adopt <remote-id>`, where
+`<remote-id>` is the task ID. Recovery can run with the binding disabled.
+See [publication recovery](../reference/cli.md#publish-a-native-issue) for
+attempt resolution and the in-flight request wait. After restoring a backup,
+keep the binding disabled and [reconcile remote creations](backup-restore.md#restore-with-published-issues)
+before resuming sync or publishing.
 
 ## Configure the daemon
 
@@ -129,8 +157,9 @@ most 100 task IDs per run in a durable, sorted rotation. A task whose first
 import failed is read the same way until it is imported or TickTick no longer
 has it. This recovers completion without rereading completed history on every
 run. If the Kata issue was closed locally while TickTick still showed the task
-open, Kata reads the task once more to record its completion. After that, Kata
-stops reading the task and forgets its fingerprint. If the task returns, for
+open, Kata reads the task once more to record its completion. This includes a
+published task closed locally before its first ordinary import. After that,
+Kata stops reading the task and forgets its fingerprint. If the task returns, for
 example after a reopen in either tool, Kata starts from the source version saved
 on its mapping. Unchanged content cannot replace newer local edits, and a
 TickTick reopen still reopens the issue. TickTick edits made while the task was

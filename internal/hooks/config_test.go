@@ -623,3 +623,17 @@ func TestMatch_CronEventsRecognized(t *testing.T) {
 		})
 	}
 }
+
+func TestMatch_PublicationResolvedRecognized(t *testing.T) {
+	for _, pattern := range []string{"issue.publication_resolved", "issue.*", "*"} {
+		t.Run(pattern, func(t *testing.T) {
+			_, match, err := compileEventMatcher(pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !match("issue.publication_resolved") {
+				t.Fatal("publication resolution must reach subscribed hooks")
+			}
+		})
+	}
+}

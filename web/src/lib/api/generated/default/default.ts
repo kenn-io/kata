@@ -196,6 +196,9 @@ import type {
   ProjectPurgeRequestBody,
   ProjectPurgeResponseBody,
   ProjectResolveBody,
+  PublishIssuePathParameters,
+  PublishIssueRequestBody,
+  PublishIssueResponseBody,
   PurgeIssuePathParameters,
   PurgeProjectPathParameters,
   PurgeResponseBody,
@@ -3653,6 +3656,50 @@ export const runIssueSyncOnce = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(runIssueSyncOnceRequestBody),
+  })
+}
+
+export type publishIssueResponse200 = {
+  data: PublishIssueResponseBody
+  status: 200
+}
+
+export type publishIssueResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type publishIssueResponseSuccess = publishIssueResponse200 & {
+  headers: Headers
+}
+export type publishIssueResponseError = publishIssueResponseDefault & {
+  headers: Headers
+}
+
+export type publishIssueResponse = publishIssueResponseSuccess | publishIssueResponseError
+
+export const getPublishIssueUrl = ({ projectId, provider }: PublishIssuePathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issue-sync/${encodeURIComponent(String(provider))}/publish`
+}
+
+export const publishIssue = async (
+  { projectId, provider }: PublishIssuePathParameters,
+  publishIssueRequestBody: PublishIssueRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<publishIssueResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<publishIssueResponse>(getPublishIssueUrl({ projectId, provider }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(publishIssueRequestBody),
   })
 }
 

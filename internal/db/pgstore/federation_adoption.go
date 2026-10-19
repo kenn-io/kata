@@ -355,6 +355,9 @@ WHERE project_id=$1 AND enabled=1 FOR UPDATE`, projectID).Scan(&id)
 }
 
 func rejectFederationSpokeProjectConflicts(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, projectID, 0); err != nil {
+		return err
+	}
 	if err := rejectIssueSyncedFederationProject(ctx, tx, projectID); err != nil {
 		return err
 	}

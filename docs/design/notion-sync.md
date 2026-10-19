@@ -447,7 +447,12 @@ V1 is ready when these observable contracts hold:
    demonstrate no token leakage. Operator docs label this as one-way and
    explain the source, mapping, size, permission, and timestamp limits.
 
-Non-goals: any Notion mutation; OAuth installation management; multiple Notion
+The original read-only scope below is superseded for explicit status updates by
+[issue status sync](issue-status-sync.md) and for initial title/body publication
+by [issue publishing](../operations/notion-sync.md#publish-a-native-issue).
+Other exclusions still apply.
+
+Original non-goals: any Notion mutation; OAuth installation management; multiple Notion
 credentials or multiple sources per project; view filters; arbitrary select or
 checkbox lifecycle fields; priority/label mapping; comments; due dates;
 relations/subtasks; deleted-page reconciliation; webhook hosting; a new plugin

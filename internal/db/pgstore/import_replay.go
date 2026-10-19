@@ -191,6 +191,9 @@ func (s *Store) pgReplayClearTarget(
 		`LOCK TABLE `+strings.Join(quotedAll, ", ")+` IN ACCESS EXCLUSIVE MODE`); err != nil {
 		return "", "", fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
 	}
+	if err := ensurePublicationReplayAllowedTx(ctx, tx); err != nil {
+		return "", "", err
+	}
 	// Access-exclusive table locks serialize this check with every grant.
 	if opts.RequireFreshTarget {
 		if err := validateFreshSchema(ctx, tx, allTables, s.instanceUID); err != nil {

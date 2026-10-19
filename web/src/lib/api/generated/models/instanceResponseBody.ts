@@ -10,6 +10,7 @@ export interface InstanceResponseBody {
   /** True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source. */
   federation_signing_required?: boolean
   instance_uid: string
+  issue_publish: boolean
   issue_status_sync: boolean
   issue_subtree_tokens: boolean
   provenance_protocol_version?: number

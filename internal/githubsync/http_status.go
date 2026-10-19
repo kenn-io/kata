@@ -90,7 +90,7 @@ func (s *httpFetcherBindingSession) verifyStatusRepository(ctx context.Context, 
 	return nil
 }
 
-func (s *httpFetcherBindingSession) validateStatusIssue(wire statusIssue, id int64, number int) error {
+func (s *httpFetcherBindingSession) validateStatusIdentity(wire statusIssue, id int64, number int) error {
 	if id <= 0 || number <= 0 || wire.ID != id || wire.Number != number || wire.PullRequest != nil {
 		return fmt.Errorf("GitHub status issue identity changed or is a pull request")
 	}
@@ -102,6 +102,13 @@ func (s *httpFetcherBindingSession) validateStatusIssue(wire statusIssue, id int
 	actual, err := url.Parse(wire.URL)
 	if err != nil || actual == nil || actual.User != nil || actual.RawQuery != "" || actual.Fragment != "" || !strings.EqualFold(actual.Scheme, expected.Scheme) || !strings.EqualFold(actual.Host, expected.Host) || !strings.EqualFold(actual.EscapedPath(), expected.EscapedPath()) {
 		return fmt.Errorf("GitHub status issue is outside the bound repository")
+	}
+	return nil
+}
+
+func (s *httpFetcherBindingSession) validateStatusIssue(wire statusIssue, id int64, number int) error {
+	if err := s.validateStatusIdentity(wire, id, number); err != nil {
+		return err
 	}
 	if wire.State != "open" && wire.State != "closed" || wire.UpdatedAt == nil || wire.UpdatedAt.IsZero() {
 		return fmt.Errorf("GitHub status observation has invalid state or version")
@@ -139,7 +146,7 @@ func (s *httpFetcherBindingSession) WriteStatus(ctx context.Context, cfg Config,
 }
 
 // statusRequest bounds and sanitizes responses. Failed GETs retry in the next
-// status pass; PATCH failures must never enter the bulk fetcher's retry loop.
+// status pass; mutation failures must never enter the bulk fetcher's retry loop.
 func (s *httpFetcherBindingSession) statusRequest(ctx context.Context, method, endpoint string, body any, out any, admission func() error) error {
 	return s.statusRequestWithHeaders(ctx, method, endpoint, body, out, admission, nil)
 }
@@ -177,7 +184,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	if err := attemptCtx.Err(); err != nil {
 		return err
 	}
-	if method == http.MethodPatch {
+	if method == http.MethodPatch || method == http.MethodPost {
 		if admission == nil {
 			return fmt.Errorf("GitHub status write requires delivery admission")
 		}
@@ -192,7 +199,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	client.CheckRedirect = noFollowGitHubRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return &issuesync.StatusError{Message: "GitHub status transport failed", Ambiguous: method == http.MethodPatch && sent()}
+		return &issuesync.StatusError{Message: "GitHub status transport failed", Ambiguous: (method == http.MethodPatch || method == http.MethodPost) && sent()}
 	}
 	if headers != nil {
 		*headers = resp.Header.Clone()
@@ -201,7 +208,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	_ = resp.Body.Close()
 	success := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if readErr != nil || len(raw) > maxStatusResponseBytes || success && json.Unmarshal(raw, out) != nil {
-		return &issuesync.StatusError{Message: "invalid GitHub status response", HTTPStatus: resp.StatusCode, Ambiguous: method == http.MethodPatch}
+		return &issuesync.StatusError{Message: "invalid GitHub status response", HTTPStatus: resp.StatusCode, Ambiguous: (method == http.MethodPatch || method == http.MethodPost)}
 	}
 	if success {
 		return nil
@@ -216,7 +223,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	}
 	return &issuesync.StatusError{
 		Message: fmt.Sprintf("GitHub status HTTP %d", resp.StatusCode), HTTPStatus: resp.StatusCode,
-		Ambiguous:  method == http.MethodPatch && resp.StatusCode >= 500,
+		Ambiguous:  (method == http.MethodPatch || method == http.MethodPost) && resp.StatusCode >= 500,
 		Blocked:    !retry && resp.StatusCode != 409,
 		RetryAfter: wait,
 	}

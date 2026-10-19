@@ -3290,6 +3290,7 @@ type InstanceResponseBody struct {
 	// FederationSigningRequired True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source.
 	FederationSigningRequired *bool          `json:"federation_signing_required,omitempty"`
 	InstanceUID               string         `json:"instance_uid" validate:"required"`
+	IssuePublish              bool           `json:"issue_publish"`
 	IssueStatusSync           bool           `json:"issue_status_sync"`
 	IssueSubtreeTokens        bool           `json:"issue_subtree_tokens"`
 	ProvenanceProtocolVersion *int64         `json:"provenance_protocol_version,omitempty"`
@@ -3723,27 +3724,35 @@ func (i IssueSyncProgressOut) Validate() error {
 }
 
 type IssueSyncStatusOut struct {
-	BindingID     int64                 `json:"binding_id"`
-	Enabled       bool                  `json:"enabled"`
-	LastAttemptAt *time.Time            `json:"last_attempt_at,omitempty"`
-	LastComments  int64                 `json:"last_comments"`
-	LastCreated   int64                 `json:"last_created"`
-	LastError     *string               `json:"last_error,omitempty"`
-	LastErrorAt   *time.Time            `json:"last_error_at,omitempty"`
-	LastSuccessAt *time.Time            `json:"last_success_at,omitempty"`
-	LastUnchanged int64                 `json:"last_unchanged"`
-	LastUpdated   int64                 `json:"last_updated"`
-	PendingCount  int64                 `json:"pending_count"`
-	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
-	ProjectID     int64                 `json:"project_id"`
-	Provider      string                `json:"provider" validate:"required"`
-	State         string                `json:"state" validate:"required"`
-	StatusSync    string                `json:"status_sync" validate:"required"`
-	SyncStartedAt *time.Time            `json:"sync_started_at,omitempty"`
+	BindingID          int64                       `json:"binding_id"`
+	Enabled            bool                        `json:"enabled"`
+	LastAttemptAt      *time.Time                  `json:"last_attempt_at,omitempty"`
+	LastComments       int64                       `json:"last_comments"`
+	LastCreated        int64                       `json:"last_created"`
+	LastError          *string                     `json:"last_error,omitempty"`
+	LastErrorAt        *time.Time                  `json:"last_error_at,omitempty"`
+	LastSuccessAt      *time.Time                  `json:"last_success_at,omitempty"`
+	LastUnchanged      int64                       `json:"last_unchanged"`
+	LastUpdated        int64                       `json:"last_updated"`
+	PendingCount       int64                       `json:"pending_count"`
+	PendingPublication *PendingIssuePublicationOut `json:"pending_publication,omitempty"`
+	Progress           *IssueSyncProgressOut       `json:"progress,omitempty"`
+	ProjectID          int64                       `json:"project_id"`
+	Provider           string                      `json:"provider" validate:"required"`
+	State              string                      `json:"state" validate:"required"`
+	StatusSync         string                      `json:"status_sync" validate:"required"`
+	SyncStartedAt      *time.Time                  `json:"sync_started_at,omitempty"`
 }
 
 func (i IssueSyncStatusOut) Validate() error {
 	var errors runtime.ValidationErrors
+	if i.PendingPublication != nil {
+		if v, ok := any(i.PendingPublication).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PendingPublication", err)
+			}
+		}
+	}
 	if i.Progress != nil {
 		if v, ok := any(i.Progress).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -4642,6 +4651,17 @@ func (p PendingFederationEnrollmentCleanup) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 
+type PendingIssuePublicationOut struct {
+	AttemptUID string `json:"attempt_uid" validate:"required"`
+	IssueUID   string `json:"issue_uid" validate:"required"`
+	Phase      string `json:"phase" validate:"required"`
+	Provider   string `json:"provider" validate:"required"`
+}
+
+func (p PendingIssuePublicationOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
 type PingResponseBody struct {
 	Ok      bool   `json:"ok"`
 	Pid     *int64 `json:"pid,omitempty"`
@@ -4923,6 +4943,33 @@ type ProjectStatsOut struct {
 }
 
 func (p ProjectStatsOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type PublishIssueRequestBody struct {
+	Actor             *string `json:"actor,omitempty"`
+	Adopt             *string `json:"adopt,omitempty"`
+	Attempt           *string `json:"attempt,omitempty"`
+	IssueRef          string  `json:"issue_ref" validate:"required,min=1"`
+	Message           *string `json:"message,omitempty"`
+	ResolveNotCreated *bool   `json:"resolve_not_created,omitempty"`
+}
+
+func (p PublishIssueRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type PublishIssueResponseBody struct {
+	ExternalID *string `json:"external_id,omitempty"`
+	IssueRef   string  `json:"issue_ref" validate:"required"`
+	IssueUID   string  `json:"issue_uid" validate:"required"`
+	Provider   string  `json:"provider" validate:"required"`
+	Result     string  `json:"result" validate:"required"`
+	SourceKey  string  `json:"source_key" validate:"required"`
+	URL        *string `json:"url,omitempty"`
+}
+
+func (p PublishIssueResponseBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 

@@ -38,6 +38,9 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, issue.ProjectID, issue.ID); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	if issue.DeletedAt != nil {
 		// Already soft-deleted; commit so the read-side state is consistent
 		// (no-op tx is harmless) and return the no-op envelope.
@@ -234,6 +237,9 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 
 	issue, projectName, err := lookupIssueIncludingDeleted(ctx, conn, issueID)
 	if err != nil {
+		return db.PurgeLog{}, err
+	}
+	if err := ensureNoPendingIssuePublicationTx(ctx, conn, issue.ProjectID, issue.ID); err != nil {
 		return db.PurgeLog{}, err
 	}
 	// The issue may have moved since the request resolved it; its current

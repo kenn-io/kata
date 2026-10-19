@@ -3202,6 +3202,8 @@ components:
           type: boolean
         instance_uid:
           type: string
+        issue_publish:
+          type: boolean
         issue_status_sync:
           type: boolean
         issue_subtree_tokens:
@@ -3226,6 +3228,7 @@ components:
         - version
         - schema_version
         - web_ui_capabilities
+        - issue_publish
         - issue_status_sync
         - issue_subtree_tokens
         - auth
@@ -3761,6 +3764,8 @@ components:
         pending_count:
           format: int64
           type: integer
+        pending_publication:
+          $ref: "#/components/schemas/PendingIssuePublicationOut"
         progress:
           $ref: "#/components/schemas/IssueSyncProgressOut"
         project_id:
@@ -4491,6 +4496,22 @@ components:
         - hub_project_id
         - hub_project_uid
       type: object
+    PendingIssuePublicationOut:
+      properties:
+        attempt_uid:
+          type: string
+        issue_uid:
+          type: string
+        phase:
+          type: string
+        provider:
+          type: string
+      required:
+        - attempt_uid
+        - provider
+        - issue_uid
+        - phase
+      type: object
     PingResponseBody:
       properties:
         ok:
@@ -4817,6 +4838,48 @@ components:
         - open
         - closed
         - last_event_at
+      type: object
+    PublishIssueRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        adopt:
+          type: string
+        attempt:
+          type: string
+        issue_ref:
+          minLength: 1
+          type: string
+        message:
+          type: string
+        resolve_not_created:
+          type: boolean
+      required:
+        - issue_ref
+      type: object
+    PublishIssueResponseBody:
+      properties:
+        external_id:
+          type: string
+        issue_ref:
+          type: string
+        issue_uid:
+          type: string
+        provider:
+          type: string
+        result:
+          type: string
+        source_key:
+          type: string
+        url:
+          type: string
+      required:
+        - provider
+        - issue_uid
+        - issue_ref
+        - source_key
+        - result
       type: object
     PurgeLog:
       properties:
@@ -9251,6 +9314,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunIssueSyncOnceResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issue-sync/{provider}/publish:
+    post:
+      operationId: publishIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishIssueRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishIssueResponseBody"
           description: OK
         default:
           content:

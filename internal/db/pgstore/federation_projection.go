@@ -498,6 +498,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	if err := ensurePublicationProjectionTx(ctx, tx, projectID, projection); err != nil {
+		return err
+	}
 	if validator == nil {
 		validator = db.NewCronReplayValidator(tx, true)
 	}

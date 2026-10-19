@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const scopeQuery = `query KataLinearScope($team: String!) { viewer { organization { id } } team(id: $team) { id name archivedAt organization { id } } }`
@@ -38,8 +40,11 @@ func (s *clientSession) Scope(ctx context.Context, c Config) (Scope, error) {
 			Organization identity   `json:"organization"`
 		} `json:"team"`
 	}
-	if json.Unmarshal(raw, &data) != nil || data.Viewer == nil || data.Team == nil || data.Viewer.Organization.ID != c.WorkspaceID || data.Team.ID != c.TeamID || data.Team.Organization.ID != c.WorkspaceID || data.Team.ArchivedAt != nil {
-		return Scope{}, fmt.Errorf("linear workspace or team is unavailable or does not match")
+	if json.Unmarshal(raw, &data) != nil {
+		return Scope{}, fmt.Errorf("invalid Linear scope response")
+	}
+	if data.Viewer == nil || data.Team == nil || data.Viewer.Organization.ID != c.WorkspaceID || data.Team.ID != c.TeamID || data.Team.Organization.ID != c.WorkspaceID || data.Team.ArchivedAt != nil {
+		return Scope{}, fmt.Errorf("linear workspace or team is unavailable or does not match: %w", issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 	}
 	scope := Scope{WorkspaceID: c.WorkspaceID, TeamID: c.TeamID, ProjectID: c.ProjectID, Name: data.Team.Name}
 	if c.ProjectID != "" {
@@ -58,8 +63,11 @@ func (s *clientSession) Scope(ctx context.Context, c Config) (Scope, error) {
 				} `json:"teams"`
 			} `json:"project"`
 		}
-		if json.Unmarshal(raw, &data) != nil || data.Project == nil || data.Project.ID != c.ProjectID || data.Project.ArchivedAt != nil || data.Project.Trashed != nil && *data.Project.Trashed {
-			return Scope{}, fmt.Errorf("linear project is unavailable or does not match")
+		if json.Unmarshal(raw, &data) != nil {
+			return Scope{}, fmt.Errorf("invalid Linear project response")
+		}
+		if data.Project == nil || data.Project.ID != c.ProjectID || data.Project.ArchivedAt != nil || data.Project.Trashed != nil && *data.Project.Trashed {
+			return Scope{}, fmt.Errorf("linear project is unavailable or does not match: %w", issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 		}
 		found := false
 		for _, team := range data.Project.Teams.Nodes {
@@ -68,7 +76,7 @@ func (s *clientSession) Scope(ctx context.Context, c Config) (Scope, error) {
 			}
 		}
 		if !found {
-			return Scope{}, fmt.Errorf("linear project does not belong to selected team")
+			return Scope{}, fmt.Errorf("linear project does not belong to selected team: %w", issuesync.NewPublicationValidationError(issuesync.PublicationDestinationUnavailable))
 		}
 		scope.Name = data.Project.Name
 	}
@@ -154,7 +162,7 @@ func (s *clientSession) States(ctx context.Context, c Config) ([]State, error) {
 		states = append(states, State{ID: id, Type: row.Type, Position: *row.Position})
 	}
 	if _, err := stateTypes(states); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: %w", err, issuesync.NewPublicationValidationError(issuesync.PublicationSchemaInvalid))
 	}
 	return states, nil
 }

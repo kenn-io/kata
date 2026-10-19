@@ -20,6 +20,11 @@ func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, bindin
 	if _, err := fmt.Fprintf(w, " status_sync=%s pending_count=%d", agentValue(issueStatusSyncDisplayMode(status.StatusSync)), status.PendingCount); err != nil {
 		return err
 	}
+	if pending := status.PendingPublication; pending != nil {
+		if _, err := fmt.Fprintf(w, " publication_attempt=%s publication_issue=%s publication_phase=%s", agentValue(pending.AttemptUID), agentValue(pending.IssueUID), agentValue(pending.Phase)); err != nil {
+			return err
+		}
+	}
 	if binding != nil {
 		if _, err := fmt.Fprintf(w, " interval_seconds=%d title_prefix=%t", binding.IntervalSeconds, githubSyncConfigTitlePrefix(binding.Config)); err != nil {
 			return err
@@ -53,6 +58,11 @@ func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, bindin
 func githubSyncPrintHumanDetails(w io.Writer, body githubSyncBindingBody) error {
 	if _, err := fmt.Fprintf(w, "Status sync: %s\nPending status changes: %d\n", textsafe.Line(issueStatusSyncDisplayMode(body.Status.StatusSync)), body.Status.PendingCount); err != nil {
 		return err
+	}
+	if pending := body.Status.PendingPublication; pending != nil {
+		if _, err := fmt.Fprintf(w, "Pending publication: %s (%s), issue %s\n", textsafe.Line(pending.AttemptUID), textsafe.Line(pending.Phase), textsafe.Line(pending.IssueUID)); err != nil {
+			return err
+		}
 	}
 	if body.Binding != nil {
 		if _, err := fmt.Fprintf(w, "Repository: %s\nInterval: %ds\nTitle prefix: %t\n", textsafe.Line(githubSyncRepoLabel(body.Binding)), body.Binding.IntervalSeconds, githubSyncConfigTitlePrefix(body.Binding.Config)); err != nil {
