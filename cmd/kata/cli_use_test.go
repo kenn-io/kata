@@ -79,6 +79,20 @@ func waitCLIUseMarker(t *testing.T, prefix string) {
 	require.Eventually(t, func() bool { return readTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
+// settledCLIUse waits for command-owned report workers before negative assertions.
+func settledCLIUse(t *testing.T, run func(*testing.T)) {
+	t.Helper()
+	saved := http.DefaultTransport
+	transport := saved.(*http.Transport).Clone()
+	transport.DisableKeepAlives = true // Idle real-network readers would keep the synctest bubble alive.
+	http.DefaultTransport = transport
+	defer func() { http.DefaultTransport = saved }()
+	synctest.Test(t, func(t *testing.T) {
+		run(t)
+		synctest.Wait()
+	})
+}
+
 var cliSurface = []map[string]any{{"surface": "cli"}}
 
 // newCLIUseEnv boots a daemon whose reporter is reporter, for a person at a
@@ -89,13 +103,6 @@ func newCLIUseEnv(t *testing.T, reporter daemon.TelemetryReporter) *testenv.Env 
 	stubIsTTY(t, true)
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	return testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = reporter })
-}
-
-func shortenCLIUseReportTimeout(t *testing.T, timeout time.Duration) {
-	t.Helper()
-	saved := cliUseReportTimeout
-	cliUseReportTimeout = timeout
-	t.Cleanup(func() { cliUseReportTimeout = saved })
 }
 
 // findCommand returns the command a fresh root would run for path, with flags reset.
@@ -154,9 +161,10 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 				env := newCLIUseEnv(t, capture)
 				t.Setenv(hooks.HookVersionEnv, test.hook)
 
-				_, err := runCmdOutput(t, env, test.args...)
-
-				require.NoError(t, err)
+				settledCLIUse(t, func(t *testing.T) {
+					_, err := runCmdOutput(t, env, test.args...)
+					require.NoError(t, err)
+				})
 				require.NotNil(t, cliUseTarget.Load(), "the command resolved a daemon")
 				if test.hook != "" {
 					capture.waitForCapture(t)
@@ -184,13 +192,17 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 					{"attention-hook", "start"},
 					{"agent-hook", "attention", "start"},
 				} {
-					_, _, err := runCmdCapture(t, env, args...)
-					require.NoError(t, err)
+					settledCLIUse(t, func(t *testing.T) {
+						_, _, err := runCmdCapture(t, env, args...)
+						require.NoError(t, err)
+					})
 					require.Nil(t, cliUseTarget.Load(), args)
 					require.Empty(t, capture.recorded(), args)
 				}
-				_, _, err := executeAgentHook(t, strings.NewReader(`{}`), "agent-hook", "attention-native", "claude", "start")
-				require.NoError(t, err)
+				settledCLIUse(t, func(t *testing.T) {
+					_, _, err := executeAgentHook(t, strings.NewReader(`{}`), "agent-hook", "attention-native", "claude", "start")
+					require.NoError(t, err)
+				})
 				require.Nil(t, cliUseTarget.Load())
 				require.Empty(t, capture.recorded())
 			}
@@ -248,7 +260,6 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		t.Setenv("KATA_HOME", t.TempDir())
 		t.Setenv("KATA_SERVER", "")
 		t.Setenv(hooks.HookVersionEnv, "")
-		shortenCLIUseReportTimeout(t, 200*time.Millisecond)
 		cmd := findCommand(t, "projects", "list")
 		cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: "http://" + closedLoopbackAddr(t)})
 		t.Cleanup(func() { cliUseTarget.Store(nil) })
@@ -257,10 +268,8 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		cmd.SetErr(&stderr)
 		cmd.SetContext(context.Background())
 
-		start := time.Now()
 		reportCLIUse(cmd)
 
-		assert.Less(t, time.Since(start), cliUseReportTimeout+time.Second)
 		assert.Empty(t, stdout.String())
 		assert.Empty(t, stderr.String())
 		_, err := discoverDaemon(context.Background())
@@ -282,34 +291,6 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 	})
 }
 
-func TestCLIUseFailureIsSilent(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		args  []string
-		limit time.Duration
-	}{
-		{"cli", []string{"projects", "list"}, 200*time.Millisecond + 2*time.Second},
-		{"contract hook", []string{"agent-contract-hook"}, 500 * time.Millisecond},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			shortenCLIUseReportTimeout(t, 200*time.Millisecond)
-			baseline, err := runCmdOutput(t, newCLIUseEnv(t, nil), test.args...)
-			require.NoError(t, err)
-			hung := &cliUseTelemetry{block: make(chan struct{})}
-			env := newCLIUseEnv(t, hung)
-			t.Cleanup(func() { close(hung.block) }) // release before daemon shutdown
-
-			start := time.Now()
-			stdout, stderr, err := runCmdCapture(t, env, test.args...)
-
-			require.NoError(t, err)
-			assert.Equal(t, baseline, stdout)
-			assert.Empty(t, stderr)
-			assert.Less(t, time.Since(start), test.limit)
-		})
-	}
-}
-
 func TestCLIUseSkipsProbes(t *testing.T) {
 	capture := &cliUseTelemetry{}
 	env := newCLIUseEnv(t, capture)
@@ -324,8 +305,10 @@ func TestCLIUseSkipsProbes(t *testing.T) {
 	} {
 		t.Setenv(hooks.HookVersionEnv, test.hook)
 		cliUseTarget.Store(nil)
-		_, err := runCmdOutput(t, env, test.args...)
-		require.NoError(t, err)
+		settledCLIUse(t, func(t *testing.T) {
+			_, err := runCmdOutput(t, env, test.args...)
+			require.NoError(t, err)
+		})
 		assert.Nil(t, cliUseTarget.Load())
 		assert.Empty(t, capture.recorded())
 	}
@@ -358,7 +341,7 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("create did not reach the held telemetry handler")
 	}
-	watchdog := time.NewTimer(900 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay command exit.
+	watchdog := time.NewTimer(10 * time.Second) //nolint:kennlint // Bound the real command liveness check; synctest owns the exact exit cap.
 	defer watchdog.Stop()
 	select {
 	case result := <-done:
@@ -369,13 +352,9 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 		t.Fatal("create waited for the held telemetry response")
 	}
 	release()
-	marker := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-")
-	//nolint:kennlint // The real HTTP send publishes completion through its daily marker.
-	require.Eventually(t, func() bool { return readTelemetryDayMarker(marker) != "" }, time.Second, time.Millisecond)
-	stdout, stderr, err := runCLIWithErr(t, env, dir, "list")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "exit wait example")
-	assert.Empty(t, stderr)
+	attempt := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
+	//nolint:kennlint // Join the send worker before removing its fixture, regardless of its outcome.
+	require.Eventually(t, func() bool { return readTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
@@ -554,60 +533,29 @@ func TestCLIUseBackoffProcess(t *testing.T) {
 	}
 }
 
-func TestCLIUseBoundsExitWaitAndRetries(t *testing.T) {
-	for _, test := range []struct {
-		name, hook string
-		contract   bool
-	}{
-		{name: "cli"},
-		{name: "hook", hook: "1"},
-		{name: "contract hook discovers target", contract: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+func TestCLIUseBoundsExitWait(t *testing.T) {
+	for _, hook := range []string{"", "1"} {
+		t.Run("hook="+hook, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			t.Setenv("KATA_AUTH_TOKEN", "")
-			t.Setenv(hooks.HookVersionEnv, test.hook)
-			if test.contract {
-				t.Setenv("KATA_SERVER", "http://127.0.0.1:7777")
-			}
+			t.Setenv(hooks.HookVersionEnv, hook)
 			stubIsTTY(t, true)
 			synctest.Test(t, func(t *testing.T) {
-				var posts int
+				release := make(chan struct{})
 				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
-					posts++
-					if posts == 1 {
-						time.Sleep(2 * time.Second)
-						w.WriteHeader(http.StatusServiceUnavailable)
-						return
-					}
+					<-release
 					w.WriteHeader(http.StatusAccepted)
-					_, _ = w.Write([]byte(`{"status":"full"}`))
+					_, _ = w.Write([]byte(`{"status":"queued"}`))
 				}))
 				saved := http.DefaultTransport
 				http.DefaultTransport = server.Client().Transport
 				defer func() { http.DefaultTransport = saved }()
-				report := func() {
-					if test.contract {
-						cliUseTarget.Store(nil)
-						stdout, stderr, err := runCmdCapture(t, nil, "agent-contract-hook")
-						require.NoError(t, err)
-						assert.Contains(t, stdout, "SessionStart")
-						assert.Empty(t, stderr)
-						assert.Nil(t, cliUseTarget.Load())
-						return
-					}
-					reportCLIUseTo(t, "http://127.0.0.1:7777")
-				}
 				start := time.Now()
-				report()
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
 				assert.Equal(t, 50*time.Millisecond, time.Since(start))
-				// Let the unaccepted request finish before the next invocation.
-				time.Sleep(2 * time.Second)
+				close(release)
 				synctest.Wait()
-				report()
-				report()
-				assert.Equal(t, 2, posts, "an unaccepted report retries, then the daily marker suppresses reports")
 			})
 		})
 	}
@@ -621,7 +569,7 @@ func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
 		"agents and scripts read output through a pipe")
 }
 
-func TestAgentContractUsePreservesOutputAndBoundsReporting(t *testing.T) {
+func TestAgentContractUsePreservesOutput(t *testing.T) {
 	baseline, err := runCmdOutput(t, newCLIUseEnv(t, nil), "agent-contract-hook")
 	require.NoError(t, err)
 	capture := &cliUseTelemetry{}

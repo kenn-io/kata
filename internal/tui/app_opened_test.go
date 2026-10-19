@@ -51,12 +51,17 @@ func (r *recordingTelemetry) Capture(event string, properties map[string]any) er
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
-	recorder := &recordingTelemetry{}
+	recorder := &recordingTelemetry{finished: make(chan struct{})}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 
 	c := NewClient(env.URL, env.HTTP)
 	require.NoError(t, c.ReportAppOpened(t.Context()))
 	c.ReportSessionEnded(2 * time.Minute)
+	select {
+	case <-recorder.finished:
+	case <-t.Context().Done():
+		t.Fatal("session_ended delivery did not finish")
+	}
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
