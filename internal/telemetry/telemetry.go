@@ -11,6 +11,9 @@ import (
 )
 
 const (
+	// ExitWait caps how long a completed command or TUI session waits for telemetry.
+	ExitWait = 50 * time.Millisecond
+
 	applicationName = "kata"
 	envPrefix       = "KATA"
 	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.

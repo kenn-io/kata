@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
+	"go.kenn.io/kit/telemetry/posthog"
 	"golang.org/x/mod/semver"
 )
 
@@ -143,11 +144,23 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 	return c.reportUsage(ctx, "app_opened", map[string]any{"surface": "tui"})
 }
 
-// ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
+// ReportSessionEnded queues the terminal lifetime with a one-second request deadline
+// and waits at most ExitWait for delivery.
 func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+	var sends posthog.SendGroup
+	result := make(chan error, 1)
+	sends.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		result <- c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+	})
+	sends.Wait(telemetry.ExitWait)
+	select {
+	case err := <-result:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {

@@ -12,15 +12,17 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/telemetry/posthog"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/telemetry"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// cliUseReportTimeout bounds the use report on the command's exit path; var so tests can shorten it.
+// cliUseReportTimeout bounds the use request; var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
 // agentUseReportTimeout keeps exit reports within installed hook deadlines.
@@ -90,55 +92,59 @@ func reportCLIUse(cmd *cobra.Command) {
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
-	day := cliUseNow().UTC().Format(time.DateOnly)
-	parent := cmd.Context()
-	if parent == nil {
-		parent = context.Background()
-	}
-	// Detached so a command that ends by cancelling its own context still reports.
-	timeout := cliUseReportTimeout
-	if agent {
-		timeout = agentUseReportTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
-	defer cancel()
-	if target == nil {
-		resolved, err := discoverDaemonResolved(ctx)
+	var sends posthog.SendGroup
+	sends.Go(func() {
+		day := cliUseNow().UTC().Format(time.DateOnly)
+		parent := cmd.Context()
+		if parent == nil {
+			parent = context.Background()
+		}
+		// Detached so a command that ends by cancelling its own context still reports.
+		timeout := cliUseReportTimeout
+		if agent {
+			timeout = agentUseReportTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+		defer cancel()
+		if target == nil {
+			resolved, err := discoverDaemonResolved(ctx)
+			if err != nil {
+				return
+			}
+			target = &resolved
+		}
+		prefix := "cli-opened-"
+		if agent {
+			prefix = "agent-full-"
+		}
+		marker := telemetryDayMarkerPath(*target, prefix)
+		if readTelemetryDayMarker(marker) == day {
+			return
+		}
+		hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 		if err != nil {
 			return
 		}
-		target = &resolved
-	}
-	prefix := "cli-opened-"
-	if agent {
-		prefix = "agent-full-"
-	}
-	marker := telemetryDayMarkerPath(*target, prefix)
-	if readTelemetryDayMarker(marker) == day {
-		return
-	}
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
-	if err != nil {
-		return
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
-	if err != nil {
-		return
-	}
-	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
-	if agent {
-		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
-	}
-	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: body,
+		apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
+		if err != nil {
+			return
+		}
+		body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
+		if agent {
+			body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
+		}
+		resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
+			Body: body,
+		})
+		if err != nil {
+			return
+		}
+		if agent && !agentUseDoneForDay(resp.JSON202.Status) {
+			return
+		}
+		recordTelemetryDayMarker(marker, day)
 	})
-	if err != nil {
-		return
-	}
-	if agent && !agentUseDoneForDay(resp.JSON202.Status) {
-		return
-	}
-	recordTelemetryDayMarker(marker, day)
+	sends.Wait(telemetry.ExitWait)
 }
 
 // agentUseDoneForDay reports whether a receipt ends agent reporting until the

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// cliUseTelemetry is the daemon's reporter; block, when set, holds every capture until closed.
+// cliUseTelemetry is the daemon's reporter; block holds use reports until closed.
 type cliUseTelemetry struct {
 	block    chan struct{}
 	mu       sync.Mutex
@@ -42,7 +43,7 @@ func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]a
 	return nil, telemetry.ErrUnsupportedEvent
 }
 func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error {
-	if c.block != nil {
+	if c.block != nil && (event == "app_opened" || event == "agent_active") {
 		<-c.block
 	}
 	c.mu.Lock()
@@ -307,6 +308,36 @@ func TestCLIUseSkipsProbes(t *testing.T) {
 	}
 }
 
+func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
+	hung := &cliUseTelemetry{block: make(chan struct{})}
+	env, dir, _ := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = hung })
+	t.Setenv(hooks.HookVersionEnv, "")
+	stubIsTTY(t, true)
+	release := sync.OnceFunc(func() { close(hung.block) })
+	t.Cleanup(release)
+	reportDone := make(chan (<-chan struct{}), 1)
+	transport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/api/v1/ui/telemetry" {
+			reportDone <- req.Context().Done()
+		}
+		return transport.RoundTrip(req)
+	})
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	start := time.Now()
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "create", "exit wait example")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "exit wait example")
+	assert.Empty(t, stderr)
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
+	release()
+	<-<-reportDone
+	stdout, stderr, err = runCLIWithErr(t, env, dir, "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "exit wait example")
+	assert.Empty(t, stderr)
+}
+
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	capture := &cliUseTelemetry{}
 	env := newCLIUseEnv(t, capture)
@@ -397,6 +428,43 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 	reportCLIUseTo(t, target.url)
 
 	assert.Equal(t, int32(2), target.posts.Load(), "only an accepted report ends the day's reporting")
+}
+
+func TestCLIUseBoundsExitWaitAndRetries(t *testing.T) {
+	for _, hook := range []string{"", "1"} {
+		t.Run("hook="+hook, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(hooks.HookVersionEnv, hook)
+			stubIsTTY(t, true)
+			synctest.Test(t, func(t *testing.T) {
+				var posts int
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+					posts++
+					if posts == 1 {
+						time.Sleep(2 * time.Second)
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = w.Write([]byte(`{"status":"full"}`))
+				}))
+				saved := http.DefaultTransport
+				http.DefaultTransport = server.Client().Transport
+				defer func() { http.DefaultTransport = saved }()
+				start := time.Now()
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				assert.Equal(t, 50*time.Millisecond, time.Since(start))
+				// Let the unaccepted request finish before the next invocation.
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				assert.Equal(t, 2, posts, "an unaccepted report retries, then the daily marker suppresses reports")
+			})
+		})
+	}
 }
 
 func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {

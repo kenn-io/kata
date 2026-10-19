@@ -1050,7 +1050,8 @@ Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 `5_to_30m`, or `over_30m`. A browser visit adds up visible time across tab
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
 recorded the opening, including after switching the displayed daemon. Delivery
-is best effort and waits at most one second; a rejected authentication request
+is best effort. TUI exit waits at most 50 ms, with a separate one-second request
+deadline; a rejected authentication request
 drops the event.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
@@ -1064,7 +1065,8 @@ after the command succeeds. Each `KATA_HOME` reports at most once per UTC day
 to each daemon: once the daemon accepts the report, kata records the day under
 `<KATA_HOME>/telemetry/` and later commands that day send nothing. A report
 that fails is retried by the next command. The report never starts a daemon,
-waits at most one second and prints nothing.
+waits at most 50 ms at exit, and prints nothing. Its request has a separate
+one-second deadline. Exiting before acceptance leaves the next command free to retry.
 
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
@@ -1106,7 +1108,8 @@ Ordinary piped commands send nothing.
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
 has a separate one-second deadline. Shutdown cancels and joins the worker. CLI
-hook reports wait at most 100 ms after successful execution; slow remote transports
+hook reports wait at most 50 ms after successful execution, with a separate
+100 ms request deadline; slow remote transports
 may drop observations. Delivery is best
 effort and preserves command output, results, and exit status.
 

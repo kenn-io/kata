@@ -57,8 +57,10 @@ func TestReportSessionEndedBoundsDelivery(t *testing.T) {
 		})}
 		c := NewClient("http://127.0.0.1:7777", hc)
 		started := time.Now()
-		assert.Error(t, c.ReportSessionEnded(time.Minute))
-		assert.Equal(t, time.Second, time.Since(started))
+		assert.NoError(t, c.ReportSessionEnded(time.Minute))
+		assert.Equal(t, 50*time.Millisecond, time.Since(started))
+		time.Sleep(time.Second)
+		synctest.Wait()
 	})
 }
 
