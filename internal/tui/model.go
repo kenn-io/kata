@@ -46,6 +46,7 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
+	telemetry           *telemetryGate
 	telemetryScreen     string
 	telemetryConnGen    uint64
 	telemetryDay        string
@@ -223,6 +224,7 @@ func initialModel(opts Options) Model {
 	uidFormat := parseUIDDisplayFormat(opts.DisplayUIDFormat)
 	return Model{
 		opts:                  opts,
+		telemetry:             newTelemetryGate(),
 		view:                  viewList,
 		keymap:                newKeymap(),
 		list:                  lm,

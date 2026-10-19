@@ -138,6 +138,7 @@ func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnecti
 	// only assign when c carries a value, so m.api stays a true nil
 	// interface otherwise and m.api != nil checks remain correct.
 	if c != nil {
+		m.telemetry = c.telemetry
 		m.api = newUndoClient(c)
 	}
 	m.scope = bi.scope

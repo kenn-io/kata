@@ -25,6 +25,8 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/tui"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 // cliUseTelemetry is the daemon's reporter; block holds use reports until closed.
@@ -73,10 +75,10 @@ func waitCLIUseMarker(t *testing.T, prefix string) {
 	t.Helper()
 	target := cliUseTarget.Load()
 	require.NotNil(t, target)
-	marker := telemetryDayMarkerPath(*target, prefix)
+	marker := client.TelemetryDayMarkerPath(*target, prefix)
 	day := cliUseNow().UTC().Format(time.DateOnly)
 	//nolint:kennlint // The daily marker signals that the real HTTP response was handled.
-	require.Eventually(t, func() bool { return readTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
 // settledCLIUse waits for command-owned report workers before negative assertions.
@@ -353,9 +355,9 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 		t.Fatal("create waited for the held telemetry response")
 	}
 	release()
-	attempt := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
+	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
 	//nolint:kennlint // Join the send worker before removing its fixture, regardless of its outcome.
-	require.Eventually(t, func() bool { return readTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
@@ -397,6 +399,7 @@ func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 		_, _ = fmt.Fprintf(w, `{"status":%q}`, receipt)
 		d.posts.Add(1)
 	}))
+	server.Config.SetKeepAlivesEnabled(false)
 	t.Cleanup(server.Close)
 	d.url = server.URL
 	return d
@@ -455,9 +458,9 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 
 	reportCLIUseTo(t, target.url)
 	target.waitForPosts(t, 1)
-	attempt := telemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
+	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
 	//nolint:kennlint // Observe the handled failure before invoking the next command.
-	require.Eventually(t, func() bool { return readTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 	target.status.Store(http.StatusAccepted)
 	reportCLIUseTo(t, target.url)
 	waitCLIUseMarker(t, "cli-opened-")
@@ -509,8 +512,8 @@ func TestCLIUseBacksOffUnobservedReports(t *testing.T) {
 			outputBytes, err := run(test.second, "exit").CombinedOutput()
 			require.NoError(t, err, "%s", outputBytes)
 			require.EqualValues(t, 1, posts.Load(), "a new process skips a report whose unseen outcome is still in backoff")
-			attempt := telemetryDayMarkerPath(client.ResolvedDaemon{BaseURL: server.URL}, "cli-opened-try-")
-			require.Equal(t, test.first, readTelemetryDayMarker(attempt), "a skipped report leaves the unseen attempt in place")
+			attempt := client.TelemetryDayMarkerPath(client.ResolvedDaemon{BaseURL: server.URL}, "cli-opened-try-")
+			require.Equal(t, test.first, client.ReadTelemetryDayMarker(attempt), "a skipped report leaves the unseen attempt in place")
 
 			outputBytes, err = run(test.retry, "accepted").CombinedOutput()
 			require.NoError(t, err, "%s", outputBytes)
@@ -635,6 +638,54 @@ func TestAgentUseFullDayProcess(t *testing.T) {
 	if url == "" {
 		return
 	}
+	agentUseReportTimeout = 5 * time.Second
 	setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
+	if os.Getenv("KATA_AGENT_USE_TEST_DISCOVER") == "1" {
+		cmd := findCommand(t, "agent-contract-hook")
+		flags.Daemon = os.Getenv("KATA_AGENT_USE_TEST_DAEMON")
+		if os.Getenv("KATA_AGENT_USE_TEST_INJECT") == "1" {
+			cmd.SetContext(context.WithValue(t.Context(), client.BaseURLKey{}, url))
+		}
+		reportCLIUse(cmd)
+		return
+	}
 	reportCLIUseTo(t, url)
+}
+
+func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
+	for _, first := range []string{"cli", "hook", "tui", "mcp"} {
+		t.Run(first, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			stubIsTTY(t, true)
+			target := newCLIUseDaemon(t)
+			target.receipt.Store("disabled")
+			synctest.Test(t, func(t *testing.T) {
+				report := func(caller string) {
+					switch caller {
+					case "mcp":
+						c, err := kataclient.NewWithHTTPClient(target.url, http.DefaultClient)
+						require.NoError(t, err)
+						observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: target.url})
+						observe()
+						synctest.Wait()
+						stop()
+					case "tui":
+						require.NoError(t, tui.NewClient(target.url, http.DefaultClient).ReportScreenViewed(t.Context(), "issues"))
+					default:
+						t.Setenv(hooks.HookVersionEnv, "")
+						if caller == "hook" {
+							t.Setenv(hooks.HookVersionEnv, "1")
+						}
+						reportCLIUseTo(t, target.url)
+					}
+				}
+				report(first)
+				for _, caller := range []string{"cli", "hook", "tui", "mcp"} {
+					report(caller)
+				}
+				require.Equal(t, int32(1), target.posts.Load())
+			})
+		})
+	}
 }

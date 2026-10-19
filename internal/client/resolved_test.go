@@ -407,7 +407,8 @@ func TestResolvedDaemonWithRunningReplacesOnlyRuntimeMetadata(t *testing.T) {
 		Source: DaemonSourceNamedCatalog, Name: "local-daemon",
 		BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123",
 		Network: "tcp", Scheme: "http",
-		Token: "target-token", AllowInsecure: true, TrustPrivateNetwork: true,
+		RuntimeDir: "/tmp/example-runtime",
+		Token:      "target-token", AllowInsecure: true, TrustPrivateNetwork: true,
 	}
 	running := RunningDaemon{
 		BaseURL: UnixBase, Address: "unix:///tmp/fresh-kata.sock",
@@ -418,6 +419,7 @@ func TestResolvedDaemonWithRunningReplacesOnlyRuntimeMetadata(t *testing.T) {
 
 	assert.Equal(t, DaemonSourceNamedCatalog, refreshed.Source)
 	assert.Equal(t, "local-daemon", refreshed.Name)
+	assert.Equal(t, "/tmp/example-runtime", refreshed.RuntimeDir)
 	assert.Equal(t, "target-token", refreshed.Token)
 	assert.True(t, refreshed.AllowInsecure)
 	assert.True(t, refreshed.TrustPrivateNetwork)

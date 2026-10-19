@@ -111,7 +111,7 @@ func (t localProfileTransport) RoundTrip(req *http.Request) (*http.Response, err
 		return nil, fmt.Errorf("local profile request has an unexpected origin")
 	}
 	resp, generation, err := t.roundTrip(req)
-	if err == nil || req.Context().Err() != nil {
+	if err == nil || req.Context().Err() != nil || isTelemetryRequest(req.Context()) {
 		return resp, err
 	}
 	if refreshErr := t.state.refresh(req.Context(), generation); refreshErr != nil {

@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
@@ -51,6 +57,7 @@ func (r *recordingTelemetry) Capture(event string, properties map[string]any) er
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	recorder := &recordingTelemetry{finished: make(chan struct{})}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 
@@ -69,6 +76,7 @@ func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
 }
 
 func TestReportSessionEndedBoundsDelivery(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	synctest.Test(t, func(t *testing.T) {
 		hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			<-req.Context().Done()
@@ -96,8 +104,9 @@ func runCmd(cmd tea.Cmd) {
 }
 
 func TestInitReportsAppOpenedOncePerLaunch(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	var reports atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/telemetry" {
 			var body struct {
 				Event string `json:"event"`
@@ -111,8 +120,11 @@ func TestInitReportsAppOpenedOncePerLaunch(t *testing.T) {
 			return
 		}
 		http.NotFound(w, r)
-	}))
+	})
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	switched := httptest.NewServer(handler)
+	t.Cleanup(switched.Close)
 	init := bootInit{scope: scope{projectID: 7, projectName: "example-project"}, view: viewList}
 	m := buildRunModel(Options{}, NewClient(srv.URL, srv.Client()), init)
 
@@ -123,7 +135,7 @@ func TestInitReportsAppOpenedOncePerLaunch(t *testing.T) {
 	}
 	assert.Equal(t, int32(1), reports.Load())
 
-	m, cmd := m.installDaemonConnection(daemonConnection{api: NewClient(srv.URL, srv.Client()), init: init})
+	m, cmd := m.installDaemonConnection(daemonConnection{api: NewClient(switched.URL, switched.Client()), init: init})
 	runCmd(cmd)
 	m, cmd = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: m.connGen})
 	runCmd(cmd)
@@ -133,6 +145,7 @@ func TestInitReportsAppOpenedOncePerLaunch(t *testing.T) {
 type noAppOpenedAPI struct{ KataAPI }
 
 func TestReportAppOpenedFailureIsSilent(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(notFound.Close)
 	readOnly := testenv.New(t, testenv.WithInsecureReadonly())
@@ -144,13 +157,24 @@ func TestReportAppOpenedFailureIsSilent(t *testing.T) {
 		{name: "daemon without the route", client: NewClient(notFound.URL, notFound.Client())},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			require.Error(t, test.client.ReportAppOpened(t.Context()))
-			m := initialModel(Options{})
-			m.api = newUndoClient(test.client)
+			transport := test.client.hc.Transport
+			if transport == nil {
+				transport = http.DefaultTransport
+			}
+			var requests atomic.Int32
+			hc := *test.client.hc
+			hc.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/api/v1/ui/telemetry" {
+					requests.Add(1)
+				}
+				return transport.RoundTrip(r)
+			})
+			m := buildRunModel(Options{}, NewClient(test.client.base, &hc), bootInit{})
 
 			cmd := m.reportAppOpened()
 			require.NotNil(t, cmd)
 			assert.Nil(t, cmd())
+			assert.Equal(t, int32(1), requests.Load())
 			assert.Nil(t, m.toast)
 		})
 	}
@@ -161,13 +185,18 @@ func TestReportAppOpenedFailureIsSilent(t *testing.T) {
 }
 
 func TestScreenViewsThroughModelAndDaemon(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
 	recorder := &recordingTelemetry{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	m := initialModel(Options{})
-	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+	m := buildRunModel(Options{}, NewClient(env.URL, env.HTTP), bootInit{view: viewList})
 	m.width = 100
 	m.scope.inbox = true
 	_, cmd := m.Update(nil)
+	require.NoDirExists(t, filepath.Join(home, "telemetry"), "Update leaves marker work to its command")
+	recorder.mu.Lock()
+	assert.Empty(t, recorder.captured)
+	recorder.mu.Unlock()
 	runCmd(cmd)
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
@@ -175,7 +204,8 @@ func TestScreenViewsThroughModelAndDaemon(t *testing.T) {
 	assert.Subset(t, recorder.captured[0], map[string]any{"screen": "inbox", "surface": "tui"})
 }
 
-func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
+func TestScreenViewsLayoutAndDaemonSwitch(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	var screens []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/ui/telemetry" {
@@ -191,10 +221,10 @@ func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
 			screens = append(screens, body.Properties["screen"])
 		}
 		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"queued"}`))
 	}))
 	defer srv.Close()
-	m := initialModel(Options{})
-	m.api = newUndoClient(NewClient(srv.URL, srv.Client()))
+	m := buildRunModel(Options{}, NewClient(srv.URL, srv.Client()), bootInit{view: viewList})
 	require.True(t, m.View().ReportFocus)
 	m.width = 70
 	next, cmd := m.Update(nil)
@@ -212,20 +242,25 @@ func TestScreenViewsFocusRolloverAndDaemonSwitch(t *testing.T) {
 	m = next.(Model)
 	runCmd(cmd)
 	require.Equal(t, []string{"issues", "issue"}, screens)
-	m.telemetryDay = "2020-01-01"
-	next, cmd = m.Update(nil)
-	m = next.(Model)
-	runCmd(cmd)
-	require.Len(t, screens, 2, "background work is not a later-day visit")
-	next, cmd = m.Update(tea.FocusMsg{})
-	m = next.(Model)
-	runCmd(cmd)
-	require.Equal(t, []string{"issues", "issue", "issue"}, screens)
 	next, cmd = m.Update(daemonSwitchResultMsg{conn: daemonConnection{api: NewClient(srv.URL, srv.Client()), init: bootInit{view: viewEmpty}}})
 	m = next.(Model)
 	runCmd(cmd)
 	require.Equal(t, "empty", screens[len(screens)-1])
 	require.Equal(t, uint64(1), m.connGen)
+	t.Run("model visit rollover", func(t *testing.T) {
+		t.Setenv("KATA_HOME", t.TempDir())
+		synctest.Test(t, func(t *testing.T) {
+			r := &screenVisitRecorder{}
+			m := initialModel(Options{})
+			m.api, m.width, m.view = r, 100, viewList
+			runCmd(m.screenViewCommand(false))
+			time.Sleep(24 * time.Hour)
+			runCmd(m.screenViewCommand(false))
+			require.Equal(t, []string{"issues"}, r.screens)
+			runCmd(m.screenViewCommand(true))
+			require.Equal(t, []string{"issues", "issues"}, r.screens)
+		})
+	})
 }
 
 func TestScreenName(t *testing.T) {
@@ -249,10 +284,134 @@ func TestScreenName(t *testing.T) {
 	}
 }
 
+type screenVisitRecorder struct {
+	KataAPI
+	screens []string
+}
+
+func (r *screenVisitRecorder) ReportScreenViewed(_ context.Context, screen string) error {
+	r.screens = append(r.screens, screen)
+	return nil
+}
+
 func (*recordingTelemetry) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
 	reporter, err := telemetry.NewReporter(telemetry.Options{})
 	if err != nil {
 		return nil, err
 	}
 	return reporter.SanitizeProperties(event, properties)
+}
+
+// Accepted daily claims survive a restart on the same daemon.
+func TestTelemetryDailyScreens(t *testing.T) {
+	for _, event := range []string{"screen_viewed", "app_opened"} {
+		t.Run(event, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			synctest.Test(t, func(t *testing.T) {
+				var requests int
+				hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					requests++
+					return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Header: make(http.Header), Request: r}, nil
+				})}
+				report := func(c *Client, screen string) {
+					if event == "app_opened" {
+						require.NoError(t, c.ReportAppOpened(t.Context()))
+					} else {
+						require.NoError(t, c.ReportScreenViewed(t.Context(), screen))
+					}
+				}
+				c := NewClient("http://daemon.example", hc)
+				report(c, "issues")
+				if event == "screen_viewed" {
+					report(c, "help")
+				}
+				report(NewClient(c.base, hc), "issues")
+				if event == "screen_viewed" {
+					require.Equal(t, 2, requests, "Issues, Help, restart, Issues reports two screens")
+				} else {
+					require.Equal(t, 1, requests)
+				}
+				time.Sleep(24 * time.Hour)
+				report(c, "issues")
+				report(NewClient(c.base, hc), "issues")
+				if event == "screen_viewed" {
+					require.Equal(t, 3, requests)
+				} else {
+					require.Equal(t, 2, requests)
+				}
+			})
+		})
+	}
+}
+
+func TestTelemetryDisabledSerializesConcurrentReports(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	synctest.Test(t, func(t *testing.T) {
+		var requests atomic.Int32
+		first, release := make(chan struct{}), make(chan struct{})
+		c := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if requests.Add(1) == 1 {
+				close(first)
+			}
+			<-release
+			return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(`{"status":"disabled"}`)), Header: make(http.Header), Request: r}, nil
+		})})
+		var wg sync.WaitGroup
+		wg.Go(func() { assert.NoError(t, c.ReportAppOpened(t.Context())) })
+		<-first
+		wg.Go(func() { assert.NoError(t, c.ReportScreenViewed(t.Context(), "issues")) })
+		synctest.Wait()
+		assert.Equal(t, int32(1), requests.Load())
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		assert.ErrorIs(t, c.ReportScreenViewed(ctx, "issues"), context.Canceled)
+		close(release)
+		wg.Wait()
+		synctest.Wait()
+		require.Equal(t, int32(1), requests.Load())
+		time.Sleep(24 * time.Hour)
+		require.NoError(t, c.ReportScreenViewed(t.Context(), "help"))
+		require.Equal(t, int32(2), requests.Load())
+	})
+}
+
+func TestTelemetryGateAcrossDaemonSwitches(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	requests := map[string]int{}
+	client := func(target string) *Client {
+		return NewClient("http://"+target+".example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests[target]++
+			responseStatus := "disabled"
+			if target == "b" {
+				responseStatus = "queued"
+			}
+			return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(`{"status":"` + responseStatus + `"}`)), Header: make(http.Header), Request: r}, nil
+		})})
+	}
+	a := client("a")
+	m := buildRunModel(Options{}, a, bootInit{})
+	require.NoError(t, a.ReportScreenViewed(t.Context(), "issues"))
+	b := client("b")
+	m, _ = m.installDaemonConnection(daemonConnection{api: b})
+	require.NoError(t, b.ReportScreenViewed(t.Context(), "issues"))
+	// Another terminal caller can receive an opt-out after this gate's first check.
+	clientpkg.RecordTelemetryDayMarker(clientpkg.TelemetryDisabledMarkerPath(b.telemetryTarget), time.Now().UTC().Format(time.DateOnly))
+	require.NoError(t, b.reportUsage(t.Context(), "session_ended", map[string]any{"surface": "tui", "duration_bucket": "1_to_5m"}))
+	require.NoError(t, os.Remove(clientpkg.TelemetryDisabledMarkerPath(a.telemetryTarget)))
+	again := client("a")
+	_, _ = m.installDaemonConnection(daemonConnection{api: again})
+	require.NoError(t, again.reportUsage(t.Context(), "session_ended", map[string]any{"surface": "tui", "duration_bucket": "1_to_5m"}))
+	require.Equal(t, map[string]int{"a": 1, "b": 1}, requests)
+}
+
+func TestTelemetryRejectsInvalidReceipts(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	for _, receipt := range []string{`{}`, `{"status":"unexpected"}`} {
+		t.Run(receipt, func(t *testing.T) {
+			c := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(receipt)), Header: make(http.Header), Request: r}, nil
+			})})
+			require.Error(t, c.ReportScreenViewed(t.Context(), "issues"))
+		})
+	}
 }

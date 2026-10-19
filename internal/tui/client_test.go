@@ -1486,3 +1486,17 @@ func TestClient_ResolveProject_RewritesStaleKataToml(t *testing.T) {
 	assert.Equal(t, "canonical-name", cfg.Project.Name,
 		"stale .kata.toml must be rewritten to the daemon's canonical name")
 }
+
+func TestTelemetrySkipsLocalDaemonRecovery(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	var refreshed bool
+	c := NewClient(clientpkg.UnixBase, &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})})
+	c.setLocalHTTPClientRefresh(func(context.Context) (*http.Client, error) {
+		refreshed = true
+		return nil, errors.New("unexpected recovery")
+	})
+	require.Error(t, c.ReportScreenViewed(t.Context(), "issues"))
+	require.False(t, refreshed)
+}

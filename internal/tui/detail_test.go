@@ -17,7 +17,7 @@ import (
 // Model.Update without re-typing the boilerplate.
 func newDetailHostModel(opts Options, projectID int64) Model {
 	m := initialModel(opts)
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: projectID}
 	return m
 }
@@ -1145,7 +1145,7 @@ func TestDetail_Viewport_ScrollClampsAtEOF(t *testing.T) {
 // project_id (not the scope's, which is zero in all-projects mode).
 func TestDetail_OpenInAllProjectsScope_UsesIssueProjectID(t *testing.T) {
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{allProjects: true}
 	iss := Issue{ProjectID: 99, UID: "01TEST-eee5", ShortID: "eee5", Title: "cross-project"}
 	out, _ := m.Update(openDetailMsg{issue: iss})

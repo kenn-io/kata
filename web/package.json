@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@kenn-io/kata-ui": "workspace:*",
-    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#0c08808dee64d41b23ca9060ce58753841a88060",
+    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#8015aec038169716dfa3fcf0effc369bdf07c380",
     "@lucide/svelte": "1.21.0",
     "@xyflow/svelte": "1.6.1",
     "elkjs": "0.11.1",

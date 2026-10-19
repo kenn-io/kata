@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
-  import { startAppOpenedReporting } from '@kenn-io/kit-ui/utils/app-opened'
+  import { startBrowserTelemetry } from '@kenn-io/kit-ui/utils/browser-telemetry'
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
 
@@ -160,60 +160,50 @@
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
-  let stopAppOpened: (() => void) | undefined
+  let browserTelemetry: ReturnType<typeof startBrowserTelemetry> | undefined
+  let stopQuietSubscription: (() => void) | undefined
   let sessionEnded: ReturnType<typeof startSessionEndedReporting> | undefined
   // Only a signed-in tab counts as an opening; anonymous viewers send nothing.
   function reportAppOpened(): void {
     if (destroyed || loadSessionCredentials() === undefined) return
-    sessionEnded ??= startSessionEndedReporting((duration) =>
-      captureTelemetryEvent(
-        {
-          event: 'session_ended',
-          properties: { surface: 'web', duration_bucket: duration },
-        },
+    sessionEnded ??= startSessionEndedReporting(async (duration) => {
+      browserTelemetry?.reportVisit(
+        { event: 'session_ended', properties: { surface: 'web', duration_bucket: duration } },
         { keepalive: true },
-      ),
-    )
-    sessionEnded.resume()
-    stopAppOpened ??= startAppOpenedReporting({
+      )
+    }, true)
+    if (browserTelemetry) {
+      sessionEnded.resume()
+      return
+    }
+    browserTelemetry = startBrowserTelemetry({
       route: '/api/v1/ui/telemetry',
       surface: 'web',
       storageKey: 'kata.web.app-opened.v1',
-      post: async (_route, event) => {
-        const response = await captureTelemetryEvent(event)
-        if (response.status === 401) restartAppOpenedAfterAuthentication()
+      post: async (_route, event, options) => {
+        const response = await captureTelemetryEvent(event, options)
+        if (response.status === 401) {
+          restartAppOpenedAfterAuthentication()
+          throw new Error('Telemetry authentication expired')
+        }
         return response
       },
     })
+    stopQuietSubscription = browserTelemetry.onQuietChange((quiet) => sessionEnded?.setQuiet(quiet))
+    sessionEnded.resume()
+    reportScreenViewed()
   }
-  // Stopping before the 401 resolves keeps the day unrecorded; the renewed
-  // session, now or after navigateAfterAuthentication, reports it instead.
   function restartAppOpenedAfterAuthentication(): void {
     sessionEnded?.pause()
-    stopAppOpened?.()
-    stopAppOpened = undefined
+    stopQuietSubscription?.()
+    browserTelemetry?.stop()
+    browserTelemetry = undefined
     reportAppOpened()
   }
-  let reportedScreen: string | undefined
-  let reportedScreenDay: string | undefined
-  function reportScreenViewed(visit = false): void {
+  function reportScreenViewed(): void {
     if (destroyed || mode !== 'ready' || !acceptedRoute || !loadSessionCredentials()) return
     const screen = screenNameForRoute(acceptedRoute)
-    const day = new Date().toISOString().slice(0, 10)
-    if (!screen || (reportedScreen === screen && (reportedScreenDay === day || !visit))) return
-    reportedScreen = screen
-    reportedScreenDay = day
-    void captureTelemetryEvent(
-      { event: 'screen_viewed', properties: { screen, surface: 'web' } },
-      { signal: AbortSignal.timeout(1000) },
-    )
-      .then((response) => {
-        if (response.status >= 400 && reportedScreen === screen && reportedScreenDay === day)
-          reportedScreen = undefined
-      })
-      .catch(() => {
-        if (reportedScreen === screen && reportedScreenDay === day) reportedScreen = undefined
-      })
+    if (screen) browserTelemetry?.reportScreen(screen)
   }
   $effect(() => {
     reportScreenViewed()
@@ -301,7 +291,6 @@
     }
     const focus = () => {
       scheduler.focused()
-      reportScreenViewed(true)
     }
     const environment = () => scheduler.environmentChanged()
     const showVersionMismatch = () => {
@@ -342,7 +331,8 @@
       window.removeEventListener('popstate', popstate)
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
       window.clearInterval(credentialRefreshTimer)
-      stopAppOpened?.()
+      stopQuietSubscription?.()
+      browserTelemetry?.stop()
       sessionEnded?.stop()
       scheduler.stop()
       stream.stop()

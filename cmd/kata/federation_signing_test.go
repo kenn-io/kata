@@ -44,7 +44,7 @@ func TestFederationSigningCLIUsesSelectedDaemon(t *testing.T) {
 					child.Env = append(child.Env, key+"="+value)
 				}
 			}
-			child.Env = append(child.Env, "KATA_SIGNING_CLI_HELPER=1", "KATA_HOME="+cliHome,
+			child.Env = append(child.Env, "KATA_SIGNING_CLI_HELPER=1", "KATA_HOME="+cliHome, "KATA_TEST_HOME="+cliHome,
 				"KATA_DB="+filepath.Join(cliHome, "kata.db"), "GIT_CONFIG_NOSYSTEM=1",
 				"GIT_CONFIG_GLOBAL="+filepath.Join(cliHome, "gitconfig"))
 			if selector == "server" {

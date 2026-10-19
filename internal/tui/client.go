@@ -33,6 +33,8 @@ type Client struct {
 	hc                     *http.Client
 	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
 	mu                     sync.RWMutex
+	telemetry              *telemetryGate
+	telemetryTarget        string
 }
 
 type suppressIssueActionTelemetryKey struct{}
@@ -53,6 +55,8 @@ func issueActionSurface(ctx context.Context) *string {
 func NewClient(base string, hc *http.Client) *Client {
 	return &Client{
 		base:                   base,
+		telemetry:              newTelemetryGate(),
+		telemetryTarget:        base,
 		hc:                     hc,
 		refreshLocalHTTPClient: refreshLocalHTTPClientForTUI,
 	}
@@ -75,7 +79,7 @@ func (c *Client) sendRequest(ctx context.Context, req *http.Request) (*http.Resp
 	}
 	resp, err := hc.Do(req) //nolint:gosec // G704: generated requests use the daemon selected by the local TUI.
 	_, profileTransport := hc.Transport.(localProfileTransport)
-	if err != nil && !profileTransport {
+	if err != nil && !profileTransport && !isTelemetryRequest(ctx) {
 		resp, err = c.retryLocalTransportFailure(ctx, req, err)
 	}
 	if resp != nil && resp.Request == nil {
@@ -157,32 +161,21 @@ func (c *Client) ReportSessionEnded(elapsed time.Duration) {
 }
 
 func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {
-	apiClient, err := c.generatedClient()
-	if err != nil {
-		return err
-	}
-	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: &generated.CaptureTelemetryEventBody{Event: event, Properties: properties},
+	screen, _ := properties["screen"].(string)
+	return c.telemetry.report(ctx, telemetryClaimKey{target: c.telemetryTarget, event: event, screen: screen}, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
+		apiClient, err := c.generatedClient()
+		if err != nil {
+			return nil, err
+		}
+		return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{
+			Body: &generated.CaptureTelemetryEventBody{Event: event, Properties: properties},
+		})
 	})
-	if wire == nil {
-		return callErr
-	}
-	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
-// ReportScreenViewed sends the visible screen to the connected daemon.
+// ReportScreenViewed sends each visible screen once per daemon and UTC day.
 func (c *Client) ReportScreenViewed(ctx context.Context, screen string) error {
-	apiClient, err := c.generatedClient()
-	if err != nil {
-		return err
-	}
-	wire, callErr := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: &generated.CaptureTelemetryEventBody{Event: "screen_viewed", Properties: map[string]any{"surface": "tui", "screen": screen}},
-	})
-	if wire == nil {
-		return callErr
-	}
-	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+	return c.reportUsage(ctx, "screen_viewed", map[string]any{"surface": "tui", "screen": screen})
 }
 
 // ListTokens returns the daemon's redacted credential audit inventory and

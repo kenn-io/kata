@@ -372,7 +372,7 @@ func TestProjectsView_PFromListTransitions(t *testing.T) {
 	m.scope = homedScope(7, "kata")
 	// Need a stub api so the cmd can be dispatched without crashing —
 	// the cmd doesn't run to completion in this test.
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 
 	nm, cmd := updateModel(m, keyRune('P'))
 	assert.Equal(t, viewProjects, nm.view)
