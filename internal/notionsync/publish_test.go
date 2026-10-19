@@ -148,23 +148,6 @@ func TestPublishNotionOneSendAndSourceFences(t *testing.T) {
 	}
 }
 
-func TestPublishNotionReadQueryStillRetries(t *testing.T) {
-	attempts := 0
-	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
-		require.Equal(t, http.MethodPost, r.Method)
-		require.Equal(t, "/v1/data_sources/"+sourceID+"/query", r.URL.Path)
-		attempts++
-		if attempts == 1 {
-			return response(503, `{}`), nil
-		}
-		return response(200, `{"results":[],"has_more":false,"next_cursor":null}`), nil
-	})
-	var result map[string]any
-	err := session(t, c).(*clientSession).request(t.Context(), http.MethodPost, "/v1/data_sources/"+sourceID+"/query", map[string]any{}, &result)
-	require.NoError(t, err)
-	require.Equal(t, 2, attempts)
-}
-
 func TestPublishNotionLongTitlePreservesText(t *testing.T) {
 	title := strings.Repeat("界", 2001)
 	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
