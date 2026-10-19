@@ -25,7 +25,7 @@ import (
 // cliUseReportTimeout bounds the use request; var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
-// agentUseReportTimeout keeps exit reports within installed hook deadlines.
+// agentUseReportTimeout bounds hook requests separately from the exit wait.
 var agentUseReportTimeout = 100 * time.Millisecond
 
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.

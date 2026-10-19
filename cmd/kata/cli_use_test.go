@@ -329,7 +329,7 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "exit wait example")
 	assert.Empty(t, stderr)
-	assert.Less(t, time.Since(start), 500*time.Millisecond)
+	assert.Less(t, time.Since(start), 150*time.Millisecond)
 	release()
 	<-<-reportDone
 	stdout, stderr, err = runCLIWithErr(t, env, dir, "list")
