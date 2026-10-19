@@ -55,6 +55,8 @@
       await onSubmit(value)
       title = ''
       onClose()
+    } catch {
+      // The application banner presents mutation failures.
     } finally {
       pending = false
     }

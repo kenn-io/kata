@@ -1194,6 +1194,25 @@ rows appear in `kata export` output. A changed
 installation ID starts a fresh count. Later-day browser focus or terminal input
 counts another visit. Delivery is best effort; a rejected enqueue can retry.
 
+Submitted searches with no results send `search_empty` with `surface` set to
+`web`, `tui`, or `cli`. Typing previews send nothing. CLI searches count only
+human terminal output on the first page. When a client shows a create or close
+error, it sends `error_shown` with `kind` set to `issue_created` or
+`issue_closed`. This includes validation refusals before a request. Discarded
+responses send nothing. Delivery requires a reachable daemon that accepts the
+capture request.
+
+A sync binding or federation spoke's first failure sends `sync_failed`.
+`sync_source` is `github`, `linear`, `notion`, `plane`, `ticktick`, `todoist`,
+`twenty`, or `federation`. `reason` is `auth`, `rate_limit`, `server`, `network`,
+`timeout`, or `other`; upstream errors without a typed status use `other`.
+Unlisted kinds, sources, and reasons become `other`. Repeated failures count
+again after that binding or spoke recovers. Status sync failures count even
+when content import succeeds. HTTP 5xx uses `server`, including retry delays.
+This state stays in memory, so a daemon restart can count the same outage twice.
+Searches send no query text, and errors send no error text. Issue-scoped
+credentials send no action outcomes.
+
 ### Reporting rules
 
 Kata sends telemetry only from builds with a plain release version, `vX.Y.Z`

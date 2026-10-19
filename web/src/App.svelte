@@ -115,7 +115,11 @@
   let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
-  let mutationState = $state<MutationState>({ kind: 'idle' })
+  let mutationState = $state<
+    MutationState & { actionKind?: string | undefined; counted?: boolean }
+  >({
+    kind: 'idle',
+  })
   let draftFenceGeneration = $state(0)
   let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
   let pendingComment: { identity: string; key: string } | undefined
@@ -268,6 +272,14 @@
     wallClockSensitive: () =>
       route.kind !== 'route-error' && route.filters.status.includes('ready'),
   })
+  function reportMutationError(): void {
+    if (!mutationState.actionKind || mutationState.counted) return
+    mutationState.counted = true
+    void captureTelemetryEvent(
+      { event: 'error_shown', properties: { surface: 'web', kind: mutationState.actionKind } },
+      { signal: AbortSignal.timeout(1000) },
+    ).catch(() => {})
+  }
   const unsubscribe = snapshots.subscribe((state) => {
     authority = { ...state }
     if (
@@ -474,7 +486,8 @@
             key: globalThis.crypto.randomUUID(),
           }
     pendingCreate = create
-    const accepted = await runMutation({ draft: title, createKey: create.key }, (context) =>
+    const options = { draft: title, createKey: create.key, actionKind: 'issue_created' }
+    const accepted = await runMutation(options, (context) =>
       createIssueRequest(
         { projectId: String(project.id) },
         context.body(
@@ -788,7 +801,7 @@
     const selected = selectedIssue()
     const target = selected ? selectedMutationTarget(selected.uid) : undefined
     if (!target) return false
-    return runMutation({ draft: request }, (context) =>
+    return runMutation({ draft: request, actionKind: 'issue_closed' }, (context) =>
       closeIssueRequest(
         { projectId: target.project_id, ref: target.ref },
         context.body({ ...request }, requestActor),
@@ -819,14 +832,14 @@
   }
 
   async function runMutation(
-    options: { draft?: unknown; revision?: string; createKey?: string },
+    options: { draft?: unknown; revision?: string; createKey?: string; actionKind?: string },
     mutate: (context: MutationContext) => Promise<MutationResult>,
     controller: MutationController = mutations,
   ): Promise<boolean> {
     mutationPending = true
     try {
       const result = await controller.execute(options, mutate)
-      mutationState = { ...controller.state }
+      mutationState = { ...controller.state, actionKind: options.actionKind, counted: false }
       return result !== false
     } finally {
       mutationPending = false
@@ -1232,6 +1245,8 @@
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
         route={acceptedRoute ?? route}
+        searchContext={JSON.stringify([activeDaemonID, route])}
+        onMutationErrorShown={reportMutationError}
         snapshot={authority.snapshot}
         loading={authority.loading}
         canMutate={authority.canMutate}

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+ "fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -412,5 +413,144 @@ func TestTelemetryRejectsInvalidReceipts(t *testing.T) {
 			})})
 			require.Error(t, c.ReportScreenViewed(t.Context(), "issues"))
 		})
+	}
+}
+
+func TestOutcomesSubmittedEmptySearch(t *testing.T) {
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	for _, tc := range []struct {
+		name, query              string
+		match, form, fresh, down bool
+		pendingScope             string
+		want                     int
+	}{
+		{name: "empty", query: "missing", want: 1},
+		{name: "empty from results", query: "missing", down: true, want: 1},
+		{name: "match", query: "Example", match: true},
+		{name: "blank", query: " "},
+		{name: "unchanged filter form", query: "missing", form: true},
+		{name: "changed filter form", query: "missing", form: true, fresh: true, want: 1},
+		{name: "same scope", query: "missing", pendingScope: "same scope", want: 1},
+		{name: "daemon", query: "missing", pendingScope: "daemon", want: 1},
+		{name: "project", query: "missing", pendingScope: "project", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder.captured = nil
+			recorder.events = nil
+			m := mFixtureForBar()
+			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.list.loading = tc.pendingScope != ""
+			if tc.match {
+				m.list.issues = []Issue{{UID: "example-issue", Title: "Example"}}
+			}
+			m = openBarFromCmd(t, m, '/')
+			var cmd tea.Cmd
+			for _, r := range tc.query {
+				m, cmd = stepModel(m, runeKey(r))
+				runCmd(cmd)
+			}
+			require.Empty(t, recorder.captured, "typing is only a preview")
+			if tc.form {
+				if tc.fresh {
+					m.list.filter.Search = ""
+				}
+				m, cmd = m.commitFilterForm(newFilterForm(ListFilter{Search: tc.query}, scope{}))
+			} else {
+				if tc.down {
+					m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+					runCmd(cmd)
+				}
+				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			}
+			runCmd(cmd)
+			if tc.pendingScope != "" {
+				require.Empty(t, recorder.captured)
+				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				runCmd(cmd)
+				switch tc.pendingScope {
+				case "daemon":
+					m, _ = m.installDaemonConnection(daemonConnection{
+						api:  NewClient(env.URL, env.HTTP),
+						init: bootInit{scope: m.scope, view: viewList},
+					})
+				case "project":
+					m.projectsCursor = 0
+					m, _ = m.applyProjectsViewSelection([]projectsRow{{projectID: 99, name: "example-project"}})
+				}
+				if tc.pendingScope != "same scope" {
+					m.list.loading = true
+					m = openBarFromCmd(t, m, '/')
+					for _, r := range tc.query {
+						m, cmd = stepModel(m, runeKey(r))
+						runCmd(cmd)
+					}
+					require.Empty(t, recorder.captured, "typing is only a preview")
+					m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+					runCmd(cmd)
+				}
+				m, cmd = stepModel(m, initialFetchMsg{dispatchKey: m.currentCacheKey()})
+				runCmd(cmd)
+			}
+			require.Len(t, recorder.captured, tc.want)
+			if tc.want > 0 {
+				require.Equal(t, []string{"search_empty"}, recorder.events)
+				require.Equal(t, map[string]any{"surface": "tui"}, recorder.captured[0])
+			}
+			if tc.pendingScope != "" {
+				_, cmd = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey()})
+				runCmd(cmd)
+				require.Len(t, recorder.captured, 1)
+			}
+		})
+	}
+}
+
+func TestOutcomesShownFormErrors(t *testing.T) {
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	for _, tc := range []struct{ origin, kind string }{{"form", "create"}, {"form", "close"}, {"detail", "close"}} {
+		t.Run(tc.origin+"/"+tc.kind, func(t *testing.T) {
+			recorder.captured, recorder.events = nil, nil
+			m := mFixtureForBar()
+			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.input = newNewIssueForm()
+			if tc.kind == "close" {
+				m.input = newCloseForm(formTarget{})
+			}
+			m.input.formGen = 2
+			m.view, m.detail.gen, m.pendingRefetch = viewDetail, 2, true
+			next, cmd := m.routeMutation(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 1, gen: 1, err: fmt.Errorf("refused")})
+			runCmd(cmd)
+			require.Empty(t, recorder.captured, "discarded response")
+			next, cmd = next.(Model).routeMutation(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 2, gen: 2, err: fmt.Errorf("refused")})
+			if tc.origin == "form" {
+				require.Contains(t, next.(Model).input.err, "refused")
+			} else {
+				require.ErrorContains(t, next.(Model).detail.err, "refused")
+			}
+			runCmd(cmd)
+			require.Equal(t, []string{"error_shown"}, recorder.events)
+			require.Equal(t, []map[string]any{{"surface": "tui", "kind": map[string]string{"create": "issue_created", "close": "issue_closed"}[tc.kind]}}, recorder.captured)
+		})
+	}
+	for _, kind := range []inputKind{inputNewIssueForm, inputCloseForm} {
+		recorder.captured = nil
+		recorder.events = nil
+		m := mFixtureForBar()
+		m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+		m.input = newNewIssueForm()
+		if kind == inputCloseForm {
+			m.input = newCloseForm(formTarget{})
+		}
+		m, cmd := m.commitFormInput(kind)
+		require.NotEmpty(t, m.input.err)
+		runCmd(cmd)
+		expected := "issue_created"
+		if kind == inputCloseForm {
+			expected = "issue_closed"
+		}
+		require.Equal(t, []string{"error_shown"}, recorder.events)
+		require.Equal(t, []map[string]any{{"surface": "tui", "kind": expected}}, recorder.captured)
 	}
 }

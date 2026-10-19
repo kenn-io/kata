@@ -98,6 +98,27 @@ func reportCLIUse(cmd *cobra.Command) {
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
+	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
+	if agent {
+		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
+	}
+	sendCLIEvent(cmd, body)
+}
+
+func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
+	if currentOutputMode() != outputHuman || !reportsCLIUse(cmd) {
+		return
+	}
+	properties := map[string]any{"surface": "cli"}
+	if kind != "" {
+		properties["kind"] = kind
+	}
+	sendCLIEvent(cmd, &generated.CaptureTelemetryEventBody{Event: event, Properties: properties})
+}
+
+func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody) {
+	agent := body.Event == "agent_active"
+	target := cliUseTarget.Load()
 	now := cliUseNow().UTC()
 	day := now.Format(time.DateOnly)
 	parent := cmd.Context()
@@ -125,11 +146,16 @@ func reportCLIUse(cmd *cobra.Command) {
 			}
 			target = &resolved
 		}
-		claim, finish, report := beginCLIUseReport(*target, agent, now)
-		if !report {
-			return
+		claim := ""
+		if body.Event == "app_opened" || agent {
+			var finish func()
+			var report bool
+			claim, finish, report = beginCLIUseReport(*target, agent, now)
+			if !report {
+				return
+			}
+			defer finish()
 		}
-		defer finish()
 		var gate client.TelemetryGate
 		_, _ = gate.Report(ctx, client.TelemetryTargetKey(*target), claim, day, agent, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
 			hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
@@ -139,10 +165,6 @@ func reportCLIUse(cmd *cobra.Command) {
 			apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
 			if err != nil {
 				return nil, err
-			}
-			body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
-			if agent {
-				body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
 			}
 			return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
 		})

@@ -23,6 +23,127 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it.each([
+    { pending: false, future: false, changed: false },
+    { pending: true, future: false, changed: false },
+    { pending: true, future: false, changed: true },
+    { pending: false, future: true, changed: false },
+  ])(
+    'counts every submitted empty search after its visible results settle, %s',
+    async ({ pending, future, changed }) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const events: unknown[] = []
+      let release: (() => void) | undefined
+      let searched = false
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request =
+            input instanceof Request
+              ? input
+              : new Request(new URL(String(input), window.location.origin), init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') {
+            const body = await request.clone().json()
+            if (body.event === 'search_empty') events.push(body)
+            return telemetryAccepted()
+          }
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname.endsWith('/api/v1/ui/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          const result = snapshot()
+          if (target.searchParams.get('text') === 'missing') {
+            searched = true
+            if (pending)
+              await new Promise<void>((resolve) => {
+                release = resolve
+              })
+            if (future) result.collection[0]!.metadata = { scheduled_on: '9999-12-31' }
+            else result.collection = []
+          }
+          return Response.json(result, { headers: { ETag: '"snapshot-outcome"' } })
+        }),
+      )
+      render(App)
+      const input = await screen.findByLabelText('Search tasks')
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await waitFor(() => expect(searched).toBe(true))
+      expect(events).toEqual([])
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      if (pending) {
+        await fireEvent.keyDown(input, { key: 'Enter' })
+        expect(events).toEqual([])
+        if (changed) {
+          await fireEvent.input(input, { target: { value: 'Example' } })
+          await screen.findByRole('button', { name: /Example issue/ })
+          release?.()
+          await tick()
+          expect(events).toEqual([])
+          return
+        }
+        release?.()
+      }
+      await waitFor(() => expect(events).toHaveLength(pending ? 2 : 1))
+      expect(events).toEqual(
+        Array.from({ length: pending ? 2 : 1 }, () => ({
+          event: 'search_empty',
+          properties: { surface: 'web' },
+        })),
+      )
+      window.dispatchEvent(new Event('focus'))
+      release?.()
+      await tick()
+      expect(events).toHaveLength(pending ? 2 : 1)
+      await fireEvent.input(input, { target: { value: 'Example' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      expect(events).toHaveLength(pending ? 2 : 1)
+    },
+  )
+
+  it('keeps anonymous search results current without posting outcomes', async () => {
+    const telemetry: unknown[] = []
+    const searches: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/telemetry') {
+          telemetry.push(await request.json())
+          return new Response('', { status: 401 })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') return new Response('', { status: 404 })
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        const result = snapshot()
+        result.capabilities.writable = false
+        result.capabilities.actor_policy = 'readonly'
+        const text = target.searchParams.get('text')
+        if (text) searches.push(text)
+        if (text === 'missing') result.collection = []
+        return Response.json(result, { headers: { ETag: '"anonymous-search"' } })
+      }),
+    )
+
+    render(App)
+    const input = await screen.findByLabelText('Search tasks')
+    await fireEvent.input(input, { target: { value: 'missing' } })
+    await waitFor(() => expect(searches).toContain('missing'))
+    await screen.findByText('No tasks')
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await tick()
+    expect(telemetry).toEqual([])
+    expect(screen.queryByRole('heading', { name: 'Launch Kata securely' })).toBeNull()
+    await fireEvent.input(input, { target: { value: 'Example' } })
+    await screen.findByRole('button', { name: /Example issue/ })
+    expect(searches).toContain('Example')
+  })
+
   it('renders the Kata application shell while loading', () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -3034,73 +3155,145 @@ describe('App', () => {
 
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
-      it(`${action} sends its surface with the mutation`, async () => {
-        history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
-        sessionStorage.setItem(
-          'kata.web.session.v1',
-          JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-        )
-        const base = snapshot()
-        base.catalog[0]!.project.metadata.role = 'inbox'
-        const accepted = {
-          ...base,
-          selected: {
-            state: 'available',
-            issue: base.collection[0],
-            comments: [],
-            labels: [],
-            links: [],
-            history: [],
-          },
-        }
-        const actionRequests: Request[] = []
-        let writes = 0
-        vi.stubGlobal(
-          'fetch',
-          vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-            const request = requestOf(input, init)
-            const path = new URL(request.url).pathname
-            if (path === '/api/v1/ui/telemetry') {
-              return telemetryAccepted()
-            }
-            if (
-              request.method === 'POST' &&
-              (path.endsWith('/issues') || path.endsWith('/close'))
-            ) {
-              actionRequests.push(request)
-              writes += 1
-              return Response.json({ changed: true })
-            }
-            if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-            if (path.endsWith('/references'))
-              return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-            return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
-          }),
-        )
-        render(App)
-        if (action === 'create') {
-          await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-          await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
-            target: { value: 'Example task' },
-          })
-          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-        } else {
-          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
-          await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
-          await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
-            target: { value: 'go test ./example' },
-          })
-          await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
-            target: { value: 'Completed the requested work and checked the result.' },
-          })
-          const buttons = screen.getAllByRole('button', { name: 'Complete' })
-          await fireEvent.click(buttons[buttons.length - 1]!)
-        }
-        await waitFor(() => expect(writes).toBe(1))
-        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-        expect(actionRequests).toHaveLength(1)
-        expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
-      })
+      it.each(['accepted', 'refused', 'dismissed', 'remounted'])(
+        `${action} reports a shown refusal once, result=%s`,
+        async (result) => {
+          const refused = result !== 'accepted'
+          let release: (() => void) | undefined
+          let releaseRemote: (() => void) | undefined
+          history.replaceState(
+            null,
+            '',
+            `/kata?issue=01J00000000000000000000001${result === 'remounted' ? '' : '#direct=1'}`,
+          )
+          sessionStorage.setItem(
+            'kata.web.session.v1',
+            JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+          )
+          const base = snapshot()
+          base.catalog[0]!.project.metadata.role = 'inbox'
+          const accepted = {
+            ...base,
+            selected: {
+              state: 'available',
+              issue: base.collection[0],
+              comments: [],
+              labels: [],
+              links: [],
+              history: [],
+            },
+          }
+          const actionRequests: Request[] = []
+          const shownErrors: unknown[] = []
+          let writes = 0
+          vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+              const request = requestOf(input, init)
+              const path = new URL(request.url).pathname
+              if (path === '/api/v1/ui/telemetry') {
+                const body = await request.clone().json()
+                if (body.event === 'error_shown') shownErrors.push(body)
+                return telemetryAccepted()
+              }
+              if (
+                request.method === 'POST' &&
+                (path.endsWith('/issues') || path.endsWith('/close'))
+              ) {
+                actionRequests.push(request)
+                writes += 1
+                if (result === 'dismissed')
+                  await new Promise<void>((resolve) => {
+                    release = resolve
+                  })
+                return refused
+                  ? Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
+                  : Response.json({ changed: true })
+              }
+              if (path === '/api/v1/ui/daemons')
+                return Response.json({
+                  daemons: [
+                    ...daemonRoster().daemons,
+                    {
+                      id: 'example-remote',
+                      url: 'https://daemon.example',
+                      auth: 'token',
+                      health: 'connected',
+                      default: false,
+                    },
+                  ],
+                })
+              if (path.endsWith('/references'))
+                return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+              if (
+                result === 'remounted' &&
+                request.headers.get('X-Kata-Web-Daemon') === 'example-remote'
+              )
+                await new Promise<void>((resolve) => {
+                  releaseRemote = resolve
+                })
+              return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+            }),
+          )
+          render(App)
+          if (action === 'create') {
+            await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+            await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+              target: { value: 'Example task' },
+            })
+            await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+          } else {
+            await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+            await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
+            await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
+              target: { value: 'go test ./example' },
+            })
+            await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
+              target: { value: 'Completed the requested work and checked the result.' },
+            })
+            const buttons = screen.getAllByRole('button', { name: 'Complete' })
+            await fireEvent.click(buttons[buttons.length - 1]!)
+          }
+          await waitFor(() => expect(writes).toBe(1))
+          if (result === 'dismissed') {
+            await fireEvent.keyDown(window, { key: 'Escape' })
+            release?.()
+          }
+          if (refused) {
+            expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
+            await waitFor(() =>
+              expect(shownErrors).toEqual([
+                {
+                  event: 'error_shown',
+                  properties: {
+                    surface: 'web',
+                    kind: action === 'create' ? 'issue_created' : 'issue_closed',
+                  },
+                },
+              ]),
+            )
+            await tick()
+            expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+          } else {
+            await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+            expect(shownErrors).toEqual([])
+          }
+          if (result === 'remounted') {
+            await fireEvent.click(
+              screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
+            )
+            await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+            await waitFor(() => expect(releaseRemote).toBeDefined())
+            expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+            releaseRemote?.()
+            await screen.findByRole('region', { name: 'Kata workspace' })
+            await tick()
+            expect(shownErrors).toHaveLength(1)
+          }
+          expect(actionRequests).toHaveLength(1)
+          expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
+        },
+      )
     }
   })
 

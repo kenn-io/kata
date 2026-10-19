@@ -260,6 +260,10 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			return nil
 		}
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matches")
+		cursor, _ := cmd.Flags().GetString("cursor")
+		if err == nil && cursor == "" {
+			reportCLIOutcome(cmd, "search_empty", "")
+		}
 		return err
 	}
 	// RRF and cosine scores cluster around 0.01-0.03, which %.2f would flatten;

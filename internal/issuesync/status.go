@@ -19,8 +19,10 @@ type StatusError struct {
 	Message    string
 	HTTPStatus int
 	RetryAfter time.Duration
-	Ambiguous  bool
-	Blocked    bool
+	// RateLimited marks a provider rate limit whose HTTP status would otherwise read as another failure.
+	RateLimited bool
+	Ambiguous   bool
+	Blocked     bool
 }
 
 func (e *StatusError) Error() string { return e.Message }

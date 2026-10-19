@@ -268,6 +268,8 @@ func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
 func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
+	// Keep detail fetching available without the optional telemetry API.
+	m.api = struct{ KataAPI }{m.api}
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
 	}
@@ -292,9 +294,7 @@ func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	startFollowGen := m.nextDetailFollowGen
 
 	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatalf("empty results transition returned unexpected command %T", cmd)
-	}
+	require.Nil(t, cmd, "empty results produce no detail fetch")
 	if m.input.searchFocus != searchFocusResults {
 		t.Fatalf("searchFocus = %v, want results", m.input.searchFocus)
 	}

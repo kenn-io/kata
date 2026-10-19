@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const (
@@ -136,12 +138,13 @@ func (f *HTTPFetcher) fetchParentGraphQLPage(ctx context.Context, client *http.C
 		if wait < 0 {
 			wait = 0
 		}
+		statusErr := err
 		if err := budget.add(wait); errors.Is(err, errGitHubRetrySingleSleepExceeded) {
 			return parentGraphQLIssues{}, fmt.Errorf("%s retry wait %s exceeds max single sleep %s: %w",
-				parentGraphQLResource, wait, gitHubMaxRetrySingleSleep, err)
+				parentGraphQLResource, wait, gitHubMaxRetrySingleSleep, errors.Join(statusErr, err))
 		} else if errors.Is(err, errGitHubRetryTotalSleepExceeded) {
 			return parentGraphQLIssues{}, fmt.Errorf("%s retry wait total %s exceeds max total sleep %s: %w",
-				parentGraphQLResource, budget.totalSleep+wait, gitHubMaxRetryTotalSleep, err)
+				parentGraphQLResource, budget.totalSleep+wait, gitHubMaxRetryTotalSleep, errors.Join(statusErr, err))
 		}
 		if err := f.sleep(ctx, wait); err != nil {
 			return parentGraphQLIssues{}, err
@@ -189,7 +192,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 			return parentGraphQLIssues{}, gitHubRetry{}, fmt.Errorf("%s request failed: %s: read response body: %w",
 				parentGraphQLResource, resp.Status, readErr)
 		}
-		statusErr := gitHubGraphQLStatusError(resp.Status, body)
+		statusErr := gitHubStatusError(parentGraphQLResource, resp, body)
 		if graphQLHTTPStatusRetryable(resp.StatusCode, resp.Header, body) {
 			f.deferStatusRequests(binding, retryWait(resp.Header, f.now()))
 			return parentGraphQLIssues{}, gitHubRetry{
@@ -214,7 +217,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 			return parentGraphQLIssues{}, gitHubRetry{
 				Retryable: true,
 				Wait:      retryWait(resp.Header, f.now()),
-			}, graphQLErrorsError(out.Errors)
+			}, &issuesync.StatusError{HTTPStatus: resp.StatusCode, RateLimited: true, Message: graphQLErrorsError(out.Errors).Error()}
 		}
 		if graphQLErrorsFeatureUnsupported(out.Errors) {
 			return parentGraphQLIssues{}, gitHubRetry{}, errParentFeatureUnsupported
@@ -295,14 +298,6 @@ func graphQLHTTPStatusRetryable(status int, header http.Header, body []byte) boo
 	}
 	trimmed := strings.TrimSpace(string(body))
 	return status == http.StatusForbidden && strings.Contains(strings.ToLower(trimmed), "rate limit")
-}
-
-func gitHubGraphQLStatusError(status string, body []byte) error {
-	message := strings.TrimSpace(redactTokenMaterial(string(body)))
-	if message == "" {
-		return fmt.Errorf("%s request failed: %s", parentGraphQLResource, status)
-	}
-	return fmt.Errorf("%s request failed: %s: %s", parentGraphQLResource, status, message)
 }
 
 func graphQLErrorsRateLimited(errors []parentGraphQLError) bool {

@@ -21,6 +21,8 @@ type Progress struct {
 type ProgressTracker struct {
 	mu     sync.RWMutex
 	active map[int64]Progress
+	// OnResult receives each acquired pass result; set before runners start.
+	OnResult func(string, int64, error)
 }
 
 // NewProgressTracker creates a daemon-owned registry shared by its runners.

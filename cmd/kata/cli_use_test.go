@@ -692,3 +692,99 @@ func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
 		})
 	}
 }
+
+func TestOutcomesEmptySearchCLI(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		tty  bool
+		want int
+	}{
+		{"human", []string{"search", "missing", "--format", "human"}, true, 1},
+		{"json", []string{"search", "missing", "--json"}, true, 0},
+		{"continuation page", []string{"search", "needle", "--lexical", "--limit", "1", "--format", "human"}, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capture := &cliUseTelemetry{}
+			env := newCLIUseEnv(t, capture)
+			stubIsTTY(t, tc.tty)
+			if tc.name == "continuation page" {
+				project, err := env.DB.CreateProject(t.Context(), "kata")
+				require.NoError(t, err)
+				var issues []db.Issue
+				for range 2 {
+					issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "matching needle", Author: "example-user"})
+					require.NoError(t, err)
+					issues = append(issues, issue)
+				}
+				output, err := runCmdOutput(t, env, "search", "needle", "--lexical", "--limit", "1", "--json")
+				require.NoError(t, err)
+				var page struct {
+					Next string `json:"next_cursor"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(output), &page))
+				require.NotEmpty(t, page.Next)
+				for _, issue := range issues {
+					_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "example-user")
+					require.NoError(t, err)
+				}
+				tc.args = append(tc.args, "--cursor", page.Next)
+			} else {
+				_, err := env.DB.CreateProject(t.Context(), "kata")
+				require.NoError(t, err)
+			}
+			output, err := runCmdOutput(t, env, tc.args...)
+			if tc.name == "continuation page" {
+				require.Contains(t, output, "no matches")
+			}
+			require.NoError(t, err)
+			if tc.want > 0 {
+				capture.waitForCapture(t)
+			}
+			capture.mu.Lock()
+			defer capture.mu.Unlock()
+			count := 0
+			for _, event := range capture.events {
+				if event == "search_empty" {
+					count++
+				}
+			}
+			require.Equal(t, tc.want, count)
+		})
+	}
+}
+
+func TestOutcomesCLIShownErrors(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		tty  bool
+		want int
+	}{
+		{[]string{"create", "", "--format", "human"}, true, 1},
+		{[]string{"close", "missing", "--format", "human"}, true, 1},
+	} {
+		t.Run(strings.Join(tc.args, " ")+fmt.Sprint(tc.tty), func(t *testing.T) {
+			capture := &cliUseTelemetry{}
+			env := newCLIUseEnv(t, capture)
+			stubIsTTY(t, tc.tty)
+			cmd := newRootCmd()
+			cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			require.Error(t, err)
+			require.Empty(t, capture.recorded(), "unshown errors do not count")
+			var output bytes.Buffer
+			emitRootError(&output, cmd, tc.args, err, runEEntered)
+			require.NotEmpty(t, output.String())
+			if tc.want > 0 {
+				capture.waitForCapture(t)
+			}
+			require.Len(t, capture.recorded(), tc.want)
+			if tc.want > 0 {
+				require.Equal(t, "error_shown", capture.events[0])
+				kind := map[string]string{"create": "issue_created", "close": "issue_closed"}[tc.args[0]]
+				require.Equal(t, []map[string]any{{"surface": "cli", "kind": kind}}, capture.recorded())
+			}
+		})
+	}
+}

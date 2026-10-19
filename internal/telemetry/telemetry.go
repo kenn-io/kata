@@ -85,6 +85,15 @@ func NewReporter(opts Options) (*Reporter, error) {
 		posthog.WithAllowedEvent("issue_closed",
 			posthog.RequireProperty("surface", validSurfaces),
 		),
+		posthog.WithAllowedEvent("search_empty", posthog.RequireProperty("surface", validSurfaces)),
+		posthog.WithAllowedEvent("error_shown",
+			posthog.RequireProperty("surface", validSurfaces),
+			posthog.RequireProperty("kind", outcomeValues("issue_created", "issue_closed")),
+		),
+		posthog.WithAllowedEvent("sync_failed",
+			posthog.AllowProperty("sync_source", outcomeValues("github", "linear", "notion", "plane", "ticktick", "todoist", "twenty", "federation")),
+			posthog.AllowProperty("reason", outcomeValues("auth", "rate_limit", "server", "network", "timeout")),
+		),
 		posthog.WithAllowedEvent("session_ended",
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
 			posthog.AllowProperty("duration_bucket", posthog.AllowStringValues("under_1m", "1_to_5m", "5_to_30m", "over_30m")),
@@ -175,3 +184,14 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 
 var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
 var screenSurfaces = posthog.AllowStringValues("web", "tui")
+
+// outcomeValues collapses unlisted values without sending free text.
+func outcomeValues(values ...string) func(any) (any, bool) {
+	allowed := posthog.AllowStringValues(values...)
+	return func(value any) (any, bool) {
+		if kept, ok := allowed(value); ok {
+			return kept, true
+		}
+		return "other", true
+	}
+}
