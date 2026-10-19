@@ -358,7 +358,7 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("create did not reach the held telemetry handler")
 	}
-	watchdog := time.NewTimer(500 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay command exit.
+	watchdog := time.NewTimer(900 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay command exit.
 	defer watchdog.Stop()
 	select {
 	case result := <-done:

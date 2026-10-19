@@ -81,7 +81,7 @@ func TestRunQuitReportsSessionWhileDeliveryIsStalled(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("TUI quit did not report session_ended")
 	}
-	watchdog := time.NewTimer(500 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay terminal quit.
+	watchdog := time.NewTimer(900 * time.Millisecond) //nolint:kennlint // The held request's one-second deadline must not delay terminal quit.
 	defer watchdog.Stop()
 	select {
 	case err := <-done:

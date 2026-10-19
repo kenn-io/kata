@@ -1069,8 +1069,11 @@ The report never starts a daemon, waits at most 50 ms at exit, and prints nothin
 Its request has a separate one-second deadline.
 A slow remote report can miss the 50 ms exit wait and leave its daily marker
 unwritten if the process exits before handling the response.
-A later eligible command can retry, even if the daemon already accepted the report.
-The daemon separately deduplicates `app_opened` per surface per UTC day.
+Until a response is handled and the marker is written, every later eligible
+command may issue another POST and wait up to 50 ms, even if the daemon already
+accepted the report.
+The daemon separately deduplicates `app_opened` per surface per UTC day until
+it restarts.
 
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
