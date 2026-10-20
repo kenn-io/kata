@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"os/exec"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx driver as "pgx"
@@ -15,20 +14,18 @@ import (
 
 func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	if testing.Short() {
-		t.Skip("testcontainer requires docker; skip on -short")
+		t.Skip("PostgreSQL service test skipped on -short")
 	}
-	if os.Getenv("KATA_TEST_POSTGRES_DSN") == "" {
+	baseDSN := os.Getenv("KATA_TEST_POSTGRES_DSN")
+	if baseDSN == "" {
 		t.Skip("explicit PostgreSQL service requires KATA_TEST_POSTGRES_DSN")
 	}
 	ctx := context.Background()
-	baseDSN, baseCleanup := testenv.NewPostgresContainer(t, ctx)
-	t.Cleanup(baseCleanup)
 	base, err := sql.Open("pgx", baseDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = base.Close() })
 	var baseStart string
 	require.NoError(t, base.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text`).Scan(&baseStart))
-	t.Setenv("KATA_TEST_POSTGRES_DSN", baseDSN)
 
 	isolatedDSN, isolatedCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(isolatedCleanup)
@@ -131,15 +128,11 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	server, err := sql.Open("pgx", serverDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	cmd := exec.Command(os.Args[0], "-test.run=^$") //nolint:gosec // G204: run this test binary with no tests selected.
-	require.NoError(t, cmd.Start())
-	deadPID := cmd.Process.Pid
-	require.NoError(t, cmd.Wait())
-	abandoned := fmt.Sprintf("kata_template_%d_1", deadPID)
-	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`) //nolint:gosec // G701: name contains only a fixed prefix and an integer PID.
+	const abandoned = "kata_template_999999_1"
+	_, err = server.ExecContext(ctx, `CREATE DATABASE kata_template_999999_1`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`) //nolint:gosec // G701: name contains only a fixed prefix and an integer PID.
+		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS kata_template_999999_1`)
 	})
 	exists := func(name string) bool {
 		var found bool
