@@ -76,9 +76,8 @@ func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testi
 	require.False(t, remaining, "cleanup must drop the test database")
 }
 
-// Template clones share the configured or automatic PostgreSQL server,
-// prepare their seed data once, and isolate each test's database.
-func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
+// Templates prepare their seed data once and give each test an isolated clone.
+func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 	if testing.Short() {
 		t.Skip("PostgreSQL template test skipped on -short")
 	}
@@ -105,12 +104,9 @@ func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 		}
 	}
 	first, closeFirst := open(t)
+	t.Cleanup(closeFirst)
 	second, closeSecond := open(t)
 	t.Cleanup(closeSecond)
-	var firstStart, secondStart, firstName, secondName string
-	require.NoError(t, first.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&firstStart, &firstName))
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&secondStart, &secondName))
-	require.Equal(t, firstStart, secondStart, "tests in one process must reuse the server")
 	require.Equal(t, 1, prepared, "the template is prepared once per server")
 	for _, database := range []*sql.DB{first, second} {
 		var value string
@@ -122,10 +118,6 @@ func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 	var copies int
 	require.NoError(t, second.QueryRowContext(ctx, `SELECT count(*) FROM seeded`).Scan(&copies))
 	require.Equal(t, 1, copies, "each clone must be isolated")
-	closeFirst()
-	var remaining bool
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
-	require.False(t, remaining, "cleanup must drop the test database")
 }
 
 // Templates outlive the test process that built them. A later process drops
