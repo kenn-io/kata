@@ -8,6 +8,7 @@
     "js-yaml": "4.3.2",
     "markdown-it": "14.3.2",
     "nanoid": "3.3.18",
-    "undici": "7.29.1"
+    "undici": "7.29.1",
+    "vite": "8.1.6"
   }
 }
