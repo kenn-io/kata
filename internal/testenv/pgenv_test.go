@@ -16,6 +16,9 @@ func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
 	if testing.Short() {
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
+	if os.Getenv("KATA_TEST_POSTGRES_DSN") == "" {
+		t.Skip("explicit PostgreSQL service requires KATA_TEST_POSTGRES_DSN")
+	}
 	ctx := context.Background()
 	baseDSN, baseCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(baseCleanup)
