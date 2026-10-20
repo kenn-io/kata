@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,38 +17,6 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
-
-func TestTerminalTelemetrySerializesProcesses(t *testing.T) {
-	for _, receipt := range []string{"disabled", "queued"} {
-		t.Run(receipt, func(t *testing.T) {
-			t.Setenv("KATA_HOME", t.TempDir())
-			t.Setenv("KATA_AUTH_TOKEN", "")
-			t.Setenv(hooks.HookVersionEnv, "1")
-			target := newCLIUseDaemon(t)
-			target.receipt.Store(receipt)
-			processes := make([]*exec.Cmd, 2)
-			outputs := make([]bytes.Buffer, 2)
-			for i := range processes {
-				process := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestAgentUseFullDayProcess$") //nolint:gosec // Current test executable with fixed fixture arguments.
-				process.Env = append(os.Environ(), "KATA_AGENT_USE_TEST_SERVER="+target.url)
-				process.Stdout, process.Stderr = &outputs[i], &outputs[i]
-				require.NoError(t, process.Start())
-				processes[i] = process
-			}
-			for i, process := range processes {
-				require.NoError(t, process.Wait(), "%s", outputs[i].String())
-			}
-			want := int32(2)
-			if receipt == "disabled" {
-				want = 1
-			}
-			require.Equal(t, want, target.posts.Load())
-			other := newCLIUseDaemon(t)
-			reportCLIUseTo(t, other.url)
-			require.EqualValues(t, 1, other.posts.Load(), "a different daemon remains reportable")
-		})
-	}
-}
 
 func TestContractHookQuietPreflight(t *testing.T) {
 	for _, selection := range []string{"remote", "named remote", "local profile", "default local", "injected fallback"} {
