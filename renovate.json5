@@ -1,0 +1,153 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+
+  // Routine updates open once a week as one batch. Security fixes ignore the
+  // schedule (see below).
+  extends: ['config:recommended', 'schedule:weekly'],
+  dependencyDashboard: true,
+
+  // A human reviews and merges every Renovate PR.
+  automerge: false,
+
+  labels: ['dependencies'],
+
+  // Let a release age before adopting it, so a compromised fresh publish is
+  // less likely to land. Security fixes skip the wait. strict keeps Renovate
+  // from creating a branch until the wait has passed. CI runs only on pull
+  // requests, so the PR must open right away to get checks.
+  minimumReleaseAge: '7 days',
+  minimumReleaseAgeBehaviour: 'timestamp-required',
+  prCreation: 'immediate',
+  internalChecksFilter: 'strict',
+  osvVulnerabilityAlerts: true,
+  // Security fixes share one PR. They skip the wait and the schedule, so they
+  // cannot ride in the routine ecosystem PRs below.
+  vulnerabilityAlerts: {
+    minimumReleaseAge: null,
+    prCreation: 'immediate',
+    labels: ['dependencies', 'security'],
+    groupName: 'security fixes',
+    groupSlug: 'security-fixes',
+  },
+
+  // Routine updates arrive as one PR per ecosystem, majors included. Bun
+  // lockfiles get no weekly refresh, because Renovate cannot hold bun to the
+  // wait.
+  separateMajorMinor: false,
+
+  packageRules: [
+    {
+      matchManagers: ['npm', 'bun'],
+      groupName: 'npm packages',
+    },
+    {
+      matchManagers: ['github-actions'],
+      groupName: 'github actions',
+      // Keep actions pinned to commit SHAs; Renovate bumps the digest and
+      // rewrites the trailing version comment.
+      pinDigests: true,
+    },
+    {
+      // The golangci-lint and kit lint plugin pins in .custom-gcl.yml come from
+      // the go datasource, so they join the Go PR.
+      matchDatasources: ['go'],
+      groupName: 'go modules',
+      postUpdateOptions: ['gomodTidy'],
+    },
+    {
+      matchManagers: ['mise'],
+      groupName: 'mise tools',
+    },
+    {
+      matchDatasources: ['pypi'],
+      groupName: 'python packages',
+    },
+    {
+      // Docker images appear in Dockerfiles, compose files, and workflow
+      // services, so match the datasource rather than the manager.
+      matchDatasources: ['docker'],
+      groupName: 'docker images',
+    },
+    {
+      // go.mod, mise.toml, and the federation image's golang base pin the same
+      // Go. Move them in one PR so the tested and shipped compilers match.
+      // These rules come after the docker and mise rules so this group wins.
+      matchDatasources: ['docker'],
+      matchPackageNames: ['golang'],
+      groupName: 'go toolchain',
+    },
+    {
+      matchDatasources: ['golang-version'],
+      groupName: 'go toolchain',
+    },
+    {
+      matchManagers: ['mise'],
+      matchDepNames: ['go'],
+      groupName: 'go toolchain',
+    },
+    {
+      // package.json, the setup-bun steps, and mise.toml pin the same Bun, and
+      // .node-version and the setup-node steps pin the same Node. Move each
+      // runtime in one PR so the pins stay equal.
+      matchDepNames: ['bun', 'node'],
+      groupName: 'npm packages',
+    },
+    {
+      // mise.toml, .custom-gcl.yml, and the Makefile pin the same
+      // golangci-lint, so local and CI lint runs build the same binary.
+      matchDepNames: [
+        'golangci/golangci-lint',
+        'github:golangci/golangci-lint',
+        'github.com/golangci/golangci-lint/v2',
+      ],
+      groupName: 'golangci-lint',
+    },
+    {
+      // Vite+ supplies the build and test tools. Update its aliases and
+      // overrides together so every workspace uses one toolchain.
+      matchPackageNames: [
+        'vite-plus',
+        '/^@voidzero-dev\\/vite-plus/',
+        'vite',
+        'vitest',
+        '/^@vitest\\//',
+        '@sveltejs/vite-plugin-svelte',
+      ],
+      groupName: 'Vite Plus toolchain',
+      groupSlug: 'vite-plus',
+    },
+    {
+      // TypeScript 7.0 does not expose the compiler API that svelte-check
+      // needs.
+      matchPackageNames: ['typescript'],
+      allowedVersions: '!/^(7\\.0\\.)/',
+    },
+  ],
+
+  customManagers: [
+    {
+      // .custom-gcl.yml pins the golangci-lint release and the kit lint plugin
+      // that the custom linter is built from.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.custom-gcl\\.yml$/'],
+      matchStrings: ['(?:^|\\n)version: (?<currentValue>\\S+)'],
+      depNameTemplate: 'github.com/golangci/golangci-lint/v2',
+      datasourceTemplate: 'go',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.custom-gcl\\.yml$/'],
+      matchStrings: ['- module: (?<depName>\\S+)\\n\\s+import: \\S+\\n\\s+version: (?<currentValue>\\S+)'],
+      datasourceTemplate: 'go',
+    },
+    {
+      // The Makefile passes the same golangci-lint version to
+      // `golangci-lint custom`.
+      customType: 'regex',
+      managerFilePatterns: ['/^Makefile$/'],
+      matchStrings: ['golangci-lint custom .*--version (?<currentValue>v\\S+)'],
+      depNameTemplate: 'github.com/golangci/golangci-lint/v2',
+      datasourceTemplate: 'go',
+    },
+  ],
+}
