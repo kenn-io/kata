@@ -6924,6 +6924,7 @@ components:
         from_qualified_id:
           type: string
         from_status:
+          description: Current status of the from_issue_uid issue.
           type: string
         id:
           format: int64
@@ -6936,6 +6937,7 @@ components:
         to_qualified_id:
           type: string
         to_status:
+          description: Current status of the to_issue_uid issue.
           type: string
         type:
           type: string
@@ -7053,6 +7055,7 @@ components:
             $ref: "#/components/schemas/UIIssue"
           type: array
         collection_links:
+          description: "Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, status, owner, label, relationship, schedule, or limit filters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero)."
           items:
             $ref: "#/components/schemas/UILink"
           type: array
