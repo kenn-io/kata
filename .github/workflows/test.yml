@@ -330,7 +330,61 @@ jobs:
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off ./...
+        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $(go list ./... | grep -v '^go.kenn.io/kata/cmd/kata$')
+
+  windows-cli:
+    name: Windows CLI (${{ matrix.shard }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: A-E and G-S
+            run: '^Test([A-E]|[G-S])'
+            skip: '^$'
+          - shard: remaining
+            run: '.'
+            skip: '^Test([A-E]|[G-S])'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Windows Go directories
+        shell: pwsh
+        run: |
+          foreach ($name in @('GOCACHE', 'GOMODCACHE', 'GOTMPDIR', 'TMP', 'TEMP')) {
+            $path = Join-Path $env:RUNNER_TEMP $name
+            New-Item -ItemType Directory -Force -Path $path | Out-Null
+            "$name=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The Windows job alone saves the complete build, vet, and test cache.
+      - name: Restore shared Go cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: |
+            ${{ env.GOMODCACHE }}
+            ${{ env.GOCACHE }}
+          key: setup-go-Windows-x64-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+
+      - name: Run CLI tests
+        shell: bash
+        env:
+          KATA_TEST_FAST_SQLITE: "1"
+          KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
+          TEST_RUN: ${{ matrix.run }}
+          TEST_SKIP: ${{ matrix.skip }}
+        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
     name: golangci-lint
