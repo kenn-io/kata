@@ -38,13 +38,12 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	require.Equal(t, baseStart, isolatedStart, "the isolated database must use the explicit server")
 }
 
-// Starting a PostgreSQL container dominates small storage tests, so every
-// test in one process shares a server and receives its own database.
-func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testing.T) {
+// Template clones share the configured or automatic PostgreSQL server,
+// prepare their seed data once, and isolate each test's database.
+func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
-	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
 	ctx := context.Background()
 	prepared := 0
 	template := testenv.NewPostgresTemplate(func(ctx context.Context, dsn string) error {
@@ -98,7 +97,6 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
-	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
 	ctx := context.Background()
 	serverDSN, serverCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(serverCleanup)
@@ -106,11 +104,11 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	server, err := sql.Open("pgx", serverDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	const abandoned = "kata_template_999999_1"
-	_, err = server.ExecContext(ctx, `CREATE DATABASE kata_template_999999_1`)
+	abandoned := fmt.Sprintf("kata_template_%d_999", os.Getpid())
+	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS kata_template_999999_1`)
+		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`)
 	})
 	exists := func(name string) bool {
 		var found bool
