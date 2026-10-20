@@ -244,14 +244,14 @@ func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 }
 
 func TestLocalProfileEnvironmentPassesThroughTelemetrySettings(t *testing.T) {
-	for _, tc := range []struct{ key, value string }{
-		{"KATA_TELEMETRY_ENABLED", "0"},
-		{"TELEMETRY_ENABLED", "0"},
-		{"DO_NOT_TRACK", "1"},
-		{"CI", "true"},
-		{"CI", ""},
+	for _, tc := range []struct{ name, key, value string }{
+		{"KATA_TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED", "0"},
+		{"TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "0"},
+		{"DO_NOT_TRACK", "DO_NOT_TRACK", "1"},
+		{"CI", "CI", "true"},
+		{"CI empty", "CI", ""},
 	} {
-		t.Run(tc.key, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			for _, key := range []string{"KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
 				t.Setenv(key, "")
 				require.NoError(t, os.Unsetenv(key))
