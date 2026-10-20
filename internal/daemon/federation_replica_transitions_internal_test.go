@@ -27,14 +27,14 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 		{
 			name: "prepared leave is leave-pending",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
+				r.markLeavePending(key, 1)
 			},
 			want: federationReplicaLeavePending,
 		},
 		{
 			name: "completed leave is left",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
+				r.markLeavePending(key, 1)
 				r.markLeft(key)
 			},
 			want: federationReplicaLeft,
@@ -49,7 +49,7 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 		{
 			name: "rolled back preparation is idle again",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
+				r.markLeavePending(key, 1)
 				r.clearLeave(key)
 			},
 			want: federationReplicaIdle,
@@ -57,7 +57,7 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 		{
 			name: "released preparation is idle again",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.releasePreparedLeave(key, r.markLeavePending(key))
+				r.releasePreparedLeave(key, r.markLeavePending(key, 1))
 			},
 			want: federationReplicaIdle,
 		},
@@ -65,15 +65,15 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 			name: "released retry of a completed leave is left again",
 			apply: func(r *federationReplicaRegistry, key string) {
 				r.markLeft(key)
-				r.releasePreparedLeave(key, r.markLeavePending(key))
+				r.releasePreparedLeave(key, r.markLeavePending(key, 1))
 			},
 			want: federationReplicaLeft,
 		},
 		{
 			name: "releasing one of two preparations stays pending",
 			apply: func(r *federationReplicaRegistry, key string) {
-				first := r.markLeavePending(key)
-				r.markLeavePending(key)
+				first := r.markLeavePending(key, 1)
+				r.markLeavePending(key, 1)
 				r.releasePreparedLeave(key, first)
 				r.releasePreparedLeave(key, first)
 				r.releasePreparedLeave(key, "unknown-preparation")
@@ -99,7 +99,7 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 
 func TestFederationReplicaRegistryForgetsIdleKeys(t *testing.T) {
 	registry := newTestFederationReplicaRegistry()
-	registry.markLeavePending("key")
+	registry.markLeavePending("key", 1)
 	registry.clearLeave("key")
 	assert.Empty(t, registry.transitions,
 		"an idle key with nothing in flight must not retain a record")
@@ -124,7 +124,7 @@ func TestFederationReplicaRegistryBlocksEntryPerLeaveState(t *testing.T) {
 		{
 			name: "prepared leave blocks with the pending message",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
+				r.markLeavePending(key, 1)
 			},
 			message: "explicit federation leave is pending",
 		},

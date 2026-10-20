@@ -25,10 +25,11 @@ const (
 // the drain accounting for hub operations already in flight for that mapping.
 type federationReplicaTransition struct {
 	state federationReplicaTransitionState
-	// preparations holds the IDs of leave preparations that have neither
-	// completed nor been released. The mapping stays leave-pending while any
-	// remains, so releasing one of two concurrent leaves keeps it blocked.
-	preparations map[string]struct{}
+	// preparations maps the ID of each leave preparation that has neither
+	// completed nor been released to the project that prepared it. The
+	// mapping stays leave-pending while any remains, so releasing one of two
+	// concurrent leaves keeps it blocked.
+	preparations map[string]int64
 	// releasedState is the state restored when the last preparation is
 	// released: left when a leave was retried after it had completed, so the
 	// mapping stays suppressed, and idle otherwise.
@@ -174,9 +175,9 @@ func waitFederationReplicaOperations(ctx context.Context, key string) error {
 	}
 }
 
-// markLeavePending records that an explicit leave was durably prepared and
-// returns the new preparation's ID for releasePreparedLeave.
-func (r *federationReplicaRegistry) markLeavePending(key string) string {
+// markLeavePending records that projectID durably prepared an explicit leave
+// and returns the new preparation's ID for releasePreparedLeave.
+func (r *federationReplicaRegistry) markLeavePending(key string, projectID int64) string {
 	preparationID := rand.Text()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -190,22 +191,24 @@ func (r *federationReplicaRegistry) markLeavePending(key string) string {
 	}
 	transition.state = federationReplicaLeavePending
 	if transition.preparations == nil {
-		transition.preparations = make(map[string]struct{})
+		transition.preparations = make(map[string]int64)
 	}
-	transition.preparations[preparationID] = struct{}{}
+	transition.preparations[preparationID] = projectID
 	return preparationID
 }
 
-// preparationOutstanding reports whether preparationID still holds key's leave.
-func (r *federationReplicaRegistry) preparationOutstanding(key, preparationID string) bool {
+// preparationKey returns the key that projectID's outstanding preparation
+// preparationID holds. It searches every key because a project can be renamed
+// after it prepared a leave, and its key may embed the old name.
+func (r *federationReplicaRegistry) preparationKey(preparationID string, projectID int64) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	transition, ok := r.transitions[key]
-	if !ok {
-		return false
+	for key, transition := range r.transitions {
+		if owner, held := transition.preparations[preparationID]; held && owner == projectID {
+			return key, true
+		}
 	}
-	_, held := transition.preparations[preparationID]
-	return held
+	return "", false
 }
 
 // releasePreparedLeave releases one preparation of a leave that stopped before

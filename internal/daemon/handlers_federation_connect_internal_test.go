@@ -184,7 +184,7 @@ func TestBridgeConnectDoesNotReserveWhileLeaveIsPending(t *testing.T) {
 	}
 	key := federationReplicaTransitionKey(store, body.ProjectName)
 	ensureFederationReplicaMu.Lock()
-	federationReplicaTransitions.markLeavePending(key)
+	federationReplicaTransitions.markLeavePending(key, 1)
 	ensureFederationReplicaMu.Unlock()
 	t.Cleanup(func() {
 		ensureFederationReplicaMu.Lock()

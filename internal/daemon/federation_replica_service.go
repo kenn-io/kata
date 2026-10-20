@@ -299,7 +299,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// concurrent reconciler record success for a leave that then fails to
 	// prepare, and rolling the publish back would erase a completed leave's
 	// suppression when a retried prepare fails.
-	preparationID := federationReplicaTransitions.markLeavePending(key)
+	preparationID := federationReplicaTransitions.markLeavePending(key, project.ID)
 	ensureFederationReplicaMu.Unlock()
 
 	// A preparation that fails from here on never reaches its client, which
@@ -354,8 +354,9 @@ var ErrFederationReplicaLeaveStarted = errors.New("federation leave has started"
 // identified by preparationID after its leave stopped before local teardown,
 // such as when the hub revoke failed. Once no other preparation remains,
 // rebind, join, and config reconciliation work again without a daemon restart.
-// An unknown or already released preparation is a successful no-op, so a
-// retried abort never releases another leave's preparation.
+// An unknown or already released preparation, or one that another project
+// prepared, is a successful no-op, so a retried abort never releases another
+// leave's preparation. A rename after prepare does not hide the preparation.
 //
 // A durable leave marker, a detached binding, or an archived project keeps the
 // leave pending and returns ErrFederationReplicaLeaveStarted: those leaves must
@@ -396,10 +397,10 @@ func AbortFederationReplicaLeave(
 	if credentialFound && credential.LeavePending {
 		return fmt.Errorf("%w: the credential is marked for leave", ErrFederationReplicaLeaveStarted)
 	}
-	// Prepare keys a provider-backed reservation by its request, like every
-	// other hub operation for it.
-	key := federationReplicaOperationKey(store, project.Name, match.Credential)
-	if !federationReplicaTransitions.preparationOutstanding(key, preparationID) {
+	// Find the preparation's own key: the project may have been renamed since
+	// it prepared, and a provider-backed key names the provider request.
+	key, held := federationReplicaTransitions.preparationKey(preparationID, project.ID)
+	if !held {
 		return nil
 	}
 	if project.DeletedAt != nil {

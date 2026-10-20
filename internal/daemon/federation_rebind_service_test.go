@@ -843,6 +843,32 @@ func TestAbortFederationReplicaLeaveReleasesOnlyItsPreparation(t *testing.T) {
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
 }
 
+// The leave registry keys a manually enrolled spoke by its project name, and a
+// project can be renamed while its leave is prepared. Abort must still release
+// the preparation, and only through the project that prepared it.
+func TestAbortFederationReplicaLeaveAfterProjectRename(t *testing.T) {
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+	other, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	require.NoError(t, err)
+	_, err = store.RenameProject(t.Context(), project.ID, "renamed-project")
+	require.NoError(t, err)
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, other.ID, prepared.PreparationID))
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"another project's abort must not release this preparation")
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
+
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"configuration that reuses the old name must not stay suppressed")
+	_, err = store.RenameProject(t.Context(), project.ID, project.Name)
+	require.NoError(t, err)
+	require.NoError(t, rebindToTarget(t, store, credentials, project))
+}
+
 // Provider-backed and config-managed preparations durably mark the
 // reservation, so abort must refuse them however the registry is keyed and
 // even after a daemon restart has emptied it.
