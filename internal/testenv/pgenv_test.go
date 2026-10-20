@@ -104,7 +104,7 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	server, err := sql.Open("pgx", serverDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	abandoned := fmt.Sprintf("kata_template_%d_999", os.Getpid())
+	abandoned := fmt.Sprintf("kata_template_%d_%d", os.Getpid(), ^uint64(0))
 	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
