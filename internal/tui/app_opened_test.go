@@ -424,96 +424,56 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 	recorder := &recordingTelemetry{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 	for _, tc := range []struct {
-		name, query                 string
-		match, form, fresh, down    bool
-		pendingScope                string
-		repeat, statusChange, cycle bool
-		want                        int
+		name                                                             string
+		repeat, statusChange, cycle, edit, match, preview, down, loading bool
+		want                                                             int
 	}{
-		{name: "empty", query: "missing", want: 1},
-		{name: "repeat", query: "missing", repeat: true, want: 1},
-		{name: "status after empty", query: "missing", repeat: true, statusChange: true, want: 1},
-		{name: "query cycle", query: "missing", cycle: true, want: 3},
-		{name: "status while loading", query: "Example", pendingScope: "same scope", statusChange: true},
-		{name: "empty from results", query: "missing", down: true, want: 1},
-		{name: "match", query: "Example", match: true},
-		{name: "blank", query: " "},
-		{name: "unchanged filter form", query: "missing", form: true},
-		{name: "changed filter form", query: "missing", form: true, fresh: true, want: 1},
-		{name: "same scope", query: "missing", pendingScope: "same scope", want: 1},
-		{name: "daemon", query: "missing", pendingScope: "daemon", want: 1},
-		{name: "project", query: "missing", pendingScope: "project", want: 1},
+		{name: "empty", want: 1},
+		{name: "repeat", repeat: true, want: 1},
+		{name: "status after empty", repeat: true, statusChange: true, want: 1},
+		{name: "query cycle", cycle: true, want: 3},
+		{name: "type and delete", edit: true, want: 2},
+		{name: "match", match: true, loading: true},
+		{name: "preview", preview: true},
+		{name: "empty from results", down: true, want: 1},
+		{name: "loaded empty", loading: true, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder.captured = nil
-			recorder.events = nil
+			recorder.captured, recorder.events = nil, nil
 			m := mFixtureForBar()
-			m.telemetry = newTelemetryGate()
 			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-			m.list.loading = tc.pendingScope != ""
-			if tc.match {
-				m.list.issues = []Issue{{UID: "example-issue", Title: "Example"}}
-			}
+			m.list.loading = tc.loading
 			m = openBarFromCmd(t, m, '/')
-			var cmd tea.Cmd
-			for _, r := range tc.query {
+			for _, r := range "missing" {
+				var cmd tea.Cmd
 				m, cmd = stepModel(m, runeKey(r))
 				runCmd(cmd)
 			}
 			require.Empty(t, recorder.captured, "typing is only a preview")
-			if tc.form {
-				if tc.fresh {
-					m.list.filter.Search = ""
-				}
-				m, cmd = m.commitFilterForm(newFilterForm(ListFilter{Search: tc.query}, scope{}))
-			} else {
-				if tc.down {
-					m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
-					runCmd(cmd)
-				}
-				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			if tc.preview {
+				return
 			}
+			if tc.down {
+				m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+			}
+			m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 			runCmd(cmd)
-			if tc.pendingScope != "" {
+			if tc.loading {
 				require.Empty(t, recorder.captured)
-				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-				runCmd(cmd)
-				if tc.statusChange {
-					m.list.filter.Status = "closed"
-				}
-				switch tc.pendingScope {
-				case "daemon":
-					m, _ = m.installDaemonConnection(daemonConnection{
-						api:  NewClient(env.URL, env.HTTP),
-						init: bootInit{scope: m.scope, view: viewList},
-					})
-				case "project":
-					m.projectsCursor = 0
-					m, _ = m.applyProjectsViewSelection([]projectsRow{{projectID: 99, name: "example-project"}})
-				}
-				if tc.pendingScope != "same scope" {
-					m.list.loading = true
-					m = openBarFromCmd(t, m, '/')
-					for _, r := range tc.query {
-						m, cmd = stepModel(m, runeKey(r))
-						runCmd(cmd)
-					}
-					require.Empty(t, recorder.captured, "typing is only a preview")
-					m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-					runCmd(cmd)
-				}
 				load := initialFetchMsg{dispatchKey: m.currentCacheKey()}
-				if tc.statusChange {
-					load.issues = []Issue{{UID: "example-issue", Title: "Example", Status: "open"}}
+				if tc.match {
+					load.issues = []Issue{{UID: "example-issue", Title: "missing"}}
 				}
 				m, cmd = stepModel(m, load)
+				runCmd(cmd)
+				m, cmd = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey()})
 				runCmd(cmd)
 			}
 			if tc.repeat {
 				if tc.statusChange {
 					m.list.filter.Status = "closed"
 				}
-				m, cmd = m.submitSearch()
+				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 				runCmd(cmd)
 			}
 			if tc.cycle {
@@ -525,226 +485,86 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 					runCmd(cmd)
 				}
 			}
-			require.Len(t, recorder.captured, tc.want)
-			if tc.want > 0 {
-				for _, event := range recorder.events {
-					require.Equal(t, "search_empty", event)
-				}
-				require.Equal(t, map[string]any{"surface": "tui"}, recorder.captured[0])
-			}
-			if tc.pendingScope != "" {
-				_, cmd = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey()})
+			if tc.edit {
+				m, _ = stepModel(m, runeKey('/'))
+				m, cmd = stepModel(m, runeKey('x'))
 				runCmd(cmd)
-				require.Len(t, recorder.captured, tc.want)
+				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+				runCmd(cmd)
+				m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				runCmd(cmd)
+			}
+			require.Len(t, recorder.captured, tc.want)
+			for i, event := range recorder.events {
+				require.Equal(t, "search_empty", event)
+				require.Equal(t, map[string]any{"surface": "tui"}, recorder.captured[i])
 			}
 		})
 	}
 }
 
 func TestOutcomesShownFormErrors(t *testing.T) {
-	recorder := &recordingTelemetry{}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	for _, tc := range []struct{ origin, kind string }{{"form", "create"}, {"form", "close"}, {"detail", "close"}} {
-		t.Run(tc.origin+"/"+tc.kind, func(t *testing.T) {
-			recorder.captured, recorder.events = nil, nil
-			m := mFixtureForBar()
-			m.width, m.height = 100, 40
-			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
-			m.detail.loading = false
-			m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
-			m.telemetry = newTelemetryGate()
-			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-			m.input = newNewIssueForm()
-			if tc.origin == "detail" {
-				m.input = inputState{}
-			}
-			if tc.kind == "close" && tc.origin == "form" {
-				m.input = newCloseForm(formTarget{})
-			}
-			m.input.formGen = 2
-			m.view, m.detail.gen, m.pendingRefetch = viewDetail, 2, true
-			next, cmd := m.Update(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 1, gen: 1, err: fmt.Errorf("refused")})
-			runCmd(cmd)
-			require.Empty(t, recorder.captured, "discarded response")
-			next, cmd = next.(Model).Update(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 2, gen: 2, err: fmt.Errorf("refused")})
-			if tc.origin == "form" {
-				require.Contains(t, next.(Model).input.err, "refused")
-			} else {
-				require.ErrorContains(t, next.(Model).detail.err, "refused")
-			}
-			runCmd(cmd)
-			require.Equal(t, []string{"error_shown"}, recorder.events)
-			require.Equal(t, []map[string]any{{"surface": "tui", "kind": map[string]string{"create": "issue_created", "close": "issue_closed"}[tc.kind]}}, recorder.captured)
-		})
-	}
 	for _, tc := range []struct {
-		name, origin string
-		view         viewID
-		want         int
+		name, origin, kind, want string
+		failed, help             bool
 	}{
-		{"list under help", "list", viewHelp, 0},
-		{"detail under help", "detail", viewHelp, 0},
-		{"unfocused detail status", "detail", viewList, 0},
+		{"create", "form", "create", "issue_created", true, false},
+		{"list close", "list", "close", "issue_closed", true, false},
+		{"detail close", "detail", "close", "issue_closed", true, false},
+		{"success", "list", "close", "", false, false},
+		{"label", "detail", "label-add", "", true, false},
+		{"help", "list", "close", "issue_closed", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder.captured, recorder.events = nil, nil
-			m := mFixtureForBar()
-			m.width, m.height = 100, 40
-			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
-			m.detail.loading = false
-			m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
-			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-			m.view, m.layout, m.focus = tc.view, splitlayout.Split, focusList
-			if tc.origin == "detail" && tc.view == viewHelp {
-				m.focus = focusDetail
-			}
-			m.detail.gen = 2
-			m.telemetryScreen = m.screenName()
-			_, cmd := m.Update(mutationDoneMsg{origin: tc.origin, kind: "close", gen: 2, err: fmt.Errorf("refused")})
-			runCmd(cmd)
-			require.Len(t, recorder.captured, tc.want)
-		})
-	}
-	for _, kind := range []inputKind{inputNewIssueForm, inputCloseForm} {
-		recorder.captured = nil
-		recorder.events = nil
-		m := mFixtureForBar()
-		m.width, m.height = 100, 40
-		m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
-		m.detail.loading = false
-		m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
-		m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-		m.input = newNewIssueForm()
-		if kind == inputCloseForm {
-			m.input = newCloseForm(formTarget{})
-		}
-		m, cmd := m.commitFormInput(kind)
-		require.NotEmpty(t, m.input.err)
-		runCmd(cmd)
-		expected := "issue_created"
-		if kind == inputCloseForm {
-			expected = "issue_closed"
-		}
-		require.Equal(t, []string{"error_shown"}, recorder.events)
-		require.Equal(t, []map[string]any{{"surface": "tui", "kind": expected}}, recorder.captured)
-	}
-}
-
-func TestOutcomesErrorFirstVisible(t *testing.T) {
-	for _, origin := range []string{"list", "detail"} {
-		for _, hidden := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/help=%t", origin, hidden), func(t *testing.T) {
-				recorder := &recordingTelemetry{}
-				errorCount := func() int {
-					count := 0
-					for _, event := range recorder.events {
-						if event == "error_shown" {
-							count++
-						}
-					}
-					return count
-				}
-				env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-				m := mFixtureForBar()
-				m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-				m.width, m.height = 100, 40
-				m.list.loading = false
-				m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
-				m.detail.loading = false
-				m.view, m.detail.gen = viewList, 2
-				if origin == "detail" {
-					m.view = viewDetail
-				}
-				if hidden {
-					m, _ = updateModel(m, runeKey('?'))
-					require.Equal(t, viewHelp, m.view)
-				}
-				m, cmd := updateModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2, err: fmt.Errorf("refused")})
-				runCmd(cmd)
-				if hidden {
-					require.Zero(t, errorCount())
-					m, cmd = updateModel(m, runeKey('?'))
-					runCmd(cmd)
-				}
-				require.Contains(t, stripANSI(m.viewContent()), "refused")
-				require.Equal(t, 1, errorCount())
-				for range 2 {
-					m, cmd = updateModel(m, runeKey('?'))
-					runCmd(cmd)
-				}
-				m, cmd = updateModel(m, tea.FocusMsg{})
-				runCmd(cmd)
-				require.Equal(t, 1, errorCount(), "later frames and Help returns keep the same count")
-			})
-		}
-	}
-}
-
-func TestOutcomesRetainedSearchError(t *testing.T) {
-	recorder := &recordingTelemetry{}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
-	m, cleanup := splitTestSetup(t)
-	defer cleanup()
-	m.list.issues = []Issue{
-		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "original row", Status: "open"},
-		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row", Status: "open"},
-	}
-	m.list.cursor, m.list.selectedProjectID = 0, 7
-	m.list.selectedUID = "01TEST-aaa1"
-	seed := m.list.issues[0]
-	m.detail = detailModel{issue: &seed, scopePID: 7, gen: 41}
-	m.nextGen = 41
-	m = openBarFromCmd(t, m, '/')
-	for _, r := range "target" {
-		m, _ = stepModel(m, runeKey(r))
-	}
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, "01TEST-bbb2", m.detail.issue.UID)
-	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-	m, cmd := stepModel(m, mutationDoneMsg{origin: "detail", kind: "close", gen: 41, err: fmt.Errorf("retained refusal")})
-	runCmd(cmd)
-	require.NotContains(t, recorder.events, "error_shown")
-	require.NotContains(t, stripANSI(m.viewContent()), "retained refusal")
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	runCmd(cmd)
-	require.NotContains(t, recorder.events, "error_shown", "the list still owns the shared status line")
-	m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
-	runCmd(cmd)
-	require.Contains(t, stripANSI(m.viewContent()), "retained refusal")
-	require.Contains(t, recorder.events, "error_shown")
-	m, cmd = stepModel(m, tea.FocusMsg{})
-	runCmd(cmd)
-	count := 0
-	for _, event := range recorder.events {
-		if event == "error_shown" {
-			count++
-		}
-	}
-	require.Equal(t, 1, count)
-}
-
-func TestOutcomesReplacedHiddenError(t *testing.T) {
-	for _, origin := range []string{"list", "detail"} {
-		t.Run(origin, func(t *testing.T) {
 			recorder := &recordingTelemetry{}
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 			m := mFixtureForBar()
-			m.width, m.height = 100, 40
-			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
 			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
-			m.view, m.prevView, m.detail.gen = viewHelp, viewList, 2
-			if origin == "detail" {
-				m.prevView = viewDetail
+			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+			m.detail.loading, m.list.loading = false, false
+			m.detail.gen = 2
+			if tc.origin == "form" {
+				m.input = newNewIssueForm()
 			}
-			m, cmd := stepModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2, err: fmt.Errorf("replaced refusal")})
+			if tc.origin == "detail" {
+				m.view = viewDetail
+			}
+			if tc.help {
+				m.view = viewHelp
+			}
+			msg := mutationDoneMsg{origin: tc.origin, kind: tc.kind, gen: 2}
+			if tc.failed {
+				msg.err = fmt.Errorf("refused")
+			}
+			m, cmd := stepModel(m, msg)
 			runCmd(cmd)
-			m, cmd = stepModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2})
+			_, cmd = stepModel(m, tea.FocusMsg{})
 			runCmd(cmd)
-			m, cmd = stepModel(m, runeKey('?'))
+			if tc.want == "" {
+				require.Empty(t, recorder.events)
+			} else {
+				require.Equal(t, []string{"error_shown"}, recorder.events)
+				require.Equal(t, []map[string]any{{"surface": "tui", "kind": tc.want}}, recorder.captured)
+			}
+		})
+	}
+	for _, kind := range []inputKind{inputNewIssueForm, inputCloseForm} {
+		t.Run(fmt.Sprint(kind), func(t *testing.T) {
+			recorder := &recordingTelemetry{}
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+			m := mFixtureForBar()
+			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.input = newNewIssueForm()
+			expected := "issue_created"
+			if kind == inputCloseForm {
+				m.input = newCloseForm(formTarget{})
+				expected = "issue_closed"
+			}
+			m, cmd := m.commitFormInput(kind)
+			require.NotEmpty(t, m.input.err)
 			runCmd(cmd)
-			require.NotContains(t, stripANSI(m.viewContent()), "replaced refusal")
-			require.NotContains(t, recorder.events, "error_shown")
+			require.Equal(t, []string{"error_shown"}, recorder.events)
+			require.Equal(t, []map[string]any{{"surface": "tui", "kind": expected}}, recorder.captured)
 		})
 	}
 }

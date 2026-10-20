@@ -2,8 +2,6 @@
   import { Button } from '@kenn-io/kit-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
 
-  import { PresentedMutationError } from '../lib/mutations/controller'
-
   import Modal from './Modal.svelte'
 
   interface Props {
@@ -57,8 +55,6 @@
       await onSubmit(value)
       title = ''
       onClose()
-    } catch (error) {
-      if (!(error instanceof PresentedMutationError)) throw error
     } finally {
       pending = false
     }

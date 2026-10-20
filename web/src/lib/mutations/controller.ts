@@ -1,8 +1,5 @@
 import { isAuthenticationRequiredError } from '../auth/session'
 
-// The caller has put this failure in the application mutation banner.
-export class PresentedMutationError extends Error {}
-
 export interface MutationAuthority {
   canMutate: boolean
   actorPolicy: string

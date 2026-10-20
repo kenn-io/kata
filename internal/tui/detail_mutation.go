@@ -147,7 +147,6 @@ func (dm detailModel) applyMutationState(m mutationDoneMsg) (detailModel, bool) 
 		return dm, false
 	}
 	if m.err != nil {
-		dm.shownError, _ = m.err.(*shownError)
 		dm.err = m.err
 		dm.status = errorStyle.Render(
 			fmt.Sprintf("%s failed: %s", m.kind, m.err.Error()),

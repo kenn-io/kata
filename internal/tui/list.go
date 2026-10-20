@@ -55,7 +55,6 @@ type listModel struct {
 	filter            ListFilter
 	expanded          expansionSet
 	actor             string
-	shownError        *shownError
 	status            string
 	err               error
 	loading           bool
@@ -952,7 +951,6 @@ func (lm listModel) applyMutation(
 		return lm, nil
 	}
 	if m.err != nil {
-		lm.shownError, _ = m.err.(*shownError)
 		lm.status = errorStyle.Render(
 			fmt.Sprintf("%s failed: %s", m.kind, m.err.Error()),
 		)

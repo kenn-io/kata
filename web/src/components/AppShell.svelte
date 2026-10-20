@@ -78,10 +78,7 @@
       | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
-    countedQuery?: string | undefined
     onSearchEmpty?: (() => void) | undefined
-    searchContext?: string | undefined
-    onMutationErrorShown?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
@@ -144,10 +141,7 @@
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
-    countedQuery = $bindable(''),
     onSearchEmpty = undefined,
-    searchContext = undefined,
-    onMutationErrorShown = undefined,
     onNavigate,
     onCreateProject,
     onDesignateInbox,
@@ -254,28 +248,23 @@
       issues: projection.issues,
     }),
   )
-  let pendingSearch = $state<{ context: string; query: string } | undefined>()
+  let pendingQuery = $state('')
+  let countedQuery = $state('')
   function submitSearch(query: string): void {
+    query = query.trim()
     if (!query || query === countedQuery) return
-    const context = searchContext ?? JSON.stringify([activeDaemonID, route.view, searchFilters])
-    pendingSearch = { context, query }
+    pendingQuery = query
   }
   $effect(() => {
-    const context = searchContext ?? JSON.stringify([activeDaemonID, route.view, searchFilters])
-    if (!pendingSearch) return
-    if (pendingSearch.context !== context) {
-      pendingSearch = undefined
-      return
-    }
-    if (loading || stale || pendingSearch.query !== searchFilters.query.trim()) return
+    if (loading || stale) return
+    const query = searchFilters.query.trim()
+    if (query !== countedQuery) countedQuery = ''
+    if (!pendingQuery || query !== pendingQuery) return
     if (currentView.groups.every((group) => group.issues.length === 0)) {
-      countedQuery = pendingSearch.query
+      countedQuery = pendingQuery
       onSearchEmpty?.()
     }
-    pendingSearch = undefined
-  })
-  $effect(() => {
-    if (mutationMessage && route.view !== 'credentials') onMutationErrorShown?.()
+    pendingQuery = ''
   })
   let areas = $derived(deriveKataAreas(projection.projects))
   let selectedProject = $derived.by(() => {
@@ -301,6 +290,9 @@
   let newTaskAllowed = $derived(canMutate && (!scopedAuthority || childParent !== undefined))
 
   function navigate(next: AppRoute): void {
+    const query = (next.filters.text ?? '').trim()
+    if (query !== countedQuery) countedQuery = ''
+    if (query !== pendingQuery) pendingQuery = ''
     navigationGeneration += 1
     void onNavigate(next)
   }

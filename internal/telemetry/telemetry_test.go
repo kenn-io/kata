@@ -224,6 +224,8 @@ func TestOutcomesProperties(t *testing.T) {
 		{"search_empty", map[string]any{"surface": "cli", "query": "private text"}, map[string]any{"surface": "cli"}},
 		{"error_shown", map[string]any{"surface": "tui", "kind": "issue_created"}, map[string]any{"surface": "tui", "kind": "issue_created"}},
 		{"error_shown", map[string]any{"surface": "web", "kind": "unlisted"}, map[string]any{"surface": "web", "kind": "other"}},
+		{"sync_failed", map[string]any{"reason": "auth"}, nil},
+		{"sync_failed", map[string]any{"sync_source": "github"}, nil},
 		{"sync_failed", map[string]any{"sync_source": "github", "reason": "auth"}, map[string]any{"sync_source": "github", "reason": "auth"}},
 		{"sync_failed", map[string]any{"sync_source": "unlisted", "reason": "private text"}, map[string]any{"sync_source": "other", "reason": "other"}},
 	} {

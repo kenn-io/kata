@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -106,7 +108,7 @@ func reportCLIUse(cmd *cobra.Command) {
 }
 
 func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
-	if event != "search_empty" && (currentOutputMode() != outputHuman || !reportsCLIUse(cmd)) {
+	if currentOutputMode() != outputHuman || !reportsCLIUse(cmd) {
 		return
 	}
 	properties := map[string]any{"surface": "cli"}
@@ -114,6 +116,23 @@ func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
 		properties["kind"] = kind
 	}
 	sendCLIEvent(cmd, &generated.CaptureTelemetryEventBody{Event: event, Properties: properties}, false)
+}
+
+// reportCLIEmptySearch remembers only the hash of the last empty query for this daemon.
+func reportCLIEmptySearch(cmd *cobra.Command, query string) {
+	if currentOutputMode() != outputHuman || !reportsCLIUse(cmd) {
+		return
+	}
+	if target := cliUseTarget.Load(); target != nil {
+		path := client.TelemetryDayMarkerPathForKey(client.TelemetryTargetKey(*target), "cli-search-empty-")
+		sum := sha256.Sum256([]byte(strings.TrimSpace(query)))
+		hash := hex.EncodeToString(sum[:])
+		if client.ReadTelemetryDayMarker(path) == hash {
+			return
+		}
+		client.RecordTelemetryDayMarker(path, hash)
+	}
+	reportCLIOutcome(cmd, "search_empty", "")
 }
 
 func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody, agent bool) {

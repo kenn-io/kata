@@ -75,7 +75,6 @@
   } from './lib/kata/types'
   import {
     MutationController,
-    PresentedMutationError,
     type MutationContext,
     type MutationResult,
     type MutationState,
@@ -116,11 +115,7 @@
   let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
   let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
-  let mutationState = $state<
-    MutationState & { actionKind?: string | undefined; counted?: boolean }
-  >({
-    kind: 'idle',
-  })
+  let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
   let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
   let pendingComment: { identity: string; key: string } | undefined
@@ -273,22 +268,12 @@
     wallClockSensitive: () =>
       route.kind !== 'route-error' && route.filters.status.includes('ready'),
   })
-  let countedQuery = $state('')
-  $effect(() => {
-    if (route.kind === 'route-error' || (route.filters.text ?? '').trim() !== countedQuery)
-      countedQuery = ''
-  })
   function reportOutcome(event: 'search_empty' | 'error_shown', kind?: string): void {
     if (!loadSessionCredentials()) return
     browserTelemetry?.reportVisit({
       event,
       properties: { surface: 'web', ...(kind ? { kind } : {}) },
     })
-  }
-  function reportMutationError(): void {
-    if (!mutationState.actionKind || mutationState.counted) return
-    mutationState.counted = true
-    reportOutcome('error_shown', mutationState.actionKind)
   }
   const unsubscribe = snapshots.subscribe((state) => {
     authority = { ...state }
@@ -520,11 +505,7 @@
         { headers: { 'Idempotency-Key': create.key, 'X-Kata-Surface': 'web' } },
       ),
     )
-    if (!accepted) {
-      const message = mutationMessage(mutationState)
-      if (message) throw new PresentedMutationError(message)
-      throw new Error('Could not create task.')
-    }
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
     pendingCreate = undefined
   }
 
@@ -853,7 +834,9 @@
     mutationPending = true
     try {
       const result = await controller.execute(options, mutate)
-      mutationState = { ...controller.state, actionKind: options.actionKind, counted: false }
+      mutationState = controller.state
+      if (options.actionKind && mutationMessage(controller.state))
+        reportOutcome('error_shown', options.actionKind)
       return result !== false
     } finally {
       mutationPending = false
@@ -1259,9 +1242,6 @@
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
         route={acceptedRoute ?? route}
-        searchContext={JSON.stringify([activeDaemonID, route])}
-        onMutationErrorShown={reportMutationError}
-        bind:countedQuery
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={authority.snapshot}
         loading={authority.loading}

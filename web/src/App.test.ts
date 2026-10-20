@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { tick } from 'svelte'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import App from './App.svelte'
 import { preferencesStorageKey } from './lib/state/preferences'
@@ -158,14 +158,30 @@ describe('App', () => {
         await tick()
         if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(index + 2))
       }
+      await fireEvent.input(input, { target: { value: 'missingx' } })
+      await tick()
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(4))
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      expect(outcomes()).toHaveLength(disabled ? 0 : 4)
       if (disabled) {
+        const rejections: unknown[] = []
+        const onRejection = (error: unknown) => rejections.push(error)
+        process.on('unhandledRejection', onRejection)
+        onTestFinished(() => {
+          process.off('unhandledRejection', onRejection)
+        })
         await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
         await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
           target: { value: 'Example task' },
         })
         await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
         await screen.findByText('validation: Action refused')
-        await tick()
+        await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
         expect(outcomes()).toEqual([])
       }
     },
@@ -3222,145 +3238,143 @@ describe('App', () => {
 
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
-      it.each(['accepted', 'refused', 'dismissed', 'remounted'])(
-        `${action} reports a shown refusal once, result=%s`,
-        async (result) => {
-          const refused = result !== 'accepted'
-          let release: (() => void) | undefined
-          let releaseRemote: (() => void) | undefined
-          history.replaceState(
-            null,
-            '',
-            `/kata?issue=01J00000000000000000000001${result === 'remounted' ? '' : '#direct=1'}`,
-          )
-          sessionStorage.setItem(
-            'kata.web.session.v1',
-            JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-          )
-          const base = snapshot()
-          base.catalog[0]!.project.metadata.role = 'inbox'
-          const accepted = {
-            ...base,
-            selected: {
-              state: 'available',
-              issue: base.collection[0],
-              comments: [],
-              labels: [],
-              links: [],
-              history: [],
-            },
-          }
-          const actionRequests: Request[] = []
-          const shownErrors: unknown[] = []
-          let writes = 0
-          vi.stubGlobal(
-            'fetch',
-            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-              const request = requestOf(input, init)
-              const path = new URL(request.url).pathname
-              if (path === '/api/v1/ui/telemetry') {
-                const body = await request.clone().json()
-                if (body.event === 'error_shown') shownErrors.push(body)
-                return telemetryAccepted()
-              }
-              if (
-                request.method === 'POST' &&
-                (path.endsWith('/issues') || path.endsWith('/close'))
-              ) {
-                actionRequests.push(request)
-                writes += 1
-                if (result === 'dismissed')
-                  await new Promise<void>((resolve) => {
-                    release = resolve
-                  })
-                return refused
-                  ? Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
-                  : Response.json({ changed: true })
-              }
-              if (path === '/api/v1/ui/daemons')
-                return Response.json({
-                  daemons: [
-                    ...daemonRoster().daemons,
-                    {
-                      id: 'example-remote',
-                      url: 'https://daemon.example',
-                      auth: 'token',
-                      health: 'connected',
-                      default: false,
-                    },
-                  ],
-                })
-              if (path.endsWith('/references'))
-                return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-              if (
-                result === 'remounted' &&
-                request.headers.get('X-Kata-Web-Daemon') === 'example-remote'
-              )
-                await new Promise<void>((resolve) => {
-                  releaseRemote = resolve
-                })
-              return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
-            }),
-          )
-          render(App)
-          if (action === 'create') {
-            await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
-            await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
-              target: { value: 'Example task' },
-            })
-            await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-          } else {
-            await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
-            await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
-            await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
-              target: { value: 'go test ./example' },
-            })
-            await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
-              target: { value: 'Completed the requested work and checked the result.' },
-            })
-            const buttons = screen.getAllByRole('button', { name: 'Complete' })
-            await fireEvent.click(buttons[buttons.length - 1]!)
-          }
-          await waitFor(() => expect(writes).toBe(1))
-          if (result === 'dismissed') {
-            await fireEvent.keyDown(window, { key: 'Escape' })
-            release?.()
-          }
-          if (refused) {
-            expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
-            await waitFor(() =>
-              expect(shownErrors).toEqual([
-                {
-                  event: 'error_shown',
-                  properties: {
-                    surface: 'web',
-                    kind: action === 'create' ? 'issue_created' : 'issue_closed',
+      it.each(
+        action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
+      )(`${action} reports a shown refusal once, result=%s`, async (result) => {
+        const refused = result !== 'accepted'
+        const rejections: unknown[] = []
+        const onRejection = (error: unknown) => rejections.push(error)
+        process.on('unhandledRejection', onRejection)
+        onTestFinished(() => {
+          process.off('unhandledRejection', onRejection)
+        })
+        history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+        sessionStorage.setItem(
+          'kata.web.session.v1',
+          JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+        )
+        const base = snapshot()
+        base.catalog[0]!.project.metadata.role = 'inbox'
+        const accepted = {
+          ...base,
+          selected: {
+            state: 'available',
+            issue: base.collection[0],
+            comments: [],
+            labels: [],
+            links: [],
+            history: [],
+          },
+        }
+        const actionRequests: Request[] = []
+        const shownErrors: unknown[] = []
+        let writes = 0
+        let removeProject = false
+        let snapshotReads = 0
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = requestOf(input, init)
+            const path = new URL(request.url).pathname
+            if (path === '/api/v1/ui/telemetry') {
+              const body = await request.clone().json()
+              if (body.event === 'error_shown') shownErrors.push(body)
+              return telemetryAccepted()
+            }
+            if (
+              request.method === 'POST' &&
+              (path.endsWith('/issues') || path.endsWith('/close'))
+            ) {
+              actionRequests.push(request)
+              writes += 1
+              return refused
+                ? Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
+                : Response.json({ changed: true })
+            }
+            if (path === '/api/v1/ui/daemons')
+              return Response.json({
+                daemons: [
+                  ...daemonRoster().daemons,
+                  {
+                    id: 'example-remote',
+                    url: 'https://daemon.example',
+                    auth: 'token',
+                    health: 'connected',
+                    default: false,
                   },
+                ],
+              })
+            if (path.endsWith('/references'))
+              return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+            snapshotReads += 1
+            if (removeProject) delete accepted.catalog[0]!.project.metadata.role
+            return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+          }),
+        )
+        render(App)
+        if (action === 'create') {
+          await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+          await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+            target: { value: 'Example task' },
+          })
+          if (result === 'missing-project') {
+            const reads = snapshotReads
+            removeProject = true
+            window.dispatchEvent(new Event('focus'))
+            await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
+            await waitFor(() =>
+              expect(screen.getByRole('button', { name: 'Capture' })).toHaveProperty(
+                'disabled',
+                false,
+              ),
+            )
+          }
+          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+        } else {
+          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
+          await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
+            target: { value: 'go test ./example' },
+          })
+          await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
+            target: { value: 'Completed the requested work and checked the result.' },
+          })
+          const buttons = screen.getAllByRole('button', { name: 'Complete' })
+          await fireEvent.click(buttons[buttons.length - 1]!)
+        }
+        if (result === 'missing-project') {
+          await waitFor(() =>
+            expect(rejections).toEqual([new Error('Task project is not available.')]),
+          )
+          expect(shownErrors).toEqual([])
+          expect(actionRequests).toHaveLength(0)
+          return
+        }
+        await waitFor(() => expect(writes).toBe(1))
+        if (action === 'create' && refused)
+          await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
+        if (refused) {
+          expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
+          await waitFor(() =>
+            expect(shownErrors).toEqual([
+              {
+                event: 'error_shown',
+                properties: {
+                  surface: 'web',
+                  kind: action === 'create' ? 'issue_created' : 'issue_closed',
                 },
-              ]),
-            )
-            await tick()
-            expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
-          } else {
-            await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-            expect(shownErrors).toEqual([])
-          }
-          if (result === 'remounted') {
-            await fireEvent.click(
-              screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
-            )
-            await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-            await waitFor(() => expect(releaseRemote).toBeDefined())
-            expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
-            releaseRemote?.()
-            await screen.findByRole('region', { name: 'Kata workspace' })
-            await tick()
-            expect(shownErrors).toHaveLength(1)
-          }
-          expect(actionRequests).toHaveLength(1)
-          expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
-        },
-      )
+              },
+            ]),
+          )
+          await tick()
+          expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+        } else {
+          await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+          expect(shownErrors).toEqual([])
+        }
+        expect(actionRequests).toHaveLength(1)
+        expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
+      })
     }
   })
 

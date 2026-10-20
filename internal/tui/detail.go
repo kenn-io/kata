@@ -127,7 +127,6 @@ type detailModel struct {
 	allProjects        bool
 	actor              string
 	status             string
-	shownError         *shownError
 	// tabExplicit tracks whether the user has manually selected the
 	// active activity tab. False on a fresh detail open; flipped to
 	// true the first time the tab cycler runs. applyFetched uses this

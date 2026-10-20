@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -152,3 +153,35 @@ func TestOutcomesProviderTransportReasons(t *testing.T) {
 		}
 	}
 }
+
+func TestOutcomesNotionHTTPReasons(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		reason string
+	}{{429, "rate_limit"}, {503, "server"}} {
+		t.Run(tc.reason, func(t *testing.T) {
+			now := time.Now()
+			requests := 0
+			session, err := notionsync.NewClient(notionsync.ClientConfig{
+				LookupEnv: func(string) (string, bool) { return "example-token", true },
+				Transport: notionOutcomeTransport(func(*http.Request) (*http.Response, error) {
+					requests++
+					return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":"service_unavailable"}`))}, nil
+				}),
+				Now:  func() time.Time { return now },
+				Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+			}).ForRun(t.Context())
+			require.NoError(t, err)
+			_, err = session.Database(t.Context(), "11111111-1111-4111-8111-111111111111")
+			require.Error(t, err)
+			require.Equal(t, 5, requests)
+			reporter := &fakeTelemetryReporter{}
+			NewSyncOutcomeObserver(reporter)("notion", 1, err)
+			require.Equal(t, []capturedTelemetryEvent{{event: "sync_failed", properties: map[string]any{"sync_source": "notion", "reason": tc.reason}}}, reporter.captured)
+		})
+	}
+}
+
+type notionOutcomeTransport func(*http.Request) (*http.Response, error)
+
+func (f notionOutcomeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

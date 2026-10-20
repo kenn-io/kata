@@ -714,9 +714,10 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 	}{
 		{"human", []string{"search", "missing", "--format", "human"}, true, 1},
 		{"quiet", []string{"search", "missing", "--format", "human", "--quiet"}, true, 1},
-		{"json", []string{"search", "missing", "--json"}, true, 1},
-		{"agent", []string{"search", "missing", "--agent"}, false, 1},
-		{"piped", []string{"search", "missing", "--format", "human"}, false, 1},
+		{"json", []string{"search", "missing", "--json"}, true, 0},
+		{"agent", []string{"search", "missing", "--agent"}, false, 0},
+		{"piped", []string{"search", "missing", "--format", "human"}, false, 0},
+		{"context", []string{"inbox", "--context"}, true, 0},
 		{"continuation page", []string{"search", "needle", "--lexical", "--limit", "1", "--format", "human"}, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -748,6 +749,14 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 				_, err := env.DB.CreateProject(t.Context(), "kata")
 				require.NoError(t, err)
 			}
+			if tc.name == "context" {
+				cmd := findCommand(t, "inbox")
+				require.NoError(t, cmd.Flags().Set("context", "true"))
+				cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: env.URL})
+				reportCLIOutcome(cmd, "search_empty", "")
+				require.Empty(t, capture.recorded())
+				return
+			}
 			output, err := runCmdOutput(t, env, tc.args...)
 			if tc.name == "continuation page" {
 				require.Contains(t, output, "no matches")
@@ -755,6 +764,24 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 			require.NoError(t, err)
 			if tc.want > 0 {
 				capture.waitForCapture(t)
+			}
+			if tc.want > 0 {
+				_, err = runCmdOutput(t, env, tc.args...)
+				require.NoError(t, err)
+				capture.mu.Lock()
+				count := 0
+				for _, event := range capture.events {
+					if event == "search_empty" {
+						count++
+					}
+				}
+				capture.mu.Unlock()
+				require.Equal(t, 1, count, "the same query in another invocation counts once")
+				args := append([]string(nil), tc.args...)
+				args[1] = "other"
+				_, err = runCmdOutput(t, env, args...)
+				require.NoError(t, err)
+				tc.want = 2
 			}
 			capture.mu.Lock()
 			defer capture.mu.Unlock()

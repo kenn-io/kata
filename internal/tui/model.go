@@ -47,7 +47,7 @@ const (
 // replace it to drive deterministic toast expiry.
 type Model struct {
 	telemetry           *telemetryGate
-	searchPending       *pendingSearch
+	searchQuery         string
 	searchCounted       string
 	telemetryScreen     string
 	telemetryConnGen    uint64
@@ -402,13 +402,17 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var errorCmd tea.Cmd
 	if mut, ok := msg.(mutationDoneMsg); ok && mut.err != nil {
-		mut.err = &shownError{error: mut.err, action: mut.kind}
-		msg = mut
+		errorCmd = m.reportShownError(mut.kind)
 	}
 	next, cmd := m.update(msg)
 	m = next.(Model)
-	if strings.TrimSpace(m.list.filter.Search) != m.searchCounted {
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query != m.searchQuery {
+		m.searchQuery = ""
+	}
+	if query != m.searchCounted {
 		m.searchCounted = ""
 	}
 	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
@@ -423,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		visit = true
 	}
 	screenCmd := m.screenViewCommand(visit)
-	return m, tea.Batch(cmd, screenCmd, m.reportVisibleErrors())
+	return m, tea.Batch(cmd, screenCmd, errorCmd)
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1321,7 +1325,6 @@ func (m Model) restoreSearchDetailIfNeeded(
 				if snapshot.status != "" {
 					m.detail.status = snapshot.status
 					m.detail.err = snapshot.err
-					m.detail.shownError = snapshot.shownError
 				}
 				return m, combineCmds(prior, m.refetchRestoredDetail())
 			}
@@ -1709,7 +1712,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
-		return m, m.reportShownError(mut.kind)
+		return m, nil
 	}
 	if m.input.kind == inputNewIssueForm {
 		m.input = inputState{}
@@ -3596,14 +3599,6 @@ type typedCommentAPI interface {
 	AddCommentReply(context.Context, int64, string, string, string, string, string, bool, string) (*MutationResp, error)
 }
 
-// pendingSearch ties a submission to the daemon and scope it was made in.
-type pendingSearch struct {
-	filter  ListFilter
-	view    viewID
-	key     cacheKey
-	connGen uint64
-}
-
 // commitSearchResults counts a search first submitted from the results list.
 func (m Model) commitSearchResults() (Model, tea.Cmd) {
 	var counted tea.Cmd
@@ -3619,25 +3614,22 @@ func (m Model) submitSearch() (Model, tea.Cmd) {
 	if query == "" || query == m.searchCounted {
 		return m, nil
 	}
-	filter := m.list.filter
-	filter.Labels = slices.Clone(filter.Labels)
-	m.searchPending = &pendingSearch{filter: filter, view: m.view, key: m.currentCacheKey(), connGen: m.connGen}
+	m.searchQuery = query
 	return m.settleSearch()
 }
 
 func (m Model) settleSearch() (Model, tea.Cmd) {
-	if m.searchPending == nil || m.list.loading {
+	if m.searchQuery == "" || m.list.loading || m.list.err != nil {
 		return m, nil
 	}
-	search := m.searchPending
-	m.searchPending = nil
-	filter := m.list.filter
-	if search.key != m.currentCacheKey() || search.connGen != m.connGen || search.view != m.view ||
-		search.filter.Status != filter.Status || search.filter.Owner != filter.Owner || search.filter.Author != filter.Author ||
-		search.filter.Search != filter.Search || search.filter.Limit != filter.Limit || !slices.Equal(search.filter.Labels, filter.Labels) ||
-		m.list.err != nil || len(m.list.visibleRows()) != 0 {
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query != m.searchQuery {
 		return m, nil
 	}
-	m.searchCounted = strings.TrimSpace(search.filter.Search)
+	m.searchQuery = ""
+	if len(m.list.visibleRows()) != 0 {
+		return m, nil
+	}
+	m.searchCounted = query
 	return m, m.reportOutcome("search_empty", "")
 }

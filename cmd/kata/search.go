@@ -144,7 +144,7 @@ per match.`,
 				return err
 			}
 			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
-				reportCLIOutcome(cmd, "search_empty", "")
+				reportCLIEmptySearch(cmd, query)
 			}
 			return nil
 		},
