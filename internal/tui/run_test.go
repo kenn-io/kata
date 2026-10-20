@@ -663,7 +663,7 @@ func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
 			},
 		},
 	}
-	m := buildRunModel(Options{}, &Client{}, bi)
+	m := buildRunModel(Options{}, NewClient("http://daemon.example", nil), bi)
 	assert.Equal(t, viewProjects, m.view)
 	assert.Equal(t, "kata", m.projectsByID[7])
 	assert.Equal(t, "kata", m.projectIdentByID[7])
@@ -684,7 +684,7 @@ func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
 		},
 	}
 
-	m := buildRunModel(Options{InitialIssueRef: "abc4"}, &Client{}, bi)
+	m := buildRunModel(Options{InitialIssueRef: "abc4"}, NewClient("http://daemon.example", nil), bi)
 
 	assert.Equal(t, viewDetail, m.view)
 	require.NotNil(t, m.detail.issue)
@@ -693,6 +693,7 @@ func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
 }
 
 func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	baseInit := bootInit{
 		scope: scope{projectID: 7, projectName: "example-project"},
 		view:  viewList,
@@ -705,10 +706,10 @@ func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
 		Title:     "Target",
 	}
 
-	baseBatch, ok := buildRunModel(Options{}, &Client{}, baseInit).Init()().(tea.BatchMsg)
+	baseBatch, ok := buildRunModel(Options{}, NewClient("http://daemon.example", nil), baseInit).Init()().(tea.BatchMsg)
 	require.True(t, ok)
 	directBatch, ok := buildRunModel(
-		Options{InitialIssueRef: "abc4"}, &Client{}, directInit,
+		Options{InitialIssueRef: "abc4"}, NewClient("http://daemon.example", nil), directInit,
 	).Init()().(tea.BatchMsg)
 	require.True(t, ok)
 	require.Len(t, directBatch, len(baseBatch)+1)

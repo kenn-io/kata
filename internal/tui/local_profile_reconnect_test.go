@@ -12,10 +12,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -291,4 +293,18 @@ func TestLocalProfileConcurrentRefreshHonorsRequestDeadline(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("API request remained blocked behind SSE refresh after its own context deadline")
 	}
+}
+
+func TestTelemetrySkipsLocalProfileRecovery(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	synctest.Test(t, func(t *testing.T) {
+		hc := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("original connection failure") })}
+		state := shareLocalProfileTransports(daemonTarget{resolved: client.ResolvedDaemon{BaseURL: "http://daemon.example"}}, hc, &http.Client{Transport: http.DefaultTransport})
+		// Block recovery as if an ordinary API request is already refreshing it.
+		state.refreshGate <- struct{}{}
+		c := NewClient("http://daemon.example", hc)
+		started := time.Now()
+		require.ErrorContains(t, c.reportUsage(t.Context(), "session_ended", map[string]any{"surface": "tui", "duration_bucket": "1_to_5m"}), "original connection failure")
+		require.Zero(t, time.Since(started), "telemetry must return before waiting for profile recovery")
+	})
 }

@@ -115,7 +115,7 @@ func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
 	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })
 	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
 		return daemonConnection{
-			api:      &Client{},
+			api:      NewClient("http://daemon.example", nil),
 			endpoint: target.URL,
 			target:   target,
 			init:     bootInit{view: viewEmpty, scope: scope{empty: true}},
@@ -143,7 +143,7 @@ func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) {
 	m.daemonSwitchAttempt = 2
 	m.activeDaemon = daemonTarget{Name: "current", URL: "https://current.example"}
 	conn := daemonConnection{
-		api:    &Client{},
+		api:    NewClient("http://daemon.example", nil),
 		target: daemonTarget{Name: "older", URL: "https://older.example"},
 		init:   bootInit{view: viewList, scope: homedScope(9, "older")},
 	}
@@ -159,7 +159,7 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	restarted := false
 	m := setupDaemonViewSource()
 	m.connGen = 4
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = homedScope(7, "old")
 	m.layout = splitlayout.Split
 	m.focus = focusDetail
@@ -185,7 +185,7 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 		}
 	}
 	conn := daemonConnection{
-		api:      &Client{},
+		api:      NewClient("http://daemon.example", nil),
 		sseHC:    &http.Client{},
 		endpoint: "https://new.example",
 		target:   daemonTarget{Name: "new", URL: "https://new.example"},
@@ -246,7 +246,7 @@ func TestDaemonSwitchClearsAllFederationState(t *testing.T) {
 		},
 	}
 	conn := daemonConnection{
-		api:    &Client{},
+		api:    NewClient("http://daemon.example", nil),
 		target: daemonTarget{Name: "other", URL: "https://other.example"},
 		init:   bootInit{view: viewList, scope: homedScope(9, "other-project")},
 	}
@@ -261,7 +261,7 @@ func TestDaemonSwitchClearsAllFederationState(t *testing.T) {
 func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
 	m := setupDaemonView()
 	conn := daemonConnection{
-		api:     &Client{},
+		api:     NewClient("http://daemon.example", nil),
 		target:  daemonTarget{Name: "empty", URL: "https://empty.example"},
 		catalog: m.daemonTargets,
 		init: bootInit{
@@ -430,7 +430,7 @@ func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) {
 	m.projectsGen = 5
 	m.projectsByID = map[int64]string{7: "old"}
 	conn := daemonConnection{
-		api:    &Client{},
+		api:    NewClient("http://daemon.example", nil),
 		target: daemonTarget{Name: "new", URL: "https://new.example"},
 		init: bootInit{
 			view:  viewList,
@@ -477,7 +477,7 @@ func TestSwitchDaemonCmdPreservesWorkspaceSelector(t *testing.T) {
 		assert.Equal(t, workspace, target.workspaceStart)
 		assert.False(t, target.skipInitialScope)
 		return daemonConnection{
-			api:    &Client{},
+			api:    NewClient("http://daemon.example", nil),
 			target: target,
 			init: bootInit{
 				view:  viewList,

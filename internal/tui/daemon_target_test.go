@@ -1042,7 +1042,7 @@ func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) {
 		init:    bootInit{view: viewEmpty, scope: scope{empty: true}},
 	}
 
-	m := buildRunModel(Options{}, &Client{}, conn.init, conn)
+	m := buildRunModel(Options{}, NewClient("http://daemon.example", nil), conn.init, conn)
 
 	assert.Equal(t, "shared", m.activeDaemon.Name)
 	require.Len(t, m.daemonTargets, 2)

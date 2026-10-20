@@ -144,7 +144,7 @@ func renderBodyNoColor(lm listModel, width, height int, chrome viewChrome) strin
 // most state-machine tests in this package.
 func newTestModel() Model {
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7}
 	m.list.loading = false
 	return m

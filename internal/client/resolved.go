@@ -51,6 +51,7 @@ func (s DaemonSource) String() string {
 // those inputs again.
 type ResolvedDaemon struct {
 	SourcePath          string
+	RuntimeDir          string
 	LocalProfile        *LocalProfileIdentity
 	profileConfig       *config.LocalProfileConfig
 	Source              DaemonSource
@@ -114,6 +115,7 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 	refreshed.LocalProfile = d.LocalProfile
 	refreshed.profileConfig = d.profileConfig
 	refreshed.SourcePath = d.SourcePath
+	refreshed.RuntimeDir = d.RuntimeDir
 	refreshed.credentialError = d.credentialError
 	refreshed.implicitToken = d.implicitToken
 	if d.implicitToken && !running.PersistedAuth {
@@ -336,7 +338,9 @@ func discoverResolved(ctx context.Context, dataDir string, scan liveDaemonScanne
 	var unreachable error
 	for candidate, err := range scan(ctx, dataDir) {
 		if err == nil {
-			return localRuntimeResolved(candidate), true, nil
+			resolved := localRuntimeResolved(candidate)
+			resolved.RuntimeDir = dataDir
+			return resolved, true, nil
 		}
 		if errors.Is(err, ErrLocalDaemonUnreachable) {
 			if unreachable == nil {

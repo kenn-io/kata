@@ -2701,9 +2701,7 @@ describe('App', () => {
       expect(request!.headers.get('X-Kata-CSRF')).toBe(csrf)
     }
 
-    it('reports accepted screens through the serving daemon and revisits on UTC focus', async () => {
-      vi.useFakeTimers({ toFake: ['Date'] })
-      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+    it('reports accepted screens through the serving daemon', async () => {
       storeSession()
       const telemetry: Request[] = []
       let rejectedSnapshots = 0
@@ -2744,12 +2742,49 @@ describe('App', () => {
       await waitFor(() => expect(rejectedSnapshots).toBeGreaterThan(0))
       await tick()
       expect(telemetry).toHaveLength(2)
+    })
+
+    it('removes session-ended handlers after a disabled receipt', async () => {
+      const addVisitListener = vi.spyOn(window, 'addEventListener')
+      const removeVisitListener = vi.spyOn(window, 'removeEventListener')
+      storeSession()
+      const telemetry: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            if ((await request.clone().json()).properties?.screen === 'today') {
+              return Response.json({ status: 'disabled' }, { status: 202 })
+            }
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await screen.findByRole('region', { name: 'Kata workspace' })
+      await waitFor(() => expect(telemetry).toHaveLength(1))
+      await waitFor(() =>
+        expect(addVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      removeVisitListener.mockClear()
+      history.pushState(null, '', '/kata?view=today')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() =>
+        expect(removeVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      const reports = telemetry.length
+      history.pushState(null, '', '/kata?view=issues')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      window.dispatchEvent(new Event('pagehide'))
       window.dispatchEvent(new Event('focus'))
       await tick()
-      expect(telemetry).toHaveLength(2)
-      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
-      window.dispatchEvent(new Event('focus'))
-      await waitFor(() => expect(telemetry).toHaveLength(3))
+      expect(telemetry).toHaveLength(reports)
     })
 
     it('reports app_opened once on load', async () => {
@@ -2872,6 +2907,74 @@ describe('App', () => {
       window.dispatchEvent(new Event('pagehide'))
       await waitFor(() => expect(telemetry).toHaveLength(3))
       expectServingDaemonPost(telemetry[2], 'local-session', 'local-csrf')
+    })
+
+    it('reports an ended visit after telemetry authentication recovers', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+      const addVisitListener = vi.spyOn(window, 'addEventListener')
+      storeSession()
+      let renew!: (response: Response) => void
+      const authentication = new Promise<Response>((resolve) => {
+        renew = resolve
+      })
+      let renewalRequested = false
+      const visits: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/session/local') {
+            renewalRequested = true
+            return authentication
+          }
+          if (path === telemetryPath) {
+            const event = await request.clone().json()
+            if (event.event === 'session_ended') visits.push(request)
+            if (
+              event.properties?.screen === 'today' &&
+              request.headers.get('X-Kata-Web-Session') === 'tab-session'
+            ) {
+              return Response.json(
+                { error: { code: 'unauthorized', message: 'session expired' } },
+                { status: 401, headers: { 'X-Kata-Web-Authentication': 'loopback' } },
+              )
+            }
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await screen.findByRole('region', { name: 'Kata workspace' })
+      await waitFor(() =>
+        expect(addVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      now = 120_000
+      await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+      await waitFor(() => expect(renewalRequested).toBe(true))
+      window.dispatchEvent(new Event('pagehide'))
+      expect(visits).toHaveLength(0)
+      renew(
+        Response.json({
+          session: 'renewed-session',
+          csrf: 'renewed-csrf',
+          return_path: '/kata',
+          writable: true,
+          updates: 'poll',
+          actor_policy: 'request',
+        }),
+      )
+      await waitFor(() => expect(visits).toHaveLength(1))
+      expectServingDaemonPost(visits[0], 'renewed-session', 'renewed-csrf')
+      await expect(visits[0]!.json()).resolves.toEqual({
+        event: 'session_ended',
+        properties: { surface: 'web', duration_bucket: '1_to_5m' },
+      })
     })
 
     it('a background refresh after UTC midnight is not an opening', async () => {
@@ -3083,5 +3186,5 @@ function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
 }
 
 function telemetryAccepted(): Response {
-  return Response.json({ status: 'disabled' }, { status: 202 })
+  return Response.json({ status: 'queued' }, { status: 202 })
 }

@@ -204,7 +204,7 @@ func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
 }
 
 func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) {
-	spokeAPI := &Client{}
+	spokeAPI := NewClient("http://daemon.example", nil)
 	spokeTarget := daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
 	hubTarget := daemonTargetWithResolvedAuth("catalog-hub", "https://hub.example", "hub-auth", false)
 	hub := &recordingFederationHubAdmin{
@@ -267,7 +267,7 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 		return hub, target, nil
 	})
 	m := setupFederationView()
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.activeDaemon = daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
 	m.daemonTargets = []daemonTarget{m.activeDaemon, hubTarget}
 	m.federation.hubCursor = 1

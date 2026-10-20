@@ -6,6 +6,8 @@ import (
 	"os"
 	"runtime"
 	"testing"
+
+	"go.kenn.io/kata/internal/testfix"
 )
 
 // Existing workspace-hook tests assume no user hook. Isolate the test process
@@ -33,7 +35,7 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(home)
 		os.Exit(1)
 	}
-	code := m.Run()
+	code := testfix.RunIsolated(m)
 	if err := cleanupExternalFixtures(); err != nil {
 		fmt.Fprintf(os.Stderr, "remove external test fixtures: %v\n", err)
 		code = 1

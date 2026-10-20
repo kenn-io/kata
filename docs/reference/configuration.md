@@ -1056,10 +1056,19 @@ available for a later enabled start.
 
 The web UI reports an anonymous `app_opened` event to the daemon serving it
 when the page loads, and again on the first window focus of each later UTC day.
-Background refreshes of an open tab do not count. The daemon sends the event to
-PostHog with the same fields, distinct ID, and opt-out as its own events; the
-browser never contacts PostHog. Only signed-in sessions with write access on the
-serving daemon are counted.
+Each screen reports once per UTC day, so returning to a screen sends nothing more
+that day. Background refreshes of an open tab do not count. The daemon sends the
+event to PostHog with the same fields, distinct ID, and opt-out as its own events;
+the browser never contacts PostHog. Only signed-in sessions with write access on the
+serving daemon are counted. A `disabled` receipt stops browser telemetry and
+removes visit listeners and timers until the next UTC day's load or focus checks
+again.
+
+The TUI remembers accepted app opens and screen views per daemon and UTC
+day across restarts. CLI commands, hooks, MCP, and the TUI share disabled receipts:
+one quiets that daemon through the UTC day across restarts. Switching to another
+daemon still allows reports. Telemetry requests from the TUI never start or
+restart a daemon.
 
 Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 `session_ended` with `surface` and `duration_bucket`: `under_1m`, `1_to_5m`,

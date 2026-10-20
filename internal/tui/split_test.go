@@ -51,7 +51,7 @@ func splitTestSetup(t *testing.T) (Model, func()) {
 	t.Setenv("NO_COLOR", "")
 	applyDefaultColorMode()
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m.list.loading = false
 	m.list.issues = snapListFixture()
@@ -1652,7 +1652,7 @@ func stackedSearchTransitionFixture(t *testing.T) (Model, func()) {
 	applyDefaultColorMode()
 
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "example-project"}
 	m.list.loading = false
 	m.list.issues = []Issue{
@@ -1741,7 +1741,7 @@ func TestStacked_SearchResizeIntoSplitRetargetsInheritedDetail(t *testing.T) {
 	defer applyDefaultColorMode()
 
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "example-project"}
 	m.list.loading = false
 	m.list.issues = []Issue{
@@ -1846,7 +1846,7 @@ func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
 	applyDefaultColorMode()
 	defer applyDefaultColorMode()
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	if m.layout != splitlayout.Split {
@@ -1884,7 +1884,7 @@ func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 	applyDefaultColorMode()
 	defer applyDefaultColorMode()
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	// Boot stacked, then deliver the list payload while still stacked.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1927,7 +1927,7 @@ func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) {
 	applyDefaultColorMode()
 	defer applyDefaultColorMode()
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	if m.layout != splitlayout.Stacked {

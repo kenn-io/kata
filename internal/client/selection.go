@@ -28,6 +28,19 @@ func InspectSelection(ctx context.Context, start, name string) (DaemonSelection,
 	return inspectSelection(ctx, start, name, false)
 }
 
+// InspectTelemetryTarget identifies the selected daemon without contacting it.
+// An empty result leaves normal discovery responsible for choosing a target.
+func InspectTelemetryTarget(ctx context.Context, start, name string) string {
+	if value, _ := ctx.Value(BaseURLKey{}).(string); value != "" {
+		return ""
+	}
+	selection, err := InspectSelection(ctx, start, name)
+	if err != nil {
+		return ""
+	}
+	return TelemetryTargetKey(selection.Resolved)
+}
+
 func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCatalogCredential bool) (DaemonSelection, error) {
 	source := DaemonSourceNamedCatalog
 	sourcePath := ""

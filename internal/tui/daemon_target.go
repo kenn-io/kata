@@ -203,6 +203,9 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		return daemonConnection{}, err
 	}
 	c := NewClient(endpoint, hc)
+	if key := client.TelemetryTargetKey(target.resolved); key != "" {
+		c.telemetryTarget = key
+	}
 	if target.resolved.LocalProfile != nil {
 		transports := shareLocalProfileTransports(target, hc, sseHC)
 		c.setLocalHTTPClientRefresh(transports.refreshAPI)

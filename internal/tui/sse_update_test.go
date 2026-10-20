@@ -1296,7 +1296,7 @@ func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) {
 	m.view = viewProjects
 	m.projectsStale = true
 	m.projectsRefetchPending = true
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 
 	out, cmd := m.Update(projectsDebounceFireMsg{})
 	nm := out.(Model)
@@ -1470,7 +1470,7 @@ func TestHandleResetRequired_ClearsProjectsState(t *testing.T) {
 	m.view = viewProjects
 	m.projectsStale = true
 	m.projectsRefetchPending = true
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 
 	out, cmd := m.Update(resetRequiredMsg{})
 	nm := out.(Model)
