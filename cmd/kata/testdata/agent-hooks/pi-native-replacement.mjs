@@ -6,6 +6,8 @@ const {ExtensionRunner}=await import(pathToFileURL(root+'/core/extensions/runner
 const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileURL(root+'/core/extensions/loader.js'));
 const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
 const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
+// Pi 1.3 takes (trigger, options); Pi 0.99 took (prompt, images, options).
+const emitBeforeAgentStart=(runner,prompt,options)=>runner.emitBeforeAgentStart.length>=3?runner.emitBeforeAgentStart(prompt,undefined,options):runner.emitBeforeAgentStart({messageType:'user',prompt},options);
 const project=(await import(pathToFileURL(projectPath))).default,user=(await import(pathToFileURL(userPath))).default;
 const calls=()=>readFileSync(process.env.KATA_PI_TEST_CALLS,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
 const base={customPrompt:'base',cwd,sections:{other:'preserved'}};
@@ -21,7 +23,7 @@ for(const reason of ['new','resume','fork','reload']) {
  const oldManager=SessionManager.inMemory(cwd),old=await load(oldManager,true);
  process.env.KATA_REF='captured-'+reason;
  await old.emit({type:'session_start',reason:'startup'});
- const initial=await old.emitBeforeAgentStart('initial',undefined,base);
+ const initial=await emitBeforeAgentStart(old,'initial',base);
  assert.equal(initial.systemPromptOptions.sections.kata_contract,'old contract');
  assert.equal(calls().filter(c=>c.args[0]==='agent-contract-hook').at(-1).args[2],'project.txt');
  const before=calls().filter(c=>c.args[0]==='agent-hook').length;
@@ -35,7 +37,7 @@ for(const reason of ['new','resume','fork','reload']) {
  assert.equal(calls().filter(c=>c.args[0]==='agent-hook').length,before+(reason==='reload'?0:1),'user attention fallback must become active');
  const activeStart=calls().filter(c=>c.args[0]==='agent-hook').at(-1);
  writeFileSync(process.env.KATA_PI_TEST_STATE,JSON.stringify({contract:'fresh user contract',inbox:'fresh user request'}));
- const fresh=await current.emitBeforeAgentStart('replacement',undefined,base);
+ const fresh=await emitBeforeAgentStart(current,'replacement',base);
  assert.equal(fresh.systemPromptOptions.sections.kata_contract,'fresh user contract',reason+' must retire stale project contract');
  assert.equal(fresh.systemPromptOptions.sections.kata_inbox,'fresh user request');
  assert.equal(fresh.systemPromptOptions.sections.other,'preserved');

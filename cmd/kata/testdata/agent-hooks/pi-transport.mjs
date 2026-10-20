@@ -8,6 +8,8 @@ const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileU
 const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
 const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
 const {buildSystemPrompt}=await import(pathToFileURL(root+'/core/system-prompt.js'));
+// Pi 1.3 takes (trigger, options); Pi 0.99 took (prompt, images, options).
+const emitBeforeAgentStart=(runner,prompt,options)=>runner.emitBeforeAgentStart.length>=3?runner.emitBeforeAgentStart(prompt,undefined,options):runner.emitBeforeAgentStart({messageType:'user',prompt},options);
 const factory=(await import(pathToFileURL(extensionPath))).default;
 let revision=1,metadata={},request='fresh request',failInbox=false,status='open';const requests=[],writes=[],errors=[];
 const server=createServer(async(req,res)=>{
@@ -35,10 +37,10 @@ try {
  const initial=await load(manager);let active=initial,runner=active.runner;
  writeFileSync(source,'source current');await runner.emit({type:'session_start',reason:'startup'});assert.equal(metadata['work.attention'],'ok');assert.match(metadata['work.attention_session'],/^[0-9a-f]{64}$/);
  const originalOwner=metadata['work.attention_session'];const base={customPrompt:'base',cwd,sections:{other:'preserved'}};
- let result=await runner.emitBeforeAgentStart('first',undefined,base);let prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('source current'));assert(prompt.includes('fresh request'));
- writeFileSync(source,'');request='';result=await runner.emitBeforeAgentStart('cleared',undefined,base);assert.equal(result.systemPromptOptions.sections.kata_contract,'');assert.equal(result.systemPromptOptions.sections.kata_inbox,'');
- writeFileSync(source,Buffer.from([0xff]));failInbox=true;result=await runner.emitBeforeAgentStart('unavailable',undefined,base);prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('contract context is unavailable'));assert(prompt.includes('inbox context is unavailable'));assert(!prompt.includes('fresh request'));
- unlinkSync(source);failInbox=false;result=await runner.emitBeforeAgentStart('fallback',undefined,base);assert(result.systemPromptOptions.sections.kata_contract.length>100);
+ let result=await emitBeforeAgentStart(runner,'first',base);let prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('source current'));assert(prompt.includes('fresh request'));
+ writeFileSync(source,'');request='';result=await emitBeforeAgentStart(runner,'cleared',base);assert.equal(result.systemPromptOptions.sections.kata_contract,'');assert.equal(result.systemPromptOptions.sections.kata_inbox,'');
+ writeFileSync(source,Buffer.from([0xff]));failInbox=true;result=await emitBeforeAgentStart(runner,'unavailable',base);prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('contract context is unavailable'));assert(prompt.includes('inbox context is unavailable'));assert(!prompt.includes('fresh request'));
+ unlinkSync(source);failInbox=false;result=await emitBeforeAgentStart(runner,'fallback',base);assert(result.systemPromptOptions.sections.kata_contract.length>100);
  metadata['work.attention']='stuck';await runner.emit({type:'session_start',reason:'startup'});await runner.emit({type:'agent_end',messages:[]});assert.equal(metadata['work.attention'],'stuck');assert.equal(writes.length,1);
  const oldSession=manager.getSessionId();
  await runner.emit({type:'session_shutdown',reason:'reload'});runner.invalidate();active=await load(manager);runner=active.runner;await runner.emit({type:'session_start',reason:'reload'});assert.equal(metadata['work.attention'],'stuck');assert.equal(writes.length,1,'reload preserves explicit handoff');
