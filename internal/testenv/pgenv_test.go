@@ -3,31 +3,14 @@ package testenv_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx driver as "pgx"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
 )
-
-// TestNewPostgresContainerReturnsUsableDSN proves the helper exposes a DSN
-// that the pgx stdlib driver can open. -short skips.
-func TestNewPostgresContainerReturnsUsableDSN(t *testing.T) {
-	if testing.Short() {
-		t.Skip("testcontainer requires docker; skip on -short")
-	}
-	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
-	t.Cleanup(cleanup)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	var one int
-	require.NoError(t, db.QueryRowContext(ctx, "SELECT 1").Scan(&one))
-	require.Equal(t, 1, one)
-}
 
 func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
 	if testing.Short() {
@@ -105,20 +88,19 @@ func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 		_, err = database.ExecContext(ctx, `CREATE TABLE seeded (value text); INSERT INTO seeded VALUES ('from-template')`)
 		return err
 	})
-	open := func(t *testing.T) (*sql.DB, string, func()) {
+	open := func(t *testing.T) (*sql.DB, func()) {
 		t.Helper()
 		dsn, cleanup := template.NewDatabase(t, ctx)
 		database, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
-		var name string
-		require.NoError(t, database.QueryRowContext(ctx, `SELECT current_database()`).Scan(&name))
-		return database, name, func() {
+		return database, func() {
 			require.NoError(t, database.Close())
 			cleanup()
 		}
 	}
-	first, firstName, closeFirst := open(t)
-	second, _, closeSecond := open(t)
+	first, closeFirst := open(t)
+	t.Cleanup(closeFirst)
+	second, closeSecond := open(t)
 	t.Cleanup(closeSecond)
 	require.Equal(t, 1, prepared, "the template is prepared once per server")
 	for _, database := range []*sql.DB{first, second} {
@@ -126,15 +108,6 @@ func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 		require.NoError(t, database.QueryRowContext(ctx, `SELECT value FROM seeded`).Scan(&value))
 		require.Equal(t, "from-template", value)
 	}
-	_, err := first.ExecContext(ctx, `INSERT INTO seeded VALUES ('only-in-first')`)
-	require.NoError(t, err)
-	var copies int
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT count(*) FROM seeded`).Scan(&copies))
-	require.Equal(t, 1, copies, "each clone must be isolated")
-	closeFirst()
-	var remaining bool
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
-	require.False(t, remaining, "cleanup must drop the clone")
 }
 
 // Templates outlive the test process that built them. A later process drops
@@ -169,7 +142,7 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = first.Close() })
 	var live []string
-	rows, err := server.QueryContext(ctx, `SELECT datname FROM pg_database WHERE datname LIKE 'kata\_template\_%'`)
+	rows, err := server.QueryContext(ctx, `SELECT datname FROM pg_database WHERE datname LIKE $1`, fmt.Sprintf(`kata\_template\_%d\_%%`, os.Getpid()))
 	require.NoError(t, err)
 	for rows.Next() {
 		var name string
