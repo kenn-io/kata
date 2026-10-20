@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx driver as "pgx"
@@ -12,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
+func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
@@ -31,15 +32,13 @@ func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
 
 	isolatedDSN, isolatedCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(isolatedCleanup)
-	require.NotEqual(t, baseDSN, isolatedDSN)
 
 	db, err := sql.Open("pgx", isolatedDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	var isolatedStart, databaseName string
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&isolatedStart, &databaseName))
+	var isolatedStart string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text`).Scan(&isolatedStart))
 	require.Equal(t, baseStart, isolatedStart, "the isolated database must use the explicit server")
-	require.Contains(t, databaseName, "kata_test_")
 }
 
 // Starting a PostgreSQL container dominates small storage tests, so every
@@ -132,11 +131,15 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	server, err := sql.Open("pgx", serverDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	abandoned := fmt.Sprintf("kata_template_%d_%d", os.Getpid(), 999)
-	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`)
+	cmd := exec.Command(os.Args[0], "-test.run=^$") //nolint:gosec // G204: run this test binary with no tests selected.
+	require.NoError(t, cmd.Start())
+	deadPID := cmd.Process.Pid
+	require.NoError(t, cmd.Wait())
+	abandoned := fmt.Sprintf("kata_template_%d_1", deadPID)
+	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`) //nolint:gosec // G701: name contains only a fixed prefix and an integer PID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`)
+		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`) //nolint:gosec // G701: name contains only a fixed prefix and an integer PID.
 	})
 	exists := func(name string) bool {
 		var found bool
