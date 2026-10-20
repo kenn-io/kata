@@ -31,7 +31,8 @@ Results are JSON.
 A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
 A run is one execution and its reported status and results.
-The request-file formats are in the Native cron reference (docs/reference/cron.md).`,
+For request bodies, see kata cron job create --help or kata cron workflow create --help.
+The full contract is in the Native cron reference (docs/reference/cron.md).`,
 		Example: `  kata cron capabilities --json
   kata cron job create --file job.json --json
   kata cron job list --json
@@ -149,20 +150,25 @@ update, delete, and restore require as --expected-event-uid.`, "  " + cmd + " <"
 		long := "Create a " + resource + ` definition from a JSON request file (--file, or -
 for stdin) holding a name and a definition. Pass --uid to choose its ULID;
 otherwise one is generated and printed to stderr. Reuse that --uid when
-retrying: a repeated create never becomes an update.`
+retrying after an uncertain response. First inspect kata cron ` + resource + ` show
+with that UID: an already-created definition conflicts on create and never
+becomes an update.`
 		if resource == "job" {
 			long += "\nCreating or enabling a native recurring issue job activates daemon delivery. Kata never launches a process."
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid from an issue ref."
 		}
-		return long, "  " + cmd + " --uid <" + resource + "-uid> --file " + resource + ".json --json"
+		return long + "\n\n" + cronRequestHelp(resource), cronRequestExamples(resource, action)
 	case "update":
 		long := "Replace a " + resource + ` definition from a JSON request file. Pass the current
 definition_event_uid from kata cron ` + resource + ` show as --expected-event-uid
-(or as expected_event_uid in the file); a stale value fails with a conflict.`
+(or as expected_event_uid in the file). If both are supplied they must match;
+a stale value fails with a conflict. Re-read show before retrying an edit.
+Send the complete name and definition, not a patch. The examples below use
+the flag, so their JSON bodies also work for create.`
 		if resource == "job" {
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid; an existing native parent binding cannot change."
 		}
-		return long, "  " + cmd + " <" + resource + "-uid> --expected-event-uid <event-uid> --file " + resource + ".json --json"
+		return long + "\n\n" + cronRequestHelp(resource), cronRequestExamples(resource, action)
 	case "delete":
 		long := "Delete a " + resource + ` definition. Requires the current --expected-event-uid.
 The definition stays readable and kata cron ` + resource + ` restore brings it back.`

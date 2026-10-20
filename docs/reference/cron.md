@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-18
+last_edited: 2026-10-20
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -44,10 +44,12 @@ kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 ```
 
 Creation requires no expected event UID. Updates, deletion, and restoration
-require the current `expected_event_uid`, either as the flag or in the request
-body; when both are present they must match. Conflicts require inspecting the
-current definition. A lost create response can be inspected using the retained
-UID. A repeated create does not silently become an update. Tombstones remain
+require the current `definition_event_uid` returned by `show`, passed as
+`--expected-event-uid` or `expected_event_uid` in the request body. When both
+are present they must match. A stale value fails with a conflict; re-read
+`show` before retrying an edit. After an uncertain create response, inspect
+`show` with the retained UID. If retrying create, reuse that same `--uid`;
+an already-created definition conflicts and never becomes an update. Tombstones remain
 readable, and `list --include-deleted` includes them. Deleting a workflow is
 refused while a live job in the project uses it; update or delete that job
 first.
@@ -61,26 +63,38 @@ option objects retain exact JSON numbers.
 
 ### Request files
 
-The `--file` body for `create` and `update` is a JSON object with a `name` and
-a `definition`. Kata trims `name`, which must then be 1–256 bytes. Optional `actor` must
+The `--file` body for `create` and `update` requires both `name` and
+`definition`. Updates replace the complete definition; they are not patches.
+Kata trims `name`, which must then be 1–256 bytes. Optional `actor` must
 match `--as` when both are given; optional `expected_event_uid` applies to
-`update` only. A job request file looks like this:
+`update` only. Create and update help includes copyable request bodies:
+
+```sh
+kata cron job create --help
+kata cron job update --help
+kata cron workflow create --help
+kata cron workflow update --help
+```
+
+For an adapter prompt job, save this as `job.json`. Configure the
+`example-project` checkout in the adapter. `options.agent` selects its prompt
+agent; option names and supported agents depend on the adapter. Kata stores
+these options without interpreting them.
 
 ```json
 {
-  "name": "Weekday review",
+  "name": "Daily summary",
   "definition": {
     "version": 1,
     "kind": "job",
     "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 9 * * 1-5", "timezone": "America/New_York"},
-    "action": {"kind": "execute", "prompt": "Review open pull requests and summarize risks."},
-    "issue": {"kind": "per-run", "title": "Weekday review", "deadline_offset_seconds": 28800},
+    "trigger": {"kind": "cron", "cron": "0 9 * * *", "timezone": "UTC"},
+    "action": {"kind": "execute", "prompt": "Review open issues and summarize next actions."},
+    "issue": {"kind": "per-run", "title": "Daily summary"},
     "overlap": "forbid",
-    "catchup": "skip",
-    "checkout_key": "main-repo",
-    "timeout_seconds": 3600,
-    "secret_refs": {"GITHUB_TOKEN": "github-review"}
+    "catchup": "latest",
+    "checkout_key": "example-project",
+    "options": {"agent": "codex"}
   }
 }
 ```
@@ -312,17 +326,55 @@ options). Each step has these fields:
 
 ```json
 {
-  "name": "Review then test",
+  "name": "nightly-tests",
   "definition": {
     "version": 1,
-    "about": "Review a change, then run the tests.",
     "steps": [
-      {"key": "review", "kind": "prompt", "prompt": "Review the change."},
-      {"key": "test", "kind": "command", "command": "make test", "after": ["review"], "retries": 1}
+      {"key": "check", "kind": "command", "command": "git diff --check"},
+      {"key": "test", "kind": "command", "command": "go test ./...", "after": ["check"]}
     ]
   }
 }
 ```
+
+### Adapter command jobs
+
+A job runs commands by referencing a workflow. `action.kind` remains
+`execute`; use `workflow_uid` instead of `prompt`, and put each command in a
+workflow step. The referenced workflow must already exist in the same project.
+
+Save the workflow above as `workflow.json` and create it with a retained UID:
+
+```sh
+kata cron workflow create --uid 01J00000000000000000000010 --file workflow.json --json
+```
+
+The UID here is an example. Choose your own ULID and use it in both the create
+command and the following job body. Save this request as `command.json`:
+
+```json
+{
+  "name": "nightly-tests",
+  "definition": {
+    "version": 1,
+    "kind": "job",
+    "enabled": true,
+    "trigger": {"kind": "cron", "cron": "0 2 * * *", "timezone": "UTC"},
+    "action": {"kind": "execute", "workflow_uid": "01J00000000000000000000010"},
+    "issue": {"kind": "per-run", "title": "Nightly tests"},
+    "overlap": "forbid",
+    "catchup": "latest",
+    "checkout_key": "example-project"
+  }
+}
+```
+
+```sh
+kata cron job create --uid <job-uid> --file command.json --json
+```
+
+The external adapter schedules the job and runs its workflow in the configured
+checkout. Kata stores the definitions and run evidence.
 
 ## Capabilities
 
