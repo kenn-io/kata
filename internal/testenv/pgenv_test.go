@@ -24,8 +24,8 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	base, err := sql.Open("pgx", baseDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = base.Close() })
-	var baseStart string
-	require.NoError(t, base.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text`).Scan(&baseStart))
+	var baseStart, baseName string
+	require.NoError(t, base.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&baseStart, &baseName))
 
 	isolatedDSN, isolatedCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(isolatedCleanup)
@@ -33,9 +33,10 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	db, err := sql.Open("pgx", isolatedDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	var isolatedStart string
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text`).Scan(&isolatedStart))
+	var isolatedStart, isolatedName string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&isolatedStart, &isolatedName))
 	require.Equal(t, baseStart, isolatedStart, "the isolated database must use the explicit server")
+	require.NotEqual(t, baseName, isolatedName)
 }
 
 // Template clones share the configured or automatic PostgreSQL server,
@@ -73,7 +74,6 @@ func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 	require.NoError(t, first.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&firstStart, &firstName))
 	require.NoError(t, second.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&secondStart, &secondName))
 	require.Equal(t, firstStart, secondStart, "tests in one process must reuse the server")
-	require.NotEqual(t, firstName, secondName)
 	require.Equal(t, 1, prepared, "the template is prepared once per server")
 	for _, database := range []*sql.DB{first, second} {
 		var value string
