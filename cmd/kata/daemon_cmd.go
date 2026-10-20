@@ -1262,6 +1262,7 @@ func runDaemonProcess(
 
 	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
 	startDaemonTelemetryHeartbeat(ctx, workers, store, telemetryReporter)
+	startSetupFinished(ctx, workers, store, telemetryReporter)
 	stopCleanup := installStopWatcher(ns.DBHash, shutdownTrigger.Call)
 	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
 	// a named reload event pumped onto the channel on Windows. See
@@ -1757,7 +1758,7 @@ func captureDaemonTelemetryEvent(ctx context.Context, store db.Storage, reporter
 	}
 	properties := map[string]any{}
 	if projects, err := store.ListProjects(ctx); err == nil {
-		properties["project_count"] = len(projects)
+		properties["project_count"] = telemetry.ProjectCountBucket(len(projects))
 	}
 	if err := reporter.Capture(event, properties); err != nil {
 		slog.Warn("capture telemetry event", "err", err)

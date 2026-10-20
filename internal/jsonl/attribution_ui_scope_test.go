@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // R5/R6: local browser cursors belong to owner backup, never a portable project.
@@ -22,7 +23,7 @@ func TestAttributionUIResetExportScope(t *testing.T) {
 				require.NoError(t, err)
 				store = native
 			} else {
-				dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+				dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 				t.Cleanup(cleanup)
 				native, err := pgstore.Open(t.Context(), dsn)
 				require.NoError(t, err)

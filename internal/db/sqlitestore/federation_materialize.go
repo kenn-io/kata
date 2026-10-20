@@ -31,6 +31,12 @@ type federationMaterialization struct {
 }
 
 func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent) (federationMaterialization, error) {
+	return prepareFederationMaterialization(ctx, tx, projectID, prepared, false, nil)
+}
+
+// alreadyStored selects pull preparation: the page is in the log already, and
+// only the supplied issue histories and rows need reconciliation (nil is full).
+func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
@@ -59,21 +65,31 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 	if err != nil {
 		return federationMaterialization{}, err
 	}
-	events, err := federationFoldEvents(ctx, tx, projectID)
+	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {
 		return federationMaterialization{}, err
 	}
-	events = append(events, fresh...)
+	if !alreadyStored {
+		events = append(events, fresh...)
+	}
 	for _, event := range events {
 		if err := db.ValidateFederationEntries(event.Type, event.UID, event.Payload); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	if len(issueScope) > 0 {
+		// Historical project events can affect issue authors, but an issue-only
+		// page must not reconcile unrelated project metadata.
+		m.projection.ProjectMetadata = nil
+	}
 	m.cronAffected = db.CronMaterializationNeeded(events, accepted)
-	m.status, err = prepareFederatedStatusIntentTx(ctx, tx, projectID, events, accepted, m.projection)
-	if err != nil {
-		return federationMaterialization{}, err
+	// Provider status intent is enqueued by hub ingest, not spoke pulls.
+	if !alreadyStored {
+		m.status, err = prepareFederatedStatusIntentTx(ctx, tx, projectID, events, accepted, m.projection)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
 	}
 	if linksAffected {
 		m.linkProjects, err = federationBindingGroupProjectIDs(ctx, tx, binding)
@@ -88,9 +104,11 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 			}
 			linkEvents = append(linkEvents, history...)
 		}
-		for _, event := range fresh {
-			if db.FederationEventAffectsLinks(event.Type) {
-				linkEvents = append(linkEvents, event)
+		if !alreadyStored {
+			for _, event := range fresh {
+				if db.FederationEventAffectsLinks(event.Type) {
+					linkEvents = append(linkEvents, event)
+				}
 			}
 		}
 		// The incremental fold reads the same group link history as a full
@@ -101,11 +119,11 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		}
 		m.links = db.FoldEvents(linkEvents)
 	}
-	if err := m.prepareRows(ctx, tx, projectID); err != nil {
+	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err
 	}
 	if m.linkProjects != nil {
-		if err := m.prepareLinks(ctx, tx, projectID); err != nil {
+		if err := m.prepareLinks(ctx, tx, projectID, issueScope); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -150,8 +168,8 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
-func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	existing, err := federatedIssueRowsByUID(ctx, tx, projectID)
+func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
+	existing, err := federatedIssueRowsByUID(ctx, tx, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -195,7 +213,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(m.projection.Issues, issue.UID)
 		}
 	}
-	comments, err := federatedCommentRowsByUID(ctx, tx, projectID)
+	comments, err := federatedCommentRowsByUID(ctx, tx, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -212,7 +230,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			delete(comments, uid)
 		}
 	}
-	labels, err := federatedLabelKeys(ctx, tx, projectID)
+	labels, err := federatedLabelKeys(ctx, tx, projectID, issueScope...)
 	if err != nil {
 		return err
 	}
@@ -242,8 +260,8 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 	return key
 }
 
-func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs)
+func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
+	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope)
 	if err != nil {
 		return err
 	}

@@ -296,6 +296,24 @@ applies hub events in order, deduplicates by event UID and content hash, folds
 portable payloads into the local projection, and advances its pull cursor only
 after successful application.
 
+SQLite direct spokes prepare pulled issue histories and projection differences
+before taking the writer lock, then update only the touched issues and changed
+comments, labels and links. Ordinary local issue push echoes need no materialization.
+Project-wide events and events without a safe issue scope use a complete fold;
+link changes still reconcile the federation group's link history. Preparation
+retries against a fresh snapshot after concurrent commits, with the same bounded
+locked-preparation fallback as hub push ingest.
+
+Remote insertion commits before materialization. The pull cursor advances last,
+so an interrupted page is replayed and its already-stored remote events remain
+materialization candidates. A reset replays the baseline through the same path.
+Local adoption snapshots, global events and echoes without an envelope issue UID
+remain repair candidates until their page's cursor advances. They can be reset
+replays or have a canonical payload already stored before an interruption;
+push acknowledgment alone does not prove their projections were repaired.
+This repair does not repeat notifications for acknowledged pushes.
+Other storage backends retain full pull folds.
+
 Baseline snapshots bridge the fact that pre-horizon history is not
 replay-complete. Events after the baseline are ordered by their event/HLC data
 and materialized normally. If the hub reports `reset_required`, the spoke
@@ -311,9 +329,9 @@ deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
 SQLite hubs prepare the event fold and projection differences in the read phase
-of a deferred transaction, before the project lock takes the writer lock. This
-is the one transaction that reads before joining the SQLite
-[write queue](data-model.md#storage-backends); it joins at the project lock.
+of a deferred transaction, before the project lock takes the writer lock. Like
+incremental direct-spoke materialization, this transaction reads before joining
+the SQLite [write queue](data-model.md#storage-backends); it joins at the project lock.
 The write phase inserts accepted events and updates only changed issues,
 comments, labels, links and status-intent pointers. Validation failures still
 roll back the entire batch.

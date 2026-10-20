@@ -413,6 +413,35 @@ func PeekSchemaVersion(ctx context.Context, path string) (int, error) {
 	return d.currentVersion(ctx)
 }
 
+// CheckpointForCutover writes every committed WAL page of an existing
+// database into its main file and truncates the WAL. Cutover renames only the
+// main file, so pages left in the WAL would be missing from the backup and
+// replayed into the replacement database. The handle skips bootstrap, so any
+// schema version is accepted.
+func CheckpointForCutover(ctx context.Context, path string) error {
+	dsn := fmt.Sprintf("file:%s?mode=rw&_pragma=busy_timeout(%d)",
+		sqliteURIPath(path), sqliteBusyTimeout.Milliseconds())
+	sdb, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("open %s for checkpoint: %w", path, err)
+	}
+	sdb.SetMaxOpenConns(1)
+	var busy, logFrames, checkpointedFrames int
+	if err := sdb.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+		_ = sdb.Close()
+		return fmt.Errorf("checkpoint %s: %w", path, err)
+	}
+	if busy != 0 {
+		_ = sdb.Close()
+		return fmt.Errorf("checkpoint %s: database is in use; stop other kata processes and retry", path)
+	}
+	if err := sdb.Close(); err != nil {
+		return fmt.Errorf("close %s after checkpoint: %w", path, err)
+	}
+	return nil
+}
+
 // HasUserTables reports whether an existing SQLite database contains any
 // application/user tables. A zero schema_version plus user tables means
 // "legacy or corrupt existing DB", not "fresh file"; storeopen uses this to
@@ -498,13 +527,22 @@ func (d *Store) hasUserTables(ctx context.Context) (bool, error) {
 // SQLite opens a URI, so literal #/?/% in a filesystem path must be escaped.
 func sqliteURIPath(path string) string { return (&url.URL{Path: filepath.ToSlash(path)}).EscapedPath() }
 
-// ClaimScreenView atomically claims one screen's day across all clients sharing this database.
+// ClaimScreenView atomically claims one screen's day across clients sharing this database.
 func (d *Store) ClaimScreenView(ctx context.Context, screen, day string) (bool, error) {
+	return d.claimTelemetry(ctx, "screen_viewed:"+screen, d.instanceUID+":"+day)
+}
+
+// ReleaseScreenView preserves newer claims when an earlier enqueue fails.
+func (d *Store) ReleaseScreenView(ctx context.Context, screen, day string) error {
+	return d.releaseTelemetry(ctx, "screen_viewed:"+screen, d.instanceUID+":"+day)
+}
+
+func (d *Store) claimTelemetry(ctx context.Context, key, value string) (bool, error) {
 	var claimed bool
 	err := d.RetryTransient(ctx, func() error {
 		result, err := d.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?, ?)
    ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE meta.value <> excluded.value`,
-			"screen_viewed:"+screen, d.instanceUID+":"+day)
+			key, value)
 		if err != nil {
 			return err
 		}
@@ -515,11 +553,10 @@ func (d *Store) ClaimScreenView(ctx context.Context, screen, day string) (bool, 
 	return claimed, err
 }
 
-// ReleaseScreenView preserves newer claims when an earlier enqueue fails.
-func (d *Store) ReleaseScreenView(ctx context.Context, screen, day string) error {
+func (d *Store) releaseTelemetry(ctx context.Context, key, value string) error {
 	return d.RetryTransient(ctx, func() error {
 		_, err := d.ExecContext(ctx, `DELETE FROM meta WHERE key=? AND value=?`,
-			"screen_viewed:"+screen, d.instanceUID+":"+day)
+			key, value)
 		return err
 	})
 }

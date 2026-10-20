@@ -23,26 +23,45 @@ import (
 type recordingTelemetry struct {
 	mu       sync.Mutex
 	captured []map[string]any
+	opened   chan struct{}
+	ended    chan map[string]any
+	release  <-chan struct{}
+	finished chan struct{}
 }
 
 func (*recordingTelemetry) EventAllowed(event string) bool {
 	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
 }
 func (*recordingTelemetry) Enabled() bool { return true }
-func (r *recordingTelemetry) Capture(_ string, properties map[string]any) error {
+func (r *recordingTelemetry) Capture(event string, properties map[string]any) error {
+	if event == "app_opened" && r.opened != nil {
+		close(r.opened)
+	}
+	if event == "session_ended" && r.ended != nil {
+		r.ended <- properties
+		<-r.release
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.captured = append(r.captured, properties)
+	if event == "session_ended" && r.finished != nil {
+		close(r.finished)
+	}
 	return nil
 }
 
 func TestReportAppOpenedReachesDaemonCapture(t *testing.T) {
-	recorder := &recordingTelemetry{}
+	recorder := &recordingTelemetry{finished: make(chan struct{})}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 
 	c := NewClient(env.URL, env.HTTP)
 	require.NoError(t, c.ReportAppOpened(t.Context()))
-	require.NoError(t, c.ReportSessionEnded(2*time.Minute))
+	c.ReportSessionEnded(2 * time.Minute)
+	select {
+	case <-recorder.finished:
+	case <-t.Context().Done():
+		t.Fatal("session_ended delivery did not finish")
+	}
 
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
@@ -57,8 +76,10 @@ func TestReportSessionEndedBoundsDelivery(t *testing.T) {
 		})}
 		c := NewClient("http://127.0.0.1:7777", hc)
 		started := time.Now()
-		assert.Error(t, c.ReportSessionEnded(time.Minute))
-		assert.Equal(t, time.Second, time.Since(started))
+		c.ReportSessionEnded(time.Minute)
+		assert.Equal(t, 50*time.Millisecond, time.Since(started))
+		time.Sleep(time.Second)
+		synctest.Wait()
 	})
 }
 

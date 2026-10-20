@@ -152,7 +152,7 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient)
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 			defer stopReporting()
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,
@@ -208,12 +208,14 @@ func newMCPServeCmd() *cobra.Command {
 	return command
 }
 
-func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (func(), context.CancelFunc) {
+func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
+	marker := telemetryDayMarkerPath(target, "agent-full-")
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		fullDay := ""
 		for {
 			select {
 			case <-reportCtx.Done():
@@ -222,11 +224,19 @@ func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (f
 				if reportCtx.Err() != nil {
 					return
 				}
+				day := cliUseNow().UTC().Format(time.DateOnly)
+				if fullDay == day || readTelemetryDayMarker(marker) == day {
+					continue
+				}
 				callCtx, stop := context.WithTimeout(reportCtx, time.Second)
-				_, _ = client.CaptureTelemetryEventWithResponse(callCtx, &generated.CaptureTelemetryEventRequestOptions{
+				resp, err := apiClient.CaptureTelemetryEventWithResponse(callCtx, &generated.CaptureTelemetryEventRequestOptions{
 					Body: &generated.CaptureTelemetryEventBody{Event: "agent_active"},
 				})
 				stop()
+				if err == nil && agentUseDoneForDay(resp.JSON202.Status) {
+					fullDay = day
+					recordTelemetryDayMarker(marker, day)
+				}
 			}
 		}
 	}()

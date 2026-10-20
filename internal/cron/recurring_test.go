@@ -134,8 +134,13 @@ func TestCalendarAndCatchup(t *testing.T) {
 		cron, start, end string
 		want             []string
 	}{
-		{"30 2 * * *", "2026-03-07T08:00:00Z", "2026-03-09T07:00:00Z", []string{"2026-03-09T06:30:00Z"}},
+		// A time inside the spring-forward gap runs that day, one hour later
+		// on the wall clock (03:30 EDT).
+		{"30 2 * * *", "2026-03-07T08:00:00Z", "2026-03-09T07:00:00Z", []string{"2026-03-08T07:30:00Z", "2026-03-09T06:30:00Z"}},
+		// A time inside the repeated fall-back hour runs on both passes.
 		{"30 1 * * *", "2026-11-01T04:00:00Z", "2026-11-01T07:00:00Z", []string{"2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z"}},
+		// Hourly schedules run once per elapsed hour through the repeat.
+		{"0 * * * *", "2026-11-01T04:59:00Z", "2026-11-01T07:00:00Z", []string{"2026-11-01T05:00:00Z", "2026-11-01T06:00:00Z", "2026-11-01T07:00:00Z"}},
 	} {
 		j.Trigger = Trigger{Kind: "cron", Cron: tc.cron, Timezone: "America/New_York"}
 		a := at(t, tc.start)

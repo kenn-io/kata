@@ -1,11 +1,34 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-17
+last_edited: 2026-10-20
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+- Count a parent's open and total children from the browser snapshot's
+  `collection_links` instead of listing issues. The counts match `child_counts`
+  from `GET /api/v1/issues` for the same principal, an absent `child_counts`
+  means zero, and the contract holds for snapshots reporting `contract_version`
+  `2`, including through the daemon-switcher proxy. See
+  [Browser UI endpoints](reference/http-api.md#browser-ui-endpoints).
+
+- Count installations that have their first visible issue with one anonymous
+  `setup_finished` event, including issues already stored at startup. The count
+  retries interrupted delivery across daemon restarts with the same event identity
+  and installation age. `KATA_TELEMETRY_ENABLED=0` opts out.
+
+- Return from successful commands, agent hooks, and TUI quit after waiting at most 50 ms for usage reports. A human CLI report that fails retries on the next command; one still unanswered at exit backs off for 15 minutes or until the next UTC day. See [Telemetry](reference/configuration.md#telemetry).
+- Stop sending the PostHog SDK's `$os`, `$os_version`, `$os_distro`, and `$go_version` properties with telemetry events. Events still carry `goos` and `goarch`; update PostHog insights that group by `$os` to group by `goos`. See [Telemetry](reference/configuration.md#telemetry).
+- Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.
+- Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
+
+- Negotiate all [cron features](reference/cron.md#capabilities), including recurring child delivery, with one `cron_v1` capability. Upgrade connected hubs, spokes, and adapters together from 0.19.0; the separate recurring capability is removed with no alias or mixed-version rolling-upgrade support. Native delivery remains hub-owned.
+
+- Count completed issue creates and closes from the web UI, TUI, and human CLI commands with anonymous `issue_created` and `issue_closed` events. The daemon records each changed mutation with its client's `surface`, without a separate action report or wait. `KATA_TELEMETRY_ENABLED=0` opts out. Web issue removal counts as a close.
 
 ## 0.19.0
 <small>2026-10-17</small>

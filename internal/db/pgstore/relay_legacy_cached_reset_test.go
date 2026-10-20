@@ -4,14 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRelayLegacyCachedResetPrivacy(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)

@@ -146,6 +146,13 @@ func TestUISnapshotCollectionContract(t *testing.T) {
 	})
 }
 
+func TestUISnapshotChildLinkContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotChildLinkContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotViewScopeContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotViewScopeContract(t, func(t *testing.T) db.Storage {

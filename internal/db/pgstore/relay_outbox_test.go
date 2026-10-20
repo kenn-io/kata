@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
@@ -13,7 +15,7 @@ import (
 )
 
 func TestRelayOfflineIntent(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -26,7 +28,7 @@ func TestRelayOfflineIntent(t *testing.T) {
 }
 
 func TestRelayRootAcceptanceStatus(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -38,7 +40,7 @@ func TestRelayRootAcceptanceStatus(t *testing.T) {
 }
 
 func TestSignedRelayResetCommitments(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -47,7 +49,7 @@ func TestSignedRelayResetCommitments(t *testing.T) {
 }
 
 func TestCreateRelayResetAfterCompaction(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -59,7 +61,7 @@ func TestCreateRelayResetAfterCompaction(t *testing.T) {
 }
 
 func TestForwardCompactedRelayCheckpointPostCheckpointIngress(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -71,7 +73,7 @@ func TestForwardCompactedRelayCheckpointPostCheckpointIngress(t *testing.T) {
 }
 
 func TestRelayResetForwardsToActiveDownstream(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -80,7 +82,7 @@ func TestRelayResetForwardsToActiveDownstream(t *testing.T) {
 }
 
 func TestRelayResetRepeatedBeforeDownstreamActivation(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -89,7 +91,7 @@ func TestRelayResetRepeatedBeforeDownstreamActivation(t *testing.T) {
 }
 
 func TestRelayResetSupersedesArtifactOffers(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -98,7 +100,7 @@ func TestRelayResetSupersedesArtifactOffers(t *testing.T) {
 }
 
 func TestRelayResetRefreshSupersedesArtifactOffers(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -107,7 +109,7 @@ func TestRelayResetRefreshSupersedesArtifactOffers(t *testing.T) {
 }
 
 func TestRelayRevokedOutboxLifecycle(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -131,7 +133,7 @@ func TestRelayResetCarriesCronDefinitions(t *testing.T) {
 }
 
 func TestRelayLocalDetach(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -140,7 +142,7 @@ func TestRelayLocalDetach(t *testing.T) {
 }
 
 func TestRelayRevocationPrunesBindingState(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -152,7 +154,7 @@ func TestRelayRevocationPrunesBindingState(t *testing.T) {
 }
 
 func TestRelayResetPreparesForSuspendedDownstream(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)

@@ -466,6 +466,7 @@ func (p *ProjectNameHeader) SetProjectName(name string) { p.ProjectName = name }
 // Body.ForceNew bypasses look-alike soft-block but is overridden by an
 // idempotent match (idempotency wins per spec §3.7).
 type CreateIssueRequest struct {
+	Surface string `header:"X-Kata-Surface" doc:"Client interface for action telemetry (web, tui, or cli); other values are ignored."`
 	ProjectTarget
 	IdempotencyKey string `header:"Idempotency-Key"`
 	Body           struct {
@@ -975,6 +976,7 @@ type ActionRequest struct {
 // CloseActionRequest adds retry and optimistic-concurrency headers to the
 // shared issue action body.
 type CloseActionRequest struct {
+	Surface        string `header:"X-Kata-Surface" doc:"Client interface for action telemetry (web, tui, or cli); other values are ignored."`
 	ProjectID      int64  `path:"project_id" required:"true"`
 	Ref            string `path:"ref" required:"true"`
 	IdempotencyKey string `header:"Idempotency-Key"`

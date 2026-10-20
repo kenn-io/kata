@@ -68,6 +68,10 @@ type Storage interface {
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
 	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 	// identity / lifecycle
+	// PrepareSetupFinished saves or reuses a delivery identity, or reports completion.
+	PrepareSetupFinished(ctx context.Context, observed time.Time) (*SetupFinishedDelivery, bool, error)
+	CompleteSetupFinished(ctx context.Context, delivery SetupFinishedDelivery) error
+
 	// ClaimScreenView records one installation/screen/UTC-day visit; Release clears a rejected enqueue.
 	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
 	ReleaseScreenView(ctx context.Context, screen, day string) error
@@ -123,6 +127,9 @@ type Storage interface {
 	IssueByID(ctx context.Context, id int64) (Issue, error)
 	IssueByShortID(ctx context.Context, projectID int64, shortID string, include IncludeDeleted) (Issue, error)
 	IssueByUID(ctx context.Context, issueUID string, include IncludeDeleted) (Issue, error)
+	// IssuesByUIDs applies IssueByUID's filters to a batch, keyed by UID.
+	// Unknown, deleted (unless included) and out-of-scope UIDs are omitted.
+	IssuesByUIDs(ctx context.Context, issueUIDs []string, include IncludeDeleted) (map[string]Issue, error)
 	IssueUIDPrefixMatch(ctx context.Context, prefix string, limit int, include IncludeDeleted) ([]Issue, error)
 	ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error)
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)

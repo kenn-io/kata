@@ -2,26 +2,31 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/hooks"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
-func agentUseMCPSession(t *testing.T, client *kataclient.Client) *sdkmcp.ClientSession {
+func agentUseMCPSession(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	observe, stop := startMCPAgentUseReporter(t.Context(), client)
+	observe, stop := startMCPAgentUseReporter(t.Context(), apiClient, client.ResolvedDaemon{})
 	t.Cleanup(stop)
 	server, err := mcpserver.New(mcpserver.Options{
-		Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", ObserveToolCall: observe,
+		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", ObserveToolCall: observe,
 	})
 	require.NoError(t, err)
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
@@ -65,6 +70,7 @@ func TestMCPCallsReportDailyAgentActivity(t *testing.T) {
 }
 
 func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
 		started := make(chan struct{}, 1)
@@ -107,6 +113,7 @@ func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
 func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 	for _, mode := range []string{"overflow", "shutdown", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				started := make(chan struct{})
@@ -124,7 +131,7 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 				})}
 				c, err := kataclient.NewWithHTTPClient("http://daemon.example", httpClient)
 				require.NoError(t, err)
-				observe, stop := startMCPAgentUseReporter(t.Context(), c)
+				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
 				defer stop()
 				observe()
 				<-started
@@ -159,4 +166,91 @@ func TestMCPAgentReporterBoundsQueueAndJoinsOnShutdown(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestMCPAgentUseFullDay(t *testing.T) {
+	for _, test := range []struct {
+		name, receipt string
+		stops         bool
+	}{
+		{"older daemon queued", "queued", false},
+		{"full", "full", true},
+		{"telemetry disabled", "disabled", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			synctest.Test(t, func(t *testing.T) {
+				setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
+				var calls atomic.Int32
+				httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					calls.Add(1)
+					return &http.Response{StatusCode: http.StatusAccepted, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"status":"` + test.receipt + `"}`))}, nil
+				})}
+				c, err := kataclient.NewWithHTTPClient("http://daemon.example", httpClient)
+				require.NoError(t, err)
+				observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
+				defer stop()
+				for range 3 {
+					observe()
+				}
+				synctest.Wait()
+				want := int32(3)
+				if test.stops {
+					want = 1
+				}
+				require.Equal(t, want, calls.Load())
+				stop()
+				observe, stop = startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: "http://daemon.example"})
+				defer stop()
+				observe()
+				synctest.Wait()
+				if !test.stops {
+					want++
+				}
+				require.Equal(t, want, calls.Load(), "a fresh reporter reuses the marker")
+				if test.stops {
+					setCLIUseClock(t, time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
+					observe()
+					synctest.Wait()
+					require.Equal(t, want+1, calls.Load())
+				}
+			})
+		})
+	}
+}
+
+func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv(hooks.HookVersionEnv, "1")
+	var posts atomic.Int32
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/ui/telemetry", r.URL.Path)
+		receipt := "queued"
+		if posts.Add(1) == 2 {
+			receipt = "full"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"` + receipt + `"}`))
+	}))
+	server.Config.SetKeepAlivesEnabled(false)
+	server.Start()
+	synctest.Test(t, func(t *testing.T) {
+		setCLIUseClock(t, time.Date(2026, 10, 2, 23, 59, 0, 0, time.UTC))
+		c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+		require.NoError(t, err)
+		observe, stop := startMCPAgentUseReporter(t.Context(), c, client.ResolvedDaemon{BaseURL: server.URL})
+		defer stop()
+		observe()
+		synctest.Wait()
+		require.EqualValues(t, 1, posts.Load())
+
+		reportCLIUseTo(t, server.URL)
+		require.EqualValues(t, 2, posts.Load())
+		observe()
+		synctest.Wait()
+		require.EqualValues(t, 2, posts.Load(), "the running reporter sees the hook's marker")
+	})
 }

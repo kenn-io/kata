@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,12 @@ func TestCronCapabilitiesEmptyProjectReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	response, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil, nil)
 	require.Equalf(t, 200, response.StatusCode, "%s", raw)
-	require.Equal(t, db.SupportedEventFeatures, response.Header.Get(db.EventFeaturesHeader))
-	require.Contains(t, string(raw), db.RecurringCronEventFeature)
+	require.Equal(t, "cron_v1", response.Header.Get(db.EventFeaturesHeader))
+	var body struct {
+		EventFeatures []string `json:"event_features"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, []string{"cron_v1"}, body.EventFeatures)
 	require.Contains(t, string(raw), project.UID)
 	after, err := env.DB.UIEventCursor(t.Context())
 	require.NoError(t, err)

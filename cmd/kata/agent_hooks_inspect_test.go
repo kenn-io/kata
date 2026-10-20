@@ -81,14 +81,14 @@ func installHookFixture(t *testing.T, agent agenthook.Agent, path, executable, m
 	require.NoError(t, err)
 }
 
-func TestAgentHooksInstallAllProfiles(t *testing.T) {
+func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 	isolateAgentHookHomes(t)
 	workspace := t.TempDir()
 	t.Chdir(workspace)
 	executable := filepath.Join(t.TempDir(), "stable path's kata.exe")
 	require.NoError(t, os.WriteFile(executable, []byte("fixture"), 0o700)) //nolint:gosec // G306: owner-only executable fixture.
 	for _, profile := range agenthook.Profiles() {
-		if profile.Agent == agenthook.AgentDroid {
+		if !agentHookUsesKit(string(profile.Agent)) {
 			continue
 		}
 		t.Run(string(profile.Agent), func(t *testing.T) {

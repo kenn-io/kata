@@ -329,9 +329,11 @@ authorization service. Review browser changes against these boundaries:
   `kata ui` opens that validated origin directly. Cookie-only ambient state is ignored; a session header still
   opts into the cookie-plus-header authentication path.
 - **CSP keeps code strict while allowing required layout state.** Production
-  scripts remain same-origin-only. Dynamic component positioning and CSS custom
-  properties require the narrow `style-src-attr 'unsafe-inline'` allowance;
-  never extend that exception to scripts.
+  scripts remain same-origin-only, with `script-src 'self' 'wasm-unsafe-eval'`
+  allowing Shiki's regex engine. JavaScript eval and inline scripts stay
+  blocked. Dynamic component positioning and CSS custom properties require the
+  narrow `style-src-attr 'unsafe-inline'` allowance; never extend that exception
+  to scripts.
 - **Snapshot consistency is a security and correctness boundary.** Matching
   snapshot ETags perform no projection reads, and a built snapshot captures its
   cursor inside the same consistent backend read. SQLite and PostgreSQL must

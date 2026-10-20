@@ -35,6 +35,16 @@ func TestWebHandlerAssetsAndNavigationFallback(t *testing.T) {
 		assert.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "default-src 'self'")
 		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "style-src-attr 'unsafe-inline'")
+		var scriptSources []string
+		for directive := range strings.SplitSeq(response.Header().Get("Content-Security-Policy"), ";") {
+			fields := strings.Fields(directive)
+			if len(fields) > 0 && fields[0] == "script-src" {
+				scriptSources = fields[1:]
+			}
+		}
+		// Shiki's regex engine needs WebAssembly, while JavaScript eval and
+		// inline/remote scripts must remain forbidden.
+		assert.ElementsMatch(t, []string{"'self'", "'wasm-unsafe-eval'"}, scriptSources)
 	})
 
 	t.Run("non-navigation miss", func(t *testing.T) {

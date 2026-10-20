@@ -157,7 +157,7 @@ func localProfileSigningReferences(profile LocalProfileConfig) ([]string, error)
 // overrides. The returned slice does not mutate the process environment.
 func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]string, error) {
 	values := map[string]string{}
-	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_TELEMETRY_ENABLED", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
+	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
 		if value, ok := os.LookupEnv(key); ok {
 			values[key] = value
 		}
@@ -203,6 +203,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 		"KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION", "KATA_TRUSTED_ACTOR_HEADER", "KATA_TRUSTED_PROXY_LISTENERS",
 		"KATA_WEB_ALLOWED_HOSTS", "KATA_FEDERATION_PULL_INTERVAL_MS", "KATA_GITHUB_SYNC_INTERVAL_MS",
 		"KATA_AUTHOR", "KATA_TEAMMATE", "KATA_INBOX_USER", "KATA_REF", "KATA_COLOR_MODE", "KATA_TELEMETRY_ENABLED",
+		"TELEMETRY_ENABLED", "DO_NOT_TRACK",
 		"KATA_TEST_FEDERATION_FAILPOINTS", "KATA_GITHUB_SYNC_ALLOWED_HOSTS",
 	}
 	copied := map[string]bool{}

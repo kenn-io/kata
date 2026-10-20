@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 // A backup written before revocation pruned delivery rows still carries a
@@ -56,7 +57,7 @@ func TestImportSkipsRevokedRelayBindingRows(t *testing.T) {
 	var backup bytes.Buffer
 	require.NoError(t, Export(ctx, source, &backup, ExportOptions{IncludeDeleted: true}))
 
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	postgres, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-17
+last_edited: 2026-10-19
 ---
 
 # Backup and restore
@@ -30,6 +30,24 @@ An unexplained difference stops startup with `cutover event count mismatch`
 and leaves the source database unchanged. Preserve that database for diagnosis.
 The 0.17.0 fix protects future upgrades; it does not restore events lost during
 an earlier upgrade. Recovering those events requires a backup that contains them.
+
+Before exporting, cutover writes any pending changes from `kata.db-wal` into
+`kata.db`, so the `kata.db.bak.*` file is complete. If another process holds
+the database open and blocks that step, startup stops with `database is in
+use; stop other kata processes and retry` and leaves the database in place.
+Stop every kata process that uses the database, then start Kata again.
+
+Releases through 0.19.0 could leave the old `kata.db-wal` beside the upgraded
+database when the previous daemon had not shut down cleanly. Later starts then
+fail with `schema cutover required` or `database disk image is malformed`. To
+recover:
+
+1. Stop every kata process.
+2. Move `kata.db`, `kata.db-wal`, and `kata.db-shm` out of the data directory.
+3. Copy the oldest `kata.db.bak.*` file to `kata.db`.
+4. Start Kata with a release that includes the fix. Cutover runs again.
+
+The backup can be missing the last changes made before the upgrade.
 
 ## Full backup
 

@@ -15,7 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -27,7 +30,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 const projectAccessCanary = "relay-private-canary"
@@ -42,7 +44,7 @@ func projectAccessBackends(t *testing.T, check func(*testing.T, db.Storage)) {
 				require.NoError(t, err)
 				store = s
 			} else {
-				dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+				dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 				t.Cleanup(cleanup)
 				s, err := pgstore.Open(t.Context(), dsn)
 				require.NoError(t, err)
@@ -62,6 +64,7 @@ type projectAccessFixture struct {
 	team            db.Team
 	tokenSuffix     string
 	broadcaster     *daemon.EventBroadcaster
+	handler         http.Handler
 	api             huma.API
 }
 
@@ -102,9 +105,10 @@ func newProjectAccessFixture(t *testing.T, store db.Storage, suffix ...string) p
 	broadcaster := daemon.NewEventBroadcaster()
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, Broadcaster: broadcaster, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	httpServer := httptest.NewServer(server.Handler())
+	handler := server.Handler()
+	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
-	return projectAccessFixture{store: store, server: httpServer, private: private, public: public, issue: issue, visible: visible, team: team, tokenSuffix: tokenSuffix, broadcaster: broadcaster, api: server.API()}
+	return projectAccessFixture{store: store, server: httpServer, private: private, public: public, issue: issue, visible: visible, team: team, tokenSuffix: tokenSuffix, broadcaster: broadcaster, handler: handler, api: server.API()}
 }
 
 func (f projectAccessFixture) request(t *testing.T, method, path, actor string, body any, headers map[string]string) (int, http.Header, []byte) {
@@ -1437,50 +1441,90 @@ func TestProjectAccessStreamRevocation(t *testing.T) {
 		t.Run(wakeup, func(t *testing.T) {
 			projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 				f := newProjectAccessFixture(t, store)
-				ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
-				defer cancel()
-				req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", f.server.URL, f.private.ID), nil)
-				require.NoError(t, err)
-				req.Header.Set("Authorization", "Bearer member-test-token")
-				req.Header.Set("Accept", "text/event-stream")
-				resp, err := f.server.Client().Do(req)
-				require.NoError(t, err)
-				defer func() { _ = resp.Body.Close() }()
-				require.Equal(t, http.StatusOK, resp.StatusCode)
-				reader := bufio.NewReader(resp.Body)
-				for {
-					line, err := reader.ReadString('\n')
-					require.NoError(t, err)
-					if strings.Contains(line, projectAccessCanary) {
-						break
+				// The store and server stay outside the bubble; the stream, its
+				// heartbeat ticker, and the request deadline use the fake clock.
+				synctest.Test(t, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
+					defer cancel()
+					req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", f.server.URL, f.private.ID), nil)
+					req.RemoteAddr = "127.0.0.1:49152"
+					req.Header.Set("Authorization", "Bearer member-test-token")
+					req.Header.Set("Accept", "text/event-stream")
+					resp := newStreamResponse()
+					served := make(chan struct{})
+					go func() {
+						defer close(served)
+						defer func() { _ = resp.body.Close() }()
+						f.handler.ServeHTTP(resp, req)
+					}()
+					defer func() { <-served }()
+					defer func() { _ = resp.reader.Close() }()
+					reader := bufio.NewReader(resp.reader)
+					for {
+						line, err := reader.ReadString('\n')
+						require.NoError(t, err)
+						if strings.Contains(line, projectAccessCanary) {
+							break
+						}
 					}
-				}
-				// Finish the admitted frame before establishing the revocation boundary.
-				for {
-					line, err := reader.ReadString('\n')
-					require.NoError(t, err)
-					if line == "\n" {
-						break
+					require.Equal(t, http.StatusOK, resp.status)
+					// Finish the admitted frame before establishing the revocation boundary.
+					for {
+						line, err := reader.ReadString('\n')
+						require.NoError(t, err)
+						if line == "\n" {
+							break
+						}
 					}
-				}
-				_, err = store.SetTeamMembership(t.Context(), f.team.UID, "member", false, "admin")
-				require.NoError(t, err)
-				publisher := daemon.NewEventPublisher(f.broadcaster, nil)
-				switch wakeup {
-				case "event":
-					_, event, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.private.ID, Title: "post-revocation-canary", Author: "member"})
+					_, err := store.SetTeamMembership(t.Context(), f.team.UID, "member", false, "admin")
 					require.NoError(t, err)
-					publisher.Event(f.private.ID, event)
-				case "reset":
-					publisher.Reset(f.private.ID, 999999)
-				}
-				raw, err := io.ReadAll(reader)
-				assert.Empty(t, string(raw), "no event, reset or heartbeat follows revocation")
-				assert.NoError(t, err, "revocation closes stream before the request deadline")
+					publisher := daemon.NewEventPublisher(f.broadcaster, nil)
+					switch wakeup {
+					case "event":
+						_, event, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.private.ID, Title: "post-revocation-canary", Author: "member"})
+						require.NoError(t, err)
+						publisher.Event(f.private.ID, event)
+					case "reset":
+						publisher.Reset(f.private.ID, 999999)
+					}
+					raw, err := io.ReadAll(reader)
+					assert.Empty(t, string(raw), "no event, reset or heartbeat follows revocation")
+					assert.NoError(t, err)
+					assert.NoError(t, ctx.Err(), "revocation closes stream before the request deadline")
+				})
 			})
 		})
 	}
 }
+
+// streamResponse hands a streaming handler's output to the test through an
+// in-memory pipe, so synctest can advance the clock while the reader waits.
+type streamResponse struct {
+	header http.Header
+	status int
+	body   *io.PipeWriter
+	reader *io.PipeReader
+}
+
+func newStreamResponse() *streamResponse {
+	reader, body := io.Pipe()
+	return &streamResponse{header: http.Header{}, body: body, reader: reader}
+}
+
+func (r *streamResponse) Header() http.Header { return r.header }
+
+func (r *streamResponse) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+}
+
+func (r *streamResponse) Write(p []byte) (int, error) {
+	r.WriteHeader(http.StatusOK)
+	return r.body.Write(p)
+}
+
+func (r *streamResponse) Flush() {}
 
 // A configured target token cannot widen the source user's project grant.
 func TestProjectAccessGatewayPreservesSourceAuthority(t *testing.T) {

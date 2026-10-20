@@ -274,6 +274,7 @@ components:
           enum:
             - queued
             - disabled
+            - full
           type: string
       required:
         - status
@@ -6923,6 +6924,7 @@ components:
         from_qualified_id:
           type: string
         from_status:
+          description: Current status of the from_issue_uid issue.
           type: string
         id:
           format: int64
@@ -6935,6 +6937,7 @@ components:
         to_qualified_id:
           type: string
         to_status:
+          description: Current status of the to_issue_uid issue.
           type: string
         type:
           type: string
@@ -7052,6 +7055,7 @@ components:
             $ref: "#/components/schemas/UIIssue"
           type: array
         collection_links:
+          description: "Every link between two issues the principal can read (non-deleted issues in non-archived projects) that has at least one endpoint in collection, regardless of the collection's view, project_uid, status, owner, label, relationship, text, local_date, time_zone, or limit parameters. Count parent links whose to_issue_uid is a collection issue to get its children: from_status gives each child's status, and the open and total counts equal child_counts from GET /api/v1/issues for the same principal at the same cursor (an absent child_counts means zero)."
           items:
             $ref: "#/components/schemas/UILink"
           type: array
@@ -7088,7 +7092,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.29.0
+  version: 0.30.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9609,6 +9613,12 @@ paths:
     post:
       operationId: createIssue
       parameters:
+        - description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+          in: header
+          name: X-Kata-Surface
+          schema:
+            description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+            type: string
         - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
           in: path
           name: project_id
@@ -9846,6 +9856,12 @@ paths:
     post:
       operationId: closeIssue
       parameters:
+        - description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+          in: header
+          name: X-Kata-Surface
+          schema:
+            description: Client interface for action telemetry (web, tui, or cli); other values are ignored.
+            type: string
         - in: path
           name: project_id
           required: true

@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-17
+last_edited: 2026-10-20
 ---
 
 # HTTP API schema
@@ -174,7 +174,9 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
-| `0.29.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy; bridge preflight and connect preserve this conflict. |
+| `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
+| `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |
+| `0.30.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy; bridge preflight and connect preserve this conflict. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
@@ -607,6 +609,22 @@ endpoints published in OpenAPI:
   remain not found. The `#direct=1` fragment keeps the standalone application
   on the daemon that issued the target even when its roster defaults to a
   different remote daemon.
+
+Clients can count a parent's open and total children from the snapshot alone,
+without a second `GET /api/v1/issues` request. `collection_links` contains
+every link between two issues the principal can read (non-deleted issues in
+non-archived projects) that has at least one endpoint in `collection`,
+regardless of the collection's view, project_uid, status, owner, label,
+relationship, text, local_date, time_zone, or limit parameters. For each
+`parent` link whose parent (`to_issue_uid`) is in `collection`, `from_status`
+is the child's status.
+Counting those links per parent gives the same open and total values as
+`child_counts` on `IssueOut` from `GET /api/v1/issues` for the same principal
+at the same cursor. An absent `child_counts` means zero of zero. Children the
+principal cannot read are excluded from both. This holds for every daemon
+whose snapshot reports `contract_version` `2`. The daemon-switcher proxy
+(`/api/v1/ui/proxy`) does not forward `GET /api/v1/issues` or project issue
+lists, so `collection_links` is how to get child counts through it.
 
 A matching snapshot `If-None-Match` returns `304` without rebuilding the
 projection. The response cursor is captured in the same consistent storage

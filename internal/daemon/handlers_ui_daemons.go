@@ -832,7 +832,7 @@ func stripWebDaemonBrowserCredentials(headers http.Header) {
 func webDaemonOutboundHeaders(in http.Header) http.Header {
 	out := make(http.Header)
 	for _, name := range []string{
-		"Accept", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match",
+		"Accept", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match", "X-Kata-Surface",
 	} {
 		if values := in.Values(name); len(values) > 0 {
 			out[name] = append([]string(nil), values...)

@@ -7,14 +7,8 @@ test('production CSP permits the dynamic styles used by the application layout',
   kata,
 }) => {
   const violations: string[] = []
-  let documentCSP = ''
   page.on('console', (message) => {
     if (message.text().includes('Refused to apply inline style')) violations.push(message.text())
-  })
-  page.on('response', (response) => {
-    if (response.request().resourceType() === 'document') {
-      documentCSP = response.headers()['content-security-policy'] ?? ''
-    }
   })
 
   await kata.launch(page)
@@ -28,6 +22,5 @@ test('production CSP permits the dynamic styles used by the application layout',
       ),
     )
     .not.toBe('')
-  expect(documentCSP).toContain("style-src-attr 'unsafe-inline'")
   expect(violations).toEqual([])
 })

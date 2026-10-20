@@ -46,6 +46,9 @@ var alreadyImplemented = map[string]bool{
 	"DispatchRecurringCron": true, // cron.go
 	"ListRecurringCronJobs": true, // cron.go
 
+	"PrepareSetupFinished":  true, // setup_finished.go
+	"CompleteSetupFinished": true, // setup_finished.go
+
 	"ClaimScreenView":     true, // store.go
 	"ReleaseScreenView":   true, // store.go
 	"ObserveCronRun":      true,
@@ -239,6 +242,7 @@ var alreadyImplemented = map[string]bool{
 	"IssueByShortID":                       true, // issues.go
 	"IssueByUID":                           true, // issues.go
 	"IssueQualifiersByUIDs":                true, // discovery.go
+	"IssuesByUIDs":                         true, // issues.go
 	"ImportMappingBySource":                true, // import_mappings.go
 	"ImportMappingsByProjectSource":        true, // import_mappings.go
 	"IssueSyncBindingByID":                 true, // issue_sync.go

@@ -322,6 +322,7 @@ func syncDirectSpoke(
 		// page is inserted in one batch so cron run history is validated once
 		// per page rather than once per event.
 		deliver := make([]bool, len(body.Events))
+		repairEcho := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
 		for i, ev := range body.Events {
@@ -332,6 +333,15 @@ func syncDirectSpoke(
 				}
 				if exists {
 					duplicate[i] = true
+					// Snapshots can have canonical payloads committed before projection.
+					// Global and envelope-less echoes can also be acknowledged reset
+					// replays; conservatively repair them until this page advances.
+					// Push acknowledgment and notification delivery are not proof.
+					if shouldDeliverPage {
+						repairEcho[i] = ev.Type == "issue.snapshot" ||
+							strings.HasPrefix(ev.Type, "project.") || strings.HasPrefix(ev.Type, "cron.") ||
+							ev.IssueUID == nil || *ev.IssueUID == ""
+					}
 					continue
 				}
 			}
@@ -352,6 +362,7 @@ func syncDirectSpoke(
 			}
 		}
 		deliverUIDs := make([]string, 0, len(body.Events))
+		materializeUIDs := make([]string, 0, len(body.Events))
 		for i, ev := range body.Events {
 			if duplicate[i] && shouldDeliverPage {
 				var err error
@@ -363,12 +374,26 @@ func syncDirectSpoke(
 			if deliver[i] {
 				deliverUIDs = append(deliverUIDs, ev.EventUID)
 			}
+			if deliver[i] || repairEcho[i] {
+				materializeUIDs = append(materializeUIDs, ev.EventUID)
+			}
 		}
 		if len(body.Events) > 0 {
 			if err := federationFailpoint("during_spoke_pull_apply_before_materialize"); err != nil {
 				return err
 			}
-			if err := store.MaterializeFederatedProject(ctx, binding.ProjectID); err != nil {
+			// Unadvanced remote duplicates remain candidates: their
+			// insertion may have committed before an interrupted materialization.
+			// Ordinary reconciled local issue echoes already have their projection.
+			var err error
+			if incremental, ok := store.(interface {
+				MaterializeFederatedEvents(context.Context, int64, []string) error
+			}); ok {
+				err = incremental.MaterializeFederatedEvents(ctx, binding.ProjectID, materializeUIDs)
+			} else {
+				err = store.MaterializeFederatedProject(ctx, binding.ProjectID)
+			}
+			if err != nil {
 				return err
 			}
 		}

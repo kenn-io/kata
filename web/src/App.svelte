@@ -504,7 +504,7 @@
           },
           requestActor,
         ),
-        { headers: { 'Idempotency-Key': create.key } },
+        { headers: { 'Idempotency-Key': create.key, 'X-Kata-Surface': 'web' } },
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
@@ -802,6 +802,7 @@
       closeIssueRequest(
         { projectId: target.project_id, ref: target.ref },
         context.body({ ...request }, requestActor),
+        { headers: { 'X-Kata-Surface': 'web' } },
       ),
     )
   }

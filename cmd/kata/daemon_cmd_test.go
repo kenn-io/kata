@@ -45,6 +45,8 @@ import (
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
+	"go.kenn.io/kit/telemetry/posthog"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -780,7 +782,13 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		return err == nil
 	}, 3*time.Second, 10*time.Millisecond)
 
-	body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
+	// Read the way kata's runtime-record readers do. On Windows os.ReadFile
+	// does not share delete access, so it fails while the atomic rename that
+	// published the record still holds its handle.
+	file, err := safefileio.OpenCurrentUserFile(runtimePath)
+	require.NoError(t, err)
+	defer func() { _ = file.Close() }()
+	body, err := io.ReadAll(file)
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
@@ -2063,20 +2071,33 @@ func TestNewDaemonTelemetryReporterSendsWithoutAgeWhenCreationTimeUnreadable(t *
 	assert.True(t, got.InstalledAt.IsZero(), "unreadable creation time passed %v", got.InstalledAt)
 }
 
-func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
-	tmp := t.TempDir()
-	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
-	defer func() { _ = store.Close() }()
-	_, err := store.CreateProject(t.Context(), "alpha")
-	require.NoError(t, err)
+func TestDaemonTelemetryProducersIncludeProjectCount(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		for i := range 37 {
+			_, err := store.CreateProject(t.Context(), fmt.Sprintf("example-project-%d", i))
+			require.NoError(t, err)
+		}
 
-	reporter := &fakeTelemetryReporter{}
-	captureDaemonStartedTelemetry(t.Context(), store, reporter)
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
+		reporter := &fakeTelemetryReporter{}
+		captureDaemonStartedTelemetry(ctx, store, reporter)
+		startDaemonTelemetryHeartbeat(ctx, workers, store, reporter)
 
-	require.Equal(t, 1, reporter.eventCount())
-	event := reporter.eventAt(0)
-	assert.Equal(t, "daemon_started", event.event)
-	assert.Equal(t, 1, event.properties["project_count"])
+		synctest.Wait()
+		require.Equal(t, 2, reporter.eventCount())
+		for i, name := range []string{"daemon_started", "daemon_active"} {
+			event := reporter.eventAt(i)
+			assert.Equal(t, name, event.event)
+			assert.Equal(t, "21-100", event.properties["project_count"])
+		}
+	})
 }
 
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
@@ -2624,13 +2645,15 @@ func TestWebAuthenticationModeAdvertisesOnlyUsableSessionIssuers(t *testing.T) {
 }
 
 type fakeTelemetryReporter struct {
-	mu     sync.Mutex
-	events []fakeTelemetryEvent
+	mu          sync.Mutex
+	events      []fakeTelemetryEvent
+	onConfirmed func(context.Context, posthog.Delivery) (posthog.Status, error)
 }
 
 type fakeTelemetryEvent struct {
 	event      string
 	properties map[string]any
+	delivery   posthog.Delivery
 }
 
 func (f *fakeTelemetryReporter) Enabled() bool { return true }
@@ -2646,6 +2669,16 @@ func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any)
 	defer f.mu.Unlock()
 	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties})
 	return nil
+}
+
+func (f *fakeTelemetryReporter) CaptureConfirmed(ctx context.Context, event string, properties map[string]any, delivery posthog.Delivery) (posthog.Status, error) {
+	f.mu.Lock()
+	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties, delivery: delivery})
+	f.mu.Unlock()
+	if f.onConfirmed != nil {
+		return f.onConfirmed(ctx, delivery)
+	}
+	return posthog.StatusDelivered, nil
 }
 
 func (f *fakeTelemetryReporter) Close() error { return nil }
@@ -3816,4 +3849,52 @@ func waitRuntimeNotionRecord(t *testing.T, recorded <-chan db.IssueSyncStatus) d
 		require.FailNow(t, "scheduled Notion worker did not record durable completion")
 	}
 	return db.IssueSyncStatus{}
+}
+
+func TestDaemonWiresSetupFinished(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "First issue", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	captured := make(chan bool, 1)
+	reporter := &fakeTelemetryReporter{}
+	reporter.onConfirmed = func(context.Context, posthog.Delivery) (posthog.Status, error) {
+		reporter.mu.Lock()
+		defer reporter.mu.Unlock()
+		found := false
+		for _, event := range reporter.events {
+			found = found || event.event == "setup_finished"
+		}
+		captured <- found
+		return posthog.StatusDelivered, nil
+	}
+	original := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return reporter }
+	t.Cleanup(func() { newTelemetryReporter = original })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after cancellation")
+		}
+	})
+	select {
+	case got := <-captured:
+		require.True(t, got, "daemon reports setup_finished")
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not report setup_finished")
+	}
 }

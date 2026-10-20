@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
+	"go.kenn.io/kit/telemetry/posthog"
 	"golang.org/x/mod/semver"
 )
 
@@ -32,6 +33,19 @@ type Client struct {
 	hc                     *http.Client
 	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
 	mu                     sync.RWMutex
+}
+
+type suppressIssueActionTelemetryKey struct{}
+
+func suppressIssueActionTelemetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressIssueActionTelemetryKey{}, true)
+}
+
+func issueActionSurface(ctx context.Context) *string {
+	if ctx.Value(suppressIssueActionTelemetryKey{}) == true {
+		return nil
+	}
+	return new("tui")
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
@@ -130,11 +144,16 @@ func (c *Client) ReportAppOpened(ctx context.Context) error {
 	return c.reportUsage(ctx, "app_opened", map[string]any{"surface": "tui"})
 }
 
-// ReportSessionEnded sends the completed terminal lifetime with an independent one-second deadline.
-func (c *Client) ReportSessionEnded(elapsed time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	return c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+// ReportSessionEnded queues the terminal lifetime with a one-second request deadline
+// and waits at most ExitWait for delivery.
+func (c *Client) ReportSessionEnded(elapsed time.Duration) {
+	var sends posthog.SendGroup
+	sends.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = c.reportUsage(ctx, "session_ended", map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(elapsed)})
+	})
+	sends.Wait(telemetry.ExitWait)
 }
 
 func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {
@@ -273,9 +292,9 @@ func (c *Client) CreateIssue(ctx context.Context, projectID int64, body CreateIs
 		}
 		payload.Links = append(payload.Links, item)
 	}
-	options := &generated.CreateIssueRequestOptions{PathParams: &generated.CreateIssuePath{ProjectID: fmt.Sprint(projectID)}, Body: payload}
+	options := &generated.CreateIssueRequestOptions{PathParams: &generated.CreateIssuePath{ProjectID: fmt.Sprint(projectID)}, Body: payload, Header: &generated.CreateIssueHeaders{XKataSurface: issueActionSurface(ctx)}}
 	if body.IdempotencyKey != "" {
-		options.Header = &generated.CreateIssueHeaders{IdempotencyKey: &body.IdempotencyKey}
+		options.Header.IdempotencyKey = &body.IdempotencyKey
 	}
 	apiClient, err := c.generatedClient()
 	if err != nil {
@@ -303,7 +322,7 @@ func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) 
 	if err != nil {
 		return nil, err
 	}
-	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
+	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Header: &generated.CloseIssueHeaders{XKataSurface: issueActionSurface(ctx)}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
 	if wire == nil {
 		return nil, callErr
 	}
@@ -337,6 +356,7 @@ func (c *Client) CloseWithEvidence(
 	}
 	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &payload,
+		Header: &generated.CloseIssueHeaders{XKataSurface: issueActionSurface(ctx)},
 	})
 	if wire == nil {
 		return nil, callErr

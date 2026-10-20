@@ -56,22 +56,27 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 	return reporter
 }
 
+type capturedTelemetryEvent struct {
+	event      string
+	properties map[string]any
+}
+
 type fakeTelemetryReporter struct {
 	failNext bool
-	captured []map[string]any
+	captured []capturedTelemetryEvent
 }
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
 	event = strings.TrimSpace(event)
-	return event == "app_opened" || event == "session_ended" || event == "screen_viewed"
+	return event == "app_opened" || event == "session_ended" || event == "screen_viewed" || event == "issue_created" || event == "issue_closed" || event == "setup_finished"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
-func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
 	if f.failNext {
 		f.failNext = false
 		return errors.New("capture failed")
 	}
-	f.captured = append(f.captured, properties)
+	f.captured = append(f.captured, capturedTelemetryEvent{event: event, properties: properties})
 	return nil
 }
 
@@ -186,12 +191,12 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
-	assert.Equal(t, []map[string]any{{"surface": "web"}}, reporter.captured)
+	assert.Equal(t, []capturedTelemetryEvent{{event: "app_opened", properties: map[string]any{"surface": "web"}}}, reporter.captured)
 	for range 2 {
 		response := server.post(t.Context(), t, `{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
-	assert.Equal(t, []map[string]any{{"surface": "web", "duration_bucket": "1_to_5m"}, {"surface": "web", "duration_bucket": "1_to_5m"}}, reporter.captured[1:])
+	assert.Equal(t, []capturedTelemetryEvent{{event: "session_ended", properties: map[string]any{"surface": "web", "duration_bucket": "1_to_5m"}}, {event: "session_ended", properties: map[string]any{"surface": "web", "duration_bucket": "1_to_5m"}}}, reporter.captured[1:])
 }
 
 // A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.
@@ -235,7 +240,7 @@ func TestCaptureTelemetryAcceptsBearerClientOnEitherListener(t *testing.T) {
 				handler.ServeHTTP(response, request)
 
 				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
-				assert.Equal(t, []map[string]any{{"surface": "tui"}}, reporter.captured)
+				assert.Equal(t, []capturedTelemetryEvent{{event: "app_opened", properties: map[string]any{"surface": "tui"}}}, reporter.captured)
 			})
 		}
 	}
@@ -323,7 +328,7 @@ func TestCaptureTelemetryEventCapturesOneAppOpenedPerSurfacePerDay(t *testing.T)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 		assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
 	}
-	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "web"}}, reporter.captured,
+	assert.Equal(t, []capturedTelemetryEvent{{event: "app_opened", properties: map[string]any{"surface": "tui"}}, {event: "app_opened", properties: map[string]any{"surface": "web"}}}, reporter.captured,
 		"a failed capture leaves the day open; later duplicates are dropped")
 }
 
@@ -343,10 +348,10 @@ func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
 	require.Len(t, reporter.captured, 2)
-	assert.Subset(t, reporter.captured[0], map[string]any{"screen": "issues", "surface": "web"})
-	assert.Subset(t, reporter.captured[1], map[string]any{"screen": "help", "surface": "tui"})
-	for _, properties := range reporter.captured {
-		assert.NotContains(t, properties, "title")
+	assert.Subset(t, reporter.captured[0].properties, map[string]any{"screen": "issues", "surface": "web"})
+	assert.Subset(t, reporter.captured[1].properties, map[string]any{"screen": "help", "surface": "tui"})
+	for _, capture := range reporter.captured {
+		assert.NotContains(t, capture.properties, "title")
 	}
 }
 

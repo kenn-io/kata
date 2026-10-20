@@ -287,6 +287,88 @@ func TestAutoCutoverFailureLeavesSourceAndRemovesTemps(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+// TestAutoCutoverFoldsUncheckpointedWAL covers an older daemon that exited
+// without its final checkpoint, leaving committed writes only in kata.db-wal.
+// The upgraded database must open and keep those writes, and the backup must
+// hold them too.
+func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
+	ctx := context.Background()
+	live := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, live)
+	_, err := source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	_, err = source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	// Copy the files while the writer is still open, as a killed daemon
+	// leaves them: committed pages sit in the WAL, not the main file.
+	path := filepath.Join(t.TempDir(), "kata.db")
+	copyTestFile(t, live, path)
+	copyTestFile(t, live+"-wal", path+"-wal")
+	require.NoError(t, source.Close())
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	upgraded, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	_, err = upgraded.ProjectByName(ctx, "spoke-project")
+	require.NoError(t, err)
+	assertNoCutoverTemps(t, path)
+
+	backups, err := filepath.Glob(path + ".bak.*")
+	require.NoError(t, err)
+	require.Len(t, backups, 1)
+	assertSchemaVersion(t, backups[0], db.CurrentSchemaVersion()-1)
+	backup, err := sqlitestore.Open(ctx, backups[0], db.ReadOnly())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = backup.Close() })
+	var n int
+	require.NoError(t, backup.QueryRowContext(ctx,
+		`SELECT count(*) FROM projects WHERE name = 'spoke-project'`).Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
+// TestAutoCutoverRefusesDatabaseInUse covers another process whose open read
+// transaction keeps WAL pages from reaching the main file. Cutover must stop
+// before the swap instead of leaving those pages behind.
+func TestAutoCutoverRefusesDatabaseInUse(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, path)
+	_, err := source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	reader, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+	readTx, err := reader.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = readTx.Rollback() })
+	var n int
+	require.NoError(t, readTx.QueryRowContext(ctx, `SELECT count(*) FROM meta`).Scan(&n))
+	_, err = source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+
+	err = jsonl.AutoCutover(ctx, path)
+
+	require.ErrorContains(t, err, "stop other kata processes")
+	backups, globErr := filepath.Glob(path + ".bak.*")
+	require.NoError(t, globErr)
+	assert.Empty(t, backups)
+	assertNoCutoverTemps(t, path)
+	require.NoError(t, readTx.Rollback())
+	_, err = source.ProjectByName(ctx, "spoke-project")
+	require.NoError(t, err)
+}
+
+func copyTestFile(t *testing.T, src, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(dst, data, 0o600)) //nolint:gosec // test fixture under TempDir
+}
+
 func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")

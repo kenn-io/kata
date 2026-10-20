@@ -228,9 +228,12 @@ jobs:
           POSTGRES_DB: kata_test
           POSTGRES_USER: kata
           POSTGRES_PASSWORD: kata
+          # Test databases are disposable, so keep the data directory in memory.
+          PGDATA: /pgdata/data
         ports:
           - 5432:5432
         options: >-
+          --tmpfs /pgdata
           --health-cmd "pg_isready -U kata -d kata_test"
           --health-interval 5s
           --health-timeout 5s
@@ -260,6 +263,19 @@ jobs:
 
       - name: Install frozen web dependencies
         run: make web-install
+
+      # Service containers cannot take server flags, so turn off durability
+      # with ALTER SYSTEM; all three settings apply on reload. TCP skips the
+      # socket-only server the image runs during initialization.
+      - name: Turn off PostgreSQL durability
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: >-
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U kata -d kata_test
+          -c "ALTER SYSTEM SET fsync = off"
+          -c "ALTER SYSTEM SET synchronous_commit = off"
+          -c "ALTER SYSTEM SET full_page_writes = off"
+          -c "SELECT pg_reload_conf()"
 
       - name: Run PostgreSQL backend and operator tests
         env:

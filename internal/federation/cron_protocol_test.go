@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"go.kenn.io/kata/internal/config"
 
 	"github.com/stretchr/testify/require"
@@ -23,7 +25,6 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -34,7 +35,7 @@ func nativeStore(t *testing.T, backend string) db.Storage {
 	if backend == "sqlite" {
 		store, err = sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	} else {
-		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+		dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 		t.Cleanup(cleanup)
 		store, err = pgstore.Open(t.Context(), dsn)
 	}
@@ -103,7 +104,7 @@ func TestCronFederationFeatureGate(t *testing.T) {
 			nativeJob(t, store, project)
 			before, err := store.MaxEventID(t.Context())
 			require.NoError(t, err)
-			for _, features := range []string{"", "unknown_v1"} {
+			for _, features := range []string{"", "unknown_v1", "cron_notify_children_v1"} {
 				for _, route := range []string{"/metadata", "/events?after_id=0"} {
 					resp, data := nativeRequest(t, path+route, grant.Token, features, http.MethodGet, nil)
 					require.Equal(t, 409, resp.StatusCode, string(data))
@@ -198,19 +199,23 @@ func TestCronReturnedPageRequiresFeaturesEvenWithoutLatch(t *testing.T) {
 }
 
 func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, db.SupportedEventFeatures, r.Header.Get("X-Kata-Event-Features"))
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Kata-Required-Event-Features", "future_v2")
-		_, _ = w.Write([]byte(`{"reset_required":true,"reset_after_id":90,"next_after_id":90,"events":[]}`))
-	}))
-	defer server.Close()
-	client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-	require.NoError(t, err)
-	body, err := client.PollProjectEvents(t.Context(), 1, 0, 100)
-	require.Error(t, err)
-	require.False(t, body.ResetRequired)
-	require.Zero(t, body.NextAfterID)
+	for _, required := range []string{"future_v2", "cron_notify_children_v1"} {
+		t.Run(required, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "cron_v1", r.Header.Get("X-Kata-Event-Features"))
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Kata-Required-Event-Features", required)
+				_, _ = w.Write([]byte(`{"reset_required":true,"reset_after_id":90,"next_after_id":90,"events":[]}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			body, err := client.PollProjectEvents(t.Context(), 1, 0, 100)
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			require.False(t, body.ResetRequired)
+			require.Zero(t, body.NextAfterID)
+		})
+	}
 }
 
 func TestCronClientDoesNotAssumeFutureEventsAreLegacy(t *testing.T) {

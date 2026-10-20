@@ -194,9 +194,13 @@ readiness; --blocked-by does. --meta key=value stores a string.
 		}
 		options := &generated.CreateIssueRequestOptions{
 			PathParams: &generated.CreateIssuePath{ProjectID: project.selector}, Body: req,
+			Header: &generated.CreateIssueHeaders{},
 		}
 		if idempotencyKey != "" {
-			options.Header = &generated.CreateIssueHeaders{IdempotencyKey: &idempotencyKey}
+			options.Header.IdempotencyKey = &idempotencyKey
+		}
+		if reportsCLIUse(cmd) {
+			options.Header.XKataSurface = new("cli")
 		}
 		response, callErr := apiClient.CreateIssueWithResponse(ctx, options)
 		if err := externalCLITransportError(response, callErr); err != nil {

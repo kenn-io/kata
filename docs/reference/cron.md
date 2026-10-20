@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-18
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -124,6 +124,43 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
 
+### Cron expressions
+
+A `cron` expression has five fields: minute, hour, day of month, month, and day
+of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
+`@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
+or `H` syntax. Kata keeps the expression exactly as written.
+
+- Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
+  `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
+  means Friday and Sunday.
+- When both day of month and day of week are restricted, a day matching either
+  field runs. `0 9 15 * 1` runs on the 15th and on every Monday.
+- A range may wrap around. `0 22-2 * * *` runs at 22:00, 23:00, 00:00, 01:00,
+  and 02:00.
+- A step must be smaller than the span it steps over. Kata rejects `0 */24 * * *`
+  and `*/60 * * * *`; write `@daily` or `@hourly` instead.
+- A step that starts at one weekday continues through 7, which is Sunday.
+  `0 9 * * 5/2` runs on Fridays and Sundays.
+
+Schedules follow the trigger timezone's daylight-saving transitions:
+
+- When clocks jump forward an hour, a time inside the skipped hour runs one
+  hour later that day. In `America/New_York`, `30 2 * * *` runs at 03:30 EDT
+  (07:30 UTC) on 2026-03-08.
+- When clocks fall back, a time inside the repeated hour runs on both passes.
+  In `America/New_York`, `30 1 * * *` runs at 05:30 and 06:30 UTC on
+  2026-11-01. Hourly schedules run once per elapsed hour through the repeat.
+- On transition days in zones that shift by 30 minutes, such as
+  `Australia/Lord_Howe`, or that skip local midnight, such as
+  `America/Santiago`, a daily schedule can miss that day's occurrence.
+
+Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and
+wrapping ranges, accepts steps as large as their span, and reads `5/2` as
+Friday only. Before writing an expression that uses one of these forms, upgrade
+every hub, spoke, and adapter with its own parser that reads the job. Older
+peers reject the definition or schedule it differently.
+
 ### Actions
 
 | `kind` | Fields and rules |
@@ -207,7 +244,8 @@ observation; a consumer may record its own execution evidence separately.
 
 Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
-UTC as the default. They follow that timezone's daylight-saving transitions.
+UTC as the default. They follow that timezone's daylight-saving transitions,
+as described in [Cron expressions](#cron-expressions).
 An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 `{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence; intervals must be at least 60 seconds;
 `@every` is not supported for native delivery. Intervals start at the first
@@ -224,9 +262,9 @@ The existing daemon sweep runs at startup and every 30 seconds by default. Keep 
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver, even with push
 writes enabled, and cannot create or edit native recurring definitions. An old
-peer that lacks `cron_notify_children_v1` cannot receive a project containing
-native recurring state. Capability refusal happens before a baseline or cursor
-change. Projects with native recurring delivery history cannot be adopted into
+peer that lacks `cron_v1` cannot receive a project containing cron state,
+including native recurring metadata on ordinary issue events. Capability refusal
+happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
 local authority and history.
 
@@ -291,11 +329,17 @@ options). Each step has these fields:
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises `cron_v1` and
-`cron_notify_children_v1`. Missing, unknown, or
-failed advertisements remain distinct outcomes. This is an ordinary project
+`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
+definitions, run observations, and native recurring child delivery. Missing,
+unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
+
+Upgrade connected hubs, spokes, and adapters together when moving from released
+0.19.0, which advertised two cron capability names. All cron support now uses
+`cron_v1`; the former recurring-delivery capability is removed with no alias.
+This deliberate protocol change does not support mixed-version rolling upgrades.
+Existing stored definitions, events, and schema stay unchanged.
 
 ## Independent run evidence
 
