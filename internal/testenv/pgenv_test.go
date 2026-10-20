@@ -39,6 +39,43 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 	require.NotEqual(t, baseName, isolatedName)
 }
 
+// Starting a PostgreSQL container dominates small storage tests, so every
+// test in one process shares a server and receives its own database.
+func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testing.T) {
+	if testing.Short() {
+		t.Skip("testcontainer requires docker; skip on -short")
+	}
+	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
+	ctx := context.Background()
+	open := func(t *testing.T) (*sql.DB, func()) {
+		t.Helper()
+		dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+		database, err := sql.Open("pgx", dsn)
+		require.NoError(t, err)
+		return database, func() {
+			require.NoError(t, database.Close())
+			cleanup()
+		}
+	}
+	first, closeFirst := open(t)
+	second, closeSecond := open(t)
+	t.Cleanup(closeSecond)
+	var firstStart, secondStart, firstName, secondName string
+	require.NoError(t, first.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&firstStart, &firstName))
+	require.NoError(t, second.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&secondStart, &secondName))
+	require.Equal(t, firstStart, secondStart, "tests in one process must reuse the server")
+	require.NotEqual(t, firstName, secondName)
+	_, err := first.ExecContext(ctx, `CREATE TABLE only_in_first (id int)`)
+	require.NoError(t, err)
+	var visible bool
+	require.NoError(t, second.QueryRowContext(ctx, `SELECT to_regclass('only_in_first') IS NOT NULL`).Scan(&visible))
+	require.False(t, visible, "each test must receive an isolated database")
+	closeFirst()
+	var remaining bool
+	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
+	require.False(t, remaining, "cleanup must drop the test database")
+}
+
 // Template clones share the configured or automatic PostgreSQL server,
 // prepare their seed data once, and isolate each test's database.
 func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
