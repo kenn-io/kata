@@ -2,9 +2,11 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // reportAppOpened tells the daemon the TUI opened. Init is its only caller, so
@@ -95,4 +97,54 @@ func (m Model) reportOutcome(event, kind string) tea.Cmd {
 		_ = reporter.ReportOutcome(ctx, event, kind)
 		return nil
 	}
+}
+
+// shownError follows an accepted failure through retained pane snapshots.
+// Copies share the flag so restoring an already displayed error cannot count it again.
+type shownError struct {
+	error
+	action  string
+	counted bool
+}
+
+func (e *shownError) Unwrap() error { return e.error }
+
+func (e *shownError) status() string {
+	return errorStyle.Render(fmt.Sprintf("%s failed: %s", e.action, e.Error()))
+}
+
+func (m Model) countShownError(e *shownError, status string) tea.Cmd {
+	if e == nil || e.counted || status != e.status() {
+		return nil
+	}
+	e.counted = true
+	return m.reportShownError(e.action)
+}
+
+func (m Model) reportVisibleErrors() tea.Cmd {
+	if m.width < 80 || m.height < listMinHeight {
+		return nil
+	}
+	switch m.view {
+	case viewList:
+		return m.reportListError()
+	case viewDetail:
+		if !m.detail.loading && m.detail.issue != nil && !m.input.kind.isPanelPrompt() {
+			return m.countShownError(m.detail.shownError, m.detail.status)
+		}
+	}
+	return nil
+}
+
+func (m Model) reportListError() tea.Cmd {
+	if m.layout == splitlayout.Split {
+		if m.focus == focusDetail {
+			return m.countShownError(m.detail.shownError, splitInfoBody(m))
+		}
+		return m.countShownError(m.list.shownError, splitInfoBody(m))
+	}
+	if !m.list.loading && m.list.err == nil && !m.input.kind.isCommandBar() {
+		return m.countShownError(m.list.shownError, m.list.status)
+	}
+	return nil
 }

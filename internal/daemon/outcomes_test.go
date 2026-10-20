@@ -4,12 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/linearsync"
+	"go.kenn.io/kata/internal/notionsync"
+	"go.kenn.io/kata/internal/planesync"
+	"go.kenn.io/kata/internal/tickticksync"
+	"go.kenn.io/kata/internal/todoistsync"
+	"go.kenn.io/kata/internal/twentysync"
 )
 
 func TestOutcomesSyncTransitions(t *testing.T) {
@@ -53,5 +63,92 @@ func TestOutcomesSyncReasons(t *testing.T) {
 			NewSyncOutcomeObserver(reporter)("github", 1, fmt.Errorf("wrapped: %w", tc.err))
 			require.Equal(t, []capturedTelemetryEvent{{event: "sync_failed", properties: map[string]any{"sync_source": "github", "reason": tc.reason}}}, reporter.captured)
 		})
+	}
+}
+
+type outcomeTransport struct {
+	err  error
+	body bool
+}
+
+func (rt outcomeTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	if rt.body {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(iotest.ErrReader(rt.err))}, nil
+	}
+	return nil, rt.err
+}
+
+func TestOutcomesProviderTransportReasons(t *testing.T) {
+	lookup := func(string) (string, bool) { return "example-token", true }
+	const id = "11111111-1111-4111-8111-111111111111"
+	for _, provider := range []struct {
+		name string
+		read func(*testing.T, http.RoundTripper) error
+	}{
+		{"linear", func(t *testing.T, rt http.RoundTripper) error {
+			cfg := linearsync.Config{WorkspaceID: id, TeamID: id}
+			session, err := linearsync.NewClient(linearsync.ClientConfig{LookupEnv: lookup, Transport: rt}).ForRun(t.Context(), cfg)
+			require.NoError(t, err)
+			_, err = session.Scope(t.Context(), cfg)
+			return err
+		}},
+		{"plane", func(t *testing.T, rt http.RoundTripper) error {
+			cfg := planesync.Config{APIOrigin: "https://api.plane.so", WebOrigin: "https://app.plane.so", Workspace: "example-workspace", ProjectID: id}
+			session, err := planesync.NewClient(planesync.ClientConfig{LookupEnv: lookup, Transport: rt}).ForRun(t.Context(), cfg)
+			require.NoError(t, err)
+			_, err = session.Project(t.Context(), cfg)
+			return err
+		}},
+		{"twenty", func(t *testing.T, rt http.RoundTripper) error {
+			cfg := twentysync.Config{APIOrigin: "https://twenty.example", WebOrigin: "https://twenty.example", WorkspaceID: id}
+			session, err := twentysync.NewClient(twentysync.ClientConfig{Daemon: config.TwentySyncConfig{APIOrigin: cfg.APIOrigin}, LookupEnv: lookup, Transport: rt}).ForRun(t.Context(), cfg)
+			require.NoError(t, err)
+			_, err = session.Workspace(t.Context(), cfg)
+			return err
+		}},
+		{"notion", func(t *testing.T, rt http.RoundTripper) error {
+			now := time.Now()
+			session, err := notionsync.NewClient(notionsync.ClientConfig{LookupEnv: lookup, Transport: rt, Now: func() time.Time { return now }, Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }}).ForRun(t.Context())
+			require.NoError(t, err)
+			_, err = session.Database(t.Context(), id)
+			return err
+		}},
+		{"ticktick", func(t *testing.T, rt http.RoundTripper) error {
+			session, err := tickticksync.NewClient(tickticksync.ClientConfig{LookupEnv: lookup, Transport: rt}).ForRun(t.Context(), tickticksync.Config{ProjectID: "project-1"})
+			require.NoError(t, err)
+			_, err = session.Project(t.Context())
+			return err
+		}},
+		{"todoist", func(t *testing.T, rt http.RoundTripper) error {
+			_, err := todoistsync.NewClient(todoistsync.ClientConfig{LookupEnv: lookup, Transport: rt}).Account(t.Context())
+			return err
+		}},
+	} {
+		for _, failure := range []struct {
+			name   string
+			err    error
+			reason string
+			body   bool
+		}{
+			{"network", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("example transport diagnostic")}, "network", false},
+			{"deadline", context.DeadlineExceeded, "timeout", false},
+			{"network timeout", &net.DNSError{IsTimeout: true}, "timeout", false},
+			{"cancelled", context.Canceled, "", false},
+			{"body network", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("example transport diagnostic")}, "network", true},
+			{"body deadline", context.DeadlineExceeded, "timeout", true},
+		} {
+			t.Run(provider.name+"/"+failure.name, func(t *testing.T) {
+				err := provider.read(t, outcomeTransport{err: failure.err, body: failure.body})
+				require.Error(t, err)
+				require.NotContains(t, err.Error(), "example transport diagnostic")
+				reporter := &fakeTelemetryReporter{}
+				NewSyncOutcomeObserver(reporter)(provider.name, 1, err)
+				if failure.reason == "" {
+					require.Empty(t, reporter.captured)
+				} else {
+					require.Equal(t, []capturedTelemetryEvent{{event: "sync_failed", properties: map[string]any{"sync_source": provider.name, "reason": failure.reason}}}, reporter.captured)
+				}
+			})
+		}
 	}
 }

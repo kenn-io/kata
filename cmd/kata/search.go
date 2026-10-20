@@ -140,7 +140,13 @@ per match.`,
 				return err
 			}
 			bs := response.Body
-			return printSearchResults(cmd, bs)
+			if err := printSearchResults(cmd, bs); err != nil {
+				return err
+			}
+			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
+				reportCLIOutcome(cmd, "search_empty", "")
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cursor, "cursor", "", "continue --lexical search with the same query and filters")
@@ -260,10 +266,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			return nil
 		}
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matches")
-		cursor, _ := cmd.Flags().GetString("cursor")
-		if err == nil && cursor == "" {
-			reportCLIOutcome(cmd, "search_empty", "")
-		}
 		return err
 	}
 	// RRF and cosine scores cluster around 0.01-0.03, which %.2f would flatten;

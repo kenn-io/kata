@@ -213,7 +213,7 @@ func (s *clientSession) read(ctx context.Context, method, path string, payload [
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, &issuesync.StatusError{Message: "Twenty API read request failed"}
+			return nil, &issuesync.StatusError{Message: "Twenty API read request failed", Cause: err}
 		}
 		if response.StatusCode == 429 || response.StatusCode >= 500 {
 			s.client.deferRequests(response.Header.Get("Retry-After"), attempt)
@@ -236,7 +236,7 @@ func (s *clientSession) read(ctx context.Context, method, path string, payload [
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, fmt.Errorf("cannot read Twenty API response")
+			return nil, &issuesync.StatusError{Message: "cannot read Twenty API response", Cause: err}
 		}
 		if len(raw) > maxResponseBytes {
 			return nil, fmt.Errorf("twenty API response exceeds 8 MiB")

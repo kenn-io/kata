@@ -713,7 +713,10 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 		want int
 	}{
 		{"human", []string{"search", "missing", "--format", "human"}, true, 1},
-		{"json", []string{"search", "missing", "--json"}, true, 0},
+		{"quiet", []string{"search", "missing", "--format", "human", "--quiet"}, true, 1},
+		{"json", []string{"search", "missing", "--json"}, true, 1},
+		{"agent", []string{"search", "missing", "--agent"}, false, 1},
+		{"piped", []string{"search", "missing", "--format", "human"}, false, 1},
 		{"continuation page", []string{"search", "needle", "--lexical", "--limit", "1", "--format", "human"}, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

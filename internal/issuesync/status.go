@@ -13,7 +13,7 @@ type StatusObservation struct {
 	Locator      string
 }
 
-// StatusError classifies delivery failures without retaining remote response
+// StatusError classifies delivery failures without displaying remote response
 // bodies or transport diagnostics that could contain credentials.
 type StatusError struct {
 	Message    string
@@ -23,6 +23,9 @@ type StatusError struct {
 	RateLimited bool
 	Ambiguous   bool
 	Blocked     bool
+	Cause       error
 }
 
 func (e *StatusError) Error() string { return e.Message }
+
+func (e *StatusError) Unwrap() error { return e.Cause }

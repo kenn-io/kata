@@ -234,9 +234,9 @@ func (s *clientSession) requestWithAdmission(ctx context.Context, method, path s
 		safeErr := fmt.Errorf("notion HTTP %d: %s", status, safeNotionCode(remote.Code))
 		if err != nil {
 			if status == 0 {
-				safeErr = fmt.Errorf("notion transport or response read failed")
+				safeErr = &issuesync.StatusError{Message: "notion transport or response read failed", Cause: err}
 			} else {
-				safeErr = fmt.Errorf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code))
+				safeErr = &issuesync.StatusError{Message: fmt.Sprintf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code)), HTTPStatus: status, Cause: err}
 			}
 			if errors.Is(attemptErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 				safeErr = fmt.Errorf("%v: %w", safeErr, context.DeadlineExceeded)

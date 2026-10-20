@@ -1195,10 +1195,10 @@ installation ID starts a fresh count. Later-day browser focus or terminal input
 counts another visit. Delivery is best effort; a rejected enqueue can retry.
 
 Submitted searches with no results send `search_empty` with `surface` set to
-`web`, `tui`, or `cli`, once per query on each surface until the query text
-changes. Typing previews send nothing. CLI searches count only human terminal
-output on the first page. When a client shows a create or close
-error, it sends `error_shown` with `kind` set to `issue_created` or
+`web`, `tui`, or `cli`. The web and TUI send it once per query on each surface
+until the query text changes. Typing previews send nothing. The CLI sends it
+once per run for a first-page search in any output mode. When a client shows a
+create or close error, it sends `error_shown` with `kind` set to `issue_created` or
 `issue_closed`. This includes validation refusals before a request. Discarded
 responses send nothing. Delivery requires a reachable daemon that accepts the
 capture request. Outcome events follow the same daily disabled receipts.

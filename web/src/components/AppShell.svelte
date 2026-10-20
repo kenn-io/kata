@@ -261,9 +261,6 @@
     pendingSearch = { context, query }
   }
   $effect(() => {
-    if (searchFilters.query.trim() !== countedQuery) countedQuery = ''
-  })
-  $effect(() => {
     const context = searchContext ?? JSON.stringify([activeDaemonID, route.view, searchFilters])
     if (!pendingSearch) return
     if (pendingSearch.context !== context) {

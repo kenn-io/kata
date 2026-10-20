@@ -75,6 +75,7 @@
   } from './lib/kata/types'
   import {
     MutationController,
+    PresentedMutationError,
     type MutationContext,
     type MutationResult,
     type MutationState,
@@ -519,7 +520,11 @@
         { headers: { 'Idempotency-Key': create.key, 'X-Kata-Surface': 'web' } },
       ),
     )
-    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
+    if (!accepted) {
+      const message = mutationMessage(mutationState)
+      if (message) throw new PresentedMutationError(message)
+      throw new Error('Could not create task.')
+    }
     pendingCreate = undefined
   }
 

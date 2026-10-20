@@ -402,6 +402,10 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mut, ok := msg.(mutationDoneMsg); ok && mut.err != nil {
+		mut.err = &shownError{error: mut.err, action: mut.kind}
+		msg = mut
+	}
 	next, cmd := m.update(msg)
 	m = next.(Model)
 	if strings.TrimSpace(m.list.filter.Search) != m.searchCounted {
@@ -419,7 +423,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		visit = true
 	}
 	screenCmd := m.screenViewCommand(visit)
-	return m, tea.Batch(cmd, screenCmd)
+	return m, tea.Batch(cmd, screenCmd, m.reportVisibleErrors())
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -681,20 +685,6 @@ func (m Model) isStaleListFetch(msg tea.Msg) bool {
 // (it's gone) nor any cache, and the list rows would stay stale
 // until an unrelated SSE event happened to refresh them.
 func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
-	next, cmd := m.applyMutation(mut)
-	shown := next.(Model)
-	visible := mut.origin == "form" && mut.formGen == shown.input.formGen && shown.input.err != "" &&
-		(shown.input.kind.isCenteredForm() || shown.input.kind.isPanelPrompt()) ||
-		mut.origin == "list" && shown.view == viewList ||
-		mut.origin == "detail" && mut.gen == shown.detail.gen &&
-			(shown.view == viewDetail || shown.view == viewList && shown.layout == splitlayout.Split)
-	if mut.err != nil && visible {
-		cmd = combineCmds(cmd, shown.reportShownError(mut.kind))
-	}
-	return next, cmd
-}
-
-func (m Model) applyMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.origin == "form" {
 		return m.routeFormMutation(mut)
 	}
@@ -1331,6 +1321,7 @@ func (m Model) restoreSearchDetailIfNeeded(
 				if snapshot.status != "" {
 					m.detail.status = snapshot.status
 					m.detail.err = snapshot.err
+					m.detail.shownError = snapshot.shownError
 				}
 				return m, combineCmds(prior, m.refetchRestoredDetail())
 			}
@@ -1718,7 +1709,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
-		return m, nil
+		return m, m.reportShownError(mut.kind)
 	}
 	if m.input.kind == inputNewIssueForm {
 		m.input = inputState{}

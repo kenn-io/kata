@@ -548,18 +548,25 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 		t.Run(tc.origin+"/"+tc.kind, func(t *testing.T) {
 			recorder.captured, recorder.events = nil, nil
 			m := mFixtureForBar()
+			m.width, m.height = 100, 40
+			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+			m.detail.loading = false
+			m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
 			m.telemetry = newTelemetryGate()
 			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 			m.input = newNewIssueForm()
-			if tc.kind == "close" {
+			if tc.origin == "detail" {
+				m.input = inputState{}
+			}
+			if tc.kind == "close" && tc.origin == "form" {
 				m.input = newCloseForm(formTarget{})
 			}
 			m.input.formGen = 2
 			m.view, m.detail.gen, m.pendingRefetch = viewDetail, 2, true
-			next, cmd := m.routeMutation(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 1, gen: 1, err: fmt.Errorf("refused")})
+			next, cmd := m.Update(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 1, gen: 1, err: fmt.Errorf("refused")})
 			runCmd(cmd)
 			require.Empty(t, recorder.captured, "discarded response")
-			next, cmd = next.(Model).routeMutation(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 2, gen: 2, err: fmt.Errorf("refused")})
+			next, cmd = next.(Model).Update(mutationDoneMsg{origin: tc.origin, kind: tc.kind, formGen: 2, gen: 2, err: fmt.Errorf("refused")})
 			if tc.origin == "form" {
 				require.Contains(t, next.(Model).input.err, "refused")
 			} else {
@@ -577,18 +584,23 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 	}{
 		{"list under help", "list", viewHelp, 0},
 		{"detail under help", "detail", viewHelp, 0},
-		{"visible unfocused detail", "detail", viewList, 1},
+		{"unfocused detail status", "detail", viewList, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder.captured, recorder.events = nil, nil
 			m := mFixtureForBar()
+			m.width, m.height = 100, 40
+			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+			m.detail.loading = false
+			m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
 			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 			m.view, m.layout, m.focus = tc.view, splitlayout.Split, focusList
 			if tc.origin == "detail" && tc.view == viewHelp {
 				m.focus = focusDetail
 			}
 			m.detail.gen = 2
-			_, cmd := m.routeMutation(mutationDoneMsg{origin: tc.origin, kind: "close", gen: 2, err: fmt.Errorf("refused")})
+			m.telemetryScreen = m.screenName()
+			_, cmd := m.Update(mutationDoneMsg{origin: tc.origin, kind: "close", gen: 2, err: fmt.Errorf("refused")})
 			runCmd(cmd)
 			require.Len(t, recorder.captured, tc.want)
 		})
@@ -597,6 +609,10 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 		recorder.captured = nil
 		recorder.events = nil
 		m := mFixtureForBar()
+		m.width, m.height = 100, 40
+		m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+		m.detail.loading = false
+		m.telemetryScreen, m.telemetryDay = "issue", time.Now().UTC().Format(time.DateOnly)
 		m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 		m.input = newNewIssueForm()
 		if kind == inputCloseForm {
@@ -611,5 +627,124 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 		}
 		require.Equal(t, []string{"error_shown"}, recorder.events)
 		require.Equal(t, []map[string]any{{"surface": "tui", "kind": expected}}, recorder.captured)
+	}
+}
+
+func TestOutcomesErrorFirstVisible(t *testing.T) {
+	for _, origin := range []string{"list", "detail"} {
+		for _, hidden := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/help=%t", origin, hidden), func(t *testing.T) {
+				recorder := &recordingTelemetry{}
+				errorCount := func() int {
+					count := 0
+					for _, event := range recorder.events {
+						if event == "error_shown" {
+							count++
+						}
+					}
+					return count
+				}
+				env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+				m := mFixtureForBar()
+				m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+				m.width, m.height = 100, 40
+				m.list.loading = false
+				m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+				m.detail.loading = false
+				m.view, m.detail.gen = viewList, 2
+				if origin == "detail" {
+					m.view = viewDetail
+				}
+				if hidden {
+					m, _ = updateModel(m, runeKey('?'))
+					require.Equal(t, viewHelp, m.view)
+				}
+				m, cmd := updateModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2, err: fmt.Errorf("refused")})
+				runCmd(cmd)
+				if hidden {
+					require.Zero(t, errorCount())
+					m, cmd = updateModel(m, runeKey('?'))
+					runCmd(cmd)
+				}
+				require.Contains(t, stripANSI(m.viewContent()), "refused")
+				require.Equal(t, 1, errorCount())
+				for range 2 {
+					m, cmd = updateModel(m, runeKey('?'))
+					runCmd(cmd)
+				}
+				m, cmd = updateModel(m, tea.FocusMsg{})
+				runCmd(cmd)
+				require.Equal(t, 1, errorCount(), "later frames and Help returns keep the same count")
+			})
+		}
+	}
+}
+
+func TestOutcomesRetainedSearchError(t *testing.T) {
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "original row", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row", Status: "open"},
+	}
+	m.list.cursor, m.list.selectedProjectID = 0, 7
+	m.list.selectedUID = "01TEST-aaa1"
+	seed := m.list.issues[0]
+	m.detail = detailModel{issue: &seed, scopePID: 7, gen: 41}
+	m.nextGen = 41
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "target" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "01TEST-bbb2", m.detail.issue.UID)
+	m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+	m, cmd := stepModel(m, mutationDoneMsg{origin: "detail", kind: "close", gen: 41, err: fmt.Errorf("retained refusal")})
+	runCmd(cmd)
+	require.NotContains(t, recorder.events, "error_shown")
+	require.NotContains(t, stripANSI(m.viewContent()), "retained refusal")
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	runCmd(cmd)
+	require.NotContains(t, recorder.events, "error_shown", "the list still owns the shared status line")
+	m, cmd = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	runCmd(cmd)
+	require.Contains(t, stripANSI(m.viewContent()), "retained refusal")
+	require.Contains(t, recorder.events, "error_shown")
+	m, cmd = stepModel(m, tea.FocusMsg{})
+	runCmd(cmd)
+	count := 0
+	for _, event := range recorder.events {
+		if event == "error_shown" {
+			count++
+		}
+	}
+	require.Equal(t, 1, count)
+}
+
+func TestOutcomesReplacedHiddenError(t *testing.T) {
+	for _, origin := range []string{"list", "detail"} {
+		t.Run(origin, func(t *testing.T) {
+			recorder := &recordingTelemetry{}
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+			m := mFixtureForBar()
+			m.width, m.height = 100, 40
+			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
+			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.view, m.prevView, m.detail.gen = viewHelp, viewList, 2
+			if origin == "detail" {
+				m.prevView = viewDetail
+			}
+			m, cmd := stepModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2, err: fmt.Errorf("replaced refusal")})
+			runCmd(cmd)
+			m, cmd = stepModel(m, mutationDoneMsg{origin: origin, kind: "close", gen: 2})
+			runCmd(cmd)
+			m, cmd = stepModel(m, runeKey('?'))
+			runCmd(cmd)
+			require.NotContains(t, stripANSI(m.viewContent()), "replaced refusal")
+			require.NotContains(t, recorder.events, "error_shown")
+		})
 	}
 }

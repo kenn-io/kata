@@ -106,7 +106,7 @@ func reportCLIUse(cmd *cobra.Command) {
 }
 
 func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
-	if currentOutputMode() != outputHuman || !reportsCLIUse(cmd) {
+	if event != "search_empty" && (currentOutputMode() != outputHuman || !reportsCLIUse(cmd)) {
 		return
 	}
 	properties := map[string]any{"surface": "cli"}
