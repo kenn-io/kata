@@ -397,6 +397,7 @@ func RunUISnapshotChildLinkContract(t *testing.T, open func(*testing.T) db.Stora
 		"label+project":  {View: "all-open", Labels: []string{"parent-row"}, ProjectUID: primary.UID},
 		"label+limit":    {View: "all-open", Labels: []string{"parent-row"}, Limit: 1},
 		"label+hasChild": {View: "all-open", Labels: []string{"parent-row"}, Relationships: []string{"child"}},
+		"label+text":     {View: "all-open", Labels: []string{"parent-row"}, Text: "parent issue"},
 	}
 	for name, query := range intents {
 		t.Run(name, func(t *testing.T) {

@@ -9,7 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Count a parent's open and total children from the browser snapshot's `collection_links` instead of listing issues. The counts match `child_counts` from `GET /api/v1/issues` for the same principal, an absent `child_counts` means zero, and the contract holds for snapshots reporting `contract_version` `2`, including through the daemon-switcher proxy. See [Browser UI endpoints](reference/http-api.md#browser-ui-endpoints).
+- Count a parent's open and total children from the browser snapshot's
+  `collection_links` instead of listing issues. The counts match `child_counts`
+  from `GET /api/v1/issues` for the same principal, an absent `child_counts`
+  means zero, and the contract holds for snapshots reporting `contract_version`
+  `2`, including through the daemon-switcher proxy. See
+  [Browser UI endpoints](reference/http-api.md#browser-ui-endpoints).
 
 - Count installations that have their first visible issue with one anonymous
   `setup_finished` event, including issues already stored at startup. The count

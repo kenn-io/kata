@@ -613,9 +613,10 @@ Clients can count a parent's open and total children from the snapshot alone,
 without a second `GET /api/v1/issues` request. `collection_links` contains
 every link between two issues the principal can read (non-deleted issues in
 non-archived projects) that has at least one endpoint in `collection`,
-regardless of the collection's view, status, owner, label, relationship,
-schedule, or limit filters. For each `parent` link whose parent
-(`to_issue_uid`) is in `collection`, `from_status` is the child's status.
+regardless of the collection's view, project_uid, status, owner, label,
+relationship, text, local_date, time_zone, or limit parameters. For each
+`parent` link whose parent (`to_issue_uid`) is in `collection`, `from_status`
+is the child's status.
 Counting those links per parent gives the same open and total values as
 `child_counts` on `IssueOut` from `GET /api/v1/issues` for the same principal
 at the same cursor. An absent `child_counts` means zero of zero. Children the
