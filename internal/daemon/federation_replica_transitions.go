@@ -23,9 +23,12 @@ const (
 // federationReplicaTransition holds one mapping's leave state together with
 // the drain accounting for hub operations already in flight for that mapping.
 type federationReplicaTransition struct {
-	state    federationReplicaTransitionState
-	inFlight int
-	drained  chan struct{}
+	state federationReplicaTransitionState
+	// preparedLeaves counts leave preparations not yet completed or released,
+	// so releasing one of two concurrent leaves keeps the mapping pending.
+	preparedLeaves int
+	inFlight       int
+	drained        chan struct{}
 }
 
 // federationReplicaRegistry owns every per-mapping transition record.
@@ -165,9 +168,38 @@ func waitFederationReplicaOperations(ctx context.Context, key string) error {
 	}
 }
 
-// markLeavePending records that an explicit leave was durably prepared.
+// markLeavePending records that an explicit leave was durably prepared. Each
+// call counts one preparation for releasePreparedLeave.
 func (r *federationReplicaRegistry) markLeavePending(key string) {
-	r.setState(key, federationReplicaLeavePending)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	transition, ok := r.transitions[key]
+	if !ok {
+		transition = &federationReplicaTransition{}
+		r.transitions[key] = transition
+	}
+	transition.state = federationReplicaLeavePending
+	transition.preparedLeaves++
+}
+
+// releasePreparedLeave releases one preparation of a leave that stopped before
+// local teardown. The mapping returns to idle only when no other preparation
+// remains, because another leave may still revoke and tear down.
+func (r *federationReplicaRegistry) releasePreparedLeave(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	transition, ok := r.transitions[key]
+	if !ok || transition.state != federationReplicaLeavePending {
+		return
+	}
+	if transition.preparedLeaves > 0 {
+		transition.preparedLeaves--
+	}
+	if transition.preparedLeaves > 0 {
+		return
+	}
+	transition.state = federationReplicaIdle
+	r.pruneLocked(key, transition)
 }
 
 // markLeft records that an explicit leave completed in this process.
@@ -175,9 +207,9 @@ func (r *federationReplicaRegistry) markLeft(key string) {
 	r.setState(key, federationReplicaLeft)
 }
 
-// clearLeave returns key to idle. It serves both the successful-ensure clear
-// and PrepareFederationReplicaLeave's rollback, so it clears the left and
-// leave-pending states alike.
+// clearLeave returns key to idle after a successful ensure or an explicit
+// connect, so it clears the left and leave-pending states alike. A leave that
+// stopped before local teardown uses releasePreparedLeave instead.
 func (r *federationReplicaRegistry) clearLeave(key string) {
 	r.setState(key, federationReplicaIdle)
 }
@@ -196,6 +228,7 @@ func (r *federationReplicaRegistry) setState(
 		r.transitions[key] = transition
 	}
 	transition.state = state
+	transition.preparedLeaves = 0
 	r.pruneLocked(key, transition)
 }
 

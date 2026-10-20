@@ -2230,6 +2230,10 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	// Local binding must still be present (teardown was not run).
 	_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, bindErr, "binding should still be present after hub-unreachable abort")
+	// The failed leave releases its preparation, so rebind and join work
+	// again without restarting the daemon.
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name),
+		"a leave that failed before local teardown must not stay pending")
 
 	// With --local-only: should succeed and tear down the local binding.
 	_, _, err = runCmdCapture(t, env, "federation", "leave",

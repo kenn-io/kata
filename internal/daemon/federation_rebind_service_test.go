@@ -744,3 +744,94 @@ func rebindCredential(hubURL string, target bool, managed bool) config.Federatio
 	}
 	return credential
 }
+
+// rebindToTarget runs the rebind an operator retries after a failed leave.
+func rebindToTarget(t *testing.T, store db.Storage, credentials config.FederationCredentialStore, project db.Project) error {
+	t.Helper()
+	_, err := daemon.RebindFederationReplica(
+		t.Context(), store, credentials,
+		daemon.RebindFederationReplicaParams{
+			ProjectID:  project.ID,
+			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
+			FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+				return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+			},
+		},
+	)
+	return err
+}
+
+// A leave whose hub revoke failed never touched local state, so releasing its
+// preparation must make the replica rebindable without a daemon restart.
+func TestAbortedFederationReplicaLeaveAllowsRebind(t *testing.T) {
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+	_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	require.NoError(t, err)
+	require.ErrorIs(t, rebindToTarget(t, store, credentials, project), daemon.ErrFederationReplicaLeavePending)
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
+
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+	require.NoError(t, rebindToTarget(t, store, credentials, project))
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rebindTargetURL, binding.HubURL)
+}
+
+func TestAbortFederationReplicaLeaveKeepsLeaveThatMustFinish(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		managed bool
+		started func(*testing.T, db.Storage, db.Project)
+	}{
+		// Preparation durably marks a config-managed reservation; only
+		// finishing the leave may clear that marker.
+		{name: "durable managed marker", managed: true},
+		{name: "binding detached", started: func(t *testing.T, store db.Storage, project db.Project) {
+			_, err := store.LeaveFederationReplica(t.Context(), project.ID)
+			require.NoError(t, err)
+		}},
+		{name: "project archived", started: func(t *testing.T, store db.Storage, project db.Project) {
+			_, _, err := store.RemoveProject(t.Context(), db.RemoveProjectParams{
+				ProjectID: project.ID, Actor: "sync-agent", Force: true, SkipFederationRelay: true,
+			})
+			require.NoError(t, err)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+			credentials := newReplicaCredentialStore()
+			credentials.put(project.UID, rebindCredential(rebindSourceURL, false, tc.managed))
+			_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			require.NoError(t, err)
+			if tc.started != nil {
+				tc.started(t, store, project)
+			}
+
+			err = daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+
+			require.ErrorIs(t, err, daemon.ErrFederationReplicaLeaveStarted)
+			assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+		})
+	}
+}
+
+// Two leaves prepared concurrently: abandoning one must not reopen hub
+// operations while the other may still revoke and tear down.
+func TestAbortFederationReplicaLeaveWaitsForEveryPreparation(t *testing.T) {
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+	for range 2 {
+		_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+}

@@ -333,6 +333,71 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	}
 }
 
+// ErrFederationReplicaLeaveStarted identifies a leave that can only be
+// finished: it holds a durable leave marker or has begun local teardown.
+var ErrFederationReplicaLeaveStarted = errors.New("federation leave has started")
+
+// AbortFederationReplicaLeave releases one PrepareFederationReplicaLeave whose
+// leave stopped before local teardown, such as when the hub revoke failed.
+// Once no other preparation remains, rebind, join, and config reconciliation
+// work again without a daemon restart. A durable leave marker, a detached
+// binding, or an archived project keeps the leave pending and returns
+// ErrFederationReplicaLeaveStarted: those leaves must be finished.
+func AbortFederationReplicaLeave(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectID int64,
+) error {
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("read federation replica project before releasing leave: %w", err)
+	}
+	key := federationReplicaTransitionKey(store, project.Name)
+	if federationReplicaTransitions.state(key) != federationReplicaLeavePending {
+		return nil
+	}
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
+	}
+	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
+	if err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return err
+		}
+		return credentialIOError("read managed reservation before releasing leave")
+	}
+	if found && match.Credential.LeavePending {
+		return fmt.Errorf("%w: the managed reservation is marked for leave", ErrFederationReplicaLeaveStarted)
+	}
+	credential, found, err := credentials.FederationCredential(ctx, project.UID)
+	if err != nil {
+		return credentialIOError("read federation credential before releasing leave")
+	}
+	if found && credential.LeavePending {
+		return fmt.Errorf("%w: the credential is marked for leave", ErrFederationReplicaLeaveStarted)
+	}
+	if project.DeletedAt != nil {
+		return fmt.Errorf("%w: the project is archived", ErrFederationReplicaLeaveStarted)
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("%w: the binding is detached", ErrFederationReplicaLeaveStarted)
+	}
+	if err != nil {
+		return fmt.Errorf("read federation replica binding before releasing leave: %w", err)
+	}
+	if binding.Role != db.FederationRoleSpoke {
+		return db.ErrFederationNotSpoke
+	}
+	federationReplicaTransitions.releasePreparedLeave(key)
+	return nil
+}
+
 // LeavePending blocks attachment first. Drain the existing project transport
 // gate before disabling the binding, so sync and claim forwarding stay stopped
 // across restarts even while the credential provider is unavailable.

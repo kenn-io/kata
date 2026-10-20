@@ -3795,6 +3795,7 @@ func (l LabelsListResponseBody) Validate() error {
 }
 
 type LeaveFederationReplicaRequestBody struct {
+	Abort       *bool   `json:"abort,omitempty"`
 	Actor       *string `json:"actor,omitempty"`
 	Disposition *string `json:"disposition,omitempty"`
 	Force       *bool   `json:"force,omitempty"`

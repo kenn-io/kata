@@ -3911,6 +3911,8 @@ components:
     LeaveFederationReplicaRequestBody:
       additionalProperties: false
       properties:
+        abort:
+          type: boolean
         actor:
           type: string
         disposition:

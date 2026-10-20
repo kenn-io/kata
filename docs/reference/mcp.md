@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-17
+last_edited: 2026-10-20
 ---
 
 # Model Context Protocol server
@@ -438,9 +438,12 @@ configured GitHub credentials read, so `kata.sync_update` with
 servers can still disable the operator-configured binding and run
 `kata.sync_once` against it.
 
-Federation leave exposes `preflight`, `prepare`, and `commit` phases so an
-operator can preserve the normal revoke-before-local-teardown order. The phase
-is required. A commit without external hub revocation also requires
+Federation leave exposes `preflight`, `prepare`, `abort`, and `commit` phases
+so an operator can preserve the normal revoke-before-local-teardown order. The
+phase is required. When the hub revoke fails after `prepare`, run `abort` to
+release the prepared leave so rebind and join work again. The daemon refuses
+`abort` with `federation_leave_started` once a config-managed reservation is
+marked for leave or local teardown has begun; finish that leave instead. A commit without external hub revocation also requires
 `COMMIT FEDERATION LEAVE <project>`. The `archive` disposition and
 `kata.federation_rebind`, which routes the replica's enrollment token to the
 selected catalog origin, require the `--all` daemon-wide scope.

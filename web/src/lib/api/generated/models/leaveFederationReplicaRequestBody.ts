@@ -3,6 +3,7 @@
  */
 
 export interface LeaveFederationReplicaRequestBody {
+  abort?: boolean
   actor?: string
   disposition?: string
   force?: boolean

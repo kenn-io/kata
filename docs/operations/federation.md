@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-17
+last_edited: 2026-10-20
 ---
 
 # Federation
@@ -1649,6 +1649,12 @@ and revoked idempotently before local teardown. If the command or daemon stops
 midway, rerun the same leave command; the marker prevents automatic
 re-enrollment and carries the cleanup forward. A successful leave suppresses
 the still-configured mapping until the daemon restarts.
+
+If the hub revoke fails, for example because the hub is unreachable, the CLI
+releases the preparation before it exits. The project stays bound, and
+`kata federation rebind` and `kata federation join` work again without a daemon
+restart. A config-managed reservation keeps its leave marker, so finish that
+leave with `kata federation leave <project>` or `--local-only`.
 
 Add `--delete` to also archive the now-standalone project (reversible with
 `kata projects restore`); `--delete --force` archives even when the project has

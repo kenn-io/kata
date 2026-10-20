@@ -3403,6 +3403,46 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	}
 }
 
+func TestLeaveFederationReplicaRouteAbortReleasesPreparedLeave(t *testing.T) {
+	env := testenv.New(t)
+	project, binding := newSpokeProject(t, env)
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
+	resp, raw := envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	require.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true, "abort": true}, nil)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true}, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+	stored, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, binding, stored, "abort must not change the binding")
+}
+
+func TestLeaveFederationReplicaRouteAbortRefusesStartedTeardown(t *testing.T) {
+	env := testenv.New(t)
+	project, _ := newSpokeProject(t, env)
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
+	resp, raw := envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	_, err := env.DB.LeaveFederationReplica(t.Context(), project.ID)
+	require.NoError(t, err)
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_leave_started")
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+}
+
 func TestLeaveFederationReplicaManagedConflictRemainsRetryable(t *testing.T) {
 	delegate := newReplicaCredentialStore()
 	manual := config.FederationCredential{

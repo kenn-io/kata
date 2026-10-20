@@ -25,6 +25,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   run `kata storage postgres migrate` first. See
   [Daemon and diagnostics](reference/cli.md#daemon-and-diagnostics).
 
+- Rebind or rejoin a spoke right after `kata federation leave` fails to reach
+  the hub, without `kata daemon restart`. The CLI now releases the leave it
+  prepared, and the project stays bound. A config-managed reservation keeps
+  its leave marker until the leave finishes. MCP agents release a prepared
+  leave with the `abort` phase of `kata.federation_leave`. See
+  [Leaving a federation](operations/federation.md#leaving-a-federation).
+
 - Count a parent's open and total children from the browser snapshot's
   `collection_links` instead of listing issues. The counts match `child_counts`
   from `GET /api/v1/issues` for the same principal, an absent `child_counts`

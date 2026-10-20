@@ -384,7 +384,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			Then: &jsonschema.Schema{Required: []string{"uid", "revision"}},
 		})
 	case "kata.federation_leave":
-		setEnum("phase", "preflight", "prepare", "commit")
+		setEnum("phase", "preflight", "prepare", "abort", "commit")
 		setEnum("disposition", "detach", "archive")
 		commit := any("commit")
 		setCondition(&jsonschema.Schema{

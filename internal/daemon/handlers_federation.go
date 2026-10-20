@@ -588,6 +588,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if in.Body.Abort {
+			if in.Body.Preflight || in.Body.Prepare {
+				return nil, api.NewError(http.StatusBadRequest, "validation",
+					"abort cannot be combined with preflight or prepare", "", nil)
+			}
+			return abortFederationReplicaLeave(ctx, cfg, in.ProjectID, disposition)
+		}
 		// Refuse a non-spoke before any teardown so an archive-leave on a hub
 		// project does not archive it and then fail to detach. A project with no
 		// binding is the idempotent resume case and is allowed (RemoveProject and
@@ -997,6 +1004,35 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 		return internalAPIError(err)
 	}
 	return nil
+}
+
+// abortFederationReplicaLeave serves the leave route's abort phase: a client
+// whose hub revoke failed releases the leave it prepared.
+func abortFederationReplicaLeave(
+	ctx context.Context, cfg ServerConfig, projectID int64, disposition string,
+) (*api.LeaveFederationReplicaResponse, error) {
+	err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+	case errors.Is(err, ErrFederationReplicaLeaveStarted):
+		return nil, api.NewError(http.StatusConflict, "federation_leave_started", err.Error(),
+			"finish the leave with kata federation leave, or kata federation leave --local-only", nil)
+	case errors.Is(err, config.ErrFederationCredentialConflict):
+		return nil, api.NewError(http.StatusConflict, "federation_credential_conflict",
+			"managed federation credential reservations conflict",
+			"resolve the conflicting credentials, then retry leave", nil)
+	case err != nil:
+		return nil, federationReplicaAPIError(err)
+	}
+	project, err := cfg.DB.ProjectByID(ctx, projectID)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	return &api.LeaveFederationReplicaResponse{Body: api.LeaveFederationReplicaResultBody{
+		Disposition: disposition,
+		Project:     dbProjectToOut(project),
+	}}, nil
 }
 
 func federationReplicaAPIError(err error) error {

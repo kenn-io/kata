@@ -149,7 +149,7 @@ func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
-	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, or commit phase of resumable federation leave.", mutating, handlers.federationLeave)
+	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Abort releases a prepared leave whose hub revoke failed.", mutating, handlers.federationLeave)
 	addTool(server, "kata.federation_root_key_repin", "Repin root signing key", "Preview or pin a hub project rooted on this daemon to its loaded federation-root.key, creating the key when missing. Without previous_key_file, downstream relays that pinned the previous key can no longer sync this project. Requires --all and daemon-owner API authority.", toolHints(false, true, false), handlers.federationRootKeyRepin)
 	addTool(server, "kata.federation_quarantine", "Resolve quarantine", "Retry or skip a federation quarantine batch after exact confirmation.", mutating, handlers.federationQuarantine)
 }
@@ -431,8 +431,8 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 	if phase == "" {
 		return nil, FederationLeaveOutput{}, errors.New("phase is required")
 	}
-	if phase != "preflight" && phase != "prepare" && phase != "commit" {
-		return nil, FederationLeaveOutput{}, errors.New("phase must be preflight, prepare, or commit")
+	if phase != "preflight" && phase != "prepare" && phase != "abort" && phase != "commit" {
+		return nil, FederationLeaveOutput{}, errors.New("phase must be preflight, prepare, abort, or commit")
 	}
 	disposition := strings.TrimSpace(input.Disposition)
 	if disposition == "" {
@@ -458,8 +458,8 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 			return nil, FederationLeaveOutput{}, fmt.Errorf("confirm must equal %q", expected)
 		}
 	}
-	preflight, prepare := phase == "preflight", phase == "prepare"
-	response, err := h.options.Client.LeaveFederationReplica(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: project.ID}, Body: &generated.LeaveFederationReplicaBody{Actor: &h.options.Actor, Disposition: &disposition, Force: optionalTrue(input.Force), Preflight: optionalTrue(preflight), Prepare: optionalTrue(prepare)}})
+	preflight, prepare, abort := phase == "preflight", phase == "prepare", phase == "abort"
+	response, err := h.options.Client.LeaveFederationReplica(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: project.ID}, Body: &generated.LeaveFederationReplicaBody{Actor: &h.options.Actor, Disposition: &disposition, Force: optionalTrue(input.Force), Preflight: optionalTrue(preflight), Prepare: optionalTrue(prepare), Abort: optionalTrue(abort)}})
 	if err != nil {
 		return nil, FederationLeaveOutput{}, err
 	}

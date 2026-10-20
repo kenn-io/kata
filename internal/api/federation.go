@@ -652,6 +652,12 @@ type LeaveFederationReplicaRequestBody struct {
 	// connections also stop local transport. It does not revoke, detach,
 	// archive, or delete credentials.
 	Prepare bool `json:"prepare,omitempty,omitzero"`
+	// Abort releases a prepared leave that stopped before local teardown,
+	// such as when the hub revoke failed, so rebind and join work again
+	// without a daemon restart. It refuses with federation_leave_started
+	// when a durable leave marker exists or teardown has begun; finish
+	// those leaves instead.
+	Abort bool `json:"abort,omitempty,omitzero"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.

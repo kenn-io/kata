@@ -777,7 +777,7 @@ func federationLeaveCmd() *cobra.Command {
 		Use:   "leave [project]",
 		Short: "leave a hub federation as a spoke (revoke + local teardown)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			if force && !deleteFlag {
 				return &cliError{Message: "--force requires --delete", Kind: kindValidation, ExitCode: ExitValidation}
 			}
@@ -786,6 +786,16 @@ func federationLeaveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// releasePrepared is set while this command holds a prepared leave
+			// that has not reached local teardown. Any failure in that window,
+			// such as an unreachable hub, releases it so rebind and join keep
+			// working without a daemon restart.
+			var releasePrepared func()
+			defer func() {
+				if runErr != nil && releasePrepared != nil {
+					releasePrepared()
+				}
+			}()
 			target, err := resolveSpokeForLeave(a, args)
 			if err != nil {
 				return err
@@ -864,6 +874,9 @@ func federationLeaveCmd() *cobra.Command {
 				if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 					return err
 				}
+				releasePrepared = func() {
+					abortFederationLeave(cmd, a, target.projectID, disposition, actor)
+				}
 				if err := json.Unmarshal(callResp.Body, &prepared); err != nil {
 					return err
 				}
@@ -912,6 +925,9 @@ func federationLeaveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The teardown call may archive or detach before it fails; from
+			// here only finishing the leave clears its pending state.
+			releasePrepared = nil
 			callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor}})
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
@@ -1101,6 +1117,31 @@ func formatEnrollmentIDList(ids []int64) string {
 		parts = append(parts, fmt.Sprintf("#%d", id))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// abortFederationLeave releases a leave this command prepared and then could
+// not carry to local teardown. It reports a failed release as a warning so the
+// original error stays the command's result. The release runs even after an
+// interrupt, under its own short deadline.
+func abortFederationLeave(cmd *cobra.Command, a daemonAPI, projectID int64, disposition, actor string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx), 10*time.Second)
+	defer cancel()
+	err := func() error {
+		apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if err != nil {
+			return err
+		}
+		callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Actor: &actor, Abort: new(true)}})
+		if err := externalCLITransportError(callResp, callErr); err != nil {
+			return err
+		}
+		return externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr)
+	}()
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: the daemon kept this leave pending, so rebind and join stay blocked until the leave finishes: %s\n",
+			textsafe.Line(err.Error()))
+	}
 }
 
 // federationLeaveHubError wraps a hub-side failure with guidance to retry the

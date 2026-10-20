@@ -1480,6 +1480,39 @@ func TestFederationLeaveRequiresPhaseAndCommitConfirmation(t *testing.T) {
 	require.Zero(t, requests.Load())
 }
 
+// An agent whose hub revoke failed after prepare releases the prepared leave
+// through the abort phase instead of leaving the mapping blocked.
+func TestFederationLeaveAbortPhaseReleasesPreparedLeave(t *testing.T) {
+	var body map[string]any
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/federation/replicas/1/actions/leave":
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
+			writeJSON(writer, map[string]any{
+				"project":     projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+				"disposition": "detach", "detached": false,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+
+	_, output, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{Project: "spoke-project", Phase: "abort"})
+
+	require.NoError(t, err)
+	require.Equal(t, "abort", output.Phase)
+	require.Equal(t, true, body["abort"])
+	require.NotContains(t, body, "prepare")
+	require.NotContains(t, body, "preflight")
+}
+
 func TestScopedFederationLeaveCannotArchive(t *testing.T) {
 	var mutations int
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
