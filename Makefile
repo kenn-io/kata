@@ -47,7 +47,7 @@ kata-ui-test:
 	bun run --cwd packages/kata-ui test
 
 kata-ui-pack-check:
-	cd packages/kata-ui && bun x vitest run pack.test.ts
+	cd packages/kata-ui && bun x vp test pack.test.ts
 
 web-check: kata-ui-check
 	cd web && bun run check
