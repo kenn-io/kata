@@ -93,26 +93,37 @@ func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 		_, err = database.ExecContext(ctx, `CREATE TABLE seeded (value text); INSERT INTO seeded VALUES ('from-template')`)
 		return err
 	})
-	open := func(t *testing.T) (*sql.DB, func()) {
+	open := func(t *testing.T) (*sql.DB, string, func()) {
 		t.Helper()
 		dsn, cleanup := template.NewDatabase(t, ctx)
 		database, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
-		return database, func() {
+		var name string
+		require.NoError(t, database.QueryRowContext(ctx, `SELECT current_database()`).Scan(&name))
+		return database, name, func() {
 			require.NoError(t, database.Close())
 			cleanup()
 		}
 	}
-	first, closeFirst := open(t)
-	t.Cleanup(closeFirst)
-	second, closeSecond := open(t)
+	first, firstName, closeFirst := open(t)
+	second, secondName, closeSecond := open(t)
 	t.Cleanup(closeSecond)
+	require.NotEqual(t, firstName, secondName)
 	require.Equal(t, 1, prepared, "the template is prepared once per server")
 	for _, database := range []*sql.DB{first, second} {
 		var value string
 		require.NoError(t, database.QueryRowContext(ctx, `SELECT value FROM seeded`).Scan(&value))
 		require.Equal(t, "from-template", value)
 	}
+	_, err := first.ExecContext(ctx, `INSERT INTO seeded VALUES ('only-in-first')`)
+	require.NoError(t, err)
+	var copies int
+	require.NoError(t, second.QueryRowContext(ctx, `SELECT count(*) FROM seeded`).Scan(&copies))
+	require.Equal(t, 1, copies, "each clone must be isolated")
+	closeFirst()
+	var remaining bool
+	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
+	require.False(t, remaining, "cleanup must drop the clone")
 }
 
 // Templates outlive the test process that built them. A later process drops
@@ -121,6 +132,7 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("testcontainer requires docker; skip on -short")
 	}
+	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
 	ctx := context.Background()
 	serverDSN, serverCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(serverCleanup)
