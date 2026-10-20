@@ -1011,19 +1011,20 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 func abortFederationReplicaLeave(
 	ctx context.Context, cfg ServerConfig, projectID int64, disposition string,
 ) (*api.LeaveFederationReplicaResponse, error) {
-	err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID)
-	switch {
-	case errors.Is(err, db.ErrNotFound):
-		return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
-	case errors.Is(err, ErrFederationReplicaLeaveStarted):
-		return nil, api.NewError(http.StatusConflict, "federation_leave_started", err.Error(),
-			"finish the leave with kata federation leave, or kata federation leave --local-only", nil)
-	case errors.Is(err, config.ErrFederationCredentialConflict):
-		return nil, api.NewError(http.StatusConflict, "federation_credential_conflict",
-			"managed federation credential reservations conflict",
-			"resolve the conflicting credentials, then retry leave", nil)
-	case err != nil:
-		return nil, federationReplicaAPIError(err)
+	if err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID); err != nil {
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+		case errors.Is(err, ErrFederationReplicaLeaveStarted):
+			return nil, api.NewError(http.StatusConflict, "federation_leave_started", err.Error(),
+				"finish the leave with kata federation leave, or kata federation leave --local-only", nil)
+		case errors.Is(err, config.ErrFederationCredentialConflict):
+			return nil, api.NewError(http.StatusConflict, "federation_credential_conflict",
+				"managed federation credential reservations conflict",
+				"resolve the conflicting credentials, then retry leave", nil)
+		default:
+			return nil, federationReplicaAPIError(err)
+		}
 	}
 	project, err := cfg.DB.ProjectByID(ctx, projectID)
 	if err != nil {
