@@ -282,6 +282,38 @@ func TestLocalProfileUnsupportedSchemaCannotReplaceProcess(t *testing.T) {
 	assert.Zero(t, calls)
 }
 
+func TestLocalProfileKeepsNewerReleaseDaemon(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v0.19.0","pid":%d}`, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
+	}))
+	defer live.Close()
+	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(live.URL, "http://"), StartedAt: time.Now()})
+	require.NoError(t, err)
+	calls := 0
+	oldVersion, oldStop, oldStart := currentVersionForEnsure, stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure
+	defer func() {
+		currentVersionForEnsure, stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure = oldVersion, oldStop, oldStart
+	}()
+	currentVersionForEnsure = func() string { return "v0.18.0" }
+	stopRunningDaemonsForEnsure = func(context.Context, string, string) error { calls++; return nil }
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error { calls++; return nil }
+
+	_, err = EnsureResolvedInWorkspace(t.Context(), root)
+
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
+	assert.Zero(t, calls)
+}
+
 func TestLocalProfileNamedDiscoveryCannotUsePersonalRuntime(t *testing.T) {
 	profile, _ := localProfileFixture(t)
 	personal := startResolvableDaemon(t)

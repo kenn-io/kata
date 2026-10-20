@@ -210,6 +210,9 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if found.Outcome == daemonScanCompatible {
 			return resolved, nil
 		}
+		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
+			return resolved, err
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
 			return resolved, err
 		}

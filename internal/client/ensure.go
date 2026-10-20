@@ -11,9 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"golang.org/x/mod/semver"
 )
 
 // DiscoveredWebRuntime is the validated browser launch metadata for one live
@@ -78,6 +82,11 @@ const (
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
 	daemonStartupWait       = 30 * time.Second
 )
+
+// ErrDaemonNotReplaceable means this binary left a live daemon of another
+// version running because it cannot open that daemon's storage or is an older
+// release than the daemon.
+var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
 
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
@@ -178,11 +187,81 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
 	case daemonScanStale:
+		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
+			return RunningDaemon{}, err
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+// checkDaemonReplaceable refuses to stop a live daemon that this binary could
+// not replace: a newer release, or one serving storage whose schema is newer
+// than this binary supports. Older storage stays replaceable because the
+// replacement daemon upgrades it on open.
+func checkDaemonReplaceable(ctx context.Context, live PingInfo) error {
+	if err := refuseDaemonDowngrade(live); err != nil {
+		return err
+	}
+	schema, err := peekStorageSchemaForEnsure(ctx)
+	if err != nil {
+		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
+	}
+	if schema > db.CurrentSchemaVersion() {
+		return fmt.Errorf("%w: kata daemon %s uses storage schema_version %d, which is newer than binary schema %d of this kata binary %s; use a newer kata binary",
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), schema, db.CurrentSchemaVersion(), currentVersionForEnsure())
+	}
+	return nil
+}
+
+func daemonVersionLabel(live PingInfo) string {
+	if live.Version == "" {
+		return "(version not reported)"
+	}
+	return live.Version
+}
+
+// refuseDaemonDowngrade keeps a live release daemon that is newer than this
+// release binary. Only plain release versions (vX.Y.Z) have a defined order:
+// development builds report a commit (gabc1234) or a git-describe suffix
+// (v0.19.0-3-gabc1234) that semver would misorder.
+func refuseDaemonDowngrade(live PingInfo) error {
+	running, binary := live.Version, currentVersionForEnsure()
+	if !isReleaseVersion(running) || !isReleaseVersion(binary) || semver.Compare(running, binary) <= 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: kata daemon %s is newer than this kata binary %s; use a newer kata binary",
+		ErrDaemonNotReplaceable, running, binary)
+}
+
+func isReleaseVersion(v string) bool {
+	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
+}
+
+// peekStorageSchemaForEnsure reads, without migrating, the schema version of
+// the storage a replacement daemon would open. A SQLite database that does not
+// exist yet reports zero. The read shares the HTTP timeout budget so
+// unreachable PostgreSQL storage cannot stall the command.
+func peekStorageSchemaForEnsure(ctx context.Context) (int, error) {
+	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	dsn, err := config.KataDSN(ctx)
+	if err != nil {
+		return 0, err
+	}
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil {
+		return 0, err
+	}
+	if backend == storeopen.BackendSQLite {
+		if _, err := os.Stat(strings.TrimPrefix(dsn, "sqlite://")); errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+	}
+	return storeopen.PeekSchemaVersion(ctx, dsn)
 }
 
 // daemonScanOutcome is the three-case answer to whether a local daemon is

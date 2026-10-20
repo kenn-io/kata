@@ -21,8 +21,116 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+// A binary that cannot open the storage cannot replace the daemon serving it,
+// so the live daemon must keep running.
+func TestEnsureRunningKeepsDaemonWhenStorageSchemaIsNewerThanBinary(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(tmp, "kata.db"), db.CurrentSchemaVersion()+1)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "newer-build", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "older-build", "http://replacement-daemon")
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	assert.Zero(t, state.stopCalls, "the live daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+	for _, want := range []string{
+		"newer-build", "older-build",
+		fmt.Sprintf("schema_version %d", db.CurrentSchemaVersion()+1),
+		fmt.Sprintf("binary schema %d", db.CurrentSchemaVersion()),
+		"use a newer kata binary",
+	} {
+		assert.Contains(t, err.Error(), want)
+	}
+}
+
+func TestEnsureRunningReplacesDaemonWhenStorageSchemaIsSupported(t *testing.T) {
+	for _, schema := range []int{db.CurrentSchemaVersion() - 1, db.CurrentSchemaVersion()} {
+		t.Run(fmt.Sprint(schema), func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			stageStorageSchema(t, filepath.Join(tmp, "kata.db"), schema)
+			_, addr := startMockDaemonPing(t, map[string]any{
+				"ok": true, "service": "kata", "version": "old-build", "pid": os.Getpid(),
+			})
+			require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+			state := patchEnsureHooks(t, "new-build", "http://replacement-daemon")
+
+			url, err := EnsureRunning(t.Context())
+
+			require.NoError(t, err)
+			assert.Equal(t, "http://replacement-daemon", url)
+			assert.Equal(t, 1, state.stopCalls)
+			assert.Equal(t, 1, state.startCalls)
+		})
+	}
+}
+
+func TestEnsureRunningKeepsNewerReleaseDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "v0.19.0", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "v0.18.0", "http://replacement-daemon")
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	assert.Zero(t, state.stopCalls, "the newer daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
+	assert.Contains(t, err.Error(), "use a newer kata binary")
+}
+
+// Only two release versions have a defined order. Development builds report a
+// commit (gabc1234) or a git-describe suffix whose semver order is wrong, so
+// they keep replacing any daemon that differs.
+func TestEnsureRunningReplacesDaemonUnlessItIsANewerRelease(t *testing.T) {
+	for _, tt := range []struct{ daemon, binary string }{
+		{daemon: "v0.18.0", binary: "v0.19.0"},
+		{daemon: "v0.19.0", binary: "v0.19.0-3-gabc1234"},
+		{daemon: "v0.19.0", binary: "gabc1234-dirty"},
+		{daemon: "v0.20.0-rc.1", binary: "v0.19.0"},
+	} {
+		t.Run(tt.daemon+" from "+tt.binary, func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			_, addr := startMockDaemonPing(t, map[string]any{
+				"ok": true, "service": "kata", "version": tt.daemon, "pid": os.Getpid(),
+			})
+			require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+			state := patchEnsureHooks(t, tt.binary, "http://replacement-daemon")
+
+			url, err := EnsureRunning(t.Context())
+
+			require.NoError(t, err)
+			assert.Equal(t, "http://replacement-daemon", url)
+			assert.Equal(t, 1, state.stopCalls)
+		})
+	}
+}
+
+// stageStorageSchema creates a SQLite database at path whose
+// meta.schema_version is schema.
+func stageStorageSchema(t *testing.T, path string, schema int) {
+	t.Helper()
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(schema))
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+}
 
 func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")

@@ -15,6 +15,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   instant, within 30 seconds of that instant while the daemon runs. Schedules
   already overdue when you upgrade record no event. See
   [Reached schedules](reference/cron.md#reached-schedules).
+- Keep a running local daemon up when an older `kata` binary runs a command.
+  Before, a binary that could not open the daemon's newer database stopped the
+  daemon anyway, failed to start its own, and left no daemon running. The
+  command now fails and names both versions or schemas so you can rerun it
+  with the newer binary. An older release binary also no longer downgrades a
+  newer release daemon. See
+  [Daemon and diagnostics](reference/cli.md#daemon-and-diagnostics).
 
 - Count a parent's open and total children from the browser snapshot's
   `collection_links` instead of listing issues. The counts match `child_counts`
