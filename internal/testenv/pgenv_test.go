@@ -42,7 +42,7 @@ func TestExplicitPostgresServiceUsesConfiguredServer(t *testing.T) {
 // prepare their seed data once, and isolate each test's database.
 func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 	if testing.Short() {
-		t.Skip("testcontainer requires docker; skip on -short")
+		t.Skip("PostgreSQL template test skipped on -short")
 	}
 	ctx := context.Background()
 	prepared := 0
@@ -95,7 +95,7 @@ func TestPostgresTemplateSharesServerWithIsolatedDatabases(t *testing.T) {
 // templates whose owner is gone so a long-lived server does not fill up.
 func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	if testing.Short() {
-		t.Skip("testcontainer requires docker; skip on -short")
+		t.Skip("PostgreSQL template test skipped on -short")
 	}
 	ctx := context.Background()
 	serverDSN, serverCleanup := testenv.NewPostgresContainer(t, ctx)
