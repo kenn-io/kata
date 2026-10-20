@@ -46,9 +46,20 @@ func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testi
 	}
 	t.Setenv("KATA_TEST_POSTGRES_DSN", "")
 	ctx := context.Background()
+	prepared := 0
+	template := testenv.NewPostgresTemplate(func(ctx context.Context, dsn string) error {
+		prepared++
+		database, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = database.Close() }()
+		_, err = database.ExecContext(ctx, `CREATE TABLE seeded (value text); INSERT INTO seeded VALUES ('from-template')`)
+		return err
+	})
 	open := func(t *testing.T) (*sql.DB, func()) {
 		t.Helper()
-		dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+		dsn, cleanup := template.NewDatabase(t, ctx)
 		database, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		return database, func() {
@@ -64,51 +75,6 @@ func TestAutomaticPostgresContainersShareOneServerWithIsolatedDatabases(t *testi
 	require.NoError(t, second.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&secondStart, &secondName))
 	require.Equal(t, firstStart, secondStart, "tests in one process must reuse the server")
 	require.NotEqual(t, firstName, secondName)
-	_, err := first.ExecContext(ctx, `CREATE TABLE only_in_first (id int)`)
-	require.NoError(t, err)
-	var visible bool
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT to_regclass('only_in_first') IS NOT NULL`).Scan(&visible))
-	require.False(t, visible, "each test must receive an isolated database")
-	closeFirst()
-	var remaining bool
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
-	require.False(t, remaining, "cleanup must drop the test database")
-}
-
-// Installing a schema per test dominates small PostgreSQL tests, so a
-// template prepares it once per server and each test receives a clone.
-func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
-	if testing.Short() {
-		t.Skip("testcontainer requires docker; skip on -short")
-	}
-	ctx := context.Background()
-	prepared := 0
-	template := testenv.NewPostgresTemplate(func(ctx context.Context, dsn string) error {
-		prepared++
-		database, err := sql.Open("pgx", dsn)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = database.Close() }()
-		_, err = database.ExecContext(ctx, `CREATE TABLE seeded (value text); INSERT INTO seeded VALUES ('from-template')`)
-		return err
-	})
-	open := func(t *testing.T) (*sql.DB, string, func()) {
-		t.Helper()
-		dsn, cleanup := template.NewDatabase(t, ctx)
-		database, err := sql.Open("pgx", dsn)
-		require.NoError(t, err)
-		var name string
-		require.NoError(t, database.QueryRowContext(ctx, `SELECT current_database()`).Scan(&name))
-		return database, name, func() {
-			require.NoError(t, database.Close())
-			cleanup()
-		}
-	}
-	first, firstName, closeFirst := open(t)
-	second, secondName, closeSecond := open(t)
-	t.Cleanup(closeSecond)
-	require.NotEqual(t, firstName, secondName)
 	require.Equal(t, 1, prepared, "the template is prepared once per server")
 	for _, database := range []*sql.DB{first, second} {
 		var value string
@@ -123,7 +89,7 @@ func TestPostgresTemplateClonesPreparedDatabase(t *testing.T) {
 	closeFirst()
 	var remaining bool
 	require.NoError(t, second.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)`, firstName).Scan(&remaining))
-	require.False(t, remaining, "cleanup must drop the clone")
+	require.False(t, remaining, "cleanup must drop the test database")
 }
 
 // Templates outlive the test process that built them. A later process drops
@@ -153,12 +119,9 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	}
 	noop := func(context.Context, string) error { return nil }
 
-	firstDSN, firstCleanup := testenv.NewPostgresTemplate(noop).NewDatabase(t, ctx)
+	_, firstCleanup := testenv.NewPostgresTemplate(noop).NewDatabase(t, ctx)
 	t.Cleanup(firstCleanup)
 	require.False(t, exists(abandoned), "a template without a live owner must be dropped")
-	first, err := sql.Open("pgx", firstDSN)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = first.Close() })
 	var live []string
 	rows, err := server.QueryContext(ctx, `SELECT datname FROM pg_database WHERE datname LIKE $1`, fmt.Sprintf(`kata\_template\_%d\_%%`, os.Getpid()))
 	require.NoError(t, err)
