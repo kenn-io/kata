@@ -652,12 +652,16 @@ type LeaveFederationReplicaRequestBody struct {
 	// connections also stop local transport. It does not revoke, detach,
 	// archive, or delete credentials.
 	Prepare bool `json:"prepare,omitempty,omitzero"`
-	// Abort releases a prepared leave that stopped before local teardown,
-	// such as when the hub revoke failed, so rebind and join work again
-	// without a daemon restart. It refuses with federation_leave_started
-	// when a durable leave marker exists or teardown has begun; finish
-	// those leaves instead.
+	// Abort releases the prepared leave named by PreparationID after it
+	// stopped before local teardown, such as when the hub revoke failed, so
+	// rebind and join work again without a daemon restart. Releasing an
+	// unknown or already released preparation succeeds without changing
+	// anything. It refuses with federation_leave_started when a durable leave
+	// marker exists or teardown has begun; finish those leaves instead.
 	Abort bool `json:"abort,omitempty,omitzero"`
+	// PreparationID is the preparation_id a prepare response returned. Abort
+	// requires it, and no other phase accepts it.
+	PreparationID string `json:"preparation_id,omitempty"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.
@@ -671,6 +675,9 @@ type LeaveFederationReplicaResultBody struct {
 	// PendingEnrollment identifies a config-managed enrollment that may have
 	// committed before local adoption. It omits the enrollment credential.
 	PendingEnrollment *PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
+	// PreparationID identifies the leave a prepare call prepared. Send it with
+	// abort to release that leave if it stops before local teardown.
+	PreparationID string `json:"preparation_id,omitempty"`
 }
 
 // PendingFederationEnrollmentCleanup gives leave clients the non-secret hub

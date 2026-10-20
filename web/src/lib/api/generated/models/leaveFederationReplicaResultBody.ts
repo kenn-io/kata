@@ -9,6 +9,7 @@ export interface LeaveFederationReplicaResultBody {
   detached: boolean
   disposition: string
   pending_enrollment?: PendingFederationEnrollmentCleanup
+  preparation_id?: string
   project: ProjectOut
   [key: string]: unknown
 }

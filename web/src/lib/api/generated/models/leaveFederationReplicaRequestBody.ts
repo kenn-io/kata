@@ -8,5 +8,6 @@ export interface LeaveFederationReplicaRequestBody {
   disposition?: string
   force?: boolean
   preflight?: boolean
+  preparation_id?: string
   prepare?: boolean
 }

@@ -104,6 +104,9 @@ type FederationLeaveInput struct {
 	Disposition string `json:"disposition,omitempty"`
 	Force       bool   `json:"force,omitempty"`
 	Confirm     string `json:"confirm,omitempty"`
+	// PreparationID is the preparation_id the prepare phase returned. The
+	// abort phase requires it.
+	PreparationID string `json:"preparation_id,omitempty"`
 }
 
 // FederationLeaveOutput reports a federation leave phase.
@@ -114,6 +117,7 @@ type FederationLeaveOutput struct {
 	Detached          bool                                          `json:"detached"`
 	Archived          bool                                          `json:"archived,omitempty"`
 	PendingEnrollment *generated.PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
+	PreparationID     string                                        `json:"preparation_id,omitempty"`
 }
 
 // FederationQuarantineInput selects a quarantine resolution action.
@@ -149,7 +153,7 @@ func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
-	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Abort releases a prepared leave whose hub revoke failed.", mutating, handlers.federationLeave)
+	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Abort releases the prepared leave named by the preparation_id that prepare returned, such as after its hub revoke failed.", mutating, handlers.federationLeave)
 	addTool(server, "kata.federation_root_key_repin", "Repin root signing key", "Preview or pin a hub project rooted on this daemon to its loaded federation-root.key, creating the key when missing. Without previous_key_file, downstream relays that pinned the previous key can no longer sync this project. Requires --all and daemon-owner API authority.", toolHints(false, true, false), handlers.federationRootKeyRepin)
 	addTool(server, "kata.federation_quarantine", "Resolve quarantine", "Retry or skip a federation quarantine batch after exact confirmation.", mutating, handlers.federationQuarantine)
 }
@@ -434,6 +438,13 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 	if phase != "preflight" && phase != "prepare" && phase != "abort" && phase != "commit" {
 		return nil, FederationLeaveOutput{}, errors.New("phase must be preflight, prepare, abort, or commit")
 	}
+	preparationID := strings.TrimSpace(input.PreparationID)
+	if phase == "abort" && preparationID == "" {
+		return nil, FederationLeaveOutput{}, errors.New("preparation_id is required for the abort phase; use the preparation_id that prepare returned")
+	}
+	if phase != "abort" && preparationID != "" {
+		return nil, FederationLeaveOutput{}, errors.New("preparation_id is accepted only with the abort phase")
+	}
 	disposition := strings.TrimSpace(input.Disposition)
 	if disposition == "" {
 		disposition = "detach"
@@ -459,12 +470,16 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 		}
 	}
 	preflight, prepare, abort := phase == "preflight", phase == "prepare", phase == "abort"
-	response, err := h.options.Client.LeaveFederationReplica(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: project.ID}, Body: &generated.LeaveFederationReplicaBody{Actor: &h.options.Actor, Disposition: &disposition, Force: optionalTrue(input.Force), Preflight: optionalTrue(preflight), Prepare: optionalTrue(prepare), Abort: optionalTrue(abort)}})
+	response, err := h.options.Client.LeaveFederationReplica(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: project.ID}, Body: &generated.LeaveFederationReplicaBody{Actor: &h.options.Actor, Disposition: &disposition, Force: optionalTrue(input.Force), Preflight: optionalTrue(preflight), Prepare: optionalTrue(prepare), Abort: optionalTrue(abort), PreparationID: optionalString(preparationID)}})
 	if err != nil {
 		return nil, FederationLeaveOutput{}, err
 	}
 	archived := response.Archived != nil && *response.Archived
-	return successResult(), FederationLeaveOutput{Project: projectSummaryOut(response.Project), Phase: phase, Disposition: response.Disposition, Detached: response.Detached, Archived: archived, PendingEnrollment: response.PendingEnrollment}, nil
+	var preparedID string
+	if response.PreparationID != nil {
+		preparedID = *response.PreparationID
+	}
+	return successResult(), FederationLeaveOutput{Project: projectSummaryOut(response.Project), Phase: phase, Disposition: response.Disposition, Detached: response.Detached, Archived: archived, PendingEnrollment: response.PendingEnrollment, PreparationID: preparedID}, nil
 }
 
 func (h toolHandlers) federationQuarantine(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationQuarantineInput) (*sdkmcp.CallToolResult, FederationQuarantineOutput, error) {

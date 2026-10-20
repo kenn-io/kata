@@ -131,6 +131,8 @@ type ReserveFederationReplicaCredentialParams struct {
 type PrepareFederationReplicaLeaveResult struct {
 	ManagedReservation      config.FederationManagedCredentialReservation
 	ManagedReservationFound bool
+	// PreparationID identifies this preparation to AbortFederationReplicaLeave.
+	PreparationID string
 }
 
 // FinishFederationReplicaHubOperation records a completed enrollment for
@@ -297,9 +299,21 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// concurrent reconciler record success for a leave that then fails to
 	// prepare, and rolling the publish back would erase a completed leave's
 	// suppression when a retried prepare fails.
-	federationReplicaTransitions.markLeavePending(key)
+	preparationID := federationReplicaTransitions.markLeavePending(key)
 	ensureFederationReplicaMu.Unlock()
 
+	// A preparation that fails from here on never reaches its client, which
+	// therefore cannot abort it. Release it, unless a durable leave marker
+	// keeps the mapping blocked until the leave finishes anyway.
+	durablyMarked := found
+	fail := func(err error) (PrepareFederationReplicaLeaveResult, error) {
+		if !durablyMarked {
+			ensureFederationReplicaMu.Lock()
+			federationReplicaTransitions.releasePreparedLeave(key, preparationID)
+			ensureFederationReplicaMu.Unlock()
+		}
+		return PrepareFederationReplicaLeaveResult{}, err
+	}
 	for {
 		ensureFederationReplicaMu.Lock()
 		drained, waiting := federationReplicaTransitions.drainSignal(key)
@@ -308,26 +322,25 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 			ensureFederationReplicaMu.Unlock()
 			if err != nil {
 				if errors.Is(err, config.ErrFederationCredentialConflict) {
-					return PrepareFederationReplicaLeaveResult{}, err
+					return fail(err)
 				}
-				return PrepareFederationReplicaLeaveResult{}, credentialIOError(
-					"read prepared managed reservation",
-				)
+				return fail(credentialIOError("read prepared managed reservation"))
 			}
 			if found && match.Credential.Provider != nil && project.ID != 0 {
 				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
-					return PrepareFederationReplicaLeaveResult{}, err
+					return fail(err)
 				}
 			}
 			return PrepareFederationReplicaLeaveResult{
 				ManagedReservation:      match,
 				ManagedReservationFound: found,
+				PreparationID:           preparationID,
 			}, nil
 		}
 		ensureFederationReplicaMu.Unlock()
 		select {
 		case <-ctx.Done():
-			return PrepareFederationReplicaLeaveResult{}, ctx.Err()
+			return fail(ctx.Err())
 		case <-drained:
 		}
 	}
@@ -337,32 +350,34 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 // finished: it holds a durable leave marker or has begun local teardown.
 var ErrFederationReplicaLeaveStarted = errors.New("federation leave has started")
 
-// AbortFederationReplicaLeave releases one PrepareFederationReplicaLeave whose
-// leave stopped before local teardown, such as when the hub revoke failed.
-// Once no other preparation remains, rebind, join, and config reconciliation
-// work again without a daemon restart. A durable leave marker, a detached
-// binding, or an archived project keeps the leave pending and returns
-// ErrFederationReplicaLeaveStarted: those leaves must be finished.
+// AbortFederationReplicaLeave releases the PrepareFederationReplicaLeave
+// identified by preparationID after its leave stopped before local teardown,
+// such as when the hub revoke failed. Once no other preparation remains,
+// rebind, join, and config reconciliation work again without a daemon restart.
+// An unknown or already released preparation is a successful no-op, so a
+// retried abort never releases another leave's preparation.
+//
+// A durable leave marker, a detached binding, or an archived project keeps the
+// leave pending and returns ErrFederationReplicaLeaveStarted: those leaves must
+// be finished. The durable markers are checked first, so a restart that emptied
+// the in-memory registry still reports them.
 func AbortFederationReplicaLeave(
 	ctx context.Context,
 	store db.Storage,
 	credentials config.FederationCredentialStore,
 	projectID int64,
+	preparationID string,
 ) error {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
+	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
 	project, err := store.ProjectByID(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("read federation replica project before releasing leave: %w", err)
-	}
-	key := federationReplicaTransitionKey(store, project.Name)
-	if federationReplicaTransitions.state(key) != federationReplicaLeavePending {
-		return nil
-	}
-	managed, err := managedCredentialStore(credentials)
-	if err != nil {
-		return err
 	}
 	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
@@ -374,12 +389,18 @@ func AbortFederationReplicaLeave(
 	if found && match.Credential.LeavePending {
 		return fmt.Errorf("%w: the managed reservation is marked for leave", ErrFederationReplicaLeaveStarted)
 	}
-	credential, found, err := credentials.FederationCredential(ctx, project.UID)
+	credential, credentialFound, err := credentials.FederationCredential(ctx, project.UID)
 	if err != nil {
 		return credentialIOError("read federation credential before releasing leave")
 	}
-	if found && credential.LeavePending {
+	if credentialFound && credential.LeavePending {
 		return fmt.Errorf("%w: the credential is marked for leave", ErrFederationReplicaLeaveStarted)
+	}
+	// Prepare keys a provider-backed reservation by its request, like every
+	// other hub operation for it.
+	key := federationReplicaOperationKey(store, project.Name, match.Credential)
+	if !federationReplicaTransitions.preparationOutstanding(key, preparationID) {
+		return nil
 	}
 	if project.DeletedAt != nil {
 		return fmt.Errorf("%w: the project is archived", ErrFederationReplicaLeaveStarted)
@@ -394,7 +415,7 @@ func AbortFederationReplicaLeave(
 	if binding.Role != db.FederationRoleSpoke {
 		return db.ErrFederationNotSpoke
 	}
-	federationReplicaTransitions.releasePreparedLeave(key)
+	federationReplicaTransitions.releasePreparedLeave(key, preparationID)
 	return nil
 }
 

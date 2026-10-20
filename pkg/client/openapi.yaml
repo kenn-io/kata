@@ -3821,6 +3821,8 @@ components:
           type: boolean
         preflight:
           type: boolean
+        preparation_id:
+          type: string
         prepare:
           type: boolean
       type: object
@@ -3834,6 +3836,8 @@ components:
           type: string
         pending_enrollment:
           $ref: "#/components/schemas/PendingFederationEnrollmentCleanup"
+        preparation_id:
+          type: string
         project:
           $ref: "#/components/schemas/ProjectOut"
       required:

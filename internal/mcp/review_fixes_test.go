@@ -1480,10 +1480,10 @@ func TestFederationLeaveRequiresPhaseAndCommitConfirmation(t *testing.T) {
 	require.Zero(t, requests.Load())
 }
 
-// An agent whose hub revoke failed after prepare releases the prepared leave
-// through the abort phase instead of leaving the mapping blocked.
+// An agent whose hub revoke failed after prepare releases that preparation
+// through the abort phase, echoing the preparation ID prepare returned.
 func TestFederationLeaveAbortPhaseReleasesPreparedLeave(t *testing.T) {
-	var body map[string]any
+	var bodies []map[string]any
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/v1/projects":
@@ -1491,11 +1491,17 @@ func TestFederationLeaveAbortPhaseReleasesPreparedLeave(t *testing.T) {
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 			}})
 		case "/api/v1/federation/replicas/1/actions/leave":
+			var body map[string]any
 			require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
-			writeJSON(writer, map[string]any{
+			bodies = append(bodies, body)
+			response := map[string]any{
 				"project":     projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 				"disposition": "detach", "detached": false,
-			})
+			}
+			if body["prepare"] == true {
+				response["preparation_id"] = "example-preparation"
+			}
+			writeJSON(writer, response)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -1504,13 +1510,40 @@ func TestFederationLeaveAbortPhaseReleasesPreparedLeave(t *testing.T) {
 	require.NoError(t, err)
 	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
 
-	_, output, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{Project: "spoke-project", Phase: "abort"})
+	_, prepared, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{Project: "spoke-project", Phase: "prepare"})
+	require.NoError(t, err)
+	require.Equal(t, "example-preparation", prepared.PreparationID)
+	_, output, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{
+		Project: "spoke-project", Phase: "abort", PreparationID: prepared.PreparationID,
+	})
 
 	require.NoError(t, err)
 	require.Equal(t, "abort", output.Phase)
-	require.Equal(t, true, body["abort"])
-	require.NotContains(t, body, "prepare")
-	require.NotContains(t, body, "preflight")
+	require.Len(t, bodies, 2)
+	abort := bodies[1]
+	require.Equal(t, true, abort["abort"])
+	require.Equal(t, "example-preparation", abort["preparation_id"])
+	require.NotContains(t, abort, "prepare")
+	require.NotContains(t, abort, "preflight")
+}
+
+func TestFederationLeavePreparationIDBelongsToAbort(t *testing.T) {
+	var requests atomic.Int32
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		http.NotFound(writer, request)
+	})
+	scope, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+
+	_, _, err = handlers.federationLeave(t.Context(), nil, FederationLeaveInput{Project: "spoke-project", Phase: "abort"})
+	require.ErrorContains(t, err, "preparation_id is required")
+	_, _, err = handlers.federationLeave(t.Context(), nil, FederationLeaveInput{
+		Project: "spoke-project", Phase: "prepare", PreparationID: "example-preparation",
+	})
+	require.ErrorContains(t, err, "preparation_id is accepted only with the abort phase")
+	require.Zero(t, requests.Load())
 }
 
 func TestScopedFederationLeaveCannotArchive(t *testing.T) {

@@ -57,19 +57,28 @@ func TestFederationReplicaRegistryStateTransitions(t *testing.T) {
 		{
 			name: "released preparation is idle again",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
-				r.releasePreparedLeave(key)
+				r.releasePreparedLeave(key, r.markLeavePending(key))
 			},
 			want: federationReplicaIdle,
 		},
 		{
-			name: "releasing a preparation keeps a completed leave",
+			name: "released retry of a completed leave is left again",
 			apply: func(r *federationReplicaRegistry, key string) {
-				r.markLeavePending(key)
 				r.markLeft(key)
-				r.releasePreparedLeave(key)
+				r.releasePreparedLeave(key, r.markLeavePending(key))
 			},
 			want: federationReplicaLeft,
+		},
+		{
+			name: "releasing one of two preparations stays pending",
+			apply: func(r *federationReplicaRegistry, key string) {
+				first := r.markLeavePending(key)
+				r.markLeavePending(key)
+				r.releasePreparedLeave(key, first)
+				r.releasePreparedLeave(key, first)
+				r.releasePreparedLeave(key, "unknown-preparation")
+			},
+			want: federationReplicaLeavePending,
 		},
 		{
 			name: "successful ensure clears a completed leave",

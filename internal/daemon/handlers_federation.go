@@ -588,12 +588,21 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		preparationID := strings.TrimSpace(in.Body.PreparationID)
 		if in.Body.Abort {
 			if in.Body.Preflight || in.Body.Prepare {
 				return nil, api.NewError(http.StatusBadRequest, "validation",
 					"abort cannot be combined with preflight or prepare", "", nil)
 			}
-			return abortFederationReplicaLeave(ctx, cfg, in.ProjectID, disposition)
+			if preparationID == "" {
+				return nil, api.NewError(http.StatusBadRequest, "validation",
+					"abort requires the preparation_id that prepare returned", "", nil)
+			}
+			return abortFederationReplicaLeave(ctx, cfg, in.ProjectID, disposition, preparationID)
+		}
+		if preparationID != "" {
+			return nil, api.NewError(http.StatusBadRequest, "validation",
+				"preparation_id is accepted only with abort", "", nil)
 		}
 		// Refuse a non-spoke before any teardown so an archive-leave on a hub
 		// project does not archive it and then fail to detach. A project with no
@@ -670,6 +679,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					match = prepared.ManagedReservation
 					found = prepared.ManagedReservationFound
 					findErr = prepareErr
+					body.PreparationID = prepared.PreparationID
 				} else {
 					match, found, findErr = config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 				}
@@ -1009,9 +1019,9 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 // abortFederationReplicaLeave serves the leave route's abort phase: a client
 // whose hub revoke failed releases the leave it prepared.
 func abortFederationReplicaLeave(
-	ctx context.Context, cfg ServerConfig, projectID int64, disposition string,
+	ctx context.Context, cfg ServerConfig, projectID int64, disposition, preparationID string,
 ) (*api.LeaveFederationReplicaResponse, error) {
-	if err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID); err != nil {
+	if err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID, preparationID); err != nil {
 		switch {
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)

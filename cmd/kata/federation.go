@@ -874,11 +874,16 @@ func federationLeaveCmd() *cobra.Command {
 				if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 					return err
 				}
-				releasePrepared = func() {
-					abortFederationLeave(cmd, a, target.projectID, disposition, actor)
-				}
 				if err := json.Unmarshal(callResp.Body, &prepared); err != nil {
 					return err
+				}
+				// No preparation ID means the daemon holds nothing this
+				// command can release, or it predates abort.
+				if prepared.PreparationID != "" {
+					preparationID := prepared.PreparationID
+					releasePrepared = func() {
+						abortFederationLeave(cmd, a, target.projectID, disposition, actor, preparationID)
+					}
 				}
 				if prepared.PendingEnrollment != nil {
 					target.providerManaged = prepared.PendingEnrollment.ProviderManaged
@@ -1123,7 +1128,7 @@ func formatEnrollmentIDList(ids []int64) string {
 // not carry to local teardown. It reports a failed release as a warning so the
 // original error stays the command's result. The release runs even after an
 // interrupt, under its own short deadline.
-func abortFederationLeave(cmd *cobra.Command, a daemonAPI, projectID int64, disposition, actor string) {
+func abortFederationLeave(cmd *cobra.Command, a daemonAPI, projectID int64, disposition, actor, preparationID string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx), 10*time.Second)
 	defer cancel()
 	err := func() error {
@@ -1131,7 +1136,7 @@ func abortFederationLeave(cmd *cobra.Command, a daemonAPI, projectID int64, disp
 		if err != nil {
 			return err
 		}
-		callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Actor: &actor, Abort: new(true)}})
+		callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Actor: &actor, Abort: new(true), PreparationID: &preparationID}})
 		if err := externalCLITransportError(callResp, callErr); err != nil {
 			return err
 		}

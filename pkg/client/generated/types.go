@@ -3795,12 +3795,13 @@ func (l LabelsListResponseBody) Validate() error {
 }
 
 type LeaveFederationReplicaRequestBody struct {
-	Abort       *bool   `json:"abort,omitempty"`
-	Actor       *string `json:"actor,omitempty"`
-	Disposition *string `json:"disposition,omitempty"`
-	Force       *bool   `json:"force,omitempty"`
-	Preflight   *bool   `json:"preflight,omitempty"`
-	Prepare     *bool   `json:"prepare,omitempty"`
+	Abort         *bool   `json:"abort,omitempty"`
+	Actor         *string `json:"actor,omitempty"`
+	Disposition   *string `json:"disposition,omitempty"`
+	Force         *bool   `json:"force,omitempty"`
+	Preflight     *bool   `json:"preflight,omitempty"`
+	PreparationID *string `json:"preparation_id,omitempty"`
+	Prepare       *bool   `json:"prepare,omitempty"`
 }
 
 type LeaveFederationReplicaResultBody struct {
@@ -3808,6 +3809,7 @@ type LeaveFederationReplicaResultBody struct {
 	Detached          bool                                `json:"detached"`
 	Disposition       string                              `json:"disposition" validate:"required"`
 	PendingEnrollment *PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
+	PreparationID     *string                             `json:"preparation_id,omitempty"`
 	Project           ProjectOut                          `json:"project"`
 }
 

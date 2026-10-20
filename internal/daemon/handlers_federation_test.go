@@ -3407,17 +3407,22 @@ func TestLeaveFederationReplicaRouteAbortReleasesPreparedLeave(t *testing.T) {
 	env := testenv.New(t)
 	project, binding := newSpokeProject(t, env)
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
-	resp, raw := envDoRaw(t, env, http.MethodPost, path,
-		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	preparationID := prepareLeaveThroughRoute(t, env, path)
 	require.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
 
-	resp, raw = envDoRaw(t, env, http.MethodPost, path,
-		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true, "abort": true}, nil)
-	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	for _, body := range []map[string]any{
+		{"disposition": "detach", "actor": "wesm", "prepare": true, "abort": true, "preparation_id": preparationID},
+		{"disposition": "detach", "actor": "wesm", "abort": true},
+		{"disposition": "detach", "actor": "wesm", "preparation_id": preparationID},
+	} {
+		resp, raw := envDoRaw(t, env, http.MethodPost, path, body, nil)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	}
+	require.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name),
+		"a rejected abort must not release the preparation")
 
-	resp, raw = envDoRaw(t, env, http.MethodPost, path,
-		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true}, nil)
+	resp, raw := envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true, "preparation_id": preparationID}, nil)
 
 	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
@@ -3430,17 +3435,30 @@ func TestLeaveFederationReplicaRouteAbortRefusesStartedTeardown(t *testing.T) {
 	env := testenv.New(t)
 	project, _ := newSpokeProject(t, env)
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
-	resp, raw := envDoRaw(t, env, http.MethodPost, path,
-		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	preparationID := prepareLeaveThroughRoute(t, env, path)
 	_, err := env.DB.LeaveFederationReplica(t.Context(), project.ID)
 	require.NoError(t, err)
 
-	resp, raw = envDoRaw(t, env, http.MethodPost, path,
-		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true}, nil)
+	resp, raw := envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "abort": true, "preparation_id": preparationID}, nil)
 
 	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_leave_started")
 	assert.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+}
+
+// prepareLeaveThroughRoute runs the prepare phase and returns the preparation
+// ID that its abort must echo.
+func prepareLeaveThroughRoute(t *testing.T, env *testenv.Env, path string) string {
+	t.Helper()
+	resp, raw := envDoRaw(t, env, http.MethodPost, path,
+		map[string]any{"disposition": "detach", "actor": "wesm", "prepare": true}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	var prepared struct {
+		PreparationID string `json:"preparation_id"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &prepared))
+	require.NotEmpty(t, prepared.PreparationID, "prepare must identify its preparation")
+	return prepared.PreparationID
 }
 
 func TestLeaveFederationReplicaManagedConflictRemainsRetryable(t *testing.T) {

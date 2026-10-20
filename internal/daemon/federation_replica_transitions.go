@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"sync"
 )
 
@@ -24,11 +25,16 @@ const (
 // the drain accounting for hub operations already in flight for that mapping.
 type federationReplicaTransition struct {
 	state federationReplicaTransitionState
-	// preparedLeaves counts leave preparations not yet completed or released,
-	// so releasing one of two concurrent leaves keeps the mapping pending.
-	preparedLeaves int
-	inFlight       int
-	drained        chan struct{}
+	// preparations holds the IDs of leave preparations that have neither
+	// completed nor been released. The mapping stays leave-pending while any
+	// remains, so releasing one of two concurrent leaves keeps it blocked.
+	preparations map[string]struct{}
+	// releasedState is the state restored when the last preparation is
+	// released: left when a leave was retried after it had completed, so the
+	// mapping stays suppressed, and idle otherwise.
+	releasedState federationReplicaTransitionState
+	inFlight      int
+	drained       chan struct{}
 }
 
 // federationReplicaRegistry owns every per-mapping transition record.
@@ -168,9 +174,10 @@ func waitFederationReplicaOperations(ctx context.Context, key string) error {
 	}
 }
 
-// markLeavePending records that an explicit leave was durably prepared. Each
-// call counts one preparation for releasePreparedLeave.
-func (r *federationReplicaRegistry) markLeavePending(key string) {
+// markLeavePending records that an explicit leave was durably prepared and
+// returns the new preparation's ID for releasePreparedLeave.
+func (r *federationReplicaRegistry) markLeavePending(key string) string {
+	preparationID := rand.Text()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	transition, ok := r.transitions[key]
@@ -178,27 +185,51 @@ func (r *federationReplicaRegistry) markLeavePending(key string) {
 		transition = &federationReplicaTransition{}
 		r.transitions[key] = transition
 	}
+	if transition.state != federationReplicaLeavePending {
+		transition.releasedState = transition.state
+	}
 	transition.state = federationReplicaLeavePending
-	transition.preparedLeaves++
+	if transition.preparations == nil {
+		transition.preparations = make(map[string]struct{})
+	}
+	transition.preparations[preparationID] = struct{}{}
+	return preparationID
+}
+
+// preparationOutstanding reports whether preparationID still holds key's leave.
+func (r *federationReplicaRegistry) preparationOutstanding(key, preparationID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	transition, ok := r.transitions[key]
+	if !ok {
+		return false
+	}
+	_, held := transition.preparations[preparationID]
+	return held
 }
 
 // releasePreparedLeave releases one preparation of a leave that stopped before
-// local teardown. The mapping returns to idle only when no other preparation
-// remains, because another leave may still revoke and tear down.
-func (r *federationReplicaRegistry) releasePreparedLeave(key string) {
+// local teardown. An unknown, already released, or completed preparation is a
+// no-op, so a retried release cannot consume another leave's preparation. The
+// mapping leaves the pending state only when no other preparation remains,
+// because another leave may still revoke and tear down.
+func (r *federationReplicaRegistry) releasePreparedLeave(key, preparationID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	transition, ok := r.transitions[key]
-	if !ok || transition.state != federationReplicaLeavePending {
+	if !ok {
 		return
 	}
-	if transition.preparedLeaves > 0 {
-		transition.preparedLeaves--
-	}
-	if transition.preparedLeaves > 0 {
+	if _, held := transition.preparations[preparationID]; !held {
 		return
 	}
-	transition.state = federationReplicaIdle
+	delete(transition.preparations, preparationID)
+	if len(transition.preparations) > 0 {
+		return
+	}
+	transition.state = transition.releasedState
+	transition.releasedState = federationReplicaIdle
+	transition.preparations = nil
 	r.pruneLocked(key, transition)
 }
 
@@ -228,7 +259,8 @@ func (r *federationReplicaRegistry) setState(
 		r.transitions[key] = transition
 	}
 	transition.state = state
-	transition.preparedLeaves = 0
+	transition.preparations = nil
+	transition.releasedState = federationReplicaIdle
 	r.pruneLocked(key, transition)
 }
 

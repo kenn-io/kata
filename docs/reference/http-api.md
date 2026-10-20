@@ -725,15 +725,30 @@ actor, and adoption policy returns the same active enrollment. An attribute
 mismatch or a revoked replacement enrollment returns `409` with
 `federation_enrollment_token_conflict`.
 
-`POST /api/v1/federation/replicas/{project_id}/actions/leave` accepts two
+`POST /api/v1/federation/replicas/{project_id}/actions/leave` accepts three
 mutually exclusive coordination flags. `preflight=true` performs the existing
 read-only eligibility check. `prepare=true` validates the same local
 conditions, durably marks any config-managed credential as leaving, blocks new
 config reconciliation for that mapping, and waits for earlier enrollment or
 rotation requests to drain. Its `pending_enrollment` response gives the
-non-secret hub coordinates needed for revoke. The client then performs hub
-cleanup and calls the endpoint again without either flag for authoritative
-local teardown. Repeating prepare and finalization is safe after interruption.
+non-secret hub coordinates needed for revoke, and its `preparation_id`
+identifies this preparation. The client then performs hub cleanup and calls the
+endpoint again without any flag for authoritative local teardown. Repeating
+prepare and finalization is safe after interruption.
+
+If hub cleanup fails, the client sends `abort=true` with that `preparation_id`
+to release its preparation, so rebind and join work again without a daemon
+restart:
+
+- Abort releases only the named preparation. Another client's preparation keeps
+  the mapping blocked until it finishes or is released.
+- Abort of an unknown or already released preparation succeeds and changes
+  nothing, so a client can retry it safely.
+- Abort returns `409 federation_leave_started` when a credential or
+  config-managed reservation is marked for leave, the project is archived, or
+  the binding is detached. Finish those leaves instead.
+- Abort without `preparation_id`, or `preparation_id` without abort, returns
+  `400 validation`.
 
 `POST /api/v1/federation/replicas/{project_id}/actions/rebind` accepts only
 `{"hub_catalog":"<name>"}`. The server resolves that name from its own daemon

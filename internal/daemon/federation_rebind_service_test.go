@@ -12,7 +12,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
+	"uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -767,11 +769,11 @@ func TestAbortedFederationReplicaLeaveAllowsRebind(t *testing.T) {
 	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 	credentials := newReplicaCredentialStore()
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
-	_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
 	require.NoError(t, err)
 	require.ErrorIs(t, rebindToTarget(t, store, credentials, project), daemon.ErrFederationReplicaLeavePending)
 
-	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
 
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
 	require.NoError(t, rebindToTarget(t, store, credentials, project))
@@ -804,13 +806,13 @@ func TestAbortFederationReplicaLeaveKeepsLeaveThatMustFinish(t *testing.T) {
 			store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 			credentials := newReplicaCredentialStore()
 			credentials.put(project.UID, rebindCredential(rebindSourceURL, false, tc.managed))
-			_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
 			require.NoError(t, err)
 			if tc.started != nil {
 				tc.started(t, store, project)
 			}
 
-			err = daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			err = daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID)
 
 			require.ErrorIs(t, err, daemon.ErrFederationReplicaLeaveStarted)
 			assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
@@ -818,20 +820,173 @@ func TestAbortFederationReplicaLeaveKeepsLeaveThatMustFinish(t *testing.T) {
 	}
 }
 
-// Two leaves prepared concurrently: abandoning one must not reopen hub
-// operations while the other may still revoke and tear down.
-func TestAbortFederationReplicaLeaveWaitsForEveryPreparation(t *testing.T) {
+// Abort releases only the preparation it names. Retrying an abort whose
+// response was lost, or naming an unknown preparation, must not release another
+// client's leave, which may still revoke and tear down.
+func TestAbortFederationReplicaLeaveReleasesOnlyItsPreparation(t *testing.T) {
 	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 	credentials := newReplicaCredentialStore()
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+	first, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	require.NoError(t, err)
+	second, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	require.NoError(t, err)
+
 	for range 2 {
-		_, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
-		require.NoError(t, err)
+		require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, first.PreparationID))
 	}
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, "unknown-preparation"))
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"the second preparation must keep the mapping pending")
 
-	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
-	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
-
-	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID))
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, second.PreparationID))
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+}
+
+// Provider-backed and config-managed preparations durably mark the
+// reservation, so abort must refuse them however the registry is keyed and
+// even after a daemon restart has emptied it.
+func TestAbortFederationReplicaLeaveRefusesDurablyMarkedLeave(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider bool
+		restart  bool
+	}{
+		{name: "provider-backed preparation", provider: true},
+		{name: "config-managed preparation after restart", restart: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+			credentials := newReplicaCredentialStore()
+			credential := rebindCredential(rebindSourceURL, false, true)
+			if tc.provider {
+				credential.Provider = &config.FederationProviderCredential{
+					RequestID: uuid.New(), Command: []string{"example-credential-provider"},
+					Intent: "collaborate", SpokeInstanceUID: store.InstanceUID(),
+					LocalProjectUID: project.UID, HubProjectUID: project.UID,
+					EnrollmentID: 7, Status: "ready",
+				}
+			}
+			credentials.put(project.UID, credential)
+			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			require.NoError(t, err)
+			if tc.restart {
+				daemon.ForgetFederationReplicaTransitionsForTest(store)
+			}
+
+			err = daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID)
+
+			require.ErrorIs(t, err, daemon.ErrFederationReplicaLeaveStarted)
+			current, found, readErr := credentials.FederationCredential(t.Context(), project.UID)
+			require.NoError(t, readErr)
+			require.True(t, found)
+			assert.True(t, current.LeavePending, "abort must not clear the durable leave marker")
+		})
+	}
+}
+
+// A preparation canceled while it drains an earlier hub operation never reached
+// its client, so the daemon releases it: a retried leave can then be aborted.
+func TestCanceledFederationReplicaLeavePreparationIsReleased(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+		credentials := newReplicaCredentialStore()
+		credential := rebindCredential(rebindSourceURL, false, false)
+		credentials.put(project.UID, credential)
+
+		cancelPrepareWhileDraining(t, store, credentials, project, credential, prepareHooks{})
+
+		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+			"a canceled preparation must not keep the mapping blocked")
+		prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+		require.NoError(t, err)
+		require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
+		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+		require.NoError(t, rebindToTarget(t, store, credentials, project))
+	})
+}
+
+// A leave that completes before or during a canceled preparation stays left,
+// so configuration cannot re-create the mapping the operator left.
+func TestCanceledFederationReplicaLeavePreparationKeepsCompletedLeave(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		whileDraining bool
+	}{
+		{name: "leave completed before the retried preparation"},
+		{name: "leave completed while the preparation drains", whileDraining: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+				credentials := newReplicaCredentialStore()
+				credential := rebindCredential(rebindSourceURL, false, false)
+				credentials.put(project.UID, credential)
+				completeLeave := func() {
+					_, err := daemon.LeaveFederationReplica(t.Context(), store, credentials, nil, project.ID)
+					require.NoError(t, err)
+				}
+				hooks := prepareHooks{beforePrepare: completeLeave}
+				if tc.whileDraining {
+					hooks = prepareHooks{whileDraining: completeLeave}
+				}
+
+				cancelPrepareWhileDraining(t, store, credentials, project, credential, hooks)
+
+				assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+					"a canceled preparation must not erase a completed leave")
+			})
+		})
+	}
+}
+
+// prepareHooks run around the preparation that cancelPrepareWhileDraining
+// cancels.
+type prepareHooks struct {
+	beforePrepare func()
+	whileDraining func()
+}
+
+// cancelPrepareWhileDraining starts a hub operation, then cancels a leave
+// preparation while it waits for that operation to drain. Call it inside a
+// synctest bubble.
+func cancelPrepareWhileDraining(
+	t *testing.T,
+	store db.Storage,
+	credentials *replicaCredentialStore,
+	project db.Project,
+	credential config.FederationCredential,
+	hooks prepareHooks,
+) {
+	t.Helper()
+	endOperation, err := daemon.BeginFederationReplicaHubOperation(
+		t.Context(), store, credentials, project.Name,
+		config.FederationManagedCredentialReservation{ProjectUID: project.UID, Credential: credential},
+	)
+	require.NoError(t, err)
+	if hooks.beforePrepare != nil {
+		hooks.beforePrepare()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	prepareErr := make(chan error, 1)
+	go func() {
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		prepareErr <- err
+	}()
+	synctest.Wait()
+	require.True(t, daemon.FederationReplicaLeavePreparedForTest(store, project.Name),
+		"prepare must hold its preparation while the hub operation drains")
+	select {
+	case err := <-prepareErr:
+		require.FailNow(t, "prepare returned before the hub operation drained", "error: %v", err)
+	default:
+	}
+	if hooks.whileDraining != nil {
+		hooks.whileDraining()
+	}
+	cancel()
+	require.ErrorIs(t, <-prepareErr, context.Canceled)
+	_, err = endOperation(t.Context(), 0)
+	require.NoError(t, err)
 }
