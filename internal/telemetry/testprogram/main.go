@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id"})
+	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id", Version: "v1.2.3"})
 	if err != nil {
 		panic(err)
 	}

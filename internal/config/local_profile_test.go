@@ -248,9 +248,11 @@ func TestLocalProfileEnvironmentPassesThroughTelemetrySettings(t *testing.T) {
 		{"KATA_TELEMETRY_ENABLED", "0"},
 		{"TELEMETRY_ENABLED", "0"},
 		{"DO_NOT_TRACK", "1"},
+		{"CI", "true"},
+		{"CI", ""},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			for _, key := range []string{"KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK"} {
+			for _, key := range []string{"KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
 				t.Setenv(key, "")
 				require.NoError(t, os.Unsetenv(key))
 			}
@@ -327,9 +329,9 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 }
 
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
-	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK"} {
+	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
 		t.Run(key, func(t *testing.T) {
-			if key == "TELEMETRY_ENABLED" || key == "DO_NOT_TRACK" {
+			if key == "TELEMETRY_ENABLED" || key == "DO_NOT_TRACK" || key == "CI" {
 				t.Setenv(key, "")
 				require.NoError(t, os.Unsetenv(key))
 			}
