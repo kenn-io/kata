@@ -303,14 +303,14 @@ jobs:
         include:
           - name: Windows
             cli: false
-          - name: Windows CLI (A-E and G-S)
+          - name: Windows CLI (G-S)
             cli: true
-            run: '^Test([A-E]|[G-S])'
+            run: '^Test[G-S]'
             skip: '^$'
-          - name: Windows CLI (F, T-Z, and fuzz/examples)
+          - name: Windows CLI (A-F, T-Z, and fuzz/examples)
             cli: true
             run: '.'
-            skip: '^Test([A-E]|[G-S])'
+            skip: '^Test[G-S]'
 
     steps:
       - name: Check out repository
