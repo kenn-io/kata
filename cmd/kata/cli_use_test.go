@@ -356,8 +356,11 @@ func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
 	}
 	release()
 	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
-	//nolint:kennlint // Join the send worker before removing its fixture, regardless of its outcome.
-	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
+	//nolint:kennlint // Stat avoids holding the marker open while the worker removes it on Windows.
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(attempt)
+		return os.IsNotExist(err)
+	}, 5*time.Second, time.Millisecond)
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
