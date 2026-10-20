@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
@@ -39,7 +41,7 @@ type cliUseTelemetry struct {
 }
 
 func (*cliUseTelemetry) EventAllowed(event string) bool {
-	return event == "app_opened" || event == "agent_active" || event == "agent_call_count"
+	return event == "error_shown" || event == "search_empty" || event == "app_opened" || event == "agent_active" || event == "agent_call_count"
 }
 func (*cliUseTelemetry) Enabled() bool { return true }
 func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]any, error) {
@@ -656,7 +658,7 @@ func TestAgentUseFullDayProcess(t *testing.T) {
 }
 
 func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
-	for _, first := range []string{"cli", "hook", "tui", "mcp"} {
+	for _, first := range []string{"cli", "hook", "tui", "mcp", "cli-outcome", "tui-outcome"} {
 		t.Run(first, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			t.Setenv("KATA_AUTH_TOKEN", "")
@@ -673,6 +675,15 @@ func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
 						observe()
 						synctest.Wait()
 						stop()
+					case "cli-outcome":
+						t.Setenv(hooks.HookVersionEnv, "")
+						cmd := newRootCmd()
+						cmd, _, err := cmd.Find([]string{"search"})
+						require.NoError(t, err)
+						cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: target.url})
+						reportCLIOutcome(cmd, "search_empty", "")
+					case "tui-outcome":
+						require.NoError(t, tui.NewClient(target.url, http.DefaultClient).ReportOutcome(t.Context(), "search_empty", ""))
 					case "tui":
 						require.NoError(t, tui.NewClient(target.url, http.DefaultClient).ReportScreenViewed(t.Context(), "issues"))
 					default:
@@ -684,7 +695,8 @@ func TestDisabledTelemetrySharedAcrossTerminalCallers(t *testing.T) {
 					}
 				}
 				report(first)
-				for _, caller := range []string{"cli", "hook", "tui", "mcp"} {
+				require.Equal(t, int32(1), target.posts.Load())
+				for _, caller := range []string{"cli", "hook", "tui", "mcp", "cli-outcome", "tui-outcome"} {
 					report(caller)
 				}
 				require.Equal(t, int32(1), target.posts.Load())

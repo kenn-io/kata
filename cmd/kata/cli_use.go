@@ -102,7 +102,7 @@ func reportCLIUse(cmd *cobra.Command) {
 	if agent {
 		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
 	}
-	sendCLIEvent(cmd, body)
+	sendCLIEvent(cmd, body, agent)
 }
 
 func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
@@ -113,11 +113,10 @@ func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
 	if kind != "" {
 		properties["kind"] = kind
 	}
-	sendCLIEvent(cmd, &generated.CaptureTelemetryEventBody{Event: event, Properties: properties})
+	sendCLIEvent(cmd, &generated.CaptureTelemetryEventBody{Event: event, Properties: properties}, false)
 }
 
-func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody) {
-	agent := body.Event == "agent_active"
+func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody, agent bool) {
 	target := cliUseTarget.Load()
 	now := cliUseNow().UTC()
 	day := now.Format(time.DateOnly)

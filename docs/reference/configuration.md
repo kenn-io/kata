@@ -1195,12 +1195,13 @@ installation ID starts a fresh count. Later-day browser focus or terminal input
 counts another visit. Delivery is best effort; a rejected enqueue can retry.
 
 Submitted searches with no results send `search_empty` with `surface` set to
-`web`, `tui`, or `cli`. Typing previews send nothing. CLI searches count only
-human terminal output on the first page. When a client shows a create or close
+`web`, `tui`, or `cli`, once per query on each surface until the query text
+changes. Typing previews send nothing. CLI searches count only human terminal
+output on the first page. When a client shows a create or close
 error, it sends `error_shown` with `kind` set to `issue_created` or
 `issue_closed`. This includes validation refusals before a request. Discarded
 responses send nothing. Delivery requires a reachable daemon that accepts the
-capture request.
+capture request. Outcome events follow the same daily disabled receipts.
 
 A sync binding or federation spoke's first failure sends `sync_failed`.
 `sync_source` is `github`, `linear`, `notion`, `plane`, `ticktick`, `todoist`,

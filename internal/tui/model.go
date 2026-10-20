@@ -46,8 +46,9 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
-	telemetry *telemetryGate
-	pendingSearches []pendingSearch
+	telemetry           *telemetryGate
+	searchPending       *pendingSearch
+	searchCounted       string
 	telemetryScreen     string
 	telemetryConnGen    uint64
 	telemetryDay        string
@@ -403,6 +404,9 @@ func initialFilter(_ Options) ListFilter {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m = next.(Model)
+	if strings.TrimSpace(m.list.filter.Search) != m.searchCounted {
+		m.searchCounted = ""
+	}
 	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
 		m.pendingDetailFollow = false
 		if len(m.detail.navStack) == 0 {
@@ -581,7 +585,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.dispatchToView(msg)
 	switch msg.(type) {
 	case initialFetchMsg, refetchedMsg:
-		settled, report := next.(Model).settleSearches()
+		settled, report := next.(Model).settleSearch()
 		next, cmd = settled, combineCmds(cmd, report)
 	}
 	if postFetchCmd == nil {
@@ -681,9 +685,9 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	shown := next.(Model)
 	visible := mut.origin == "form" && mut.formGen == shown.input.formGen && shown.input.err != "" &&
 		(shown.input.kind.isCenteredForm() || shown.input.kind.isPanelPrompt()) ||
-		mut.origin == "list" && (shown.listIsActive() || shown.view == viewList && shown.layout == splitlayout.Split) ||
+		mut.origin == "list" && shown.view == viewList ||
 		mut.origin == "detail" && mut.gen == shown.detail.gen &&
-			(shown.detailIsActive() || shown.view == viewList && shown.layout == splitlayout.Split)
+			(shown.view == viewDetail || shown.view == viewList && shown.layout == splitlayout.Split)
 	if mut.err != nil && visible {
 		cmd = combineCmds(cmd, shown.reportShownError(mut.kind))
 	}
@@ -3603,7 +3607,8 @@ type typedCommentAPI interface {
 
 // pendingSearch ties a submission to the daemon and scope it was made in.
 type pendingSearch struct {
-	query   string
+	filter  ListFilter
+	view    viewID
 	key     cacheKey
 	connGen uint64
 }
@@ -3619,48 +3624,29 @@ func (m Model) commitSearchResults() (Model, tea.Cmd) {
 }
 
 func (m Model) submitSearch() (Model, tea.Cmd) {
-	if query := strings.TrimSpace(m.list.filter.Search); query != "" {
-		m.pendingSearches = append(m.pendingSearches, pendingSearch{query, m.currentCacheKey(), m.connGen})
-	}
-	return m.settleSearches()
-}
-
-func (m Model) settleSearches() (Model, tea.Cmd) {
-	if m.list.loading {
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query == "" || query == m.searchCounted {
 		return m, nil
 	}
-	var cmds []tea.Cmd
-	for _, search := range m.pendingSearches {
-		if m.searchCameUpEmpty(search) {
-			cmds = append(cmds, m.reportOutcome("search_empty", ""))
-		}
-	}
-	m.pendingSearches = nil
-	return m, tea.Batch(cmds...)
+	filter := m.list.filter
+	filter.Labels = slices.Clone(filter.Labels)
+	m.searchPending = &pendingSearch{filter: filter, view: m.view, key: m.currentCacheKey(), connGen: m.connGen}
+	return m.settleSearch()
 }
 
-func (m Model) searchCameUpEmpty(search pendingSearch) bool {
-	return search.key == m.currentCacheKey() && search.connGen == m.connGen &&
-		search.query == strings.TrimSpace(m.list.filter.Search) && m.list.err == nil && len(m.list.visibleRows()) == 0
-}
-
-func (m Model) reportShownError(action string) tea.Cmd {
-	kind := map[string]string{"create": "issue_created", "close": "issue_closed"}[action]
-	if kind == "" {
-		return nil
+func (m Model) settleSearch() (Model, tea.Cmd) {
+	if m.searchPending == nil || m.list.loading {
+		return m, nil
 	}
-	return m.reportOutcome("error_shown", kind)
-}
-
-func (m Model) reportOutcome(event, kind string) tea.Cmd {
-	reporter, ok := m.api.(outcomeAPI)
-	if !ok {
-		return nil
+	search := m.searchPending
+	m.searchPending = nil
+	filter := m.list.filter
+	if search.key != m.currentCacheKey() || search.connGen != m.connGen || search.view != m.view ||
+		search.filter.Status != filter.Status || search.filter.Owner != filter.Owner || search.filter.Author != filter.Author ||
+		search.filter.Search != filter.Search || search.filter.Limit != filter.Limit || !slices.Equal(search.filter.Labels, filter.Labels) ||
+		m.list.err != nil || len(m.list.visibleRows()) != 0 {
+		return m, nil
 	}
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
-		defer cancel()
-		_ = reporter.ReportOutcome(ctx, event, kind)
-		return nil
-	}
+	m.searchCounted = strings.TrimSpace(search.filter.Search)
+	return m, m.reportOutcome("search_empty", "")
 }

@@ -134,6 +134,8 @@ test('submits the trimmed search on Enter', async () => {
   const input = screen.getByLabelText('Search tasks')
   await fireEvent.input(input, { target: { value: '  missing  ' } })
   expect(onSubmitSearch).not.toHaveBeenCalled()
+  await fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+  expect(onSubmitSearch).not.toHaveBeenCalled()
   await fireEvent.keyDown(input, { key: 'Enter' })
   expect(onSubmitSearch).toHaveBeenCalledExactlyOnceWith('missing')
 })

@@ -77,7 +77,7 @@
         ariaLabel="Search tasks"
         oninput={(query) => emit('query', { query })}
         onkeydown={(event) => {
-          if (event.key === 'Enter') onSubmitSearch?.(draft.query.trim())
+          if (event.key === 'Enter' && !event.isComposing) onSubmitSearch?.(draft.query.trim())
         }}
       />
     </div>

@@ -8,8 +8,6 @@
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
-  import { captureTelemetryEvent } from '../lib/api/generated'
-  import { loadSessionCredentials } from '../lib/auth/session'
 
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
@@ -80,6 +78,8 @@
       | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
+    countedQuery?: string | undefined
+    onSearchEmpty?: (() => void) | undefined
     searchContext?: string | undefined
     onMutationErrorShown?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
@@ -144,6 +144,8 @@
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
+    countedQuery = $bindable(''),
+    onSearchEmpty = undefined,
     searchContext = undefined,
     onMutationErrorShown = undefined,
     onNavigate,
@@ -252,35 +254,28 @@
       issues: projection.issues,
     }),
   )
-  let pendingSearch = $state({ context: '', query: '', count: 0 })
+  let pendingSearch = $state<{ context: string; query: string } | undefined>()
   function submitSearch(query: string): void {
-    if (!query) return
+    if (!query || query === countedQuery) return
     const context = searchContext ?? JSON.stringify([activeDaemonID, route.view, searchFilters])
-    pendingSearch = {
-      context,
-      query,
-      count:
-        pendingSearch.context === context && pendingSearch.query === query
-          ? pendingSearch.count + 1
-          : 1,
-    }
+    pendingSearch = { context, query }
   }
   $effect(() => {
+    if (searchFilters.query.trim() !== countedQuery) countedQuery = ''
+  })
+  $effect(() => {
     const context = searchContext ?? JSON.stringify([activeDaemonID, route.view, searchFilters])
-    if (!pendingSearch.count) return
+    if (!pendingSearch) return
     if (pendingSearch.context !== context) {
-      pendingSearch.count = 0
+      pendingSearch = undefined
       return
     }
     if (loading || stale || pendingSearch.query !== searchFilters.query.trim()) return
-    if (loadSessionCredentials() && currentView.groups.every((group) => group.issues.length === 0))
-      for (let count = 0; count < pendingSearch.count; count++) {
-        void captureTelemetryEvent(
-          { event: 'search_empty', properties: { surface: 'web' } },
-          { signal: AbortSignal.timeout(1000) },
-        ).catch(() => {})
-      }
-    pendingSearch.count = 0
+    if (currentView.groups.every((group) => group.issues.length === 0)) {
+      countedQuery = pendingSearch.query
+      onSearchEmpty?.()
+    }
+    pendingSearch = undefined
   })
   $effect(() => {
     if (mutationMessage && route.view !== 'credentials') onMutationErrorShown?.()

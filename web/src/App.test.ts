@@ -29,13 +29,14 @@ describe('App', () => {
     { pending: true, future: false, changed: true },
     { pending: false, future: true, changed: false },
   ])(
-    'counts every submitted empty search after its visible results settle, %s',
+    'counts each submitted empty query after its visible results settle, %s',
     async ({ pending, future, changed }) => {
       sessionStorage.setItem(
         'kata.web.session.v1',
         JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
       )
       const events: unknown[] = []
+      let opened = false
       let release: (() => void) | undefined
       let searched = false
       vi.stubGlobal(
@@ -48,6 +49,7 @@ describe('App', () => {
           const target = new URL(request.url)
           if (target.pathname === '/api/v1/ui/telemetry') {
             const body = await request.clone().json()
+            if (body.event === 'app_opened') opened = true
             if (body.event === 'search_empty') events.push(body)
             return telemetryAccepted()
           }
@@ -69,6 +71,8 @@ describe('App', () => {
       )
       render(App)
       const input = await screen.findByLabelText('Search tasks')
+      await waitFor(() => expect(opened).toBe(true))
+      await tick()
       await fireEvent.input(input, { target: { value: 'missing' } })
       await waitFor(() => expect(searched).toBe(true))
       expect(events).toEqual([])
@@ -86,21 +90,84 @@ describe('App', () => {
         }
         release?.()
       }
-      await waitFor(() => expect(events).toHaveLength(pending ? 2 : 1))
-      expect(events).toEqual(
-        Array.from({ length: pending ? 2 : 1 }, () => ({
-          event: 'search_empty',
-          properties: { surface: 'web' },
-        })),
-      )
+      await waitFor(() => expect(events).toHaveLength(1))
+      expect(events).toEqual([{ event: 'search_empty', properties: { surface: 'web' } }])
       window.dispatchEvent(new Event('focus'))
       release?.()
       await tick()
-      expect(events).toHaveLength(pending ? 2 : 1)
+      expect(events).toHaveLength(1)
       await fireEvent.input(input, { target: { value: 'Example' } })
       await fireEvent.keyDown(input, { key: 'Enter' })
       await tick()
-      expect(events).toHaveLength(pending ? 2 : 1)
+      expect(events).toHaveLength(1)
+    },
+  )
+
+  it.each([false, true])(
+    'honors query memory and disabled outcome receipts, disabled=%s',
+    async (disabled) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const telemetry: { event: string }[] = []
+      let opened = false
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') {
+            const body = await request.json()
+            telemetry.push(body)
+            if (body.event === 'app_opened') opened = true
+            return Response.json({ status: disabled ? 'disabled' : 'queued' }, { status: 202 })
+          }
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname.endsWith('/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          if (request.method === 'POST' && target.pathname.endsWith('/issues'))
+            return Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
+          const result = snapshot()
+          result.catalog[0]!.project.metadata.role = 'inbox'
+          if (target.searchParams.get('text')?.startsWith('missing')) result.collection = []
+          return Response.json(result, { headers: { ETag: '"query-memory"' } })
+        }),
+      )
+      render(App)
+      const input = await screen.findByLabelText('Search tasks')
+      await waitFor(() => expect(opened).toBe(true))
+      await tick()
+      const outcomes = () =>
+        telemetry.filter(({ event }) => event === 'search_empty' || event === 'error_shown')
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(1))
+      await fireEvent.click(screen.getByRole('combobox', { name: 'Status: Open' }))
+      await fireEvent.click(screen.getByRole('option', { name: 'All' }))
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      expect(outcomes()).toHaveLength(disabled ? 0 : 1)
+      for (const [index, query] of ['missing2', 'missing'].entries()) {
+        await fireEvent.input(input, { target: { value: query } })
+        await screen.findByText('No tasks')
+        await fireEvent.keyDown(input, { key: 'Enter' })
+        await tick()
+        if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(index + 2))
+      }
+      if (disabled) {
+        await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+        await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+          target: { value: 'Example task' },
+        })
+        await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+        await screen.findByText('validation: Action refused')
+        await tick()
+        expect(outcomes()).toEqual([])
+      }
     },
   )
 

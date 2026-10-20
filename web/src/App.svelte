@@ -272,13 +272,22 @@
     wallClockSensitive: () =>
       route.kind !== 'route-error' && route.filters.status.includes('ready'),
   })
+  let countedQuery = $state('')
+  $effect(() => {
+    if (route.kind === 'route-error' || (route.filters.text ?? '').trim() !== countedQuery)
+      countedQuery = ''
+  })
+  function reportOutcome(event: 'search_empty' | 'error_shown', kind?: string): void {
+    if (!loadSessionCredentials()) return
+    browserTelemetry?.reportVisit({
+      event,
+      properties: { surface: 'web', ...(kind ? { kind } : {}) },
+    })
+  }
   function reportMutationError(): void {
     if (!mutationState.actionKind || mutationState.counted) return
     mutationState.counted = true
-    void captureTelemetryEvent(
-      { event: 'error_shown', properties: { surface: 'web', kind: mutationState.actionKind } },
-      { signal: AbortSignal.timeout(1000) },
-    ).catch(() => {})
+    reportOutcome('error_shown', mutationState.actionKind)
   }
   const unsubscribe = snapshots.subscribe((state) => {
     authority = { ...state }
@@ -1247,6 +1256,8 @@
         route={acceptedRoute ?? route}
         searchContext={JSON.stringify([activeDaemonID, route])}
         onMutationErrorShown={reportMutationError}
+        bind:countedQuery
+        onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={authority.snapshot}
         loading={authority.loading}
         canMutate={authority.canMutate}

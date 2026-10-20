@@ -75,3 +75,24 @@ func (m *Model) screenViewCommand(visit bool) tea.Cmd {
 	m.telemetryScreen, m.telemetryConnGen, m.telemetryDay = screen, m.connGen, day
 	return m.reportScreenViewed(screen)
 }
+
+func (m Model) reportShownError(action string) tea.Cmd {
+	kind := map[string]string{"create": "issue_created", "close": "issue_closed"}[action]
+	if kind == "" {
+		return nil
+	}
+	return m.reportOutcome("error_shown", kind)
+}
+
+func (m Model) reportOutcome(event, kind string) tea.Cmd {
+	reporter, ok := m.api.(outcomeAPI)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+		defer cancel()
+		_ = reporter.ReportOutcome(ctx, event, kind)
+		return nil
+	}
+}
