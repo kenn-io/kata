@@ -368,7 +368,7 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # The Windows job alone saves the complete build, vet, and test cache.
+      # The Windows job is the only writer of the shared Go cache.
       - name: Restore shared Go cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
