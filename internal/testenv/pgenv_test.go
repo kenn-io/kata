@@ -19,6 +19,11 @@ func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
 	ctx := context.Background()
 	baseDSN, baseCleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(baseCleanup)
+	base, err := sql.Open("pgx", baseDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = base.Close() })
+	var baseStart string
+	require.NoError(t, base.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text`).Scan(&baseStart))
 	t.Setenv("KATA_TEST_POSTGRES_DSN", baseDSN)
 
 	isolatedDSN, isolatedCleanup := testenv.NewPostgresContainer(t, ctx)
@@ -28,8 +33,9 @@ func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
 	db, err := sql.Open("pgx", isolatedDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	var databaseName string
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT current_database()`).Scan(&databaseName))
+	var isolatedStart, databaseName string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pg_postmaster_start_time()::text, current_database()`).Scan(&isolatedStart, &databaseName))
+	require.Equal(t, baseStart, isolatedStart, "the isolated database must use the explicit server")
 	require.Contains(t, databaseName, "kata_test_")
 }
 
@@ -123,10 +129,11 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 	server, err := sql.Open("pgx", serverDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
-	_, err = server.ExecContext(ctx, `CREATE DATABASE kata_template_abandoned`)
+	abandoned := fmt.Sprintf("kata_template_%d_%d", os.Getpid(), ^uint64(0))
+	_, err = server.ExecContext(ctx, `CREATE DATABASE "`+abandoned+`"`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS kata_template_abandoned`)
+		_, _ = server.ExecContext(context.Background(), `DROP DATABASE IF EXISTS "`+abandoned+`"`)
 	})
 	exists := func(name string) bool {
 		var found bool
@@ -137,7 +144,7 @@ func TestPostgresTemplateDropsAbandonedTemplates(t *testing.T) {
 
 	firstDSN, firstCleanup := testenv.NewPostgresTemplate(noop).NewDatabase(t, ctx)
 	t.Cleanup(firstCleanup)
-	require.False(t, exists("kata_template_abandoned"), "a template without a live owner must be dropped")
+	require.False(t, exists(abandoned), "a template without a live owner must be dropped")
 	first, err := sql.Open("pgx", firstDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = first.Close() })
