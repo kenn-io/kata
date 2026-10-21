@@ -317,7 +317,7 @@ func TestDoctorUsesExplicitProjectWhenWorkspaceCannotResolve(t *testing.T) {
 func TestDoctorUsesActiveDaemonWhenWorkspaceCannotResolve(t *testing.T) {
 	home, workspace := doctorTestEnv(t)
 	server := doctorTestServer(t, nil, nil)
-	config := fmt.Sprintf("active_daemon = \"example-remote\"\n[[daemon]]\nname = \"example-remote\"\nurl = %q\n", server.URL)
+	config := fmt.Sprintf("active_daemon = \"example-remote\"\n[[daemon]]\nname = \"example-remote\"\nurl = %q\n", server.URL) + untrustedWebConfig
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 	flags = globalFlags{Workspace: filepath.Join(workspace, "missing")}
 

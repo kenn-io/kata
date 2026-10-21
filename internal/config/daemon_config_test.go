@@ -76,6 +76,90 @@ future_option = true
 	assert.Contains(t, err.Error(), "display.future_option")
 }
 
+func TestReadTUIConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, wantError string
+		want                     config.TUIConfig
+	}{
+		{name: "absent file"},
+		{name: "unknown tui key", content: "[tui]\nfuture_option = true\n", wantError: "tui.future_option"},
+		{name: "unrelated invalid web config", content: "[tui]\nmouse = true\n[web]\npublic_origin = \"http://daemon.example\"\n", want: config.TUIConfig{Mouse: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			if tc.content != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.content), 0o600))
+			}
+			got, err := config.ReadTUIConfig()
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestReadSearchConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, wantError string
+		env                      map[string]string
+		want                     config.SearchConfig
+	}{
+		{name: "absent file"},
+		{name: "unknown search key", content: "[search]\nfuture_option = true\n", wantError: "search.future_option"},
+		{
+			name:    "unrelated invalid web config",
+			content: "[search.embeddings]\nbase_url = \"https://embedding.example/v1\"\nmodel = \"example-model\"\ndims = 2\n[web]\npublic_origin = \"http://daemon.example\"\n",
+			want:    config.SearchConfig{Embeddings: config.EmbeddingsConfig{BaseURL: "https://embedding.example/v1", Model: "example-model", Dims: 2}},
+		},
+		{
+			name: "environment without file",
+			env: map[string]string{
+				"KATA_SEARCH_EMBEDDINGS_BASE_URL": "https://embedding.example/v1",
+				"KATA_SEARCH_EMBEDDINGS_MODEL":    "example-model",
+				"KATA_SEARCH_EMBEDDINGS_DIMS":     "2",
+			},
+			want: config.SearchConfig{Embeddings: config.EmbeddingsConfig{BaseURL: "https://embedding.example/v1", Model: "example-model", Dims: 2}},
+		},
+		{
+			name:      "partial environment without file",
+			env:       map[string]string{"KATA_SEARCH_EMBEDDINGS_BASE_URL": "https://embedding.example/v1"},
+			wantError: "base_url and model must both be set or both omitted",
+		},
+		{
+			name:      "invalid dimensions without file",
+			env:       map[string]string{"KATA_SEARCH_EMBEDDINGS_DIMS": "-1"},
+			wantError: "KATA_SEARCH_EMBEDDINGS_DIMS must be a non-negative integer",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
+				t.Setenv(key, "")
+			}
+			for key, value := range tc.env {
+				t.Setenv(key, value)
+			}
+			if tc.content != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.content), 0o600))
+			}
+			got, err := config.ReadSearchConfig()
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestReadDaemonConfigTreatsDisplayAsOpaque(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

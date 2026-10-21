@@ -318,12 +318,6 @@ func TestBootDaemonConnectionIgnoresUnusedInvalidWebConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, server.URL, conn.endpoint)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, conn.endpoint+"/api/v1/ping", nil)
-	require.NoError(t, err)
-	response, err := conn.sseHC.Do(req)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {

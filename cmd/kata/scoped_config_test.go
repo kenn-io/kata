@@ -18,17 +18,8 @@ func TestDaemonStartRejectsInvalidServerConfig(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(untrustedWebConfig), 0600))
-	_, _, err := runCmdCapture(t, nil, "daemon", "start", "--foreground")
+	_, err := preflightDaemonStartup(t.Context(), "", false, false)
 	require.ErrorContains(t, err, "web.public_origin")
-}
-
-func TestTUIConfigIgnoresInvalidServerConfig(t *testing.T) {
-	home := setupKataEnv(t)
-	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nmouse = true\n"+untrustedWebConfig), 0600))
-	got, err := resolveTUIConfig(newTUICmd(), false)
-	require.NoError(t, err)
-	assert.True(t, got.Mouse)
 }
 
 func TestFederationSpokeAuthIgnoresInvalidServerConfig(t *testing.T) {
@@ -37,7 +28,6 @@ func TestFederationSpokeAuthIgnoresInvalidServerConfig(t *testing.T) {
 			home := setupKataEnv(t)
 			resetFlags(t)
 			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
-			require.NoError(t, os.Unsetenv("KATA_TRUST_PRIVATE_NETWORK"))
 			t.Setenv("KATA_SERVER", "")
 			t.Setenv("KATA_AUTH_TOKEN", "unrelated-local-token")
 			t.Chdir(t.TempDir())
@@ -65,29 +55,4 @@ func TestFederationSpokeAuthIgnoresInvalidServerConfig(t *testing.T) {
 			assert.Equal(t, http.StatusNoContent, response.StatusCode)
 		})
 	}
-}
-
-func TestDoctorDaemonFallbackIgnoresInvalidServerConfig(t *testing.T) {
-	home := setupKataEnv(t)
-	resetFlags(t)
-	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
-	require.NoError(t, os.Unsetenv("KATA_TRUST_PRIVATE_NETWORK"))
-	t.Setenv("KATA_SERVER", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("active_daemon = \"spoke\"\n[[daemon]]\nname = \"spoke\"\nurl = \"https://daemon.example\"\ntoken = \"spoke-token\"\n"+untrustedWebConfig), 0600))
-	state := doctorState{workspaceValid: false}
-	resolved, err := state.resolveDoctorDaemon(t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, "https://daemon.example", resolved.BaseURL)
-	assert.Equal(t, "spoke-token", resolved.Token)
-}
-
-func TestFederationEmbeddingRecipeIgnoresInvalidServerConfig(t *testing.T) {
-	home := setupKataEnv(t)
-	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
-	require.NoError(t, os.Unsetenv("KATA_TRUST_PRIVATE_NETWORK"))
-	data := untrustedWebConfig + "[search.embeddings]\nbase_url = \"https://embedding.example/v1\"\nmodel = \"example-model\"\ndims = 2\n"
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(data), 0600))
-	output, _, err := runCmdCapture(t, nil, "federation", "embedding-recipe")
-	require.NoError(t, err)
-	assert.Contains(t, output, `"model":"example-model"`)
 }
