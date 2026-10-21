@@ -659,9 +659,13 @@ type LeaveFederationReplicaRequestBody struct {
 	// anything. It refuses with federation_leave_started when a durable leave
 	// marker exists or teardown has begun; finish those leaves instead.
 	Abort bool `json:"abort,omitempty,omitzero"`
-	// PreparationID is the preparation_id a prepare response returned. Abort
-	// requires it, and no other phase accepts it.
-	PreparationID string `json:"preparation_id,omitempty"`
+	// PreparationID names the leave preparation. Abort requires the ID that
+	// prepare used. A client should choose a random ID and send it with
+	// prepare, so it can abort the preparation even if the prepare response
+	// is lost; repeating prepare with the same ID holds the same preparation.
+	// Without one, prepare picks an ID and returns it. Preflight and commit
+	// refuse it.
+	PreparationID string `json:"preparation_id,omitempty" maxLength:"128"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.

@@ -3800,8 +3800,12 @@ type LeaveFederationReplicaRequestBody struct {
 	Disposition   *string `json:"disposition,omitempty"`
 	Force         *bool   `json:"force,omitempty"`
 	Preflight     *bool   `json:"preflight,omitempty"`
-	PreparationID *string `json:"preparation_id,omitempty"`
+	PreparationID *string `json:"preparation_id,omitempty" validate:"omitempty,max=128"`
 	Prepare       *bool   `json:"prepare,omitempty"`
+}
+
+func (l LeaveFederationReplicaRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
 type LeaveFederationReplicaResultBody struct {

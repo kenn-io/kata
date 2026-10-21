@@ -283,7 +283,7 @@ func TestFederationBridgeCatalogPreflight(t *testing.T) {
 					other.ProjectName = "unrelated-replica"
 					_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, other)
 					require.NoError(t, err)
-					_, err = daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+					_, err = daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 					require.NoError(t, err)
 					release()
 					select {

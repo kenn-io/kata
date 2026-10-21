@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -867,7 +868,15 @@ func federationLeaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Prepare: new(true)}})
+				// Name the preparation before asking for it, so a failure
+				// after the daemon prepared, such as a lost response, still
+				// releases it. Aborting a preparation the daemon never made
+				// changes nothing.
+				preparationID := rand.Text()
+				releasePrepared = func() {
+					abortFederationLeave(cmd, a, target.projectID, disposition, actor, preparationID)
+				}
+				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Prepare: new(true), PreparationID: &preparationID}})
 				if err := externalCLITransportError(callResp, callErr); err != nil {
 					return err
 				}
@@ -876,14 +885,6 @@ func federationLeaveCmd() *cobra.Command {
 				}
 				if err := json.Unmarshal(callResp.Body, &prepared); err != nil {
 					return err
-				}
-				// No preparation ID means the daemon holds nothing this
-				// command can release, or it predates abort.
-				if prepared.PreparationID != "" {
-					preparationID := prepared.PreparationID
-					releasePrepared = func() {
-						abortFederationLeave(cmd, a, target.projectID, disposition, actor, preparationID)
-					}
 				}
 				if prepared.PendingEnrollment != nil {
 					target.providerManaged = prepared.PendingEnrollment.ProviderManaged

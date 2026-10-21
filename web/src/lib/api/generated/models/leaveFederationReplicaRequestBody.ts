@@ -8,6 +8,7 @@ export interface LeaveFederationReplicaRequestBody {
   disposition?: string
   force?: boolean
   preflight?: boolean
+  /** @maxLength 128 */
   preparation_id?: string
   prepare?: boolean
 }

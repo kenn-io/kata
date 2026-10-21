@@ -3922,6 +3922,7 @@ components:
         preflight:
           type: boolean
         preparation_id:
+          maxLength: 128
           type: string
         prepare:
           type: boolean

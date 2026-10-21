@@ -683,7 +683,7 @@ func TestRebindFederationReplicaDrainsBeforePreparedLeave(t *testing.T) {
 	prepareDone := make(chan error, 1)
 	var prepared atomic.Bool
 	go func() {
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 		prepared.Store(true)
 		prepareDone <- err
 	}()
@@ -769,7 +769,7 @@ func TestAbortedFederationReplicaLeaveAllowsRebind(t *testing.T) {
 	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 	credentials := newReplicaCredentialStore()
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
-	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 	require.NoError(t, err)
 	require.ErrorIs(t, rebindToTarget(t, store, credentials, project), daemon.ErrFederationReplicaLeavePending)
 
@@ -806,7 +806,7 @@ func TestAbortFederationReplicaLeaveKeepsLeaveThatMustFinish(t *testing.T) {
 			store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 			credentials := newReplicaCredentialStore()
 			credentials.put(project.UID, rebindCredential(rebindSourceURL, false, tc.managed))
-			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 			require.NoError(t, err)
 			if tc.started != nil {
 				tc.started(t, store, project)
@@ -827,9 +827,9 @@ func TestAbortFederationReplicaLeaveReleasesOnlyItsPreparation(t *testing.T) {
 	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
 	credentials := newReplicaCredentialStore()
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
-	first, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	first, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 	require.NoError(t, err)
-	second, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	second, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 	require.NoError(t, err)
 
 	for range 2 {
@@ -843,6 +843,51 @@ func TestAbortFederationReplicaLeaveReleasesOnlyItsPreparation(t *testing.T) {
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
 }
 
+// A client that lost a prepare response retries prepare with the preparation ID
+// it chose. Both calls hold the same preparation, so one abort releases it.
+func TestAbortFederationReplicaLeaveReleasesRetriedPreparation(t *testing.T) {
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+	for range 2 {
+		prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "client-preparation")
+		require.NoError(t, err)
+		require.Equal(t, "client-preparation", prepared.PreparationID)
+	}
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, "client-preparation"))
+
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+	require.NoError(t, rebindToTarget(t, store, credentials, project))
+}
+
+// Every daemon service in a process shares the leave registry. Two stores whose
+// projects have the same database-local ID, preparing under the same
+// preparation ID, must not release each other's preparation.
+func TestAbortFederationReplicaLeaveStaysWithinItsStore(t *testing.T) {
+	first, firstProject, _ := prepareFederationRebind(t, rebindSourceURL)
+	second, secondProject, _ := prepareFederationRebind(t, rebindSourceURL)
+	require.Equal(t, firstProject.ID, secondProject.ID)
+	require.NotEqual(t, first.InstanceUID(), second.InstanceUID())
+	firstCredentials := newReplicaCredentialStore()
+	firstCredentials.put(firstProject.UID, rebindCredential(rebindSourceURL, false, false))
+	secondCredentials := newReplicaCredentialStore()
+	secondCredentials.put(secondProject.UID, rebindCredential(rebindSourceURL, false, false))
+	_, err := daemon.PrepareFederationReplicaLeave(t.Context(), first, firstCredentials, firstProject.ID, "shared-preparation")
+	require.NoError(t, err)
+	_, err = daemon.PrepareFederationReplicaLeave(t.Context(), second, secondCredentials, secondProject.ID, "shared-preparation")
+	require.NoError(t, err)
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), second, secondCredentials, secondProject.ID, "shared-preparation"))
+
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(second, secondProject.Name))
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(first, firstProject.Name),
+		"another store's abort must not release this store's preparation")
+	require.ErrorIs(t, rebindToTarget(t, first, firstCredentials, firstProject), daemon.ErrFederationReplicaLeavePending)
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), first, firstCredentials, firstProject.ID, "shared-preparation"))
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(first, firstProject.Name))
+}
+
 // The leave registry keys a manually enrolled spoke by its project name, and a
 // project can be renamed while its leave is prepared. Abort must still release
 // the preparation, and only through the project that prepared it.
@@ -852,7 +897,7 @@ func TestAbortFederationReplicaLeaveAfterProjectRename(t *testing.T) {
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
 	other, err := store.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
-	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 	require.NoError(t, err)
 	_, err = store.RenameProject(t.Context(), project.ID, "renamed-project")
 	require.NoError(t, err)
@@ -894,7 +939,7 @@ func TestAbortFederationReplicaLeaveRefusesDurablyMarkedLeave(t *testing.T) {
 				}
 			}
 			credentials.put(project.UID, credential)
-			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+			prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 			require.NoError(t, err)
 			if tc.restart {
 				daemon.ForgetFederationReplicaTransitionsForTest(store)
@@ -924,7 +969,7 @@ func TestCanceledFederationReplicaLeavePreparationIsReleased(t *testing.T) {
 
 		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
 			"a canceled preparation must not keep the mapping blocked")
-		prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID)
+		prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "")
 		require.NoError(t, err)
 		require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
 		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
@@ -997,7 +1042,7 @@ func cancelPrepareWhileDraining(
 	defer cancel()
 	prepareErr := make(chan error, 1)
 	go func() {
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 		prepareErr <- err
 	}()
 	synctest.Wait()

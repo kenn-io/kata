@@ -27,10 +27,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Rebind or rejoin a spoke right after `kata federation leave` fails to reach
   the hub, without `kata daemon restart`. The CLI now releases the leave it
-  prepared, and the project stays bound. A config-managed reservation keeps
-  its leave marker until the leave finishes. MCP agents release a prepared
-  leave with the `abort` phase of `kata.federation_leave`, passing the
-  `preparation_id` that `prepare` returned. See
+  prepared, even when the daemon's prepare response was lost, and the project
+  stays bound. A config-managed reservation keeps its leave marker until the
+  leave finishes. MCP agents release a prepared leave with the `abort` phase
+  of `kata.federation_leave`, passing the `preparation_id` they sent to
+  `prepare`. See
   [Leaving a federation](operations/federation.md#leaving-a-federation).
 
 - Count a parent's open and total children from the browser snapshot's

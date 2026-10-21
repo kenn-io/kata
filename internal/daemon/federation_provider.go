@@ -215,7 +215,7 @@ func releaseFederationProvider(ctx context.Context, store db.Storage, managed co
 	if !found || previous.Credential.Provider == nil || (expectedRequest != (uuid.UUID{}) && previous.Credential.Provider.RequestID != expectedRequest) {
 		return previous, ErrFederationReplicaCredentialConflict
 	}
-	prepared, err := prepareFederationReplicaLeave(ctx, store, managed, project)
+	prepared, err := prepareFederationReplicaLeave(ctx, store, managed, project, "")
 	if err != nil {
 		return previous, err
 	}

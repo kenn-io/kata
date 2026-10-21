@@ -440,9 +440,11 @@ servers can still disable the operator-configured binding and run
 
 Federation leave exposes `preflight`, `prepare`, `abort`, and `commit` phases
 so an operator can preserve the normal revoke-before-local-teardown order. The
-phase is required. `prepare` returns a `preparation_id`. When the hub revoke
-fails after `prepare`, run `abort` with that `preparation_id` to release the
-prepared leave so rebind and join work again. The daemon refuses `abort` with
+phase is required. Pass `prepare` a random `preparation_id`; it returns that
+ID, or one it picked when you pass none. When the hub revoke fails after
+`prepare`, or the `prepare` result is lost, run `abort` with that
+`preparation_id` to release the prepared leave so rebind and join work again.
+Retrying `prepare` with the same `preparation_id` holds the same preparation. The daemon refuses `abort` with
 `federation_leave_started` once a reservation is marked for leave or local
 teardown has begun; finish that leave instead. A commit without external hub
 revocation also requires `COMMIT FEDERATION LEAVE <project>`. The `archive` disposition and

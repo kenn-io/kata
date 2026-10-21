@@ -600,9 +600,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return abortFederationReplicaLeave(ctx, cfg, in.ProjectID, disposition, preparationID)
 		}
-		if preparationID != "" {
+		if preparationID != "" && !in.Body.Prepare {
 			return nil, api.NewError(http.StatusBadRequest, "validation",
-				"preparation_id is accepted only with abort", "", nil)
+				"preparation_id is accepted only with prepare or abort", "", nil)
 		}
 		// Refuse a non-spoke before any teardown so an archive-leave on a hub
 		// project does not archive it and then fail to detach. A project with no
@@ -675,6 +675,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 						cfg.DB,
 						cfg.federationCredentialStore(),
 						in.ProjectID,
+						preparationID,
 					)
 					match = prepared.ManagedReservation
 					found = prepared.ManagedReservationFound

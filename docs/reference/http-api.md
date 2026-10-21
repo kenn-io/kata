@@ -736,19 +736,25 @@ identifies this preparation. The client then performs hub cleanup and calls the
 endpoint again without any flag for authoritative local teardown. Repeating
 prepare and finalization is safe after interruption.
 
-If hub cleanup fails, the client sends `abort=true` with that `preparation_id`
-to release its preparation, so rebind and join work again without a daemon
-restart:
+Send prepare a random `preparation_id` of at most 128 characters. The client
+then knows the ID even if the prepare response is lost, and can retry prepare
+with the same ID: repeated prepares with one ID hold a single preparation.
+Without `preparation_id`, prepare picks one and returns it.
 
-- Abort releases only the named preparation. Another client's preparation keeps
-  the mapping blocked until it finishes or is released.
+If hub cleanup fails, or the prepare response is lost, the client sends
+`abort=true` with that `preparation_id` to release its preparation, so rebind
+and join work again without a daemon restart:
+
+- Abort releases only the named preparation of this project on this daemon.
+  Another client's preparation keeps the mapping blocked until it finishes or
+  is released.
 - Abort of an unknown or already released preparation succeeds and changes
   nothing, so a client can retry it safely.
 - Abort returns `409 federation_leave_started` when a credential or
   config-managed reservation is marked for leave, the project is archived, or
   the binding is detached. Finish those leaves instead.
-- Abort without `preparation_id`, or `preparation_id` without abort, returns
-  `400 validation`.
+- Abort without `preparation_id`, or `preparation_id` with preflight or
+  teardown, returns `400 validation`.
 
 `POST /api/v1/federation/replicas/{project_id}/actions/rebind` accepts only
 `{"hub_catalog":"<name>"}`. The server resolves that name from its own daemon

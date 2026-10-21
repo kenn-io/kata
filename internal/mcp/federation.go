@@ -104,8 +104,10 @@ type FederationLeaveInput struct {
 	Disposition string `json:"disposition,omitempty"`
 	Force       bool   `json:"force,omitempty"`
 	Confirm     string `json:"confirm,omitempty"`
-	// PreparationID is the preparation_id the prepare phase returned. The
-	// abort phase requires it.
+	// PreparationID names the prepared leave. Send a random ID with prepare
+	// so abort can release the preparation even if the prepare response is
+	// lost; without one, prepare picks an ID and returns it. The abort phase
+	// requires it.
 	PreparationID string `json:"preparation_id,omitempty"`
 }
 
@@ -153,7 +155,7 @@ func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
-	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Abort releases the prepared leave named by the preparation_id that prepare returned, such as after its hub revoke failed.", mutating, handlers.federationLeave)
+	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Send prepare a random preparation_id, then abort with that preparation_id to release the prepared leave, such as after its hub revoke failed or the prepare response was lost.", mutating, handlers.federationLeave)
 	addTool(server, "kata.federation_root_key_repin", "Repin root signing key", "Preview or pin a hub project rooted on this daemon to its loaded federation-root.key, creating the key when missing. Without previous_key_file, downstream relays that pinned the previous key can no longer sync this project. Requires --all and daemon-owner API authority.", toolHints(false, true, false), handlers.federationRootKeyRepin)
 	addTool(server, "kata.federation_quarantine", "Resolve quarantine", "Retry or skip a federation quarantine batch after exact confirmation.", mutating, handlers.federationQuarantine)
 }
@@ -442,8 +444,8 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 	if phase == "abort" && preparationID == "" {
 		return nil, FederationLeaveOutput{}, errors.New("preparation_id is required for the abort phase; use the preparation_id that prepare returned")
 	}
-	if phase != "abort" && preparationID != "" {
-		return nil, FederationLeaveOutput{}, errors.New("preparation_id is accepted only with the abort phase")
+	if phase != "prepare" && phase != "abort" && preparationID != "" {
+		return nil, FederationLeaveOutput{}, errors.New("preparation_id is accepted only with the prepare and abort phases")
 	}
 	disposition := strings.TrimSpace(input.Disposition)
 	if disposition == "" {

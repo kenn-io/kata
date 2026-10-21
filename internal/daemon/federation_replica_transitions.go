@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"sync"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // federationReplicaTransitionState is the leave lifecycle of one spoke
@@ -25,11 +27,13 @@ const (
 // the drain accounting for hub operations already in flight for that mapping.
 type federationReplicaTransition struct {
 	state federationReplicaTransitionState
-	// preparations maps the ID of each leave preparation that has neither
-	// completed nor been released to the project that prepared it. The
-	// mapping stays leave-pending while any remains, so releasing one of two
-	// concurrent leaves keeps it blocked.
-	preparations map[string]int64
+	// preparations counts, for each leave preparation that has neither
+	// completed nor been released, the prepare calls that hold it. A client
+	// retries prepare with the same preparation ID after losing a response,
+	// so one preparation can be held more than once. The mapping stays
+	// leave-pending while any remains, so releasing one of two concurrent
+	// leaves keeps it blocked.
+	preparations map[federationReplicaPreparation]int
 	// releasedState is the state restored when the last preparation is
 	// released: left when a leave was retried after it had completed, so the
 	// mapping stays suppressed, and idle otherwise.
@@ -175,10 +179,35 @@ func waitFederationReplicaOperations(ctx context.Context, key string) error {
 	}
 }
 
-// markLeavePending records that projectID durably prepared an explicit leave
-// and returns the new preparation's ID for releasePreparedLeave.
-func (r *federationReplicaRegistry) markLeavePending(key string, projectID int64) string {
-	preparationID := rand.Text()
+// federationReplicaPreparation identifies one leave preparation. The client's
+// preparation ID is scoped to the daemon store and the project that prepared
+// it, because the registry is shared by every daemon service in the process
+// and their database-local project IDs can match.
+type federationReplicaPreparation struct {
+	instanceUID string
+	projectID   int64
+	id          string
+}
+
+// newFederationReplicaPreparation scopes preparationID to projectID in store.
+// An empty preparationID gets a fresh random ID.
+func newFederationReplicaPreparation(
+	store db.Storage, projectID int64, preparationID string,
+) federationReplicaPreparation {
+	if preparationID == "" {
+		preparationID = rand.Text()
+	}
+	return federationReplicaPreparation{
+		instanceUID: store.InstanceUID(), projectID: projectID, id: preparationID,
+	}
+}
+
+// markLeavePending records that one prepare call for preparation durably
+// prepared an explicit leave. A retry with the same preparation adds a hold to
+// the same preparation instead of creating another one.
+func (r *federationReplicaRegistry) markLeavePending(
+	key string, preparation federationReplicaPreparation,
+) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	transition, ok := r.transitions[key]
@@ -191,42 +220,67 @@ func (r *federationReplicaRegistry) markLeavePending(key string, projectID int64
 	}
 	transition.state = federationReplicaLeavePending
 	if transition.preparations == nil {
-		transition.preparations = make(map[string]int64)
+		transition.preparations = make(map[federationReplicaPreparation]int)
 	}
-	transition.preparations[preparationID] = projectID
-	return preparationID
+	transition.preparations[preparation]++
 }
 
-// preparationKey returns the key that projectID's outstanding preparation
-// preparationID holds. It searches every key because a project can be renamed
-// after it prepared a leave, and its key may embed the old name.
-func (r *federationReplicaRegistry) preparationKey(preparationID string, projectID int64) (string, bool) {
+// preparationKeys returns every key that preparation holds. It searches every
+// key because a project can be renamed after it prepared a leave, and its key
+// may embed the old name; a preparation retried after the rename holds both.
+func (r *federationReplicaRegistry) preparationKeys(
+	preparation federationReplicaPreparation,
+) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	var keys []string
 	for key, transition := range r.transitions {
-		if owner, held := transition.preparations[preparationID]; held && owner == projectID {
-			return key, true
+		if transition.preparations[preparation] > 0 {
+			keys = append(keys, key)
 		}
 	}
-	return "", false
+	return keys
 }
 
-// releasePreparedLeave releases one preparation of a leave that stopped before
-// local teardown. An unknown, already released, or completed preparation is a
-// no-op, so a retried release cannot consume another leave's preparation. The
-// mapping leaves the pending state only when no other preparation remains,
-// because another leave may still revoke and tear down.
-func (r *federationReplicaRegistry) releasePreparedLeave(key, preparationID string) {
+// releasePreparedLeave releases a preparation of a leave that stopped before
+// local teardown, however many prepare calls hold it. An unknown, already
+// released, or completed preparation is a no-op, so a retried release cannot
+// consume another leave's preparation. The mapping leaves the pending state
+// only when no other preparation remains, because another leave may still
+// revoke and tear down.
+func (r *federationReplicaRegistry) releasePreparedLeave(
+	key string, preparation federationReplicaPreparation,
+) {
+	r.releasePreparation(key, preparation, true)
+}
+
+// releaseFailedPrepare drops the hold of one prepare call that failed before
+// it answered its client. A retry of the same preparation that is still
+// running keeps its own hold.
+func (r *federationReplicaRegistry) releaseFailedPrepare(
+	key string, preparation federationReplicaPreparation,
+) {
+	r.releasePreparation(key, preparation, false)
+}
+
+func (r *federationReplicaRegistry) releasePreparation(
+	key string, preparation federationReplicaPreparation, everyHold bool,
+) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	transition, ok := r.transitions[key]
 	if !ok {
 		return
 	}
-	if _, held := transition.preparations[preparationID]; !held {
+	holds := transition.preparations[preparation]
+	switch {
+	case holds == 0:
+		return
+	case holds > 1 && !everyHold:
+		transition.preparations[preparation] = holds - 1
 		return
 	}
-	delete(transition.preparations, preparationID)
+	delete(transition.preparations, preparation)
 	if len(transition.preparations) > 0 {
 		return
 	}
