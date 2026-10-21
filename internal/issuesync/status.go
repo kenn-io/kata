@@ -21,6 +21,7 @@ type StatusError struct {
 	RetryAfter time.Duration
 	// RateLimited marks a provider rate limit whose HTTP status would otherwise read as another failure.
 	RateLimited bool
+	AuthFailure bool
 	Ambiguous   bool
 	Blocked     bool
 	Cause       error

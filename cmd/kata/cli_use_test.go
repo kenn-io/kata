@@ -804,6 +804,9 @@ func TestOutcomesCLIShownErrors(t *testing.T) {
 	}{
 		{[]string{"create", "", "--format", "human"}, true, 1},
 		{[]string{"close", "missing", "--format", "human"}, true, 1},
+		{[]string{"create", "Example task", "--unknown-flag", "--format", "human"}, true, 0},
+		{[]string{"close", "missing", "--unknown-flag", "--format", "human"}, true, 0},
+		{[]string{"close", "--format", "human"}, true, 0},
 	} {
 		t.Run(strings.Join(tc.args, " ")+fmt.Sprint(tc.tty), func(t *testing.T) {
 			capture := &cliUseTelemetry{}
@@ -815,6 +818,8 @@ func TestOutcomesCLIShownErrors(t *testing.T) {
 			err := cmd.Execute()
 			require.Error(t, err)
 			require.Empty(t, capture.recorded(), "unshown errors do not count")
+			// A resolved target makes accidental reports observable even before RunE.
+			recordCLIUseTarget(client.ResolvedDaemon{BaseURL: env.URL})
 			var output bytes.Buffer
 			emitRootError(&output, cmd, tc.args, err, runEEntered)
 			require.NotEmpty(t, output.String())

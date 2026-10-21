@@ -1205,6 +1205,7 @@ requires a reachable daemon that accepts the capture request.
 capture request. Outcome events follow the same daily disabled receipts.
 
 A sync binding or federation spoke's first failure sends `sync_failed`.
+This includes a binding's first failure before it has ever synced successfully.
 `sync_source` is `github`, `linear`, `notion`, `plane`, `ticktick`, `todoist`,
 `twenty`, or `federation`. `reason` is `auth`, `rate_limit`, `server`, `network`,
 `timeout`, or `other`; upstream errors without a typed status use `other`.

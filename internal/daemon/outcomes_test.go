@@ -67,17 +67,40 @@ func TestOutcomesSyncReasons(t *testing.T) {
 	}
 }
 
-type outcomeTransport struct {
-	err  error
-	body bool
+func TestOutcomesLinearSemanticReasons(t *testing.T) {
+	for _, tc := range []struct {
+		code, reason string
+	}{
+		{"FORBIDDEN", "auth"},
+		{"AUTHENTICATION_ERROR", "auth"},
+		{"AUTHENTICATION_REQUIRED", "auth"},
+		{"UNAUTHENTICATED", "auth"},
+		{"UNAUTHORIZED", "auth"},
+		{"RATELIMITED", "rate_limit"},
+		{"UNKNOWN", "other"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			now := time.Now()
+			cfg := linearsync.Config{WorkspaceID: "11111111-1111-4111-8111-111111111111", TeamID: "22222222-2222-4222-8222-222222222222"}
+			session, err := linearsync.NewClient(linearsync.ClientConfig{
+				LookupEnv: func(string) (string, bool) { return "example-token", true },
+				Transport: outcomeTransport(func(*http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"errors":[{"extensions":{"code":"` + tc.code + `"}}]}`))}, nil
+				}),
+				Now:  func() time.Time { return now },
+				Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+			}).ForRun(t.Context(), cfg)
+			require.NoError(t, err)
+			_, err = session.Scope(t.Context(), cfg)
+			require.Error(t, err)
+			require.Equal(t, tc.reason, syncFailureReason(err))
+		})
+	}
 }
 
-func (rt outcomeTransport) RoundTrip(*http.Request) (*http.Response, error) {
-	if rt.body {
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(iotest.ErrReader(rt.err))}, nil
-	}
-	return nil, rt.err
-}
+type outcomeTransport func(*http.Request) (*http.Response, error)
+
+func (rt outcomeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return rt(r) }
 
 func TestOutcomesProviderTransportReasons(t *testing.T) {
 	lookup := func(string) (string, bool) { return "example-token", true }
@@ -139,7 +162,12 @@ func TestOutcomesProviderTransportReasons(t *testing.T) {
 			{"body deadline", context.DeadlineExceeded, "timeout", true},
 		} {
 			t.Run(provider.name+"/"+failure.name, func(t *testing.T) {
-				err := provider.read(t, outcomeTransport{err: failure.err, body: failure.body})
+				err := provider.read(t, outcomeTransport(func(*http.Request) (*http.Response, error) {
+					if failure.body {
+						return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(iotest.ErrReader(failure.err))}, nil
+					}
+					return nil, failure.err
+				}))
 				require.Error(t, err)
 				require.NotContains(t, err.Error(), "example transport diagnostic")
 				reporter := &fakeTelemetryReporter{}
@@ -164,7 +192,7 @@ func TestOutcomesNotionHTTPReasons(t *testing.T) {
 			requests := 0
 			session, err := notionsync.NewClient(notionsync.ClientConfig{
 				LookupEnv: func(string) (string, bool) { return "example-token", true },
-				Transport: notionOutcomeTransport(func(*http.Request) (*http.Response, error) {
+				Transport: outcomeTransport(func(*http.Request) (*http.Response, error) {
 					requests++
 					return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":"service_unavailable"}`))}, nil
 				}),
@@ -181,7 +209,3 @@ func TestOutcomesNotionHTTPReasons(t *testing.T) {
 		})
 	}
 }
-
-type notionOutcomeTransport func(*http.Request) (*http.Response, error)
-
-func (f notionOutcomeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

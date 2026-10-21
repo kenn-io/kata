@@ -246,10 +246,10 @@ func (s *clientSession) query(ctx context.Context, query string, variables map[s
 			if attempt < 3 {
 				continue
 			}
-			return nil, &issuesync.StatusError{Message: "linear API temporarily unavailable", HTTPStatus: res.StatusCode, RetryAfter: s.client.cooldownRemaining()}
+			return nil, &issuesync.StatusError{Message: "linear API temporarily unavailable", HTTPStatus: res.StatusCode, RateLimited: limited, RetryAfter: s.client.cooldownRemaining()}
 		}
 		if res.StatusCode != 200 || auth {
-			return nil, &issuesync.StatusError{Message: fmt.Sprintf("linear API read failed (HTTP %d)", res.StatusCode), HTTPStatus: res.StatusCode, Blocked: true}
+			return nil, &issuesync.StatusError{Message: fmt.Sprintf("linear API read failed (HTTP %d)", res.StatusCode), HTTPStatus: res.StatusCode, AuthFailure: auth, Blocked: true}
 		}
 		if readErr != nil || len(raw) > maxResponseBytes {
 			return nil, &issuesync.StatusError{Message: "incomplete or oversized Linear response", Cause: readErr}

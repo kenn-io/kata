@@ -35,9 +35,9 @@ func NewSyncOutcomeObserver(reporter TelemetryReporter) func(string, int64, erro
 }
 
 func syncFailureReason(err error) string {
-	status, limited := 0, false
+	status, limited, auth := 0, false, false
 	if typed, ok := errors.AsType[*issuesync.StatusError](err); ok {
-		status, limited = typed.HTTPStatus, typed.RateLimited || typed.RetryAfter > 0 && !typed.Ambiguous
+		status, limited, auth = typed.HTTPStatus, typed.RateLimited || typed.RetryAfter > 0 && !typed.Ambiguous, typed.AuthFailure
 	}
 	if hub, ok := errors.AsType[interface {
 		error
@@ -50,7 +50,7 @@ func syncFailureReason(err error) string {
 		return "server"
 	case limited || status == 429:
 		return "rate_limit"
-	case status == 401 || status == 403:
+	case auth || status == 401 || status == 403:
 		return "auth"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"

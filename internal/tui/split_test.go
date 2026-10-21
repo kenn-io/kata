@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -268,8 +270,9 @@ func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
 func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
-	// Keep detail fetching available without the optional telemetry API.
-	m.api = struct{ KataAPI }{m.api}
+	recorder := &recordingTelemetry{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	m.api = NewClient(env.URL, env.HTTP)
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
 	}
@@ -294,7 +297,10 @@ func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	startFollowGen := m.nextDetailFollowGen
 
 	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Nil(t, cmd, "empty results produce no detail fetch")
+	require.NotNil(t, cmd, "submitting an empty search reports its outcome")
+	require.Nil(t, cmd(), "empty results report telemetry without fetching detail")
+	require.Equal(t, []string{"search_empty"}, recorder.events)
+	require.Equal(t, []map[string]any{{"surface": "tui"}}, recorder.captured)
 	if m.input.searchFocus != searchFocusResults {
 		t.Fatalf("searchFocus = %v, want results", m.input.searchFocus)
 	}
