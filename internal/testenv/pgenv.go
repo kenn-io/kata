@@ -105,7 +105,7 @@ func postgresServerDSN(ctx context.Context, t *testing.T, image, baseDSN string)
 	if baseDSN != "" {
 		return baseDSN
 	}
-	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN, os.Getenv(postgresAutoContainerEnv)) {
+	if skipAutomaticPostgresContainer(runtime.GOOS, os.Getenv(postgresAutoContainerEnv)) {
 		t.Skip("automatic PostgreSQL testcontainers are disabled; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
 	}
 	server := sharedPostgresContainer(ctx, image)
@@ -298,8 +298,8 @@ func installTestPgvector(ctx context.Context, dsn string) error {
 	return nil
 }
 
-func skipAutomaticPostgresContainer(goos, explicitDSN, autostart string) bool {
-	return explicitDSN == "" && (goos == "windows" || autostart == "0")
+func skipAutomaticPostgresContainer(goos, autostart string) bool {
+	return goos == "windows" || autostart == "0"
 }
 
 // newIsolatedPostgresDatabase turns a server DSN, from the explicit CI service

@@ -22,7 +22,7 @@ func TestSkipAutomaticPostgresContainer(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, skipAutomaticPostgresContainer(tc.goos, "", tc.autostart))
+			assert.Equal(t, tc.want, skipAutomaticPostgresContainer(tc.goos, tc.autostart))
 		})
 	}
 }
