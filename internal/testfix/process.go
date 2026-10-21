@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,16 @@ import (
 func RunIsolated(m *testing.M) int {
 	if os.Getenv("KATA_TEST_HOME") != "" {
 		return m.Run()
+	}
+	// macOS gives each user a long TMPDIR under the /var symlink. Test socket
+	// paths there exceed the 104-byte sun_path limit, and child processes
+	// report working directories under /private/var instead. Set it before
+	// creating the test home, so that home is short too.
+	if runtime.GOOS == "darwin" {
+		if err := os.Setenv("TMPDIR", "/private/tmp"); err != nil {
+			fmt.Fprintf(os.Stderr, "set test TMPDIR: %v\n", err)
+			return 1
+		}
 	}
 	output, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT").Output()
 	if err != nil {

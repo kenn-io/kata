@@ -17,7 +17,7 @@ install: web-embed
 		go install -ldflags="$(LDFLAGS)" ./cmd/kata
 
 test:
-	env -u KATA_AUTH_TOKEN go test $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test $(GOFLAGS_TEST) ./...
 
 # Regenerate the committed OpenAPI schema and generated Go client.
 # Drift tests fail if the OpenAPI artifacts or generated client differ from this output.
@@ -85,12 +85,12 @@ web-embed: web-build web-assets-check
 	cd web && bun run scripts/embed-assets.ts dist
 
 web-release-check: web-embed
-	env -u KATA_AUTH_TOKEN KATA_RUN_WEB_RELEASE_CHECK=1 go test ./e2e -run '^TestReleaseBinaryContainsValidatedWebUI$$' -count=1
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK KATA_RUN_WEB_RELEASE_CHECK=1 go test ./e2e -run '^TestReleaseBinaryContainsValidatedWebUI$$' -count=1
 
 openapi: api-generate
 
 test-short:
-	env -u KATA_AUTH_TOKEN go test -short $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
 test-stress:
 	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m
