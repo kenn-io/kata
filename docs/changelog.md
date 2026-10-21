@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-20
+last_edited: 2026-10-21
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -33,6 +33,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   of `kata.federation_leave`, passing the `preparation_id` they sent to
   `prepare`. See
   [Leaving a federation](operations/federation.md#leaving-a-federation).
+
 - Disable anonymous telemetry with `DO_NOT_TRACK` or any present `CI` variable, including in registered local profile daemons Kata autostarts. CLI, TUI, and MCP processes honor their own preferences when using an enabled daemon, including CLI and TUI action attribution. Only plain release versions send reports. See [Telemetry](reference/configuration.md#telemetry) for opt-outs and the shared field inventory.
 - Count a parent's open and total children from the browser snapshot's
   `collection_links` instead of listing issues. The counts match `child_counts`
