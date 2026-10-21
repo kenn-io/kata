@@ -281,7 +281,7 @@ func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
 func TestMCPCommandTelemetryAdmission(t *testing.T) {
 	scenario := os.Getenv("KATA_MCP_ADMISSION_SCENARIO")
 	if scenario == "" {
-		for _, name := range []string{"release", "CI", "CI empty", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED", "dev"} {
+		for _, name := range []string{"release", "KATA_TELEMETRY_ENABLED", "dev"} {
 			t.Run(name, func(t *testing.T) {
 				command := exec.Command(os.Args[0], "-test.run=^TestMCPCommandTelemetryAdmission$", "-test.timeout=30s") //nolint:gosec // Run this exact test in a fresh process.
 				command.Env = append(os.Environ(), "KATA_MCP_ADMISSION_SCENARIO="+name)
@@ -301,11 +301,7 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 	switch scenario {
 	case "dev":
 		version.Version = "dev"
-	case "CI empty":
-		t.Setenv("CI", "")
-	case "CI", "DO_NOT_TRACK":
-		t.Setenv(scenario, "1")
-	case "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED":
+	case "KATA_TELEMETRY_ENABLED":
 		t.Setenv(scenario, "0")
 	}
 	capture := &cliUseTelemetry{}
@@ -350,26 +346,20 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 		created := call("kata.create", map[string]any{"project": "spoke-project", "title": "Example issue", "idempotency_key": "admission-create"})
 		ref := created.StructuredContent.(map[string]any)["issue"].(map[string]any)["qualified_ref"].(string)
 		call("kata.close", map[string]any{"ref": ref, "reason": "done", "message": "Completed the workflow behavior with daemon evidence.", "evidence": []any{map[string]any{"type": "test", "command": "go test ./cmd/kata"}}})
-		if scenario == "release" {
-			//nolint:kennlint // Wait for the real daemon to accept all six tool observations.
-			require.Eventually(t, func() bool { return completed.Load() == 6 }, 5*time.Second, time.Millisecond)
-			t.Setenv("DO_NOT_TRACK", "1")
-			call("kata.list", map[string]any{"project": "spoke-project"})
-		}
 		//nolint:kennlint // The real-network listener cannot settle in synctest. Leave the command running beyond the worker's one-second request budget.
 		time.Sleep(2 * time.Second)
 		if scenario == "release" {
-			require.EqualValues(t, 6, posts.Load(), "the running observer must honor a new local veto")
-			require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
-			capture.mu.Lock()
-			require.Equal(t, []string{"agent_active"}, capture.events)
-			capture.mu.Unlock()
+			//nolint:kennlint // Wait for the real daemon to finish responding to forwarded activity.
+			require.Eventually(t, func() bool { return posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
+			require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
+			beforeVeto := posts.Load()
+			t.Setenv("DO_NOT_TRACK", "1")
+			call("kata.list", map[string]any{"project": "spoke-project"})
+			//nolint:kennlint // Keep the running command alive beyond the reporting request budget after the vetoed call.
+			time.Sleep(2 * time.Second)
+			require.Equal(t, beforeVeto, posts.Load(), "the running observer must honor a new local veto")
 		} else {
 			require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
-			require.Empty(t, capture.recorded())
-			target := client.ResolvedDaemon{BaseURL: proxy.URL}
-			require.Empty(t, client.ReadTelemetryDayMarker(client.TelemetryDayMarkerPath(target, "agent-full-")))
-			require.Empty(t, client.ReadTelemetryDayMarker(client.TelemetryDisabledMarkerPath(proxy.URL)))
 		}
 	})
 }

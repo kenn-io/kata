@@ -71,7 +71,7 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
-func TestStandaloneTelemetryOptOutSpellings(t *testing.T) {
+func TestStandaloneTelemetryAdmission(t *testing.T) {
 	for _, key := range []string{"CI", "DO_NOT_TRACK"} {
 		t.Setenv(key, "")
 		require.NoError(t, os.Unsetenv(key))
