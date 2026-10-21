@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-20
+last_edited: 2026-10-21
 ---
 
 # Model Context Protocol server
@@ -97,6 +97,18 @@ Use that plaintext mode only on an operator-trusted private network or behind
 an HTTPS reverse proxy. Public IPs and DNS hostnames are rejected. The
 listener also serves unauthenticated `GET` and `HEAD` requests at `/healthz`;
 the probe returns only readiness text and disables caching.
+
+For a remote gateway that takes an endpoint URL, run the MCP listener alongside
+the hub behind the HTTPS reverse proxy that already fronts it. Route `/mcp`
+to this listener and configure the gateway with the HTTPS endpoint URL and
+the MCP bearer token, which is separate from the daemon token:
+
+```sh
+kata mcp serve --all \
+  --http 0.0.0.0:8080 \
+  --http-token-file /run/secrets/mcp-token \
+  --trust-private-network
+```
 
 ## Client configuration
 
