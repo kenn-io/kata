@@ -164,7 +164,7 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	// A rejection is definitive only when no mutation data accompanies it.
 	hasData := len(envelope.Data) > 0 && string(envelope.Data) != "null" && string(envelope.Data) != "{}"
 	if !hasData && (limited || auth || res.StatusCode == 401 || res.StatusCode == 403 || res.StatusCode >= 300 && res.StatusCode < 400) {
-		return zero, &issuesync.StatusError{Message: "Linear status write rejected", HTTPStatus: res.StatusCode, Blocked: !limited, RetryAfter: s.client.cooldownRemaining()}
+		return zero, &issuesync.StatusError{Message: "Linear status write rejected", HTTPStatus: res.StatusCode, Blocked: !limited, RateLimited: limited, AuthFailure: auth, RetryAfter: s.client.cooldownRemaining()}
 	}
 	if res.StatusCode != 200 || readErr != nil || len(raw) > maxResponseBytes || decodeErr != nil || len(envelope.Errors) > 0 {
 		return zero, &issuesync.StatusError{Message: "Linear status write outcome is unproven", HTTPStatus: res.StatusCode, Ambiguous: true}
