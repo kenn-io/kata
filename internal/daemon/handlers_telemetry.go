@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -123,6 +124,15 @@ func (g *agentUseGate) capture(reporter TelemetryReporter) (bool, error) {
 	return err == nil && g.state.Sent == 101, err
 }
 
+// captureError reports a rejected required property as the client's mistake.
+func captureError(err error) error {
+	if errors.Is(err, telemetry.ErrInvalidProperty) {
+		return api.NewError(http.StatusBadRequest, "invalid_telemetry_property", err.Error(), "", nil)
+	}
+	return api.NewError(http.StatusInternalServerError, "telemetry_capture_failed",
+		"capture telemetry event failed", "", nil)
+}
+
 // registerTelemetryHandlers lets UI clients report allowlisted events through
 // the daemon's reporter, which filters properties and owns delivery.
 func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -190,8 +200,7 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			capture()
 		}
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "telemetry_capture_failed",
-				"capture telemetry event failed", "", nil)
+			return nil, captureError(err)
 		}
 		out.Body.Status = "queued"
 		if full {
