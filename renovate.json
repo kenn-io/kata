@@ -1,0 +1,156 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "osvVulnerabilityAlerts": true,
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "prCreation": "not-pending",
+  "internalChecksFilter": "strict",
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": null,
+    "prCreation": "immediate"
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "Go dependencies",
+      "groupSlug": "go-dependencies",
+      "postUpdateOptions": ["gomodUpdateImportPaths", "gomodTidy"]
+    },
+    {
+      "description": [
+        "The custom golangci-lint config pins the kit lint plugin as a Go module."
+      ],
+      "matchManagers": ["custom.regex"],
+      "matchDatasources": ["go"],
+      "groupName": "Go dependencies",
+      "groupSlug": "go-dependencies"
+    },
+    {
+      "matchManagers": ["bun"],
+      "groupName": "JavaScript dependencies",
+      "groupSlug": "javascript-dependencies"
+    },
+    {
+      "description": [
+        "Vite+ supplies the build and test tools. Update its aliases and overrides together so every workspace uses one toolchain."
+      ],
+      "matchManagers": ["bun"],
+      "matchPackageNames": [
+        "vite-plus",
+        "/^@voidzero-dev\\/vite-plus/",
+        "vite",
+        "vitest",
+        "/^@vitest\\//",
+        "@sveltejs/vite-plugin-svelte"
+      ],
+      "groupName": "Vite+ toolchain",
+      "groupSlug": "vite-plus-toolchain"
+    },
+    {
+      "description": [
+        "TypeScript 7.0 does not expose the compiler API that svelte-check needs."
+      ],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "!/^(7\\.0\\.)/"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
+    },
+    {
+      "description": [
+        "Image tags from Dockerfiles. The Go toolchain group below takes the golang image."
+      ],
+      "matchDatasources": ["docker"],
+      "groupName": "Docker images",
+      "groupSlug": "docker-images"
+    },
+    {
+      "matchManagers": ["mise"],
+      "groupName": "Developer tools",
+      "groupSlug": "dev-tools"
+    },
+    {
+      "matchManagers": ["pep621"],
+      "groupName": "Docs dependencies",
+      "groupSlug": "docs-dependencies"
+    },
+    {
+      "description": [
+        "mise.toml, .custom-gcl.yml, and the Makefile pin the same golangci-lint."
+      ],
+      "matchPackageNames": [
+        "golangci-lint",
+        "golangci/golangci-lint",
+        "github:golangci/golangci-lint",
+        "github.com/golangci/golangci-lint/v2"
+      ],
+      "groupName": "golangci-lint",
+      "groupSlug": "golangci-lint"
+    },
+    {
+      "description": [
+        "go.mod, mise.toml, and the federation image pin the same Go."
+      ],
+      "matchDatasources": ["golang-version"],
+      "groupName": "Go toolchain",
+      "groupSlug": "go-toolchain",
+      "postUpdateOptions": ["gomodTidy"]
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["golang"],
+      "groupName": "Go toolchain",
+      "groupSlug": "go-toolchain"
+    },
+    {
+      "matchManagers": ["mise"],
+      "matchPackageNames": ["go", "golang/go"],
+      "groupName": "Go toolchain",
+      "groupSlug": "go-toolchain"
+    },
+    {
+      "description": [
+        "package.json, mise.toml, and setup-bun pin the same Bun. .node-version and setup-node pin the same Node."
+      ],
+      "matchPackageNames": [
+        "bun",
+        "node",
+        "oven-sh/bun",
+        "oven/bun",
+        "actions/node-versions"
+      ],
+      "groupName": "JavaScript dependencies",
+      "groupSlug": "javascript-dependencies"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.custom-gcl\\.yml$/"],
+      "matchStrings": ["(?:^|\\n)version: (?<currentValue>\\S+)"],
+      "depNameTemplate": "github.com/golangci/golangci-lint/v2",
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.custom-gcl\\.yml$/"],
+      "matchStrings": [
+        "- module: (?<depName>\\S+)\\n\\s+import: \\S+\\n\\s+version: (?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": [
+        "golangci-lint custom .*--version (?<currentValue>v\\S+)"
+      ],
+      "depNameTemplate": "github.com/golangci/golangci-lint/v2",
+      "datasourceTemplate": "go"
+    }
+  ]
+}
