@@ -43,6 +43,11 @@ func pgReplayProject(ctx context.Context, tx *sql.Tx, project *db.ProjectExport)
 				project.ID, project.Name, name)
 		}
 	}
+	return pgInsertReplayProject(ctx, tx, project, name)
+}
+
+// pgInsertReplayProject does not apply restore's project-name suffix policy.
+func pgInsertReplayProject(ctx context.Context, tx *sql.Tx, project *db.ProjectExport, name string) error {
 	metadata := project.Metadata
 	if len(metadata) == 0 {
 		metadata = jsontext.Value(`{}`)
@@ -236,14 +241,19 @@ SELECT 1 FROM links WHERE type=$1 AND (
 	if duplicate {
 		return replayLinkDuplicate, nil
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO links(
+	return replayLinkInserted, pgInsertReplayLink(ctx, tx, link)
+}
+
+// pgInsertReplayLink inserts exact validated endpoints, without silent skips.
+func pgInsertReplayLink(ctx context.Context, tx *sql.Tx, link *db.LinkExport) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO links(
 id,from_issue_id,from_issue_uid,to_issue_id,to_issue_uid,type,author,created_at
 ) OVERRIDING SYSTEM VALUE VALUES(
 $1,$2,COALESCE(NULLIF($3,''),(SELECT uid FROM issues WHERE id=$2)),
 $4,COALESCE(NULLIF($5,''),(SELECT uid FROM issues WHERE id=$4)),$6,$7,$8
 )`, link.ID, link.FromIssueID, link.FromIssueUID, link.ToIssueID, link.ToIssueUID,
 		link.Type, link.Author, link.CreatedAt)
-	return replayLinkInserted, pgReplayError(db.ImportKindLink, err)
+	return pgReplayError(db.ImportKindLink, err)
 }
 
 func pgReplayImportMapping(

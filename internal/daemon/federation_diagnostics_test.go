@@ -49,7 +49,8 @@ func TestFederationFailureDiagnostics(t *testing.T) {
 			})
 			project, err := env.DB.CreateProject(t.Context(), "hub-project")
 			require.NoError(t, err)
-			path := fmt.Sprintf("/api/v1/projects/%d/federation/enable?token=query-secret", project.ID)
+			queryMarker := "query-" + project.UID
+			path := fmt.Sprintf("/api/v1/projects/%d/federation/enable?token=%s", project.ID, queryMarker)
 			requestBody := map[string]any{"actor": "body-secret"}
 			if tc.status == 400 {
 				requestBody["actor"] = map[string]any{"token": "body-secret"}
@@ -77,7 +78,7 @@ func TestFederationFailureDiagnostics(t *testing.T) {
 			assert.Equal(t, tc.cause, entry["cause"])
 			assert.Equal(t, tc.level, entry["level"])
 			assert.Len(t, entry, 7, "only standard log fields and bounded diagnostics are allowed")
-			for _, marker := range []string{"header-marker", "query-secret", "body-secret", "sql-secret", "SELECT"} {
+			for _, marker := range []string{"header-marker", queryMarker, "body-secret", "sql-secret", "SELECT"} {
 				assert.NotContains(t, logs.String(), marker)
 			}
 		})

@@ -50,6 +50,22 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "FederationPublicationCapacity", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublicationCapacity(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublicationRollback", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublicationRollback(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublication", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublication(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublicationRelatedEndpointOrder", runWithBackend: func(t *testing.T, store db.Storage, _ Backend) error {
+		RunFederationPublicationRelatedEndpointOrder(t, store)
+		return nil
+	}},
 	{name: "relay history order", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		RunRelayHistoryOrder(t, store, backend)
 		return nil

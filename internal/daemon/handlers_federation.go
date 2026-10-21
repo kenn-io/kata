@@ -57,6 +57,7 @@ func rejectRelayCredentialOnLegacyEvents(principal federationPrincipal) error {
 }
 
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
+	registerFederationPublication(humaAPI, cfg)
 	registerFederationSigningHandlers(humaAPI, cfg)
 	registerRelayHandlers(humaAPI, cfg)
 	registerFederationBridgeConnect(humaAPI, cfg)

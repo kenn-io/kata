@@ -144,6 +144,7 @@ type InstanceResponse struct {
 		Version                          string         `json:"version"`
 		SchemaVersion                    int64          `json:"schema_version"`
 		RelayProtocolVersion             int            `json:"relay_protocol_version,omitempty"`
+		RelayPublicationVersion          int            `json:"relay_publication_version,omitempty"`
 		ProvenanceProtocolVersion        int            `json:"provenance_protocol_version,omitempty"`
 		EmbeddingArtifactProtocolVersion int            `json:"embedding_artifact_protocol_version,omitempty"`
 		WebUIContractVersion             string         `json:"web_ui_contract_version,omitempty"`

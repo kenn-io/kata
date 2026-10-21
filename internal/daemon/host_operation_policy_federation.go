@@ -1,6 +1,11 @@
 package daemon
 
 func registerFederationOperationPolicies(policies map[string]HostOperationPolicy) {
+	// Publication creates a native project; it grants no federation authority.
+	registerHostOperations(policies, HostOperationPolicy{
+		Kind: hostOperationProjectAdministration, Capability: hostCapabilityManage,
+		Mutation: true, restricted: true,
+	}, "publish-federation-project")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationRead, Capability: hostCapabilityRead,
 	}, "getFederationStatus", "getProjectFederation", "getProjectFederationStatus", "getFederationBridgeStatus")
