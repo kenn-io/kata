@@ -1001,6 +1001,58 @@ func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 	assert.Equal(t, "wesm", enrollments[0].Actor)
 }
 
+// Direct grants must remain owner-authorized: an account must be refused
+// before enroll creates or enables a project on its behalf.
+func TestEnrollAccountRefusalHasNoProjectSideEffects(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-fixture"), testenv.WithRequireTokenIdentity())
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "account-fixture", Actor: "member", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	t.Setenv("EXAMPLE_HUB_TOKEN", "account-fixture")
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			name := "hub-project"
+			if existing {
+				_, err := env.DB.CreateProject(t.Context(), name)
+				require.NoError(t, err)
+			}
+			var mutations []string
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					mutations = append(mutations, r.URL.Path)
+				}
+				r.RequestURI = ""
+				r.URL.Scheme = "http"
+				r.URL.Host = strings.TrimPrefix(env.URL, "http://")
+				resp, err := env.HTTP.Do(r)
+				if err != nil {
+					http.Error(w, "upstream unavailable", http.StatusBadGateway)
+					return
+				}
+				t.Cleanup(func() { require.NoError(t, resp.Body.Close()) })
+				w.WriteHeader(resp.StatusCode)
+				_, _ = io.Copy(w, resp.Body)
+			}))
+			defer proxy.Close()
+			_, err := runCLICapture(t, env, t.TempDir(), "--project", name, "federation", "enroll",
+				"--spoke-instance", "01HZNQ7VFPK1XGD8R5MABCD4EF", "--hub-url", proxy.URL,
+				"--hub-token-env", "EXAMPLE_HUB_TOKEN", "--adopt-existing", "--actor", "member")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "relay")
+			assert.Empty(t, mutations, "refusal must precede init and enable requests")
+			project, lookupErr := env.DB.ProjectByName(t.Context(), name)
+			if !existing {
+				assert.ErrorIs(t, lookupErr, db.ErrNotFound)
+			} else {
+				require.NoError(t, lookupErr)
+				_, bindingErr := env.DB.FederationBindingByProject(t.Context(), project.ID)
+				assert.ErrorIs(t, bindingErr, db.ErrNotFound)
+			}
+		})
+	}
+}
+
 func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHostname(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
