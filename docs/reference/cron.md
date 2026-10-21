@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-18
+last_edited: 2026-10-20
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -419,6 +419,36 @@ fallback for scheduled dates, then daemon default timezone and UTC. Deadline
 dates have no recurrence fallback. Explicit UTC values resolve to UTC. The read
 uses native civil-time and DST behavior; it evaluates no clock and changes no
 readiness or persisted state. Normal project and issue-subtree read policy applies.
+
+### Reached schedules
+
+An adapter can start date-driven work from the event stream instead of polling.
+When an open issue's `scheduled_on` is reached, the daemon's date sweeper
+records one `issue.scheduled_reached` event by `system`. Its payload is the
+planning-date object above: `field`, raw `value`, resolved `timezone`, and UTC
+`instant`.
+
+- The sweeper runs at daemon startup and every 30 seconds, so the event follows
+  the instant by up to 30 seconds. A date that passed while the daemon was down
+  is recorded at the next startup.
+- Schedules that were already overdue before the upgrade record no event. The
+  first sweep after upgrading stores its time as the database's floor. The
+  sweeper records a date only if its instant is at or after the floor, or if
+  its current value was set after the floor. Setting a past date after the
+  upgrade therefore records it at the next sweep. Overdue schedules still
+  surface through the inbox as before.
+- Each raw value is recorded once per issue. A rescheduled issue records its new
+  value when that value is reached. A value that was already recorded is not
+  recorded again, even if the date moves away and back.
+- The event does not change the issue or its revision, and it is recorded
+  whether or not the inbox slot it would notify is occupied.
+- Closed issues are skipped. An enabled spoke records no event of its own; it
+  receives the hub's event when it pulls hub changes. Hub-to-hub relay does
+  not carry the event.
+- `deadline_on` records no event; deadlines remain notification-only.
+
+`kata events --tail` and hooks subscribed to the event type, `issue.*`, or `*`
+receive it.
 
 ## Adapter responsibilities
 

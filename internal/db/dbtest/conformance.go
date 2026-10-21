@@ -667,6 +667,22 @@ var storageScenarios = []scenario{
 		run: checkDueNotifications,
 	},
 	{
+		name: "scheduled reached",
+		methods: []string{
+			"CloseIssue", "CreateIssue", "CreateProject", "EventsByUIDs", "IssueByID", "PatchIssueMetadata",
+			"ReconcileDueNotification",
+		},
+		run: checkScheduledReached,
+	},
+	{
+		name: "scheduled reached floor",
+		methods: []string{
+			"CreateIssue", "CreateProject", "CreateRecurrenceForIssue", "EnableProjectFederation",
+			"EnsureScheduledReachedFloor", "InsertRemoteEvent", "PatchIssueMetadata", "ReconcileDueNotification",
+		},
+		run: checkScheduledReachedFloor,
+	},
+	{
 		name: "due notification timezones",
 		run:  checkDueNotificationTimezones,
 	},

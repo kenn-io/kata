@@ -17,7 +17,8 @@ const defaultDueNotificationSweepInterval = 30 * time.Second
 const maxRecurringBatchesPerSweep = 20
 
 // DueNotificationSweeper surfaces reached planning dates and native recurring
-// child issues through the same notify.* inbox slots written by kata notify.
+// child issues through the same notify.* inbox slots written by kata notify,
+// and records each newly reached scheduled_on value as issue.scheduled_reached.
 type DueNotificationSweeper struct {
 	DB                db.Storage
 	Publish           EventPublisher
@@ -26,6 +27,8 @@ type DueNotificationSweeper struct {
 	OnError           func(error)
 	IdleAdmission     activity.WaitableAdmission
 	recurringAfterUID string
+	// reachedFloor caches the database's stored reached-schedule floor.
+	reachedFloor *time.Time
 }
 
 // NewDueNotificationSweeper constructs a sweeper for the provided store and event publisher.
@@ -56,20 +59,34 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 		fork = idleLease.Fork
 	}
 	var errs []error
+	if s.reachedFloor == nil {
+		// Without a floor the sweep still delivers inbox requests but records
+		// no reached schedule, so a failed read cannot replay overdue dates.
+		if floor, err := s.DB.EnsureScheduledReachedFloor(ctx, now); err != nil {
+			errs = append(errs, err)
+		} else {
+			s.reachedFloor = &floor
+		}
+	}
 	ids, err := s.DB.ListDueNotificationIssueIDs(ctx)
 	if err != nil {
 		errs = append(errs, err)
 	}
 	for _, issueID := range ids {
 		result, err := s.DB.ReconcileDueNotification(ctx, db.ReconcileDueNotificationIn{
-			IssueID: issueID, Now: now, DefaultTimezone: s.DefaultTimezone,
+			IssueID: issueID, Now: now, DefaultTimezone: s.DefaultTimezone, ScheduledReachedFloor: s.reachedFloor,
 		})
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if result.Changed && result.Event != nil {
-			s.Publish.EventFrom(result.Event.ProjectID, *result.Event, fork)
+		for _, event := range []*db.Event{result.Reached, result.Event} {
+			if event != nil {
+				s.Publish.EventFrom(event.ProjectID, *event, fork)
+			}
+		}
+		if result.NotificationErr != nil {
+			errs = append(errs, fmt.Errorf("plan inbox request for issue %d: %w", issueID, result.NotificationErr))
 		}
 	}
 	candidates, err := s.DB.ListRecurringCronJobs(ctx, s.recurringAfterUID, 100)

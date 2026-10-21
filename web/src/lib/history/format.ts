@@ -1,6 +1,7 @@
 import type { Component } from 'svelte'
 import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore'
 import ArrowRightLeftIcon from '@lucide/svelte/icons/arrow-right-left'
+import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check'
 import CheckCircleIcon from '@lucide/svelte/icons/check-circle-2'
 import CircleIcon from '@lucide/svelte/icons/circle'
 import FlagIcon from '@lucide/svelte/icons/flag'
@@ -59,6 +60,12 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
         icon: UserIcon,
         label: `assignment for ${formatValue(payload.previous_owner)} expired at ${formatValue(payload.assignment_expires_on)}`,
         tone: 'warning',
+      }
+    case 'issue.scheduled_reached':
+      return {
+        icon: CalendarCheckIcon,
+        label: `scheduled date reached ${formatValue(payload.value)}`,
+        tone: 'neutral',
       }
     case 'issue.priority_set':
       return {

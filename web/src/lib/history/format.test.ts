@@ -87,6 +87,14 @@ describe('describeKataEvent', () => {
     expect(descriptor.tone).toBe('warning')
   })
 
+  test('issue.scheduled_reached names the reached date', () => {
+    const descriptor = describeKataEvent(
+      makeEvent('issue.scheduled_reached', { field: 'scheduled_on', value: '2026-09-16' }),
+    )
+    expect(descriptor.label).toBe('scheduled date reached 2026-09-16')
+    expect(descriptor.tone).toBe('neutral')
+  })
+
   test('issue.priority_set names the new priority', () => {
     expect(describeKataEvent(makeEvent('issue.priority_set', { priority: 1 })).label).toBe(
       'set priority P1',

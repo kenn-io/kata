@@ -37,12 +37,17 @@ func TestDueNotificationSweeperPublishesOrdinaryMetadataEvent(t *testing.T) {
 
 	require.NoError(t, sweeper.RunOnce(ctx,
 		time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)))
+	reached := receiveMsg(t, sub.Ch, time.Second, "scheduled reached broadcast")
+	require.NotNil(t, reached.Event)
+	assert.Equal(t, "issue.scheduled_reached", reached.Event.Type)
+	assert.Equal(t, "system", reached.Event.Actor)
 	msg := receiveMsg(t, sub.Ch, time.Second, "due notification broadcast")
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "issue.metadata_updated", msg.Event.Type)
 	assert.Equal(t, "system", msg.Event.Actor)
-	require.Len(t, hookSink.events, 1)
-	assert.Equal(t, msg.Event.ID, hookSink.events[0].ID)
+	require.Len(t, hookSink.events, 2)
+	assert.Equal(t, reached.Event.ID, hookSink.events[0].ID)
+	assert.Equal(t, msg.Event.ID, hookSink.events[1].ID)
 
 	got, err := env.DB.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
@@ -56,7 +61,52 @@ func TestDueNotificationSweeperPublishesOrdinaryMetadataEvent(t *testing.T) {
 	require.NoError(t, sweeper.RunOnce(ctx,
 		time.Date(2026, 9, 16, 10, 1, 0, 0, time.UTC)))
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "delivered date must not repeat")
+	require.Len(t, hookSink.events, 2)
+}
+
+// The first sweep after an upgrade delivers an overdue schedule's inbox
+// request without replaying it as issue.scheduled_reached.
+func TestDueNotificationSweeperSkipsSchedulesOverdueBeforeFirstSweep(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "upgrade-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Overdue before upgrade", Author: "coordinator",
+		Metadata: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2020-01-01"`)},
+	})
+	require.NoError(t, err)
+
+	hookSink := &captureHookSink{}
+	sweeper := daemon.NewDueNotificationSweeper(
+		env.DB, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hookSink), "UTC",
+	)
+	require.NoError(t, sweeper.RunOnce(ctx, time.Now().Add(time.Second)))
 	require.Len(t, hookSink.events, 1)
+	assert.Equal(t, "issue.metadata_updated", hookSink.events[0].Type)
+}
+
+func TestDueNotificationSweeperPublishesReachedScheduleForInvalidRecipient(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "recipient-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Invalid recipient", Author: "bad\nactor",
+		Metadata: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2026-09-16"`)},
+	})
+	require.NoError(t, err)
+
+	hookSink := &captureHookSink{}
+	sweeper := daemon.NewDueNotificationSweeper(
+		env.DB, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hookSink), "UTC",
+	)
+	err = sweeper.RunOnce(ctx, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
+	require.ErrorContains(t, err, "notification recipient")
+	require.Len(t, hookSink.events, 1)
+	assert.Equal(t, "issue.scheduled_reached", hookSink.events[0].Type)
+	require.NotNil(t, hookSink.events[0].IssueID)
+	assert.Equal(t, issue.ID, *hookSink.events[0].IssueID)
 }
 
 func TestDueNotificationSweeperContinuesAfterInvalidRecipient(t *testing.T) {

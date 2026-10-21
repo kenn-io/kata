@@ -22,6 +22,7 @@ var knownEventTypes = map[string]struct{}{
 	"issue.soft_deleted": {}, "issue.restored": {},
 	"issue.links_changed":             {},
 	"issue.metadata_updated":          {},
+	"issue.scheduled_reached":         {},
 	"issue.external_root_bound":       {},
 	"issue.external_root_paused":      {},
 	"issue.external_root_resumed":     {},

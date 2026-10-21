@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Start date-driven work from `kata events --tail` or a hook when an issue's
+  `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
+  event per scheduled value, with the date's raw value, timezone, and UTC
+  instant, within 30 seconds of that instant while the daemon runs. Schedules
+  already overdue when you upgrade record no event. See
+  [Reached schedules](reference/cron.md#reached-schedules).
+
 - Count a parent's open and total children from the browser snapshot's
   `collection_links` instead of listing issues. The counts match `child_counts`
   from `GET /api/v1/issues` for the same principal, an absent `child_counts`

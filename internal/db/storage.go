@@ -161,6 +161,9 @@ type Storage interface {
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error)
 	ReconcileDueNotification(ctx context.Context, in ReconcileDueNotificationIn) (ReconcileDueNotificationOut, error)
+	// EnsureScheduledReachedFloor stores at as the reached-schedule floor on the
+	// first call and returns the stored floor on every call.
+	EnsureScheduledReachedFloor(ctx context.Context, at time.Time) (time.Time, error)
 	IssueQualifiersByUIDs(ctx context.Context, uids []string) (map[string]IssueQualifier, error)
 	PurgeResetCheck(ctx context.Context, afterID, projectID int64) (int64, error)
 

@@ -305,6 +305,7 @@ var alreadyImplemented = map[string]bool{
 	"ReadyIssuesGlobal":                    true, // discovery.go
 	"RecentSameMessageClose":               true, // events.go
 	"RecentSiblingCloses":                  true, // events.go
+	"EnsureScheduledReachedFloor":          true, // due_notifications.go
 	"ReconcileDueNotification":             true, // due_notifications.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RecordIssueSyncError":                 true, // issue_sync.go

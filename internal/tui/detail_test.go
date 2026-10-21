@@ -1247,6 +1247,8 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 			Payload: map[string]any{"owner": "wesm", "assignment_expires_on": "2025-01-02T17:04:00Z"}},
 		{Type: "issue.assignment_expired", Actor: "system", CreatedAt: when,
 			Payload: map[string]any{"previous_owner": "wesm", "assignment_expires_on": "2025-01-02T15:04:00Z"}},
+		{Type: "issue.scheduled_reached", Actor: "system", CreatedAt: when,
+			Payload: map[string]any{"field": "scheduled_on", "value": "2025-01-02"}},
 	}
 	out := renderEventsTab(es, 200, 20, -1, tabState{})
 	assertContainsAll(t, out,
@@ -1257,6 +1259,7 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 		"[issue.assigned] 2025-01-02 15:04 d — assigned wesm",
 		"[issue.assignment_renewed] 2025-01-02 15:04 wesm — renewed assignment for wesm until 2025-01-02T17:04:00Z",
 		"[issue.assignment_expired] 2025-01-02 15:04 system — assignment for wesm expired at 2025-01-02T15:04:00Z",
+		"[issue.scheduled_reached] 2025-01-02 15:04 system — scheduled date reached 2025-01-02",
 	)
 }
 
