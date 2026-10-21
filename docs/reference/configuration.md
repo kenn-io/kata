@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-20
+last_edited: 2026-10-21
 ---
 
 # Configuration
@@ -1212,7 +1212,8 @@ export DO_NOT_TRACK=1
 whitespace and letter case. `TELEMETRY_ENABLED` accepts the same opt-out values.
 `DO_NOT_TRACK` disables telemetry for every present value except trimmed,
 case-insensitive `0` or `false`. The `kit_posthog_disabled` build tag also
-disables telemetry.
+disables telemetry. Kit's process-wide `posthog.DisableProcess()` switch also
+closes the reporting gate.
 
 The daemon reads its preferences at startup. Set these variables before it
 starts, or restart a running daemon after changing its environment. Kata passes
@@ -1223,7 +1224,7 @@ forwarding activity to the daemon, even when that daemon has reporting enabled.
 An ineligible CLI or TUI also omits action attribution on issue creates and closes,
 so those operations succeed without asking the daemon to report action events.
 MCP establishes its gate before starting its server. MCP issue actions carry no
-CLI or TUI attribution.
+CLI or TUI attribution. Browser reports use the serving daemon's preferences.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

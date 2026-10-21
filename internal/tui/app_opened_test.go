@@ -22,6 +22,7 @@ import (
 
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -293,7 +294,10 @@ func (r *screenVisitRecorder) ReportScreenViewed(_ context.Context, screen strin
 	return nil
 }
 
-func (*recordingTelemetry) SanitizeProperties(_ string, properties map[string]any) (map[string]any, error) {
+func (r *recordingTelemetry) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
+	if !r.EventAllowed(event) {
+		return nil, telemetry.ErrUnsupportedEvent
+	}
 	return properties, nil
 }
 

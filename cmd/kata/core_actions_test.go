@@ -18,12 +18,12 @@ import (
 	"go.kenn.io/kata/internal/version"
 )
 
-func TestCoreActionCLIHeaders(t *testing.T) {
+func TestCLIClientTelemetryAdmission(t *testing.T) {
 	scenario := os.Getenv("KATA_CLI_ADMISSION_SCENARIO")
 	if scenario == "" {
-		for _, name := range []string{"release", "CI", "KATA_TELEMETRY_ENABLED", "dev"} {
+		for _, name := range []string{"release", "KATA_TELEMETRY_ENABLED", "dev"} {
 			t.Run(name, func(t *testing.T) {
-				command := exec.Command(os.Args[0], "-test.run=^TestCoreActionCLIHeaders$", "-test.timeout=30s") //nolint:gosec // Run this exact command test in a fresh process.
+				command := exec.Command(os.Args[0], "-test.run=^TestCLIClientTelemetryAdmission$", "-test.timeout=30s") //nolint:gosec // Run this exact command test in a fresh process.
 				command.Env = append(os.Environ(), "KATA_CLI_ADMISSION_SCENARIO="+name)
 				output, err := command.CombinedOutput()
 				require.NoError(t, err, string(output))
@@ -34,8 +34,6 @@ func TestCoreActionCLIHeaders(t *testing.T) {
 	saved := version.Version
 	t.Cleanup(func() { version.Version = saved })
 	switch scenario {
-	case "CI":
-		t.Setenv("CI", "")
 	case "KATA_TELEMETRY_ENABLED":
 		t.Setenv(scenario, "0")
 	case "dev":

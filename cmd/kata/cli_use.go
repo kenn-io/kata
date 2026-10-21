@@ -90,11 +90,11 @@ func reportsAgentUse(cmd *cobra.Command) bool {
 
 // reportCLIUse discovers an existing target only for contract hooks.
 func reportCLIUse(cmd *cobra.Command) {
-	if !posthog.Eligible("KATA", version.Version) {
-		return
-	}
 	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
+	if agent && !posthog.Eligible("KATA", version.Version) {
+		return
+	}
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
