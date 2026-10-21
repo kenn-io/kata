@@ -295,9 +295,14 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 				Transport: env.HTTP.Transport,
 			}
 			var posts, completed atomic.Int32
+			forwarded := make(chan struct{}, 1)
 			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/ui/telemetry" {
 					posts.Add(1)
+					select {
+					case forwarded <- struct{}{}:
+					default:
+					}
 				}
 				forward.ServeHTTP(w, r)
 				if r.URL.Path == "/api/v1/ui/telemetry" {
@@ -317,7 +322,13 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 				require.Eventually(t, func() bool { return posts.Load() > 0 && posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
 				require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
 			} else {
-				require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
+				// The command exposes no worker-drain signal, and stopping it can discard queued reports.
+				// Observe twice the worker's one-second request budget, failing as soon as a report arrives.
+				select {
+				case <-forwarded:
+					t.Fatal("an ineligible MCP command forwarded activity to an enabled daemon")
+				case <-time.After(2 * time.Second):
+				}
 			}
 		})
 	}
