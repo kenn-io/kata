@@ -99,9 +99,12 @@ listener also serves unauthenticated `GET` and `HEAD` requests at `/healthz`;
 the probe returns only readiness text and disables caching.
 
 For a remote gateway that takes an endpoint URL, run the MCP listener alongside
-the hub behind the HTTPS reverse proxy that already fronts it. Route `/mcp`
-to this listener and configure the gateway with the HTTPS endpoint URL and
-the MCP bearer token, which is separate from the daemon token:
+the hub behind the HTTPS reverse proxy that already fronts it. The listener
+reaches the hub daemon through the normal settings in
+[Client configuration](#client-configuration), including `KATA_SERVER` and the
+daemon's bearer. Route `/mcp` to this listener and configure the gateway with
+the HTTPS endpoint URL and the MCP bearer token, which is separate from the
+daemon token:
 
 ```sh
 kata mcp serve --all \
