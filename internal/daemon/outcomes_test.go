@@ -51,11 +51,13 @@ func TestOutcomesSyncReasons(t *testing.T) {
 		reason string
 	}{
 		{&issuesync.StatusError{HTTPStatus: 401}, "auth"}, {&issuesync.StatusError{HTTPStatus: 403}, "auth"},
-		{&issuesync.StatusError{HTTPStatus: 429}, "rate_limit"}, {&issuesync.StatusError{RetryAfter: time.Minute}, "rate_limit"},
+		{&issuesync.StatusError{HTTPStatus: 429}, "rate_limit"},
+		{&issuesync.StatusError{AuthFailure: true}, "auth"},
+		{&issuesync.StatusError{RetryAfter: time.Minute}, "other"},
 		{&issuesync.StatusError{HTTPStatus: 403, RateLimited: true}, "rate_limit"},
 		{&issuesync.StatusError{HTTPStatus: 200, RetryAfter: time.Minute}, "rate_limit"},
 		{&issuesync.StatusError{HTTPStatus: 503, RetryAfter: time.Minute}, "server"},
-		{&issuesync.StatusError{HTTPStatus: 503, RetryAfter: time.Minute, Ambiguous: true}, "server"},
+		{&issuesync.StatusError{HTTPStatus: 200, RetryAfter: time.Minute, Ambiguous: true}, "other"},
 		{context.DeadlineExceeded, "timeout"}, {&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}, "network"},
 		{errors.New("private error text"), "other"},
 	} {
