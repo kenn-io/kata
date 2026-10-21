@@ -1008,7 +1008,7 @@ type namedWorker struct {
 // result treats cancellation and automatic transaction rollback as a clean stop
 // only after the run context stops. Other errors remain attributed to the worker.
 func (w namedWorker) result(err, terminal error) error {
-	if err == nil || (terminal != nil && errors.Is(err, terminal) && isOnlyError(err, terminal, sql.ErrTxDone)) {
+	if err == nil || (errors.Is(err, terminal) && isOnlyError(err, terminal, sql.ErrTxDone)) {
 		return nil
 	}
 	return fmt.Errorf("kata: %s worker: %w", w.name, err)
