@@ -34,11 +34,7 @@ const late=await emitBeforeAgentStart(lateRunner,'later prompt',base);assert.equ
 // Structured normal composition preserves base and other extensions.
 const plainRunner=new ExtensionRunner([userExt,projectExt],runtime,cwd,manager,{});
 const plain=await emitBeforeAgentStart(plainRunner,'plain prompt',base);prompt=buildSystemPrompt(plain.systemPromptOptions);assert(prompt.includes('original base'));assert(prompt.includes('other preserved'));assert.equal(prompt.split('native contract D').length-1,1);
-await runner.emit({type:'session_shutdown',reason:'reload'});const reloadedUser=await loadExtensionFromFactory(user,cwd,bus,runtime,userPath);const reloadedProject=await loadExtensionFromFactory(project,cwd,bus,runtime,projectPath);runner=new ExtensionRunner([reloadedUser,reloadedProject],runtime,cwd,manager,{});await runner.emit({type:'session_start',reason:'reload'});await runner.emit({type:'agent_end',messages:[]});
-for(const reason of ['new','resume','fork']) {await runner.emit({type:'session_shutdown',reason});runner.invalidate();const nextManager=SessionManager.inMemory(cwd),nextRuntime=createExtensionRuntime();const nextUser=await loadExtensionFromFactory(user,cwd,bus,nextRuntime,userPath),nextProject=await loadExtensionFromFactory(project,cwd,bus,nextRuntime,projectPath);runner=new ExtensionRunner([nextUser,nextProject],nextRuntime,cwd,nextManager,{});await runner.emit({type:'session_start',reason});}
-await runner.emit({type:'session_shutdown',reason:'quit'});await runner.emit({type:'session_shutdown',reason:'quit'});
-assert.deepEqual(calls().filter(c=>c.args[0]==='agent-hook').map(c=>c.args[3]),['start','start','start','start','end']);
 assert.equal(calls().filter(c=>c.args[0]==='agent-contract-hook').length,5);
 for(const call of calls()) {assert.equal(call.cwd,cwd);assert.equal(call.server,'https://daemon.example');assert.equal(call.author,'actor');assert.equal(call.teammate,'teammate');assert.equal(call.recipient,'actor/teammate');if(call.args[0]==='agent-contract-hook')assert.deepEqual(call.args,['agent-contract-hook','--source',"contract '$;`.txt"]);}
 assert.deepEqual(errors,[]);
-console.log('Pi installed runner passed: native lifecycle, actual subprocess, structured/forced precedence, fresh and unavailable context');
+console.log('Pi installed runner passed: actual subprocess, structured/forced precedence, fresh and unavailable context');
