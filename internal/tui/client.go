@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/telemetry/posthog"
 	"golang.org/x/mod/semver"
@@ -44,7 +45,7 @@ func suppressIssueActionTelemetry(ctx context.Context) context.Context {
 }
 
 func issueActionSurface(ctx context.Context) *string {
-	if ctx.Value(suppressIssueActionTelemetryKey{}) == true {
+	if !posthog.Eligible("KATA", version.Version) || ctx.Value(suppressIssueActionTelemetryKey{}) == true {
 		return nil
 	}
 	return new("tui")
@@ -161,6 +162,9 @@ func (c *Client) ReportSessionEnded(elapsed time.Duration) {
 }
 
 func (c *Client) reportUsage(ctx context.Context, event string, properties map[string]any) error {
+	if !posthog.Eligible("KATA", version.Version) {
+		return nil
+	}
 	screen, _ := properties["screen"].(string)
 	return c.telemetry.report(ctx, telemetryClaimKey{target: c.telemetryTarget, event: event, screen: screen}, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
 		apiClient, err := c.generatedClient()

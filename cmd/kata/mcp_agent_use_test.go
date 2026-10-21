@@ -352,12 +352,6 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 			//nolint:kennlint // Wait for the real daemon to finish responding to forwarded activity.
 			require.Eventually(t, func() bool { return posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
 			require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
-			beforeVeto := posts.Load()
-			t.Setenv("DO_NOT_TRACK", "1")
-			call("kata.list", map[string]any{"project": "spoke-project"})
-			//nolint:kennlint // Keep the running command alive beyond the reporting request budget after the vetoed call.
-			time.Sleep(2 * time.Second)
-			require.Equal(t, beforeVeto, posts.Load(), "the running observer must honor a new local veto")
 		} else {
 			require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
 		}

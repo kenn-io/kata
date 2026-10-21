@@ -156,13 +156,9 @@ func newMCPServeCmd() *cobra.Command {
 			}
 			var observe func()
 			if posthog.Eligible("KATA", version.Version) {
-				enqueue, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+				var stopReporting context.CancelFunc
+				observe, stopReporting = startMCPAgentUseReporter(ctx, apiClient, resolved)
 				defer stopReporting()
-				observe = func() {
-					if posthog.Eligible("KATA", version.Version) {
-						enqueue()
-					}
-				}
 			}
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,

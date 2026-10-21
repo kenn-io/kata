@@ -1,9 +1,3 @@
----
-title: Packaging kata
-description: Build and distribute Kata packages
-last_edited: 2026-10-20
----
-
 # Packaging kata
 
 ## Release ownership
@@ -108,7 +102,8 @@ export DO_NOT_TRACK=1
 
 See [Configuration](../reference/configuration.md#telemetry) for the emitted
 events and excluded data, and [reporting rules](../reference/configuration.md#reporting-rules)
-for CI and build-version requirements.
+for CI and build-version requirements. Each CLI, TUI, and MCP process applies
+its own preferences when using an enabled daemon.
 
 ## Official tap publishing
 

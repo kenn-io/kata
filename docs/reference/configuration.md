@@ -1216,9 +1216,14 @@ disables telemetry.
 
 The daemon reads its preferences at startup. Set these variables before it
 starts, or restart a running daemon after changing its environment. Kata passes
-them and `CI` to registered local profile daemons it autostarts. Each MCP process
-checks its own build version and environment before forwarding activity to the
-daemon, even when the daemon has reporting enabled.
+them and `CI` to registered local profile daemons it autostarts.
+
+CLI, TUI, and MCP processes check their own build version and environment before
+forwarding activity to the daemon, even when that daemon has reporting enabled.
+An ineligible CLI or TUI also omits action attribution on issue creates and closes,
+so those operations succeed without asking the daemon to report action events.
+MCP establishes its gate before starting its server. MCP issue actions carry no
+CLI or TUI attribution.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

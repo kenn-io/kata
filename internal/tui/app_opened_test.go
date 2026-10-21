@@ -22,7 +22,6 @@ import (
 
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -294,12 +293,8 @@ func (r *screenVisitRecorder) ReportScreenViewed(_ context.Context, screen strin
 	return nil
 }
 
-func (*recordingTelemetry) SanitizeProperties(event string, properties map[string]any) (map[string]any, error) {
-	reporter, err := telemetry.NewReporter(telemetry.Options{})
-	if err != nil {
-		return nil, err
-	}
-	return reporter.SanitizeProperties(event, properties)
+func (*recordingTelemetry) SanitizeProperties(_ string, properties map[string]any) (map[string]any, error) {
+	return properties, nil
 }
 
 // Accepted daily claims survive a restart on the same daemon.
