@@ -42,17 +42,6 @@ func resolveAttachment(ctx context.Context, cfg ServerConfig, in api.AttachmentR
 	return e, nil
 }
 func registerAttachmentReadHandlers(h huma.API, cfg ServerConfig) {
-	huma.Register(h, huma.Operation{OperationID: "attachmentText", Method: "GET", Path: attachmentPath + "/{attachment_id}/text"}, func(ctx context.Context, in *api.AttachmentTextRequest) (*api.AttachmentTextResponse, error) {
-		e, err := resolveAttachment(ctx, cfg, in.AttachmentReadRequest)
-		if err != nil {
-			return nil, err
-		}
-		result, err := cfg.Docbank.Text(ctx, e, in.Profile, in.MaxBytes)
-		if err != nil {
-			return nil, docbankError(err)
-		}
-		return &api.AttachmentTextResponse{Body: result}, nil
-	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Verified attachment bytes", Content: map[string]*huma.MediaType{"application/octet-stream": {Schema: &huma.Schema{Type: "string", Format: "binary"}}}}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		e, err := resolveAttachment(ctx, cfg, *in)
 		if err != nil {
@@ -72,7 +61,11 @@ func registerAttachmentReadHandlers(h huma.API, cfg ServerConfig) {
 		}
 		head = head[:n]
 		typ := http.DetectContentType(head)
-		inline := typ == "image/png" || typ == "image/jpeg" || typ == "image/gif" || typ == "image/webp"
+		inline := typ == "image/png" || typ == "image/jpeg" || typ == "image/gif" || typ == "image/webp" || typ == "video/mp4" || typ == "video/webm"
+		if typ == "application/ogg" && e.MediaType == "video/ogg" {
+			typ = "video/ogg"
+			inline = true
+		}
 		disposition := "inline"
 		if !inline {
 			typ = "application/octet-stream"

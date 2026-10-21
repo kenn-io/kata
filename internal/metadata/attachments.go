@@ -103,17 +103,6 @@ func ValidateEntry(id string, e Attachment) error {
 	return nil
 }
 
-// AdmitAdd applies only local admission limits, never replay or removal limits.
-func (m Attachments) AdmitAdd(id string, e Attachment) error {
-	if err := ValidateEntry(id, e); err != nil {
-		return err
-	}
-	if _, exists := m[id]; !exists && len(m) >= 100 {
-		return fmt.Errorf("%w: at most 100 attachments", ErrInvalidValue)
-	}
-	return nil
-}
-
 // Add never edits an existing entry; callers resolve idempotent retries separately.
 func (m Attachments) Add(id string, e Attachment) error {
 	if err := ValidateEntry(id, e); err != nil {
@@ -121,6 +110,15 @@ func (m Attachments) Add(id string, e Attachment) error {
 	}
 	if _, ok := m[id]; ok {
 		return fmt.Errorf("%w: attachment id already exists", ErrInvalidValue)
+	}
+	count := 0
+	for key := range m {
+		if _, err := m.Lookup(key); err == nil {
+			count++
+		}
+	}
+	if count >= 100 {
+		return fmt.Errorf("%w: at most 100 attachments", ErrInvalidValue)
 	}
 	raw, err := json.Marshal(e)
 	if err == nil {

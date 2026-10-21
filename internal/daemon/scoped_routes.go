@@ -19,7 +19,7 @@ func scopedRoute(method, pattern string) scopedRouteRule {
 // at the domain boundary; this first gate ensures new or administrative routes
 // fail closed before their handlers resolve any target.
 var issueScopedRoutes = []scopedRouteRule{
-	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/attachments/[^/]+/(?:content|text)`),
+	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/attachments/[^/]+/content`),
 	scopedRoute(http.MethodPost, `/api/v1/ui/telemetry`),
 	scopedRoute(http.MethodGet, `/api/v1/instance`),
 	scopedRoute(http.MethodGet, `/api/v1/health`),

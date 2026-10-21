@@ -1,14 +1,14 @@
 ---
 title: Issue attachments
-description: Attach files through Docbank and read their pinned content or text from Kata.
-last_edited: 2026-10-20
+description: Attach files through Docbank and view images and videos in Kata.
+last_edited: 2026-10-21
 ---
 
 # Issue attachments
 
-Attach screenshots, recordings, and other files to issues with `kata docbank attachments`.
+Attach screenshots, recordings, and other files to issues in the web UI or with `kata docbank attachments`.
 Kata stores an immutable reference in issue metadata. A separately hosted
-[Docbank](https://github.com/kenn-io/docbank) stores the bytes and text renditions.
+[Docbank](https://github.com/kenn-io/docbank) stores the bytes.
 Only the reference federates; file bytes never enter Kata's database or events.
 This feature is available on main after 0.19.0.
 
@@ -36,7 +36,7 @@ restart. HTTPS is required except on loopback. See the
 for credential precedence and environment overrides.
 
 Without this section, references received from peers still appear in issue
-metadata and attachment lists. Upload, content, and text requests report
+metadata and attachment lists. Upload and content requests report
 `docbank_not_configured`. A reference to a different vault reports `foreign_vault`
 and is never fetched.
 
@@ -46,17 +46,12 @@ and is never fetched.
 kata docbank attachments add abc4 screenshot.png recording.mp4
 kata docbank attachments ls abc4
 kata docbank attachments get abc4 <attachment-id-or-suffix> -o screenshot.png
-kata docbank attachments text abc4 <attachment-id-or-suffix> --max-bytes 65536
 kata docbank attachments rm abc4 <attachment-id-or-suffix>
 ```
 
 Each file gets its own id and outcome. Failed uploads do not add metadata;
 retries reuse the same id. `get` verifies the pinned hash and size before
 publishing the destination file. An existing destination requires `--force`.
-`text` returns a successful state such as `unprocessed` when Docbank has not
-built a rendition. Kata does not start OCR or transcription jobs. Returned text
-defaults to 64 KiB and is capped at 16 MiB, truncated at a UTF-8 boundary.
-Kata verifies the complete artifact before returning that prefix.
 
 Removal drops only the reference. Docbank retains the file under its own
 retention rules. Do not edit reference entries in place; remove and add instead.
@@ -64,19 +59,16 @@ retention rules. Do not edit reference entries in place; remove and add instead.
 ## Limits and display
 
 The default upload limit is 256 MiB per file; operators may raise it to 2 GiB.
-A daemon admits two concurrent uploads and at most 100 references per issue.
+A daemon admits two concurrent uploads and at most 100 valid references per issue.
 References received through federation may exceed that count; removal remains
 available. Each map key must be a ULID and each entry must be an object. Entries
-with invalid reference fields stay visible as `invalid` and remain removable.
+with invalid reference fields, including empty entries left by older peers, are omitted from lists and the count limit. They remain removable by id.
 A peer map with a non-ULID key or a non-object entry blocks attachment commands.
 Repair that map with the [generic metadata commands](../reference/metadata.md),
 preserving valid entries when replacing its value.
 
-The web UI fetches attachments using the current browser session. It previews
-PNG, JPEG, GIF, and WebP images up to 20 MiB and offers downloads up to 100 MiB.
-Larger files show a `kata docbank attachments get` hint. SVG, HTML, and video are
-always downloads. Video playback and seeking are outside this version.
+## Use the web UI
 
-Agents can load `kata.load_attachments`, then call `kata.attachment_text` with
-an issue reference and full attachment id. MCP caps text at 1 MiB to fit its
-response limit after JSON escaping. See the [MCP reference](../reference/mcp.md).
+On a daemon with Docbank configured, click **Attach files** on an issue and select one or more files. Each file shows its upload progress or error. Upload controls require a writable session and stay disabled while the connection is stale, an upload is running, or another mutation is pending. New entries appear through the normal issue refresh.
+
+The web UI fetches attachments using the current browser session. Click **Preview** for PNG, JPEG, GIF, and WebP images up to 20 MiB, or **Play** for MP4, WebM, and Ogg videos up to 100 MiB. Videos play in an inline player. Downloads are available up to 100 MiB. Larger files show a `kata docbank attachments get` hint. SVG and HTML files download.

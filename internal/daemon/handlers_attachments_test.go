@@ -43,7 +43,6 @@ func attachmentUpload(t *testing.T, env *testenv.Env, p string, id string, data 
 	var b bytes.Buffer
 	w := multipart.NewWriter(&b)
 	require.NoError(t, w.WriteField("attachment_id", id))
-	require.NoError(t, w.WriteField("actor", "operator"))
 	for range count {
 		f, err := w.CreateFormFile("file", "screen.png")
 		require.NoError(t, err)
@@ -51,7 +50,7 @@ func attachmentUpload(t *testing.T, env *testenv.Env, p string, id string, data 
 		require.NoError(t, err)
 	}
 	require.NoError(t, w.Close())
-	req, err := http.NewRequest("POST", env.URL+p, &b)
+	req, err := http.NewRequest("POST", env.URL+p+"?actor=operator", &b)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	if len(token) > 0 {
@@ -115,9 +114,9 @@ func TestAttachmentRejectsBeforeDocbank(t *testing.T) {
 			require.Empty(t, f.Requests())
 		})
 	}
-	env := testenv.New(t)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MaxAttachmentBytes = 32 })
 	p, iss := seedProjectAndIssue(t, env)
-	code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), attachmentID, []byte("x"), 1)
+	code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), attachmentID, bytes.Repeat([]byte("x"), 1<<20), 1)
 	require.Equal(t, 503, code, string(raw))
 	require.Contains(t, string(raw), "docbank_not_configured")
 }
@@ -135,7 +134,7 @@ func TestAttachmentUpstreamErrorDoesNotWrite(t *testing.T) {
 func TestAttachmentUnknownIssueDoesNotCallDocbank(t *testing.T) {
 	env, f := attachmentEnv(t, 1024)
 	p, _ := seedProjectAndIssue(t, env)
-	code, _ := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/unknown/attachments", p.ID), attachmentID, []byte(strings.Repeat("x", 3)), 1)
+	code, _ := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/unknown/attachments", p.ID), attachmentID, bytes.Repeat([]byte("x"), 1<<20), 1)
 	require.Equal(t, 404, code)
 	require.Empty(t, f.Requests())
 }
@@ -243,12 +242,14 @@ func TestAttachmentScopeBeforeOutbound(t *testing.T) {
 	require.Equal(t, 404, code, string(raw))
 	require.Empty(t, f.Requests())
 }
-func TestAttachmentLimitKeepsInvalidPeersRemovable(t *testing.T) {
+func TestAttachmentLimitRejectsValidPeersBeforeDocbank(t *testing.T) {
 	env, f := attachmentEnv(t, 1024)
 	p, iss := seedProjectAndIssue(t, env)
 	m := metadata.Attachments{}
 	for i := range 100 {
-		m[fmt.Sprintf("%026d", i)] = jsontext.Value(`{"future":true}`)
+		raw, err := json.Marshal(metadata.Attachment{Name: "screen.png", MediaType: "image/png", Size: 1, Docbank: metadata.DocbankReference{VaultUID: docbanktest.VaultUID, NodeID: 42, ContentVersionID: "6f1c2e8a-2222-4222-8222-222222222222", ContentSHA256: strings.Repeat("a", 64)}})
+		require.NoError(t, err)
+		m[fmt.Sprintf("%026d", i)] = raw
 	}
 	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachments": m.Encode()}})
 	require.NoError(t, err)
@@ -335,19 +336,21 @@ func TestAttachmentConcurrentUploadBound(t *testing.T) {
 	}
 }
 
-func TestAttachmentContentAndText(t *testing.T) {
+func TestAttachmentContent(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		data   []byte
-		inline bool
+		name      string
+		data      []byte
+		mediaType string
 	}{
-		{"PNG", append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 600)...), true},
-		{"SVG", []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`), false},
-		{"HTML", []byte(`<html>hello</html>`), false},
-		{"video", []byte("\x00\x00\x00\x18ftypmp42video"), false},
+		{"PNG", append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 600)...), "image/png"},
+		{"SVG", []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`), "application/octet-stream"},
+		{"HTML", []byte(`<html>hello</html>`), "application/octet-stream"},
+		{"MP4", append([]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), bytes.Repeat([]byte{0}, 512)...), "video/mp4"},
+		{"WebM", append([]byte("\x1a\x45\xdf\xa3"), bytes.Repeat([]byte{0}, 600)...), "video/webm"},
+		{"Ogg", append([]byte("OggS\x00"), bytes.Repeat([]byte{0}, 600)...), "video/ogg"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env, f := attachmentEnv(t, 1024)
+			env, _ := attachmentEnv(t, 1024)
 			p, iss := seedProjectAndIssue(t, env)
 			base := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
 			code, raw := attachmentUpload(t, env, base, attachmentID, tc.data, 1)
@@ -363,22 +366,10 @@ func TestAttachmentContentAndText(t *testing.T) {
 			require.Equal(t, "sandbox", resp.Header.Get("Content-Security-Policy"))
 			require.Equal(t, int64(len(tc.data)), resp.ContentLength)
 			require.Empty(t, resp.Header.Get("X-Docbank-Blob-Hash"))
-			if tc.inline {
-				require.Equal(t, "image/png", resp.Header.Get("Content-Type"))
-			} else {
-				require.Equal(t, "application/octet-stream", resp.Header.Get("Content-Type"))
+			require.Equal(t, tc.mediaType, resp.Header.Get("Content-Type"))
+			if tc.mediaType == "application/octet-stream" {
 				require.Contains(t, resp.Header.Get("Content-Disposition"), "attachment")
 			}
-			f.State = "ready"
-			f.Text = "café text"
-			resp, err = env.HTTP.Get(env.URL + base + "/" + attachmentID + "/text?max_bytes=4")
-			require.NoError(t, err)
-			defer func() { _ = resp.Body.Close() }()
-			b, err = io.ReadAll(resp.Body)
-			require.NoError(t, err)
-			require.Equal(t, 200, resp.StatusCode, string(b))
-			require.Contains(t, string(b), `"text":"caf"`)
-			require.Contains(t, string(b), `"truncated":true`)
 		})
 	}
 }
@@ -418,16 +409,14 @@ func TestAttachmentReadErrors(t *testing.T) {
 			_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachments": metadata.Attachments{attachmentID: b}.Encode()}})
 			require.NoError(t, err)
 			calls := len(f.Requests())
-			for _, route := range []string{"content", "text"} {
-				resp, err := env.HTTP.Get(env.URL + base + "/" + id + "/" + route)
-				require.NoError(t, err)
-				b, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				require.Equal(t, tc.code, resp.StatusCode, string(b))
-				require.Contains(t, string(b), tc.state)
-			}
+			resp, err := env.HTTP.Get(env.URL + base + "/" + id + "/content")
+			require.NoError(t, err)
+			b, _ = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			require.Equal(t, tc.code, resp.StatusCode, string(b))
+			require.Contains(t, string(b), tc.state)
 			if tc.kind == "foreign" {
-				require.Len(t, f.Requests(), calls+2)
+				require.Len(t, f.Requests(), calls+1)
 			} // identity only, never content
 			if tc.kind == "invalid" || tc.kind == "unknown" {
 				require.Len(t, f.Requests(), calls)
@@ -487,13 +476,12 @@ func TestAttachmentPublishesBeforeResponseScopeLookup(t *testing.T) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	require.NoError(t, writer.WriteField("attachment_id", attachmentID))
-	require.NoError(t, writer.WriteField("actor", "worker-a"))
 	part, err := writer.CreateFormFile("file", "note.txt")
 	require.NoError(t, err)
 	_, err = part.Write([]byte("note"))
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
-	request, err := http.NewRequest(http.MethodPost, env.URL+fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), &body)
+	request, err := http.NewRequest(http.MethodPost, env.URL+fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?actor=worker-a", p.ID, iss.ShortID), &body)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	request.Header.Set("Authorization", "Bearer worker-token")
@@ -508,4 +496,41 @@ func TestAttachmentPublishesBeforeResponseScopeLookup(t *testing.T) {
 	require.NotNil(t, msg.Event)
 	require.Equal(t, wrapped.committed.ID, msg.Event.ID)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+}
+
+func TestAttachmentEmptyPeerEntriesDoNotBlockUpload(t *testing.T) {
+	env, _ := attachmentEnv(t, 1024)
+	p, iss := seedProjectAndIssue(t, env)
+	m := metadata.Attachments{}
+	for i := range 100 {
+		m[fmt.Sprintf("%026d", i)] = jsontext.Value(`{}`)
+	}
+	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachments": m.Encode()}})
+	require.NoError(t, err)
+	code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), attachmentID, []byte("image"), 1)
+	require.Equal(t, 200, code, string(raw))
+}
+
+func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprint(configured), func(t *testing.T) {
+			env, _ := attachmentEnv(t, 1024)
+			if !configured {
+				env = testenv.New(t)
+			}
+			response, err := env.HTTP.Get(env.URL + "/api/v1/ui/snapshot?view=inbox")
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+			var raw struct {
+				Capabilities map[string]json.RawMessage `json:"capabilities"`
+			}
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&raw))
+			var enabled bool
+			if field := raw.Capabilities["attachments"]; field != nil {
+				require.NoError(t, json.Unmarshal(field, &enabled))
+			}
+			require.Equal(t, configured, enabled)
+		})
+	}
 }

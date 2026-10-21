@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/json/jsontext"
-	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -67,7 +67,7 @@ func attachmentCLIEnv(t *testing.T) (*testenv.Env, *docbanktest.Fake, string) {
 	return env, f, iss.ShortID
 }
 func TestAttachmentCLIWorkflow(t *testing.T) {
-	env, f, ref := attachmentCLIEnv(t)
+	env, _, ref := attachmentCLIEnv(t)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "screen.png")
 	require.NoError(t, os.WriteFile(file, []byte("sample bytes"), 0600))
@@ -101,13 +101,6 @@ func TestAttachmentCLIWorkflow(t *testing.T) {
 	require.NoError(t, os.Symlink(dest, link))
 	_, err = executeAttachmentCLI(t, env.URL, "get", ref, suffix, "-o", link)
 	require.Error(t, err)
-	out, err = executeAttachmentCLI(t, env.URL, "text", ref, suffix, "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, `"unprocessed"`)
-	f.State = "ready"
-	out, err = executeAttachmentCLI(t, env.URL, "text", ref, suffix, "--max-bytes", "3", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, `"OCR"`)
 	out, err = executeAttachmentCLI(t, env.URL, "rm", ref, suffix, "--json")
 	require.NoError(t, err)
 	var removed struct {
@@ -117,12 +110,12 @@ func TestAttachmentCLIWorkflow(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &removed))
 	require.Equal(t, id, removed.AttachmentID)
 	require.True(t, removed.Removed)
-	_, err = executeAttachmentCLI(t, env.URL, "text", ref, suffix)
+	_, err = executeAttachmentCLI(t, env.URL, "get", ref, suffix)
 	require.Error(t, err)
 }
 
 func TestAttachmentCLIOutputModes(t *testing.T) {
-	env, f, ref := attachmentCLIEnv(t)
+	env, _, ref := attachmentCLIEnv(t)
 	file := filepath.Join(t.TempDir(), "agent-note.txt")
 	content := []byte("attachment text")
 	require.NoError(t, os.WriteFile(file, content, 0600))
@@ -162,14 +155,6 @@ func TestAttachmentCLIOutputModes(t *testing.T) {
 	require.Equal(t, 1, listed.KataAPIVersion)
 	require.Len(t, listed.Attachments, 2)
 	require.Contains(t, listed.Attachments, attachmentID)
-
-	f.State = "ready"
-	f.Text = "sample rendition"
-	out, err = executeAttachmentCLIWithRootFlags(t, env.URL, []string{"--agent"}, "text", ref, attachmentID)
-	require.NoError(t, err)
-	require.Contains(t, out, "OK docbank-attachments-text state=ready")
-	require.Contains(t, out, "sample rendition")
-	require.NotContains(t, out, `"kata_api_version"`)
 
 	jsonPath := filepath.Join(t.TempDir(), "json-download.txt")
 	out, err = executeAttachmentCLIWithRootFlags(t, env.URL, []string{"--json"}, "get", ref, attachmentID, "-o", jsonPath)
@@ -236,13 +221,6 @@ func TestAttachmentCLIDaemonErrorsKeepCLIClassification(t *testing.T) {
 			args:   []string{"rm", ref, id}, wantKind: kindNotFound, wantCode: "attachment_not_found", wantExit: ExitNotFound,
 			wantHint: "refresh the issue", wantMessage: "attachment not found",
 		},
-		{
-			name: "text validation", method: http.MethodGet, suffix: "/attachments/" + id + "/text",
-			status: http.StatusBadRequest,
-			body:   `{"error":{"code":"attachment_invalid","message":"attachment invalid","hint":"check the attachment reference"}}`,
-			args:   []string{"text", ref, id}, wantKind: kindValidation, wantCode: "attachment_invalid", wantExit: ExitValidation,
-			wantHint: "check the attachment reference", wantMessage: "attachment invalid",
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -304,7 +282,6 @@ func TestAttachmentCLIInputErrorsKeepCLIClassification(t *testing.T) {
 		message  string
 	}{
 		{name: "missing attachment", args: []string{"rm", ref, "missing"}, wantKind: kindNotFound, wantExit: ExitNotFound, message: "attachment not found"},
-		{name: "invalid max bytes", args: []string{"text", ref, id, "--max-bytes", "0"}, wantKind: kindValidation, wantExit: ExitValidation, message: "max-bytes must be between 1 and 16777216"},
 		{name: "existing destination", args: []string{"get", ref, id, "-o", existing}, wantKind: kindConflict, wantExit: ExitConflict, message: "destination already exists (use --force)"},
 	}
 	for _, test := range tests {
@@ -434,36 +411,6 @@ func TestAttachmentCLIGetInvalidPeerEntryIsValidationError(t *testing.T) {
 	envelope := parseErrorEnvelope(t, []byte(stderr))
 	require.Equal(t, string(kindValidation), envelope.Error.Kind)
 	require.Equal(t, ExitValidation, envelope.Error.ExitCode)
-}
-
-func TestPublishAttachmentWithoutHardLinks(t *testing.T) {
-	dir := t.TempDir()
-	temp := filepath.Join(dir, "verified")
-	dest := filepath.Join(dir, "destination")
-	require.NoError(t, os.WriteFile(temp, []byte("verified attachment"), 0600))
-	linkErr := errors.New("hard links are unsupported")
-	err := publishAttachmentNoReplace(temp, dest, func(string, string) error { return linkErr })
-	require.NoError(t, err)
-	got, err := os.ReadFile(dest) //nolint:gosec // G304: path belongs to this isolated test fixture.
-	require.NoError(t, err)
-	require.Equal(t, "verified attachment", string(got))
-	_, err = os.Lstat(temp)
-	require.True(t, os.IsNotExist(err), "successful publication removes the temporary file")
-}
-
-func TestPublishAttachmentWithoutHardLinksDoesNotReplace(t *testing.T) {
-	dir := t.TempDir()
-	temp := filepath.Join(dir, "verified")
-	dest := filepath.Join(dir, "destination")
-	require.NoError(t, os.WriteFile(temp, []byte("verified attachment"), 0600))
-	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
-	err := publishAttachmentNoReplace(temp, dest, func(string, string) error {
-		return errors.New("hard links are unsupported")
-	})
-	require.Error(t, err)
-	got, err := os.ReadFile(dest) //nolint:gosec // G304: path belongs to this isolated test fixture.
-	require.NoError(t, err)
-	require.Equal(t, "existing", string(got))
 }
 
 func TestAttachmentCLIDownloadAllowsBothMaximumTransferLegs(t *testing.T) {
@@ -614,6 +561,8 @@ func TestAttachmentCLIStableRetry(t *testing.T) {
 			b, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(b))
 			require.NoError(t, r.ParseMultipartForm(1<<20))
+			require.Equal(t, "operator", r.URL.Query().Get("actor"))
+			require.Empty(t, r.MultipartForm.Value["actor"])
 			ids = append(ids, r.FormValue("attachment_id"))
 			r.Body = io.NopCloser(bytes.NewReader(b))
 			if len(ids) == 1 {
@@ -656,30 +605,37 @@ func TestShowAttachmentSection(t *testing.T) {
 	require.Contains(t, b.String(), "2 bytes")
 }
 
-func TestAttachmentCLITextSanitizesTerminalControls(t *testing.T) {
-	env, f, ref := attachmentCLIEnv(t)
-	file := filepath.Join(t.TempDir(), "note.txt")
-	require.NoError(t, os.WriteFile(file, []byte("note"), 0600))
-	out, err := executeAttachmentCLI(t, env.URL, "add", ref, file, "--json")
-	require.NoError(t, err)
-	var added struct {
-		Results []struct {
-			AttachmentID string `json:"attachment_id"`
-		} `json:"results"`
+func TestAttachmentReadersSkipInvalidPeerEntries(t *testing.T) {
+	const id = "01JB3Z6V2K8M4Q9T1X5W7Y0RNA"
+	m := metadata.Attachments{}
+	require.NoError(t, m.Add(id, metadata.Attachment{Name: "screen.png", MediaType: "image/png", Size: 3, Docbank: metadata.DocbankReference{VaultUID: docbanktest.VaultUID, NodeID: 42, ContentVersionID: "6f1c2e8a-2222-4222-8222-222222222222", ContentSHA256: strings.Repeat("a", 64)}}))
+	m["01JB3Z6V2K8M4Q9T1X5W7Y0RNB"] = jsontext.Value(`{}`)
+	for _, mode := range []string{"human", "json", "agent", "show"} {
+		t.Run(mode, func(t *testing.T) {
+			var out bytes.Buffer
+			switch mode {
+			case "human":
+				require.NoError(t, printAttachmentsCLI(&out, m, false))
+			case "json":
+				require.NoError(t, printAttachmentsCLI(&out, m, true))
+				var result struct {
+					Attachments map[string]json.RawMessage `json:"attachments"`
+				}
+				require.NoError(t, json.Unmarshal(out.Bytes(), &result))
+				require.Len(t, result.Attachments, 1)
+			case "agent":
+				require.NoError(t, printAttachmentsAgentCLI(&out, m))
+				require.Contains(t, out.String(), "count=1")
+			case "show":
+				require.NoError(t, printIssueAttachments(&out, m.Encode()))
+			}
+			require.Contains(t, out.String(), "screen.png")
+			require.NotContains(t, out.String(), "01JB3Z6V2K8M4Q9T1X5W7Y0RNB")
+			require.NotContains(t, out.String(), "invalid")
+		})
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &added))
-	f.State = "ready"
-	f.Text = "hello\x1b[31m red\x1b[0m\n\x1b]52;c;ZXhhbXBsZQ==\aend"
-	out, err = executeAttachmentCLI(t, env.URL, "text", ref, added.Results[0].AttachmentID)
-	require.NoError(t, err)
-	require.NotContains(t, out, "\x1b")
-	require.NotContains(t, out, "\a")
-	require.Contains(t, out, "hello")
-	out, err = executeAttachmentCLI(t, env.URL, "text", ref, added.Results[0].AttachmentID, "--json")
-	require.NoError(t, err)
-	var result struct {
-		Text string `json:"text"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, f.Text, result.Text)
+	m.Remove(id)
+	var out bytes.Buffer
+	require.NoError(t, printIssueAttachments(&out, m.Encode()))
+	require.Empty(t, out.String())
 }

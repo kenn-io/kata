@@ -26,10 +26,12 @@ irreversible hard tier, each gated behind explicit confirmation.
 (`parent`, `blocks`, `related`, with `blocked_by` as the inverse of `blocks`),
 labels, owners, comments, and an optional priority. The surface stays small on
 purpose. kata has no `in_progress` status (use `owner` or a label), no severity
-field, no threaded comment replies, no reactions, no file attachments, and no
+field, no threaded comment replies, no reactions, and no
 markdown rendering. Priority is the one field that was added after v1: it is a
 constrained integer `0`–`4` rather than an open taxonomy, so it earns its place
 without reopening the door to arbitrary custom fields.
+
+[Issue attachments](../guide/attachments.md) keep file bytes in Docbank and references on issues.
 
 ## Lineage: borrowed from roborev, narrowed on purpose
 

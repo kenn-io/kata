@@ -8,6 +8,7 @@ import type {
   AcquireIssueLeasePathParameters,
   ActionRequestBody,
   AddAttachmentBody,
+  AddAttachmentParams,
   AddAttachmentPathParameters,
   AddLabelPathParameters,
   AddLabelRequestBody,
@@ -19,8 +20,6 @@ import type {
   AssignRequestBody,
   AttachmentContentPathParameters,
   AttachmentResponseBody,
-  AttachmentTextParams,
-  AttachmentTextPathParameters,
   AuditClosesParams,
   AuditClosesResponseBody,
   BindExternalRootPathParameters,
@@ -298,7 +297,6 @@ import type {
   SkipFederationQuarantinePathParameters,
   SkipFederationQuarantineRequestBody,
   TeamResponseBody,
-  TextResult,
   UIIssueReferenceResponseBody,
   UILaunchTargetResponseBody,
   UIReferencesResponseBody,
@@ -311,7 +309,6 @@ import type {
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
-import { orvalBlobFetch } from '../../client.ts'
 
 export type HTTPStatusCode1xx = 100 | 101 | 102 | 103
 export type HTTPStatusCode2xx = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207
@@ -4361,23 +4358,36 @@ export type addAttachmentResponseError = addAttachmentResponseDefault & {
 
 export type addAttachmentResponse = addAttachmentResponseSuccess | addAttachmentResponseError
 
-export const getAddAttachmentUrl = ({ projectId, ref }: AddAttachmentPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments`
+export const getAddAttachmentUrl = (
+  { projectId, ref }: AddAttachmentPathParameters,
+  params?: AddAttachmentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments`
 }
 
 export const addAttachment = async (
   { projectId, ref }: AddAttachmentPathParameters,
   addAttachmentBody: AddAttachmentBody,
+  params?: AddAttachmentParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<addAttachmentResponse> => {
   const formData = new FormData()
-  if (addAttachmentBody.actor !== undefined) {
-    formData.append(`actor`, addAttachmentBody.actor)
-  }
   formData.append(`attachment_id`, addAttachmentBody.attachment_id)
   formData.append(`file`, addAttachmentBody.file)
 
-  return orvalFetch<addAttachmentResponse>(getAddAttachmentUrl({ projectId, ref }), {
+  return orvalFetch<addAttachmentResponse>(getAddAttachmentUrl({ projectId, ref }, params), {
     ...options,
     method: 'POST',
     body: formData,
@@ -4469,62 +4479,10 @@ export const getAttachmentContentUrl = ({
 
 export const attachmentContent = async (
   { projectId, ref, attachmentId }: AttachmentContentPathParameters,
-  options?: Parameters<typeof orvalBlobFetch>[1],
-): Promise<attachmentContentResponse> => {
-  return orvalBlobFetch<attachmentContentResponse>(
-    getAttachmentContentUrl({ projectId, ref, attachmentId }),
-    {
-      ...options,
-      method: 'GET',
-    },
-  )
-}
-
-export type attachmentTextResponse200 = {
-  data: TextResult
-  status: 200
-}
-
-export type attachmentTextResponseDefault = {
-  data: ErrorEnvelope
-  status: Exclude<HTTPStatusCodes, 200>
-}
-
-export type attachmentTextResponseSuccess = attachmentTextResponse200 & {
-  headers: Headers
-}
-export type attachmentTextResponseError = attachmentTextResponseDefault & {
-  headers: Headers
-}
-
-export type attachmentTextResponse = attachmentTextResponseSuccess | attachmentTextResponseError
-
-export const getAttachmentTextUrl = (
-  { projectId, ref, attachmentId }: AttachmentTextPathParameters,
-  params?: AttachmentTextParams,
-) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/text?${stringifiedParams}`
-    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/text`
-}
-
-export const attachmentText = async (
-  { projectId, ref, attachmentId }: AttachmentTextPathParameters,
-  params?: AttachmentTextParams,
   options?: Parameters<typeof orvalFetch>[1],
-): Promise<attachmentTextResponse> => {
-  return orvalFetch<attachmentTextResponse>(
-    getAttachmentTextUrl({ projectId, ref, attachmentId }, params),
+): Promise<attachmentContentResponse> => {
+  return orvalFetch<attachmentContentResponse>(
+    getAttachmentContentUrl({ projectId, ref, attachmentId }),
     {
       ...options,
       method: 'GET',

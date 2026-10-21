@@ -186,6 +186,9 @@ export interface KataIssueDetailProps {
   attachmentControlsDisabled?: boolean | undefined
   attachmentContextKey?: string | undefined
   fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
+  uploadAttachment?: ((file: File) => Promise<void>) | undefined
+  attachmentsEnabled?: boolean | undefined
+  actionsDisabled?: boolean | undefined
   detail: KataIssueDetailModel
   actions?: readonly KataIssueHostAction[]
   /** Host navigation for parent, child, and linked issue references. */

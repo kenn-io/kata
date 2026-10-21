@@ -1,9 +1,11 @@
 package daemon_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,7 +196,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
 		w.Header().Set("Set-Cookie", "upstream=secret")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`,
+		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"sse","actor_policy":"request"}}`,
 			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(upstream.Close)
@@ -224,7 +226,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`,
+	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"poll","actor_policy":"request"}}`,
 		api.UISnapshotContractVersion), string(body))
 	assert.Empty(t, response.Header.Get("Set-Cookie"))
 }
@@ -502,13 +504,26 @@ func TestWebDaemonProxyAttachmentStreamOutlivesJSONDeadline(t *testing.T) {
 	require.Equal(t, payload, string(body))
 }
 
-func TestWebDaemonProxyAttachmentTextOutlivesJSONDeadline(t *testing.T) {
+func TestWebDaemonProxyAttachmentUploadOutlivesJSONDeadline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("exercises the live 30-second gateway deadline")
 	}
-	payload := `{"state":"ready","text":"verified text"}`
+	payload := `{"attachment_id":"saved"}`
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/instance" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities":     api.UICapabilities{Writable: true, ActorPolicy: "request"},
+			})
+			return
+		}
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "operator", r.URL.Query().Get("actor"))
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		require.NoError(t, r.ParseMultipartForm(1024)) //nolint:gosec // G120: MaxBytesReader above caps the test request at 1 MiB.
+		defer func() { _ = r.MultipartForm.RemoveAll() }()
+		require.Equal(t, "01JB3Z6V2K8M4Q9T1X5W7Y0RNA", r.FormValue("attachment_id"))
 		select {
 		case <-time.After(31 * time.Second):
 			_, _ = io.WriteString(w, payload)
@@ -518,10 +533,22 @@ func TestWebDaemonProxyAttachmentTextOutlivesJSONDeadline(t *testing.T) {
 	defer upstream.Close()
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	response, err := http.Get(server.URL + "/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/text")
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("attachment_id", "01JB3Z6V2K8M4Q9T1X5W7Y0RNA"))
+	file, err := writer.CreateFormFile("file", "screen.png")
+	require.NoError(t, err)
+	_, err = file.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?actor=operator", &body)
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
-	body, err := io.ReadAll(response.Body)
+	result, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	require.Equal(t, payload, string(body))
+	require.Equal(t, http.StatusOK, response.StatusCode, string(result))
+	require.Equal(t, payload, string(result))
 }

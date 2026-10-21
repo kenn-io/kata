@@ -33,11 +33,10 @@ const (
 )
 
 func newAttachmentCmd() *cobra.Command {
-	root := &cobra.Command{Use: "attachments", Short: "attach Docbank files and read pinned content or text"}
-	for _, action := range []string{"add", "ls", "get", "text", "rm"} {
-		var output, profile string
+	root := &cobra.Command{Use: "attachments", Short: "attach Docbank files and read pinned content"}
+	for _, action := range []string{"add", "ls", "get", "rm"} {
+		var output string
 		var force bool
-		var maxBytes int64 = 64 << 10
 		cmd := &cobra.Command{Use: action + " <issue> <attachment>", Short: action + " issue attachments", Args: cobra.ExactArgs(2)}
 		if action == "add" {
 			cmd.Use = "add <issue> <file>..."
@@ -51,10 +50,6 @@ func newAttachmentCmd() *cobra.Command {
 			cmd.Flags().StringVarP(&output, "output", "o", "", "destination (defaults to attachment name)")
 			cmd.Flags().BoolVar(&force, "force", false, "replace the destination without following symlinks")
 		}
-		if action == "text" {
-			cmd.Flags().Int64Var(&maxBytes, "max-bytes", 64<<10, "maximum UTF-8 text bytes (1–16777216)")
-			cmd.Flags().StringVar(&profile, "profile", "", "Docbank text profile")
-		}
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			ctx, base, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {
@@ -67,7 +62,7 @@ func newAttachmentCmd() *cobra.Command {
 			copyClient := *hc
 			// Uploads and database-token-authorized downloads can traverse two
 			// sequential transfer legs. Reserve both windows plus processing
-			// overhead; text reads use one upstream transfer window.
+			// overhead.
 			copyClient.Timeout = attachmentReadTimeout
 			if action == "add" || action == "get" {
 				copyClient.Timeout = attachmentTransferTimeout
@@ -132,30 +127,6 @@ func newAttachmentCmd() *cobra.Command {
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), "removed "+id)
 				return err
-			case "text":
-				if maxBytes < 1 || maxBytes > 16<<20 {
-					return externalCLIValidation("max-bytes must be between 1 and 16777216")
-				}
-				response, callErr := client.AttachmentTextWithResponse(ctx, &generated.AttachmentTextRequestOptions{PathParams: &generated.AttachmentTextPath{ProjectID: pid, Ref: ref.RefForAPI, AttachmentID: id}, Query: &generated.AttachmentTextQuery{MaxBytes: &maxBytes, Profile: nonemptyStringPointer(profile)}})
-				if err := externalCLITransportError(response, callErr); err != nil {
-					return err
-				}
-				if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-					return err
-				}
-				result := response.JSON200
-				switch currentOutputMode() {
-				case outputJSON:
-					return emitJSON(cmd.OutOrStdout(), result)
-				case outputAgent:
-					return printAttachmentTextAgent(cmd.OutOrStdout(), id, result)
-				}
-				if result.Text != nil {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), textsafe.Block(*result.Text))
-				} else {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), result.State)
-				}
-				return err
 			case "get":
 				e, err := m.Lookup(id)
 				if err != nil {
@@ -214,7 +185,13 @@ func safeAttachmentFilename(name string) string {
 }
 func printAttachmentsCLI(w io.Writer, m metadata.Attachments, structured bool) error {
 	if structured {
-		return emitJSON(w, map[string]any{"attachments": m})
+		visible := metadata.Attachments{}
+		for id := range m {
+			if _, err := m.Lookup(id); err == nil {
+				visible[id] = m[id]
+			}
+		}
+		return emitJSON(w, map[string]any{"attachments": visible})
 	}
 	ids := make([]string, 0, len(m))
 	for id := range m {
@@ -224,9 +201,6 @@ func printAttachmentsCLI(w io.Writer, m metadata.Attachments, structured bool) e
 	for _, id := range ids {
 		e, err := m.Lookup(id)
 		if err != nil {
-			if _, err = fmt.Fprintf(w, "%s  invalid\n", textsafe.Line(id)); err != nil {
-				return err
-			}
 			continue
 		}
 		suffix := id
@@ -305,7 +279,9 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *kataclient.Cl
 func printAttachmentsAgentCLI(w io.Writer, m metadata.Attachments) error {
 	ids := make([]string, 0, len(m))
 	for id := range m {
-		ids = append(ids, id)
+		if _, err := m.Lookup(id); err == nil {
+			ids = append(ids, id)
+		}
 	}
 	slices.Sort(ids)
 	if _, err := fmt.Fprintf(w, "OK docbank-attachments-ls count=%d\n", len(ids)); err != nil {
@@ -314,29 +290,11 @@ func printAttachmentsAgentCLI(w io.Writer, m metadata.Attachments) error {
 	for _, id := range ids {
 		entry, err := m.Lookup(id)
 		if err != nil {
-			if _, err := fmt.Fprintf(w, "- id=%s invalid=true\n", agentValue(id)); err != nil {
-				return err
-			}
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "- id=%s name=%s media_type=%s size=%d\n", agentValue(id), agentValue(entry.Name), agentValue(entry.MediaType), entry.Size); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func printAttachmentTextAgent(w io.Writer, id string, result *generated.AttachmentTextResponse) error {
-	textBytes := 0
-	if result.Text != nil {
-		textBytes = len(*result.Text)
-	}
-	if _, err := fmt.Fprintf(w, "OK docbank-attachments-text state=%s attachment_id=%s bytes=%d truncated=%t\n", agentValue(result.State), agentValue(id), textBytes, result.Truncated); err != nil {
-		return err
-	}
-	if result.Text != nil {
-		_, err := fmt.Fprint(w, agentFencedText(*result.Text))
-		return err
 	}
 	return nil
 }
@@ -371,9 +329,6 @@ func uploadAttachmentCLI(ctx context.Context, c *kataclient.Client, pid int64, r
 	done := make(chan error, 1)
 	go func() {
 		err := mw.WriteField("attachment_id", id)
-		if err == nil {
-			err = mw.WriteField("actor", actor)
-		}
 		var part io.Writer
 		if err == nil {
 			part, err = mw.CreateFormFile("file", safeAttachmentFilename(filename))
@@ -388,7 +343,7 @@ func uploadAttachmentCLI(ctx context.Context, c *kataclient.Client, pid int64, r
 		done <- err
 	}()
 	// This generator exposes request editors rather than a WithBody variant.
-	resp, callErr := c.AddAttachmentWithResponse(ctx, &generated.AddAttachmentRequestOptions{PathParams: &generated.AddAttachmentPath{ProjectID: pid, Ref: ref}}, func(_ context.Context, r *http.Request) error {
+	resp, callErr := c.AddAttachmentWithResponse(ctx, &generated.AddAttachmentRequestOptions{PathParams: &generated.AddAttachmentPath{ProjectID: pid, Ref: ref}, Query: &generated.AddAttachmentQuery{Actor: &actor}}, func(_ context.Context, r *http.Request) error {
 		r.Body = reader
 		r.ContentLength = -1
 		r.Header.Set("Content-Type", mw.FormDataContentType())
@@ -453,40 +408,23 @@ func downloadAttachmentCLI(ctx context.Context, c *http.Client, endpoint string,
 	if force {
 		return atomicfile.Replace(temp.Name(), dest)
 	}
-	return publishAttachmentNoReplace(temp.Name(), dest, os.Link)
-}
-
-// publishAttachmentNoReplace publishes the verified file without overwriting
-// a destination created after the initial check. Some filesystems do not
-// support hard links, so an exclusive copy provides the same no-overwrite rule.
-func publishAttachmentNoReplace(tempPath, dest string, link func(string, string) error) error {
-	if err := link(tempPath, dest); err == nil {
-		return os.Remove(tempPath)
-	}
-
-	destination, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) //nolint:gosec // G304: the operator selects the destination; O_EXCL prevents replacing an existing path.
-	if err != nil {
-		return err
-	}
-	source, err := os.Open(tempPath) //nolint:gosec // G304: tempPath was created by os.CreateTemp in the destination directory.
-	if err != nil {
-		closeErr := destination.Close()
-		removeErr := os.Remove(dest)
-		return errors.Join(err, closeErr, removeErr)
-	}
-	_, copyErr := io.Copy(destination, source)
-	sourceCloseErr := source.Close()
-	destinationCloseErr := destination.Close()
-	if err = errors.Join(copyErr, sourceCloseErr, destinationCloseErr); err != nil {
-		return errors.Join(err, os.Remove(dest))
-	}
-	return os.Remove(tempPath)
+	return atomicfile.PublishNoReplace(temp.Name(), dest)
 }
 
 // Used by show's human view; structured output retains the original metadata.
 func printIssueAttachments(w io.Writer, raw jsontext.Value) error {
 	m, err := metadata.DecodeAttachments(raw)
-	if err != nil || len(m) == 0 {
+	if err != nil {
+		return nil
+	}
+	visible := false
+	for id := range m {
+		if _, err := m.Lookup(id); err == nil {
+			visible = true
+			break
+		}
+	}
+	if !visible {
 		return nil
 	}
 	if _, err = fmt.Fprintln(w, "\n--- attachments ---"); err != nil {

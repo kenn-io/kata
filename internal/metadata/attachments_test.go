@@ -38,11 +38,12 @@ func TestAttachmentAdmission(t *testing.T) {
 	require.Error(t, ValidateEntry("bad", validAttachment()))
 	m := Attachments{}
 	for i := range 100 {
-		m[fmt.Sprintf("%026d", i)] = jsontext.Value(`{"future":true}`)
+		raw, err := json.Marshal(validAttachment())
+		require.NoError(t, err)
+		m[fmt.Sprintf("%026d", i)] = raw
 	}
-	require.Error(t, m.AdmitAdd(attachmentID, validAttachment()))
+	require.Error(t, m.Add(attachmentID, validAttachment()))
 	m.Remove("00000000000000000000000000")
-	require.NoError(t, m.AdmitAdd(attachmentID, validAttachment()))
 	require.NoError(t, m.Add(attachmentID, validAttachment()))
 	require.Error(t, m.Add(attachmentID, validAttachment()))
 }
@@ -58,7 +59,6 @@ func TestAttachmentsPreservePeers(t *testing.T) {
 			m[fmt.Sprintf("%026d", i)] = bytes.Clone(raw)
 		}
 		before := m.Encode()
-		require.NoError(t, m.AdmitAdd(attachmentID, validAttachment()))
 		require.NoError(t, m.Add(attachmentID, validAttachment()))
 		encoded := m.Encode()
 		got, err := DecodeAttachments(encoded)
@@ -89,7 +89,13 @@ func TestAttachmentsOverLimitPeersDecodeAndRemove(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		count := rapid.IntRange(100, 150).Draw(t, "count")
 		value := rapid.String().Draw(t, "opaque")
-		raw, err := json.Marshal(map[string]any{"future": value})
+		raw, err := json.Marshal(validAttachment())
+		require.NoError(t, err)
+		var fields map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		fields["future"], err = json.Marshal(value)
+		require.NoError(t, err)
+		raw, err = json.Marshal(fields)
 		require.NoError(t, err)
 		peers := Attachments{}
 		for i := range count {
@@ -97,11 +103,22 @@ func TestAttachmentsOverLimitPeersDecodeAndRemove(t *testing.T) {
 		}
 		got, err := DecodeAttachments(peers.Encode())
 		require.NoError(t, err)
-		require.Error(t, got.AdmitAdd(attachmentID, validAttachment()))
+		require.Error(t, got.Add(attachmentID, validAttachment()))
 		got.Remove(fmt.Sprintf("%026d", 0))
 		require.Len(t, got, count-1)
 		for id, entry := range got {
 			require.Equal(t, peers[id], entry)
 		}
 	})
+}
+
+func TestAttachmentsInvalidPeersDoNotCountTowardLimit(t *testing.T) {
+	m := Attachments{}
+	for i := range 100 {
+		m[fmt.Sprintf("%026d", i)] = jsontext.Value(`{}`)
+	}
+	require.NoError(t, m.Add(attachmentID, validAttachment()))
+	entry, err := m.Lookup(attachmentID)
+	require.NoError(t, err)
+	require.Equal(t, "screen.png", entry.Name)
 }

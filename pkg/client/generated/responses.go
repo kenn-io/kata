@@ -379,10 +379,6 @@ type AttachmentContentResponse = runtime.File
 
 type AttachmentContentErrorResponse = ErrorEnvelope
 
-type AttachmentTextResponse = TextResult
-
-type AttachmentTextErrorResponse = ErrorEnvelope
-
 type UnbindExternalRootResponse = ExternalRootBridgeOut
 
 type UnbindExternalRootErrorResponse = ErrorEnvelope
@@ -1328,13 +1324,6 @@ type AttachmentContentResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
-}
-
-type AttachmentTextResp struct {
-	HTTPResponse *http.Response
-	Body         []byte
-	StatusCode   int
-	JSON200      *AttachmentTextResponse
 }
 
 type UnbindExternalRootResp struct {

@@ -3,7 +3,6 @@
  */
 
 export type AddAttachmentBody = {
-  actor?: string
   attachment_id: string
   file: Blob
 }

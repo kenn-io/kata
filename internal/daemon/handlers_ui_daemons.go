@@ -722,9 +722,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		timeout := webDaemonProxyTimeout
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/projects/"), "/")
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/projects/") && len(parts) == 6 && parts[1] == "issues" && parts[3] == "attachments" && (parts[5] == "content" || parts[5] == "text") {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/projects/") && len(parts) >= 4 && parts[1] == "issues" && parts[3] == "attachments" &&
+			((r.Method == http.MethodGet && len(parts) == 6 && parts[5] == "content") || (r.Method == http.MethodPost && len(parts) == 4)) {
 			// The Docbank client allows 30s plus 1s/MiB, up to 2GiB. Leave
-			// room for identity checks and complete-artifact text verification.
+			// room for identity checks and attachment transfers.
 			timeout = 36 * time.Minute
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)

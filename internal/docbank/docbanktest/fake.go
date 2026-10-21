@@ -25,8 +25,6 @@ const VaultUID = "6f1c2e8a-1111-4111-8111-111111111111"
 type Fake struct {
 	Server   *httptest.Server
 	Fault    string
-	State    string
-	Text     string
 	mu       sync.Mutex
 	requests []string
 	dirs     map[string]int64
@@ -37,7 +35,7 @@ type Fake struct {
 
 // New starts a fake server and registers its cleanup.
 func New(t testing.TB) *Fake {
-	f := &Fake{State: "unprocessed", Text: "OCR café", dirs: map[string]int64{"/": 1}, nodes: map[int64]map[string]any{}, versions: map[string]map[string]any{}, content: map[string][]byte{}}
+	f := &Fake{dirs: map[string]int64{"/": 1}, nodes: map[int64]map[string]any{}, versions: map[string]map[string]any{}, content: map[string][]byte{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
@@ -175,22 +173,6 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			digest = "wrong"
 		}
 		w.Header().Set("Content-Digest", digest)
-	case p == "/api/v1/renditions/text" && r.Method == "POST":
-		var source map[string]any
-		_ = json.UnmarshalRead(r.Body, &source)
-		sum := sha256.Sum256([]byte(f.Text))
-		send(map[string]any{"state": f.State, "source": source, "profile": map[string]string{"fingerprint": strings.Repeat("a", 64)}, "generation_id": strings.Repeat("b", 64), "attachment_id": strings.Repeat("c", 64), "build_id": strings.Repeat("d", 64), "artifact": map[string]any{"id": "text-artifact", "sha256": hex.EncodeToString(sum[:]), "size": len(f.Text)}})
-	case p == "/api/v1/renditions/text/content" && r.Method == "GET":
-		q := r.URL.Query()
-		if q.Get("version_id") == "" || q.Get("profile_fingerprint") == "" || q.Get("attachment_id") == "" || q.Get("build_id") == "" || q.Get("artifact_id") != "text-artifact" {
-			http.Error(w, "binding", 400)
-			return
-		}
-		sum := sha256.Sum256([]byte(f.Text))
-		w.Header().Set("X-Docbank-Rendition-SHA256", hex.EncodeToString(sum[:]))
-		w.Header().Set("X-Docbank-Rendition-Size", strconv.Itoa(len(f.Text)))
-		w.Header().Set("Content-Digest", "sha-256=:"+base64.StdEncoding.EncodeToString(sum[:])+":")
-		_, _ = io.WriteString(w, f.Text)
 	default:
 		http.NotFound(w, r)
 	}

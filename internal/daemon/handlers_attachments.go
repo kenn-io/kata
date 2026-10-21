@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -25,7 +26,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-var attachmentUploadRoute = regexp.MustCompile(`^/api/v1/projects/[^/]+/issues/[^/]+/attachments$`)
+var attachmentUploadRoute = regexp.MustCompile(`^(/api/v1/ui/proxy)?/api/v1/projects/[^/]+/issues/[^/]+/attachments$`)
 
 func isAttachmentUpload(r *http.Request) bool {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -65,6 +66,34 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	}
 	slots := make(chan struct{}, 2)
 	bound := func(ctx huma.Context, next func(huma.Context)) {
+		if err := func() error {
+			if cfg.Docbank == nil {
+				return attachmentError(503, "docbank_not_configured")
+			}
+			projectID, err := strconv.ParseInt(ctx.Param("project_id"), 10, 64)
+			if err != nil {
+				return attachmentError(400, "validation")
+			}
+			actor, err := attributedActor(ctx.Context(), ctx.Query("actor"))
+			if err != nil {
+				return err
+			}
+			iss, err := activeIssueByRef(ctx.Context(), cfg.DB, projectID, ctx.Param("ref"), db.IncludeDeletedNo)
+			if err != nil {
+				return err
+			}
+			return requireFederatedIssueClaim(ctx.Context(), cfg, projectID, iss, actor)
+		}(); err != nil {
+			err = internalAPIError(err)
+			status := http.StatusInternalServerError
+			if statusError, ok := errors.AsType[huma.StatusError](err); ok {
+				status = statusError.GetStatus()
+			}
+			ctx.SetHeader("Content-Type", "application/json")
+			ctx.SetStatus(status)
+			_ = json.MarshalWrite(ctx.BodyWriter(), err)
+			return
+		}
 		select {
 		case slots <- struct{}{}:
 			defer func() { <-slots }()
@@ -88,20 +117,14 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
 		next(ctx)
 	}
-	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, BodyReadTimeout: -1, Middlewares: huma.Middlewares{bound}, RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{"multipart/form-data": {Schema: &huma.Schema{Type: "object", Required: []string{"file", "attachment_id"}, Properties: map[string]*huma.Schema{"file": {Type: "string", Format: "binary"}, "attachment_id": {Type: "string"}, "actor": {Type: "string"}}}}}}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AttachmentResponse, error) {
-		actor, err := attributedActor(ctx, firstFormValue(in.RawBody.Value, "actor"))
+	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, BodyReadTimeout: -1, Middlewares: huma.Middlewares{bound}, RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{"multipart/form-data": {Schema: &huma.Schema{Type: "object", Required: []string{"file", "attachment_id"}, Properties: map[string]*huma.Schema{"file": {Type: "string", Format: "binary"}, "attachment_id": {Type: "string"}}}}}}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AttachmentResponse, error) {
+		actor, err := attributedActor(ctx, in.Actor)
 		if err != nil {
 			return nil, err
 		}
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
-		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
-			return nil, err
-		}
-		if cfg.Docbank == nil {
-			return nil, attachmentError(503, "docbank_not_configured")
 		}
 		files := in.RawBody.File["file"]
 		if len(files) != 1 || len(in.RawBody.File) != 1 || len(in.RawBody.Value["attachment_id"]) != 1 {
@@ -132,6 +155,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		e.MediaType = http.DetectContentType(head[:n])
+		if e.MediaType == "application/ogg" {
+			e.MediaType = "video/ogg"
+		}
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -168,10 +194,10 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 				}
 				return e, false, attachmentError(409, "attachment_id_conflict")
 			}
-			if err := m.AdmitAdd(id, e); err != nil {
+			if err := m.Add(id, e); err != nil {
 				return e, false, attachmentError(400, "attachment_invalid")
 			}
-			return e, true, m.Add(id, e)
+			return e, true, nil
 		})
 		if err != nil {
 			return nil, err
@@ -239,7 +265,13 @@ func preflightAttachmentAdmission(raw db.JSONBlob, id string) error {
 		}
 		return nil
 	}
-	if len(m) >= 100 {
+	count := 0
+	for key := range m {
+		if _, err := m.Lookup(key); err == nil {
+			count++
+		}
+	}
+	if count >= 100 {
 		return attachmentError(400, "attachment_invalid")
 	}
 	return nil

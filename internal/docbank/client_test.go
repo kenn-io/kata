@@ -9,12 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
-	"pgregory.net/rapid"
 )
 
 func uploadFixture(t *testing.T, f *docbanktest.Fake) (*Client, metadata.Attachment) {
@@ -59,27 +57,6 @@ func TestContentPinnedIntegrity(t *testing.T) {
 		})
 	}
 }
-func TestTextStatesAndPinnedVersion(t *testing.T) {
-	for _, state := range []string{"ready", "verified_empty", "unprocessed", "failed", "unconfigured", "profile_required", "historical_unavailable"} {
-		t.Run(state, func(t *testing.T) {
-			f := docbanktest.New(t)
-			c, e := uploadFixture(t, f)
-			f.State = state
-			out, err := c.Text(t.Context(), e, "ocr", 5)
-			require.NoError(t, err)
-			if state == "verified_empty" {
-				require.Equal(t, "ready", out.State)
-				require.Empty(t, out.Text)
-			} else {
-				require.Equal(t, state, out.State)
-			}
-			if state == "ready" {
-				require.Equal(t, "OCR c", out.Text)
-				require.True(t, out.Truncated)
-			}
-		})
-	}
-}
 func TestClientErrorClassesAndRedirectRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		status int
@@ -119,42 +96,6 @@ func TestInvalidUploadReceipt(t *testing.T) {
 	_, err := c.Upload(t.Context(), 1, "x.txt", "text/plain", strings.NewReader("x"), 1, hex.EncodeToString(sum[:]))
 	require.Equal(t, "invalid_receipt", ErrorKind(err))
 }
-func TestTruncateUTF8Property(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		s := rapid.String().Draw(t, "text")
-		n := rapid.IntRange(0, len(s)+4).Draw(t, "maxBytes")
-		got := truncateUTF8([]byte(s), n)
-		require.True(t, utf8.Valid(got))
-		require.LessOrEqual(t, len(got), n)
-		require.True(t, strings.HasPrefix(s, string(got)))
-	})
-}
-
-func FuzzTruncateUTF8(f *testing.F) {
-	f.Add("OCR café", uint16(6))
-	f.Add("", uint16(0))
-	f.Add("😀界", uint16(4))
-	f.Fuzz(func(t *testing.T, s string, n uint16) {
-		if !utf8.ValidString(s) {
-			t.Skip("rendition text contract requires UTF-8")
-		}
-		got := truncateUTF8([]byte(s), int(n))
-		require.True(t, utf8.Valid(got))
-		require.LessOrEqual(t, len(got), int(n))
-		require.True(t, strings.HasPrefix(s, string(got)))
-	})
-}
-
-func TestTextLargeArtifactTruncatesAfterVerification(t *testing.T) {
-	f := docbanktest.New(t)
-	c, e := uploadFixture(t, f)
-	f.State = "ready"
-	f.Text = strings.Repeat("é", (8<<20)+1)
-	out, err := c.Text(t.Context(), e, "ocr", 5)
-	require.NoError(t, err)
-	require.Equal(t, "éé", out.Text)
-	require.True(t, out.Truncated)
-}
 
 type failingBody struct{}
 
@@ -165,30 +106,4 @@ func TestContentTransportInterruptionReturnsUnreachable(t *testing.T) {
 	_, err := io.ReadAll(stream)
 	require.Equal(t, "unreachable", ErrorKind(err))
 	require.Equal(t, err, stream.Close())
-}
-
-func TestTextPrefixChunkIndependence(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		text := rapid.String().Draw(t, "text")
-		limit := rapid.IntRange(1, 16<<20).Draw(t, "max_bytes")
-		chunk := rapid.IntRange(1, 257).Draw(t, "chunk_bytes")
-		p := &textPrefix{limit: limit, valid: true}
-		for rest := []byte(text); len(rest) > 0; {
-			n := min(chunk, len(rest))
-			_, _ = p.Write(rest[:n])
-			rest = rest[n:]
-		}
-		require.True(t, p.valid)
-		require.Empty(t, p.tail)
-		boundary := len(text)
-		if boundary > limit {
-			boundary = 0
-			for i := range text {
-				if i <= limit {
-					boundary = i
-				}
-			}
-		}
-		require.Equal(t, text[:boundary], string(truncateUTF8(p.bytes, limit)))
-	})
 }

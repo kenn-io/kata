@@ -10,18 +10,15 @@ import (
 	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/metadata"
@@ -72,16 +69,6 @@ func NewClient(base string, key func() (string, error)) (*Client, error) {
 	base, err := httpurl.CanonicalHTTPBaseURL(base)
 	if err != nil {
 		return nil, err
-	}
-	u, err := url.Parse(base)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme == "http" && u.Hostname() != "localhost" {
-		ip := net.ParseIP(u.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("docbank requires HTTPS except on loopback")
-		}
 	}
 	return &Client{base: base, key: key, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -376,146 +363,4 @@ func (c *Client) Content(ctx context.Context, e metadata.Attachment) (io.ReadClo
 		return nil, fault("integrity")
 	}
 	return &verifiedStream{resp: resp, h: sha256.New(), size: e.Size, sha: e.Docbank.ContentSHA256, cancel: cancel}, nil
-}
-
-// TextResult reports a successful state query even when no rendition exists.
-type TextResult struct {
-	State     string `json:"state"`
-	Text      string `json:"text,omitempty"`
-	Truncated bool   `json:"truncated"`
-}
-
-func truncateUTF8(b []byte, n int) []byte {
-	if len(b) > n {
-		b = b[:n]
-	}
-	for len(b) > 0 && !utf8.Valid(b) {
-		b = b[:len(b)-1]
-	}
-	return b
-}
-
-// Text verifies the full rendition and returns a bounded UTF-8 prefix.
-func (c *Client) Text(ctx context.Context, e metadata.Attachment, profile string, maxBytes int) (TextResult, error) {
-	if maxBytes <= 0 {
-		maxBytes = 64 << 10
-	}
-	if maxBytes > 16<<20 {
-		maxBytes = 16 << 20
-	}
-	node, err := c.verify(ctx, e)
-	if err != nil {
-		return TextResult{}, err
-	}
-	source := struct {
-		NodeID    int64  `json:"node_id"`
-		Revision  int64  `json:"revision"`
-		VersionID string `json:"version_id"`
-		BlobHash  string `json:"blob_hash"`
-		Size      int64  `json:"size"`
-		Profile   string `json:"profile,omitempty"`
-	}{e.Docbank.NodeID, node.Revision, e.Docbank.ContentVersionID, e.Docbank.ContentSHA256, e.Size, profile}
-	var receipt struct {
-		State  string `json:"state"`
-		Source struct {
-			NodeID    int64  `json:"node_id"`
-			Revision  int64  `json:"revision"`
-			VersionID string `json:"version_id"`
-			BlobHash  string `json:"blob_hash"`
-			Size      int64  `json:"size"`
-		} `json:"source"`
-		Profile struct {
-			Fingerprint string `json:"fingerprint"`
-		} `json:"profile"`
-		GenerationID string `json:"generation_id"`
-		AttachmentID string `json:"attachment_id"`
-		BuildID      string `json:"build_id"`
-		Artifact     *struct {
-			ID     string `json:"id"`
-			SHA256 string `json:"sha256"`
-			Size   int64  `json:"size"`
-		} `json:"artifact"`
-	}
-	if err := c.json(ctx, "POST", "/api/v1/renditions/text", source, &receipt); err != nil {
-		return TextResult{}, err
-	}
-	if receipt.Source.NodeID != source.NodeID || receipt.Source.Revision != source.Revision || receipt.Source.VersionID != source.VersionID || receipt.Source.BlobHash != source.BlobHash || receipt.Source.Size != source.Size {
-		return TextResult{}, fault("integrity")
-	}
-	out := TextResult{State: receipt.State}
-	switch out.State {
-	case "verified_empty":
-		out.State = "ready"
-		return out, nil
-	case "unprocessed", "failed", "unconfigured", "profile_required", "historical_unavailable":
-		return out, nil
-	case "ready":
-	default:
-		return out, fault("invalid_receipt")
-	}
-	a := receipt.Artifact
-	if a == nil || a.Size < 0 || a.ID == "" || receipt.Profile.Fingerprint == "" || receipt.AttachmentID == "" || receipt.BuildID == "" {
-		return out, fault("invalid_receipt")
-	}
-	q := url.Values{"node_id": {strconv.FormatInt(source.NodeID, 10)}, "revision": {strconv.FormatInt(source.Revision, 10)}, "version_id": {source.VersionID}, "blob_hash": {source.BlobHash}, "size": {strconv.FormatInt(source.Size, 10)}, "profile_fingerprint": {receipt.Profile.Fingerprint}, "generation_id": {receipt.GenerationID}, "attachment_id": {receipt.AttachmentID}, "build_id": {receipt.BuildID}, "artifact_id": {a.ID}}
-	ctx, cancel := context.WithTimeout(ctx, streamTimeout(a.Size))
-	defer cancel()
-	resp, err := c.request(ctx, "GET", "/api/v1/renditions/text/content?"+q.Encode(), nil, nil)
-	if err != nil {
-		return out, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	prefix := &textPrefix{limit: maxBytes, valid: true}
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(h, prefix), io.LimitReader(resp.Body, a.Size))
-	if err != nil {
-		return out, fault("unreachable")
-	}
-	// Read through EOF to establish that the declared artifact has no extra bytes.
-	var extra [1]byte
-	extraN, endErr := resp.Body.Read(extra[:])
-	if endErr != nil && endErr != io.EOF {
-		return out, fault("unreachable")
-	}
-	sum := h.Sum(nil)
-	if n != a.Size || extraN != 0 || endErr != io.EOF || hex.EncodeToString(sum) != a.SHA256 || resp.Header.Get("X-Docbank-Rendition-SHA256") != a.SHA256 || resp.Header.Get("X-Docbank-Rendition-Size") != strconv.FormatInt(a.Size, 10) || resp.Header.Get("Content-Digest") != "sha-256=:"+base64.StdEncoding.EncodeToString(sum)+":" || !prefix.valid || len(prefix.tail) != 0 {
-		return out, fault("integrity")
-	}
-	truncated := truncateUTF8(prefix.bytes, maxBytes)
-	out.Text = string(truncated)
-	out.Truncated = int64(len(truncated)) < n
-	return out, nil
-}
-
-// textPrefix retains only the requested prefix while validating UTF-8 throughout
-// the artifact. Up to three trailing bytes bridge a rune split between reads.
-type textPrefix struct {
-	bytes []byte
-	tail  []byte
-	limit int
-	valid bool
-}
-
-func (p *textPrefix) Write(b []byte) (int, error) {
-	n := len(b)
-	if len(p.bytes) < p.limit {
-		p.bytes = append(p.bytes, b[:min(len(b), p.limit-len(p.bytes))]...)
-	}
-	if !p.valid {
-		return n, nil
-	}
-	if len(p.tail) != 0 {
-		b = append(p.tail, b...)
-	}
-	cut := len(b)
-	start := len(b) - 1
-	for start >= 0 && !utf8.RuneStart(b[start]) {
-		start--
-	}
-	if start >= 0 && !utf8.FullRune(b[start:]) {
-		cut = start
-	}
-	p.valid = utf8.Valid(b[:cut])
-	p.tail = append([]byte(nil), b[cut:]...)
-	return n, nil
 }

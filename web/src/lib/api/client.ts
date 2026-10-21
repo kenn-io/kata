@@ -1,6 +1,7 @@
 import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 import { applicationRequest, applicationURL } from '../applicationBase'
+import { createULID } from '../ulid'
 
 type CredentialReader = () => SessionCredentials | undefined
 type AuthenticationRequiredHandler = () => boolean
@@ -64,24 +65,6 @@ export async function orvalFetch<T>(
   } as T
 }
 
-// Successful content responses are bytes even when their media type is JSON.
-export async function orvalBlobFetch<T>(url: string, options: RequestInit): Promise<T> {
-  const response = await generatedFetch(applicationURL(url), options)
-  if (!response.ok) {
-    const text = await response.text()
-    return {
-      data: text
-        ? response.headers.get('Content-Type')?.includes('json')
-          ? JSON.parse(text)
-          : text
-        : undefined,
-      status: response.status,
-      headers: response.headers,
-    } as T
-  }
-  return { data: await response.blob(), status: response.status, headers: response.headers } as T
-}
-
 // Uses the active daemon transport, tab credentials, and authentication rejection path.
 export async function fetchAttachmentBlob(url: string): Promise<Blob> {
   const response = await generatedFetch(applicationURL(url), { method: 'GET' })
@@ -110,6 +93,30 @@ export async function fetchAttachmentBlob(url: string): Promise<Blob> {
   return new Blob(parts, {
     type: response.headers.get('Content-Type') ?? 'application/octet-stream',
   })
+}
+
+export async function uploadAttachment(
+  projectID: number,
+  ref: string,
+  file: File,
+  actor: string,
+): Promise<void> {
+  const body = new FormData()
+  body.set('attachment_id', createULID())
+  body.set('file', file)
+  const query = actor ? `?${new URLSearchParams({ actor })}` : ''
+  const response = await generatedFetch(
+    applicationURL(
+      `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments${query}`,
+    ),
+    { method: 'POST', body },
+  )
+  if (!response.ok) {
+    const body = (await response.json().catch(() => undefined)) as
+      | { error?: { code?: string } }
+      | undefined
+    throw new Error(body?.error?.code ?? 'docbank_unreachable')
+  }
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

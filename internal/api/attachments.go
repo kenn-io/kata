@@ -4,13 +4,13 @@ package api
 import (
 	"mime/multipart"
 
-	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/metadata"
 )
 
 type AddAttachmentRequest struct {
 	ProjectID int64  `path:"project_id"`
 	Ref       string `path:"ref"`
+	Actor     string `query:"actor"`
 	RawBody   multipart.Form
 }
 type AttachmentResponse struct {
@@ -36,9 +36,3 @@ type AttachmentReadRequest struct {
 	Ref          string `path:"ref"`
 	AttachmentID string `path:"attachment_id"`
 }
-type AttachmentTextRequest struct {
-	AttachmentReadRequest
-	MaxBytes int    `query:"max_bytes" minimum:"1" maximum:"16777216" default:"65536"`
-	Profile  string `query:"profile"`
-}
-type AttachmentTextResponse struct{ Body docbank.TextResult }

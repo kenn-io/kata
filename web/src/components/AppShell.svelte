@@ -731,6 +731,8 @@
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
+        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        attachmentActor={snapshot.capabilities.actor_policy === 'identity' ? '' : 'kata-web'}
         attachmentReadsBlocked={Boolean(
           stale ||
           credentialExpired ||

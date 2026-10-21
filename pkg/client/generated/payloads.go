@@ -103,7 +103,6 @@ type RestoreIssueBody = RestoreRequestBody
 type UnassignIssueBody = UnassignRequestBody
 
 type AddAttachmentBody struct {
-	Actor        *string      `json:"actor,omitempty"`
 	AttachmentID string       `json:"attachment_id" validate:"required"`
 	File         runtime.File `json:"file" validate:"required"`
 }

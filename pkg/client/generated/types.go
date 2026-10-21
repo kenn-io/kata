@@ -6553,16 +6553,6 @@ func (t TeamResponseBody) Validate() error {
 	return errors
 }
 
-type TextResult struct {
-	State     string  `json:"state" validate:"required"`
-	Text      *string `json:"text,omitempty"`
-	Truncated bool    `json:"truncated"`
-}
-
-func (t TextResult) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(t))
-}
-
 type TokenOut struct {
 	Actor      string         `json:"actor" validate:"required"`
 	CreatedAt  time.Time      `json:"created_at" validate:"required"`
@@ -6721,6 +6711,7 @@ type UICapabilities struct {
 	Account        *string  `json:"account,omitempty"`
 	ActorPolicy    string   `json:"actor_policy" validate:"required"`
 	AllowedActions []string `json:"allowed_actions,omitempty"`
+	Attachments    *bool    `json:"attachments,omitempty"`
 
 	// AuthKind How this request authenticated; matches the instance auth kind. Never contains credentials.
 	AuthKind              *string               `json:"auth_kind,omitempty"`

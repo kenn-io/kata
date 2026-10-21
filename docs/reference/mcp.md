@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-20
+last_edited: 2026-10-21
 ---
 
 # Model Context Protocol server
@@ -244,7 +244,6 @@ model context at startup.
 | `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
-| `kata.load_attachments` | `kata.attachment_text` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
 | `kata.load_import` | `kata.import_issues` |
 | `kata.load_external_roots` | `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`, `kata.connector_field_unmap`, `kata.bridge_bind`, `kata.bridge_show`, `kata.bridge_reconcile`, `kata.bridge_pause`, `kata.bridge_resume`, `kata.bridge_resolve_field`, `kata.bridge_resolve_comment`, `kata.bridge_unbind` |
@@ -505,16 +504,3 @@ a burst of 20, and at most eight concurrent daemon calls per server process.
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
 endpoints remain CLI or operator workflows.
-
-## Attachment text
-
-On main after 0.19.0, load `kata.load_attachments` to use the read-only
-`kata.attachment_text` tool. Pass `issue`, a full `attachment` id, and optionally
-`max_bytes` (default 65536, accepted range 1–16777216) and `profile`. MCP caps
-the requested prefix at 1 MiB so JSON escaping fits the 8 MiB stdio response
-limit. It returns `state`,
-optional `text`, and `truncated`. The daemon authorizes issue access and verifies
-the pinned Docbank reference before reading text. A successful rendition-state
-query such as `unprocessed` is a normal tool result.
-
-See [Issue attachments](../guide/attachments.md) for configuration and trust.

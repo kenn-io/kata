@@ -6,8 +6,9 @@ import {
   setGeneratedFetch,
   orvalFetch,
   responseTriggeredAuthenticationTransition,
+  uploadAttachment,
 } from './client'
-import { attachmentContent, getReadUISnapshotUrl } from './generated'
+import { getReadUISnapshotUrl } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -99,6 +100,38 @@ describe('Kata browser API credentials', () => {
   })
 })
 
+it('uploads attachments with a query actor, multipart file, ULID, and browser credentials', async () => {
+  const upstream = vi.fn<typeof fetch>(async () => Response.json({ attachment_id: 'saved' }))
+  setGeneratedFetch(
+    createCredentialedFetch(
+      () => ({ session: 'tab-session', csrf: 'tab-csrf' }),
+      upstream as typeof fetch,
+    ),
+  )
+  try {
+    const file = new File(['image'], 'screen.png', { type: 'image/png' })
+    await uploadAttachment(7, 'abc4', file, 'kata-web')
+    const [input, init] = upstream.mock.calls[0]!
+    const url = new URL(String(input), 'https://daemon.example')
+    expect(url.pathname).toBe('/api/v1/projects/7/issues/abc4/attachments')
+    expect(url.searchParams.get('actor')).toBe('kata-web')
+    expect(init?.method).toBe('POST')
+    expect(new Headers(init?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
+    expect(new Headers(init?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
+    expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
+    const body = init?.body as FormData
+    expect(body.get('file')).toBe(file)
+    expect(body.get('attachment_id')).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
+    expect(body.has('actor')).toBe(false)
+    setGeneratedFetch(async () =>
+      Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }),
+    )
+    await expect(uploadAttachment(7, 'abc4', file, '')).rejects.toThrow('attachment_too_large')
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
 it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {
   const transport = vi.fn(async () => new Response('bytes'))
   setGeneratedFetch(transport as typeof fetch)
@@ -111,43 +144,4 @@ it('fetches attachment blobs through the active browser transport and exposes st
     'docbank_not_configured',
   )
   setGeneratedFetch(createCredentialedFetch())
-})
-
-describe('generated attachment content', () => {
-  it.each([new Uint8Array([0, 255, 128, 13]), new Uint8Array([])])(
-    'preserves binary and empty downloads',
-    async (bytes) => {
-      setGeneratedFetch(
-        async () =>
-          new Response(bytes, {
-            headers: { 'Content-Type': 'application/octet-stream', 'X-Example': 'retained' },
-          }),
-      )
-      try {
-        const result = await attachmentContent({
-          projectId: 1,
-          ref: 'abc4',
-          attachmentId: 'example',
-        })
-        expect(result.status).toBe(200)
-        expect(result.headers.get('X-Example')).toBe('retained')
-        expect(result.data).toBeInstanceOf(Blob)
-        expect(new Uint8Array(await (result.data as Blob).arrayBuffer())).toEqual(bytes)
-      } finally {
-        setGeneratedFetch(createCredentialedFetch())
-      }
-    },
-  )
-  it('preserves JSON error envelopes', async () => {
-    setGeneratedFetch(async () =>
-      Response.json({ error: { code: 'attachment_not_found' } }, { status: 404 }),
-    )
-    try {
-      const result = await attachmentContent({ projectId: 1, ref: 'abc4', attachmentId: 'missing' })
-      expect(result.status).toBe(404)
-      expect(result.data).toEqual({ error: { code: 'attachment_not_found' } })
-    } finally {
-      setGeneratedFetch(createCredentialedFetch())
-    }
-  })
 })

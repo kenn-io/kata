@@ -811,6 +811,60 @@ describe('AppShell', () => {
     expect(screen.queryByLabelText('Team')).toBeNull()
   })
 
+  test.each(['request', 'identity'])(
+    'uploads attachments with %s actor policy and disables stale writes',
+    async (actorPolicy) => {
+      const current = snapshot()
+      current.capabilities.attachments = true
+      current.capabilities.actor_policy = actorPolicy
+      const issue = current.collection[0]!
+      current.selected = {
+        state: 'available',
+        issue,
+        comments: [],
+        history: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+      }
+      const transport = vi.fn<typeof fetch>(async () => Response.json({ attachment_id: 'saved' }))
+      setGeneratedFetch(transport as typeof fetch)
+      const view = render(AppShell, {
+        props: {
+          route: {
+            kind: 'kata',
+            view: 'all-open',
+            issueUID: issue.uid,
+            graph: false,
+            filters: { status: [], owner: [], label: [], relationship: [] },
+          },
+          snapshot: current,
+          loading: false,
+          ...mutationProps(),
+          onNavigate: vi.fn(),
+          onCreateProject: vi.fn(async () => ({ changed: true })),
+        },
+      })
+      const button = screen.getByRole('button', { name: 'Attach files' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+      await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+        target: { files: [new File(['image'], 'screen.png')] },
+      })
+      await waitFor(() => expect(transport).toHaveBeenCalledTimes(1))
+      const url = new URL(String(transport.mock.calls[0]![0]), 'https://daemon.example')
+      expect(url.pathname).toBe(
+        `/api/v1/projects/${issue.project_id}/issues/${issue.uid}/attachments`,
+      )
+      expect(url.searchParams.get('actor')).toBe(actorPolicy === 'identity' ? null : 'kata-web')
+      await view.rerender({ canMutate: false, stale: true })
+      expect(button.disabled).toBe(true)
+      await view.rerender({
+        snapshot: { ...current, capabilities: { ...current.capabilities, attachments: false } },
+      })
+      expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+    },
+  )
+
   test('keeps attachment previews and downloads alive through a remote polling 304', async () => {
     const attachmentID = '01JB3Z6V2K8M4Q9T1X5W7Y0RNA'
     const current = snapshot()

@@ -12,6 +12,9 @@
     detail,
     attachmentBaseURL = '',
     fetchAttachment,
+    uploadAttachment,
+    attachmentsEnabled = false,
+    actionsDisabled = false,
     attachmentControlsDisabled = false,
     attachmentContextKey = '',
     actions = [],
@@ -63,6 +66,9 @@
     attachments={detail.issue.attachments}
     baseURL={attachmentBaseURL}
     {fetchAttachment}
+    {uploadAttachment}
+    {attachmentsEnabled}
+    {actionsDisabled}
     {attachmentControlsDisabled}
     {attachmentContextKey}
   />

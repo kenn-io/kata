@@ -6407,18 +6407,6 @@ components:
       required:
         - team
       type: object
-    TextResult:
-      properties:
-        state:
-          type: string
-        text:
-          type: string
-        truncated:
-          type: boolean
-      required:
-        - state
-        - truncated
-      type: object
     TokenOut:
       properties:
         actor:
@@ -6562,6 +6550,8 @@ components:
           items:
             type: string
           type: array
+        attachments:
+          type: boolean
         auth_kind:
           description: How this request authenticated; matches the instance auth kind. Never contains credentials.
           type: string
@@ -10062,13 +10052,16 @@ paths:
           required: true
           schema:
             type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            type: string
       requestBody:
         content:
           multipart/form-data:
             schema:
               properties:
-                actor:
-                  type: string
                 attachment_id:
                   type: string
                 file:
@@ -10160,53 +10153,6 @@ paths:
                 type: string
                 x-contentMediaType: application/octet-stream
           description: Verified attachment bytes
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/text:
-    get:
-      operationId: attachmentText
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: attachment_id
-          required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: max_bytes
-          schema:
-            default: 65536
-            format: int64
-            maximum: 16777216
-            minimum: 1
-            type: integer
-        - explode: false
-          in: query
-          name: profile
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TextResult"
-          description: OK
         default:
           content:
             application/json:
