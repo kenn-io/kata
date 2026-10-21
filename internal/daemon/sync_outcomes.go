@@ -29,15 +29,14 @@ func NewSyncOutcomeObserver(reporter TelemetryReporter) func(string, int64, erro
 		if failing[key] {
 			return
 		}
-		failing[key] = true
-		_ = reporter.Capture("sync_failed", map[string]any{"sync_source": provider, "reason": syncFailureReason(err)})
+		failing[key] = reporter.Capture("sync_failed", map[string]any{"sync_source": provider, "reason": syncFailureReason(err)}) == nil
 	}
 }
 
 func syncFailureReason(err error) string {
 	status, limited, auth := 0, false, false
 	if typed, ok := errors.AsType[*issuesync.StatusError](err); ok {
-		status, limited, auth = typed.HTTPStatus, typed.RateLimited || typed.HTTPStatus > 0 && typed.RetryAfter > 0 && !typed.Ambiguous, typed.AuthFailure
+		status, limited, auth = typed.HTTPStatus, typed.RateLimited, typed.AuthFailure
 	}
 	if hub, ok := errors.AsType[interface {
 		error

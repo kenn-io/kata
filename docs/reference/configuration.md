@@ -1199,10 +1199,10 @@ Submitted searches with no results send `search_empty` with `surface` set to
 until the query text changes. Typing previews send nothing. The CLI sends it
 for an interactive terminal command whose first-page empty query differs from
 the last empty query reported to that daemon on this machine. It remembers only
-a hash of the query. When a create or close fails, the client sends
-`error_shown` with `kind` set to `issue_created` or `issue_closed`. Delivery
-requires a reachable daemon that accepts the capture request.
-capture request. Outcome events follow the same daily disabled receipts.
+a hash of the query. When a create or close fails, the client sends `error_shown`
+with `kind` set to `issue_created` or `issue_closed`. Delivery requires a
+reachable daemon that accepts the capture request. Outcome events follow the
+same daily disabled receipts.
 
 A sync binding or federation spoke's first failure sends `sync_failed`.
 This includes a binding's first failure before it has ever synced successfully.

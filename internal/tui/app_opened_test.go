@@ -572,7 +572,7 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			recorder := &recordingTelemetry{}
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 			m := mFixtureForBar()
-			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
+			m.api = NewClient(env.URL, env.HTTP)
 			m.input = newNewIssueForm()
 			expected := "issue_created"
 			if kind == inputCloseForm {

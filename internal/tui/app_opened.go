@@ -78,11 +78,10 @@ func (m *Model) screenViewCommand(visit bool) tea.Cmd {
 
 func (m Model) reportShownError(action string) tea.Cmd { return reportShownError(m.api, action) }
 
-// reportShownError counts a refusal written to the screen. Actions run through
-// the undo client, so only it reports their errors to the daemon that ran them.
+// reportShownError counts a refusal written to the screen.
 func reportShownError(api any, action string) tea.Cmd {
 	kind := map[string]string{"create": "issue_created", "close": "issue_closed"}[action]
-	writer, ok := api.(*undoClient)
+	writer, ok := api.(outcomeAPI)
 	if kind == "" || !ok {
 		return nil
 	}

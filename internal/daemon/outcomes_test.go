@@ -24,6 +24,17 @@ import (
 )
 
 func TestOutcomesSyncTransitions(t *testing.T) {
+	t.Run("retry failed enqueue", func(t *testing.T) {
+		reporter := &fakeTelemetryReporter{failNext: true}
+		observe := NewSyncOutcomeObserver(reporter)
+		observe("github", 1, errors.New("failed"))
+		require.Empty(t, reporter.captured)
+		observe("github", 1, errors.New("still failing"))
+		observe("github", 1, errors.New("still failing"))
+		require.Equal(t, []capturedTelemetryEvent{
+			{event: "sync_failed", properties: map[string]any{"sync_source": "github", "reason": "other"}},
+		}, reporter.captured)
+	})
 	reporter := &fakeTelemetryReporter{}
 	observe := NewSyncOutcomeObserver(reporter)
 	for _, err := range []error{errors.New("failed"), errors.New("still failing"), nil, errors.New("failed again")} {
@@ -55,9 +66,7 @@ func TestOutcomesSyncReasons(t *testing.T) {
 		{&issuesync.StatusError{AuthFailure: true}, "auth"},
 		{&issuesync.StatusError{RetryAfter: time.Minute}, "other"},
 		{&issuesync.StatusError{HTTPStatus: 403, RateLimited: true}, "rate_limit"},
-		{&issuesync.StatusError{HTTPStatus: 200, RetryAfter: time.Minute}, "rate_limit"},
 		{&issuesync.StatusError{HTTPStatus: 503, RetryAfter: time.Minute}, "server"},
-		{&issuesync.StatusError{HTTPStatus: 200, RetryAfter: time.Minute, Ambiguous: true}, "other"},
 		{context.DeadlineExceeded, "timeout"}, {&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}, "network"},
 		{errors.New("private error text"), "other"},
 	} {

@@ -834,7 +834,7 @@
     mutationPending = true
     try {
       const result = await controller.execute(options, mutate)
-      mutationState = controller.state
+      mutationState = { ...controller.state }
       if (options.actionKind && mutationMessage(controller.state))
         reportOutcome('error_shown', options.actionKind)
       return result !== false
