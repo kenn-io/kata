@@ -299,6 +299,8 @@ jobs:
     runs-on: windows-2025
     strategy:
       fail-fast: false
+      # G-S uses measured Windows root-test times. Rebalance if a CLI shard
+      # takes longer than the remaining-package leg.
       matrix:
         include:
           - name: Windows
