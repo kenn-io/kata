@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestServiceRunTreatsCallerDeadlineAsCleanShutdown(t *testing.T) {
@@ -150,9 +154,9 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	assert.NoError(t, worker.result(errors.Join(
 		context.Canceled, fmt.Errorf("stopping: %w", context.Canceled)), context.Canceled))
 	assert.NoError(t, worker.result(context.DeadlineExceeded, context.DeadlineExceeded))
-	assert.NoError(t, worker.result(sql.ErrTxDone, context.Canceled))
-	assert.NoError(t, worker.result(
-		fmt.Errorf("commit: %w", sql.ErrTxDone), context.DeadlineExceeded))
+	require.ErrorIs(t, worker.result(sql.ErrTxDone, context.Canceled), sql.ErrTxDone)
+	require.ErrorIs(t, worker.result(
+		fmt.Errorf("commit: %w", sql.ErrTxDone), context.DeadlineExceeded), sql.ErrTxDone)
 	assert.NoError(t, worker.result(errors.Join(
 		sql.ErrTxDone,
 		fmt.Errorf("list due notification issues: %w", context.Canceled),
@@ -173,6 +177,45 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	rollbackErr := worker.result(errors.Join(sql.ErrTxDone, context.Canceled, failure), context.Canceled)
 	require.ErrorIs(t, rollbackErr, failure)
 	assert.ErrorContains(t, rollbackErr, "github-sync worker")
+}
+
+func TestNamedWorkerResultTreatsCanceledSweeperCommitAsCleanStop(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "sweeper.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sweeper := daemon.NewDueNotificationSweeper(
+			&cancelSweeperCommitStore{Store: store, cancel: cancel}, daemon.EventPublisher{}, "UTC")
+
+		err := sweeper.Run(ctx)
+		require.ErrorIs(t, err, sql.ErrTxDone)
+		require.ErrorIs(t, err, context.Canceled)
+		require.NoError(t, (namedWorker{name: "due-notification"}).result(err, ctx.Err()))
+	})
+}
+
+type cancelSweeperCommitStore struct {
+	*sqlitestore.Store
+	cancel context.CancelFunc
+}
+
+func (s *cancelSweeperCommitStore) EnsureScheduledReachedFloor(ctx context.Context, at time.Time) (time.Time, error) {
+	tx, err := s.BeginTx(ctx, nil)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	floor, err := db.EnsureScheduledReachedFloorTx(ctx, tx, at)
+	if err != nil {
+		return time.Time{}, err
+	}
+	s.cancel()
+	// Let database/sql finish its automatic rollback before the commit.
+	synctest.Wait()
+	return floor, tx.Commit()
 }
 
 // TestFenceRecorderPreservesStopPriorityAcrossInternalUnwind pins the boundary

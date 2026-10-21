@@ -1008,14 +1008,15 @@ type namedWorker struct {
 // result treats cancellation and automatic transaction rollback as a clean stop
 // only after the run context stops. Other errors remain attributed to the worker.
 func (w namedWorker) result(err, terminal error) error {
-	if err == nil || terminal != nil && isOnlyError(err, terminal, sql.ErrTxDone) {
+	if err == nil || (terminal != nil && errors.Is(err, terminal) && isOnlyError(err, terminal, sql.ErrTxDone)) {
 		return nil
 	}
 	return fmt.Errorf("kata: %s worker: %w", w.name, err)
 }
 
-// isOnlyError reports whether every non-nil leaf in err's causal graph matches
-// one of targets. errors.Is alone also matches joins containing a genuine failure.
+// isOnlyError reports whether err has at least one non-nil leaf and each leaf
+// matches at least one target through errors.Is. Different leaves may match
+// different targets; a match on a wrapper alone does not satisfy this contract.
 func isOnlyError(err error, targets ...error) bool {
 	if err == nil {
 		return false
