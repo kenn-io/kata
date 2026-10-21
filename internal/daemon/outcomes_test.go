@@ -71,29 +71,45 @@ func TestOutcomesSyncReasons(t *testing.T) {
 
 func TestOutcomesLinearSemanticReasons(t *testing.T) {
 	for _, tc := range []struct {
-		code, reason string
+		provider, code, reason string
 	}{
-		{"FORBIDDEN", "auth"},
-		{"AUTHENTICATION_ERROR", "auth"},
-		{"AUTHENTICATION_REQUIRED", "auth"},
-		{"UNAUTHENTICATED", "auth"},
-		{"UNAUTHORIZED", "auth"},
-		{"RATELIMITED", "rate_limit"},
-		{"UNKNOWN", "other"},
+		{"linear", "FORBIDDEN", "auth"},
+		{"linear", "AUTHENTICATION_ERROR", "auth"},
+		{"linear", "AUTHENTICATION_REQUIRED", "auth"},
+		{"linear", "UNAUTHENTICATED", "auth"},
+		{"linear", "UNAUTHORIZED", "auth"},
+		{"linear", "RATELIMITED", "rate_limit"},
+		{"linear", "UNKNOWN", "other"},
+		{"twenty", "UNAUTHENTICATED", "auth"},
+		{"twenty", "FORBIDDEN", "auth"},
+		{"twenty", "RATE_LIMITED", "rate_limit"},
+		{"twenty", "UNKNOWN", "other"},
 	} {
-		t.Run(tc.code, func(t *testing.T) {
+		t.Run(tc.provider+"/"+tc.code, func(t *testing.T) {
 			now := time.Now()
-			cfg := linearsync.Config{WorkspaceID: "11111111-1111-4111-8111-111111111111", TeamID: "22222222-2222-4222-8222-222222222222"}
-			session, err := linearsync.NewClient(linearsync.ClientConfig{
-				LookupEnv: func(string) (string, bool) { return "example-token", true },
-				Transport: outcomeTransport(func(*http.Request) (*http.Response, error) {
-					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"errors":[{"extensions":{"code":"` + tc.code + `"}}]}`))}, nil
-				}),
-				Now:  func() time.Time { return now },
-				Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
-			}).ForRun(t.Context(), cfg)
-			require.NoError(t, err)
-			_, err = session.Scope(t.Context(), cfg)
+			lookup := func(string) (string, bool) { return "example-token", true }
+			transport := outcomeTransport(func(r *http.Request) (*http.Response, error) {
+				if tc.provider == "twenty" {
+					require.Equal(t, "/metadata", r.URL.Path)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"errors":[{"extensions":{"code":"` + tc.code + `"}}]}`))}, nil
+			})
+			var err error
+			if tc.provider == "linear" {
+				cfg := linearsync.Config{WorkspaceID: "11111111-1111-4111-8111-111111111111", TeamID: "22222222-2222-4222-8222-222222222222"}
+				session, setupErr := linearsync.NewClient(linearsync.ClientConfig{
+					LookupEnv: lookup, Transport: transport,
+					Now:  func() time.Time { return now },
+					Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+				}).ForRun(t.Context(), cfg)
+				require.NoError(t, setupErr)
+				_, err = session.Scope(t.Context(), cfg)
+			} else {
+				cfg := twentysync.Config{APIOrigin: "https://twenty.example", WebOrigin: "https://twenty.example", WorkspaceID: "11111111-1111-4111-8111-111111111111"}
+				session, setupErr := twentysync.NewClient(twentysync.ClientConfig{Daemon: config.TwentySyncConfig{APIOrigin: cfg.APIOrigin}, LookupEnv: lookup, Transport: transport}).ForRun(t.Context(), cfg)
+				require.NoError(t, setupErr)
+				_, err = session.Workspace(t.Context(), cfg)
+			}
 			require.Error(t, err)
 			require.Equal(t, tc.reason, syncFailureReason(err))
 		})
@@ -133,11 +149,7 @@ func TestOutcomesProviderTransportReasons(t *testing.T) {
 			return err
 		}},
 		{"notion", func(t *testing.T, rt http.RoundTripper) error {
-			now := time.Now()
-			session, err := notionsync.NewClient(notionsync.ClientConfig{LookupEnv: lookup, Transport: rt, Now: func() time.Time { return now }, Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }}).ForRun(t.Context())
-			require.NoError(t, err)
-			_, err = session.Database(t.Context(), id)
-			return err
+			return readOutcomeNotionDatabase(t, rt)
 		}},
 		{"ticktick", func(t *testing.T, rt http.RoundTripper) error {
 			session, err := tickticksync.NewClient(tickticksync.ClientConfig{LookupEnv: lookup, Transport: rt}).ForRun(t.Context(), tickticksync.Config{ProjectID: "project-1"})
@@ -172,12 +184,10 @@ func TestOutcomesProviderTransportReasons(t *testing.T) {
 				}))
 				require.Error(t, err)
 				require.NotContains(t, err.Error(), "example transport diagnostic")
-				reporter := &fakeTelemetryReporter{}
-				NewSyncOutcomeObserver(reporter)(provider.name, 1, err)
 				if failure.reason == "" {
-					require.Empty(t, reporter.captured)
+					require.ErrorIs(t, err, context.Canceled)
 				} else {
-					require.Equal(t, []capturedTelemetryEvent{{event: "sync_failed", properties: map[string]any{"sync_source": provider.name, "reason": failure.reason}}}, reporter.captured)
+					require.Equal(t, failure.reason, syncFailureReason(err))
 				}
 			})
 		}
@@ -190,19 +200,11 @@ func TestOutcomesNotionHTTPReasons(t *testing.T) {
 		reason string
 	}{{429, "rate_limit"}, {503, "server"}} {
 		t.Run(tc.reason, func(t *testing.T) {
-			now := time.Now()
 			requests := 0
-			session, err := notionsync.NewClient(notionsync.ClientConfig{
-				LookupEnv: func(string) (string, bool) { return "example-token", true },
-				Transport: outcomeTransport(func(*http.Request) (*http.Response, error) {
-					requests++
-					return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":"service_unavailable"}`))}, nil
-				}),
-				Now:  func() time.Time { return now },
-				Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
-			}).ForRun(t.Context())
-			require.NoError(t, err)
-			_, err = session.Database(t.Context(), "11111111-1111-4111-8111-111111111111")
+			err := readOutcomeNotionDatabase(t, outcomeTransport(func(*http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":"service_unavailable"}`))}, nil
+			}))
 			require.Error(t, err)
 			require.Equal(t, 5, requests)
 			reporter := &fakeTelemetryReporter{}
@@ -210,4 +212,17 @@ func TestOutcomesNotionHTTPReasons(t *testing.T) {
 			require.Equal(t, []capturedTelemetryEvent{{event: "sync_failed", properties: map[string]any{"sync_source": "notion", "reason": tc.reason}}}, reporter.captured)
 		})
 	}
+}
+
+func readOutcomeNotionDatabase(t *testing.T, rt http.RoundTripper) error {
+	t.Helper()
+	now := time.Now()
+	session, err := notionsync.NewClient(notionsync.ClientConfig{
+		LookupEnv: func(string) (string, bool) { return "example-token", true }, Transport: rt,
+		Now:  func() time.Time { return now },
+		Wait: func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil },
+	}).ForRun(t.Context())
+	require.NoError(t, err)
+	_, err = session.Database(t.Context(), "11111111-1111-4111-8111-111111111111")
+	return err
 }

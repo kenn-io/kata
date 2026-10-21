@@ -697,7 +697,7 @@ func (t *rewriteHostRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 	return nextRoundTripper(t.next).RoundTrip(clone)
 }
 
-func TestOutcomesGitHubFetchReasons(t *testing.T) {
+func TestHTTPFetcherRESTAndGraphQLTypedStatusErrors(t *testing.T) {
 	for _, tc := range []struct {
 		limited    bool
 		retryAfter string

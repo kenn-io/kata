@@ -46,9 +46,8 @@ func TestRunnerDefersRelayOutcomesUntilCatchUpCompletes(t *testing.T) {
 				require.NoError(t, err)
 				return len(issues)
 			}
-			// The third turn's only batch is short, but the stream and byte limits
-			// also cut batches short, so a turn that used its budget on a nonempty
-			// batch still reports work; only an empty batch proves the stream drained.
+			// Recovery waits until the empty fourth batch proves the stream drained;
+			// the first three turns leave the outcome observer untouched.
 			var results []error
 			outcomeRunner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, OnSpokeResult: func(id int64, err error) {
 				require.Equal(t, relay.project.ID, id)

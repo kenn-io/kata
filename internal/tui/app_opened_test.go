@@ -506,14 +506,19 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 func TestOutcomesShownFormErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, origin, kind, want string
-		failed, help             bool
+		failed, help, discarded  bool
 	}{
-		{"create", "form", "create", "issue_created", true, false},
-		{"list close", "list", "close", "issue_closed", true, false},
-		{"detail close", "detail", "close", "issue_closed", true, false},
-		{"success", "list", "close", "", false, false},
-		{"label", "detail", "label-add", "", true, false},
-		{"help", "list", "close", "issue_closed", true, true},
+		{"create", "form", "create", "issue_created", true, false, false},
+		{"list close", "list", "close", "issue_closed", true, false, false},
+		{"detail close", "detail", "close", "issue_closed", true, false, false},
+		{"success", "list", "close", "", false, false, false},
+		{"label", "detail", "label-add", "", true, false, false},
+		{"help", "list", "close", "issue_closed", true, true, false},
+		{"old daemon", "list", "close", "", true, false, true},
+		{"old detail generation", "detail", "close", "", true, false, true},
+		{"cancelled create", "form", "create", "", true, false, true},
+		{"cancelled close", "form", "close", "", true, false, true},
+		{"replaced form", "form", "create", "", true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := &recordingTelemetry{}
@@ -522,8 +527,8 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			m.api = newUndoClient(NewClient(env.URL, env.HTTP))
 			m.detail.issue = &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Example task", Status: "open"}
 			m.detail.loading, m.list.loading = false, false
-			m.detail.gen = 2
-			if tc.origin == "form" {
+			m.detail.gen, m.connGen = 2, 2
+			if tc.origin == "form" && !tc.discarded {
 				m.input = newNewIssueForm()
 			}
 			if tc.origin == "detail" {
@@ -532,14 +537,32 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			if tc.help {
 				m.view = viewHelp
 			}
-			msg := mutationDoneMsg{origin: tc.origin, kind: tc.kind, gen: 2}
+			msg := mutationDoneMsg{origin: tc.origin, kind: tc.kind, gen: 2, connGen: 2}
 			if tc.failed {
 				msg.err = fmt.Errorf("refused")
 			}
+			if tc.discarded {
+				msg.formGen = 1
+			}
+			switch tc.name {
+			case "old daemon":
+				msg.connGen = 1
+			case "old detail generation":
+				msg.gen, m.pendingRefetch = 1, true
+			case "replaced form":
+				m.input = newNewIssueForm()
+				m.input.formGen = 2
+			}
 			m, cmd := stepModel(m, msg)
 			runCmd(cmd)
-			_, cmd = stepModel(m, tea.FocusMsg{})
-			runCmd(cmd)
+			if tc.discarded {
+				require.Empty(t, m.input.err)
+				require.Empty(t, m.detail.err)
+				require.Empty(t, m.list.status)
+			} else {
+				_, cmd = stepModel(m, tea.FocusMsg{})
+				runCmd(cmd)
+			}
 			if tc.want == "" {
 				require.Empty(t, recorder.events)
 			} else {
@@ -557,7 +580,7 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			m.input = newNewIssueForm()
 			expected := "issue_created"
 			if kind == inputCloseForm {
-				m.input = newCloseForm(formTarget{})
+				m.input = newCloseForm(formTarget{issueUID: "01TEST-aaa1", issueShortID: "aaa1", projectID: 7, detailGen: 2, origin: "list"})
 				expected = "issue_closed"
 			}
 			m, cmd := m.commitFormInput(kind)

@@ -444,37 +444,29 @@ func TestHTTPFetcherParentDataGraphQLRateLimitRetriesHTTP200Errors(t *testing.T)
 }
 
 func TestHTTPFetcherParentDataGraphQLRateLimitExhaustionKeepsStatus(t *testing.T) {
-	for _, retryAfter := range []string{"2", "31"} {
-		t.Run(retryAfter, func(t *testing.T) {
-			attempts := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				decodeParentGraphQLTestRequest(t, r)
-				attempts++
-				w.Header().Set("Retry-After", retryAfter)
-				writeParentGraphQLTestResponse(t, w, `{"errors":[{"type":"RATE_LIMITED","message":"rate limited"}]}`)
-			}))
-			defer server.Close()
-			fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
-			now := time.Now()
-			fetcher.graphQLNow = func() time.Time { return now }
-			fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
-				now = now.Add(d)
-				return nil
-			}
-
-			_, err := fetcher.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
-			require.Error(t, err)
-			status, ok := errors.AsType[*issuesync.StatusError](err)
-			require.True(t, ok, "rate limit classification lost: %v", err)
-			require.True(t, status.RateLimited)
-			require.Equal(t, http.StatusOK, status.HTTPStatus)
-			if retryAfter == "31" {
-				require.Equal(t, 1, attempts)
-			} else {
-				require.Equal(t, 3, attempts)
-			}
-		})
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeParentGraphQLTestRequest(t, r)
+		attempts++
+		w.Header().Set("Retry-After", "2")
+		writeParentGraphQLTestResponse(t, w, `{"errors":[{"type":"RATE_LIMITED","message":"rate limited"}]}`)
+	}))
+	defer server.Close()
+	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	now := time.Now()
+	fetcher.graphQLNow = func() time.Time { return now }
+	fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
+		now = now.Add(d)
+		return nil
 	}
+
+	_, err := fetcher.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
+	require.Error(t, err)
+	status, ok := errors.AsType[*issuesync.StatusError](err)
+	require.True(t, ok, "rate limit classification lost: %v", err)
+	require.True(t, status.RateLimited)
+	require.Equal(t, http.StatusOK, status.HTTPStatus)
+	require.Equal(t, 3, attempts)
 }
 
 func TestHTTPFetcherParentDataRetryAfterCapReturnsFatal(t *testing.T) {

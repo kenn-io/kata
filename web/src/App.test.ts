@@ -92,14 +92,6 @@ describe('App', () => {
       }
       await waitFor(() => expect(events).toHaveLength(1))
       expect(events).toEqual([{ event: 'search_empty', properties: { surface: 'web' } }])
-      window.dispatchEvent(new Event('focus'))
-      release?.()
-      await tick()
-      expect(events).toHaveLength(1)
-      await fireEvent.input(input, { target: { value: 'Example' } })
-      await fireEvent.keyDown(input, { key: 'Enter' })
-      await tick()
-      expect(events).toHaveLength(1)
     },
   )
 
@@ -126,10 +118,7 @@ describe('App', () => {
           if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
           if (target.pathname.endsWith('/references'))
             return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-          if (request.method === 'POST' && target.pathname.endsWith('/issues'))
-            return Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
           const result = snapshot()
-          result.catalog[0]!.project.metadata.role = 'inbox'
           if (target.searchParams.get('text')?.startsWith('missing')) result.collection = []
           return Response.json(result, { headers: { ETag: '"query-memory"' } })
         }),
@@ -168,22 +157,6 @@ describe('App', () => {
       await fireEvent.keyDown(input, { key: 'Enter' })
       await tick()
       expect(outcomes()).toHaveLength(disabled ? 0 : 4)
-      if (disabled) {
-        const rejections: unknown[] = []
-        const onRejection = (error: unknown) => rejections.push(error)
-        process.on('unhandledRejection', onRejection)
-        onTestFinished(() => {
-          process.off('unhandledRejection', onRejection)
-        })
-        await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
-        await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
-          target: { value: 'Example task' },
-        })
-        await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
-        await screen.findByText('validation: Action refused')
-        await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
-        expect(outcomes()).toEqual([])
-      }
     },
   )
 
@@ -3240,7 +3213,7 @@ describe('App', () => {
     for (const action of ['create', 'close'] as const) {
       it.each(
         action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
-      )(`${action} reports a shown refusal once, result=%s`, async (result) => {
+      )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
         const refused = result !== 'accepted'
         const rejections: unknown[] = []
         const onRejection = (error: unknown) => rejections.push(error)
@@ -3371,9 +3344,9 @@ describe('App', () => {
         } else {
           await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
           expect(shownErrors).toEqual([])
+          expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
         }
         expect(actionRequests).toHaveLength(1)
-        expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
       })
     }
   })

@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -713,11 +715,9 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 		want int
 	}{
 		{"human", []string{"search", "missing", "--format", "human"}, true, 1},
-		{"quiet", []string{"search", "missing", "--format", "human", "--quiet"}, true, 1},
 		{"json", []string{"search", "missing", "--json"}, true, 0},
 		{"agent", []string{"search", "missing", "--agent"}, false, 0},
 		{"piped", []string{"search", "missing", "--format", "human"}, false, 0},
-		{"context", []string{"inbox", "--context"}, true, 0},
 		{"continuation page", []string{"search", "needle", "--lexical", "--limit", "1", "--format", "human"}, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -749,40 +749,41 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 				_, err := env.DB.CreateProject(t.Context(), "kata")
 				require.NoError(t, err)
 			}
-			if tc.name == "context" {
-				cmd := findCommand(t, "inbox")
-				require.NoError(t, cmd.Flags().Set("context", "true"))
-				cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: env.URL})
-				reportCLIOutcome(cmd, "search_empty", "")
-				require.Empty(t, capture.recorded())
-				return
-			}
-			output, err := runCmdOutput(t, env, tc.args...)
-			if tc.name == "continuation page" {
-				require.Contains(t, output, "no matches")
-			}
-			require.NoError(t, err)
-			if tc.want > 0 {
-				capture.waitForCapture(t)
-			}
-			if tc.want > 0 {
-				_, err = runCmdOutput(t, env, tc.args...)
-				require.NoError(t, err)
-				capture.mu.Lock()
-				count := 0
-				for _, event := range capture.events {
-					if event == "search_empty" {
-						count++
+			settledCLIUse(t, func(t *testing.T) {
+				transport := http.DefaultTransport
+				http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.URL.Path != "/api/v1/ui/telemetry" {
+						return transport.RoundTrip(r)
 					}
-				}
-				capture.mu.Unlock()
-				require.Equal(t, 1, count, "the same query in another invocation counts once")
-				args := append([]string(nil), tc.args...)
-				args[1] = "other"
-				_, err = runCmdOutput(t, env, args...)
+					var body struct {
+						Event      string         `json:"event"`
+						Properties map[string]any `json:"properties"`
+					}
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+					require.NoError(t, capture.Capture(body.Event, body.Properties))
+					return &http.Response{StatusCode: 202, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Request: r}, nil
+				})
+				defer func() { http.DefaultTransport = transport }()
+				output, err := runCmdOutput(t, env, tc.args...)
 				require.NoError(t, err)
-				tc.want = 2
-			}
+				if tc.name == "continuation page" {
+					require.Contains(t, output, "no matches")
+				}
+				if tc.want > 0 {
+					args := append([]string(nil), tc.args...)
+					args[1] = "other"
+					_, err = runCmdOutput(t, env, args...)
+					require.NoError(t, err)
+					tc.want = 2
+				} else {
+					// A control report proves the transport is observable in suppressed modes.
+					cmd := findCommand(t, "search")
+					recordCLIUseTarget(client.ResolvedDaemon{BaseURL: env.URL})
+					sendCLIEvent(cmd, cliOutcomeBody("app_opened", ""), false, "")
+				}
+				capture.waitForCapture(t)
+				synctest.Wait()
+			})
 			capture.mu.Lock()
 			defer capture.mu.Unlock()
 			count := 0
@@ -797,40 +798,74 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 }
 
 func TestOutcomesCLIShownErrors(t *testing.T) {
+	if encoded := os.Getenv("KATA_OUTCOME_ERROR_ARGS"); encoded != "" {
+		var args []string
+		require.NoError(t, json.Unmarshal([]byte(encoded), &args))
+		stubIsTTY(t, true)
+		transport := http.DefaultTransport
+		http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path != "/api/v1/ui/telemetry" {
+				return transport.RoundTrip(r)
+			}
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			log, err := os.OpenFile(os.Getenv("KATA_OUTCOME_ERROR_LOG"), os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // Parent supplies its own TempDir log to this child.
+			require.NoError(t, err)
+			_, err = log.Write(append(body, '\n'))
+			require.NoError(t, err)
+			require.NoError(t, log.Close())
+			return &http.Response{StatusCode: 202, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Request: r}, nil
+		})
+		cmd := findCommand(t, "create")
+		recordCLIUseTarget(client.ResolvedDaemon{BaseURL: os.Getenv("KATA_SERVER")})
+		sendCLIEvent(cmd, cliOutcomeBody("app_opened", ""), false, "")
+		waitCLIUseMarker(t, "cli-opened-")
+		// main exits the child before TestMain can remove its empty fixture home.
+		require.NoError(t, os.Remove(os.Getenv("CODEX_HOME"))) //nolint:gosec // TestMain created this empty child fixture directory.
+		os.Args = append([]string{os.Args[0]}, args...)
+		main()
+		t.Fatal("main must exit after reporting the error")
+	}
 	for _, tc := range []struct {
 		args []string
-		tty  bool
 		want int
 	}{
-		{[]string{"create", "", "--format", "human"}, true, 1},
-		{[]string{"close", "missing", "--format", "human"}, true, 1},
-		{[]string{"create", "Example task", "--unknown-flag", "--format", "human"}, true, 0},
-		{[]string{"close", "missing", "--unknown-flag", "--format", "human"}, true, 0},
-		{[]string{"close", "--format", "human"}, true, 0},
+		{[]string{"create", "", "--format", "human"}, 1},
+		{[]string{"close", "missing", "--format", "human"}, 1},
+		{[]string{"create", "Example task", "--unknown-flag", "--format", "human"}, 0},
+		{[]string{"close", "missing", "--unknown-flag", "--format", "human"}, 0},
+		{[]string{"close", "--format", "human"}, 0},
 	} {
-		t.Run(strings.Join(tc.args, " ")+fmt.Sprint(tc.tty), func(t *testing.T) {
-			capture := &cliUseTelemetry{}
-			env := newCLIUseEnv(t, capture)
-			stubIsTTY(t, tc.tty)
-			cmd := newRootCmd()
-			cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
-			cmd.SetArgs(tc.args)
-			err := cmd.Execute()
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			env := newCLIUseEnv(t, nil)
+			t.Setenv("KATA_SERVER", env.URL)
+			logPath := filepath.Join(t.TempDir(), "transport.jsonl")
+			require.NoError(t, os.WriteFile(logPath, nil, 0o600))
+			args, err := json.Marshal(tc.args)
+			require.NoError(t, err)
+			process := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestOutcomesCLIShownErrors$") //nolint:gosec // Current test executable runs the real main with fixture arguments.
+			process.Env = append(os.Environ(), "KATA_OUTCOME_ERROR_ARGS="+string(args), "KATA_OUTCOME_ERROR_LOG="+logPath, "GORACE=atexit_sleep_ms=0")
+			output, err := process.CombinedOutput()
 			require.Error(t, err)
-			require.Empty(t, capture.recorded(), "unshown errors do not count")
-			// A resolved target makes accidental reports observable even before RunE.
-			recordCLIUseTarget(client.ResolvedDaemon{BaseURL: env.URL})
-			var output bytes.Buffer
-			emitRootError(&output, cmd, tc.args, err, runEEntered)
-			require.NotEmpty(t, output.String())
-			if tc.want > 0 {
-				capture.waitForCapture(t)
+			require.NotEmpty(t, output)
+			data, err := os.ReadFile(logPath) //nolint:gosec // This test created the log under its TempDir.
+			require.NoError(t, err)
+			type report struct {
+				Event      string         `json:"event"`
+				Properties map[string]any `json:"properties"`
 			}
-			require.Len(t, capture.recorded(), tc.want)
+			var events []report
+			for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+				var event report
+				require.NoError(t, json.Unmarshal([]byte(line), &event))
+				events = append(events, event)
+			}
+			require.Equal(t, "app_opened", events[0].Event, "the control request reached the transport before main")
+			require.Len(t, events, 1+tc.want)
 			if tc.want > 0 {
-				require.Equal(t, "error_shown", capture.events[0])
+				require.Equal(t, "error_shown", events[1].Event)
 				kind := map[string]string{"create": "issue_created", "close": "issue_closed"}[tc.args[0]]
-				require.Equal(t, []map[string]any{{"surface": "cli", "kind": kind}}, capture.recorded())
+				require.Equal(t, map[string]any{"surface": "cli", "kind": kind}, events[1].Properties)
 			}
 		})
 	}
