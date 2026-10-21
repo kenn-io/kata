@@ -365,7 +365,8 @@ jobs:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         run: |
-          packages=$(go list ./... | grep -v '^go.kenn.io/kata/cmd/kata$')
+          cli_package=$(go list ./cmd/kata)
+          packages=$(go list ./... | grep -vx "$cli_package")
           env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
 
       - name: Run CLI tests
