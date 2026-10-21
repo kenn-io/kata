@@ -361,7 +361,6 @@ jobs:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         run: |
-          set -e -o pipefail
           packages=$(go list ./... | grep -v '^go.kenn.io/kata/cmd/kata$')
           env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
 
