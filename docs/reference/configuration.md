@@ -13,10 +13,10 @@ bindings, local per-machine overrides, and daemon config.
 
 TUI preferences and connection, federation spoke authentication and
 `kata federation embedding-recipe`, and doctor's daemon lookup read only the
-configuration sections they use.
-
-`kata daemon start` and `kata doctor`'s configuration check validate the full
-configuration.
+configuration sections they use. They still reject bad values and unknown keys
+in the sections they read, including `[tui]`, `[search]`, and the daemon catalog.
+Other sections are checked only by `kata doctor`'s configuration check and
+`kata daemon start`, which validate the full configuration.
 
 ## Closing-session transcripts
 
