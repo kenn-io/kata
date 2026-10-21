@@ -402,10 +402,6 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var errorCmd tea.Cmd
-	if mut, ok := msg.(mutationDoneMsg); ok && mut.err != nil {
-		errorCmd = m.reportShownError(mut.kind)
-	}
 	next, cmd := m.update(msg)
 	m = next.(Model)
 	query := strings.TrimSpace(m.list.filter.Search)
@@ -427,7 +423,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		visit = true
 	}
 	screenCmd := m.screenViewCommand(visit)
-	return m, tea.Batch(cmd, screenCmd, errorCmd)
+	return m, tea.Batch(cmd, screenCmd)
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1712,7 +1708,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
-		return m, nil
+		return m, m.reportShownError(mut.kind)
 	}
 	if m.input.kind == inputNewIssueForm {
 		m.input = inputState{}

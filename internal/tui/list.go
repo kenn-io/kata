@@ -954,7 +954,7 @@ func (lm listModel) applyMutation(
 		lm.status = errorStyle.Render(
 			fmt.Sprintf("%s failed: %s", m.kind, m.err.Error()),
 		)
-		return lm, nil
+		return lm, reportShownError(api, m.kind)
 	}
 	lm.status = listMutationSuccessText(m)
 	// On a successful create, seed selection with the new issue's
