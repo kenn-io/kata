@@ -424,9 +424,9 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 	recorder := &recordingTelemetry{}
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
 	for _, tc := range []struct {
-		name                                                             string
-		repeat, statusChange, cycle, edit, match, preview, down, loading bool
-		want                                                             int
+		name                                                    string
+		repeat, statusChange, cycle, edit, match, down, loading bool
+		want                                                    int
 	}{
 		{name: "empty", want: 1},
 		{name: "repeat", repeat: true, want: 1},
@@ -434,7 +434,6 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 		{name: "query cycle", cycle: true, want: 3},
 		{name: "type and delete", edit: true, want: 2},
 		{name: "match", match: true, loading: true},
-		{name: "preview", preview: true},
 		{name: "empty from results", down: true, want: 1},
 		{name: "loaded empty", loading: true, want: 1},
 	} {
@@ -450,9 +449,6 @@ func TestOutcomesSubmittedEmptySearch(t *testing.T) {
 				runCmd(cmd)
 			}
 			require.Empty(t, recorder.captured, "typing is only a preview")
-			if tc.preview {
-				return
-			}
 			if tc.down {
 				m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
 			}
@@ -512,7 +508,7 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 		{"list close", "list", "close", "issue_closed", true, false, false},
 		{"detail close", "detail", "close", "issue_closed", true, false, false},
 		{"success", "list", "close", "", false, false, false},
-		{"label", "detail", "label-add", "", true, false, false},
+		{"label", "detail", "label.add", "", true, false, false},
 		{"help", "list", "close", "issue_closed", true, true, false},
 		{"old daemon", "list", "close", "", true, false, true},
 		{"old detail generation", "detail", "close", "", true, false, true},
