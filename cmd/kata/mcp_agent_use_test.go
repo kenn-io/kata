@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/hooks"
 	mcpserver "go.kenn.io/kata/internal/mcp"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -269,4 +274,102 @@ func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Each command needs a fresh process because unrelated reporter tests call
+// Kit's irreversible DisableProcess gate.
+func TestMCPCommandTelemetryAdmission(t *testing.T) {
+	scenario := os.Getenv("KATA_MCP_ADMISSION_SCENARIO")
+	if scenario == "" {
+		for _, name := range []string{"release", "CI", "CI empty", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED", "dev"} {
+			t.Run(name, func(t *testing.T) {
+				command := exec.Command(os.Args[0], "-test.run=^TestMCPCommandTelemetryAdmission$", "-test.timeout=30s") //nolint:gosec // Run this exact test in a fresh process.
+				command.Env = append(os.Environ(), "KATA_MCP_ADMISSION_SCENARIO="+name)
+				output, err := command.CombinedOutput()
+				require.NoError(t, err, string(output))
+			})
+		}
+		return
+	}
+	for _, key := range []string{"CI", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED"} {
+		t.Setenv(key, "")
+		require.NoError(t, os.Unsetenv(key))
+	}
+	saved := version.Version
+	version.Version = "v1.2.3"
+	t.Cleanup(func() { version.Version = saved })
+	switch scenario {
+	case "dev":
+		version.Version = "dev"
+	case "CI empty":
+		t.Setenv("CI", "")
+	case "CI", "DO_NOT_TRACK":
+		t.Setenv(scenario, "1")
+	case "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED":
+		t.Setenv(scenario, "0")
+	}
+	capture := &cliUseTelemetry{}
+	env := newCLIUseEnv(t, capture)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	forward := &httputil.ReverseProxy{
+		Rewrite:   func(request *httputil.ProxyRequest) { request.SetURL(target) },
+		Transport: env.HTTP.Transport,
+	}
+	var posts, completed atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ui/telemetry" {
+			posts.Add(1)
+		}
+		forward.ServeHTTP(w, r)
+		if r.URL.Path == "/api/v1/ui/telemetry" {
+			completed.Add(1)
+		}
+	}))
+	t.Cleanup(proxy.Close)
+	t.Run("command", func(t *testing.T) {
+		endpoint := startMCPHTTPTestServer(t, proxy.URL)
+		session, err := newMCPHTTPTestClient().Connect(t.Context(), newAuthenticatedMCPHTTPTestTransport(endpoint), nil)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, session.Close()) }()
+		call := func(name string, args map[string]any) *sdkmcp.CallToolResult {
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
+			require.NoError(t, err)
+			content, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.False(t, result.IsError, "%s: %s", name, content)
+			return result
+		}
+		call("kata.load_issue_discovery", nil)
+		call("kata.load_issue_mutation", nil)
+		call("kata.load_issue_lifecycle", nil)
+		call("kata.list", map[string]any{"project": "spoke-project"})
+		created := call("kata.create", map[string]any{"project": "spoke-project", "title": "Example issue", "idempotency_key": "admission-create"})
+		ref := created.StructuredContent.(map[string]any)["issue"].(map[string]any)["qualified_ref"].(string)
+		call("kata.close", map[string]any{"ref": ref, "reason": "done", "message": "Completed the workflow behavior with daemon evidence.", "evidence": []any{map[string]any{"type": "test", "command": "go test ./cmd/kata"}}})
+		if scenario == "release" {
+			//nolint:kennlint // Wait for the real daemon to accept all six tool observations.
+			require.Eventually(t, func() bool { return completed.Load() == 6 }, 5*time.Second, time.Millisecond)
+			t.Setenv("DO_NOT_TRACK", "1")
+			call("kata.list", map[string]any{"project": "spoke-project"})
+		}
+		//nolint:kennlint // The real-network listener cannot settle in synctest. Leave the command running beyond the worker's one-second request budget.
+		time.Sleep(2 * time.Second)
+		if scenario == "release" {
+			require.EqualValues(t, 6, posts.Load(), "the running observer must honor a new local veto")
+			require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
+			capture.mu.Lock()
+			require.Equal(t, []string{"agent_active"}, capture.events)
+			capture.mu.Unlock()
+		} else {
+			require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
+			require.Empty(t, capture.recorded())
+			target := client.ResolvedDaemon{BaseURL: proxy.URL}
+			require.Empty(t, client.ReadTelemetryDayMarker(client.TelemetryDayMarkerPath(target, "agent-full-")))
+			require.Empty(t, client.ReadTelemetryDayMarker(client.TelemetryDisabledMarkerPath(proxy.URL)))
+		}
+	})
 }

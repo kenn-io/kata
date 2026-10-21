@@ -1,3 +1,9 @@
+---
+title: Install
+description: Install and upgrade Kata
+last_edited: 2026-10-20
+---
+
 # Install
 
 kata is a single Go binary. It has no runtime service dependency beyond the
@@ -96,8 +102,10 @@ any reported startup problem, then run `kata daemon restart` with the daemon's
 original startup options.
 
 The daemon sends limited anonymous usage reports by default. Set
-`KATA_TELEMETRY_ENABLED=0` in the daemon's environment to turn them off; see
-[Telemetry](../reference/configuration.md#telemetry) for what is collected.
+`KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the daemon's environment
+to turn them off. See [Telemetry](../reference/configuration.md#telemetry) for
+what is collected and [reporting rules](../reference/configuration.md#reporting-rules)
+for CI and build-version requirements.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

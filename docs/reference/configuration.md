@@ -131,10 +131,10 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
 | `KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION` | Set to `1` to let database-backed identity tokens administer connectors and external-root bridges. Off by default. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
-| `KATA_TELEMETRY_ENABLED` | Set to `0`, `false`, `no`, or `off` to disable anonymous PostHog telemetry. Values are case-insensitive and trimmed. |
-| `TELEMETRY_ENABLED` | Global telemetry switch with the same opt-out values as `KATA_TELEMETRY_ENABLED`. Passed to registered local profile daemons Kata autostarts. Set before startup. |
-| `DO_NOT_TRACK` | Disables telemetry for every present value except trimmed, case-insensitive `0` or `false`. Passed to registered local profile daemons. Set before startup. |
-| `CI` | Disables telemetry whenever present, including an empty value. Passed to registered local profile daemons. Set before startup. |
+| `KATA_TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
@@ -1019,10 +1019,6 @@ the new configuration cannot be scored against the old generation's vectors), so
 
 ## Telemetry
 
-Kata sends telemetry only from builds with a plain release version, `vX.Y.Z`
-or `X.Y.Z`. Development, prerelease, and source builds with other version
-strings send nothing. A present `CI` variable, even empty, disables telemetry.
-
 kata sends limited anonymous telemetry to PostHog when the daemon starts, and
 then emits an in-process `daemon_active` heartbeat once per UTC day while the
 daemon keeps running. Restarting the daemon may send another heartbeat; kata
@@ -1040,7 +1036,7 @@ properties the PostHog SDK would add. Use distinct `daemon_active` counts for
 active-install reporting; `daemon_started` is only for startup-volume
 diagnostics.
 
-See [Kit's shared telemetry field inventory](https://github.com/kenn-io/kit/blob/v0.39.0/telemetry/posthog/fields.md)
+See [Kit's shared telemetry field inventory](https://github.com/kenn-io/kit/blob/911b2612038d01ee6f1233f8c9e727abe1e87505/telemetry/posthog/fields.md)
 for every shared payload field. Kata's event properties and allowed values
 are listed below.
 
@@ -1198,18 +1194,31 @@ rows appear in `kata export` output. A changed
 installation ID starts a fresh count. Later-day browser focus or terminal input
 counts another visit. Delivery is best effort; a rejected enqueue can retry.
 
-Disable telemetry with:
+### Reporting rules
+
+Kata sends telemetry only from builds with a plain release version, `vX.Y.Z`
+or `X.Y.Z`. Development, prerelease, and source builds with other version
+strings send nothing. A present `CI` variable, even empty, disables telemetry.
+
+Disable telemetry with either setting:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
+# Or use the shared opt-out:
+export DO_NOT_TRACK=1
 ```
 
 `false`, `no`, and `off` also disable telemetry, ignoring surrounding
 whitespace and letter case. `TELEMETRY_ENABLED` accepts the same opt-out values.
 `DO_NOT_TRACK` disables telemetry for every present value except trimmed,
-case-insensitive `0` or `false`. Set these variables before daemon startup;
-Kata passes them and `CI` to registered local profile daemons it autostarts.
-The `kit_posthog_disabled` build tag also disables telemetry.
+case-insensitive `0` or `false`. The `kit_posthog_disabled` build tag also
+disables telemetry.
+
+The daemon reads its preferences at startup. Set these variables before it
+starts, or restart a running daemon after changing its environment. Kata passes
+them and `CI` to registered local profile daemons it autostarts. Each MCP process
+checks its own build version and environment before forwarding activity to the
+daemon, even when the daemon has reporting enabled.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

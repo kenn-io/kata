@@ -1,3 +1,9 @@
+---
+title: Packaging kata
+description: Build and distribute Kata packages
+last_edited: 2026-10-20
+---
+
 # Packaging kata
 
 ## Release ownership
@@ -96,10 +102,13 @@ before starting the daemon:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
+# Or use the shared opt-out:
+export DO_NOT_TRACK=1
 ```
 
 See [Configuration](../reference/configuration.md#telemetry) for the emitted
-events and excluded data.
+events and excluded data, and [reporting rules](../reference/configuration.md#reporting-rules)
+for CI and build-version requirements.
 
 ## Official tap publishing
 

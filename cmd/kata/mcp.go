@@ -13,6 +13,8 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"go.kenn.io/kit/telemetry/posthog"
+
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -152,8 +154,16 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
-			defer stopReporting()
+			var observe func()
+			if posthog.Eligible("KATA", version.Version) {
+				enqueue, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+				defer stopReporting()
+				observe = func() {
+					if posthog.Eligible("KATA", version.Version) {
+						enqueue()
+					}
+				}
+			}
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,
 				ObserveToolCall:   observe,
