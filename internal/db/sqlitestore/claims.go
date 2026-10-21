@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -1248,7 +1249,7 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		seen[uid] = struct{}{}
 		out = append(out, issue)
 	}
-	if claimWorkMutationRequiresClaim(ev.Type) {
+	if claimWorkMutationRequiresClaim(ev.Type) && !attentionOnlyMetadataEvent(ev.Type, ev.Payload) {
 		issueUID := ""
 		if ev.IssueUID != nil {
 			issueUID = *ev.IssueUID
@@ -1368,6 +1369,13 @@ func claimWorkMutationRequiresClaim(eventType string) bool {
 	default:
 		return false
 	}
+}
+
+// attentionOnlyMetadataEvent identifies notification-slot writes, including
+// the ones a typed reply makes in its comment transaction. Comments need no
+// lease, so the attention they raise must not count as uncovered work.
+func attentionOnlyMetadataEvent(eventType string, payload jsontext.Value) bool {
+	return eventType == "issue.metadata_updated" && notification.AttentionOnlyDiff(payload)
 }
 
 func claimWorkMutationRequiresPeerClaim(eventType string) bool {

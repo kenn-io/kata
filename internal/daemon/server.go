@@ -348,7 +348,7 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
 	humaConfig.DocsPath = ""
-	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError)
+	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError, scopedNotificationTransformer(cfg.DB))
 	// Drop DefaultConfig's SchemaLinkTransformer: it rebuilds response structs
 	// via reflection (adding a $schema field), which silently bypasses any
 	// MarshalJSON. Our APIError relies on MarshalJSON to emit the wire-spec
@@ -806,6 +806,7 @@ func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 // registerMetadata registers metadata patch routes.
 func registerMetadata(humaAPI huma.API, cfg ServerConfig) {
 	registerMetadataHandlers(humaAPI, cfg)
+	registerNotificationHandlers(humaAPI, cfg)
 }
 
 // registerMove registers the cross-project issue move action route.

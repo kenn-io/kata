@@ -1344,6 +1344,7 @@ func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment
 // CreateComment appends a comment + issue.commented event in one tx, bumping
 // issues.updated_at.
 func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
+	db.RetainCommentEvents(ctx)
 	if err := teammate.Validate(p.Teammate); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
@@ -1465,9 +1466,28 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 	if err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
+	committedEvents := []db.Event{evt}
+	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
+		updates, err := hook(ctx, tx, issue, comment)
+		if err != nil {
+			return db.Comment{}, db.Event{}, err
+		}
+		for _, update := range db.CoalesceCommentMetadataUpdates(updates) {
+			result, err := d.patchIssueMetadataTx(ctx, tx, db.PatchIssueMetadataIn{
+				IssueID: update.IssueID, Actor: p.Author, Patch: update.Patch,
+			})
+			if err != nil {
+				return db.Comment{}, db.Event{}, err
+			}
+			if result.Changed {
+				committedEvents = append(committedEvents, result.Event)
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
+	db.RetainCommentEvents(ctx, committedEvents...)
 	return comment, evt, nil
 }
 

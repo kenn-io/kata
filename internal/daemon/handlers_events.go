@@ -146,10 +146,15 @@ func readVisibleEvents(
 		if err != nil {
 			return nil, afterID, 0, internalAPIError(err)
 		}
-		for _, event := range rows {
+		for index, event := range rows {
 			if event.Type == db.ProjectScopeResetEventType {
 				return nil, event.ID, event.ID, nil
 			}
+			raw, err := projectNotificationEventPayload(ctx, store, event)
+			if err != nil {
+				return nil, afterID, 0, internalAPIError(err)
+			}
+			rows[index].Payload = string(raw)
 		}
 		next := nextAfterID(rows, afterID)
 		if len(rows) == 0 && throughID > next {
@@ -210,6 +215,11 @@ func readVisibleEvents(
 			}
 			projected, ok := projectedRows[index], visibleRows[index]
 			if ok && event.Type != "issue.links_changed" {
+				raw, err := projectNotificationEventPayload(ctx, store, projected)
+				if err != nil {
+					return nil, cursor, 0, internalAPIError(err)
+				}
+				projected.Payload = string(raw)
 				visible = append(visible, projected)
 				if len(visible) == limit {
 					break
@@ -1041,7 +1051,7 @@ func writeRevalidatedEventFrame(
 
 func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Event) (bool, error) {
 	if issueScopeFromContext(ctx) == nil {
-		return true, nil
+		return notificationEventStillVisible(ctx, store, event)
 	}
 	if event.IssueID == nil {
 		return false, nil
@@ -1090,7 +1100,7 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 			}
 		}
 	}
-	return true, nil
+	return notificationEventStillVisible(ctx, store, event)
 }
 
 // eventStillInAuthorizedProjects re-reads one event under the caller's current

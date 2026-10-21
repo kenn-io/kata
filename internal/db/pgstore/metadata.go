@@ -52,10 +52,22 @@ func (s *Store) patchIssueMetadata(
 		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
-		if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), input.Patch, input.Guard); err != nil {
+		patch, err := db.ResolveMetadataPatch(ctx, tx, current, input.Patch)
+		if err != nil {
 			return err
 		}
-		updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
+		if err := db.CheckRecurringMetadataWrite(ctx, patch); err != nil {
+			return err
+		}
+		for key, raw := range patch {
+			if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+				return fmt.Errorf("validate %q: %w", key, err)
+			}
+		}
+		if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), patch, input.Guard); err != nil {
+			return err
+		}
+		updated, diff, err := patchedMetadata(current.Metadata, patch)
 		if err != nil {
 			return err
 		}

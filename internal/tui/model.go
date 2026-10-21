@@ -2673,27 +2673,34 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 
 func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.snapshot":
+	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot":
 	default:
 		return false
 	}
-	matches := func(uid string) bool {
-		return uid != "" && (uid == msg.commentUID || slices.Contains(msg.snapshotCommentUIDs, uid))
-	}
 	for _, comment := range comments {
-		if matches(comment.UID) {
+		if msg.matchesCommentUID(comment.UID) {
 			return true
 		}
-		if comment.Reply != nil && matches(comment.Reply.UID) {
+		if comment.Reply != nil && msg.matchesCommentUID(comment.Reply.UID) {
 			return true
 		}
 		for _, backlink := range comment.Backlinks {
-			if matches(backlink.UID) {
+			if msg.matchesCommentUID(backlink.UID) {
 				return true
 			}
 		}
+		if slices.Contains(msg.replyToUIDs, comment.UID) {
+			return true
+		}
 	}
 	return false
+}
+
+func (msg eventReceivedMsg) matchesCommentUID(uid string) bool {
+	if uid == "" || uid == msg.commentUID {
+		return uid != ""
+	}
+	return slices.Contains(msg.commentUIDs, uid)
 }
 
 func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {

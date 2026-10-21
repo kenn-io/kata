@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # Agent workflows
@@ -514,8 +514,8 @@ Point workers at the comment they need to answer. A typed link records whether
 an agent builds on, reproduces, contradicts, or replaces that finding. The log
 stays chronological; Kata stores a reference without copying the target's body.
 Comment replies require Kata 0.19.0 or later and daemon API `0.28.0`. Reply
-notifications, broadcasts, and `wait --until reply`, described from
-[How replies reach the inbox](#how-replies-reach-the-inbox) onward, are planned.
+notifications, broadcasts, and `wait --until reply` are available in current
+development builds; the 0.19.0 release does not include them.
 
 ### Find and use comment handles
 
@@ -622,17 +622,13 @@ older confirmation. Kata records the edit without claiming to verify content.
 
 ### How replies reach the inbox
 
-Planned: Kata 0.19.0 does not write reply notifications to the inbox or accept
-the `notify --re`, `notify --broadcast`, or `wait --until reply` options shown
-in this section. Use `kata show --inbound` and targeted `kata notify --to`
-requests until they ship.
-
 Every linked comment notifies the target's author and teammate. Replies to your
 own comments do not notify you. Each issue has one `notify.<recipient>` slot
 per exact recipient; later link notifications replace earlier ones. The inbox
 shows the latest kind and comment handle. Its count, if present, is only a hint.
-A link never replaces a human request without a `re` comment pointer. The reply
-still appears in `show` when that request takes precedence.
+A link replaces only an earlier link notification. It never replaces a request,
+with or without a `re` comment pointer. The reply still appears in `show` when
+that request takes precedence.
 
 A `confirm` also reaches the issue owner, the parent owner's address for a
 child issue, and up to 8 earlier linkers of the same target, newest first. A
@@ -640,10 +636,14 @@ recipient already awaiting a link notification about that target is skipped.
 The parent owner's slot is written on the child issue; coordinators can find it
 with `kata inbox --for coordinator --all` without `--project` or `--workspace`.
 
-An inbox slot's `re` is the comment UID the recipient should open. Posting
-`--reply` to that comment clears the matching slot in the same transaction.
-Only slots with `re` auto-clear; ordinary human requests still require explicit
-`notify --clear` after handling. To point one worker at a specific comment:
+An inbox slot's `re` is the comment UID the recipient should open. Any typed
+answer to that comment (`--reply`, `--confirm`, `--refute`, or `--supersede`)
+clears the matching slot in the same transaction, on whichever issue it was
+requested. The answer can be posted on any issue in the project. The requester's
+slot on the requested issue then reports the answer, so a `wait --until reply`
+there wakes. Only slots with `re` auto-clear; ordinary human requests still
+require explicit `notify --clear` after handling. To point one worker at a
+specific comment:
 
 ```sh
 kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq \
@@ -655,10 +655,6 @@ revision. Writers using `meta set --if-match` can see more `412` conflicts.
 Read the current revision before retrying a guarded write.
 
 ### Coordinate a group
-
-Planned: this workflow depends on the reply notifications described in
-[How replies reach the inbox](#how-replies-reach-the-inbox), which Kata 0.19.0
-does not include.
 
 Post a finding, copy its handle from `show`, and request the relevant worker's
 attention with `--to ... --re`. The worker responds with one of the four kinds.
@@ -692,10 +688,6 @@ group that work without gating readiness.
 
 ### Broadcast only when the group needs it
 
-Planned: this workflow depends on the reply notifications described in
-[How replies reach the inbox](#how-replies-reach-the-inbox), which Kata 0.19.0
-does not include.
-
 A coordinator can request attention from everyone working on an issue:
 
 ```sh
@@ -708,8 +700,10 @@ kata inbox --for coordinator
 `--re <cref>` is optional. Broadcast reaches the issue owner and each distinct
 commenter, plus owners and commenters on open child issues one level deep,
 using local links. By default commenters are addressed as actors; add
-`--teammates` to include their teammate addresses. The sender, `system`, and
-integration authors are excluded. All recipient slots are written on the
+`--teammates` to include their teammate addresses. The sender's actor and exact
+address, `system`, and integration authors (`<provider>-sync` and
+`integration:<name>`) are excluded. With `--teammates`, the sender's other
+teammates are still included. All recipient slots are written on the
 broadcast issue in one metadata event. The inbox labels it as a broadcast.
 
 Broadcast refuses closed issues. More than 50 recipients is an error; Kata
@@ -724,8 +718,8 @@ Limits apply per writing daemon, not globally across federated daemons:
 A refusal returns `429 broadcast_rate_limited` with `retry_after_seconds`,
 `window`, `last_broadcast_at`, `last_broadcast_by`, and `last_message_prefix`.
 It emits no events and does not extend the window. Prefer a targeted
-`--to ... --re` request when rate-limited. Broadcast stays out of the
-per-session contract and remains a planned coordinator workflow in this guide.
+`--to ... --re` request when rate-limited. Broadcast is an explicit coordinator
+workflow and stays out of the per-session contract.
 
 For federation rollout, upgrade hubs to the comment-link schema before their
 spokes. A schema-30 hub rejects pushes from a schema-31 spoke. Older CLIs ignore

@@ -1098,8 +1098,14 @@ See the [metadata conventions](metadata.md) for all reserved and standard keys.
 ## Teammate requests
 
 ```sh
+kata notify <ref> [--to <recipient> | --broadcast] \
+  [--re <comment>] [--teammates] --message TEXT
+kata notify <ref> --to <recipient> --clear
 kata notify abc4 --to coordinator --message "Please decide"
 kata notify abc4 --to coordinator/teammate-1 --message "Please check the reproduction"
+kata notify abc4 --to coordinator/teammate-1 --re c:xbzxrq --message "Please check this finding"
+kata notify abc4 --broadcast --message "Please review the latest findings"
+kata notify abc4 --broadcast --teammates --message "Include teammate inboxes"
 kata inbox --for coordinator/teammate-1
 kata --daemon team-hub inbox --for coordinator/teammate-1 --all
 kata notify abc4 --to coordinator/teammate-1 --clear
@@ -1116,6 +1122,16 @@ other recipients' requests; the last write to the same recipient wins.
 Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
 Requests do not change ownership or readiness.
+
+Use `--re <comment>` to ask the recipient to answer one visible comment. A
+typed reply clears the matching request and notifies the original requester on
+the issue where the request was recorded. `--broadcast` replaces `--to` and
+reaches the issue's participants and the participants of its open direct child
+issues. Broadcast resolves at most 50 recipients and is rate-limited per sender
+and issue. Use `--teammates` only with `--broadcast` to include commenters'
+teammate addresses.
+See [Reply to a finding](../workflows/agents.md#reply-to-a-finding) for the
+limits and reply workflow.
 
 `inbox` reads requests on open issues in the selected project by default,
 including parked issues. `--all` reads every active project on the
@@ -1163,7 +1179,7 @@ for the external harness integration contract.
 ## Coordination and wait
 
 ```sh
-kata wait <ref> [<ref>...] [--until closed|attention|needs-human|stuck] \
+kata wait <ref> [<ref>...] [--until closed|attention|needs-human|stuck|reply] \
   [--timeout <dur>] [--any|--all] [--poll-interval <dur>]
 ```
 
@@ -1171,6 +1187,10 @@ kata wait <ref> [<ref>...] [--until closed|attention|needs-human|stuck] \
 `--all` (waiting for every ref). In attention modes, a closed issue also
 completes the wait. A timeout exits with a dedicated nonzero code and covers the
 whole command, including project/ref resolution and polling.
+
+`--until reply` waits for the caller's notification slot to change after the
+first successful poll; the existing request is the baseline. `KATA_INBOX_USER`
+selects the inbox address. Otherwise, Kata uses the caller's actor and teammate.
 
 Both duration flags require an explicit unit using Go duration syntax, such as
 `30s`, `5m`, or `1h30m`. A bare number is ambiguous and rejected; the error
