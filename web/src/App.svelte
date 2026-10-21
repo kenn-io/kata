@@ -12,7 +12,7 @@
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
-  import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
+  import { createCredentialedFetch, setGeneratedFetch, uploadAttachment } from './lib/api/client'
   import {
     addLabel as addLabelRequest,
     assignIssue,
@@ -569,6 +569,21 @@
         { headers: context.headers },
       ),
     )
+  }
+
+  async function attachFile(uid: string, file: File): Promise<void> {
+    const target = selectedMutationTarget(uid)
+    if (!target) throw new Error('issue_not_found')
+    const accepted = await runMutation({ draft: file }, (context) =>
+      uploadAttachment(
+        target.project_id,
+        target.ref,
+        file,
+        context.body<{ actor?: string }>({}, requestActor).actor ?? '',
+        context.headers,
+      ),
+    )
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'attachment_upload_failed')
   }
 
   async function addComment(
@@ -1263,6 +1278,7 @@
         {searchReferences}
         onMoveIssue={moveIssue}
         onPatchMetadata={patchMetadata}
+        onUploadAttachment={attachFile}
         onAddComment={addComment}
         onEditIssue={editIssue}
         onAssignOwner={assignOwner}

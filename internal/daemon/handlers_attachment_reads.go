@@ -60,12 +60,8 @@ func registerAttachmentReadHandlers(h huma.API, cfg ServerConfig) {
 			return nil, docbankError(err)
 		}
 		head = head[:n]
-		typ := http.DetectContentType(head)
-		inline := typ == "image/png" || typ == "image/jpeg" || typ == "image/gif" || typ == "image/webp" || typ == "video/mp4" || typ == "video/webm"
-		if typ == "application/ogg" && e.MediaType == "video/ogg" {
-			typ = "video/ogg"
-			inline = true
-		}
+		typ := attachmentMediaType(head)
+		inline := typ == "image/png" || typ == "image/jpeg" || typ == "image/gif" || typ == "image/webp" || typ == "video/mp4" || typ == "video/webm" || typ == "video/ogg" || typ == "video/quicktime"
 		disposition := "inline"
 		if !inline {
 			typ = "application/octet-stream"
@@ -74,7 +70,7 @@ func registerAttachmentReadHandlers(h huma.API, cfg ServerConfig) {
 		return &huma.StreamResponse{Body: func(hctx huma.Context) {
 			defer func() { _ = stream.Close() }()
 			hctx.SetHeader("Content-Type", typ)
-			hctx.SetHeader("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": cleanAttachmentName(e.Name)}))
+			hctx.SetHeader("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": e.Name}))
 			hctx.SetHeader("Content-Length", strconv.FormatInt(e.Size, 10))
 			hctx.SetHeader("X-Content-Type-Options", "nosniff")
 			hctx.SetHeader("Content-Security-Policy", "sandbox")

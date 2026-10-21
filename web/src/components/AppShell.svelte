@@ -84,6 +84,7 @@
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
+    onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
     onAddComment: (
       uid: string,
       body: string,
@@ -146,6 +147,7 @@
     searchReferences,
     onMoveIssue,
     onPatchMetadata,
+    onUploadAttachment,
     onAddComment,
     onEditIssue,
     onAssignOwner,
@@ -732,7 +734,7 @@
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
         attachmentsEnabled={snapshot.capabilities.attachments ?? false}
-        attachmentActor={snapshot.capabilities.actor_policy === 'identity' ? '' : 'kata-web'}
+        {onUploadAttachment}
         attachmentReadsBlocked={Boolean(
           stale ||
           credentialExpired ||

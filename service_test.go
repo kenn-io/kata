@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,8 +17,59 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/webui"
 )
+
+func TestServiceDocbankAttachments(t *testing.T) {
+	vault := docbanktest.New(t)
+	service, err := kata.New(t.Context(), kata.Config{
+		DSN:     filepath.Join(t.TempDir(), "service.db"),
+		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
+		Docbank: kata.DocbankConfig{URL: vault.Server.URL, APIKey: "test-key", Folder: "/embedded", MaxUploadBytes: 3},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	resp, err := http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues", server.URL, project.Project.ID), "application/json", strings.NewReader(`{"title":"Attach files","actor":"user-a"}`))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var issue struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&issue))
+	require.NoError(t, resp.Body.Close())
+	for _, tc := range []struct {
+		data   string
+		status int
+	}{{"too large", http.StatusRequestEntityTooLarge}, {"ok", http.StatusOK}} {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("attachment_id", "01JB3Z6V2K8M4Q9T1X5W7Y0RNA"))
+		part, err := writer.CreateFormFile("file", "file.txt")
+		require.NoError(t, err)
+		_, err = io.WriteString(part, tc.data)
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		resp, err := http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?actor=user-a", server.URL, project.Project.ID, issue.Issue.UID), writer.FormDataContentType(), &body)
+		require.NoError(t, err)
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, tc.status, resp.StatusCode, string(raw))
+	}
+	resp, err = http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content", server.URL, project.Project.ID, issue.Issue.UID))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "ok", string(raw))
+}
 
 func TestServiceMountRunAndClose(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "service.db")

@@ -85,17 +85,32 @@ func TestAttachmentLookupAndLastRemoval(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestAttachmentLookupRejectsUnknownFields(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			raw, err := json.Marshal(validAttachment())
+			require.NoError(t, err)
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			if nested {
+				fields["docbank"].(map[string]any)["future"] = true
+			} else {
+				fields["future"] = true
+			}
+			raw, err = json.Marshal(fields)
+			require.NoError(t, err)
+			m := Attachments{attachmentID: raw}
+			_, err = m.Lookup(attachmentID)
+			require.ErrorIs(t, err, ErrInvalidValue)
+			require.JSONEq(t, string(raw), string(m[attachmentID]))
+		})
+	}
+}
+
 func TestAttachmentsOverLimitPeersDecodeAndRemove(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		count := rapid.IntRange(100, 150).Draw(t, "count")
-		value := rapid.String().Draw(t, "opaque")
 		raw, err := json.Marshal(validAttachment())
-		require.NoError(t, err)
-		var fields map[string]jsontext.Value
-		require.NoError(t, json.Unmarshal(raw, &fields))
-		fields["future"], err = json.Marshal(value)
-		require.NoError(t, err)
-		raw, err = json.Marshal(fields)
 		require.NoError(t, err)
 		peers := Attachments{}
 		for i := range count {

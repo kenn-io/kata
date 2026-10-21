@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
@@ -16,8 +14,8 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
+	"github.com/cenkalti/backoff/v7"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/textsafe"
@@ -133,7 +131,7 @@ func newAttachmentCmd() *cobra.Command {
 					return externalCLIValidation(err.Error())
 				}
 				if output == "" {
-					output = safeAttachmentFilename(e.Name)
+					output = e.Name
 				}
 				if err := downloadAttachmentCLI(ctx, hc, base+path+"/content", e, output, force); err != nil {
 					return err
@@ -169,19 +167,6 @@ func resolveAttachmentSuffix(ids map[string]bool, suffix string) (string, error)
 		return "", &cliError{Message: "attachment not found", Kind: kindNotFound, ExitCode: ExitNotFound}
 	}
 	return match, nil
-}
-func safeAttachmentFilename(name string) string {
-	name = filepath.Base(strings.ReplaceAll(name, `\`, "/"))
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, name)
-	if name == "" || name == "." || name == ".." {
-		return "attachment"
-	}
-	return name
 }
 func printAttachmentsCLI(w io.Writer, m metadata.Attachments, structured bool) error {
 	if structured {
@@ -230,12 +215,18 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *kataclient.Cl
 			return err
 		}
 		result := attachmentAddOutcome{File: file, AttachmentID: id}
-		for attempt := range 2 {
-			var retry bool
-			retry, err = uploadAttachmentCLI(ctx, c, pid, ref, actor, id, file)
-			if err == nil || !retry || attempt == 1 {
-				break
+		bo := backoff.NewExponentialBackOff()
+		bo.InitialInterval = 500 * time.Millisecond
+		bo.MaxInterval = time.Second
+		_, err = backoff.Retry(ctx, func() (struct{}, error) {
+			retry, err := uploadAttachmentCLI(ctx, c, pid, ref, actor, id, file)
+			if err != nil && !retry {
+				return struct{}{}, backoff.Permanent(err)
 			}
+			return struct{}{}, err
+		}, backoff.WithBackOff(bo), backoff.WithMaxTries(2), backoff.WithMaxElapsedTime(0))
+		if err != nil {
+			err = backoff.AsRetryError(err).LastErr
 		}
 		if err != nil {
 			result.Error = err.Error()
@@ -331,7 +322,7 @@ func uploadAttachmentCLI(ctx context.Context, c *kataclient.Client, pid int64, r
 		err := mw.WriteField("attachment_id", id)
 		var part io.Writer
 		if err == nil {
-			part, err = mw.CreateFormFile("file", safeAttachmentFilename(filename))
+			part, err = mw.CreateFormFile("file", metadata.CleanAttachmentName(filename))
 		}
 		if err == nil {
 			_, err = io.Copy(part, file)
@@ -342,8 +333,10 @@ func uploadAttachmentCLI(ctx context.Context, c *kataclient.Client, pid int64, r
 		_ = writer.CloseWithError(err)
 		done <- err
 	}()
-	// This generator exposes request editors rather than a WithBody variant.
-	resp, callErr := c.AddAttachmentWithResponse(ctx, &generated.AddAttachmentRequestOptions{PathParams: &generated.AddAttachmentPath{ProjectID: pid, Ref: ref}, Query: &generated.AddAttachmentQuery{Actor: &actor}}, func(_ context.Context, r *http.Request) error {
+	resp, callErr := c.AddAttachmentWithResponse(ctx, &generated.AddAttachmentRequestOptions{
+		PathParams: &generated.AddAttachmentPath{ProjectID: pid, Ref: ref},
+		Query:      &generated.AddAttachmentQuery{Actor: &actor},
+	}, func(_ context.Context, r *http.Request) error {
 		r.Body = reader
 		r.ContentLength = -1
 		r.Header.Set("Content-Type", mw.FormDataContentType())
@@ -394,12 +387,11 @@ func downloadAttachmentCLI(ctx context.Context, c *http.Client, endpoint string,
 	}
 	defer func() { _ = os.Remove(temp.Name()) }()
 	defer func() { _ = temp.Close() }()
-	hash := sha256.New()
-	n, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(resp.Body, e.Size+1))
+	n, err := io.Copy(temp, io.LimitReader(resp.Body, e.Size+1))
 	if err != nil {
 		return err
 	}
-	if n != e.Size || hex.EncodeToString(hash.Sum(nil)) != e.Docbank.ContentSHA256 {
+	if n != e.Size {
 		return errors.New("attachment integrity failure")
 	}
 	if err = temp.Close(); err != nil {

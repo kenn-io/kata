@@ -29,63 +29,54 @@
   const uploads = new SvelteMap<File, string>()
   let fileInput: HTMLInputElement | undefined = $state()
   let uploading = $state(false)
+  let uploadQueue: File[] = $state([])
   let uploadGeneration = 0
   const canUpload = $derived(attachmentsEnabled && Boolean(uploadAttachment))
-  const uploadDisabled = $derived(uploading || attachmentControlsDisabled || actionsDisabled)
+  const uploadDisabled = $derived(
+    uploading || uploadQueue.length > 0 || attachmentControlsDisabled || actionsDisabled,
+  )
   let generation = 0
-  const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   function object(value: unknown): Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {}
   }
   const entries = $derived(
-    Object.entries(object(attachments))
-      .map(([id, raw]) => {
-        const e = object(raw),
-          d = object(e.docbank)
-        const name = typeof e.name === 'string' ? e.name : id
-        const type = typeof e.media_type === 'string' ? e.media_type : 'unknown'
-        const size = typeof e.size === 'number' ? e.size : 0
-        const valid =
-          /^[0-9A-HJKMNP-TV-Z]{26}$/.test(id) &&
-          typeof e.name === 'string' &&
-          name.length > 0 &&
-          new TextEncoder().encode(name).length <= 255 &&
-          !/[/\\\p{Cc}]/u.test(name) &&
-          name !== '.' &&
-          name !== '..' &&
-          /^[^\s/;]+\/[^\s;]+(?:;.*)?$/.test(type) &&
-          (e.size == null || typeof e.size === 'number') &&
-          Number.isSafeInteger(size) &&
-          size >= 0 &&
-          (e.added_by == null || typeof e.added_by === 'string') &&
-          (e.added_at == null || typeof e.added_at === 'string') &&
-          new TextEncoder().encode(JSON.stringify(raw)).length <= 2048 &&
-          typeof d.node_id === 'number' &&
-          Number.isSafeInteger(d.node_id) &&
-          d.node_id > 0 &&
-          typeof d.vault_uid === 'string' &&
-          uuid.test(d.vault_uid) &&
-          typeof d.content_version_id === 'string' &&
-          uuid.test(d.content_version_id) &&
-          typeof d.content_sha256 === 'string' &&
-          /^[a-f0-9]{64}$/.test(d.content_sha256)
-        return {
-          id,
+    Object.entries(object(attachments)).map(([id, raw]) => {
+      // The daemon projects only entries accepted by metadata.Lookup.
+      const e = object(raw)
+      const docbank = object(e.docbank)
+      const name = typeof e.name === 'string' ? e.name : id
+      const type = typeof e.media_type === 'string' ? e.media_type : 'unknown'
+      const size = typeof e.size === 'number' ? e.size : 0
+      const mediaType = type.split(';')[0]!.trim().toLowerCase()
+      return {
+        id,
+        name,
+        type,
+        size,
+        reference: JSON.stringify([
           name,
           type,
           size,
-          valid,
-          image:
-            ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(type) &&
-            size <= 20 << 20,
-          video: ['video/mp4', 'video/webm', 'video/ogg'].includes(type) && size <= 100 << 20,
-        }
-      })
-      .filter((entry) => entry.valid),
+          e.added_by ?? '',
+          e.added_at ?? '',
+          docbank.vault_uid,
+          docbank.node_id,
+          docbank.content_version_id,
+          docbank.content_sha256,
+        ]),
+        mediaType,
+        image:
+          ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mediaType) &&
+          size <= 20 << 20,
+        video:
+          ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(mediaType) &&
+          size <= 100 << 20,
+      }
+    }),
   )
-  let previousAttachments: string | undefined
+  const references = new Map<string, string>()
   let previousBaseURL: string | undefined
   let previousFetcher: Props['fetchAttachment']
   let previousContextKey: string | undefined
@@ -98,6 +89,7 @@
   }
   function clearUploads(): void {
     uploadGeneration++
+    uploadQueue = []
     uploads.clear()
     uploading = false
   }
@@ -106,58 +98,78 @@
     clearUploads()
   })
   $effect(() => {
-    const identity = JSON.stringify(attachments)
-    if (
-      identity === previousAttachments &&
-      baseURL === previousBaseURL &&
-      fetchAttachment === previousFetcher &&
-      attachmentContextKey === previousContextKey
-    )
-      return
+    const next = new Map(entries.map((entry) => [entry.id, entry.reference]))
     if (baseURL !== previousBaseURL || attachmentContextKey !== previousContextKey)
       untrack(clearUploads)
-    previousAttachments = identity
+    if (
+      baseURL !== previousBaseURL ||
+      fetchAttachment !== previousFetcher ||
+      attachmentContextKey !== previousContextKey
+    ) {
+      untrack(clearPreviews)
+    } else {
+      untrack(() => {
+        for (const [id, reference] of references) {
+          if (next.get(id) === reference) continue
+          const url = previews.get(id)
+          if (url) URL.revokeObjectURL(url)
+          previews.delete(id)
+          states.delete(id)
+          loading.delete(id)
+        }
+      })
+    }
+    references.clear()
+    for (const [id, reference] of next) references.set(id, reference)
     previousBaseURL = baseURL
     previousFetcher = fetchAttachment
     previousContextKey = attachmentContextKey
-    untrack(clearPreviews)
   })
-  async function attachFiles(): Promise<void> {
-    const uploader = uploadAttachment
-    if (!uploader || !canUpload || uploadDisabled || !fileInput) return
-    const files = Array.from(fileInput.files ?? [])
+  $effect(() => {
+    if (
+      uploadQueue.length > 0 &&
+      !uploading &&
+      !actionsDisabled &&
+      !attachmentControlsDisabled &&
+      canUpload
+    )
+      untrack(() => void uploadNext())
+  })
+  function attachFiles(): void {
+    if (!canUpload || uploadDisabled || !fileInput) return
+    uploadQueue = Array.from(fileInput.files ?? [])
     fileInput.value = ''
+    for (const file of uploadQueue) uploads.set(file, 'queued')
+  }
+  async function uploadNext(): Promise<void> {
+    const uploader = uploadAttachment
+    const file = uploadQueue[0]
+    if (!uploader || !file) return
+    uploadQueue = uploadQueue.slice(1)
     const accepted = uploadGeneration
     uploading = true
-    for (const file of files) {
-      if (
-        accepted !== uploadGeneration ||
-        actionsDisabled ||
-        attachmentControlsDisabled ||
-        !canUpload
-      )
-        break
-      uploads.set(file, 'uploading')
-      try {
-        await uploader(file)
-        if (accepted !== uploadGeneration) return
-        uploads.delete(file)
-      } catch (error) {
-        if (accepted !== uploadGeneration) return
+    uploads.set(file, 'uploading')
+    try {
+      await uploader(file)
+      if (accepted === uploadGeneration) uploads.delete(file)
+    } catch (error) {
+      if (accepted === uploadGeneration)
         uploads.set(file, error instanceof Error ? error.message : 'docbank_unreachable')
-      }
+    } finally {
+      if (accepted === uploadGeneration) uploading = false
     }
-    if (accepted === uploadGeneration) uploading = false
   }
   async function load(id: string, name: string, preview: boolean, mediaType = ''): Promise<void> {
     const fetcher = fetchAttachment
     if (!fetcher || loading.get(id)) return
     const accepted = generation
+    const reference = references.get(id)
+    const current = () => accepted === generation && references.get(id) === reference
     loading.set(id, true)
     states.delete(id)
     try {
       const blob = await fetcher(`${baseURL}/${encodeURIComponent(id)}/content`)
-      if (accepted !== generation) return
+      if (!current()) return
       if (blob.size > 100 << 20) throw new Error('attachment_too_large')
       const url = URL.createObjectURL(preview ? new Blob([blob], { type: mediaType }) : blob)
       if (preview) previews.set(id, url)
@@ -169,10 +181,9 @@
         setTimeout(() => URL.revokeObjectURL(url), 0)
       }
     } catch (error) {
-      if (accepted === generation)
-        states.set(id, error instanceof Error ? error.message : 'docbank_unreachable')
+      if (current()) states.set(id, error instanceof Error ? error.message : 'docbank_unreachable')
     } finally {
-      if (accepted === generation) loading.delete(id)
+      if (current()) loading.delete(id)
     }
   }
 </script>
@@ -217,7 +228,7 @@
                   disabled={attachmentControlsDisabled ||
                     !fetchAttachment ||
                     Boolean(loading.get(entry.id))}
-                  onclick={() => load(entry.id, entry.name, true, entry.type)}
+                  onclick={() => load(entry.id, entry.name, true, entry.mediaType)}
                 />{/if}
               {#if entry.video && !previews.has(entry.id)}
                 <Button
@@ -226,7 +237,7 @@
                   disabled={attachmentControlsDisabled ||
                     !fetchAttachment ||
                     Boolean(loading.get(entry.id))}
-                  onclick={() => load(entry.id, entry.name, true, entry.type)}
+                  onclick={() => load(entry.id, entry.name, true, entry.mediaType)}
                 />
               {/if}
               <Button

@@ -23,6 +23,90 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it.each([
+    { actorPolicy: 'identity', outcome: 'saved' },
+    { actorPolicy: 'request', outcome: 'saved' },
+    { actorPolicy: 'request', outcome: 'uncertain' },
+  ])(
+    'refreshes authority after a $outcome attachment upload with $actorPolicy attribution',
+    async ({ actorPolicy, outcome }) => {
+      history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const base = snapshot()
+      Object.assign(base.capabilities, { attachments: true, actor_policy: actorPolicy })
+      const accepted = {
+        ...base,
+        selected: {
+          state: 'available',
+          issue: base.collection[0],
+          comments: [],
+          labels: [],
+          links: [],
+          recurrences: [],
+          history: [],
+        },
+      }
+      let finish!: (response: Response) => void
+      let fail!: (reason: Error) => void
+      const pending = new Promise<Response>((resolve, reject) => {
+        finish = resolve
+        fail = reject
+      })
+      let uploadURL: URL | undefined
+      let uploadOptions: RequestInit | undefined
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(
+            input instanceof Request ? input.url : String(input),
+            window.location.origin,
+          )
+          if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (init?.method === 'POST' && url.pathname.endsWith('/attachments')) {
+            uploadURL = url
+            uploadOptions = init
+            return pending
+          }
+          if (url.pathname.endsWith('/ui/snapshot')) snapshotReads++
+          return Response.json(accepted, { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }),
+      )
+      const view = render(App)
+      await screen.findByRole('button', { name: 'Attach files' })
+      const file = new File(['image'], 'screen.png', { type: 'image/png' })
+      await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+        target: { files: [file] },
+      })
+      await waitFor(() => expect(uploadURL).toBeDefined())
+      const readsBeforeCompletion = snapshotReads
+      expect(uploadURL!.searchParams.get('actor')).toBe(
+        actorPolicy === 'identity' ? null : 'kata-web',
+      )
+      expect(new Headers(uploadOptions?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
+      expect(new Headers(uploadOptions?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
+      expect((uploadOptions?.body as FormData).get('file')).toBe(file)
+      expect((uploadOptions?.body as FormData).get('attachment_id')).toMatch(
+        /^[0-9A-HJKMNP-TV-Z]{26}$/,
+      )
+      expect(screen.getByRole('button', { name: 'Edit issue' }).hasAttribute('disabled')).toBe(true)
+      if (outcome === 'saved') finish(Response.json({ attachment_id: 'saved', attachment: {} }))
+      else fail(new TypeError('network response unavailable'))
+      await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Edit issue' }).hasAttribute('disabled')).toBe(
+          false,
+        ),
+      )
+      if (outcome === 'uncertain')
+        expect(screen.getByRole('alert').textContent).toContain('uncertain')
+    },
+  )
+
   it('renders the Kata application shell while loading', () => {
     sessionStorage.setItem(
       'kata.web.session.v1',

@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
@@ -127,6 +128,9 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string
 }
 
+// DocbankConfig selects the vault and upload limits used by issue attachments.
+type DocbankConfig = config.DocbankConfig
+
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
@@ -140,6 +144,7 @@ type Config struct {
 	TwentySync   TwentySyncConfig
 	TodoistSync  TodoistSyncConfig
 	TickTickSync TickTickSyncConfig
+	Docbank      DocbankConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -258,6 +263,17 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	if boolCount(usesAccess, usesToken, usesTrustedCaller) != 1 {
 		return nil, errors.New("kata: auth token, trusted caller authentication, and host access are mutually exclusive")
+	}
+	docbankConfig, err := config.NormalizeDocbankConfig(cfg.Docbank)
+	if err != nil {
+		return nil, fmt.Errorf("kata: Docbank config: %w", err)
+	}
+	var docbankClient *docbank.Client
+	if docbankConfig.Enabled() {
+		docbankClient, err = docbank.NewClient(docbankConfig.URL, docbankConfig.ResolveKey)
+		if err != nil {
+			return nil, fmt.Errorf("kata: Docbank client: %w", err)
+		}
 	}
 	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
 	if err != nil {
@@ -435,6 +451,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                        store,
+		Docbank:                   docbankClient,
+		DocbankFolder:             docbankConfig.Folder,
+		MaxAttachmentBytes:        docbankConfig.MaxUploadBytes,
 		WebHandler:                cfg.WebHandler,
 		DefaultTimezone:           cfg.DefaultTimezone,
 		StartedAt:                 startedAt,

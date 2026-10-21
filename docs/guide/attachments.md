@@ -62,7 +62,7 @@ The default upload limit is 256 MiB per file; operators may raise it to 2 GiB.
 A daemon admits two concurrent uploads and at most 100 valid references per issue.
 References received through federation may exceed that count; removal remains
 available. Each map key must be a ULID and each entry must be an object. Entries
-with invalid reference fields, including empty entries left by older peers, are omitted from lists and the count limit. They remain removable by id.
+with invalid or unknown fields, including empty entries left by older peers, are omitted from lists and the count limit. Readers treat unknown fields as an unsupported entry format. These entries remain removable by id, and other metadata writes preserve them.
 A peer map with a non-ULID key or a non-object entry blocks attachment commands.
 Repair that map with the [generic metadata commands](../reference/metadata.md),
 preserving valid entries when replacing its value.
@@ -71,4 +71,4 @@ preserving valid entries when replacing its value.
 
 On a daemon with Docbank configured, click **Attach files** on an issue and select one or more files. Each file shows its upload progress or error. Upload controls require a writable session and stay disabled while the connection is stale, an upload is running, or another mutation is pending. New entries appear through the normal issue refresh.
 
-The web UI fetches attachments using the current browser session. Click **Preview** for PNG, JPEG, GIF, and WebP images up to 20 MiB, or **Play** for MP4, WebM, and Ogg videos up to 100 MiB. Videos play in an inline player. Downloads are available up to 100 MiB. Larger files show a `kata docbank attachments get` hint. SVG and HTML files download.
+The web UI fetches attachments using the current browser session. Click **Preview** for PNG, JPEG, GIF, and WebP images up to 20 MiB, or **Play** for MP4, QuickTime, WebM, and Ogg videos up to 100 MiB. Videos play in an inline player when the browser supports their codecs. Downloads are available up to 100 MiB. Larger files show a `kata docbank attachments get` hint. SVG and HTML files download.

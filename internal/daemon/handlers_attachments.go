@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -15,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -34,6 +34,12 @@ func isAttachmentUpload(r *http.Request) bool {
 }
 
 const attachmentPath = "/api/v1/projects/{project_id}/issues/{ref}/attachments"
+
+type attachmentUploadContextKey struct{}
+type attachmentUploadPreflight struct {
+	actor string
+	issue db.Issue
+}
 
 func attachmentError(status int, code string) error {
 	return api.NewError(status, code, strings.ReplaceAll(code, "_", " "), "", nil)
@@ -66,6 +72,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	}
 	slots := make(chan struct{}, 2)
 	bound := func(ctx huma.Context, next func(huma.Context)) {
+		var prepared attachmentUploadPreflight
 		if err := func() error {
 			if cfg.Docbank == nil {
 				return attachmentError(503, "docbank_not_configured")
@@ -82,6 +89,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return err
 			}
+			prepared = attachmentUploadPreflight{actor: actor, issue: iss}
 			return requireFederatedIssueClaim(ctx.Context(), cfg, projectID, iss, actor)
 		}(); err != nil {
 			err = internalAPIError(err)
@@ -115,17 +123,11 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return
 		}
 		defer func() { _ = r.MultipartForm.RemoveAll() }()
-		next(ctx)
+		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, prepared)))
 	}
 	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, BodyReadTimeout: -1, Middlewares: huma.Middlewares{bound}, RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{"multipart/form-data": {Schema: &huma.Schema{Type: "object", Required: []string{"file", "attachment_id"}, Properties: map[string]*huma.Schema{"file": {Type: "string", Format: "binary"}, "attachment_id": {Type: "string"}}}}}}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AttachmentResponse, error) {
-		actor, err := attributedActor(ctx, in.Actor)
-		if err != nil {
-			return nil, err
-		}
-		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
-		}
+		prepared := ctx.Value(attachmentUploadContextKey{}).(attachmentUploadPreflight)
+		actor, iss := prepared.actor, prepared.issue
 		files := in.RawBody.File["file"]
 		if len(files) != 1 || len(in.RawBody.File) != 1 || len(in.RawBody.Value["attachment_id"]) != 1 {
 			return nil, attachmentError(400, "invalid_attachment_upload")
@@ -135,7 +137,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if fh.Size > limit {
 			return nil, attachmentError(413, "attachment_too_large")
 		}
-		name := cleanAttachmentName(fh.Filename)
+		name := metadata.CleanAttachmentName(fh.Filename)
 		e := metadata.Attachment{Name: name, MediaType: "application/octet-stream", Size: fh.Size, AddedBy: actor, AddedAt: time.Now().UTC().Format(time.RFC3339)}
 		// Validate the client id/name before contacting Docbank; reference fields follow the receipt.
 		if !uid.Valid(id) || name == "" || len(name) > 255 {
@@ -154,10 +156,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 			return nil, internalAPIError(err)
 		}
-		e.MediaType = http.DetectContentType(head[:n])
-		if e.MediaType == "application/ogg" {
-			e.MediaType = "video/ogg"
-		}
+		e.MediaType = attachmentMediaType(head[:n])
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -233,18 +232,28 @@ func firstFormValue(m map[string][]string, key string) string {
 	}
 	return m[key][0]
 }
-func cleanAttachmentName(name string) string {
-	name = path.Base(strings.ReplaceAll(name, `\`, "/"))
-	name = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
+func attachmentMediaType(head []byte) string {
+	if len(head) >= 16 && string(head[4:8]) == "ftyp" {
+		size := int(binary.BigEndian.Uint32(head[:4]))
+		if size >= 16 && size <= len(head) && size%4 == 0 {
+			for offset := 8; offset < size; offset += 4 {
+				if offset == 12 {
+					continue // Minor version, rather than a compatible brand.
+				}
+				switch string(head[offset : offset+4]) {
+				case "qt  ":
+					return "video/quicktime"
+				case "isom", "iso2", "avc1", "mp41", "mp42":
+					return "video/mp4"
+				}
+			}
 		}
-		return r
-	}, name)
-	if name == "." || name == ".." || name == "/" {
-		return ""
 	}
-	return name
+	typ := http.DetectContentType(head)
+	if typ == "application/ogg" {
+		return "video/ogg"
+	}
+	return typ
 }
 
 // preflightAttachmentAdmission rejects an invalid map or a full issue before

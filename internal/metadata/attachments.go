@@ -1,13 +1,12 @@
 package metadata
 
 import (
-	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"mime"
+	"path"
 	"regexp"
-	"slices"
 	"strings"
 	"unicode"
 )
@@ -58,24 +57,26 @@ func DecodeAttachments(raw jsontext.Value) (Attachments, error) {
 
 // Encode retains raw entry values, including fields unknown to this daemon.
 func (m Attachments) Encode() jsontext.Value {
-	keys := make([]string, 0, len(m))
-	for id := range m {
-		keys = append(keys, id)
+	out, err := json.Marshal(m, json.Deterministic(true))
+	if err != nil {
+		return jsontext.Value(`{}`)
 	}
-	slices.Sort(keys)
-	var b bytes.Buffer
-	b.WriteByte('{')
-	for i, id := range keys {
-		if i > 0 {
-			b.WriteByte(',')
+	return out
+}
+
+// CleanAttachmentName strips path components and controls from an upload name.
+func CleanAttachmentName(name string) string {
+	name = path.Base(strings.ReplaceAll(name, `\`, "/"))
+	name = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
 		}
-		k, _ := json.Marshal(id)
-		b.Write(k)
-		b.WriteByte(':')
-		b.Write(m[id])
+		return r
+	}, name)
+	if name == "." || name == ".." || name == "/" {
+		return ""
 	}
-	b.WriteByte('}')
-	return b.Bytes()
+	return name
 }
 
 // ValidateEntry checks an entry immediately before local admission or dereferencing.
@@ -140,7 +141,7 @@ func (m Attachments) Lookup(id string) (Attachment, error) {
 	if len(raw) > 2048 {
 		return e, fmt.Errorf("%w: attachment entry exceeds 2 KiB", ErrInvalidValue)
 	}
-	if err := json.Unmarshal(raw, &e); err != nil {
+	if err := json.Unmarshal(raw, &e, json.RejectUnknownMembers(true)); err != nil {
 		return e, fmt.Errorf("%w: attachment: %v", ErrInvalidValue, err)
 	}
 	return e, ValidateEntry(id, e)

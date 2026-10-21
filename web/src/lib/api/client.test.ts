@@ -126,7 +126,9 @@ it('uploads attachments with a query actor, multipart file, ULID, and browser cr
     setGeneratedFetch(async () =>
       Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }),
     )
-    await expect(uploadAttachment(7, 'abc4', file, '')).rejects.toThrow('attachment_too_large')
+    const rejected = await uploadAttachment(7, 'abc4', file, '')
+    expect(rejected.status).toBe(413)
+    expect(rejected.data).toEqual({ error: { code: 'attachment_too_large' } })
   } finally {
     setGeneratedFetch(createCredentialedFetch())
   }

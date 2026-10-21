@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"reflect"
 
@@ -36,12 +39,102 @@ type pathEscapingAPIClient struct {
 }
 
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
+	var multipartBody io.ReadCloser
+	if params.ContentType == "multipart/form-data" && !isNilRequestOptions(params.Options) && params.Options.GetBody() != nil {
+		body, contentType := encodeMultipartBody(params.Options.GetBody())
+		multipartBody = body
+		params.Options = bodylessRequestOptions{RequestOptions: params.Options}
+		reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+			req.Body = body
+			req.ContentLength = -1
+			req.GetBody = nil
+			req.Header.Set("Content-Type", contentType)
+			return nil
+		}}, reqEditors...)
+	}
 	if isNilRequestOptions(params.Options) {
 		params.Options = nil
 	} else {
 		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
 	}
-	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
+	req, err := c.APIClient.CreateRequest(ctx, params, reqEditors...)
+	if err != nil && multipartBody != nil {
+		_ = multipartBody.Close()
+	}
+	return req, err
+}
+
+// The runtime only encodes JSON and URL-encoded forms. Supply multipart as a
+// stream and hide the original body from its JSON encoder.
+type bodylessRequestOptions struct{ runtime.RequestOptions }
+
+func (bodylessRequestOptions) GetBody() any { return nil }
+
+func encodeMultipartBody(body any) (io.ReadCloser, string) {
+	reader, writer := io.Pipe()
+	form := multipart.NewWriter(writer)
+	contentType := form.FormDataContentType()
+	go func() {
+		err := func() error {
+			value := reflect.ValueOf(body)
+			if value.Kind() == reflect.Pointer {
+				if value.IsNil() {
+					return fmt.Errorf("multipart body is nil")
+				}
+				value = value.Elem()
+			}
+			if value.Kind() != reflect.Struct {
+				return fmt.Errorf("multipart body must be an object")
+			}
+			for i := 0; i < value.NumField(); i++ {
+				field := value.Field(i)
+				definition := value.Type().Field(i)
+				if definition.PkgPath != "" {
+					continue
+				}
+				name := strings.Split(definition.Tag.Get("json"), ",")[0]
+				if name == "-" {
+					continue
+				}
+				if name == "" {
+					name = definition.Name
+				}
+				if field.Kind() == reflect.Pointer {
+					if field.IsNil() {
+						continue
+					}
+					field = field.Elem()
+				}
+				switch data := field.Interface().(type) {
+				case runtime.File:
+					file, err := data.Reader()
+					if err != nil {
+						return err
+					}
+					part, err := form.CreateFormFile(name, data.Filename())
+					if err == nil {
+						_, err = io.Copy(part, file)
+					}
+					closeErr := file.Close()
+					if err != nil {
+						return err
+					}
+					if closeErr != nil {
+						return closeErr
+					}
+				case string:
+					if err := form.WriteField(name, data); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unsupported multipart field %s", name)
+				}
+			}
+			return form.Close()
+		}()
+		_ = writer.CloseWithError(err)
+	}()
+	return reader, contentType
 }
 
 func isNilRequestOptions(options runtime.RequestOptions) bool {

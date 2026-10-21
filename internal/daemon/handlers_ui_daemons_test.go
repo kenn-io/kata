@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,54 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
+
+type attachmentDeadlineTransport struct {
+	base   http.RoundTripper
+	budget chan time.Duration
+}
+
+func (t attachmentDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments") {
+		if deadline, ok := r.Context().Deadline(); ok {
+			t.budget <- time.Until(deadline)
+		}
+	}
+	return t.base.RoundTrip(r)
+}
+
+func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities":     api.UICapabilities{Writable: true, ActorPolicy: "request"},
+			})
+			return
+		}
+		_, _ = io.WriteString(w, `{"attachment_id":"saved"}`)
+	}))
+	defer upstream.Close()
+	base := http.DefaultTransport
+	budgets := make(chan time.Duration, 1)
+	http.DefaultTransport = attachmentDeadlineTransport{base: base, budget: budgets}
+	t.Cleanup(func() { http.DefaultTransport = base })
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?actor=operator", strings.NewReader("upload"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=fixture")
+	// Keep the caller out of the transport being observed.
+	resp, err := (&http.Client{Transport: base}).Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	select {
+	case budget := <-budgets:
+		require.GreaterOrEqual(t, budget, 74*time.Minute)
+	default:
+		t.Fatal("upstream attachment request had no deadline")
+	}
+}
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	connected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -24,7 +26,70 @@ import (
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
+
+func TestAttachmentCLIUploadStreamsSource(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file.txt")
+	require.NoError(t, os.WriteFile(file, []byte("before"), 0600))
+	client, err := kataclient.NewWithHTTPClient("https://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		defer func() { _ = r.Body.Close() }()
+		// The multipart writer must wait for the transport to consume the body
+		// before reading the source file, rather than buffering it up front.
+		require.NoError(t, os.WriteFile(file, []byte("streamed"), 0600))
+		reader, err := r.MultipartReader()
+		require.NoError(t, err)
+		form, err := reader.ReadForm(1024)
+		require.NoError(t, err)
+		defer func() { _ = form.RemoveAll() }()
+		require.Equal(t, []string{"attachment-id"}, form.Value["attachment_id"])
+		require.Equal(t, "operator", r.URL.Query().Get("actor"))
+		require.Equal(t, "file.txt", form.File["file"][0].Filename)
+		source, err := form.File["file"][0].Open()
+		require.NoError(t, err)
+		defer func() { _ = source.Close() }()
+		data, err := io.ReadAll(source)
+		require.NoError(t, err)
+		require.Equal(t, "streamed", string(data))
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"attachment_id":"attachment-id","attachment":{}}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+	})})
+	require.NoError(t, err)
+	retry, err := uploadAttachmentCLI(t.Context(), client, 7, "abc4", "operator", "attachment-id", file)
+	require.NoError(t, err)
+	require.False(t, retry)
+}
+
+func TestAttachmentCLIRateLimitBackoff(t *testing.T) {
+	resetFlags(t)
+	file := filepath.Join(t.TempDir(), "file.txt")
+	require.NoError(t, os.WriteFile(file, []byte("ok"), 0600))
+	synctest.Test(t, func(t *testing.T) {
+		var ids []string
+		var elapsed time.Duration
+		start := time.Now()
+		client, err := kataclient.NewWithHTTPClient("https://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			reader, err := r.MultipartReader()
+			require.NoError(t, err)
+			form, err := reader.ReadForm(1024)
+			require.NoError(t, err)
+			defer func() { _ = form.RemoveAll() }()
+			ids = append(ids, form.Value["attachment_id"][0])
+			status, body := http.StatusTooManyRequests, `{"error":{"code":"rate_limited","message":"upload busy"}}`
+			if len(ids) == 2 {
+				elapsed = time.Since(start)
+				status, body = http.StatusOK, `{"attachment_id":"saved","attachment":{}}`
+			}
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+		})})
+		require.NoError(t, err)
+		cmd := &cobra.Command{}
+		cmd.SetOut(io.Discard)
+		require.NoError(t, addAttachmentsCLI(t.Context(), cmd, client, 7, "abc4", []string{file}))
+		require.Len(t, ids, 2)
+		require.Equal(t, ids[0], ids[1])
+		require.GreaterOrEqual(t, elapsed, 250*time.Millisecond)
+	})
+}
 
 func executeAttachmentCLI(t *testing.T, base string, args ...string) (string, error) {
 	return executeAttachmentCLIWithRootFlags(t, base, nil, args...)
@@ -603,6 +668,7 @@ func TestShowAttachmentSection(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	require.Contains(t, b.String(), "--- attachments ---")
 	require.Contains(t, b.String(), "2 bytes")
+	require.NotContains(t, b.String(), "attachments =")
 }
 
 func TestAttachmentReadersSkipInvalidPeerEntries(t *testing.T) {

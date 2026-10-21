@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -825,6 +827,31 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 		}
 	}
 	if out.Body.Selected != nil && data.SelectedIssue != nil {
+		issue := *data.SelectedIssue
+		var values map[string]jsontext.Value
+		if len(issue.Metadata) > 0 {
+			if err := json.Unmarshal([]byte(issue.Metadata), &values); err != nil {
+				return nil, internalAPIError(err)
+			}
+		}
+		if raw, exists := values["attachments"]; exists {
+			visible, err := metadata.DecodeAttachments(raw)
+			if err != nil {
+				visible = metadata.Attachments{}
+			}
+			for id := range visible {
+				if _, err := visible.Lookup(id); err != nil {
+					delete(visible, id)
+				}
+			}
+			values["attachments"] = visible.Encode()
+			raw, err := json.Marshal(values)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			issue.Metadata = db.JSONBlob(raw)
+		}
+		out.Body.Selected.Issue = &issue
 		records, err := projectCommentGraph(ctx, data.CommentGraph)
 		if err != nil {
 			return nil, err

@@ -346,6 +346,9 @@ func TestAttachmentContent(t *testing.T) {
 		{"SVG", []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`), "application/octet-stream"},
 		{"HTML", []byte(`<html>hello</html>`), "application/octet-stream"},
 		{"MP4", append([]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), bytes.Repeat([]byte{0}, 512)...), "video/mp4"},
+		{"isom", append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomavc1"), bytes.Repeat([]byte{0}, 512)...), "video/mp4"},
+		{"avc1", append([]byte("\x00\x00\x00\x18ftypavc1\x00\x00\x00\x00avc1isom"), bytes.Repeat([]byte{0}, 512)...), "video/mp4"},
+		{"QuickTime", append([]byte("\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00qt  "), bytes.Repeat([]byte{0}, 512)...), "video/quicktime"},
 		{"WebM", append([]byte("\x1a\x45\xdf\xa3"), bytes.Repeat([]byte{0}, 600)...), "video/webm"},
 		{"Ogg", append([]byte("OggS\x00"), bytes.Repeat([]byte{0}, 600)...), "video/ogg"},
 	} {
@@ -355,6 +358,13 @@ func TestAttachmentContent(t *testing.T) {
 			base := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
 			code, raw := attachmentUpload(t, env, base, attachmentID, tc.data, 1)
 			require.Equal(t, 200, code, string(raw))
+			if strings.HasPrefix(tc.mediaType, "video/") {
+				var added struct {
+					Attachment metadata.Attachment `json:"attachment"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &added))
+				require.Equal(t, tc.mediaType, added.Attachment.MediaType)
+			}
 			resp, err := env.HTTP.Get(env.URL + base + "/" + attachmentID + "/content")
 			require.NoError(t, err)
 			defer func() { _ = resp.Body.Close() }()
@@ -533,4 +543,63 @@ func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 			require.Equal(t, configured, enabled)
 		})
 	}
+}
+
+func TestUIAttachmentMetadataUsesValidatedReferences(t *testing.T) {
+	env, _ := attachmentEnv(t, 1024)
+	p, iss := seedProjectAndIssue(t, env)
+	code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), attachmentID, []byte("image"), 1)
+	require.Equal(t, http.StatusOK, code, string(raw))
+	var added struct {
+		Attachment metadata.Attachment `json:"attachment"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &added))
+	added.Attachment.MediaType = "image/png ; charset=utf-8"
+	m := metadata.Attachments{}
+	require.NoError(t, m.Add(attachmentID, added.Attachment))
+	m["01JB3Z6V2K8M4Q9T1X5W7Y0RNB"] = jsontext.Value(`{}`)
+	var future map[string]any
+	require.NoError(t, json.Unmarshal(m[attachmentID], &future))
+	future["future"] = true
+	raw, err := json.Marshal(future)
+	require.NoError(t, err)
+	m["01JB3Z6V2K8M4Q9T1X5W7Y0RNC"] = raw
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachments": m.Encode()},
+	})
+	require.NoError(t, err)
+	resp, err := env.HTTP.Get(env.URL + "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + iss.UID)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var snapshot struct {
+		Selected struct {
+			Issue struct {
+				Metadata struct {
+					Attachments map[string]metadata.Attachment `json:"attachments"`
+				} `json:"metadata"`
+			} `json:"issue"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&snapshot))
+	require.Equal(t, map[string]metadata.Attachment{attachmentID: added.Attachment}, snapshot.Selected.Issue.Metadata.Attachments)
+	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	require.Contains(t, string(stored.Metadata), `"future":true`)
+}
+
+func TestAttachmentUnsupportedMediaTypeExplainsMultipart(t *testing.T) {
+	env, _ := attachmentEnv(t, 1024)
+	p, iss := seedProjectAndIssue(t, env)
+	resp, err := env.HTTP.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments", env.URL, p.ID, iss.ShortID), "text/plain", strings.NewReader("file"))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode)
+	var result struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.Equal(t, "Content-Type must be multipart/form-data", result.Error.Message)
 }

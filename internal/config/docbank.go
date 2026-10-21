@@ -25,6 +25,12 @@ type DocbankConfig struct {
 // Enabled reports whether an operator configured a Docbank endpoint.
 func (c DocbankConfig) Enabled() bool { return c.URL != "" }
 
+// NormalizeDocbankConfig applies daemon defaults and validates without reading secrets.
+func NormalizeDocbankConfig(c DocbankConfig) (DocbankConfig, error) {
+	err := normalizeDocbank(&c)
+	return c, err
+}
+
 // ResolveKey reads the selected secret on every request, permitting key rotation.
 func (c DocbankConfig) ResolveKey() (string, error) {
 	key, _, err := ResolveSecret(c.APIKey, c.APIKeyFile, c.APIKeyEnv)

@@ -8,7 +8,7 @@
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { ComponentProps } from 'svelte'
 
-  import { fetchAttachmentBlob, uploadAttachment } from '../lib/api/client'
+  import { fetchAttachmentBlob } from '../lib/api/client'
   import Comments from './Comments.svelte'
   import type { KataCommentReplyIntent } from '../lib/kata/types'
   import IssueEditor from './IssueEditor.svelte'
@@ -20,7 +20,7 @@
     attachmentControlsDisabled?: boolean | undefined
     attachmentContextKey?: string | undefined
     attachmentsEnabled?: boolean | undefined
-    attachmentActor?: string | undefined
+    onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
   } = $props()
   let editing = $state(false)
   let replyIntent = $state<KataCommentReplyIntent | undefined>()
@@ -93,13 +93,9 @@
       {detail}
       attachmentBaseURL={`/api/v1/projects/${props.issue.issue.project_id}/issues/${props.issue.issue.uid}/attachments`}
       fetchAttachment={props.attachmentReadsBlocked ? undefined : fetchAttachmentBlob}
-      uploadAttachment={(file) =>
-        uploadAttachment(
-          props.issue.issue.project_id,
-          props.issue.issue.uid,
-          file,
-          props.attachmentActor ?? '',
-        )}
+      uploadAttachment={props.onUploadAttachment
+        ? (file) => props.onUploadAttachment!(props.issue.issue.uid, file)
+        : undefined}
       attachmentsEnabled={props.attachmentsEnabled}
       actionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
       attachmentControlsDisabled={props.attachmentControlsDisabled}

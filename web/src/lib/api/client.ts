@@ -2,6 +2,7 @@ import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 import { applicationRequest, applicationURL } from '../applicationBase'
 import { createULID } from '../ulid'
+import { addAttachment, type addAttachmentResponse } from './generated'
 
 type CredentialReader = () => SessionCredentials | undefined
 type AuthenticationRequiredHandler = () => boolean
@@ -100,23 +101,14 @@ export async function uploadAttachment(
   ref: string,
   file: File,
   actor: string,
-): Promise<void> {
-  const body = new FormData()
-  body.set('attachment_id', createULID())
-  body.set('file', file)
-  const query = actor ? `?${new URLSearchParams({ actor })}` : ''
-  const response = await generatedFetch(
-    applicationURL(
-      `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments${query}`,
-    ),
-    { method: 'POST', body },
+  headers?: Headers,
+): Promise<addAttachmentResponse> {
+  return addAttachment(
+    { projectId: projectID, ref },
+    { attachment_id: createULID(), file },
+    actor ? { actor } : undefined,
+    headers ? { headers } : undefined,
   )
-  if (!response.ok) {
-    const body = (await response.json().catch(() => undefined)) as
-      | { error?: { code?: string } }
-      | undefined
-    throw new Error(body?.error?.code ?? 'docbank_unreachable')
-  }
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
