@@ -308,11 +308,10 @@ jobs:
             cli: false
           - name: Windows CLI (G-S)
             cli: true
-            run: '^Test[G-S]'
+            shard: G-S
           - name: Windows CLI (A-F, T-Z, and fuzz/examples)
             cli: true
-            run: '.'
-            skip: '^Test[G-S]'
+            shard: complement
 
     steps:
       - name: Check out repository
@@ -338,6 +337,7 @@ jobs:
 
       # The Windows job is the only writer of the shared Go cache.
       - name: Restore shared Go cache
+        id: restore-go-cache
         if: matrix.cli
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
         with:
@@ -345,6 +345,10 @@ jobs:
             ${{ env.GOMODCACHE }}
             ${{ env.GOCACHE }}
           key: setup-go-Windows-x64-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+
+      - name: Warn on shared Go cache miss
+        if: matrix.cli && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: echo "::warning::Shared Windows Go cache was not restored."
 
       - name: Build
         if: ${{ !matrix.cli }}
@@ -370,12 +374,13 @@ jobs:
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-          TEST_RUN: ${{ matrix.run }}
-          TEST_SKIP: ${{ matrix.skip }}
+          TEST_SHARD: ${{ matrix.shard }}
         run: |
-          skip_args=()
-          if [[ -n "$TEST_SKIP" ]]; then skip_args=(-skip "$TEST_SKIP"); fi
-          env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" "${skip_args[@]}" ./cmd/kata
+          shard_pattern='^Test[G-S]'
+          TEST_RUN="$shard_pattern"
+          TEST_SKIP=''
+          if [[ "$TEST_SHARD" == complement ]]; then TEST_RUN='.'; TEST_SKIP="$shard_pattern"; fi
+          env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
     name: golangci-lint
