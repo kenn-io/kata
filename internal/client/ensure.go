@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -200,18 +201,23 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 // checkDaemonReplaceable refuses to stop a live daemon that this binary could
 // not replace: a newer release, or one serving storage whose schema is newer
 // than this binary supports. Older storage stays replaceable because the
-// replacement daemon upgrades it on open.
+// replacement daemon upgrades it on open, unless PostgreSQL runs in validate
+// mode, where the daemon performs no DDL and starts only on its exact schema.
 func checkDaemonReplaceable(ctx context.Context, live PingInfo) error {
 	if err := refuseDaemonDowngrade(live); err != nil {
 		return err
 	}
-	schema, err := peekStorageSchemaForEnsure(ctx)
+	storage, err := peekStorageSchemaForEnsure(ctx)
 	if err != nil {
 		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
 	}
-	if schema > db.CurrentSchemaVersion() {
+	switch {
+	case storage.Version > db.CurrentSchemaVersion():
 		return fmt.Errorf("%w: kata daemon %s uses storage schema_version %d, which is newer than binary schema %d of this kata binary %s; use a newer kata binary",
-			ErrDaemonNotReplaceable, daemonVersionLabel(live), schema, db.CurrentSchemaVersion(), currentVersionForEnsure())
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, db.CurrentSchemaVersion(), currentVersionForEnsure())
+	case storage.ValidateOnly && storage.Version != db.CurrentSchemaVersion():
+		return fmt.Errorf("%w: kata daemon %s uses PostgreSQL schema_version %d, but validate mode starts only on binary schema %d of this kata binary %s; stop the daemon and run this binary's kata storage postgres migrate first",
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, db.CurrentSchemaVersion(), currentVersionForEnsure())
 	}
 	return nil
 }
@@ -240,28 +246,47 @@ func isReleaseVersion(v string) bool {
 	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
 }
 
+// ensureStorageSchema is the schema of the storage a replacement daemon would
+// open. ValidateOnly means that daemon cannot migrate it: PostgreSQL storage
+// configured with mode "validate".
+type ensureStorageSchema struct {
+	Version      int
+	ValidateOnly bool
+}
+
 // peekStorageSchemaForEnsure reads, without migrating, the schema version of
-// the storage a replacement daemon would open. A SQLite database that does not
-// exist yet reports zero. The read shares the HTTP timeout budget so
-// unreachable PostgreSQL storage cannot stall the command.
-func peekStorageSchemaForEnsure(ctx context.Context) (int, error) {
+// the storage a replacement daemon would open, using the same storage settings
+// that daemon reads. A SQLite database that does not exist yet reports zero.
+// The read shares the HTTP timeout budget so unreachable PostgreSQL storage
+// cannot stall the command.
+func peekStorageSchemaForEnsure(ctx context.Context) (ensureStorageSchema, error) {
 	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	dsn, err := config.KataDSN(ctx)
 	if err != nil {
-		return 0, err
+		return ensureStorageSchema{}, err
 	}
 	backend, err := storeopen.BackendForDSN(dsn)
 	if err != nil {
-		return 0, err
+		return ensureStorageSchema{}, err
 	}
-	if backend == storeopen.BackendSQLite {
+	var storage ensureStorageSchema
+	switch backend {
+	case storeopen.BackendSQLite:
 		if _, err := os.Stat(strings.TrimPrefix(dsn, "sqlite://")); errors.Is(err, os.ErrNotExist) {
-			return 0, nil
+			return storage, nil
 		}
+	case storeopen.BackendPostgres:
+		pg, err := config.KataPostgresStorageConfig(ctx)
+		if err != nil {
+			return ensureStorageSchema{}, err
+		}
+		mode := pgstore.ConfigFromValues(pg.Schema, pg.Mode, pg.SchemaOwner, pg.AllowInsecure).SchemaMode
+		storage.ValidateOnly = mode == pgstore.SchemaModeValidate
 	}
-	return storeopen.PeekSchemaVersion(ctx, dsn)
+	storage.Version, err = storeopen.PeekSchemaVersion(ctx, dsn)
+	return storage, err
 }
 
 // daemonScanOutcome is the three-case answer to whether a local daemon is

@@ -20,7 +20,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   daemon anyway, failed to start its own, and left no daemon running. The
   command now fails and names both versions or schemas so you can rerun it
   with the newer binary. An older release binary also no longer downgrades a
-  newer release daemon. See
+  newer release daemon. With PostgreSQL in validate mode, a binary whose schema
+  differs from the database's also leaves the daemon running and tells you to
+  run `kata storage postgres migrate` first. See
   [Daemon and diagnostics](reference/cli.md#daemon-and-diagnostics).
 
 - Count a parent's open and total children from the browser snapshot's
