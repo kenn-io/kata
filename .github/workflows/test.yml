@@ -300,7 +300,8 @@ jobs:
     strategy:
       fail-fast: false
       # G-S uses measured Windows root-test times. Rebalance if a CLI shard
-      # takes longer than the remaining-package leg.
+      # takes longer than the remaining-package leg. Keep the G-S run and skip
+      # selectors paired so edits cannot drop or duplicate tests.
       matrix:
         include:
           - name: Windows
@@ -359,7 +360,10 @@ jobs:
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $(go list ./... | grep -v '^go.kenn.io/kata/cmd/kata$')
+        run: |
+          set -e -o pipefail
+          packages=$(go list ./... | grep -v '^go.kenn.io/kata/cmd/kata$')
+          env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
 
       - name: Run CLI tests
         if: matrix.cli
