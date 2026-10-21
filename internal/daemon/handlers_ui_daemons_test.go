@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -472,4 +473,55 @@ func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestWebDaemonProxyAttachmentStreamOutlivesJSONDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exercises the live 30-second gateway deadline")
+	}
+	payload := strings.Repeat("x", 2<<20)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "2097152")
+		_, _ = io.WriteString(w, payload[:16384])
+		w.(http.Flusher).Flush()
+		select {
+		case <-time.After(31 * time.Second):
+			_, _ = io.WriteString(w, payload[16384:])
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	response, err := http.Get(server.URL + "/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, payload, string(body))
+}
+
+func TestWebDaemonProxyAttachmentTextOutlivesJSONDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exercises the live 30-second gateway deadline")
+	}
+	payload := `{"state":"ready","text":"verified text"}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		select {
+		case <-time.After(31 * time.Second):
+			_, _ = io.WriteString(w, payload)
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	response, err := http.Get(server.URL + "/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/text")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, payload, string(body))
 }

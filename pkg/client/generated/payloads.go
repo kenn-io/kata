@@ -2,6 +2,10 @@
 
 package generated
 
+import (
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+)
+
 type ReconcileExternalRootByKeyBody = ReconcileExternalRootByKeyRequestBody
 
 type MapConnectorFieldBody = MapConnectorFieldRequestBody
@@ -97,6 +101,28 @@ type ReopenIssueBody = ActionRequestBody
 type RestoreIssueBody = RestoreRequestBody
 
 type UnassignIssueBody = UnassignRequestBody
+
+type AddAttachmentBody struct {
+	Actor        *string      `json:"actor,omitempty"`
+	AttachmentID string       `json:"attachment_id" validate:"required"`
+	File         runtime.File `json:"file" validate:"required"`
+}
+
+func (a AddAttachmentBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.AttachmentID, "required"); err != nil {
+		errors = errors.Append("AttachmentID", err)
+	}
+	if v, ok := any(a.File).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("File", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
 
 type BindExternalRootBody = BindExternalRootRequestBody
 

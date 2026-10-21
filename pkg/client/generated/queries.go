@@ -285,6 +285,19 @@ func (s ShowIssueQuery) Validate() error {
 	return errors
 }
 
+type RemoveAttachmentQuery struct {
+	Actor *string `json:"actor,omitempty"`
+}
+
+type AttachmentTextQuery struct {
+	MaxBytes *int64  `json:"max_bytes,omitempty" validate:"omitempty,gte=1,lte=16777216"`
+	Profile  *string `json:"profile,omitempty"`
+}
+
+func (a AttachmentTextQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
 type UnbindExternalRootQuery struct {
 	Actor *string `json:"actor,omitempty"`
 }

@@ -93,12 +93,24 @@ func TestDeploymentInvalidRequestDimensionsFailLoudly(t *testing.T) {
 }
 
 func TestLocalProfileRejectsDeploymentControlReferences(t *testing.T) {
-	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
+	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE", "KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
 		t.Run(key, func(t *testing.T) {
 			_, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir(), Catalog: config.CatalogDaemonConfig{TokenEnv: key}}, true)
 			require.ErrorContains(t, err, "reserved environment key")
 		})
 	}
+}
+
+func TestLocalProfilePassesDocbankAPIKeyEnv(t *testing.T) {
+	const keyEnv = "EXAMPLE_DOCBANK_KEY"
+	t.Setenv(keyEnv, "example-secret")
+	profile := config.LocalProfileConfig{
+		Home:   t.TempDir(),
+		Config: &config.DaemonConfig{Docbank: config.DocbankConfig{APIKeyEnv: keyEnv}},
+	}
+	env, err := config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	require.Contains(t, env, keyEnv+"=example-secret")
 }
 
 // Empty Compose substitutions must preserve the operator's TOML settings.

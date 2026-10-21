@@ -731,6 +731,22 @@
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
+        attachmentReadsBlocked={Boolean(
+          stale ||
+          credentialExpired ||
+          activeConnection?.health === 'auth_required' ||
+          /authentication required/i.test(daemonError ?? ''),
+        )}
+        attachmentControlsDisabled={Boolean(
+          daemonSwitching ||
+          stale ||
+          reconnecting ||
+          loading ||
+          daemonError ||
+          credentialExpired ||
+          activeConnection?.health === 'auth_required',
+        )}
+        attachmentContextKey={`${activeDaemonID ?? 'direct'}:${activeConnection?.url ?? ''}`}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
         {draftFenceGeneration}

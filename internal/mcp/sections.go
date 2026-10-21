@@ -56,6 +56,7 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) {
 
 func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 	return []toolSection{
+		{loader: "kata.load_attachments", section: "attachments", title: "Load attachment tools", description: "Read pinned attachment text and rendition state from Docbank.", tools: []string{"kata.attachment_text"}, available: true, register: registerAttachmentTools},
 		{
 			loader: "kata.load_activity", section: "activity", title: "Load activity tools",
 			description: "Load typed digest and event-stream tools, then refresh the MCP tool list.",

@@ -88,6 +88,7 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       reference: referenceFor(issue),
       title: issue.title,
       body: issue.body ?? '',
+      attachments: issue.metadata?.attachments,
       status: issue.status,
       ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),

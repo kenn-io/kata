@@ -2,7 +2,11 @@
 
 package generated
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+)
 
 type AuditClosesResponse = AuditClosesResponseBody
 
@@ -362,6 +366,22 @@ type RestoreIssueErrorResponse = ErrorEnvelope
 type UnassignIssueResponse = MutationResponseBody
 
 type UnassignIssueErrorResponse = ErrorEnvelope
+
+type AddAttachmentResponse = AttachmentResponseBody
+
+type AddAttachmentErrorResponse = ErrorEnvelope
+
+type RemoveAttachmentResponse = RemoveAttachmentResponseBody
+
+type RemoveAttachmentErrorResponse = ErrorEnvelope
+
+type AttachmentContentResponse = runtime.File
+
+type AttachmentContentErrorResponse = ErrorEnvelope
+
+type AttachmentTextResponse = TextResult
+
+type AttachmentTextErrorResponse = ErrorEnvelope
 
 type UnbindExternalRootResponse = ExternalRootBridgeOut
 
@@ -1288,6 +1308,33 @@ type UnassignIssueResp struct {
 	StatusCode   int
 	JSON200      *UnassignIssueResponse
 	Headers200   *UnassignIssueResp200Headers
+}
+
+type AddAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AddAttachmentResponse
+}
+
+type RemoveAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RemoveAttachmentResponse
+}
+
+type AttachmentContentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+}
+
+type AttachmentTextResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AttachmentTextResponse
 }
 
 type UnbindExternalRootResp struct {

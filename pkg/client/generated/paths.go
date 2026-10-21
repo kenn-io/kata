@@ -471,6 +471,45 @@ func (u UnassignIssuePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
 }
 
+type AddAttachmentPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (a AddAttachmentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
+type RemoveAttachmentPath struct {
+	ProjectID    int64  `json:"project_id"`
+	Ref          string `json:"ref" validate:"required"`
+	AttachmentID string `json:"attachment_id" validate:"required"`
+}
+
+func (r RemoveAttachmentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type AttachmentContentPath struct {
+	ProjectID    int64  `json:"project_id"`
+	Ref          string `json:"ref" validate:"required"`
+	AttachmentID string `json:"attachment_id" validate:"required"`
+}
+
+func (a AttachmentContentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
+type AttachmentTextPath struct {
+	ProjectID    int64  `json:"project_id"`
+	Ref          string `json:"ref" validate:"required"`
+	AttachmentID string `json:"attachment_id" validate:"required"`
+}
+
+func (a AttachmentTextPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
 type UnbindExternalRootPath struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

@@ -7,6 +7,8 @@ import type {
   AckRelayDeliveriesPathParameters,
   AcquireIssueLeasePathParameters,
   ActionRequestBody,
+  AddAttachmentBody,
+  AddAttachmentPathParameters,
   AddLabelPathParameters,
   AddLabelRequestBody,
   AddLabelResponseBody,
@@ -15,6 +17,10 @@ import type {
   ArchiveCronWorkflowPathParameters,
   AssignIssuePathParameters,
   AssignRequestBody,
+  AttachmentContentPathParameters,
+  AttachmentResponseBody,
+  AttachmentTextParams,
+  AttachmentTextPathParameters,
   AuditClosesParams,
   AuditClosesResponseBody,
   BindExternalRootPathParameters,
@@ -225,6 +231,9 @@ import type {
   RelayBatchResponse,
   RelayResetCheckpoint,
   ReleaseIssueLeasePathParameters,
+  RemoveAttachmentParams,
+  RemoveAttachmentPathParameters,
+  RemoveAttachmentResponseBody,
   RemoveLabelParams,
   RemoveLabelPathParameters,
   RemoveProjectParams,
@@ -289,6 +298,7 @@ import type {
   SkipFederationQuarantinePathParameters,
   SkipFederationQuarantineRequestBody,
   TeamResponseBody,
+  TextResult,
   UIIssueReferenceResponseBody,
   UILaunchTargetResponseBody,
   UIReferencesResponseBody,
@@ -301,6 +311,7 @@ import type {
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
+import { orvalBlobFetch } from '../../client.ts'
 
 export type HTTPStatusCode1xx = 100 | 101 | 102 | 103
 export type HTTPStatusCode2xx = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207
@@ -4329,6 +4340,196 @@ export const unassignIssue = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(unassignRequestBody),
   })
+}
+
+export type addAttachmentResponse200 = {
+  data: AttachmentResponseBody
+  status: 200
+}
+
+export type addAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type addAttachmentResponseSuccess = addAttachmentResponse200 & {
+  headers: Headers
+}
+export type addAttachmentResponseError = addAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type addAttachmentResponse = addAttachmentResponseSuccess | addAttachmentResponseError
+
+export const getAddAttachmentUrl = ({ projectId, ref }: AddAttachmentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments`
+}
+
+export const addAttachment = async (
+  { projectId, ref }: AddAttachmentPathParameters,
+  addAttachmentBody: AddAttachmentBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<addAttachmentResponse> => {
+  const formData = new FormData()
+  if (addAttachmentBody.actor !== undefined) {
+    formData.append(`actor`, addAttachmentBody.actor)
+  }
+  formData.append(`attachment_id`, addAttachmentBody.attachment_id)
+  formData.append(`file`, addAttachmentBody.file)
+
+  return orvalFetch<addAttachmentResponse>(getAddAttachmentUrl({ projectId, ref }), {
+    ...options,
+    method: 'POST',
+    body: formData,
+  })
+}
+
+export type removeAttachmentResponse200 = {
+  data: RemoveAttachmentResponseBody
+  status: 200
+}
+
+export type removeAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type removeAttachmentResponseSuccess = removeAttachmentResponse200 & {
+  headers: Headers
+}
+export type removeAttachmentResponseError = removeAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type removeAttachmentResponse =
+  | removeAttachmentResponseSuccess
+  | removeAttachmentResponseError
+
+export const getRemoveAttachmentUrl = (
+  { projectId, ref, attachmentId }: RemoveAttachmentPathParameters,
+  params?: RemoveAttachmentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}`
+}
+
+export const removeAttachment = async (
+  { projectId, ref, attachmentId }: RemoveAttachmentPathParameters,
+  params?: RemoveAttachmentParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<removeAttachmentResponse> => {
+  return orvalFetch<removeAttachmentResponse>(
+    getRemoveAttachmentUrl({ projectId, ref, attachmentId }, params),
+    {
+      ...options,
+      method: 'DELETE',
+    },
+  )
+}
+
+export type attachmentContentResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type attachmentContentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type attachmentContentResponseSuccess = attachmentContentResponse200 & {
+  headers: Headers
+}
+export type attachmentContentResponseError = attachmentContentResponseDefault & {
+  headers: Headers
+}
+
+export type attachmentContentResponse =
+  | attachmentContentResponseSuccess
+  | attachmentContentResponseError
+
+export const getAttachmentContentUrl = ({
+  projectId,
+  ref,
+  attachmentId,
+}: AttachmentContentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/content`
+}
+
+export const attachmentContent = async (
+  { projectId, ref, attachmentId }: AttachmentContentPathParameters,
+  options?: Parameters<typeof orvalBlobFetch>[1],
+): Promise<attachmentContentResponse> => {
+  return orvalBlobFetch<attachmentContentResponse>(
+    getAttachmentContentUrl({ projectId, ref, attachmentId }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
+export type attachmentTextResponse200 = {
+  data: TextResult
+  status: 200
+}
+
+export type attachmentTextResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type attachmentTextResponseSuccess = attachmentTextResponse200 & {
+  headers: Headers
+}
+export type attachmentTextResponseError = attachmentTextResponseDefault & {
+  headers: Headers
+}
+
+export type attachmentTextResponse = attachmentTextResponseSuccess | attachmentTextResponseError
+
+export const getAttachmentTextUrl = (
+  { projectId, ref, attachmentId }: AttachmentTextPathParameters,
+  params?: AttachmentTextParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/text?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/text`
+}
+
+export const attachmentText = async (
+  { projectId, ref, attachmentId }: AttachmentTextPathParameters,
+  params?: AttachmentTextParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<attachmentTextResponse> => {
+  return orvalFetch<attachmentTextResponse>(
+    getAttachmentTextUrl({ projectId, ref, attachmentId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type unbindExternalRootResponse200 = {

@@ -243,6 +243,9 @@ func printShowHuman(
 			}
 		}
 	}
+	if err := printIssueAttachments(out, b.Issue.Metadata["attachments"]); err != nil {
+		return err
+	}
 	if len(b.Issue.Metadata) > 0 {
 		if _, err := fmt.Fprintln(out, "\n--- metadata ---"); err != nil {
 			return err

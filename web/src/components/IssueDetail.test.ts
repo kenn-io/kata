@@ -547,3 +547,32 @@ describe('typed reply draft across edit mode', () => {
     expect(composer.value).toBe(draft)
   })
 })
+
+it('allows attachment reads for a read-only principal and fences stale read authority', async () => {
+  const id = '01JB3Z6V2K8M4Q9T1X5W7Y0RNA'
+  const issue = makeIssue({
+    metadata: {
+      attachments: {
+        [id]: {
+          name: 'screen.png',
+          media_type: 'image/png',
+          size: 12,
+          docbank: {
+            vault_uid: '6f1c2e8a-1111-4111-8111-111111111111',
+            node_id: 42,
+            content_version_id: '6f1c2e8a-2222-4222-8222-222222222222',
+            content_sha256: 'a'.repeat(64),
+          },
+        },
+      },
+    },
+  })
+  const view = renderDetail({ authorityBlocked: true, issue })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
+    false,
+  )
+  await view.rerender({ attachmentReadsBlocked: true })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
+    true,
+  )
+})

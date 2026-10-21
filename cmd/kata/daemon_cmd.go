@@ -29,6 +29,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
@@ -1394,6 +1395,13 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
+	var docbankClient *docbank.Client
+	if dcfg.Docbank.Enabled() {
+		docbankClient, err = docbank.NewClient(dcfg.Docbank.URL, dcfg.Docbank.ResolveKey)
+		if err != nil {
+			return err
+		}
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
@@ -1451,6 +1459,9 @@ func runDaemonProcess(
 		WebHandler:             webHandler,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,
+		Docbank:                docbankClient,
+		DocbankFolder:          dcfg.Docbank.Folder,
+		MaxAttachmentBytes:     dcfg.Docbank.MaxUploadBytes,
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,

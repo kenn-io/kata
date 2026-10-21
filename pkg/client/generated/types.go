@@ -176,6 +176,61 @@ func (a AssignRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type Attachment struct {
+	AddedAt   string           `json:"added_at" validate:"required"`
+	AddedBy   string           `json:"added_by" validate:"required"`
+	Docbank   DocbankReference `json:"docbank"`
+	MediaType string           `json:"media_type" validate:"required"`
+	Name      string           `json:"name" validate:"required"`
+	Size      int64            `json:"size"`
+}
+
+func (a Attachment) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.AddedAt, "required"); err != nil {
+		errors = errors.Append("AddedAt", err)
+	}
+	if err := typesValidator.Var(a.AddedBy, "required"); err != nil {
+		errors = errors.Append("AddedBy", err)
+	}
+	if v, ok := any(a.Docbank).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Docbank", err)
+		}
+	}
+	if err := typesValidator.Var(a.MediaType, "required"); err != nil {
+		errors = errors.Append("MediaType", err)
+	}
+	if err := typesValidator.Var(a.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type AttachmentResponseBody struct {
+	Attachment   Attachment `json:"attachment"`
+	AttachmentID string     `json:"attachment_id" validate:"required"`
+}
+
+func (a AttachmentResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(a.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(a.AttachmentID, "required"); err != nil {
+		errors = errors.Append("AttachmentID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type AuditCloseRow struct {
 	Actor         string   `json:"actor" validate:"required"`
 	EventID       int64    `json:"event_id"`
@@ -1849,6 +1904,17 @@ func (d DisconnectRelayRequestBody) Validate() error {
 
 type DisconnectRelayResponseBody struct {
 	Revoked bool `json:"revoked"`
+}
+
+type DocbankReference struct {
+	ContentSha256    string `json:"content_sha256" validate:"required"`
+	ContentVersionID string `json:"content_version_id" validate:"required"`
+	NodeID           int64  `json:"node_id"`
+	VaultUID         string `json:"vault_uid" validate:"required"`
+}
+
+func (d DocbankReference) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
 type DoctorResponseBody struct {
@@ -5762,6 +5828,10 @@ type RelayStreamCursors struct {
 	Receipts  int64 `json:"receipts"`
 }
 
+type RemoveAttachmentResponseBody struct {
+	Changed bool `json:"changed"`
+}
+
 type RemoveProjectResponseBody struct {
 	Event   Event      `json:"event"`
 	Project ProjectOut `json:"project"`
@@ -6481,6 +6551,16 @@ func (t TeamResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type TextResult struct {
+	State     string  `json:"state" validate:"required"`
+	Text      *string `json:"text,omitempty"`
+	Truncated bool    `json:"truncated"`
+}
+
+func (t TextResult) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(t))
 }
 
 type TokenOut struct {

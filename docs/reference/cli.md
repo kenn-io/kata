@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-20
+last_edited: 2026-10-21
 ---
 
 # CLI reference
@@ -2190,3 +2190,28 @@ kata#abc4
 ```
 
 Legacy numeric refs no longer resolve.
+
+## Issue attachments
+
+On main after 0.19.0, use a configured Docbank to store files outside Kata while
+keeping their references on an issue. See [Issue attachments](../guide/attachments.md).
+
+```sh
+kata docbank attachments add <issue> <file>...
+kata docbank attachments ls <issue>
+kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
+kata docbank attachments text <issue> <attachment> [--max-bytes N] [--profile P]
+kata docbank attachments rm <issue> <attachment>
+```
+
+`<attachment>` accepts a full id or unique suffix. `add` reports each file's
+result and exits nonzero if any failed. `get` uses the attachment's sanitized
+name by default and publishes the file only after size and hash verification.
+It refuses an existing path or symlink unless `--force` is set.
+
+`text` defaults to 64 KiB, capped at 16 MiB, and truncates at a UTF-8 boundary.
+A successful state query exits zero even when its state is `unprocessed` or
+`failed`; transport and integrity errors exit nonzero. `--json` returns a
+versioned JSON object for each command. `--agent` emits an `OK` status line
+followed by command details. After `get`, both modes include the destination
+path, size, and SHA-256. Removing a reference never deletes Docbank bytes.

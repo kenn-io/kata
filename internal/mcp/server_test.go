@@ -30,6 +30,7 @@ import (
 
 var sectionLoaderNames = []string{
 	"kata.load_activity",
+	"kata.load_attachments",
 	"kata.load_coordination",
 	"kata.load_docs",
 	"kata.load_external_roots",
@@ -146,6 +147,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 
 	wantNames := []string{
 		"kata.assign",
+		"kata.attachment_text",
 		"kata.audit_closes",
 		"kata.bridge_bind",
 		"kata.bridge_pause",
@@ -301,6 +303,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
+		"kata.attachment_text":          true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,

@@ -64,4 +64,52 @@ export async function orvalFetch<T>(
   } as T
 }
 
+// Successful content responses are bytes even when their media type is JSON.
+export async function orvalBlobFetch<T>(url: string, options: RequestInit): Promise<T> {
+  const response = await generatedFetch(applicationURL(url), options)
+  if (!response.ok) {
+    const text = await response.text()
+    return {
+      data: text
+        ? response.headers.get('Content-Type')?.includes('json')
+          ? JSON.parse(text)
+          : text
+        : undefined,
+      status: response.status,
+      headers: response.headers,
+    } as T
+  }
+  return { data: await response.blob(), status: response.status, headers: response.headers } as T
+}
+
+// Uses the active daemon transport, tab credentials, and authentication rejection path.
+export async function fetchAttachmentBlob(url: string): Promise<Blob> {
+  const response = await generatedFetch(applicationURL(url), { method: 'GET' })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => undefined)) as
+      | { error?: { code?: string } }
+      | undefined
+    throw new Error(body?.error?.code ?? 'docbank_unreachable')
+  }
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('docbank_unreachable')
+  const parts: Uint8Array<ArrayBuffer>[] = []
+  let size = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > 100 << 20) throw new Error('attachment_too_large')
+      parts.push(value)
+    }
+  } finally {
+    await reader.cancel()
+    reader.releaseLock()
+  }
+  return new Blob(parts, {
+    type: response.headers.get('Content-Type') ?? 'application/octet-stream',
+  })
+}
+
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

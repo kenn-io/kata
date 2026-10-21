@@ -52,6 +52,7 @@ rejected. Everything else is stored verbatim.
 | `deadline_on` | Issue | Date, local date-time, or UTC timestamp |
 | `someday` | Issue | Boolean |
 | `checklist` | Issue | Checklist structure |
+| `attachments` | Issue | Object of immutable Docbank references, keyed by ULID |
 | `timezone` | Issue | IANA timezone name |
 | `area` | Project | String |
 
@@ -285,3 +286,8 @@ The enum says `stuck`, not `blocked`, precisely to avoid this collision:
 `blocked` already means "has an open blocked-by dependency" in kata, so reusing
 it for the attention axis would conflate a structural relationship with a
 moment-to-moment agent signal.
+
+Attachment metadata contains references, never file bytes or credentials. Direct
+metadata writes validate only the object shape, ULID keys, and object entries.
+Attachment commands validate entries before adding or fetching them and preserve
+unknown peer fields. Remove the last entry with `{}`, rather than clearing the key.

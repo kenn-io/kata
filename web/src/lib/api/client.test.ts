@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createCredentialedFetch,
+  fetchAttachmentBlob,
+  setGeneratedFetch,
   orvalFetch,
   responseTriggeredAuthenticationTransition,
 } from './client'
-import { getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -94,5 +96,58 @@ describe('Kata browser API credentials', () => {
     expect(result.status).toBe(401)
     expect(onAuthenticationRequired).not.toHaveBeenCalled()
     expect(responseTriggeredAuthenticationTransition(result)).toBe(false)
+  })
+})
+
+it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {
+  const transport = vi.fn(async () => new Response('bytes'))
+  setGeneratedFetch(transport as typeof fetch)
+  expect(await (await fetchAttachmentBlob('/attachments/content')).text()).toBe('bytes')
+  expect(transport).toHaveBeenCalled()
+  setGeneratedFetch(async () =>
+    Response.json({ error: { code: 'docbank_not_configured' } }, { status: 503 }),
+  )
+  await expect(fetchAttachmentBlob('/attachments/content')).rejects.toThrow(
+    'docbank_not_configured',
+  )
+  setGeneratedFetch(createCredentialedFetch())
+})
+
+describe('generated attachment content', () => {
+  it.each([new Uint8Array([0, 255, 128, 13]), new Uint8Array([])])(
+    'preserves binary and empty downloads',
+    async (bytes) => {
+      setGeneratedFetch(
+        async () =>
+          new Response(bytes, {
+            headers: { 'Content-Type': 'application/octet-stream', 'X-Example': 'retained' },
+          }),
+      )
+      try {
+        const result = await attachmentContent({
+          projectId: 1,
+          ref: 'abc4',
+          attachmentId: 'example',
+        })
+        expect(result.status).toBe(200)
+        expect(result.headers.get('X-Example')).toBe('retained')
+        expect(result.data).toBeInstanceOf(Blob)
+        expect(new Uint8Array(await (result.data as Blob).arrayBuffer())).toEqual(bytes)
+      } finally {
+        setGeneratedFetch(createCredentialedFetch())
+      }
+    },
+  )
+  it('preserves JSON error envelopes', async () => {
+    setGeneratedFetch(async () =>
+      Response.json({ error: { code: 'attachment_not_found' } }, { status: 404 }),
+    )
+    try {
+      const result = await attachmentContent({ projectId: 1, ref: 'abc4', attachmentId: 'missing' })
+      expect(result.status).toBe(404)
+      expect(result.data).toEqual({ error: { code: 'attachment_not_found' } })
+    } finally {
+      setGeneratedFetch(createCredentialedFetch())
+    }
   })
 })

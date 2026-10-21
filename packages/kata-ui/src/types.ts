@@ -37,6 +37,7 @@ export interface KataIssueWire extends KataCreationAttributionWire {
         scheduled_on?: string | undefined
         deadline_on?: string | undefined
         checklist?: KataChecklistItem[] | undefined
+        attachments?: unknown
       }
     | undefined
   labels?: string[] | null | undefined
@@ -139,6 +140,7 @@ export interface KataIssueDetailModel {
     priority?: number
     scheduledOn?: string
     deadlineOn?: string
+    attachments?: unknown
     checklist: KataChecklistItem[]
     labels: string[]
     updatedAt?: string
@@ -180,6 +182,10 @@ export interface KataIssueHostAction {
 }
 
 export interface KataIssueDetailProps {
+  attachmentBaseURL?: string | undefined
+  attachmentControlsDisabled?: boolean | undefined
+  attachmentContextKey?: string | undefined
+  fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
   detail: KataIssueDetailModel
   actions?: readonly KataIssueHostAction[]
   /** Host navigation for parent, child, and linked issue references. */

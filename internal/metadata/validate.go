@@ -54,6 +54,9 @@ func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 		return validateBool(raw)
 	case TypeString:
 		return validateString(raw)
+	case TypeAttachments:
+		_, err := DecodeAttachments(raw)
+		return err
 	case TypeChecklist:
 		return validateChecklist(raw)
 	case TypeTimezoneIANA:

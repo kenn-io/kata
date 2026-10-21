@@ -23,6 +23,7 @@ nav = [
   {"Guide" = [
     {"Concepts" = "guide/concepts.md"},
     {"Web UI" = "guide/web-ui.md"},
+    {"Issue attachments" = "guide/attachments.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
     {"Share projects between hubs" = "guide/project-relays.md"},
     {"Semantic search" = "guide/semantic-search.md"},

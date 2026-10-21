@@ -3,7 +3,12 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { setGeneratedFetch } from '../lib/api/client'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
-import type { UISnapshot } from '../lib/state/snapshot'
+import {
+  SnapshotController,
+  type SnapshotRequestOptions,
+  type SnapshotResponse,
+  type UISnapshot,
+} from '../lib/state/snapshot'
 import AppShell from './AppShell.svelte'
 
 describe('AppShell', () => {
@@ -805,6 +810,128 @@ describe('AppShell', () => {
     await view.rerender({ ...props, loading: false, canMutate: false, stale: true })
     expect(screen.queryByLabelText('Team')).toBeNull()
   })
+
+  test('keeps attachment previews and downloads alive through a remote polling 304', async () => {
+    const attachmentID = '01JB3Z6V2K8M4Q9T1X5W7Y0RNA'
+    const current = snapshot()
+    current.capabilities.updates = 'poll'
+    const selectedIssue = {
+      ...current.collection[0]!,
+      metadata: {
+        attachments: {
+          [attachmentID]: {
+            name: 'screen.png',
+            media_type: 'image/png',
+            size: 12,
+            docbank: {
+              vault_uid: '6f1c2e8a-1111-4111-8111-111111111111',
+              node_id: 42,
+              content_version_id: '6f1c2e8a-2222-4222-8222-222222222222',
+              content_sha256: 'a'.repeat(64),
+            },
+          },
+        },
+      },
+    }
+    current.collection[0] = selectedIssue
+    current.selected = {
+      state: 'available',
+      issue: selectedIssue,
+      comments: [],
+      history: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+    }
+
+    type Intent = { daemonID: string }
+    let finishPollingRefresh: ((response: SnapshotResponse<UISnapshot>) => void) | undefined
+    const controller = new SnapshotController<Intent, UISnapshot>(
+      async (_intent, options: SnapshotRequestOptions) => {
+        if (!options.etag) {
+          return { status: 200, etag: '"snapshot-1"', snapshot: current }
+        }
+        expect(options.etag).toBe('"snapshot-1"')
+        return await new Promise<SnapshotResponse<UISnapshot>>((resolve) => {
+          finishPollingRefresh = resolve
+        })
+      },
+      (intent) => intent.daemonID,
+    )
+    const intent = { daemonID: 'remote-hub' }
+    await expect(controller.load(intent)).resolves.toBe(true)
+
+    let createObjectURLCalls = 0
+    const createObjectURL = vi.fn(() => `blob:attachment-${createObjectURLCalls++}`)
+    const revokeObjectURL = vi.fn()
+    const NativeURL = globalThis.URL
+    class AttachmentTestURL extends NativeURL {}
+    Object.assign(AttachmentTestURL, { createObjectURL, revokeObjectURL })
+    vi.stubGlobal('URL', AttachmentTestURL)
+
+    let attachmentRequests = 0
+    let finishDownload: ((response: Response) => void) | undefined
+    const attachmentFetch = vi.fn<typeof fetch>(async () => {
+      attachmentRequests++
+      if (attachmentRequests === 1) {
+        return new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'image/png' } })
+      }
+      return await new Promise<Response>((resolve) => {
+        finishDownload = resolve
+      })
+    })
+    setGeneratedFetch(attachmentFetch)
+
+    const route = {
+      kind: 'kata' as const,
+      view: 'all-open' as const,
+      issueUID: selectedIssue.uid,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    const remote = {
+      id: intent.daemonID,
+      url: 'https://remote.example',
+      default: false,
+      local: false,
+      auth: 'token' as const,
+      health: 'connected' as const,
+    }
+    const shellProps = (state: typeof controller.state) => ({
+      route,
+      snapshot: state.snapshot!,
+      loading: state.loading,
+      ...mutationProps({ canMutate: state.canMutate }),
+      daemons: [remote],
+      activeDaemonID: intent.daemonID,
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    })
+    const view = render(AppShell, { props: shellProps(controller.state) })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1))
+    await fireEvent.click(screen.getByRole('button', { name: 'Download screen.png' }))
+    await waitFor(() => expect(attachmentFetch).toHaveBeenCalledTimes(2))
+
+    const polling = controller.load(intent)
+    await view.rerender(shellProps(controller.state))
+    expect(
+      (screen.getByRole('button', { name: 'Download screen.png' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    if (!finishPollingRefresh) throw new Error('polling refresh did not start')
+    finishPollingRefresh({ status: 304, etag: '"snapshot-1"' })
+    await expect(polling).resolves.toBe(true)
+    await view.rerender(shellProps(controller.state))
+    expect(controller.state.snapshot).toBe(current)
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+
+    if (!finishDownload) throw new Error('attachment download did not start')
+    finishDownload(
+      new Response(new Uint8Array([2, 3]), { headers: { 'Content-Type': 'image/png' } }),
+    )
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2))
+  }, 15_000)
 
   test.each(['nonadmin', 'readonly', 'stale', 'expired', 'switching', 'remote', 'reconnecting'])(
     'withholds access management from %s authority',

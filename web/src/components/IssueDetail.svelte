@@ -8,13 +8,18 @@
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { ComponentProps } from 'svelte'
 
+  import { fetchAttachmentBlob } from '../lib/api/client'
   import Comments from './Comments.svelte'
   import type { KataCommentReplyIntent } from '../lib/kata/types'
   import IssueEditor from './IssueEditor.svelte'
   import IssueHistory from './IssueHistory.svelte'
   import RecurrencePanel from './RecurrencePanel.svelte'
 
-  let props: ComponentProps<typeof IssueEditor> = $props()
+  let props: ComponentProps<typeof IssueEditor> & {
+    attachmentReadsBlocked?: boolean | undefined
+    attachmentControlsDisabled?: boolean | undefined
+    attachmentContextKey?: string | undefined
+  } = $props()
   let editing = $state(false)
   let replyIntent = $state<KataCommentReplyIntent | undefined>()
   let replySourceUID = $state('')
@@ -84,6 +89,10 @@
   {#if !editing}
     <SharedIssueDetail
       {detail}
+      attachmentBaseURL={`/api/v1/projects/${props.issue.issue.project_id}/issues/${props.issue.issue.uid}/attachments`}
+      fetchAttachment={props.attachmentReadsBlocked ? undefined : fetchAttachmentBlob}
+      attachmentControlsDisabled={props.attachmentControlsDisabled}
+      attachmentContextKey={props.attachmentContextKey}
       {actions}
       onOpenIssue={(uid) => void props.onSelectIssue?.({ uid })}
       onOpenComment={(uid, commentUID, returnComment) =>

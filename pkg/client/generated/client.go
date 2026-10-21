@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"reflect"
 
@@ -36,12 +39,102 @@ type pathEscapingAPIClient struct {
 }
 
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
+	var multipartBody io.ReadCloser
+	if params.ContentType == "multipart/form-data" && !isNilRequestOptions(params.Options) && params.Options.GetBody() != nil {
+		body, contentType := encodeMultipartBody(params.Options.GetBody())
+		multipartBody = body
+		params.Options = bodylessRequestOptions{RequestOptions: params.Options}
+		reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+			req.Body = body
+			req.ContentLength = -1
+			req.GetBody = nil
+			req.Header.Set("Content-Type", contentType)
+			return nil
+		}}, reqEditors...)
+	}
 	if isNilRequestOptions(params.Options) {
 		params.Options = nil
 	} else {
 		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
 	}
-	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
+	req, err := c.APIClient.CreateRequest(ctx, params, reqEditors...)
+	if err != nil && multipartBody != nil {
+		_ = multipartBody.Close()
+	}
+	return req, err
+}
+
+// The runtime only encodes JSON and URL-encoded forms. Supply multipart as a
+// stream and hide the original body from its JSON encoder.
+type bodylessRequestOptions struct{ runtime.RequestOptions }
+
+func (bodylessRequestOptions) GetBody() any { return nil }
+
+func encodeMultipartBody(body any) (io.ReadCloser, string) {
+	reader, writer := io.Pipe()
+	form := multipart.NewWriter(writer)
+	contentType := form.FormDataContentType()
+	go func() {
+		err := func() error {
+			value := reflect.ValueOf(body)
+			if value.Kind() == reflect.Pointer {
+				if value.IsNil() {
+					return fmt.Errorf("multipart body is nil")
+				}
+				value = value.Elem()
+			}
+			if value.Kind() != reflect.Struct {
+				return fmt.Errorf("multipart body must be an object")
+			}
+			for i := 0; i < value.NumField(); i++ {
+				field := value.Field(i)
+				definition := value.Type().Field(i)
+				if definition.PkgPath != "" {
+					continue
+				}
+				name := strings.Split(definition.Tag.Get("json"), ",")[0]
+				if name == "-" {
+					continue
+				}
+				if name == "" {
+					name = definition.Name
+				}
+				if field.Kind() == reflect.Pointer {
+					if field.IsNil() {
+						continue
+					}
+					field = field.Elem()
+				}
+				switch data := field.Interface().(type) {
+				case runtime.File:
+					file, err := data.Reader()
+					if err != nil {
+						return err
+					}
+					part, err := form.CreateFormFile(name, data.Filename())
+					if err == nil {
+						_, err = io.Copy(part, file)
+					}
+					closeErr := file.Close()
+					if err != nil {
+						return err
+					}
+					if closeErr != nil {
+						return closeErr
+					}
+				case string:
+					if err := form.WriteField(name, data); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unsupported multipart field %s", name)
+				}
+			}
+			return form.Close()
+		}()
+		_ = writer.CloseWithError(err)
+	}()
+	return reader, contentType
 }
 
 func isNilRequestOptions(options runtime.RequestOptions) bool {
@@ -84,7 +177,16 @@ func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
 	if o.RequestOptions == nil {
 		return nil, nil
 	}
-	return o.RequestOptions.GetQuery()
+	params, err := o.RequestOptions.GetQuery()
+	if err != nil {
+		return nil, err
+	}
+	// The runtime's JSON map converts integers to floats. Preserve the byte
+	// limit so large values do not become invalid scientific query notation.
+	if options, ok := o.RequestOptions.(*AttachmentTextRequestOptions); ok && options.Query != nil && options.Query.MaxBytes != nil {
+		params["max_bytes"] = *options.Query.MaxBytes
+	}
+	return params, nil
 }
 
 func (o pathEscapingRequestOptions) GetBody() any {
@@ -394,6 +496,18 @@ type ClientInterface interface {
 
 	UnassignIssue(ctx context.Context, options *UnassignIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnassignIssueResponse, error)
 	UnassignIssueWithResponse(ctx context.Context, options *UnassignIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnassignIssueResp, error)
+
+	AddAttachment(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResponse, error)
+	AddAttachmentWithResponse(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResp, error)
+
+	RemoveAttachment(ctx context.Context, options *RemoveAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RemoveAttachmentResponse, error)
+	RemoveAttachmentWithResponse(ctx context.Context, options *RemoveAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RemoveAttachmentResp, error)
+
+	AttachmentContent(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResponse, error)
+	AttachmentContentWithResponse(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResp, error)
+
+	AttachmentText(ctx context.Context, options *AttachmentTextRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentTextResponse, error)
+	AttachmentTextWithResponse(ctx context.Context, options *AttachmentTextRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentTextResp, error)
 
 	UnbindExternalRoot(ctx context.Context, options *UnbindExternalRootRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnbindExternalRootResponse, error)
 	UnbindExternalRootWithResponse(ctx context.Context, options *UnbindExternalRootRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnbindExternalRootResp, error)
@@ -6276,6 +6390,271 @@ func (c *Client) UnassignIssue(ctx context.Context, options *UnassignIssueReques
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/actions/unassign")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "multipart/form-data",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*AddAttachmentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(AddAttachmentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "AddAttachmentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(AddAttachmentResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "AddAttachmentResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) RemoveAttachment(ctx context.Context, options *RemoveAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RemoveAttachmentResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"actor": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}",
+		Method:        "DELETE",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*RemoveAttachmentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(RemoveAttachmentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "RemoveAttachmentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(RemoveAttachmentResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "RemoveAttachmentResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) AttachmentContent(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*AttachmentContentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(AttachmentContentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "AttachmentContentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(AttachmentContentResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "AttachmentContentResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	if resp.StatusCode == 200 {
+		target := new(AttachmentContentResponse)
+		target.InitFromBytes(resp.Content, "")
+		return target, nil
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) AttachmentText(ctx context.Context, options *AttachmentTextRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentTextResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"max_bytes": {Style: "form", Explode: &[]bool{false}[0]},
+		"profile":   {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/text",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*AttachmentTextResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(AttachmentTextErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "AttachmentTextErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(AttachmentTextResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "AttachmentTextResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/text")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
