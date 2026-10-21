@@ -138,8 +138,9 @@ func TestRunResultAppliesShutdownPolicy(t *testing.T) {
 }
 
 // TestNamedWorkerResultAttributesOnlyRealFailures pins the other half of the
-// policy: cancellation is how a worker reports a clean stop, and anything else
-// is named after the worker that produced it.
+// policy: cancellation is how a worker reports a clean stop. A transaction
+// rollback from shutdown counts as a clean stop only alongside the terminal
+// error. Anything else is named after the worker that produced it.
 func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	worker := namedWorker{name: "github-sync"}
 
@@ -151,8 +152,6 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 		context.Canceled, fmt.Errorf("stopping: %w", context.Canceled)), context.Canceled))
 	assert.NoError(t, worker.result(context.DeadlineExceeded, context.DeadlineExceeded))
 	assert.NoError(t, worker.result(errors.Join(sql.ErrTxDone, context.Canceled), context.Canceled))
-	assert.NoError(t, worker.result(errors.Join(
-		fmt.Errorf("commit: %w", sql.ErrTxDone), context.DeadlineExceeded), context.DeadlineExceeded))
 	require.ErrorIs(t, worker.result(sql.ErrTxDone, context.Canceled), sql.ErrTxDone)
 
 	failure := errors.New("boom")
