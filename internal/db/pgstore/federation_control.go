@@ -62,6 +62,9 @@ func (s *Store) RebindFederationBinding(
 		if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
 			return err
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, p.ProjectID); err != nil {
+			return err
+		}
 		current, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, p.ProjectID))
 		if err != nil {
@@ -115,6 +118,13 @@ func (s *Store) UpsertFederationBinding(ctx context.Context, input db.Federation
 	var output db.FederationBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationBinding{}
+		if err := lockAdoptionProjectTx(ctx, tx, input.ProjectID); err != nil {
+			return err
+		}
+		if err := s.adoptionSQL(tx).CheckAttachment(ctx, input.ProjectID, &input); err != nil {
+			return err
+		}
+
 		if _, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 FOR UPDATE`, input.ProjectID)); err != nil {
 			return err
 		}
@@ -440,6 +450,12 @@ func createFederationEnrollmentTx(
 	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
 	input := prepared.Params
+	if input.ProjectID != nil {
+		if err := ensureAdoptionWritableTx(ctx, tx, *input.ProjectID); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
+
 	var projectID any
 	if input.ProjectID != nil {
 		projectID = *input.ProjectID

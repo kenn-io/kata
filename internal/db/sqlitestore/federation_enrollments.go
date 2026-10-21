@@ -196,6 +196,12 @@ func createFederationEnrollmentTx(
 	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
 	p := prepared.Params
+	if p.ProjectID != nil {
+		if err := ensureAdoptionWritableTx(ctx, tx, *p.ProjectID); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
+
 	var projectID any
 	if p.ProjectID != nil {
 		projectID = *p.ProjectID

@@ -43,6 +43,9 @@ func (s *Store) AdoptProjectIntoFederation(
 		if project.DeletedAt != nil {
 			return fmt.Errorf("adopt project into federation: project %d is archived", params.ProjectID)
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, params.ProjectID); err != nil {
+			return err
+		}
 		if params.RelayProtocolVersion != 0 {
 			if params.RelayProtocolVersion != db.RelayProtocolVersion {
 				return db.ErrFederationIngestValidation

@@ -183,16 +183,25 @@ func RunFederationPublication(t *testing.T, store db.Storage, backend Backend) {
 	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { return denied })
 	_, err = publisher.PublishFederationProject(fenced, p, "publisher")
 	require.ErrorIs(t, err, denied)
-	// Both marker families are internal even in full portable exports.
+	// Native metadata iteration preserves operation state for same-instance
+	// backups. The JSONL exporter filters both marker families from project copies.
 	sqlStore := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	_, err = sqlStore.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)`, "federation.adoption.v1/"+p.ProjectUID, "private-operation")
 	require.NoError(t, err)
+	markers := map[string]bool{
+		"federation.publication.v1/" + p.OperationUID: false,
+		"federation.adoption.v1/" + p.ProjectUID:      false,
+	}
 	for m, err := range store.ExportMeta(ctx) {
 		require.NoError(t, err)
-		require.False(t, strings.HasPrefix(m.Key, "federation.publication.v1/") || strings.HasPrefix(m.Key, "federation.adoption.v1/"))
+		if _, internal := markers[m.Key]; internal {
+			markers[m.Key] = true
+		}
 	}
+	require.True(t, markers["federation.publication.v1/"+p.OperationUID], "native metadata reads preserve publication identity")
+	require.True(t, markers["federation.adoption.v1/"+p.ProjectUID], "native metadata reads preserve adoption recovery state")
 
 	for _, collision := range []string{"empty_name", "active_name", "archived_name", "uid"} {
 		t.Run(collision, func(t *testing.T) {
@@ -351,4 +360,39 @@ func RunFederationPublicationCapacity(t *testing.T, _ db.Storage, backend Backen
 	require.ErrorIs(t, err, db.ErrFederationPublicationTooLarge)
 	_, err = store.ProjectByUID(t.Context(), p.ProjectUID)
 	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+// RunFederationPublicationCapacityIncludesFederationEnable refuses a project
+// whose initial federation baseline would make its checkpoint too large.
+func RunFederationPublicationCapacityIncludesFederationEnable(t *testing.T, store db.Storage, backend Backend) {
+	t.Helper()
+	require.NotNil(t, backend.OpenWithRelayCheckpointCapacity, "native capacity fixture required")
+	publisher, ok := store.(db.FederationPublicationStore)
+	require.True(t, ok)
+	measurer, ok := store.(db.RelayCheckpointMeasurer)
+	require.True(t, ok)
+
+	probe := PublicationFixture(t, store.InstanceUID())
+	probeResult, err := publisher.PublishFederationProject(t.Context(), probe, "publisher")
+	require.NoError(t, err)
+	before, err := measurer.RelayCheckpointSize(t.Context(), probeResult.Project.ID)
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), probeResult.Project.ID, "publisher")
+	require.NoError(t, err)
+	after, err := measurer.RelayCheckpointSize(t.Context(), probeResult.Project.ID)
+	require.NoError(t, err)
+	require.Greater(t, after.Bytes, before.Bytes, "the federation baseline adds checkpoint history")
+
+	delta := after.Bytes - before.Bytes
+	capacity := before.Bytes + delta*3/4
+	require.Greater(t, capacity, before.Bytes, "the project fits before enablement")
+	require.Greater(t, after.Bytes, capacity, "the project exceeds capacity after enablement")
+
+	limited := backend.OpenWithRelayCheckpointCapacity(t, capacity)
+	limitedPublisher, ok := limited.(db.FederationPublicationStore)
+	require.True(t, ok)
+	_, err = limitedPublisher.PublishFederationProject(t.Context(), PublicationFixture(t, limited.InstanceUID()), "publisher")
+	require.ErrorIs(t, err, db.ErrFederationPublicationTooLarge)
+	_, err = limited.ProjectByUID(t.Context(), probe.ProjectUID)
+	require.ErrorIs(t, err, db.ErrNotFound, "an over-capacity post-enable project is not published")
 }

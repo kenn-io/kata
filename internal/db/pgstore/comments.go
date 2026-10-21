@@ -221,6 +221,10 @@ func (s *Store) RewriteAuthorIdentity(
 	var result db.RewriteAuthorIdentityResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result = db.RewriteAuthorIdentityResult{}
+		if err := ensureAdoptionAuthorRewriteTx(ctx, tx, params.ProjectID, from); err != nil {
+			return err
+		}
+
 		project, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, params.ProjectID))
 		if err != nil {

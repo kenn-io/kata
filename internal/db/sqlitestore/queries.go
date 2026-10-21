@@ -212,6 +212,9 @@ func (d *Store) renameProject(ctx context.Context, id int64, name, actor string)
 		return db.Project{}, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionProjectsTx(ctx, tx, id); err != nil {
+		return db.Project{}, nil, false, err
+	}
 
 	current, err := projectByIDTx(ctx, tx, id)
 	if err != nil {

@@ -68,6 +68,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		if err != nil {
 			return err
 		}
+		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, "federation.publication.v1/") || strings.HasPrefix(record.Key, "federation.adoption.v1/")) {
+			continue
+		}
 		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}

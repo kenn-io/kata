@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # Federation
@@ -164,9 +164,9 @@ state; use bridge connect for this recovery.
 The target must be a root HTTP(S) origin. Non-loopback plain HTTP requires the catalog's
 explicit `allow_insecure` setting, and redirects are rejected. Preview and
 connect require daemon-owner authority; ordinary browser sessions and scoped
-user credentials cannot use this administrative operation. When the hub rejects
-a request, bridge connect and disconnect report it as an upstream failure with
-the hub's status in `data.hub_status`: a hub `401` or `403` returns `502` with
+user credentials cannot use this administrative operation. For receive/rejoin
+connections, bridge connect and disconnect report hub rejection as an upstream
+failure with the hub's status in `data.hub_status`: a hub `401` or `403` returns `502` with
 code `hub_credential_rejected`, any other hub `3xx` or `4xx` returns `502` with
 code `hub_request_rejected`, and a hub `5xx` keeps that status. The local daemon
 accepted the caller; the hub refused what the daemon sent.
@@ -249,6 +249,150 @@ disconnect that is stuck because the hub stopped answering. After it completes,
 repeat bridge connect to reconnect the project to a hub. Edits made while the
 hub was gone or while the project was detached are offered to the hub by the
 new binding before any reset, so reconnecting does not delete them.
+
+## Publish a populated standalone project
+
+On newer `main`, a source daemon with API `0.32.0` can publish a populated
+standalone project through `kata federation bridge connect --adopt-existing`.
+The selected hub must advertise `relay_publication_version: 1` on
+`GET /api/v1/instance`. An older hub requires an upgrade; there is no fallback
+to owner-issued direct enrollment. See the
+[CLI procedure](../guide/project-relays.md#publish-your-existing-local-project).
+
+Use the source daemon's existing bridge endpoint:
+
+```json
+{
+  "hub_catalog": "example-hub",
+  "hub_project": "source-project",
+  "project_name": "source-project",
+  "actor": "local-member",
+  "adopt_existing": true,
+  "serve_downstream": true,
+  "preflight": true
+}
+```
+
+The source caller needs owner authority on that local daemon. The catalog must
+contain an ordinary writable, unscoped hub account with native project-creation
+permission. No hub bootstrap token or direct
+grant is needed. Source and requested hub names must match in this version.
+Any existing hub name or UID conflicts, including empty or archived projects;
+publication does not merge independent projects.
+
+Preflight validates a consistent source snapshot and previews `account`,
+`visibility` and `counts` without creating an operation, file, project or
+credential. Visibility follows native project creation: currently `all`.
+Team membership does not change that default. Custom visibility/policy fields
+are refused, so this operation cannot promise a team-restricted publication.
+
+The portable content consists of project, issue, comment, label, intra-project
+link and supported event records, including soft-delete tombstones. Project,
+issue, comment and event UIDs, stored short IDs, original attribution,
+timestamps, reply/edit lineage and event origin/HLC/payload/hash survive.
+Numeric row IDs and foreign keys are remapped. Aliases, workspace paths,
+credentials, host policies, transport state and caches are not published.
+
+The source and published hub retain every accepted original event. Native
+relay transport carries the original portable events to downstream replicas,
+with their issue/comment projections and exact event tuples. Host-local
+`project.created`, `project.renamed` and `project.author_rewritten` events stay
+on the source and published hub. Replicas keep their independently chosen
+local catalog names and local catalog creation times; publication does not
+extend the relay event allowlist. Issue/comment timestamps remain portable.
+Label snapshots carry names and issue associations, not historical label
+author/time. A new replica reconstructs labels with author `federation` and
+local bookkeeping timestamps. Original label author/time remains exact on the
+source and published hub. Link attribution and timestamps travel in snapshots.
+
+An active standalone source must have introductions before dependent events
+in retained event order. Federation authority, unresolved claims, active
+integrations/external-root ownership, cron/recurrence state, purge/reset
+boundaries, unknown record/event families and external historical references
+are refused. The existing
+[current cross-project link refusal](#connect-a-project-through-the-daemon-catalog)
+still applies; publication additionally refuses retained typed references to
+outside or purged entities even after a live link was removed. The envelope
+is bounded by 64 MiB and the applicable checkpoint capacity. Unsupported data
+is never silently dropped.
+
+Set `preflight` to `false` to publish. The source first drains earlier writers
+and durably pauses mutations affecting the project. Reads and unrelated work
+continue. It freezes the exact canonical envelope in an owner-only file under
+`<KATA_HOME>/federation/adoptions/<operation_uid>.json`, then records possible
+transmission before making the request. The hub publishes in one native
+transaction while its process keeps serving. It enables the published project
+and uses ordinary relay enrollment and exact-UID attachment afterward.
+
+Connect returns `ready`, `pending` or `connected`. Adoption responses include
+`operation_uid`, `phase`, `visibility`, `counts`, `source_paused` and a warning
+where applicable. Local bridge status can report `adoption_pending` even
+before a binding exists, with the operation, phase and pause state. A pending
+operation has no automatic expiry. The source remains paused until the active
+credential and binding are durable, the first baseline has been applied and a
+fully drained sync turn validates deliveries, root receipts, claims and
+quarantine. Successful request or sync timestamps alone do not release it.
+
+### Retry or disconnect publication
+
+After a timeout, lost response or credential-write failure, keep the database,
+private credential file and frozen envelope. Repair the reported access or
+credential problem, then repeat the identical command:
+
+```sh
+kata federation bridge connect --project source-project \
+  --hub-daemon example-hub --hub-project source-project \
+  --adopt-existing --serve-downstream --as local-member
+kata federation bridge status --project source-project --json
+```
+
+Keep the same destination, account and connection choices. A publication retry
+returns the committed identity without overwriting later hub edits. Updating
+an expired account credential must retain the same account. After observing
+revocation, an identical retry can reauthorize the saved grant with a replacement
+token for that account, retaining the transport credential and queued work.
+A later refusal
+does not prove that an earlier uncertain publication failed. Once transmission
+may have happened, a missing or invalid artifact requires restoration of the
+original private artifact from backup; do not reconstruct different bytes or
+delete the operation to regain writes.
+
+Disconnect can cancel an unused `preparing`/`frozen` operation or a definitely
+`rejected` publication. Preview that decision first:
+
+```sh
+kata federation bridge disconnect --project source-project --preflight
+kata federation bridge disconnect --project source-project
+```
+
+For `transmitting`, `published` or `attached`, disconnect returns
+`409 federation_adoption_resume_required`. Resolve the outcome and drain the
+adoption with the identical connect before ordinary disconnect. This applies
+to known publication followed by credential activation failure too: retain the
+candidate credential so retry can recover the exact grant. Neither ordinary
+nor local-only disconnect may abandon a possibly published operation's fence.
+After cutover, normal disconnect revokes only the retained narrow enrollment
+and preserves local data and published hub content.
+
+If a safe cancellation reports `federation_adoption_cleanup_failed`, the
+operation is already canceled and source writes are available. Remove only the
+unreferenced private artifact named by the error; no publication retry is needed.
+
+Original author and teammate labels are source claims, not evidence of past
+hub login. The authenticated account is accountable for publication. Later
+relay receipts use the existing attribution rules.
+
+The direct hub API is `POST /api/v1/federation/publications` with
+`{"preflight":true|false,"envelope":<version-1 object>}`. It accepts the closed
+typed envelope, not an owner backup. Its response is `ready` or `published`,
+with project identity, account, visibility, counts and `replayed`. An exact
+committed retry requires current authorization and returns `replayed: true`.
+Stable publication errors are `federation_publication_unsupported`,
+`federation_publication_conflict`, `federation_publication_invalid` and
+`federation_publication_too_large`. Local source refusal uses
+`federation_adoption_ineligible`; missing frozen state uses
+`federation_adoption_recovery_required`. Consult the generated
+[HTTP schema](../reference/http-api.md) for the complete request contract.
 
 ## Team visibility
 
@@ -1575,6 +1719,10 @@ If a token has `push` but the spoke joins without `--push`, the spoke remains
 pull-only and the CLI prints a warning.
 
 ### Adopting an existing project
+
+This section describes legacy direct enrollment and its timeline cutover.
+For ordinary hub accounts and preservation of retained history, use
+[populated-project publication](#publish-a-populated-standalone-project).
 
 If a spoke already has a non-federated project that should join the hub, use an
 enrollment token created with adoption enabled and add `--adopt-existing` to the

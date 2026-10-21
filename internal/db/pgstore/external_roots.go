@@ -621,6 +621,10 @@ func (d *Store) ClaimExternalRootBinding(
 			return db.ExternalRootBinding{}, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, false, err
+		}
+
 		if err := lockExternalRootClaimIssueTx(ctx, tx, bindingID); err != nil {
 			return db.ExternalRootBinding{}, false, err
 		}
@@ -705,6 +709,10 @@ func (d *Store) claimExternalRootBindingWithoutDue(
 			return db.ExternalRootBinding{}, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, false, err
+		}
+
 		if lockIssue {
 			if err := lockExternalRootClaimIssueTx(ctx, tx, bindingID); err != nil {
 				return db.ExternalRootBinding{}, false, err
@@ -839,6 +847,10 @@ func (d *Store) ApplyExternalRootProjection(
 			return db.Issue{}, nil, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", params.BindingID); err != nil {
+			return db.Issue{}, nil, false, err
+		}
+
 		binding, issue, project, err := externalRootProjectionContext(
 			ctx, tx, params.BindingID, params.ClaimToken, params.IntegrationActor,
 		)
@@ -1363,6 +1375,10 @@ func (d *Store) updateClaimedExternalRootWithPolicy(
 			return db.ExternalRootBinding{}, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, err
+		}
+
 		current, err := externalRootBindingByIDTx(ctx, tx, bindingID)
 		if err != nil {
 			return db.ExternalRootBinding{}, err

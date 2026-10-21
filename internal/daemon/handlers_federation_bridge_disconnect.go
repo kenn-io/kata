@@ -24,6 +24,9 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 		if config.ValidateProjectName(in.ProjectName) != nil {
 			return nil, api.NewError(400, "validation", "valid local project name required", "", nil)
 		}
+		if response, handled, err := disconnectFederationAdoption(ctx, cfg, in); handled {
+			return response, err
+		}
 		credentials := cfg.federationCredentialStore()
 		replacer, replaceOK := credentials.(config.FederationCredentialReplacer)
 		remover, removeOK := credentials.(config.FederationCredentialRemover)
@@ -274,7 +277,7 @@ func resolveFederationBridgeDisconnect(ctx context.Context, store db.Storage, cr
 			return target, false, internalAPIError(bindingErr)
 		}
 	}
-	if !found || credential.Token == "" || credential.Provider != nil || credential.ManagedByConfig || credential.SpokeProjectName != name {
+	if !found || credential.Token == "" || credential.Provider != nil || (credential.ManagedByConfig && !managedAdoptionBridgeCredential(credential, name)) || credential.SpokeProjectName != name {
 		return target, false, api.NewError(409, "federation_credential_conflict", "selected bridge has no matching manual credential", "", nil)
 	}
 	hubURL, err := httpurl.CanonicalHTTPOrigin(credential.HubURL)
@@ -302,11 +305,15 @@ func resolveFederationBridgeBindingTarget(ctx context.Context, credentials confi
 		return target, false, nil
 	}
 	credentialHubURL, err := httpurl.CanonicalHTTPOrigin(credential.HubURL)
-	if err != nil || credential.Provider != nil || credential.ManagedByConfig || credentialHubURL != binding.HubURL || credential.HubProjectID != binding.HubProjectID {
+	if err != nil || credential.Provider != nil || (credential.ManagedByConfig && !managedAdoptionBridgeCredential(credential, target.project.Name)) || credentialHubURL != binding.HubURL || credential.HubProjectID != binding.HubProjectID {
 		return target, false, api.NewError(409, "federation_credential_conflict", "saved credential does not match the selected bridge", "resolve the retained credential before retrying", nil)
 	}
 	target.credential, target.credentialFound = credential, true
 	return target, false, nil
+}
+
+func managedAdoptionBridgeCredential(credential config.FederationCredential, name string) bool {
+	return credential.ManagedByConfig && credential.Provider == nil && credential.SpokeProjectName == name && credential.HubCatalog != "" && credential.HubProjectName != "" && db.ValidateTokenActor(credential.RequestedActor) == nil
 }
 
 func federationBridgeDisconnectAPIError(err error) error {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"time"
 
@@ -25,7 +26,12 @@ var relaySyncTurnBatches = 8
 var relaySyncBatchLimit = federationPollLimit
 
 // relaySyncTurn records that a budgeted loop stopped with work still pending.
-type relaySyncTurn struct{ remaining bool }
+type relaySyncTurn struct {
+	remaining bool
+	// Set only after full bidirectional event/receipt exchange and new-epoch
+	// activation succeed. Artifact staging still needs an explicit empty proof.
+	completedBinding *db.FederationBinding
+}
 
 // spent records one processed nonempty batch and reports whether the loop's
 // turn budget is used up. Delivery counts, manifest bytes and vector bytes all
@@ -217,7 +223,59 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 	if err := syncRelayArtifacts(ctx, store, binding, remoteProjectID, client, validateLease, turn); err != nil {
 		return err
 	}
-	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+	if err := store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
+		return err
+	}
+	if !turn.remaining {
+		turn.completedBinding = &binding
+	}
+	return nil
+}
+
+// Artifact exchange may stop successfully with a staged, unacknowledged
+// manifest. Probe both directions explicitly rather than treating nil as drain
+// proof. Event and receipt loops only finish empty when remaining is false.
+func finalizeDrainedRelayTurn(ctx context.Context, store db.Storage, client *Client, remoteProjectID int64, turn *relaySyncTurn, validateLease func(context.Context) error, callback RelayDrainedCallback) error {
+	expected := *turn.completedBinding
+	c := expected.RelayConfig
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
+	pending, err := store.PendingRelayDeliveries(ctx, c.BindingUID, db.RelayStreamArtifact, relayArtifactBatchLimit)
+	if err != nil {
+		return err
+	}
+	if len(pending) != 0 {
+		return nil
+	}
+	batch, err := client.OfferRelayDeliveries(ctx, remoteProjectID, db.RelayStreamArtifact, relayArtifactBatchLimit, c.ResetEpoch)
+	if err != nil {
+		return err
+	}
+	if batch.Stream != db.RelayStreamArtifact || len(batch.Artifacts) != 0 {
+		return db.ErrFederationIngestValidation
+	}
+	if len(batch.Envelopes) != 0 {
+		return nil
+	}
+	current, err := store.FederationBindingByProject(ctx, expected.ProjectID)
+	if err != nil {
+		return err
+	}
+	if !current.Enabled || !current.PushEnabled || current.Role != expected.Role || current.HubURL != expected.HubURL || current.HubProjectID != expected.HubProjectID || current.HubProjectUID != expected.HubProjectUID || current.Actor != expected.Actor || current.AllowInsecure != expected.AllowInsecure || !reflect.DeepEqual(current.RelayConfig, c) {
+		return db.ErrRemoteEventConflict
+	}
+	quarantines, err := store.ActiveFederationQuarantinesByProject(ctx, current.ProjectID)
+	if err != nil {
+		return err
+	}
+	if len(quarantines) != 0 {
+		return db.ErrFederationResetBlockedByQuarantine
+	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
+	return callback(ctx, current)
 }
 
 // syncRelayPushBeforeReset retains local event and artifact intent without

@@ -26,6 +26,9 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
 			return err
 		}
+		if err := lockAdoptionMoveTx(ctx, tx, input.FromProjectID, input.ToProjectID, input.IssueID); err != nil {
+			return err
+		}
 		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
 			return err
 		}

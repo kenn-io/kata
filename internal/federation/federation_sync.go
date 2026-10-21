@@ -66,6 +66,12 @@ var ErrFederationAdoptionBaselineTooLarge = errors.New("federation adoption snap
 
 var errFederationRunnerLeaseInvalid = errors.New("federation runner lease invalid")
 
+// RelayDrainedCallback runs under project sync coordination after an exact
+// relay binding has observed every stream empty. It must revalidate durable
+// credentials and pending native work transactionally before releasing a fence.
+// It may run again on a later drained turn and must be idempotent.
+type RelayDrainedCallback func(context.Context, db.FederationBinding) error
+
 // SyncFederationOnce pulls one spoke binding from its configured hub.
 func SyncFederationOnce(
 	ctx context.Context,
@@ -88,6 +94,25 @@ func SyncFederationOnceWithPulledEvents(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 ) error {
+	return syncFederationWithCallbacks(ctx, store, binding, creds, opts, onPulledEvents, nil, true)
+}
+
+// SyncFederationOnceWithCallbacks runs one bounded sync turn. An exhausted
+// relay turn leaves finalization to the runner or an exact retry. The existing
+// entry points retain their drain-to-completion behavior.
+func SyncFederationOnceWithCallbacks(
+	ctx context.Context, store db.Storage, binding db.FederationBinding,
+	creds config.FederationCredential, opts clientpkg.Opts,
+	onPulledEvents func(int64, []db.Event), onRelayDrained RelayDrainedCallback,
+) error {
+	return syncFederationWithCallbacks(ctx, store, binding, creds, opts, onPulledEvents, onRelayDrained, false)
+}
+
+func syncFederationWithCallbacks(
+	ctx context.Context, store db.Storage, binding db.FederationBinding,
+	creds config.FederationCredential, opts clientpkg.Opts,
+	onPulledEvents func(int64, []db.Event), onRelayDrained RelayDrainedCallback, drain bool,
+) error {
 	finish, err := federationcoord.BeginSync(
 		ctx,
 		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
@@ -99,8 +124,8 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	defer finish()
 	for {
-		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
-		if err != nil || !remaining {
+		remaining, err := syncFederationTurnWithCallbacks(ctx, store, binding, creds, opts, onPulledEvents, nil, onRelayDrained)
+		if err != nil || !remaining || !drain {
 			return err
 		}
 		// A turn can change the stored binding, for example by clearing a
@@ -125,6 +150,15 @@ func syncFederationOnceWithFence(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+) (bool, error) {
+	return syncFederationTurnWithCallbacks(ctx, store, binding, creds, opts, onPulledEvents, validateLease, nil)
+}
+
+func syncFederationTurnWithCallbacks(
+	ctx context.Context, store db.Storage, binding db.FederationBinding,
+	creds config.FederationCredential, opts clientpkg.Opts,
+	onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error,
+	onRelayDrained RelayDrainedCallback,
 ) (bool, error) {
 	if creds.RelayEnrollmentPending {
 		return false, ErrRelayEnrollmentPending
@@ -161,6 +195,11 @@ func syncFederationOnceWithFence(
 			}
 			err = recordRelayUpstreamRejection(ctx, store, binding, err)
 			return false, recordFederationSyncError(ctx, store, binding.ProjectID, err)
+		}
+		if onRelayDrained != nil && !turn.remaining && turn.completedBinding != nil {
+			if err := finalizeDrainedRelayTurn(ctx, store, client, hubProjectID, turn, validateLease, onRelayDrained); err != nil {
+				return false, recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			}
 		}
 		return turn.remaining, nil
 	}
@@ -828,6 +867,7 @@ type Runner struct {
 	// acknowledgement can leave valid artifacts durably committed.
 	OnSyncComplete func()
 	OnPulledEvents func(projectID int64, events []db.Event)
+	OnRelayDrained RelayDrainedCallback
 	// OnPulledEventsFrom takes precedence over OnPulledEvents and receives the
 	// fork source for hook jobs caused by this admitted spoke pass. The source
 	// is nil when the pass has no parent activity lease.
@@ -1006,7 +1046,11 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease)
+	onRelayDrained := r.OnRelayDrained
+	if len(errs) > 0 {
+		onRelayDrained = nil
+	}
+	remaining, syncErr := syncFederationTurnWithCallbacks(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease, onRelayDrained)
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
 	}

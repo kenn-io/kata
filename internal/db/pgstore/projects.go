@@ -158,6 +158,9 @@ func (s *Store) RenameProjectAndEvent(ctx context.Context, id int64, name, actor
 		if current.Name == db.SystemProjectName || current.UID == db.SystemProjectUID {
 			return db.ErrNotFound
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, id); err != nil {
+			return err
+		}
 		if current.Name == name {
 			project = current
 			return nil

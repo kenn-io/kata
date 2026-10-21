@@ -35,6 +35,9 @@ func (d *Store) CreateRelayEnrollment(ctx context.Context, p db.CreateRelayEnrol
 		if err := lockProjectAccess(ctx, tx); err != nil {
 			return err
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, p.ProjectID); err != nil {
+			return err
+		}
 		_, projectUID, err := d.relayServingBindingTx(ctx, tx, p.ProjectID, p.ProtocolVersion)
 		if err != nil {
 			return err

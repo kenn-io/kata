@@ -594,6 +594,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := rejectLeaveDuringFederationAdoption(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, internalAPIError(err)
+		}
 		// Refuse a non-spoke before any teardown so an archive-leave on a hub
 		// project does not archive it and then fail to detach. A project with no
 		// binding is the idempotent resume case and is allowed (RemoveProject and

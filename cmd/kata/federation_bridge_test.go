@@ -60,6 +60,20 @@ func TestFederationBridgeConnectRequiresSelection(t *testing.T) {
 	}
 }
 
+func TestFederationBridgeAdoptionFlagAndPendingOutput(t *testing.T) {
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, true, body["adopt_existing"])
+		writeFederationRebindJSON(t, w, map[string]any{"project_name": "source-project", "hub_catalog": "example-hub", "status": "pending", "direction": "bidirectional", "source_paused": true, "operation_uid": "01K00000000000000000000005", "phase": "attached", "visibility": "all", "counts": map[string]any{"issues": 2, "comments": 1, "events": 4}, "warning": "Source writes are paused; retry the identical connect."})
+	})
+	out, err := runFederationRebindAgainstServer(t, server.URL, "--project", "source-project", "federation", "bridge", "connect", "--hub-daemon", "example-hub", "--hub-project", "source-project", "--adopt-existing")
+	require.NoError(t, err)
+	require.Contains(t, out, "pending")
+	require.Contains(t, out, "paused")
+	require.Contains(t, out, "all")
+}
+
 func TestFederationBridgeStatusUsesLocalProject(t *testing.T) {
 	var calls int
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {

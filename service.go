@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -434,13 +436,23 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB:                        store,
-		WebHandler:                cfg.WebHandler,
-		DefaultTimezone:           cfg.DefaultTimezone,
-		StartedAt:                 startedAt,
-		Broadcaster:               broadcaster,
-		FederationWake:            wakeFederation,
-		FederationCredentials:     federationCredentials,
+		DB:                    store,
+		WebHandler:            cfg.WebHandler,
+		DefaultTimezone:       cfg.DefaultTimezone,
+		StartedAt:             startedAt,
+		Broadcaster:           broadcaster,
+		FederationWake:        wakeFederation,
+		FederationCredentials: federationCredentials,
+		FederationAdoptionPublish: func(ctx context.Context, c config.CatalogDaemonConfig, raw []byte, preview bool) (api.FederationPublicationBody, error) {
+			h, err := federation.NewHubClient(ctx, c)
+			if err != nil {
+				return api.FederationPublicationBody{}, err
+			}
+			return h.PublishFederationProject(ctx, raw, preview)
+		},
+		FederationAdoptionSync: func(ctx context.Context, b db.FederationBinding, c config.FederationCredential, pulled func(int64, []db.Event), drained func(context.Context, db.FederationBinding) error) error {
+			return federation.SyncFederationOnceWithCallbacks(ctx, store, b, c, client.Opts{}, pulled, drained)
+		},
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
@@ -783,7 +795,10 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	runner := &federation.Runner{
-		DB:          s.store,
+		DB: s.store,
+		OnRelayDrained: func(ctx context.Context, b db.FederationBinding) error {
+			return daemon.FinalizeFederationAdoptionAfterSync(ctx, daemon.ServerConfig{DB: s.store, FederationCredentials: s.federationCredentials}, b)
+		},
 		Credentials: s.federationCredentials,
 		Interval:    30 * time.Second,
 		Wake:        s.federationWake,

@@ -356,6 +356,12 @@ func resolveClaimIssueTx(
 	issueRef string,
 	lock bool,
 ) (db.Issue, db.Project, error) {
+	if lock {
+		if err := ensureAdoptionWritableTx(ctx, queryer, projectID); err != nil {
+			return db.Issue{}, db.Project{}, err
+		}
+	}
+
 	issueRef = strings.TrimSpace(issueRef)
 	if issueRef == "" {
 		return db.Issue{}, db.Project{}, db.ErrNotFound
