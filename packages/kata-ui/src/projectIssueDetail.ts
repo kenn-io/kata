@@ -88,7 +88,29 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       reference: referenceFor(issue),
       title: issue.title,
       body: issue.body ?? '',
-      attachments: issue.metadata?.attachments,
+      attachments: Object.fromEntries(
+        Object.entries(issue.metadata ?? {}).flatMap(([key, raw]) => {
+          if (!key.startsWith('attachment.') || typeof raw !== 'object' || raw === null) return []
+          const entry = raw as Record<string, unknown>
+          if (
+            typeof entry.name !== 'string' ||
+            typeof entry.media_type !== 'string' ||
+            typeof entry.size !== 'number'
+          )
+            return []
+          return [
+            [
+              key.slice('attachment.'.length),
+              {
+                name: entry.name,
+                media_type: entry.media_type,
+                size: entry.size,
+                docbank_version: entry.docbank_version,
+              },
+            ],
+          ]
+        }),
+      ),
       status: issue.status,
       ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),

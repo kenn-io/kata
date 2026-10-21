@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-21
+last_edited: 2026-10-20
 ---
 
 # Model Context Protocol server

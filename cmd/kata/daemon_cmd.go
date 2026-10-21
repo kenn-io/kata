@@ -1397,10 +1397,7 @@ func runDaemonProcess(
 	}
 	var docbankClient *docbank.Client
 	if dcfg.Docbank.Enabled() {
-		docbankClient, err = docbank.NewClient(dcfg.Docbank.URL, dcfg.Docbank.ResolveKey)
-		if err != nil {
-			return err
-		}
+		docbankClient = docbank.NewClient(dcfg.Docbank.URL, dcfg.Docbank.ResolveKey)
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		FederationSigning:         signingVerifier,
@@ -1461,7 +1458,6 @@ func runDaemonProcess(
 		Embedder:               embedder,
 		Docbank:                docbankClient,
 		DocbankFolder:          dcfg.Docbank.Folder,
-		MaxAttachmentBytes:     dcfg.Docbank.MaxUploadBytes,
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,

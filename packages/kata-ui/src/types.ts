@@ -1,3 +1,10 @@
+export interface KataAttachment {
+  name: string
+  media_type: string
+  size: number
+  docbank_version?: unknown
+}
+
 export interface KataChecklistItem {
   id: string
   text: string
@@ -37,7 +44,7 @@ export interface KataIssueWire extends KataCreationAttributionWire {
         scheduled_on?: string | undefined
         deadline_on?: string | undefined
         checklist?: KataChecklistItem[] | undefined
-        attachments?: unknown
+        [key: string]: unknown
       }
     | undefined
   labels?: string[] | null | undefined
@@ -140,7 +147,7 @@ export interface KataIssueDetailModel {
     priority?: number
     scheduledOn?: string
     deadlineOn?: string
-    attachments?: unknown
+    attachments?: Record<string, KataAttachment>
     checklist: KataChecklistItem[]
     labels: string[]
     updatedAt?: string
@@ -183,8 +190,6 @@ export interface KataIssueHostAction {
 
 export interface KataIssueDetailProps {
   attachmentBaseURL?: string | undefined
-  attachmentControlsDisabled?: boolean | undefined
-  attachmentContextKey?: string | undefined
   fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
   uploadAttachment?: ((file: File) => Promise<void>) | undefined
   attachmentsEnabled?: boolean | undefined

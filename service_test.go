@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -26,7 +25,7 @@ func TestServiceDocbankAttachments(t *testing.T) {
 	service, err := kata.New(t.Context(), kata.Config{
 		DSN:     filepath.Join(t.TempDir(), "service.db"),
 		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
-		Docbank: kata.DocbankConfig{URL: vault.Server.URL, APIKey: "test-key", Folder: "/embedded", MaxUploadBytes: 3},
+		Docbank: kata.DocbankConfig{URL: vault.Server.URL, APIKey: "test-key", Folder: "/embedded"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
@@ -43,26 +42,14 @@ func TestServiceDocbankAttachments(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&issue))
 	require.NoError(t, resp.Body.Close())
-	for _, tc := range []struct {
-		data   string
-		status int
-	}{{"too large", http.StatusRequestEntityTooLarge}, {"ok", http.StatusOK}} {
-		var body bytes.Buffer
-		writer := multipart.NewWriter(&body)
-		require.NoError(t, writer.WriteField("attachment_id", "01JB3Z6V2K8M4Q9T1X5W7Y0RNA"))
-		part, err := writer.CreateFormFile("file", "file.txt")
-		require.NoError(t, err)
-		_, err = io.WriteString(part, tc.data)
-		require.NoError(t, err)
-		require.NoError(t, writer.Close())
-		resp, err := http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?actor=user-a", server.URL, project.Project.ID, issue.Issue.UID), writer.FormDataContentType(), &body)
-		require.NoError(t, err)
-		raw, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, tc.status, resp.StatusCode, string(raw))
+	resp, err = http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?name=file.txt&actor=user-a", server.URL, project.Project.ID, issue.Issue.UID), "application/octet-stream", strings.NewReader("ok"))
+	require.NoError(t, err)
+	var added struct {
+		ID string `json:"attachment_id"`
 	}
-	resp, err = http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content", server.URL, project.Project.ID, issue.Issue.UID))
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&added))
+	require.NoError(t, resp.Body.Close())
+	resp, err = http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/%s/content", server.URL, project.Project.ID, issue.Issue.UID, added.ID))
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)

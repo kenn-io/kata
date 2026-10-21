@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -244,16 +243,11 @@ func printShowHuman(
 			}
 		}
 	}
-	if err := printIssueAttachments(out, b.Issue.Metadata["attachments"]); err != nil {
-		return err
-	}
-	metadata := sortedMetadata(b.Issue.Metadata)
-	metadata = slices.DeleteFunc(metadata, func(kv metadataKV) bool { return kv.key == "attachments" })
-	if len(metadata) > 0 {
+	if len(b.Issue.Metadata) > 0 {
 		if _, err := fmt.Fprintln(out, "\n--- metadata ---"); err != nil {
 			return err
 		}
-		for _, kv := range metadata {
+		for _, kv := range sortedMetadata(b.Issue.Metadata) {
 			if _, err := fmt.Fprintf(out, "%s = %s\n",
 				textsafe.Line(kv.key), textsafe.Line(kv.value)); err != nil {
 				return err

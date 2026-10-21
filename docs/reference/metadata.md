@@ -52,7 +52,6 @@ rejected. Everything else is stored verbatim.
 | `deadline_on` | Issue | Date, local date-time, or UTC timestamp |
 | `someday` | Issue | Boolean |
 | `checklist` | Issue | Checklist structure |
-| `attachments` | Issue | Object of immutable Docbank references, keyed by ULID |
 | `timezone` | Issue | IANA timezone name |
 | `area` | Project | String |
 
@@ -74,6 +73,8 @@ Clearing a generated request acknowledges that exact date and recipient; a
 changed date or assignment can surface again. Kata stores no separate reminder
 record. A reached `scheduled_on` also records an `issue.scheduled_reached`
 event for adapters; see [Reached schedules](cron.md#reached-schedules).
+
+`attachment.*` keys hold [Docbank file references](../guide/attachments.md#read-references-as-metadata). Readers ignore malformed entries and accept unknown fields.
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
@@ -286,8 +287,3 @@ The enum says `stuck`, not `blocked`, precisely to avoid this collision:
 `blocked` already means "has an open blocked-by dependency" in kata, so reusing
 it for the attention axis would conflate a structural relationship with a
 moment-to-moment agent signal.
-
-Attachment metadata contains references, never file bytes or credentials. Direct
-metadata writes validate only the object shape, ULID keys, and object entries.
-Attachment commands validate entries before adding or fetching them and preserve
-unknown peer fields. Remove the last entry with `{}`, rather than clearing the key.

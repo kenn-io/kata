@@ -1,10 +1,8 @@
-// Package docbanktest implements the Docbank HTTP routes used by Kata tests.
-// Shapes and integrity headers follow Docbank's internal/api routes, not Kata's client.
+// Package docbanktest implements Docbank's folder, upload, and content routes for tests.
 package docbanktest
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
@@ -18,30 +16,26 @@ import (
 	"testing"
 )
 
-// VaultUID is the fixed identity of an isolated fake vault.
-const VaultUID = "6f1c2e8a-1111-4111-8111-111111111111"
-
-// Fake implements the Docbank routes used by attachment clients.
+// Fake keeps uploaded bytes in memory and records API requests.
 type Fake struct {
 	Server   *httptest.Server
 	Fault    string
 	mu       sync.Mutex
 	requests []string
 	dirs     map[string]int64
-	nodes    map[int64]map[string]any
-	versions map[string]map[string]any
+	versions map[string]string
 	content  map[string][]byte
 }
 
-// New starts a fake server and registers its cleanup.
+// New starts an isolated Docbank fake and registers its cleanup.
 func New(t testing.TB) *Fake {
-	f := &Fake{dirs: map[string]int64{"/": 1}, nodes: map[int64]map[string]any{}, versions: map[string]map[string]any{}, content: map[string][]byte{}}
+	f := &Fake{dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
 }
 
-// Requests returns the observed method and path pairs.
+// Requests returns the method and path of each observed request.
 func (f *Fake) Requests() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -61,22 +55,22 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send := func(v any) { w.Header().Set("Content-Type", "application/json"); _ = json.MarshalWrite(w, v) }
-	p := r.URL.Path
 	switch {
-	case p == "/api/v1/info":
-		send(map[string]any{"vault_id": VaultUID})
-	case p == "/api/v1/path":
+	case r.URL.Path == "/api/v1/path" && r.Method == "GET":
 		id, ok := f.dirs[r.URL.Query().Get("path")]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		send(map[string]any{"id": id, "kind": "dir"})
-	case p == "/api/v1/path/mkdir" && r.Method == "POST":
+	case r.URL.Path == "/api/v1/path/mkdir" && r.Method == "POST":
 		var in struct {
 			Path string `json:"path"`
 		}
-		_ = json.UnmarshalRead(r.Body, &in)
+		if json.UnmarshalRead(r.Body, &in) != nil {
+			http.Error(w, "path", 400)
+			return
+		}
 		if _, ok := f.dirs[in.Path]; ok {
 			http.Error(w, "exists", http.StatusConflict)
 			return
@@ -88,9 +82,9 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		id := int64(len(f.dirs) + 1)
 		f.dirs[in.Path] = id
 		send(map[string]any{"id": id, "kind": "dir"})
-	case p == "/api/v1/uploads" && r.Method == "POST":
+	case r.URL.Path == "/api/v1/uploads" && r.Method == "POST":
 		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
-		if err := r.ParseMultipartForm(1 << 20); err != nil { //nolint:gosec // G120: bounded above with MaxBytesReader in this test server.
+		if err := r.ParseMultipartForm(1 << 20); err != nil { //nolint:gosec // Bounded by MaxBytesReader above.
 			http.Error(w, "multipart", 400)
 			return
 		}
@@ -109,70 +103,44 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(file)
 		sum := sha256.Sum256(b)
 		hash := hex.EncodeToString(sum[:])
-		parent, _ := strconv.ParseInt(r.URL.Query().Get("parent_id"), 10, 64)
 		if hash != r.Header.Get("X-Docbank-Blob-Hash") || strconv.Itoa(len(b)) != r.Header.Get("X-Docbank-Blob-Size") {
 			http.Error(w, "identity", http.StatusUnprocessableEntity)
 			return
 		}
-		name := r.URL.Query().Get("name")
-		var node map[string]any
-		status := "added"
-		for _, n := range f.nodes {
-			if n["name"] == name && n["parent_id"] == parent {
-				node = n
-				status = "skipped"
+		parent, _ := strconv.ParseInt(r.URL.Query().Get("parent_id"), 10, 64)
+		found := false
+		for _, id := range f.dirs {
+			if id == parent {
+				found = true
 			}
 		}
-		if node == nil {
-			id := int64(len(f.nodes) + 10)
-			version := fmt.Sprintf("6f1c2e8a-2222-4222-8222-%012d", id)
-			node = map[string]any{"id": id, "parent_id": parent, "kind": "file", "name": name, "blob_hash": hash, "size": len(b), "current_version_id": version, "revision": 3}
-			f.nodes[id] = node
-			f.versions[version] = map[string]any{"id": version, "node_id": id, "blob_hash": hash, "size": len(b)}
+		if !found {
+			http.NotFound(w, r)
+			return
+		}
+		name := r.URL.Query().Get("name")
+		if name != files[0].Filename || !strings.HasPrefix(name, hash[:12]+"-") {
+			http.Error(w, "name", 400)
+			return
+		}
+		key := fmt.Sprintf("%d/%s", parent, name)
+		version, exists := f.versions[key]
+		if !exists {
+			version = fmt.Sprintf("6f1c2e8a-2222-4222-8222-%012d", len(f.versions)+1)
+			f.versions[key] = version
 			f.content[version] = b
 		}
-		if f.Fault == "receipt" {
-			hash = strings.Repeat("0", 64)
-		}
-		send(map[string]any{"status": status, "node": node, "computed_hash": hash, "computed_size": len(b)})
-	case strings.HasPrefix(p, "/api/v1/nodes/"):
-		id, _ := strconv.ParseInt(path.Base(p), 10, 64)
-		n := f.nodes[id]
-		if n == nil || f.Fault == "missing" {
+		send(map[string]any{"node": map[string]string{"current_version_id": version}})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/versions/") && strings.HasSuffix(r.URL.Path, "/content"):
+		version := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/versions/"), "/content")
+		b, ok := f.content[version]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		send(n)
-	case strings.HasPrefix(p, "/api/v1/versions/"):
-		id := strings.TrimSuffix(strings.TrimPrefix(p, "/api/v1/versions/"), "/content")
-		v := f.versions[id]
-		if v == nil || f.Fault == "missing" {
-			http.NotFound(w, r)
-			return
-		}
-		if !strings.HasSuffix(p, "/content") {
-			send(v)
-			return
-		}
-		w.Header().Set("X-Docbank-Content-Version", id)
-		w.Header().Set("X-Docbank-Blob-Hash", v["blob_hash"].(string))
-		w.Header().Set("X-Docbank-Blob-Size", fmt.Sprint(v["size"]))
-		w.Header().Set("Trailer", "Content-Digest")
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 		w.Header().Set("Set-Cookie", "must-not-leak=1")
-		b := append([]byte(nil), f.content[id]...)
-		if f.Fault == "short" && len(b) > 0 {
-			b = b[:len(b)-1]
-		}
-		if f.Fault == "bytes" && len(b) > 0 {
-			b[0] ^= 1
-		}
 		_, _ = w.Write(b)
-		sum := sha256.Sum256(b)
-		digest := "sha-256=:" + base64.StdEncoding.EncodeToString(sum[:]) + ":"
-		if f.Fault == "trailer" {
-			digest = "wrong"
-		}
-		w.Header().Set("Content-Digest", digest)
 	default:
 		http.NotFound(w, r)
 	}

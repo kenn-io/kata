@@ -100,7 +100,7 @@ describe('Kata browser API credentials', () => {
   })
 })
 
-it('uploads attachments with a query actor, multipart file, ULID, and browser credentials', async () => {
+it('uploads attachments with a filename, raw file body, and browser credentials', async () => {
   const upstream = vi.fn<typeof fetch>(async () => Response.json({ attachment_id: 'saved' }))
   setGeneratedFetch(
     createCredentialedFetch(
@@ -115,14 +115,12 @@ it('uploads attachments with a query actor, multipart file, ULID, and browser cr
     const url = new URL(String(input), 'https://daemon.example')
     expect(url.pathname).toBe('/api/v1/projects/7/issues/abc4/attachments')
     expect(url.searchParams.get('actor')).toBe('kata-web')
+    expect(url.searchParams.get('name')).toBe('screen.png')
     expect(init?.method).toBe('POST')
     expect(new Headers(init?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
     expect(new Headers(init?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
     expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
-    const body = init?.body as FormData
-    expect(body.get('file')).toBe(file)
-    expect(body.get('attachment_id')).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
-    expect(body.has('actor')).toBe(false)
+    expect(init?.body).toBe(file)
     setGeneratedFetch(async () =>
       Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }),
     )

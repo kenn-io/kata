@@ -874,15 +874,13 @@ func mergeMetadataObject(
 			delete(current, key)
 			continue
 		}
-		// An unchanged subtree must not recreate data removed by another peer.
-		if jsonRawEqual(fromVal, toVal) {
-			continue
-		}
 		if rawJSONObject(fromVal) && rawJSONObject(toVal) && metadataObjectMergeable(current[key], fromVal, toVal) {
 			current[key] = mustMarshalRawObject(mergeMetadataObject(parseRawObject(current[key]), parseRawObject(fromVal), parseRawObject(toVal)))
 			continue
 		}
-		current[key] = canonicalJSON(toVal)
+		if !jsonRawEqual(fromVal, toVal) {
+			current[key] = canonicalJSON(toVal)
+		}
 	}
 	for key, toVal := range to {
 		if _, ok := seen[key]; ok {

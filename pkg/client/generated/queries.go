@@ -285,14 +285,6 @@ func (s ShowIssueQuery) Validate() error {
 	return errors
 }
 
-type AddAttachmentQuery struct {
-	Actor *string `json:"actor,omitempty"`
-}
-
-type RemoveAttachmentQuery struct {
-	Actor *string `json:"actor,omitempty"`
-}
-
 type UnbindExternalRootQuery struct {
 	Actor *string `json:"actor,omitempty"`
 }

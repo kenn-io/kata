@@ -15,8 +15,6 @@
     uploadAttachment,
     attachmentsEnabled = false,
     actionsDisabled = false,
-    attachmentControlsDisabled = false,
-    attachmentContextKey = '',
     actions = [],
     onOpenIssue,
     onOpenComment,
@@ -69,8 +67,6 @@
     {uploadAttachment}
     {attachmentsEnabled}
     {actionsDisabled}
-    {attachmentControlsDisabled}
-    {attachmentContextKey}
   />
   <IssueLinks
     parent={detail.parent}

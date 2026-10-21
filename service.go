@@ -128,7 +128,7 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string
 }
 
-// DocbankConfig selects the vault and upload limits used by issue attachments.
+// DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
 // Config contains the process-neutral inputs needed to construct a Service.
@@ -270,10 +270,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	var docbankClient *docbank.Client
 	if docbankConfig.Enabled() {
-		docbankClient, err = docbank.NewClient(docbankConfig.URL, docbankConfig.ResolveKey)
-		if err != nil {
-			return nil, fmt.Errorf("kata: Docbank client: %w", err)
-		}
+		docbankClient = docbank.NewClient(docbankConfig.URL, docbankConfig.ResolveKey)
 	}
 	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
 	if err != nil {
@@ -453,7 +450,6 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		DB:                        store,
 		Docbank:                   docbankClient,
 		DocbankFolder:             docbankConfig.Folder,
-		MaxAttachmentBytes:        docbankConfig.MaxUploadBytes,
 		WebHandler:                cfg.WebHandler,
 		DefaultTimezone:           cfg.DefaultTimezone,
 		StartedAt:                 startedAt,

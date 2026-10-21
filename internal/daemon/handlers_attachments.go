@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -11,11 +10,13 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -26,311 +27,175 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+const attachmentPath = "/api/v1/projects/{project_id}/issues/{ref}/attachments"
+const maxAttachmentBytes = 256 << 20
+
 var attachmentUploadRoute = regexp.MustCompile(`^(/api/v1/ui/proxy)?/api/v1/projects/[^/]+/issues/[^/]+/attachments$`)
 
 func isAttachmentUpload(r *http.Request) bool {
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	return r.Method == http.MethodPost && err == nil && mediaType == "multipart/form-data" && attachmentUploadRoute.MatchString(r.URL.Path)
+	return r.Method == http.MethodPost && attachmentUploadRoute.MatchString(r.URL.Path)
 }
-
-const attachmentPath = "/api/v1/projects/{project_id}/issues/{ref}/attachments"
 
 type attachmentUploadContextKey struct{}
-type attachmentUploadPreflight struct {
-	actor string
-	issue db.Issue
-}
 
 func attachmentError(status int, code string) error {
 	return api.NewError(status, code, strings.ReplaceAll(code, "_", " "), "", nil)
 }
 func docbankError(err error) error {
-	switch docbank.ErrorKind(err) {
-	case "foreign_vault":
-		return attachmentError(409, "foreign_vault")
-	case "not_found":
-		return attachmentError(410, "attachment_content_missing")
-	case "too_large":
-		return attachmentError(413, "attachment_too_large")
-	case "unauthorized":
-		return attachmentError(502, "docbank_unauthorized")
-	case "integrity", "invalid_receipt":
-		return attachmentError(502, "attachment_integrity")
-	default:
-		return attachmentError(502, "docbank_unreachable")
+	if e, ok := errors.AsType[*docbank.Error](err); ok {
+		switch e.Status {
+		case 404:
+			return attachmentError(410, "attachment_content_missing")
+		case 401, 403:
+			return attachmentError(502, "docbank_unauthorized")
+		}
 	}
+	return attachmentError(502, "docbank_unreachable")
+}
+
+// The nine extension entries work even on hosts without a MIME database.
+var attachmentTypes = map[string]string{
+	".png": "image/png", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+	".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime", ".webm": "video/webm", ".ogv": "video/ogg",
+}
+
+func inlineAttachmentType(typ string) bool {
+	for _, allowed := range attachmentTypes {
+		if typ == allowed {
+			return true
+		}
+	}
+	return false
 }
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
-	registerAttachmentReadHandlers(h, cfg)
-	limit := cfg.MaxAttachmentBytes
-	if limit <= 0 {
-		limit = 256 << 20
-	}
-	folder := cfg.DocbankFolder
-	if folder == "" {
-		folder = "/kata"
-	}
-	slots := make(chan struct{}, 2)
-	bound := func(ctx huma.Context, next func(huma.Context)) {
-		var prepared attachmentUploadPreflight
-		if err := func() error {
-			if cfg.Docbank == nil {
-				return attachmentError(503, "docbank_not_configured")
-			}
-			projectID, err := strconv.ParseInt(ctx.Param("project_id"), 10, 64)
-			if err != nil {
-				return attachmentError(400, "validation")
-			}
-			actor, err := attributedActor(ctx.Context(), ctx.Query("actor"))
-			if err != nil {
-				return err
-			}
-			iss, err := activeIssueByRef(ctx.Context(), cfg.DB, projectID, ctx.Param("ref"), db.IncludeDeletedNo)
-			if err != nil {
-				return err
-			}
-			prepared = attachmentUploadPreflight{actor: actor, issue: iss}
-			return requireFederatedIssueClaim(ctx.Context(), cfg, projectID, iss, actor)
-		}(); err != nil {
-			err = internalAPIError(err)
-			status := http.StatusInternalServerError
-			if statusError, ok := errors.AsType[huma.StatusError](err); ok {
-				status = statusError.GetStatus()
-			}
-			ctx.SetHeader("Content-Type", "application/json")
-			ctx.SetStatus(status)
-			_ = json.MarshalWrite(ctx.BodyWriter(), err)
-			return
-		}
-		select {
-		case slots <- struct{}{}:
-			defer func() { <-slots }()
-		default:
-			_ = huma.WriteErr(h, ctx, 429, "attachment upload concurrency limit")
-			return
-		}
+	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
-		r.Body = http.MaxBytesReader(w, r.Body, limit+(64<<10))
-		if err := r.ParseMultipartForm(8 << 20); err != nil {
-			if r.MultipartForm != nil {
-				_ = r.MultipartForm.RemoveAll()
-			}
-			code := 400
-			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-				code = 413
-			}
-			_ = huma.WriteErr(h, ctx, code, "invalid attachment multipart body")
-			return
-		}
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
-		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, prepared)))
+		// Match huma's unlimited body-read timeout for a streaming upload.
+		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
+		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, maxAttachmentBytes))))
 	}
-	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, BodyReadTimeout: -1, Middlewares: huma.Middlewares{bound}, RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{"multipart/form-data": {Schema: &huma.Schema{Type: "object", Required: []string{"file", "attachment_id"}, Properties: map[string]*huma.Schema{"file": {Type: "string", Format: "binary"}, "attachment_id": {Type: "string"}}}}}}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AttachmentResponse, error) {
-		prepared := ctx.Value(attachmentUploadContextKey{}).(attachmentUploadPreflight)
-		actor, iss := prepared.actor, prepared.issue
-		files := in.RawBody.File["file"]
-		if len(files) != 1 || len(in.RawBody.File) != 1 || len(in.RawBody.Value["attachment_id"]) != 1 {
-			return nil, attachmentError(400, "invalid_attachment_upload")
+	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, Hidden: true, BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*huma.StreamResponse, error) {
+		if cfg.Docbank == nil {
+			return nil, attachmentError(503, "docbank_not_configured")
 		}
-		id := firstFormValue(in.RawBody.Value, "attachment_id")
-		fh := files[0]
-		if fh.Size > limit {
-			return nil, attachmentError(413, "attachment_too_large")
-		}
-		name := metadata.CleanAttachmentName(fh.Filename)
-		e := metadata.Attachment{Name: name, MediaType: "application/octet-stream", Size: fh.Size, AddedBy: actor, AddedAt: time.Now().UTC().Format(time.RFC3339)}
-		// Validate the client id/name before contacting Docbank; reference fields follow the receipt.
-		if !uid.Valid(id) || name == "" || len(name) > 255 {
-			return nil, attachmentError(400, "attachment_invalid")
-		}
-		if err := preflightAttachmentAdmission(iss.Metadata, id); err != nil {
+		actor, err := attributedActor(ctx, in.Actor)
+		if err != nil {
 			return nil, err
 		}
-		file, err := fh.Open()
+		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
+			return nil, err
+		}
+		e := metadata.Attachment{Name: in.Name, MediaType: "application/octet-stream"}
+		if e.Name == "" || len(e.Name) > 255 || path.Base(e.Name) != e.Name || strings.ContainsAny(e.Name, `\`) || e.Name == "." || e.Name == ".." || strings.ContainsFunc(e.Name, unicode.IsControl) {
+			return nil, attachmentError(400, "attachment_invalid")
+		}
+		if typ := attachmentTypes[strings.ToLower(path.Ext(e.Name))]; typ != "" {
+			e.MediaType = typ
+		} else if typ := mime.TypeByExtension(strings.ToLower(path.Ext(e.Name))); inlineAttachmentType(typ) {
+			e.MediaType = typ
+		}
+		file, err := os.CreateTemp("", "kata-attachment-*")
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		defer func() { _ = file.Close() }()
-		head := make([]byte, 512)
-		n, err := io.ReadFull(file, head)
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, internalAPIError(err)
-		}
-		e.MediaType = attachmentMediaType(head[:n])
-		if _, err = file.Seek(0, io.SeekStart); err != nil {
-			return nil, internalAPIError(err)
-		}
+		defer func() { _ = file.Close(); _ = os.Remove(file.Name()) }()
 		hash := sha256.New()
-		if _, err = io.Copy(hash, file); err != nil {
+		e.Size, err = io.Copy(io.MultiWriter(file, hash), ctx.Value(attachmentUploadContextKey{}).(io.Reader))
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return nil, attachmentError(413, "attachment_too_large")
+		}
+		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		sha := hex.EncodeToString(hash.Sum(nil))
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
-		}
-		vault, err := cfg.Docbank.Info(ctx)
-		if err != nil {
-			return nil, docbankError(err)
 		}
 		project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		folder := cfg.DocbankFolder
+		if folder == "" {
+			folder = "/kata"
+		}
 		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(folder, project.UID))
 		if err != nil {
 			return nil, docbankError(err)
 		}
-		receipt, err := cfg.Docbank.Upload(ctx, parent, sha[:12]+"-"+name, e.MediaType, file, e.Size, sha)
+		sha := hex.EncodeToString(hash.Sum(nil))
+		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, sha[:12]+"-"+e.Name, file, e.Size, sha)
 		if err != nil {
 			return nil, docbankError(err)
 		}
-		e.Docbank = metadata.DocbankReference{VaultUID: vault, NodeID: receipt.Node.ID, ContentVersionID: receipt.Node.VersionID, ContentSHA256: sha}
-		saved, _, err := mutateAttachments(ctx, cfg, in.ProjectID, in.Ref, actor, func(m metadata.Attachments) (metadata.Attachment, bool, error) {
-			if _, exists := m[id]; exists {
-				old, err := m.Lookup(id)
-				if err == nil && old.Name == e.Name && old.MediaType == e.MediaType && old.Size == e.Size && old.Docbank == e.Docbank {
-					return old, false, nil
-				}
-				return e, false, attachmentError(409, "attachment_id_conflict")
-			}
-			if err := m.Add(id, e); err != nil {
-				return e, false, attachmentError(400, "attachment_invalid")
-			}
-			return e, true, nil
-		})
+		id, err := uid.New()
 		if err != nil {
-			return nil, err
+			return nil, internalAPIError(err)
 		}
-		out := &api.AttachmentResponse{}
-		out.Body.AttachmentID = id
-		out.Body.Attachment = saved
-		return out, nil
-	})
-	huma.Register(h, huma.Operation{OperationID: "removeAttachment", Method: "DELETE", Path: attachmentPath + "/{attachment_id}"}, func(ctx context.Context, in *api.RemoveAttachmentRequest) (*api.RemoveAttachmentResponse, error) {
-		actor, err := attributedActor(ctx, in.Actor)
+		raw, err := json.Marshal(e)
 		if err != nil {
-			return nil, err
+			return nil, internalAPIError(err)
 		}
-		_, changed, err := mutateAttachments(ctx, cfg, in.ProjectID, in.Ref, actor, func(m metadata.Attachments) (metadata.Attachment, bool, error) {
-			if _, ok := m[in.AttachmentID]; !ok {
-				return metadata.Attachment{}, false, attachmentError(404, "attachment_not_found")
-			}
-			m.Remove(in.AttachmentID)
-			return metadata.Attachment{}, true, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		out := &api.RemoveAttachmentResponse{}
-		out.Body.Changed = changed
-		return out, nil
-	})
-}
-func firstFormValue(m map[string][]string, key string) string {
-	if len(m[key]) == 0 {
-		return ""
-	}
-	return m[key][0]
-}
-func attachmentMediaType(head []byte) string {
-	if len(head) >= 16 && string(head[4:8]) == "ftyp" {
-		size := int(binary.BigEndian.Uint32(head[:4]))
-		if size >= 16 && size <= len(head) && size%4 == 0 {
-			for offset := 8; offset < size; offset += 4 {
-				if offset == 12 {
-					continue // Minor version, rather than a compatible brand.
-				}
-				switch string(head[offset : offset+4]) {
-				case "qt  ":
-					return "video/quicktime"
-				case "isom", "iso2", "avc1", "mp41", "mp42":
-					return "video/mp4"
-				}
-			}
-		}
-	}
-	typ := http.DetectContentType(head)
-	if typ == "application/ogg" {
-		return "video/ogg"
-	}
-	return typ
-}
-
-// preflightAttachmentAdmission rejects an invalid map or a full issue before
-// contacting Docbank. mutateAttachments repeats admission under its guarded
-// metadata write because another writer can change the map during the upload.
-func preflightAttachmentAdmission(raw db.JSONBlob, id string) error {
-	var values map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return internalAPIError(err)
-	}
-	m, err := metadata.DecodeAttachments(values["attachments"])
-	if err != nil {
-		return attachmentError(400, "attachment_invalid")
-	}
-	if _, exists := m[id]; exists {
-		if _, err := m.Lookup(id); err != nil {
-			return attachmentError(400, "attachment_invalid")
-		}
-		return nil
-	}
-	count := 0
-	for key := range m {
-		if _, err := m.Lookup(key); err == nil {
-			count++
-		}
-	}
-	if count >= 100 {
-		return attachmentError(400, "attachment_invalid")
-	}
-	return nil
-}
-
-// mutateAttachments reapplies only the intended add/remove after a guard conflict,
-// preserving every unseen peer entry. No Docbank call occurs inside the retry loop.
-func mutateAttachments(ctx context.Context, cfg ServerConfig, projectID int64, ref, actor string, edit func(metadata.Attachments) (metadata.Attachment, bool, error)) (metadata.Attachment, bool, error) {
-	for range 8 {
-		iss, err := activeIssueByRef(ctx, cfg.DB, projectID, ref, db.IncludeDeletedNo)
-		if err != nil {
-			return metadata.Attachment{}, false, err
-		}
-		if err := requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor); err != nil {
-			return metadata.Attachment{}, false, err
-		}
-		var values map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(iss.Metadata), &values); err != nil {
-			return metadata.Attachment{}, false, internalAPIError(err)
-		}
-		raw := values["attachments"]
-		m, err := metadata.DecodeAttachments(raw)
-		if err != nil {
-			return metadata.Attachment{}, false, attachmentError(400, "attachment_invalid")
-		}
-		saved, changed, err := edit(m)
-		if err != nil || !changed {
-			return saved, changed, err
-		}
-		guard := &db.MetadataPatchGuard{Key: "attachments", IfValue: raw}
-		if len(raw) == 0 || string(raw) == "null" {
-			guard.IfAbsent = true
-			guard.IfValue = nil
-		}
-		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{"attachments": m.Encode()}, Guard: guard})
-		if _, ok := errors.AsType[*db.MetadataGuardConflictError](err); ok {
-			continue
-		}
+		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
 		if errors.Is(err, db.ErrFederatedReadOnly) {
-			return saved, false, federationReadOnlyError(err)
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return saved, false, internalAPIError(err)
+			return nil, internalAPIError(err)
 		}
 		if res.Changed {
-			// The response carries no event projection. Publish the retained
-			// transaction event before any response-only read can fail.
 			cfg.Publish().Event(res.Event.ProjectID, res.Event)
 		}
-		return saved, res.Changed, nil
-	}
-	return metadata.Attachment{}, false, attachmentError(409, "metadata_guard_failed")
+		return &huma.StreamResponse{Body: func(hctx huma.Context) {
+			hctx.SetHeader("Content-Type", "application/json")
+			_ = json.MarshalWrite(hctx.BodyWriter(), struct {
+				ID         string              `json:"attachment_id"`
+				Attachment metadata.Attachment `json:"attachment"`
+			}{id, e})
+		}}, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Hidden: true}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
+		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		var values map[string]jsontext.Value
+		if err = json.Unmarshal([]byte(iss.Metadata), &values); err != nil {
+			return nil, internalAPIError(err)
+		}
+		raw, exists := values[metadata.AttachmentPrefix+in.AttachmentID]
+		if !exists {
+			return nil, attachmentError(404, "attachment_not_found")
+		}
+		e, valid := metadata.Valid(raw)
+		if !valid {
+			return nil, attachmentError(400, "attachment_invalid")
+		}
+		if cfg.Docbank == nil {
+			return nil, attachmentError(503, "docbank_not_configured")
+		}
+		resp, err := cfg.Docbank.Content(ctx, e.DocbankVersion)
+		if err != nil {
+			return nil, docbankError(err)
+		}
+		typ, disposition := "application/octet-stream", "attachment"
+		if inlineAttachmentType(e.MediaType) {
+			typ, disposition = e.MediaType, "inline"
+		}
+		return &huma.StreamResponse{Body: func(hctx huma.Context) {
+			defer func() { _ = resp.Body.Close() }()
+			hctx.SetHeader("Content-Type", typ)
+			hctx.SetHeader("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": e.Name}))
+			if resp.ContentLength >= 0 {
+				hctx.SetHeader("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+			}
+			hctx.SetHeader("X-Content-Type-Options", "nosniff")
+			if _, err := io.Copy(hctx.BodyWriter(), resp.Body); err != nil {
+				panic(http.ErrAbortHandler)
+			}
+		}}, nil
+	})
 }

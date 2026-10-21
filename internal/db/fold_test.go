@@ -443,21 +443,3 @@ func TestFoldCommentTeammateSurvivesEdit(t *testing.T) {
 	require.Equal(t, "reviewer-7", got.Teammate)
 	require.Equal(t, "revised", got.Body)
 }
-
-func TestFoldAttachmentConcurrentAddsAndRemoval(t *testing.T) {
-	// Contract: independent per-device additions survive; omission removes only a seen entry.
-	base := testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"operator","status":"open","metadata":{"attachments":{"X":{"name":"x"},"Y":{"name":"y"}}},"created_at":"2026-05-23T12:00:00.000Z"}`)
-	add := testEvent("issue.metadata_updated", 2, `{"diff":{"attachments":{"from":{"X":{"name":"x"},"Y":{"name":"y"}},"to":{"X":{"name":"x"},"Y":{"name":"y"},"Z":{"name":"z"}}}}}`)
-	remove := testEvent("issue.metadata_updated", 3, `{"diff":{"attachments":{"from":{"X":{"name":"x"},"Y":{"name":"y"}},"to":{"Y":{"name":"y"}}}}}`)
-	got := FoldEvents([]FoldEvent{base, add, remove})
-	require.JSONEq(t, `{"attachments":{"Y":{"name":"y"},"Z":{"name":"z"}}}`, string(got.IssueMetadata["issue-1"]))
-	// The removal must also survive when it precedes the concurrent add.
-	remove = testEvent("issue.metadata_updated", 2, `{"diff":{"attachments":{"from":{"X":{"name":"x"},"Y":{"name":"y"}},"to":{"Y":{"name":"y"}}}}}`)
-	add = testEvent("issue.metadata_updated", 3, `{"diff":{"attachments":{"from":{"X":{"name":"x"},"Y":{"name":"y"}},"to":{"X":{"name":"x"},"Y":{"name":"y"},"Z":{"name":"z"}}}}}`)
-	got = FoldEvents([]FoldEvent{base, remove, add})
-	require.JSONEq(t, `{"attachments":{"Y":{"name":"y"},"Z":{"name":"z"}}}`, string(got.IssueMetadata["issue-1"]))
-	a := testEvent("issue.metadata_updated", 2, `{"diff":{"attachments":{"from":{},"to":{"A":{"name":"a"}}}}}`)
-	b := testEvent("issue.metadata_updated", 3, `{"diff":{"attachments":{"from":{},"to":{"B":{"name":"b"}}}}}`)
-	got = FoldEvents([]FoldEvent{a, b})
-	require.JSONEq(t, `{"attachments":{"A":{"name":"a"},"B":{"name":"b"}}}`, string(got.IssueMetadata["issue-1"]))
-}

@@ -25,7 +25,6 @@ api_key="test-key"
 	require.NoError(t, err)
 	require.True(t, cfg.Docbank.Enabled())
 	require.Equal(t, "/kata", cfg.Docbank.Folder)
-	require.EqualValues(t, 256<<20, cfg.Docbank.MaxUploadBytes)
 	for _, u := range []string{"http://localhost:9000", "http://127.0.0.1:9000", "http://[::1]:9000", "https://docbank.example/prefix"} {
 		_, err = readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\n", u))
 		require.NoError(t, err)
@@ -34,7 +33,7 @@ api_key="test-key"
 		_, err = readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\n", u))
 		require.Error(t, err, u)
 	}
-	for _, extra := range []string{"api_key=\"\"", "api_key=\"test-key\"\nfolder=\"relative\"", "api_key=\"test-key\"\nfolder=\"/a/../b\"", "api_key=\"test-key\"\nmax_upload_bytes=2147483649", "api_key=\"test-key\"\nmax_upload_bytes=-1"} {
+	for _, extra := range []string{"api_key=\"\"", "api_key=\"test-key\"\nfolder=\"relative\"", "api_key=\"test-key\"\nfolder=\"/a/../b\""} {
 		_, err = readDocbank(t, "[docbank]\nurl=\"https://docbank.example\"\n"+extra)
 		require.Error(t, err, extra)
 	}

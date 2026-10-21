@@ -16,9 +16,6 @@
   import RecurrencePanel from './RecurrencePanel.svelte'
 
   let props: ComponentProps<typeof IssueEditor> & {
-    attachmentReadsBlocked?: boolean | undefined
-    attachmentControlsDisabled?: boolean | undefined
-    attachmentContextKey?: string | undefined
     attachmentsEnabled?: boolean | undefined
     onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
   } = $props()
@@ -92,14 +89,12 @@
     <SharedIssueDetail
       {detail}
       attachmentBaseURL={`/api/v1/projects/${props.issue.issue.project_id}/issues/${props.issue.issue.uid}/attachments`}
-      fetchAttachment={props.attachmentReadsBlocked ? undefined : fetchAttachmentBlob}
+      fetchAttachment={fetchAttachmentBlob}
       uploadAttachment={props.onUploadAttachment
         ? (file) => props.onUploadAttachment!(props.issue.issue.uid, file)
         : undefined}
       attachmentsEnabled={props.attachmentsEnabled}
       actionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
-      attachmentControlsDisabled={props.attachmentControlsDisabled}
-      attachmentContextKey={props.attachmentContextKey}
       {actions}
       onOpenIssue={(uid) => void props.onSelectIssue?.({ uid })}
       onOpenComment={(uid, commentUID, returnComment) =>

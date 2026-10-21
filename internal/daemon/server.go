@@ -147,10 +147,9 @@ type ServerConfig struct {
 
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
-	Embedder           *embedding.Client
-	Docbank            *docbank.Client
-	DocbankFolder      string
-	MaxAttachmentBytes int64
+	Embedder      *embedding.Client
+	Docbank       *docbank.Client
+	DocbankFolder string
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
@@ -683,9 +682,6 @@ func requireJSONMutation(next http.Handler) http.Handler {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
 				message := "Content-Type must be application/json"
-				if r.Method == http.MethodPost && attachmentUploadRoute.MatchString(r.URL.Path) {
-					message = "Content-Type must be multipart/form-data"
-				}
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
 					message)
 				return

@@ -1302,9 +1302,8 @@ setup and the shared-vault trust boundary.
 | `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
 | `api_key_env` | empty | Name of the environment variable containing the key. |
 | `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
-| `max_upload_bytes` | `268435456` | Per-file limit in bytes; must be positive and at most `2147483648`. |
 
-A configured URL requires a non-empty resolved key. A broken selected credential
+A configured URL requires a key source. A broken selected credential
 source fails explicitly; Kata does not fall back to another source. Keys are
 resolved on each request.
 

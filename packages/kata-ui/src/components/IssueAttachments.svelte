@@ -2,26 +2,23 @@
   import { Button, ImagePreview } from '@kenn-io/kit-ui'
   import { SvelteMap } from 'svelte/reactivity'
   import { onDestroy, untrack } from 'svelte'
+  import type { KataAttachment } from '../types.js'
 
   interface Props {
-    attachments?: unknown
+    attachments?: Record<string, KataAttachment> | undefined
     baseURL: string
     fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
     uploadAttachment?: ((file: File) => Promise<void>) | undefined
     attachmentsEnabled?: boolean | undefined
     actionsDisabled?: boolean | undefined
-    attachmentControlsDisabled?: boolean | undefined
-    attachmentContextKey?: string | undefined
   }
   let {
-    attachments,
+    attachments = {},
     baseURL,
     fetchAttachment,
     uploadAttachment,
     attachmentsEnabled = false,
     actionsDisabled = false,
-    attachmentControlsDisabled = false,
-    attachmentContextKey = '',
   }: Props = $props()
   const previews = new SvelteMap<string, string>()
   const states = new SvelteMap<string, string>()
@@ -29,57 +26,27 @@
   const uploads = new SvelteMap<File, string>()
   let fileInput: HTMLInputElement | undefined = $state()
   let uploading = $state(false)
-  let uploadQueue: File[] = $state([])
+  let generation = 0
   let uploadGeneration = 0
   const canUpload = $derived(attachmentsEnabled && Boolean(uploadAttachment))
-  const uploadDisabled = $derived(
-    uploading || uploadQueue.length > 0 || attachmentControlsDisabled || actionsDisabled,
-  )
-  let generation = 0
-  function object(value: unknown): Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {}
-  }
+  const uploadDisabled = $derived(uploading || actionsDisabled)
   const entries = $derived(
-    Object.entries(object(attachments)).map(([id, raw]) => {
-      // The daemon projects only entries accepted by metadata.Lookup.
-      const e = object(raw)
-      const docbank = object(e.docbank)
-      const name = typeof e.name === 'string' ? e.name : id
-      const type = typeof e.media_type === 'string' ? e.media_type : 'unknown'
-      const size = typeof e.size === 'number' ? e.size : 0
-      const mediaType = type.split(';')[0]!.trim().toLowerCase()
-      return {
-        id,
-        name,
-        type,
-        size,
-        reference: JSON.stringify([
-          name,
-          type,
-          size,
-          e.added_by ?? '',
-          e.added_at ?? '',
-          docbank.vault_uid,
-          docbank.node_id,
-          docbank.content_version_id,
-          docbank.content_sha256,
-        ]),
-        mediaType,
-        image:
-          ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mediaType) &&
-          size <= 20 << 20,
-        video:
-          ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(mediaType) &&
-          size <= 100 << 20,
-      }
-    }),
+    Object.entries(attachments).map(([id, e]) => ({
+      ...e,
+      id,
+      reference: JSON.stringify([e.name, e.media_type, e.size, e.docbank_version]),
+      image:
+        ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(e.media_type) &&
+        e.size <= 20 << 20,
+      video:
+        ['video/mp4', 'video/x-m4v', 'video/quicktime', 'video/webm', 'video/ogg'].includes(
+          e.media_type,
+        ) && e.size <= 100 << 20,
+    })),
   )
   const references = new Map<string, string>()
   let previousBaseURL: string | undefined
   let previousFetcher: Props['fetchAttachment']
-  let previousContextKey: string | undefined
   function clearPreviews(): void {
     generation++
     for (const url of previews.values()) URL.revokeObjectURL(url)
@@ -89,7 +56,6 @@
   }
   function clearUploads(): void {
     uploadGeneration++
-    uploadQueue = []
     uploads.clear()
     uploading = false
   }
@@ -98,16 +64,10 @@
     clearUploads()
   })
   $effect(() => {
-    const next = new Map(entries.map((entry) => [entry.id, entry.reference]))
-    if (baseURL !== previousBaseURL || attachmentContextKey !== previousContextKey)
-      untrack(clearUploads)
-    if (
-      baseURL !== previousBaseURL ||
-      fetchAttachment !== previousFetcher ||
-      attachmentContextKey !== previousContextKey
-    ) {
-      untrack(clearPreviews)
-    } else {
+    const next = new Map(entries.map((e) => [e.id, e.reference]))
+    if (baseURL !== previousBaseURL) untrack(clearUploads)
+    if (baseURL !== previousBaseURL || fetchAttachment !== previousFetcher) untrack(clearPreviews)
+    else
       untrack(() => {
         for (const [id, reference] of references) {
           if (next.get(id) === reference) continue
@@ -118,72 +78,56 @@
           loading.delete(id)
         }
       })
-    }
     references.clear()
     for (const [id, reference] of next) references.set(id, reference)
     previousBaseURL = baseURL
     previousFetcher = fetchAttachment
-    previousContextKey = attachmentContextKey
   })
-  $effect(() => {
-    if (
-      uploadQueue.length > 0 &&
-      !uploading &&
-      !actionsDisabled &&
-      !attachmentControlsDisabled &&
-      canUpload
-    )
-      untrack(() => void uploadNext())
-  })
-  function attachFiles(): void {
-    if (!canUpload || uploadDisabled || !fileInput) return
-    uploadQueue = Array.from(fileInput.files ?? [])
-    fileInput.value = ''
-    for (const file of uploadQueue) uploads.set(file, 'queued')
-  }
-  async function uploadNext(): Promise<void> {
+  async function attachFiles(): Promise<void> {
     const uploader = uploadAttachment
-    const file = uploadQueue[0]
-    if (!uploader || !file) return
-    uploadQueue = uploadQueue.slice(1)
+    if (!canUpload || uploadDisabled || !fileInput || !uploader) return
+    const files = Array.from(fileInput.files ?? [])
+    fileInput.value = ''
     const accepted = uploadGeneration
     uploading = true
-    uploads.set(file, 'uploading')
-    try {
-      await uploader(file)
-      if (accepted === uploadGeneration) uploads.delete(file)
-    } catch (error) {
-      if (accepted === uploadGeneration)
-        uploads.set(file, error instanceof Error ? error.message : 'docbank_unreachable')
-    } finally {
-      if (accepted === uploadGeneration) uploading = false
+    for (const file of files) uploads.set(file, 'queued')
+    for (const file of files) {
+      if (accepted !== uploadGeneration) break
+      uploads.set(file, 'uploading')
+      try {
+        await uploader(file)
+        if (accepted === uploadGeneration) uploads.delete(file)
+      } catch (error) {
+        if (accepted === uploadGeneration)
+          uploads.set(file, error instanceof Error ? error.message : 'docbank_unreachable')
+      }
     }
+    if (accepted === uploadGeneration) uploading = false
   }
-  async function load(id: string, name: string, preview: boolean, mediaType = ''): Promise<void> {
+  async function load(entry: (typeof entries)[number], preview: boolean): Promise<void> {
     const fetcher = fetchAttachment
-    if (!fetcher || loading.get(id)) return
+    if (!fetcher || actionsDisabled || !attachmentsEnabled || loading.get(entry.id)) return
     const accepted = generation
-    const reference = references.get(id)
-    const current = () => accepted === generation && references.get(id) === reference
-    loading.set(id, true)
-    states.delete(id)
+    const current = () => accepted === generation && references.get(entry.id) === entry.reference
+    loading.set(entry.id, true)
+    states.delete(entry.id)
     try {
-      const blob = await fetcher(`${baseURL}/${encodeURIComponent(id)}/content`)
+      const blob = await fetcher(`${baseURL}/${encodeURIComponent(entry.id)}/content`)
       if (!current()) return
-      if (blob.size > 100 << 20) throw new Error('attachment_too_large')
-      const url = URL.createObjectURL(preview ? new Blob([blob], { type: mediaType }) : blob)
-      if (preview) previews.set(id, url)
+      const url = URL.createObjectURL(preview ? new Blob([blob], { type: entry.media_type }) : blob)
+      if (preview) previews.set(entry.id, url)
       else {
         const link = document.createElement('a')
         link.href = url
-        link.download = name
+        link.download = entry.name
         link.click()
         setTimeout(() => URL.revokeObjectURL(url), 0)
       }
     } catch (error) {
-      if (current()) states.set(id, error instanceof Error ? error.message : 'docbank_unreachable')
+      if (current())
+        states.set(entry.id, error instanceof Error ? error.message : 'docbank_unreachable')
     } finally {
-      if (current()) loading.delete(id)
+      if (current()) loading.delete(entry.id)
     }
   }
 </script>
@@ -209,45 +153,40 @@
         />
       {/if}
     </header>
-    {#each uploads as [file, state] (file)}
-      <span role="status">{file.name} {state}</span>
-    {/each}
+    {#each uploads as [file, state] (file)}<span role="status">{file.name} {state}</span>{/each}
     {#if entries.length > 0}
       <ul>
         {#each entries as entry (entry.id)}
           <li>
             <span>{entry.name}</span>
-            <span class="description">{entry.type} · {entry.size} bytes</span>
-            {#if entry.size > 100 << 20}<code
-                >kata docbank attachments get &lt;issue&gt; {entry.id}</code
-              >
-            {:else}
-              {#if entry.image && !previews.has(entry.id)}<Button
-                  size="sm"
-                  label={`Preview ${entry.name}`}
-                  disabled={attachmentControlsDisabled ||
-                    !fetchAttachment ||
-                    Boolean(loading.get(entry.id))}
-                  onclick={() => load(entry.id, entry.name, true, entry.mediaType)}
-                />{/if}
-              {#if entry.video && !previews.has(entry.id)}
+            <span class="description">{entry.media_type} · {entry.size} bytes</span>
+            {#if attachmentsEnabled}
+              {#if entry.size > 100 << 20}
+                <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
+              {:else}
+                {#if entry.image && !previews.has(entry.id)}
+                  <Button
+                    size="sm"
+                    label={`Preview ${entry.name}`}
+                    disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                    onclick={() => load(entry, true)}
+                  />
+                {/if}
+                {#if entry.video && !previews.has(entry.id)}
+                  <Button
+                    size="sm"
+                    label={`Play ${entry.name}`}
+                    disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                    onclick={() => load(entry, true)}
+                  />
+                {/if}
                 <Button
                   size="sm"
-                  label={`Play ${entry.name}`}
-                  disabled={attachmentControlsDisabled ||
-                    !fetchAttachment ||
-                    Boolean(loading.get(entry.id))}
-                  onclick={() => load(entry.id, entry.name, true, entry.mediaType)}
+                  label={`Download ${entry.name}`}
+                  disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                  onclick={() => load(entry, false)}
                 />
               {/if}
-              <Button
-                size="sm"
-                label={`Download ${entry.name}`}
-                disabled={attachmentControlsDisabled ||
-                  !fetchAttachment ||
-                  Boolean(loading.get(entry.id))}
-                onclick={() => load(entry.id, entry.name, false)}
-              />
             {/if}
             {#if states.has(entry.id)}<span role="status">{states.get(entry.id)}</span>{/if}
             {#if previews.has(entry.id)}
@@ -260,11 +199,9 @@
                     src={previews.get(entry.id)}
                     aria-label={entry.name}
                   ></video>
-                {:else}<ImagePreview
-                    src={previews.get(entry.id)!}
-                    alt={entry.name}
-                    maxHeight="160px"
-                  />{/if}
+                {:else}
+                  <ImagePreview src={previews.get(entry.id)!} alt={entry.name} maxHeight="160px" />
+                {/if}
               </div>
             {/if}
           </li>

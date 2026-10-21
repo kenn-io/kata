@@ -548,31 +548,27 @@ describe('typed reply draft across edit mode', () => {
   })
 })
 
-it('allows attachment reads for a read-only principal and fences stale read authority', async () => {
-  const id = '01JB3Z6V2K8M4Q9T1X5W7Y0RNA'
+it('disables attachment controls with stale or read-only authority', async () => {
   const issue = makeIssue({
     metadata: {
-      attachments: {
-        [id]: {
-          name: 'screen.png',
-          media_type: 'image/png',
-          size: 12,
-          docbank: {
-            vault_uid: '6f1c2e8a-1111-4111-8111-111111111111',
-            node_id: 42,
-            content_version_id: '6f1c2e8a-2222-4222-8222-222222222222',
-            content_sha256: 'a'.repeat(64),
-          },
-        },
+      'attachment.01JB3Z6V2K8M4Q9T1X5W7Y0RNA': {
+        name: 'screen.png',
+        media_type: 'image/png',
+        size: 12,
+        docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
       },
     },
   })
-  const view = renderDetail({ authorityBlocked: true, issue })
+  const view = renderDetail({ authorityBlocked: true, attachmentsEnabled: true, issue })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
+    true,
+  )
+  await view.rerender({ authorityBlocked: false })
   expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
     false,
   )
-  await view.rerender({ attachmentReadsBlocked: true })
-  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
+  await view.rerender({ actionsDisabled: true })
+  expect(screen.getByRole('button', { name: 'Download screen.png' }).hasAttribute('disabled')).toBe(
     true,
   )
 })

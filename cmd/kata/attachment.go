@@ -3,35 +3,25 @@ package main
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
-	"github.com/cenkalti/backoff/v7"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/textsafe"
-	"go.kenn.io/kata/internal/uid"
-	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/atomicfile"
 )
 
-const (
-	attachmentReadTimeout     = 36 * time.Minute
-	attachmentTransferTimeout = 2*attachmentReadTimeout + 3*time.Minute
-)
-
 func newAttachmentCmd() *cobra.Command {
-	root := &cobra.Command{Use: "attachments", Short: "attach Docbank files and read pinned content"}
+	root := &cobra.Command{Use: "attachments", Short: "attach and download issue files"}
 	for _, action := range []string{"add", "ls", "get", "rm"} {
 		var output string
 		var force bool
@@ -46,7 +36,7 @@ func newAttachmentCmd() *cobra.Command {
 		}
 		if action == "get" {
 			cmd.Flags().StringVarP(&output, "output", "o", "", "destination (defaults to attachment name)")
-			cmd.Flags().BoolVar(&force, "force", false, "replace the destination without following symlinks")
+			cmd.Flags().BoolVar(&force, "force", false, "replace the destination")
 		}
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
 			ctx, base, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
@@ -57,88 +47,51 @@ func newAttachmentCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			copyClient := *hc
-			// Uploads and database-token-authorized downloads can traverse two
-			// sequential transfer legs. Reserve both windows plus processing
-			// overhead.
-			copyClient.Timeout = attachmentReadTimeout
-			if action == "add" || action == "get" {
-				copyClient.Timeout = attachmentTransferTimeout
-			}
-			hc = &copyClient
-			client, err := kataclient.NewWithHTTPClient(base, hc)
-			if err != nil {
-				return err
-			}
 			if action == "add" {
-				return addAttachmentsCLI(ctx, cmd, client, pid, ref.RefForAPI, args[1:])
+				return addAttachmentsCLI(ctx, cmd, hc, base, pid, ref.RefForAPI, args[1:])
 			}
 			issue, _, err := fetchMetaIssue(ctx, hc, base, pid, ref.RefForAPI)
 			if err != nil {
 				return err
 			}
-			m, err := metadata.DecodeAttachments(issue.Metadata["attachments"])
-			if err != nil {
-				return err
-			}
-			if action == "ls" {
-				switch currentOutputMode() {
-				case outputJSON:
-					return printAttachmentsCLI(cmd.OutOrStdout(), m, true)
-				case outputAgent:
-					return printAttachmentsAgentCLI(cmd.OutOrStdout(), m)
-				default:
-					return printAttachmentsCLI(cmd.OutOrStdout(), m, false)
+			entries := map[string]metadata.Attachment{}
+			var ids []string
+			for key, raw := range issue.Metadata {
+				if id, ok := strings.CutPrefix(key, metadata.AttachmentPrefix); ok {
+					ids = append(ids, id)
+					if e, valid := metadata.Valid(raw); valid {
+						entries[id] = e
+					}
 				}
 			}
-			ids := map[string]bool{}
-			for id := range m {
-				ids[id] = true
+			if action == "ls" {
+				return printAttachmentsCLI(cmd, entries)
 			}
 			id, err := resolveAttachmentSuffix(ids, args[1])
 			if err != nil {
 				return err
 			}
-			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/%s", pid, url.PathEscape(ref.RefForAPI), url.PathEscape(id))
-			switch action {
-			case "rm":
-				actor, _ := resolveActor(ctx, flags.As, nil)
-				response, callErr := client.RemoveAttachmentWithResponse(ctx, &generated.RemoveAttachmentRequestOptions{PathParams: &generated.RemoveAttachmentPath{ProjectID: pid, Ref: ref.RefForAPI, AttachmentID: id}, Query: &generated.RemoveAttachmentQuery{Actor: &actor}})
-				if err := externalCLITransportError(response, callErr); err != nil {
-					return err
-				}
-				if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-					return err
-				}
-				switch currentOutputMode() {
-				case outputJSON:
-					return emitJSON(cmd.OutOrStdout(), map[string]any{"attachment_id": id, "removed": true})
-				case outputAgent:
-					if flags.Quiet {
-						return nil
-					}
-					_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-rm attachment_id=%s\n", agentValue(id))
-					return err
-				}
-				if flags.Quiet {
-					return nil
-				}
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), "removed "+id)
-				return err
-			case "get":
-				e, err := m.Lookup(id)
-				if err != nil {
-					return externalCLIValidation(err.Error())
-				}
-				if output == "" {
-					output = e.Name
-				}
-				if err := downloadAttachmentCLI(ctx, hc, base+path+"/content", e, output, force); err != nil {
-					return err
-				}
-				return printAttachmentDownloadCLI(cmd, id, e, output)
+			if action == "rm" {
+				return runMetaPatch(cmd, args[0], metadata.AttachmentPrefix+id, jsontext.Value("null"), "", "unset")
 			}
-			return nil
+			e, valid := entries[id]
+			if !valid {
+				return externalCLIValidation("attachment_invalid")
+			}
+			if output == "" {
+				output = e.Name
+			}
+			endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/%s/content", base, pid, url.PathEscape(ref.RefForAPI), url.PathEscape(id))
+			if err := downloadAttachmentCLI(ctx, hc, endpoint, e, output, force); err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				return emitJSON(cmd.OutOrStdout(), map[string]any{"attachment_id": id, "path": output, "size": e.Size, "downloaded": true})
+			case outputAgent:
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-get attachment_id=%s path=%s size=%d\n", agentValue(id), agentValue(output), e.Size)
+			}
+			return err
 		}
 		root.AddCommand(cmd)
 	}
@@ -146,17 +99,19 @@ func newAttachmentCmd() *cobra.Command {
 	parent.AddCommand(root)
 	return parent
 }
-func resolveAttachmentSuffix(ids map[string]bool, suffix string) (string, error) {
+func resolveAttachmentSuffix(ids []string, suffix string) (string, error) {
 	suffix = strings.ToUpper(strings.TrimSpace(suffix))
 	if suffix == "" {
 		return "", externalCLIValidation("attachment id is empty")
 	}
-	if ids[suffix] {
-		return suffix, nil
+	for _, id := range ids {
+		if strings.ToUpper(id) == suffix {
+			return id, nil
+		}
 	}
 	match := ""
-	for id := range ids {
-		if strings.HasSuffix(id, suffix) {
+	for _, id := range ids {
+		if strings.HasSuffix(strings.ToUpper(id), suffix) {
 			if match != "" {
 				return "", &cliError{Message: "ambiguous attachment suffix", Kind: kindConflict, ExitCode: ExitConflict}
 			}
@@ -168,66 +123,46 @@ func resolveAttachmentSuffix(ids map[string]bool, suffix string) (string, error)
 	}
 	return match, nil
 }
-func printAttachmentsCLI(w io.Writer, m metadata.Attachments, structured bool) error {
-	if structured {
-		visible := metadata.Attachments{}
-		for id := range m {
-			if _, err := m.Lookup(id); err == nil {
-				visible[id] = m[id]
-			}
-		}
-		return emitJSON(w, map[string]any{"attachments": visible})
+func printAttachmentsCLI(cmd *cobra.Command, entries map[string]metadata.Attachment) error {
+	if currentOutputMode() == outputJSON {
+		return emitJSON(cmd.OutOrStdout(), map[string]any{"attachments": entries})
 	}
-	ids := make([]string, 0, len(m))
-	for id := range m {
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
+	if currentOutputMode() == outputAgent {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-ls count=%d\n", len(ids)); err != nil {
+			return err
+		}
+	}
 	for _, id := range ids {
-		e, err := m.Lookup(id)
+		e := entries[id]
+		var err error
+		if currentOutputMode() == outputAgent {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "- id=%s name=%s media_type=%s size=%d\n", agentValue(id), agentValue(e.Name), agentValue(e.MediaType), e.Size)
+		} else {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %d bytes  %s\n", textsafe.Line(e.Name), textsafe.Line(e.MediaType), e.Size, id)
+		}
 		if err != nil {
-			continue
-		}
-		suffix := id
-		if len(suffix) > 8 {
-			suffix = suffix[len(suffix)-8:]
-		}
-		if _, err = fmt.Fprintf(w, "%s  %s  %d bytes  %s\n", textsafe.Line(e.Name), textsafe.Line(e.MediaType), e.Size, suffix); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-type attachmentAddOutcome struct {
-	File         string `json:"file"`
-	AttachmentID string `json:"attachment_id"`
-	Error        string `json:"error,omitempty"`
-}
-
-func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *kataclient.Client, pid int64, ref string, files []string) error {
+func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *http.Client, base string, pid int64, ref string, files []string) error {
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	out := make([]attachmentAddOutcome, 0, len(files))
+	type outcome struct {
+		File  string `json:"file"`
+		ID    string `json:"attachment_id"`
+		Error string `json:"error,omitempty"`
+	}
+	out := make([]outcome, 0, len(files))
 	var failures []error
 	for _, file := range files {
-		id, err := uid.New()
-		if err != nil {
-			return err
-		}
-		result := attachmentAddOutcome{File: file, AttachmentID: id}
-		bo := backoff.NewExponentialBackOff()
-		bo.InitialInterval = 500 * time.Millisecond
-		bo.MaxInterval = time.Second
-		_, err = backoff.Retry(ctx, func() (struct{}, error) {
-			retry, err := uploadAttachmentCLI(ctx, c, pid, ref, actor, id, file)
-			if err != nil && !retry {
-				return struct{}{}, backoff.Permanent(err)
-			}
-			return struct{}{}, err
-		}, backoff.WithBackOff(bo), backoff.WithMaxTries(2), backoff.WithMaxElapsedTime(0))
-		if err != nil {
-			err = backoff.AsRetryError(err).LastErr
-		}
+		id, err := uploadAttachmentCLI(ctx, c, base, pid, ref, actor, file)
+		result := outcome{File: file, ID: id}
 		if err != nil {
 			result.Error = err.Error()
 			failures = append(failures, err)
@@ -236,9 +171,9 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *kataclient.Cl
 		if currentOutputMode() == outputHuman && !flags.Quiet {
 			state := id
 			if err != nil {
-				state = "failed: " + err.Error()
+				state = err.Error()
 			}
-			if _, err = fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n", textsafe.Line(file), textsafe.Line(state)); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n", textsafe.Line(file), textsafe.Line(state)); err != nil {
 				return err
 			}
 		}
@@ -249,108 +184,53 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *kataclient.Cl
 			return err
 		}
 	case outputAgent:
-		if len(failures) == 0 && !flags.Quiet {
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-add count=%d\n", len(out)); err != nil {
-				return err
-			}
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-add count=%d\n", len(out)-len(failures)); err != nil {
+			return err
 		}
 		for _, result := range out {
-			line := fmt.Sprintf("- file=%s attachment_id=%s", agentValue(result.File), agentValue(result.AttachmentID))
-			if result.Error != "" {
-				line += " error=" + agentValue(result.Error)
-			}
-			if _, err := fmt.Fprintln(cmd.OutOrStdout(), line); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "- file=%s attachment_id=%s error=%s\n", agentValue(result.File), agentValue(result.ID), agentValue(result.Error)); err != nil {
 				return err
 			}
 		}
 	}
 	return errors.Join(failures...)
 }
-
-func printAttachmentsAgentCLI(w io.Writer, m metadata.Attachments) error {
-	ids := make([]string, 0, len(m))
-	for id := range m {
-		if _, err := m.Lookup(id); err == nil {
-			ids = append(ids, id)
-		}
-	}
-	slices.Sort(ids)
-	if _, err := fmt.Fprintf(w, "OK docbank-attachments-ls count=%d\n", len(ids)); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		entry, err := m.Lookup(id)
-		if err != nil {
-			continue
-		}
-		if _, err := fmt.Fprintf(w, "- id=%s name=%s media_type=%s size=%d\n", agentValue(id), agentValue(entry.Name), agentValue(entry.MediaType), entry.Size); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printAttachmentDownloadCLI(cmd *cobra.Command, id string, e metadata.Attachment, path string) error {
-	switch currentOutputMode() {
-	case outputJSON:
-		return emitJSON(cmd.OutOrStdout(), map[string]any{
-			"downloaded":    true,
-			"attachment_id": id,
-			"path":          path,
-			"size":          e.Size,
-			"sha256":        e.Docbank.ContentSHA256,
-		})
-	case outputAgent:
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK docbank-attachments-get attachment_id=%s path=%s size=%d sha256=%s\n", agentValue(id), agentValue(path), e.Size, e.Docbank.ContentSHA256)
-		return err
-	default:
-		return nil
-	}
-}
-
-func uploadAttachmentCLI(ctx context.Context, c *kataclient.Client, pid int64, ref, actor, id, filename string) (bool, error) {
-	file, err := os.Open(filename) //nolint:gosec // G304: the operator explicitly selects the upload source.
+func uploadAttachmentCLI(ctx context.Context, c *http.Client, base string, pid int64, ref, actor, filename string) (string, error) {
+	file, err := os.Open(filename) //nolint:gosec // The operator selects the source file.
 	if err != nil {
-		return false, externalCLIValidation(err.Error())
+		return "", externalCLIValidation(err.Error())
 	}
 	defer func() { _ = file.Close() }()
-	reader, writer := io.Pipe()
-	defer func() { _ = reader.Close() }()
-	mw := multipart.NewWriter(writer)
-	done := make(chan error, 1)
-	go func() {
-		err := mw.WriteField("attachment_id", id)
-		var part io.Writer
-		if err == nil {
-			part, err = mw.CreateFormFile("file", metadata.CleanAttachmentName(filename))
-		}
-		if err == nil {
-			_, err = io.Copy(part, file)
-		}
-		if err == nil {
-			err = mw.Close()
-		}
-		_ = writer.CloseWithError(err)
-		done <- err
-	}()
-	resp, callErr := c.AddAttachmentWithResponse(ctx, &generated.AddAttachmentRequestOptions{
-		PathParams: &generated.AddAttachmentPath{ProjectID: pid, Ref: ref},
-		Query:      &generated.AddAttachmentQuery{Actor: &actor},
-	}, func(_ context.Context, r *http.Request) error {
-		r.Body = reader
-		r.ContentLength = -1
-		r.Header.Set("Content-Type", mw.FormDataContentType())
-		return nil
-	})
-	_ = reader.Close()
-	writeErr := <-done
-	if resp == nil {
-		return true, externalCLITransportError(resp, callErr)
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
 	}
-	if err = externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
-		return resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode >= 500, err
+	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?", base, pid, url.PathEscape(ref)) + url.Values{"name": {filepath.Base(filename)}, "actor": {actor}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, file)
+	if err != nil {
+		return "", err
 	}
-	return false, writeErr
+	req.ContentLength = info.Size()
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	if err := externalCLIResponseError(resp.StatusCode, raw, nil); err != nil {
+		return "", err
+	}
+	var out struct {
+		ID string `json:"attachment_id"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
 }
 func downloadAttachmentCLI(ctx context.Context, c *http.Client, endpoint string, e metadata.Attachment, dest string, force bool) error {
 	if !force {
@@ -401,26 +281,4 @@ func downloadAttachmentCLI(ctx context.Context, c *http.Client, endpoint string,
 		return atomicfile.Replace(temp.Name(), dest)
 	}
 	return atomicfile.PublishNoReplace(temp.Name(), dest)
-}
-
-// Used by show's human view; structured output retains the original metadata.
-func printIssueAttachments(w io.Writer, raw jsontext.Value) error {
-	m, err := metadata.DecodeAttachments(raw)
-	if err != nil {
-		return nil
-	}
-	visible := false
-	for id := range m {
-		if _, err := m.Lookup(id); err == nil {
-			visible = true
-			break
-		}
-	}
-	if !visible {
-		return nil
-	}
-	if _, err = fmt.Fprintln(w, "\n--- attachments ---"); err != nil {
-		return err
-	}
-	return printAttachmentsCLI(w, m, false)
 }

@@ -9,6 +9,35 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 }
 
 describe('projectIssueDetail', () => {
+  it('projects attachment keys and skips malformed entries', () => {
+    const entry = {
+      name: 'shot.png',
+      media_type: 'image/png',
+      size: 12,
+      docbank_version: 'version',
+      future: true,
+    }
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Files',
+        status: 'open',
+        metadata: {
+          'attachment.file': entry,
+          'attachment.junk': 'junk',
+          'attachment.missing-name': { media_type: 'image/png', size: 12 },
+          'attachment.missing-type': { name: 'shot.png', size: 12 },
+          'attachment.missing-size': { name: 'shot.png', media_type: 'image/png' },
+          'attachment.wrong-size': { ...entry, size: '12' },
+          'work.branch': 'feature',
+        },
+      },
+    })
+    expect(detail.issue.attachments).toEqual({
+      file: { name: 'shot.png', media_type: 'image/png', size: 12, docbank_version: 'version' },
+    })
+  })
+
   it.each(['verified', 'pending', 'legacy'])(
     'preserves %s creation attribution without inventing accountability',
     (verification) => {

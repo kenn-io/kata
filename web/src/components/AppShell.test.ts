@@ -861,21 +861,15 @@ describe('AppShell', () => {
     const attachmentID = '01JB3Z6V2K8M4Q9T1X5W7Y0RNA'
     const current = snapshot()
     current.capabilities.updates = 'poll'
+    current.capabilities.attachments = true
     const selectedIssue = {
       ...current.collection[0]!,
       metadata: {
-        attachments: {
-          [attachmentID]: {
-            name: 'screen.png',
-            media_type: 'image/png',
-            size: 12,
-            docbank: {
-              vault_uid: '6f1c2e8a-1111-4111-8111-111111111111',
-              node_id: 42,
-              content_version_id: '6f1c2e8a-2222-4222-8222-222222222222',
-              content_sha256: 'a'.repeat(64),
-            },
-          },
+        ['attachment.' + attachmentID]: {
+          name: 'screen.png',
+          media_type: 'image/png',
+          size: 12,
+          docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
         },
       },
     }

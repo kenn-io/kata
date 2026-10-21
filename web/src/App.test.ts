@@ -89,10 +89,8 @@ describe('App', () => {
       )
       expect(new Headers(uploadOptions?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
       expect(new Headers(uploadOptions?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
-      expect((uploadOptions?.body as FormData).get('file')).toBe(file)
-      expect((uploadOptions?.body as FormData).get('attachment_id')).toMatch(
-        /^[0-9A-HJKMNP-TV-Z]{26}$/,
-      )
+      expect(uploadOptions?.body).toBe(file)
+      expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
       expect(screen.getByRole('button', { name: 'Edit issue' }).hasAttribute('disabled')).toBe(true)
       if (outcome === 'saved') finish(Response.json({ attachment_id: 'saved', attachment: {} }))
       else fail(new TypeError('network response unavailable'))

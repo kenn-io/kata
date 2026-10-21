@@ -172,41 +172,6 @@ components:
       required:
         - owner
       type: object
-    Attachment:
-      additionalProperties: true
-      properties:
-        added_at:
-          type: string
-        added_by:
-          type: string
-        docbank:
-          $ref: "#/components/schemas/DocbankReference"
-        media_type:
-          type: string
-        name:
-          type: string
-        size:
-          format: int64
-          type: integer
-      required:
-        - name
-        - media_type
-        - size
-        - added_by
-        - added_at
-        - docbank
-      type: object
-    AttachmentResponseBody:
-      additionalProperties: true
-      properties:
-        attachment:
-          $ref: "#/components/schemas/Attachment"
-        attachment_id:
-          type: string
-      required:
-        - attachment_id
-        - attachment
-      type: object
     AuditCloseRow:
       additionalProperties: true
       properties:
@@ -1655,24 +1620,6 @@ components:
           type: boolean
       required:
         - revoked
-      type: object
-    DocbankReference:
-      additionalProperties: true
-      properties:
-        content_sha256:
-          type: string
-        content_version_id:
-          type: string
-        node_id:
-          format: int64
-          type: integer
-        vault_uid:
-          type: string
-      required:
-        - vault_uid
-        - node_id
-        - content_version_id
-        - content_sha256
       type: object
     DoctorResponseBody:
       additionalProperties: true
@@ -5932,14 +5879,6 @@ components:
         - events
         - receipts
         - artifacts
-      type: object
-    RemoveAttachmentResponseBody:
-      additionalProperties: true
-      properties:
-        changed:
-          type: boolean
-      required:
-        - changed
       type: object
     RemoveProjectResponseBody:
       additionalProperties: true
@@ -10238,128 +10177,6 @@ paths:
               schema:
                 description: Canonical project name
                 type: string
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/issues/{ref}/attachments:
-    post:
-      operationId: addAttachment
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: actor
-          schema:
-            type: string
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              properties:
-                attachment_id:
-                  type: string
-                file:
-                  contentMediaType: application/octet-stream
-                  format: binary
-                  type: string
-              required:
-                - file
-                - attachment_id
-              type: object
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttachmentResponseBody"
-          description: OK
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}:
-    delete:
-      operationId: removeAttachment
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: attachment_id
-          required: true
-          schema:
-            type: string
-        - explode: false
-          in: query
-          name: actor
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RemoveAttachmentResponseBody"
-          description: OK
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content:
-    get:
-      operationId: attachmentContent
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-        - in: path
-          name: ref
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: attachment_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/octet-stream:
-              schema:
-                contentMediaType: application/octet-stream
-                format: binary
-                type: string
-          description: Verified attachment bytes
         default:
           content:
             application/json:

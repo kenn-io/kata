@@ -735,22 +735,6 @@
         authorityBlocked={!canMutate}
         attachmentsEnabled={snapshot.capabilities.attachments ?? false}
         {onUploadAttachment}
-        attachmentReadsBlocked={Boolean(
-          stale ||
-          credentialExpired ||
-          activeConnection?.health === 'auth_required' ||
-          /authentication required/i.test(daemonError ?? ''),
-        )}
-        attachmentControlsDisabled={Boolean(
-          daemonSwitching ||
-          stale ||
-          reconnecting ||
-          loading ||
-          daemonError ||
-          credentialExpired ||
-          activeConnection?.health === 'auth_required',
-        )}
-        attachmentContextKey={`${activeDaemonID ?? 'direct'}:${activeConnection?.url ?? ''}`}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
         {draftFenceGeneration}

@@ -23,7 +23,6 @@ const (
 	TypeString                   // free-form string
 	TypeChecklist                // array of {id: ULID, text: string, done: bool}
 	TypeTimezoneIANA             // IANA timezone string
-	TypeAttachments              // object of immutable Docbank references
 	TypeSchedule                 // date, local date-time, or UTC instant
 )
 
@@ -39,7 +38,6 @@ var IssueRegistry = map[string]Entry{
 	"deadline_on":  {Type: TypeSchedule},
 	"someday":      {Type: TypeBool},
 	"checklist":    {Type: TypeChecklist},
-	"attachments":  {Type: TypeAttachments},
 	"timezone":     {Type: TypeTimezoneIANA},
 }
 

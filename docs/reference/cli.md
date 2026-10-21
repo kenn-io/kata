@@ -2193,8 +2193,7 @@ Legacy numeric refs no longer resolve.
 
 ## Issue attachments
 
-On main after 0.19.0, use a configured Docbank to store files outside Kata while
-keeping their references on an issue. See [Issue attachments](../guide/attachments.md).
+On main after 0.19.0, attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
 kata docbank attachments add <issue> <file>...
@@ -2203,12 +2202,4 @@ kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
 
-`<attachment>` accepts a full id or unique suffix. `add` reports each file's
-result and exits nonzero if any failed. `get` uses the attachment's sanitized
-name by default and publishes the file only after size and hash verification.
-It refuses an existing path or symlink unless `--force` is set.
-
-`--json` returns a
-versioned JSON object for each command. `--agent` emits an `OK` status line
-followed by command details. After `get`, both modes include the destination
-path, size, and SHA-256. Removing a reference never deletes Docbank bytes.
+`<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.

@@ -27,8 +27,8 @@ func TestProjectKeysAreRegistered(t *testing.T) {
 // must be accepted opaquely. If you intentionally reserve a new key, update
 // this test in the same commit so the trade-off is reviewed.
 func TestRegistriesAreNarrow(t *testing.T) {
-	assert.Len(t, IssueRegistry, 6,
-		"IssueRegistry should hold exactly the 6 reserved keys")
+	assert.Len(t, IssueRegistry, 5,
+		"IssueRegistry should hold exactly the 5 reserved keys")
 	assert.Len(t, ProjectRegistry, 1,
 		"ProjectRegistry should hold exactly the 1 reserved key")
 }

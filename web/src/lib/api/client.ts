@@ -1,8 +1,6 @@
 import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 import { applicationRequest, applicationURL } from '../applicationBase'
-import { createULID } from '../ulid'
-import { addAttachment, type addAttachmentResponse } from './generated'
 
 type CredentialReader = () => SessionCredentials | undefined
 type AuthenticationRequiredHandler = () => boolean
@@ -75,25 +73,7 @@ export async function fetchAttachmentBlob(url: string): Promise<Blob> {
       | undefined
     throw new Error(body?.error?.code ?? 'docbank_unreachable')
   }
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error('docbank_unreachable')
-  const parts: Uint8Array<ArrayBuffer>[] = []
-  let size = 0
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      size += value.byteLength
-      if (size > 100 << 20) throw new Error('attachment_too_large')
-      parts.push(value)
-    }
-  } finally {
-    await reader.cancel()
-    reader.releaseLock()
-  }
-  return new Blob(parts, {
-    type: response.headers.get('Content-Type') ?? 'application/octet-stream',
-  })
+  return response.blob()
 }
 
 export async function uploadAttachment(
@@ -102,13 +82,17 @@ export async function uploadAttachment(
   file: File,
   actor: string,
   headers?: Headers,
-): Promise<addAttachmentResponse> {
-  return addAttachment(
-    { projectId: projectID, ref },
-    { attachment_id: createULID(), file },
-    actor ? { actor } : undefined,
-    headers ? { headers } : undefined,
+): Promise<{ data: unknown; status: number; headers: Headers }> {
+  const query = new URLSearchParams({ name: file.name })
+  if (actor) query.set('actor', actor)
+  const response = await generatedFetch(
+    applicationURL(
+      `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments?${query}`,
+    ),
+    { method: 'POST', body: file, ...(headers ? { headers } : {}) },
   )
+  const data: unknown = await response.json()
+  return { data, status: response.status, headers: response.headers }
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

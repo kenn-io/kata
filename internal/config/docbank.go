@@ -14,12 +14,11 @@ import (
 // DocbankConfig selects a vault shared by every issue reader and metadata writer
 // served by this daemon. Folder placement is organization, not authorization.
 type DocbankConfig struct {
-	URL            string `toml:"url"`
-	APIKey         string `toml:"api_key"`
-	APIKeyFile     string `toml:"api_key_file"`
-	APIKeyEnv      string `toml:"api_key_env"`
-	Folder         string `toml:"folder"`
-	MaxUploadBytes int64  `toml:"max_upload_bytes"`
+	URL        string `toml:"url"`
+	APIKey     string `toml:"api_key"`
+	APIKeyFile string `toml:"api_key_file"`
+	APIKeyEnv  string `toml:"api_key_env"`
+	Folder     string `toml:"folder"`
 }
 
 // Enabled reports whether an operator configured a Docbank endpoint.
@@ -50,12 +49,6 @@ func normalizeDocbank(c *DocbankConfig) error {
 	}
 	if !strings.HasPrefix(c.Folder, "/") || path.Clean(c.Folder) != c.Folder || strings.ContainsAny(c.Folder, `\`) || strings.ContainsFunc(c.Folder, unicode.IsControl) {
 		return fmt.Errorf("docbank.folder must be a clean absolute path")
-	}
-	if c.MaxUploadBytes == 0 {
-		c.MaxUploadBytes = 256 << 20
-	}
-	if c.MaxUploadBytes < 0 || c.MaxUploadBytes > 2<<30 {
-		return fmt.Errorf("docbank.max_upload_bytes must be between 1 and 2147483648")
 	}
 	if !c.Enabled() {
 		return nil

@@ -1,12 +1,10 @@
 package daemon_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,7 +54,7 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?actor=operator", strings.NewReader("upload"))
 	require.NoError(t, err)
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=fixture")
+	req.Header.Set("Content-Type", "application/octet-stream")
 	// Keep the caller out of the transport being observed.
 	resp, err := (&http.Client{Transport: base}).Do(req)
 	require.NoError(t, err)
@@ -569,10 +567,10 @@ func TestWebDaemonProxyAttachmentUploadOutlivesJSONDeadline(t *testing.T) {
 		}
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "operator", r.URL.Query().Get("actor"))
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		require.NoError(t, r.ParseMultipartForm(1024)) //nolint:gosec // G120: MaxBytesReader above caps the test request at 1 MiB.
-		defer func() { _ = r.MultipartForm.RemoveAll() }()
-		require.Equal(t, "01JB3Z6V2K8M4Q9T1X5W7Y0RNA", r.FormValue("attachment_id"))
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "image", string(raw))
+		require.Equal(t, "screen.png", r.URL.Query().Get("name"))
 		select {
 		case <-time.After(31 * time.Second):
 			_, _ = io.WriteString(w, payload)
@@ -582,17 +580,9 @@ func TestWebDaemonProxyAttachmentUploadOutlivesJSONDeadline(t *testing.T) {
 	defer upstream.Close()
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	require.NoError(t, writer.WriteField("attachment_id", "01JB3Z6V2K8M4Q9T1X5W7Y0RNA"))
-	file, err := writer.CreateFormFile("file", "screen.png")
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator", strings.NewReader("image"))
 	require.NoError(t, err)
-	_, err = file.Write([]byte("image"))
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?actor=operator", &body)
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Content-Type", "application/octet-stream")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
