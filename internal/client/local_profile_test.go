@@ -604,9 +604,9 @@ func TestLocalProfileDiscoveryUsesLiveIdentityWithoutStorage(t *testing.T) {
 // is stopped or started.
 func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T) {
 	profile, root := localProfileFixture(t)
-	previousStorage := localProfileStorage
-	UseLocalProfileStorage(nil)
-	defer UseLocalProfileStorage(previousStorage)
+	previousStorage := storageInspector
+	UseStorageInspector(nil)
+	defer UseStorageInspector(previousStorage)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {

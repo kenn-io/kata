@@ -53,6 +53,28 @@ func TestEnsureRunningKeepsDaemonWhenStorageSchemaIsNewerThanBinary(t *testing.T
 	}
 }
 
+// Client-only programs do not install a storage inspector. They cannot tell
+// whether a replacement could open the storage, so the live daemon stays.
+func TestEnsureRunningKeepsDaemonWithoutStorageInspector(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(tmp, "kata.db"), db.CurrentSchemaVersion())
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-build", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "new-build", "http://replacement-daemon")
+	previous := storageInspector
+	UseStorageInspector(nil)
+	t.Cleanup(func() { UseStorageInspector(previous) })
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrStorageInspectorUnavailable)
+	assert.Zero(t, state.stopCalls, "the live daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+}
+
 func TestEnsureRunningReplacesDaemonWhenStorageSchemaIsSupported(t *testing.T) {
 	for _, schema := range []int{db.CurrentSchemaVersion() - 1, db.CurrentSchemaVersion()} {
 		t.Run(fmt.Sprint(schema), func(t *testing.T) {

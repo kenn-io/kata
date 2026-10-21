@@ -20,40 +20,21 @@ type LocalProfileStorageIdentity struct {
 	SchemaVersion int
 }
 
-// LocalProfileStorage reads a selected local profile's existing storage
-// without bootstrap, migration, or cutover. Implementations live outside this
-// package so programs that only discover daemons do not link storage engines.
-type LocalProfileStorage interface {
-	// ReadIdentity returns the stored instance UID and schema version. It may
-	// return the UID alongside an error when only the schema read failed.
-	ReadIdentity(ctx context.Context, profile config.LocalProfileConfig) (instanceUID string, schemaVersion int, err error)
-	// CurrentSchemaVersion is the schema version a daemon started by this
-	// program serves.
-	CurrentSchemaVersion() int
-}
-
-var localProfileStorage LocalProfileStorage
-
-// UseLocalProfileStorage installs the storage reader that local profile
-// inspection and startup require. Call it during program initialization,
-// before any client resolution. Without it, starting or inspecting a local
-// profile fails with ErrProfileStorageUnavailable; discovery is unaffected.
-func UseLocalProfileStorage(storage LocalProfileStorage) {
-	localProfileStorage = storage
-}
-
-var errLocalProfileStorageNotInstalled = errors.New("this program cannot read local profile storage")
-
 // InspectLocalProfileStorage reads existing metadata without bootstrap,
 // migration, or cutover. Callers must check the schema before starting a daemon.
 func InspectLocalProfileStorage(ctx context.Context, profile config.LocalProfileConfig) (LocalProfileStorageIdentity, error) {
-	if localProfileStorage == nil {
-		return LocalProfileStorageIdentity{}, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, errLocalProfileStorageNotInstalled)
+	inspector, err := installedStorageInspector()
+	if err != nil {
+		return LocalProfileStorageIdentity{}, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
 	}
+	return inspectLocalProfileStorage(ctx, inspector, profile)
+}
+
+func inspectLocalProfileStorage(ctx context.Context, inspector StorageInspector, profile config.LocalProfileConfig) (LocalProfileStorageIdentity, error) {
 	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	uid, version, err := localProfileStorage.ReadIdentity(ctx, profile)
+	uid, version, err := inspector.ReadProfileIdentity(ctx, profile)
 	identity := LocalProfileStorageIdentity{InstanceUID: uid, SchemaVersion: version}
 	if err != nil {
 		return identity, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
@@ -175,13 +156,17 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
 	profile := *selection.Profile
-	identity, err := InspectLocalProfileStorage(ctx, profile)
+	inspector, err := installedStorageInspector()
+	if err != nil {
+		return selection.Resolved, fmt.Errorf("%w: %w", ErrProfileStorageUnavailable, err)
+	}
+	identity, err := inspectLocalProfileStorage(ctx, inspector, profile)
 	if err != nil {
 		return selection.Resolved, err
 	}
 	// A process is never stopped or started against unsupported storage. This
 	// check precedes version replacement, including a newer live daemon.
-	if identity.SchemaVersion != localProfileStorage.CurrentSchemaVersion() {
+	if identity.SchemaVersion != inspector.CurrentSchemaVersion() {
 		return selection.Resolved, ErrProfileSchemaMismatch
 	}
 	resolved := selection.Resolved

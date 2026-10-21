@@ -4,13 +4,13 @@ import (
 	"os"
 	"testing"
 
-	"go.kenn.io/kata/internal/localprofilestore"
+	"go.kenn.io/kata/internal/storageinspect"
 	"go.kenn.io/kata/internal/testfix"
 )
 
-// The kata binary installs local profile storage at startup; these tests
+// The kata binary installs its storage inspector at startup; these tests
 // exercise the same configuration.
 func TestMain(m *testing.M) {
-	UseLocalProfileStorage(localprofilestore.Storage{})
+	UseStorageInspector(storageinspect.Inspector{})
 	os.Exit(testfix.RunIsolated(m))
 }

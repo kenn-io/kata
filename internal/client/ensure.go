@@ -11,11 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
-	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"golang.org/x/mod/semver"
@@ -207,17 +203,22 @@ func checkDaemonReplaceable(ctx context.Context, live PingInfo) error {
 	if err := refuseDaemonDowngrade(live); err != nil {
 		return err
 	}
-	storage, err := peekStorageSchemaForEnsure(ctx)
+	inspector, err := installedStorageInspector()
 	if err != nil {
 		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
 	}
+	storage, err := peekStorageSchemaForEnsure(ctx, inspector)
+	if err != nil {
+		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
+	}
+	binarySchema := inspector.CurrentSchemaVersion()
 	switch {
-	case storage.Version > db.CurrentSchemaVersion():
+	case storage.Version > binarySchema:
 		return fmt.Errorf("%w: kata daemon %s uses storage schema_version %d, which is newer than binary schema %d of this kata binary %s; use a newer kata binary",
-			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, db.CurrentSchemaVersion(), currentVersionForEnsure())
-	case storage.ValidateOnly && storage.Version != db.CurrentSchemaVersion():
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, binarySchema, currentVersionForEnsure())
+	case storage.ValidateOnly && storage.Version != binarySchema:
 		return fmt.Errorf("%w: kata daemon %s uses PostgreSQL schema_version %d, but validate mode starts only on binary schema %d of this kata binary %s; stop the daemon and run this binary's kata storage postgres migrate first",
-			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, db.CurrentSchemaVersion(), currentVersionForEnsure())
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, binarySchema, currentVersionForEnsure())
 	}
 	return nil
 }
@@ -256,37 +257,14 @@ type ensureStorageSchema struct {
 
 // peekStorageSchemaForEnsure reads, without migrating, the schema version of
 // the storage a replacement daemon would open, using the same storage settings
-// that daemon reads. A SQLite database that does not exist yet reports zero.
-// The read shares the HTTP timeout budget so unreachable PostgreSQL storage
-// cannot stall the command.
-func peekStorageSchemaForEnsure(ctx context.Context) (ensureStorageSchema, error) {
+// that daemon reads. The read shares the HTTP timeout budget so unreachable
+// PostgreSQL storage cannot stall the command.
+func peekStorageSchemaForEnsure(ctx context.Context, inspector StorageInspector) (ensureStorageSchema, error) {
 	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	dsn, err := config.KataDSN(ctx)
-	if err != nil {
-		return ensureStorageSchema{}, err
-	}
-	backend, err := storeopen.BackendForDSN(dsn)
-	if err != nil {
-		return ensureStorageSchema{}, err
-	}
-	var storage ensureStorageSchema
-	switch backend {
-	case storeopen.BackendSQLite:
-		if _, err := os.Stat(strings.TrimPrefix(dsn, "sqlite://")); errors.Is(err, os.ErrNotExist) {
-			return storage, nil
-		}
-	case storeopen.BackendPostgres:
-		pg, err := config.KataPostgresStorageConfig(ctx)
-		if err != nil {
-			return ensureStorageSchema{}, err
-		}
-		mode := pgstore.ConfigFromValues(pg.Schema, pg.Mode, pg.SchemaOwner, pg.AllowInsecure).SchemaMode
-		storage.ValidateOnly = mode == pgstore.SchemaModeValidate
-	}
-	storage.Version, err = storeopen.PeekSchemaVersion(ctx, dsn)
-	return storage, err
+	version, validateOnly, err := inspector.PeekCurrentSchema(ctx)
+	return ensureStorageSchema{Version: version, ValidateOnly: validateOnly}, err
 }
 
 // daemonScanOutcome is the three-case answer to whether a local daemon is
