@@ -666,7 +666,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if name == "" {
 		return nil, api.NewError(404, "project_not_initialized",
 			"alias "+info.Identity+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			missingConfiguredProjectHint, nil)
 	}
 	if err := config.ValidateProjectName(name); err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -675,7 +675,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, api.NewError(404, "project_not_initialized",
 			"project "+name+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			missingConfiguredProjectHint, nil)
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -712,7 +712,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, api.NewError(404, "project_not_initialized",
 			"project "+name+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			missingConfiguredProjectHint, nil)
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -722,6 +722,8 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	}
 	return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
 }
+
+const missingConfiguredProjectHint = `select the daemon that already has this project with --daemon <name>, or use "kata federation bridge connect" to connect its existing hub project; run "kata init" only to create an intentional new project`
 
 // resolveByKataToml returns (body, true, nil) when a .kata.toml binding
 // exists at the workspace root and resolves to a project. Returns
@@ -754,7 +756,7 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, api.NewError(404, "project_not_initialized",
 			"project "+cfgFile.Project.Name+" is bound by .kata.toml but not registered",
-			`run "kata init" in this workspace`, nil)
+			missingConfiguredProjectHint, nil)
 	}
 	if err != nil {
 		return nil, false, internalAPIError(err)

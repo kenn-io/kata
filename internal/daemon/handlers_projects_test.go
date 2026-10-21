@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,35 @@ func TestResolve_FailsOutsideKataTomlAndWithoutAlias(t *testing.T) {
 		"start_path": t.TempDir(),
 	})
 	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+}
+
+func TestResolve_MissingConfiguredProjectSuggestsConnection(t *testing.T) {
+	for _, path := range []string{"name", "alias-name", "alias-only", "kata-toml"} {
+		t.Run(path, func(t *testing.T) {
+			ts := newTestServer(t)
+			body := map[string]any{"name": "hub-project"}
+			switch path {
+			case "alias-name", "alias-only":
+				if path == "alias-only" {
+					delete(body, "name")
+				}
+				body["alias"] = map[string]any{"identity": "github.com/example/hub-project", "kind": "git"}
+			case "kata-toml":
+				dir := t.TempDir()
+				testfix.WriteKataToml(t, dir, "hub-project")
+				body = map[string]any{"start_path": dir}
+			}
+			resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", body)
+			assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+			var envelope struct{ Error struct{ Hint string } }
+			require.NoError(t, json.Unmarshal(bs, &envelope))
+			hint := envelope.Error.Hint
+			assert.Contains(t, hint, "daemon")
+			assert.Contains(t, hint, "federation bridge connect")
+			assert.Greater(t, strings.Index(hint, "kata init"), strings.Index(hint, "federation bridge connect"))
+			assert.Contains(t, hint, "new project")
+		})
+	}
 }
 
 func TestInit_FromGitRemoteCreatesProject(t *testing.T) {

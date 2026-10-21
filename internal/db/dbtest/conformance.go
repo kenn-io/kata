@@ -50,6 +50,10 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "relay history order", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayHistoryOrder(t, store, backend)
+		return nil
+	}},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

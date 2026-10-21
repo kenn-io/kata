@@ -18,6 +18,125 @@ import (
 	"go.kenn.io/kata/internal/federation"
 )
 
+// A root checkpoint can withhold a cross-project creation while retaining a
+// later assignment and snapshot. The relay must forward the signed checkpoint
+// rather than replay the assignment before the leaf knows the issue.
+func TestRelayLeafRecoversLateSnapshot(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRelayMatrixNode(t, backend, "root-member")
+			relay := newRelayMatrixNode(t, backend, "relay-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			project, err := root.store.CreateProject(ctx, "shared-project")
+			require.NoError(t, err)
+			root.project = project
+			known, knownCreation, err := root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Accepted prefix issue"})
+			require.NoError(t, err)
+			privateProject, err := root.store.CreateProject(ctx, "unshared-project")
+			require.NoError(t, err)
+			privateIssue, _, err := root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: privateProject.ID, Author: "source-agent", Title: "Private peer"})
+			require.NoError(t, err)
+			issue, creation, err := root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Shared issue", Links: []db.InitialLink{{ToNumber: privateIssue.ID, Type: "related"}}})
+			require.NoError(t, err)
+			links, err := root.store.LinksByIssue(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			require.NoError(t, root.store.DeleteLinkByID(ctx, links[0].ID))
+			owner := "source-agent"
+			assigned, err := root.store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: owner})
+			require.NoError(t, err)
+			assignment := assigned.Event
+			require.Equal(t, "issue.assigned", assignment.Type)
+			_, err = root.store.EnableProjectFederation(ctx, project.ID, root.account)
+			require.NoError(t, err)
+			public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+			pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
+			require.NoError(t, root.store.PinRootAuthority(ctx, pin))
+			enrollRelayMatrixReplica(t, root, relay, "relay-alias", true)
+			syncRelayMatrixNode(t, relay)
+			history, err := relay.store.EventsByUIDs(ctx, relay.project.ID, []string{assignment.UID})
+			require.NoError(t, err)
+			require.Len(t, history, 1, "the private creation was withheld while the assignment survived")
+			require.Equal(t, assignment.UID, history[0].UID)
+			require.Equal(t, assignment.ContentHash, history[0].ContentHash)
+			_, err = relay.store.EventsByUIDs(ctx, relay.project.ID, []string{creation.UID})
+			require.ErrorIs(t, err, db.ErrNotFound, "private historical creation remains withheld")
+			enrollRelayMatrixReplica(t, relay, leaf, "leaf-alias", false)
+			binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			required, err := relay.store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, binding.RelayConfig.BindingUID)
+			require.NoError(t, err)
+			require.True(t, required, "a retained late snapshot must select signed reset")
+
+			// Reproduce the pre-repair failed leaf replay with the same live
+			// enrollment. Unknown-issue validation stays strict and atomic.
+			body, err := db.EncodeRelaySourceEvent(db.RemoteEventFromStored(knownCreation))
+			require.NoError(t, err)
+			envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: binding.RelayConfig.BindingUID, ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), SenderInstanceUID: relay.store.InstanceUID(), ReceiverInstanceUID: leaf.store.InstanceUID(), Epoch: binding.RelayConfig.ResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{root.store.InstanceUID(), relay.store.InstanceUID()}, SourceUID: knownCreation.UID, SourceHash: knownCreation.ContentHash, Body: body})
+			require.NoError(t, err)
+			_, err = leaf.store.AcceptRelayDeliveries(ctx, binding.RelayConfig.BindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+			require.NoError(t, err, "an older replay accepted this prefix before failing on the missing issue")
+			body, err = db.EncodeRelaySourceEvent(db.RemoteEventFromStored(history[0]))
+			require.NoError(t, err)
+			envelope.Sequence = 2
+			envelope.SourceUID, envelope.SourceHash, envelope.Body = assignment.UID, assignment.ContentHash, body
+			envelope, err = db.SealRelayEnvelope(envelope)
+			require.NoError(t, err)
+			_, err = leaf.store.AcceptRelayDeliveries(ctx, binding.RelayConfig.BindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+			require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+			require.ErrorContains(t, err, "unknown issue")
+			_, err = leaf.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.ErrorIs(t, err, db.ErrNotFound)
+
+			checkpoint, err := relay.store.(db.RelayResetStore).CreateRelayReset(ctx, binding.RelayConfig.BindingUID, db.RootAttributionSigner{})
+			require.NoError(t, err, "a relay forwards the existing root signature without a root private key")
+			require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
+			install := func() error {
+				return leaf.store.(db.RelayResetStore).InstallRelayReset(ctx, binding.RelayConfig.BindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation)
+			}
+			claim, err := leaf.store.EnqueuePendingClaim(ctx, db.PendingClaimParams{ProjectID: leaf.project.ID, IssueRef: known.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: leaf.store.InstanceUID(), Holder: "leaf-member", ClientKind: "cli"}, ClaimKind: "hard", Now: time.Now().UTC()})
+			require.NoError(t, err)
+			require.ErrorIs(t, install(), db.ErrFederationResetBlockedByPendingPush)
+			claims, err := leaf.store.ListPendingClaimRequests(ctx, leaf.project.ID, 100)
+			require.NoError(t, err)
+			require.Len(t, claims, 1, "blocked reset retains the pending claim")
+			require.Equal(t, claim.RequestUID, claims[0].RequestUID)
+			require.NoError(t, leaf.store.RejectPendingClaim(ctx, claim.RequestUID, "Fixture resolves its pending claim", time.Now().UTC()))
+			quarantine, err := leaf.store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: leaf.project.ID, Direction: db.FederationQuarantineDirectionPull, FirstEventID: 2, LastEventID: 2, EventUIDs: []string{assignment.UID}, Error: "Previous replay rejected an unknown issue", RelayBindingUID: binding.RelayConfig.BindingUID, RelayResetEpoch: binding.RelayConfig.ResetEpoch})
+			require.NoError(t, err)
+			require.ErrorIs(t, install(), db.ErrFederationResetBlockedByQuarantine)
+			active, err := leaf.store.ActiveFederationQuarantinesByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			require.Len(t, active, 1, "blocked reset retains quarantine for explicit recovery")
+			_, err = leaf.store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{ID: quarantine.ID, ProjectID: leaf.project.ID, Actor: leaf.account, Reason: "Retry through signed checkpoint", Now: time.Now().UTC()})
+			require.NoError(t, err)
+			local, localEvent, err := leaf.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: leaf.project.ID, Author: "leaf-agent", Title: "Pending local issue"})
+			require.NoError(t, err)
+			require.ErrorIs(t, install(), db.ErrFederationResetBlockedByPendingPush)
+			pending, err := leaf.store.PendingRelayDeliveries(ctx, binding.RelayConfig.BindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Len(t, pending, 1)
+			require.Equal(t, localEvent.UID, pending[0].SourceUID)
+			err = federation.SyncFederationOnce(ctx, leaf.store, binding, leaf.credential)
+			require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush, "root acceptance is required even after the relay acknowledges local work")
+			syncRelayMatrixNode(t, relay)
+			syncRelayMatrixNode(t, leaf)
+			got, err := leaf.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, issue.Title, got.Title)
+			require.NotNil(t, got.Owner)
+			require.Equal(t, owner, *got.Owner)
+			quarantines, err := leaf.store.ActiveFederationQuarantinesByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			require.Empty(t, quarantines)
+			retained, err := leaf.store.IssueByUID(ctx, local.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, local.Title, retained.Title, "the recovered checkpoint retains accepted local work")
+		})
+	}
+}
+
 // One relay sync turn moves a bounded number of batches per stream and then
 // yields with work remaining; the next turn continues where it stopped, and
 // the runner comes back without waiting for its interval.
