@@ -343,13 +343,13 @@ func TestCaptureScreenViewsAcrossSurfacesAndRejectedEnqueue(t *testing.T) {
 	body := `{"event":"screen_viewed","properties":{"screen":"issues","surface":"web","title":"private"}}`
 	failed := server.post(t.Context(), t, body)
 	require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
-	for _, body := range []string{body, `{"event":"screen_viewed","properties":{"screen":"issues","surface":"tui"}}`, `{"event":"screen_viewed","properties":{"screen":"help","surface":"tui"}}`} {
+	for _, body := range []string{body, `{"event":"screen_viewed","properties":{"screen":"issues","surface":"tui"}}`, `{"event":"screen_viewed","properties":{"screen":"inbox","surface":"tui"}}`} {
 		response := server.post(t.Context(), t, body)
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
 	require.Len(t, reporter.captured, 2)
 	assert.Subset(t, reporter.captured[0].properties, map[string]any{"screen": "issues", "surface": "web"})
-	assert.Subset(t, reporter.captured[1].properties, map[string]any{"screen": "help", "surface": "tui"})
+	assert.Subset(t, reporter.captured[1].properties, map[string]any{"screen": "inbox", "surface": "tui"})
 	for _, capture := range reporter.captured {
 		assert.NotContains(t, capture.properties, "title")
 	}

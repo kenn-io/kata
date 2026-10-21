@@ -13,11 +13,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/telemetry"
 )
 
 // Contract: normal daemon startup opts into a separate restricted listener,
 // advertises its private ephemeral address and releases replay ownership on stop.
 func TestDaemonStartsConfiguredFederationIngress(t *testing.T) {
+	original := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = original })
 	for _, secret := range []string{strings.Repeat("k", 64), ""} {
 		t.Run(fmt.Sprintf("key available %t", secret != ""), func(t *testing.T) {
 			resetFlags(t)

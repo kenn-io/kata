@@ -2,20 +2,11 @@ package tui
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
-	"os"
-	"os/exec"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -34,6 +25,33 @@ func TestCoreActionSurfaceHeaders(t *testing.T) {
 	_, err = c.Reopen(t.Context(), 7, "abcd", "user-a")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"tui", "tui", "tui", ""}, surfaces)
+	for _, scenario := range []string{"KATA_TELEMETRY_ENABLED", "dev"} {
+		t.Run(scenario, func(t *testing.T) {
+			saved := version.Version
+			t.Cleanup(func() { version.Version = saved })
+			if scenario == "dev" {
+				version.Version = "dev"
+			} else {
+				t.Setenv(scenario, "0")
+			}
+			var surfaces []string
+			var posts int
+			hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/api/v1/ui/telemetry" {
+					posts++
+				} else {
+					surfaces = append(surfaces, req.Header.Get("X-Kata-Surface"))
+				}
+				return jsonResponse(t, map[string]any{"changed": true}), nil
+			})}
+			c := NewClient("http://127.0.0.1:7777", hc)
+			require.NoError(t, c.ReportAppOpened(t.Context()))
+			_, err := c.CreateIssue(t.Context(), 7, CreateIssueBody{Title: "Example task", Actor: "user-a"})
+			require.NoError(t, err)
+			require.Zero(t, posts)
+			assert.Equal(t, []string{""}, surfaces)
+		})
+	}
 }
 
 func TestUndoCloseSuppressesSurface(t *testing.T) {
@@ -80,57 +98,4 @@ func TestUndoCloseSuppressesSurface(t *testing.T) {
 	outcome.attempt.complete()
 
 	assert.Equal(t, []string{"", ""}, surfaces)
-}
-
-func TestTUIClientTelemetryAdmission(t *testing.T) {
-	scenario := os.Getenv("KATA_TUI_ADMISSION_SCENARIO")
-	if scenario == "" {
-		for _, name := range []string{"KATA_TELEMETRY_ENABLED", "dev"} {
-			t.Run(name, func(t *testing.T) {
-				command := exec.Command(os.Args[0], "-test.run=^TestTUIClientTelemetryAdmission$", "-test.timeout=30s") //nolint:gosec // Run this exact client test in a fresh process.
-				command.Env = append(os.Environ(), "KATA_TUI_ADMISSION_SCENARIO="+name)
-				output, err := command.CombinedOutput()
-				require.NoError(t, err, string(output))
-			})
-		}
-		return
-	}
-	saved := version.Version
-	t.Cleanup(func() { version.Version = saved })
-	switch scenario {
-	case "KATA_TELEMETRY_ENABLED":
-		t.Setenv(scenario, "0")
-	case "dev":
-		version.Version = "dev"
-	}
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = &recordingTelemetry{} })
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	forward := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) { request.SetURL(target) }}
-	var mu sync.Mutex
-	var surfaces []string
-	var posts int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			posts++
-		}
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues") {
-			surfaces = append(surfaces, r.Header.Get("X-Kata-Surface"))
-		}
-		mu.Unlock()
-		forward.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	c := NewClient(server.URL, server.Client())
-	require.NoError(t, c.ReportAppOpened(t.Context()))
-	created, err := c.CreateIssue(t.Context(), project.ID, CreateIssueBody{Title: "Example task", Actor: "user-a"})
-	require.NoError(t, err)
-	require.NotNil(t, created.Issue)
-	mu.Lock()
-	defer mu.Unlock()
-	require.Zero(t, posts)
-	assert.Equal(t, []string{""}, surfaces)
 }

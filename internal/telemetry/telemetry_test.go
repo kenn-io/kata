@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	for _, key := range []string{"CI", "DO_NOT_TRACK"} {
+		if err := os.Unsetenv(key); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 func TestSessionEndedDurationBuckets(t *testing.T) {
 	for _, tc := range []struct {
@@ -27,10 +38,6 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 }
 
 func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
-	for _, key := range []string{"CI", "DO_NOT_TRACK"} {
-		t.Setenv(key, "")
-		require.NoError(t, os.Unsetenv(key))
-	}
 	goEnv := exec.Command("go", "env", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned module cache.
 	moduleCacheOutput, err := goEnv.CombinedOutput()
 	require.NoErrorf(t, err, "resolve caller module cache: %s", moduleCacheOutput)
@@ -72,10 +79,6 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
 func TestStandaloneTelemetryAdmission(t *testing.T) {
-	for _, key := range []string{"CI", "DO_NOT_TRACK"} {
-		t.Setenv(key, "")
-		require.NoError(t, os.Unsetenv(key))
-	}
 	scratch := t.TempDir()
 	binary := filepath.Join(scratch, "telemetry-opt-out")
 	if runtime.GOOS == "windows" {

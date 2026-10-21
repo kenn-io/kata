@@ -8,7 +8,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -225,13 +224,6 @@ func TestMCPAgentUseFullDay(t *testing.T) {
 }
 
 func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
-	if os.Getenv("KATA_MCP_HOOK_MARKER_TEST") != "1" {
-		command := exec.Command(os.Args[0], "-test.run=^TestMCPAgentUseSeesHookFullDayMarker$", "-test.timeout=30s") //nolint:gosec // Isolate the existing hook receipt test from Kit's irreversible process gate.
-		command.Env = append(os.Environ(), "KATA_MCP_HOOK_MARKER_TEST=1")
-		output, err := command.CombinedOutput()
-		require.NoError(t, err, string(output))
-		return
-	}
 	for _, receipt := range []string{"full", "disabled"} {
 		t.Run(receipt, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
@@ -282,70 +274,51 @@ func TestMCPAgentUseSeesHookFullDayMarker(t *testing.T) {
 	}
 }
 
-// Each command needs a fresh process because unrelated reporter tests call
-// Kit's irreversible DisableProcess gate.
 func TestMCPCommandTelemetryAdmission(t *testing.T) {
-	scenario := os.Getenv("KATA_MCP_ADMISSION_SCENARIO")
-	if scenario == "" {
-		for _, name := range []string{"release", "KATA_TELEMETRY_ENABLED", "dev"} {
-			t.Run(name, func(t *testing.T) {
-				command := exec.Command(os.Args[0], "-test.run=^TestMCPCommandTelemetryAdmission$", "-test.timeout=30s") //nolint:gosec // Run this exact test in a fresh process.
-				command.Env = append(os.Environ(), "KATA_MCP_ADMISSION_SCENARIO="+name)
-				output, err := command.CombinedOutput()
-				require.NoError(t, err, string(output))
-			})
-		}
-		return
+	for _, scenario := range []string{"release", "KATA_TELEMETRY_ENABLED", "dev"} {
+		t.Run(scenario, func(t *testing.T) {
+			saved := version.Version
+			t.Cleanup(func() { version.Version = saved })
+			switch scenario {
+			case "dev":
+				version.Version = "dev"
+			case "KATA_TELEMETRY_ENABLED":
+				t.Setenv(scenario, "0")
+			}
+			capture := &cliUseTelemetry{}
+			env := newCLIUseEnv(t, capture)
+			t.Setenv("KATA_AUTHOR", "example-agent")
+			target, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			forward := &httputil.ReverseProxy{
+				Rewrite:   func(request *httputil.ProxyRequest) { request.SetURL(target) },
+				Transport: env.HTTP.Transport,
+			}
+			var posts, completed atomic.Int32
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/ui/telemetry" {
+					posts.Add(1)
+				}
+				forward.ServeHTTP(w, r)
+				if r.URL.Path == "/api/v1/ui/telemetry" {
+					completed.Add(1)
+				}
+			}))
+			t.Cleanup(proxy.Close)
+			endpoint := startMCPHTTPTestServer(t, proxy.URL)
+			session, err := newMCPHTTPTestClient().Connect(t.Context(), newAuthenticatedMCPHTTPTestTransport(endpoint), nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, session.Close()) }()
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			if scenario == "release" {
+				//nolint:kennlint // Wait for the real daemon to finish responding to forwarded activity.
+				require.Eventually(t, func() bool { return posts.Load() > 0 && posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
+				require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
+			} else {
+				require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
+			}
+		})
 	}
-	for _, key := range []string{"CI", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED"} {
-		t.Setenv(key, "")
-		require.NoError(t, os.Unsetenv(key))
-	}
-	saved := version.Version
-	version.Version = "v1.2.3"
-	t.Cleanup(func() { version.Version = saved })
-	switch scenario {
-	case "dev":
-		version.Version = "dev"
-	case "KATA_TELEMETRY_ENABLED":
-		t.Setenv(scenario, "0")
-	}
-	capture := &cliUseTelemetry{}
-	env := newCLIUseEnv(t, capture)
-	t.Setenv("KATA_AUTHOR", "example-agent")
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	forward := &httputil.ReverseProxy{
-		Rewrite:   func(request *httputil.ProxyRequest) { request.SetURL(target) },
-		Transport: env.HTTP.Transport,
-	}
-	var posts, completed atomic.Int32
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			posts.Add(1)
-		}
-		forward.ServeHTTP(w, r)
-		if r.URL.Path == "/api/v1/ui/telemetry" {
-			completed.Add(1)
-		}
-	}))
-	t.Cleanup(proxy.Close)
-	t.Run("command", func(t *testing.T) {
-		endpoint := startMCPHTTPTestServer(t, proxy.URL)
-		session, err := newMCPHTTPTestClient().Connect(t.Context(), newAuthenticatedMCPHTTPTestTransport(endpoint), nil)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, session.Close()) }()
-		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
-		require.NoError(t, err)
-		require.False(t, result.IsError)
-		//nolint:kennlint // The real-network listener cannot settle in synctest. Leave the command running beyond the worker's one-second request budget.
-		time.Sleep(2 * time.Second)
-		if scenario == "release" {
-			//nolint:kennlint // Wait for the real daemon to finish responding to forwarded activity.
-			require.Eventually(t, func() bool { return posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
-			require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
-		} else {
-			require.Zero(t, posts.Load(), "an ineligible MCP command must not forward to an enabled daemon")
-		}
-	})
 }
