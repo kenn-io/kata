@@ -110,7 +110,7 @@ func invalidJSONErr(entity string, id int64, field string) error {
 	return fmt.Errorf("%s %d %s is invalid JSON", entity, id, field)
 }
 
-// ExportMeta streams every meta row ordered by key.
+// ExportMeta streams installation metadata ordered by key, including durable local operation state.
 func (d *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
 	return streamRows(ctx, d.readQ, "meta",
 		`SELECT key, value FROM meta ORDER BY key ASC`, nil,

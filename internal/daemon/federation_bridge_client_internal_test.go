@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 type bridgeTrackedResponseBody struct {
@@ -17,6 +19,17 @@ type bridgeTrackedResponseBody struct {
 }
 
 func (b *bridgeTrackedResponseBody) Close() error { b.closed = true; return nil }
+
+type bridgeCountingReader struct {
+	io.Reader
+	bytesRead int
+}
+
+func (r *bridgeCountingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
 
 type bridgeResponseTransport struct {
 	body             *bridgeTrackedResponseBody
@@ -43,6 +56,9 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 		{"forbidden", 403, `{}`, "hub_credential_rejected", 502},
 		{"missing", 404, `{}`, "hub_request_rejected", 502},
 		{"conflict", 409, `{}`, "hub_request_rejected", 502},
+		{"relay boundary", 409, `{"status":409,"error":{"code":"relay_cross_project_links","message":"project has cross-project links","hint":"remove cross-project links before retrying"}}`, "relay_cross_project_links", 409},
+		{"relay private diagnostics", 409, `{"error":{"code":"relay_cross_project_links","message":"private diagnostic","hint":"private remedy","data":{"token":"private-token"}}}`, "relay_cross_project_links", 409},
+		{"untrusted conflict", 409, `{"error":{"code":"private_diagnostic","message":"secret"}}`, "hub_request_rejected", 502},
 		{"redirect", 302, `{}`, "hub_request_rejected", 502},
 		{"unavailable", 503, `{}`, "hub_request_rejected", 503},
 	} {
@@ -60,6 +76,12 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 				require.True(t, ok, "error=%v", err)
 				require.Equal(t, test.code, failure.Code)
 				require.Equal(t, test.localStatus, failure.Status, "a hub rejection must not look like a local authorization failure")
+				if test.code == "relay_cross_project_links" {
+					require.Contains(t, failure.Hint, "remove")
+					require.NotContains(t, failure.Message, "private")
+					require.NotContains(t, failure.Hint, "private")
+					require.NotContains(t, failure.Data, "token")
+				}
 				if test.status != 200 {
 					require.Equal(t, test.status, failure.Data["hub_status"], "callers decide from the hub's own status")
 				}
@@ -67,5 +89,42 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 			require.Equal(t, 1, transport.attempts)
 			require.True(t, body.closed, "the original response body must close after bounded capture")
 		})
+	}
+}
+
+func TestFederationBridgeOversizedConflictReadIsBounded(t *testing.T) {
+	largeEnvelope := fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1))
+	reader := &bridgeCountingReader{Reader: strings.NewReader(largeEnvelope)}
+	body := &bridgeTrackedResponseBody{Reader: reader}
+	transport := &bridgeResponseTransport{body: body, status: http.StatusConflict}
+	client, err := newFederationBridgeAPIClient(&http.Client{Transport: transport}, "https://hub.example")
+	require.NoError(t, err)
+
+	_, err = client.InstanceWithResponse(t.Context())
+	failure, ok := errors.AsType[*api.APIError](err)
+	require.True(t, ok, "error=%v", err)
+	require.Equal(t, "hub_request_rejected", failure.Code)
+	require.Equal(t, http.StatusBadGateway, failure.Status)
+	require.Equal(t, http.StatusConflict, failure.Data["hub_status"])
+	require.LessOrEqual(t, reader.bytesRead, (1<<20)+1, "oversized response reads must stop after the size limit plus one detection byte")
+	require.Equal(t, 1, transport.attempts)
+	require.True(t, body.closed, "the original response body must close after bounded capture")
+}
+
+func TestRelayCrossProjectLinksErrorMapping(t *testing.T) {
+	for _, err := range []error{
+		db.ErrFederationCrossProjectBoundary,
+		errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary),
+		fmt.Errorf("store operation: %w", db.ErrFederationCrossProjectBoundary),
+	} {
+		for _, mapError := range []func(error) error{relayTransportError, federationReplicaAPIError} {
+			mapped := mapError(err)
+			failure, ok := errors.AsType[*api.APIError](mapped)
+			require.True(t, ok)
+			require.Equal(t, http.StatusConflict, failure.Status)
+			require.Equal(t, "relay_cross_project_links", failure.Code)
+			require.Contains(t, failure.Hint, "remove")
+			require.NotContains(t, failure.Hint, "on the hub", "local relay setup may be the source of this error")
+		}
 	}
 }

@@ -77,6 +77,26 @@ type RevokeFederationEnrollmentResponse = RevokeFederationEnrollmentBody
 
 type RevokeFederationEnrollmentErrorResponse = ErrorEnvelope
 
+type PublishFederationProjectResponse = FederationPublicationBody
+
+type PublishFederationProjectErrorResponse = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON403 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON404 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON409 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON413 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON422 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON500 = ErrorEnvelope
+
+type PublishFederationProjectErrorResponseJSON503 = ErrorEnvelope
+
 type CreateFederationReplicaResponse = CreateFederationReplicaResponseBody
 
 type CreateFederationReplicaErrorResponse = ErrorEnvelope
@@ -694,6 +714,22 @@ type RevokeFederationEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RevokeFederationEnrollmentResponse
+}
+
+type PublishFederationProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PublishFederationProjectResponse
+	JSON400      *PublishFederationProjectErrorResponse
+	JSON401      *PublishFederationProjectErrorResponseJSON
+	JSON403      *PublishFederationProjectErrorResponseJSON403
+	JSON404      *PublishFederationProjectErrorResponseJSON404
+	JSON409      *PublishFederationProjectErrorResponseJSON409
+	JSON413      *PublishFederationProjectErrorResponseJSON413
+	JSON422      *PublishFederationProjectErrorResponseJSON422
+	JSON500      *PublishFederationProjectErrorResponseJSON500
+	JSON503      *PublishFederationProjectErrorResponseJSON503
 }
 
 type CreateFederationReplicaResp struct {

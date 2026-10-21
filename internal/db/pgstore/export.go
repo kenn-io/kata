@@ -165,7 +165,7 @@ FROM project_purge_log`, "project_id", filter)
 		})
 }
 
-// ExportMeta streams installation metadata ordered by key.
+// ExportMeta streams installation metadata ordered by key, including durable local operation state.
 func (s *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
 	return streamExportRows(ctx, s, "meta", `SELECT key, value FROM meta ORDER BY key ASC`, nil,
 		func(rows *sql.Rows) (db.MetaKV, error) {

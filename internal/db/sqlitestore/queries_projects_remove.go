@@ -29,6 +29,9 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		return db.Project{}, nil, fmt.Errorf("begin remove project: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockAdoptionLifecycleTx(ctx, tx, p.ProjectID); err != nil {
+		return db.Project{}, nil, err
+	}
 
 	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, p.ProjectID))
 	if err != nil {
@@ -135,6 +138,9 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 		return db.Project{}, nil, false, fmt.Errorf("begin restore project: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockAdoptionLifecycleTx(ctx, tx, projectID); err != nil {
+		return db.Project{}, nil, false, err
+	}
 
 	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, projectID))
 	if err != nil {

@@ -3,8 +3,10 @@
  */
 import type { FederationBridgeBodyDirection } from './federationBridgeBodyDirection.ts'
 import type { FederationBridgeBodyStatus } from './federationBridgeBodyStatus.ts'
+import type { FederationPublicationCounts } from './federationPublicationCounts.ts'
 
 export interface FederationBridgeBody {
+  counts?: FederationPublicationCounts
   direction: FederationBridgeBodyDirection
   hub_catalog: string
   hub_instance_uid: string
@@ -12,9 +14,14 @@ export interface FederationBridgeBody {
   hub_project_uid: string
   hub_url: string
   local_account: string
+  operation_uid?: string
+  phase?: string
   project_id?: number
   project_name: string
+  source_paused: boolean
   status: FederationBridgeBodyStatus
   upstream_account: string
+  visibility?: string
+  warning?: string
   [key: string]: unknown
 }

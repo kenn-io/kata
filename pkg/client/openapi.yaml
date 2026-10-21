@@ -701,6 +701,8 @@ components:
       properties:
         actor:
           type: string
+        adopt_existing:
+          type: boolean
         hub_catalog:
           minLength: 1
           type: string
@@ -2222,6 +2224,8 @@ components:
       type: object
     FederationBridgeBody:
       properties:
+        counts:
+          $ref: "#/components/schemas/FederationPublicationCounts"
         direction:
           enum:
             - bidirectional
@@ -2239,17 +2243,32 @@ components:
           type: string
         local_account:
           type: string
+        operation_uid:
+          type: string
+        phase:
+          type: string
         project_id:
           format: int64
           type: integer
         project_name:
           type: string
+        source_paused:
+          type: boolean
         status:
           enum:
             - ready
             - connected
+            - pending
           type: string
+          x-enum-names:
+            - Ready
+            - Connected
+            - FederationBridgePending
         upstream_account:
+          type: string
+        visibility:
+          type: string
+        warning:
           type: string
       required:
         - hub_catalog
@@ -2262,6 +2281,7 @@ components:
         - upstream_account
         - direction
         - status
+        - source_paused
       type: object
     FederationBridgeDisconnectResult:
       properties:
@@ -2299,6 +2319,10 @@ components:
           type: string
         local_account:
           type: string
+        operation_uid:
+          type: string
+        phase:
+          type: string
         project_id:
           format: int64
           type: integer
@@ -2308,6 +2332,8 @@ components:
           type: string
         relay:
           $ref: "#/components/schemas/RelayBindingConfig"
+        source_paused:
+          type: boolean
         state:
           enum:
             - connected
@@ -2316,6 +2342,7 @@ components:
             - offline
             - revoked
             - signing_rejected
+            - adoption_pending
           type: string
         upstream_account:
           type: string
@@ -2327,6 +2354,7 @@ components:
         - upstream_account
         - direction
         - state
+        - source_paused
         - credential_status
       type: object
     FederationConfigHealth:
@@ -2710,6 +2738,112 @@ components:
         - unresolved_violation_count
         - recent_violation_count
         - recent_violations
+      type: object
+    FederationPublicationBody:
+      properties:
+        account:
+          type: string
+        counts:
+          $ref: "#/components/schemas/FederationPublicationCounts"
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        replayed:
+          type: boolean
+        status:
+          enum:
+            - ready
+            - published
+          type: string
+        visibility:
+          enum:
+            - all
+            - teams
+          type: string
+          x-enum-names:
+            - FederationPublicationVisibilityAll
+            - FederationPublicationVisibilityTeams
+      required:
+        - status
+        - project_uid
+        - project_name
+        - account
+        - visibility
+        - counts
+        - replayed
+      type: object
+    FederationPublicationCounts:
+      properties:
+        comments:
+          format: int64
+          type: integer
+        events:
+          format: int64
+          type: integer
+        issues:
+          format: int64
+          type: integer
+      required:
+        - issues
+        - comments
+        - events
+      type: object
+    FederationPublicationEnvelope:
+      additionalProperties: false
+      properties:
+        digest:
+          type: string
+        operation_uid:
+          type: string
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        records:
+          items:
+            $ref: "#/components/schemas/FederationPublicationRecord"
+          type: array
+        source_instance_uid:
+          type: string
+        target_instance_uid:
+          type: string
+        version:
+          enum:
+            - 1
+          format: int64
+          type: integer
+      required:
+        - version
+        - operation_uid
+        - source_instance_uid
+        - project_uid
+        - target_instance_uid
+        - project_name
+        - digest
+        - records
+      type: object
+    FederationPublicationRecord:
+      additionalProperties: false
+      properties:
+        data:
+          additionalProperties: true
+          type: object
+        kind:
+          enum:
+            - project
+            - issue
+            - comment
+            - issue_label
+            - link
+            - event
+          type: string
+      required:
+        - kind
+        - data
       type: object
     FederationQuarantineSummary:
       properties:
@@ -3210,6 +3344,9 @@ components:
           format: int64
           type: integer
         relay_protocol_version:
+          format: int64
+          type: integer
+        relay_publication_version:
           format: int64
           type: integer
         schema_version:
@@ -4817,6 +4954,17 @@ components:
         - open
         - closed
         - last_event_at
+      type: object
+    PublishFederationProjectBody:
+      additionalProperties: false
+      properties:
+        envelope:
+          $ref: "#/components/schemas/FederationPublicationEnvelope"
+        preflight:
+          type: boolean
+      required:
+        - preflight
+        - envelope
       type: object
     PurgeLog:
       properties:
@@ -6889,7 +7037,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.30.0
+  version: 0.32.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7385,6 +7533,76 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/federation/publications:
+    post:
+      operationId: publish-federation-project
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishFederationProjectBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationPublicationBody"
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Request Entity Too Large
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Service Unavailable
   /api/v1/federation/replicas:
     post:
       operationId: createFederationReplica
@@ -8653,6 +8871,16 @@ paths:
           required: true
           schema:
             format: int64
+            type: integer
+        - description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+          explode: false
+          in: query
+          name: relay_protocol_version
+          schema:
+            description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+            format: int64
+            maximum: 1
+            minimum: 1
             type: integer
       responses:
         "200":

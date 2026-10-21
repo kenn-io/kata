@@ -32,6 +32,26 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if len(expected) > 1 || (len(expected) == 1 && !reflect.DeepEqual(binding.RelayConfig, &expected[0])) {
 			return db.ErrRemoteEventConflict
 		}
+		// Existing sync may record revocation, or recover it with an exact
+		// expected config. This narrow control change cannot alter topology,
+		// account, serving policy or epoch, and retains the content pause.
+		var recovery bool
+		if prior := binding.RelayConfig; prior != nil {
+			unchanged := config
+			unchanged.UpstreamRevoked = prior.UpstreamRevoked
+			recovery = (len(expected) == 1 || config.UpstreamRevoked) && reflect.DeepEqual(&unchanged, prior)
+		}
+		if recovery {
+			if err := d.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+				return err
+			}
+		} else {
+			candidate := binding
+			candidate.RelayConfig = &config
+			if err := d.adoptionSQL(tx).CheckAttachment(ctx, projectID, &candidate); err != nil {
+				return err
+			}
+		}
 		if binding.Role != db.FederationRoleSpoke || !binding.Enabled || !binding.PushEnabled || binding.Actor == "" {
 			return db.ErrNotFound
 		}

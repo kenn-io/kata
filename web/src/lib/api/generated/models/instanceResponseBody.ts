@@ -14,6 +14,7 @@ export interface InstanceResponseBody {
   issue_subtree_tokens: boolean
   provenance_protocol_version?: number
   relay_protocol_version?: number
+  relay_publication_version?: number
   schema_version: number
   version: string
   web_ui_capabilities: UICapabilities

@@ -25,9 +25,15 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 	var project db.Project
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockAdoptionLifecycleTx(ctx, tx, params.ProjectID); err != nil {
+			return err
+		}
 		var err error
 		project, err = scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, params.ProjectID))
 		if err != nil {
+			return err
+		}
+		if err := ensureAdoptionProjectsTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {
@@ -122,10 +128,16 @@ func (s *Store) restoreProject(
 	var event *db.Event
 	var changed bool
 	err := runTx(ctx, func(tx *sql.Tx) error {
+		if err := lockAdoptionLifecycleTx(ctx, tx, projectID); err != nil {
+			return err
+		}
 		project, event, changed = db.Project{}, nil, false
 		var err error
 		project, err = scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, projectID))
 		if err != nil {
+			return err
+		}
+		if err := ensureAdoptionProjectsTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {
@@ -251,8 +263,14 @@ type projectPurgeCounts struct {
 func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
 	var result db.ProjectPurgeLog
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := lockAdoptionLifecycleTx(ctx, tx, params.ProjectID); err != nil {
+			return err
+		}
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, params.ProjectID))
 		if err != nil {
+			return err
+		}
+		if err := ensureAdoptionProjectsTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
 		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {

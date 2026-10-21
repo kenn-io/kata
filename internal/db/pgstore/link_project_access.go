@@ -10,6 +10,10 @@ import (
 )
 
 func checkLinkEndpointsProjectAccessTx(ctx context.Context, tx *sql.Tx, issueIDs ...int64) error {
+	if err := ensureAdoptionIssuesTx(ctx, tx, issueIDs...); err != nil {
+		return err
+	}
+
 	ids := slices.Clone(issueIDs)
 	slices.Sort(ids)
 	last := int64(0)

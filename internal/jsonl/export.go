@@ -265,7 +265,12 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 			}
 		}
 	}
-	rows, err := d.QueryContext(ctx, `SELECT key, value FROM meta ORDER BY key ASC`)
+	query := `SELECT key, value FROM meta`
+	if opts.ProjectID != 0 {
+		query += ` WHERE key NOT LIKE 'federation.publication.v1/%' AND key NOT LIKE 'federation.adoption.v1/%'`
+	}
+	query += ` ORDER BY key ASC`
+	rows, err := d.QueryContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("export meta: %w", err)
 	}

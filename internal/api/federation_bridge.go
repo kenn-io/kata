@@ -1,6 +1,9 @@
 package api
 
-import "go.kenn.io/kata/internal/db"
+import (
+	"github.com/danielgtaylor/huma/v2"
+	"go.kenn.io/kata/internal/db"
+)
 
 // ConnectFederationBridgeRequest uses exactly one configured hub credential.
 // Preflight resolves the account and project without issuing a transport grant.
@@ -13,6 +16,7 @@ type ConnectFederationBridgeRequest struct {
 		ProjectName     string `json:"project_name" minLength:"1"`
 		Actor           string `json:"actor,omitempty"`
 		Preflight       bool   `json:"preflight,omitempty"`
+		AdoptExisting   bool   `json:"adopt_existing,omitempty"`
 		ServeDownstream bool   `json:"serve_downstream,omitempty"`
 		SigningKeyID    string `json:"signing_key_id,omitempty"`
 		SigningKeyFile  string `json:"signing_key_file,omitempty" doc:"Absolute path of an owner-only signing secret file on the daemon."`
@@ -22,17 +26,36 @@ type ConnectFederationBridgeRequest struct {
 
 // FederationBridgeBody describes the selected project, account and connection without credentials.
 type FederationBridgeBody struct {
-	HubCatalog      string `json:"hub_catalog"`
-	HubURL          string `json:"hub_url"`
-	HubInstanceUID  string `json:"hub_instance_uid"`
-	HubProjectUID   string `json:"hub_project_uid"`
-	HubProjectID    int64  `json:"hub_project_id"`
-	ProjectName     string `json:"project_name"`
-	ProjectID       int64  `json:"project_id,omitempty"`
-	LocalAccount    string `json:"local_account"`
-	UpstreamAccount string `json:"upstream_account"`
-	Direction       string `json:"direction" enum:"bidirectional"`
-	Status          string `json:"status" enum:"ready,connected"`
+	HubCatalog      string                       `json:"hub_catalog"`
+	HubURL          string                       `json:"hub_url"`
+	HubInstanceUID  string                       `json:"hub_instance_uid"`
+	HubProjectUID   string                       `json:"hub_project_uid"`
+	HubProjectID    int64                        `json:"hub_project_id"`
+	ProjectName     string                       `json:"project_name"`
+	ProjectID       int64                        `json:"project_id,omitempty"`
+	LocalAccount    string                       `json:"local_account"`
+	UpstreamAccount string                       `json:"upstream_account"`
+	Direction       string                       `json:"direction" enum:"bidirectional"`
+	Status          string                       `json:"status" enum:"ready,connected,pending"`
+	OperationUID    string                       `json:"operation_uid,omitempty"`
+	Phase           string                       `json:"phase,omitempty"`
+	Visibility      string                       `json:"visibility,omitempty"`
+	Counts          *FederationPublicationCounts `json:"counts,omitempty"`
+	SourcePaused    bool                         `json:"source_paused"`
+	Warning         string                       `json:"warning,omitempty"`
+}
+
+// TransformSchema adds stable names for the federation bridge status values.
+func (FederationBridgeBody) TransformSchema(_ huma.Registry, schema *huma.Schema) *huma.Schema {
+	if schema == nil || schema.Properties == nil {
+		return schema
+	}
+	status, ok := schema.Properties["status"]
+	if !ok || status == nil {
+		return schema
+	}
+	status.Extensions = map[string]any{"x-enum-names": []string{"Ready", "Connected", "FederationBridgePending"}}
+	return schema
 }
 
 // ConnectFederationBridgeResponse returns the selected bridge preflight or enrollment result.
@@ -53,7 +76,10 @@ type FederationBridgeStatusBody struct {
 	LocalAccount     string                   `json:"local_account"`
 	UpstreamAccount  string                   `json:"upstream_account"`
 	Direction        string                   `json:"direction" enum:"bidirectional,pull_only"`
-	State            string                   `json:"state" enum:"connected,enrollment_pending,paused,offline,revoked,signing_rejected"`
+	State            string                   `json:"state" enum:"connected,enrollment_pending,paused,offline,revoked,signing_rejected,adoption_pending"`
+	OperationUID     string                   `json:"operation_uid,omitempty"`
+	Phase            string                   `json:"phase,omitempty"`
+	SourcePaused     bool                     `json:"source_paused"`
 	CredentialStatus string                   `json:"credential_status"`
 	Relay            *db.RelayBindingConfig   `json:"relay,omitempty"`
 	Federation       *FederationProjectStatus `json:"federation,omitempty"`

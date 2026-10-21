@@ -144,6 +144,10 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 	// Each retried attempt overwrites every entry.
 	inserted := make([]bool, len(events))
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := s.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+			return err
+		}
+
 		validator := db.NewCronReplayValidator(tx, true)
 		for i, remote := range events {
 			var err error

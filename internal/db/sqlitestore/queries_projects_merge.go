@@ -36,6 +36,10 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		return db.ProjectMergeResult{}, fmt.Errorf("begin merge projects: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockAdoptionLifecycleTx(ctx, tx, p.SourceProjectID, p.TargetProjectID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+
 	if err := lockProjectAccess(ctx, tx); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("lock project access revision: %w", err)
 	}

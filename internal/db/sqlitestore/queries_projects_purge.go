@@ -43,6 +43,9 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	if err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
+	if err := lockAdoptionLifecycleTx(ctx, conn, p.ProjectID); err != nil {
+		return db.ProjectPurgeLog{}, err
+	}
 	if isSystemProject(project) {
 		return db.ProjectPurgeLog{}, db.ErrNotFound
 	}

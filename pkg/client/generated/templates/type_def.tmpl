@@ -40,6 +40,23 @@
     func (e EventEnvelope) Validate() error {
         return runtime.ConvertValidatorError(typesValidator.Struct(e))
     }
+    {{ else if eq $td.Name "FederationPublicationRecord" }}
+    {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
+    type FederationPublicationRecord struct {
+        Data json.RawMessage `json:"data"`
+        Kind FederationPublicationRecordKind `json:"kind" validate:"required"`
+    }
+
+    func (f FederationPublicationRecord) Validate() error {
+        if err := f.Kind.Validate(); err != nil {
+            return err
+        }
+        var object map[string]json.RawMessage
+        if len(f.Data) == 0 || json.Unmarshal(f.Data, &object) != nil || object == nil {
+            return runtime.NewValidationErrorsFromString("Data", "must be a JSON object")
+        }
+        return nil
+    }
     {{ else if eq $td.Name "FederationIngestEventEnvelope" }}
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type FederationIngestEventEnvelope struct {

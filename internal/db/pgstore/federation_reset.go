@@ -16,6 +16,10 @@ func (s *Store) ResetFederatedProject(
 	pullCursorEventID int64,
 ) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+			return err
+		}
+
 		if _, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID)); err != nil {
 			return err

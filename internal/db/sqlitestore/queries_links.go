@@ -341,19 +341,19 @@ func (d *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, err
 
 // DeleteLinkByID removes a links row. Returns ErrNotFound when no row exists.
 func (d *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
-	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, linkID)
-		if err != nil {
-			return fmt.Errorf("delete link: %w", err)
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		var from, to int64
+		if err := tx.QueryRowContext(ctx, `SELECT from_issue_id,to_issue_id FROM links WHERE id=$1`, linkID).Scan(&from, &to); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return db.ErrNotFound
+			}
+			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("delete link rows affected: %w", err)
+		if err := ensureAdoptionIssuesTx(ctx, tx, from, to); err != nil {
+			return err
 		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		_, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=$1`, linkID)
+		return err
 	})
 }
 

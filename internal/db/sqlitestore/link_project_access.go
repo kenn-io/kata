@@ -9,6 +9,10 @@ import (
 )
 
 func checkLinkEndpointsProjectAccessTx(ctx context.Context, tx *sql.Tx, issueIDs ...int64) error {
+	if err := ensureAdoptionIssuesTx(ctx, tx, issueIDs...); err != nil {
+		return err
+	}
+
 	seen := make(map[int64]struct{}, len(issueIDs))
 	for _, issueID := range issueIDs {
 		if _, ok := seen[issueID]; ok {

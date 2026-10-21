@@ -179,6 +179,15 @@ type PollProjectEventsQuery struct {
 	Limit   *int64 `json:"limit,omitempty"`
 }
 
+type GetProjectFederationQuery struct {
+	// RelayProtocolVersion Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+	RelayProtocolVersion *int64 `json:"relay_protocol_version,omitempty" validate:"omitempty,gte=1,lte=1"`
+}
+
+func (g GetProjectFederationQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
 	Limit   *int64 `json:"limit,omitempty"`

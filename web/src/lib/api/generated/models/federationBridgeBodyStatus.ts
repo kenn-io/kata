@@ -8,4 +8,5 @@ export type FederationBridgeBodyStatus =
 export const FederationBridgeBodyStatus = {
   ready: 'ready',
   connected: 'connected',
+  pending: 'pending',
 } as const

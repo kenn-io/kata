@@ -391,6 +391,12 @@ func writeHostAccessError(ctx huma.Context, status int, code, message string) {
 }
 
 func internalAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationAdoptionPaused) {
+		return api.NewError(http.StatusConflict, "federation_adoption_paused", "project writes are paused while relay adoption finishes", adoptionRetryHint, nil)
+	}
+	if errors.Is(err, db.ErrFederationAdoptionConflict) {
+		return adoptionConflict("saved adoption state changed; source writes remain paused")
+	}
 	if errors.Is(err, db.ErrTransactionFinalizationFailed) {
 		return api.NewError(http.StatusServiceUnavailable, "access_unavailable",
 			"transaction finalization is unavailable", "", nil)

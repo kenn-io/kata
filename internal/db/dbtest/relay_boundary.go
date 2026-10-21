@@ -58,13 +58,41 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	for _, p := range []db.Project{first, shared} {
 		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: p.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	}
+	// An existing legacy spoke can also have local cross-project links. The
+	// negotiated setup path must return the same boundary sentinel without
+	// partially installing a relay configuration.
+	rootUID := "00000000000000000000000002"
+	var legacyProjects [2]db.Project
+	var legacyIssues [2]db.Issue
+	for i, name := range []string{"legacy-project", "legacy-peer-project"} {
+		project, err := store.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: int64(42 + i), HubProjectUID: project.UID, Actor: "member", PushEnabled: true, Enabled: true})
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Legacy linked issue", Author: "member"})
+		require.NoError(t, err)
+		legacyProjects[i] = project
+		legacyIssues[i] = issue
+	}
+	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: legacyIssues[0].ID, ToIssueID: legacyIssues[1].ID, Type: "blocks", Author: "member"})
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: legacyProjects[0].UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	_, err = store.SetRelayBindingConfig(ctx, legacyProjects[0].ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: "00000000000000000000000012", UpstreamInstanceUID: rootUID, AuthorityUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: "member", ResetEpoch: 1})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+	legacy, err := store.FederationBindingByProject(ctx, legacyProjects[0].ID)
+	require.NoError(t, err)
+	require.Nil(t, legacy.RelayConfig)
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "boundary-parent-test-token"})
 	require.NoError(t, err)
+	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, first.ID), db.ErrFederationCrossProjectBoundary)
+	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, second.ID), db.ErrFederationCrossProjectBoundary, "incoming links count too")
+	require.NoError(t, store.CheckRelayProjectLinks(ctx, shared.ID))
+	require.ErrorIs(t, store.CheckRelayProjectLinks(db.WithAuthorizedProjects(ctx, []string{}), first.ID), db.ErrNotFound)
 	params := db.CreateRelayEnrollmentParams{ProjectID: first.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: 1, Token: "boundary-rejected-test-token"}
 	_, err = store.CreateRelayEnrollment(db.WithAuthorizedProjects(ctx, []string{}), params)
 	require.ErrorIs(t, err, db.ErrNotFound, "hidden admission cannot reveal whether a boundary exists")
 	_, err = store.CreateRelayEnrollment(ctx, params)
-	require.Error(t, err, "admission cannot silently strip an existing hashed cross-project link")
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "admission cannot silently strip an existing hashed cross-project link")
 	preserved, err := store.LinkByID(ctx, link.ID)
 	require.NoError(t, err)
 	require.Equal(t, link, preserved)
@@ -77,6 +105,7 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	_, err = store.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: old.ID, Actor: "member", FromUID: old.UID, ToUID: private.UID, FromShortID: old.ShortID, ToShortID: private.ShortID})
 	require.NoError(t, err)
+	require.NoError(t, store.CheckRelayProjectLinks(ctx, first.ID), "historical links do not block admission after unlinking")
 	admitted, err := store.CreateRelayEnrollment(ctx, params)
 	require.NoError(t, err, "explicitly removing the boundary allows enrollment")
 	bootstrap, ok := store.(db.RelayResetBootstrapStore)

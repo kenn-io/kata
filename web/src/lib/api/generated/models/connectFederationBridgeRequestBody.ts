@@ -4,6 +4,7 @@
 
 export interface ConnectFederationBridgeRequestBody {
   actor?: string
+  adopt_existing?: boolean
   /** @minLength 1 */
   hub_catalog: string
   /** @minLength 1 */

@@ -266,14 +266,15 @@ func (f FederationBridgeBodyDirection) Validate() error {
 type FederationBridgeBodyStatus string
 
 const (
-	Connected FederationBridgeBodyStatus = "connected"
-	Ready     FederationBridgeBodyStatus = "ready"
+	Connected               FederationBridgeBodyStatus = "connected"
+	FederationBridgePending FederationBridgeBodyStatus = "pending"
+	Ready                   FederationBridgeBodyStatus = "ready"
 )
 
 // Validate checks if the FederationBridgeBodyStatus value is valid
 func (f FederationBridgeBodyStatus) Validate() error {
 	switch f {
-	case Connected, Ready:
+	case Connected, FederationBridgePending, Ready:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeBodyStatus value, got: %v", f))
@@ -317,6 +318,7 @@ func (f FederationBridgeStatusBodyDirection) Validate() error {
 type FederationBridgeStatusBodyState string
 
 const (
+	AdoptionPending                          FederationBridgeStatusBodyState = "adoption_pending"
 	EnrollmentPending                        FederationBridgeStatusBodyState = "enrollment_pending"
 	FederationBridgeStatusBodyStateConnected FederationBridgeStatusBodyState = "connected"
 	Offline                                  FederationBridgeStatusBodyState = "offline"
@@ -328,7 +330,7 @@ const (
 // Validate checks if the FederationBridgeStatusBodyState value is valid
 func (f FederationBridgeStatusBodyState) Validate() error {
 	switch f {
-	case EnrollmentPending, FederationBridgeStatusBodyStateConnected, Offline, Paused, Revoked, SigningRejected:
+	case AdoptionPending, EnrollmentPending, FederationBridgeStatusBodyStateConnected, Offline, Paused, Revoked, SigningRejected:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeStatusBodyState value, got: %v", f))
@@ -349,6 +351,77 @@ func (f FederationProjectStatusRootSigningKey) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationProjectStatusRootSigningKey value, got: %v", f))
+	}
+}
+
+type FederationPublicationBodyStatus string
+
+const (
+	FederationPublicationBodyStatusReady FederationPublicationBodyStatus = "ready"
+	Published                            FederationPublicationBodyStatus = "published"
+)
+
+// Validate checks if the FederationPublicationBodyStatus value is valid
+func (f FederationPublicationBodyStatus) Validate() error {
+	switch f {
+	case FederationPublicationBodyStatusReady, Published:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationPublicationBodyStatus value, got: %v", f))
+	}
+}
+
+type FederationPublicationBodyVisibility string
+
+const (
+	FederationPublicationVisibilityAll   FederationPublicationBodyVisibility = "all"
+	FederationPublicationVisibilityTeams FederationPublicationBodyVisibility = "teams"
+)
+
+// Validate checks if the FederationPublicationBodyVisibility value is valid
+func (f FederationPublicationBodyVisibility) Validate() error {
+	switch f {
+	case FederationPublicationVisibilityAll, FederationPublicationVisibilityTeams:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationPublicationBodyVisibility value, got: %v", f))
+	}
+}
+
+type FederationPublicationEnvelopeVersion int64
+
+const (
+	N1 FederationPublicationEnvelopeVersion = 1
+)
+
+// Validate checks if the FederationPublicationEnvelopeVersion value is valid
+func (f FederationPublicationEnvelopeVersion) Validate() error {
+	switch f {
+	case N1:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationPublicationEnvelopeVersion value, got: %v", f))
+	}
+}
+
+type FederationPublicationRecordKind string
+
+const (
+	FederationPublicationRecordKindComment    FederationPublicationRecordKind = "comment"
+	FederationPublicationRecordKindEvent      FederationPublicationRecordKind = "event"
+	FederationPublicationRecordKindIssue      FederationPublicationRecordKind = "issue"
+	FederationPublicationRecordKindIssueLabel FederationPublicationRecordKind = "issue_label"
+	FederationPublicationRecordKindProject    FederationPublicationRecordKind = "project"
+	Link                                      FederationPublicationRecordKind = "link"
+)
+
+// Validate checks if the FederationPublicationRecordKind value is valid
+func (f FederationPublicationRecordKind) Validate() error {
+	switch f {
+	case FederationPublicationRecordKindComment, FederationPublicationRecordKindEvent, FederationPublicationRecordKindIssue, FederationPublicationRecordKindIssueLabel, FederationPublicationRecordKindProject, Link:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationPublicationRecordKind value, got: %v", f))
 	}
 }
 

@@ -40,6 +40,9 @@ func (s *Store) UpsertIssueSyncBinding(
 			projectSelect+` WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, params.ProjectID)); err != nil {
 			return err
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, params.ProjectID); err != nil {
+			return err
+		}
 		if err := rejectFederationSpokeIssueSyncProject(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
@@ -255,6 +258,10 @@ func (s *Store) ClaimIssueSyncBinding(
 	var claimed bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "issue_sync_bindings", bindingID); err != nil {
+			return err
+		}
+
 		binding, err = scanIssueSyncBinding(tx.QueryRowContext(ctx,
 			issueSyncBindingSelect+` WHERE b.id=$1`, bindingID))
 		if err != nil {
@@ -371,6 +378,10 @@ func (s *Store) RefreshIssueSyncBinding(
 	}
 	var binding db.IssueSyncBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "issue_sync_bindings", params.BindingID); err != nil {
+			return err
+		}
 		previous, err := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.id=$1 FOR UPDATE`, params.BindingID))
 		if err != nil {
 			return err

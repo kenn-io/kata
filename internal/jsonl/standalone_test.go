@@ -124,6 +124,49 @@ func TestStandaloneCopyCanPinItsNewRootAuthority(t *testing.T) {
 	}), "the new owner must be able to establish its own root authority")
 }
 
+func TestStandaloneCopyDropsInFlightRelayOperationMetadata(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Retained history", Author: "member"})
+	require.NoError(t, err)
+	_, err = source.BeginFederationAdoption(ctx, db.FederationAdoptionOperation{
+		OperationUID: "00000000000000000000000011", SourceInstanceUID: source.InstanceUID(),
+		ProjectUID: project.UID, ProjectID: project.ID, TargetInstanceUID: "00000000000000000000000012",
+		TargetOrigin: "https://hub.example", CatalogName: "hub", Account: "member", ProjectName: project.Name,
+	})
+	require.NoError(t, err)
+	publicationKey := "federation.publication.v1/00000000000000000000000013"
+	_, err = source.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?)`, publicationKey, `{"operation_uid":"00000000000000000000000013","status":"published"}`)
+	require.NoError(t, err)
+
+	var backup bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+	_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Source stays paused", Author: "member"})
+	require.ErrorIs(t, err, db.ErrFederationAdoptionPaused)
+
+	copied := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(backup.Bytes()), copied, jsonl.ImportOptions{AsStandalone: true}))
+	var standalone bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, copied, &standalone, jsonl.ExportOptions{IncludeDeleted: true}))
+	records, err := jsonl.NewDecoder(bytes.NewReader(standalone.Bytes())).ReadAll(ctx)
+	require.NoError(t, err)
+	for _, record := range records {
+		if record.Kind != jsonl.KindMeta {
+			continue
+		}
+		var metadata db.MetaKV
+		require.NoError(t, json.Unmarshal(record.Data, &metadata))
+		assert.False(t, strings.HasPrefix(metadata.Key, "federation.publication.v1/"), "standalone copy retained publication operation %q", metadata.Key)
+		assert.False(t, strings.HasPrefix(metadata.Key, "federation.adoption.v1/"), "standalone copy retained adoption pause %q", metadata.Key)
+	}
+	_, _, err = copied.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Independent copy is writable", Author: "member"})
+	require.NoError(t, err)
+	_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Source remains paused", Author: "member"})
+	require.ErrorIs(t, err, db.ErrFederationAdoptionPaused)
+}
+
 func TestStandaloneCopyPreservesContentWithoutRestoringAuthority(t *testing.T) {
 	ctx := t.Context()
 	source := openExportTestDB(t)

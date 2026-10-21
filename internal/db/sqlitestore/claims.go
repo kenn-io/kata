@@ -1753,6 +1753,14 @@ func scanClaimViolationSummaries(rows *sql.Rows) ([]db.ClaimViolationSummary, er
 }
 
 func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, issueRef string) (db.Issue, string, error) {
+	// Read-only status lookups use the store; mutating lease paths use a
+	// native connection/transaction and must participate in the source pause.
+	switch tx.(type) {
+	case *sql.Conn, *sql.Tx:
+		if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+			return db.Issue{}, "", err
+		}
+	}
 	issueRef = strings.TrimSpace(issueRef)
 	if issueRef == "" {
 		return db.Issue{}, "", db.ErrNotFound

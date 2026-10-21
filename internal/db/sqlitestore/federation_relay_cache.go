@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 type relayHistoryValidationEntry struct {
@@ -11,6 +13,7 @@ type relayHistoryValidationEntry struct {
 	generation uint64
 	cursor     int64
 	reset      bool
+	history    db.RelayHistoryOrderValidator
 }
 
 type relayHistoryValidationCache struct {
@@ -91,7 +94,8 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		if d.relayHistoryFullScanObserver != nil {
 			d.relayHistoryFullScanObserver()
 		}
-		reset, err := relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
+		var history db.RelayHistoryOrderValidator
+		reset, err := relayHistoryNeedsResetWithOrderTx(ctx, tx, projectID, projectUID, &history)
 		if err != nil {
 			return false, err
 		}
@@ -100,13 +104,20 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 			generation: cache.generation,
 			cursor:     projectCursor,
 			reset:      reset,
+			history:    history,
 		}
 		return reset, nil
 	}
 	if projectCursor == entry.cursor {
 		return entry.reset, nil
 	}
-	reset, err := relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, entry.cursor)
+	reset, err := relayHistoryOrderAfterTx(ctx, tx, projectID, entry.cursor, &entry.history)
+	if err != nil {
+		return false, err
+	}
+	if !reset {
+		reset, err = relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, entry.cursor)
+	}
 	if err != nil {
 		return false, err
 	}

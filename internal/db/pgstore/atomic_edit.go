@@ -237,6 +237,29 @@ func (s *Store) applyAtomicLinkDeltaTx(
 	changes *db.AtomicEditChanges,
 	updatedAt string,
 ) (bool, error) {
+	peers := []int64{issue.ID}
+	peers = append(peers, params.AddBlocks...)
+	peers = append(peers, params.AddBlockedBy...)
+	peers = append(peers, params.AddRelated...)
+	peers = append(peers, params.RemoveBlocks...)
+	peers = append(peers, params.RemoveBlockedBy...)
+	peers = append(peers, params.RemoveRelated...)
+	if params.SetParent != nil {
+		peers = append(peers, *params.SetParent)
+	}
+	if params.RemoveParent != nil {
+		peers = append(peers, *params.RemoveParent)
+	}
+	var parent int64
+	if err := tx.QueryRowContext(ctx, `SELECT to_issue_id FROM links WHERE from_issue_id=$1 AND type='parent'`, issue.ID).Scan(&parent); err == nil {
+		peers = append(peers, parent)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err := ensureAdoptionIssuesTx(ctx, tx, peers...); err != nil {
+		return false, err
+	}
+
 	changed := false
 	if params.SetParent != nil || params.RemoveParent != nil {
 		if _, err := tx.ExecContext(ctx,
