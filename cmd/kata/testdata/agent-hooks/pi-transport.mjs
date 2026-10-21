@@ -2,14 +2,13 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {writeFileSync,unlinkSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {emitBeforeAgentStart} from './pi-runner-compat.mjs';
 const [root,extensionPath,cwd,source]=process.argv.slice(2);
 const {ExtensionRunner}=await import(pathToFileURL(root+'/core/extensions/runner.js'));
 const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileURL(root+'/core/extensions/loader.js'));
 const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
 const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
 const {buildSystemPrompt}=await import(pathToFileURL(root+'/core/system-prompt.js'));
-// Pi 1.3 takes (trigger, options); Pi 0.99 took (prompt, images, options).
-const emitBeforeAgentStart=(runner,prompt,options)=>runner.emitBeforeAgentStart.length>=3?runner.emitBeforeAgentStart(prompt,undefined,options):runner.emitBeforeAgentStart({messageType:'user',prompt},options);
 const factory=(await import(pathToFileURL(extensionPath))).default;
 let revision=1,metadata={},request='fresh request',failInbox=false,status='open';const requests=[],writes=[],errors=[];
 const server=createServer(async(req,res)=>{

@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {emitBeforeAgentStart} from './pi-runner-compat.mjs';
 const [root,projectPath,userPath,cwd]=process.argv.slice(2);
 const {ExtensionRunner}=await import(pathToFileURL(root+'/core/extensions/runner.js'));
 const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileURL(root+'/core/extensions/loader.js'));
 const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
 const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
-// Pi 1.3 takes (trigger, options); Pi 0.99 took (prompt, images, options).
-const emitBeforeAgentStart=(runner,prompt,options)=>runner.emitBeforeAgentStart.length>=3?runner.emitBeforeAgentStart(prompt,undefined,options):runner.emitBeforeAgentStart({messageType:'user',prompt},options);
 const project=(await import(pathToFileURL(projectPath))).default,user=(await import(pathToFileURL(userPath))).default;
 const calls=()=>readFileSync(process.env.KATA_PI_TEST_CALLS,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
 const base={customPrompt:'base',cwd,sections:{other:'preserved'}};
