@@ -25,10 +25,16 @@ type TelemetryGate struct {
 // other daily claims end on any accepted receipt. A true result ends this day's
 // reporting for this claim. An empty claim keeps enabled per-run reports distinct.
 func (g *TelemetryGate) Report(ctx context.Context, target, claim, day string, agent bool, send func(context.Context) (*generated.CaptureTelemetryEventResponse, error)) (bool, error) {
+	return g.ReportClaim(ctx, target, claim, day, day, agent, send)
+}
+
+// ReportClaim is Report for a claim marker that holds mark instead of the day.
+// A claim whose mark changes, such as the last empty search, reports again.
+func (g *TelemetryGate) ReportClaim(ctx context.Context, target, claim, mark, day string, agent bool, send func(context.Context) (*generated.CaptureTelemetryEventResponse, error)) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if g.settled(target, claim, day) {
+	if g.settled(target, claim, mark, day) {
 		return true, nil
 	}
 	unlock, err := lockTelemetryGate(ctx, target)
@@ -36,7 +42,7 @@ func (g *TelemetryGate) Report(ctx context.Context, target, claim, day string, a
 		return false, err
 	}
 	defer unlock()
-	if g.settled(target, claim, day) {
+	if g.settled(target, claim, mark, day) {
 		return true, nil
 	}
 	receipt, err := send(ctx)
@@ -56,13 +62,13 @@ func (g *TelemetryGate) Report(ctx context.Context, target, claim, day string, a
 	}
 	done := !agent || quiet || receipt.Status == generated.Full
 	if done && claim != "" {
-		RecordTelemetryDayMarker(claim, day)
+		RecordTelemetryDayMarker(claim, mark)
 	}
 	return quiet || (done && claim != ""), nil
 }
 
-// settled reports whether a disabled receipt or this claim already ends the day.
-func (g *TelemetryGate) settled(target, claim, day string) bool {
+// settled reports whether a disabled receipt ends the day or the claim holds mark.
+func (g *TelemetryGate) settled(target, claim, mark, day string) bool {
 	if g.quiet(target, day) {
 		return true
 	}
@@ -70,7 +76,7 @@ func (g *TelemetryGate) settled(target, claim, day string) bool {
 		g.markQuiet(target, day)
 		return true
 	}
-	return claim != "" && ReadTelemetryDayMarker(claim) == day
+	return claim != "" && ReadTelemetryDayMarker(claim) == mark
 }
 
 // lockTelemetryGate serializes receipt checks for target across processes. When
