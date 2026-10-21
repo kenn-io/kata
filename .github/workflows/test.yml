@@ -300,8 +300,8 @@ jobs:
     strategy:
       fail-fast: false
       # G-S uses measured Windows root-test times. Rebalance if a CLI shard
-      # takes longer than the remaining-package leg. Keep the G-S run and skip
-      # selectors paired so edits cannot drop or duplicate tests.
+      # takes longer than the remaining-package leg. Both CLI selectors derive
+      # from the single Bash pattern below.
       matrix:
         include:
           - name: Windows
@@ -348,7 +348,7 @@ jobs:
 
       - name: Warn on shared Go cache miss
         if: matrix.cli && steps.restore-go-cache.outputs.cache-hit != 'true'
-        run: echo "::warning::Shared Windows Go cache was not restored."
+        run: echo "::warning::This CLI shard will rebuild the test binary."
 
       - name: Build
         if: ${{ !matrix.cli }}
