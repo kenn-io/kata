@@ -508,6 +508,10 @@ func (d *Store) ClaimExternalRootBinding(
 			return db.ExternalRootBinding{}, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, false, err
+		}
+
 		result, err := tx.ExecContext(ctx, `UPDATE external_root_bindings
  SET claim_token=?, claim_started_at=?, last_attempt_at=?, updated_at=?
  WHERE id=? AND active=1 AND enabled=1
@@ -581,6 +585,10 @@ func (d *Store) claimExternalRootBindingWithoutDue(
 			return db.ExternalRootBinding{}, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, false, err
+		}
+
 		// #nosec G202 -- setClause is assembled only from fixed statements at package-owned call sites.
 		result, err := tx.ExecContext(ctx, `UPDATE external_root_bindings SET `+setClause+`
  WHERE id=? AND active=1`+enabledClause+`
@@ -704,6 +712,10 @@ func (d *Store) ApplyExternalRootProjection(
 			return db.Issue{}, nil, false, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", params.BindingID); err != nil {
+			return db.Issue{}, nil, false, err
+		}
+
 		binding, issue, projectName, err := externalRootProjectionContext(
 			ctx, tx, params.BindingID, params.ClaimToken, params.IntegrationActor,
 		)
@@ -1253,6 +1265,10 @@ func (d *Store) updateClaimedExternalRootWithPolicy(
 			return db.ExternalRootBinding{}, err
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "external_root_bindings", bindingID); err != nil {
+			return db.ExternalRootBinding{}, err
+		}
+
 		queryArgs := append(append([]any(nil), args...), bindingID, claimToken)
 		enabledPredicate := " AND enabled=1"
 		if allowDisabled {

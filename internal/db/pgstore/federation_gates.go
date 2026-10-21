@@ -16,6 +16,9 @@ type rowQueryer interface {
 // ensureProjectWritableTx applies the generic spoke write gate. A spoke may
 // accept local writes only after push has been explicitly enabled.
 func ensureProjectWritableTx(ctx context.Context, query rowQueryer, projectID int64) error {
+	if err := ensureAdoptionWritableTx(ctx, query, projectID); err != nil {
+		return err
+	}
 	var role string
 	var enabled int
 	var pushEnabled int
@@ -35,6 +38,11 @@ func ensureProjectWritableTx(ctx context.Context, query rowQueryer, projectID in
 }
 
 func ensureFederatedMoveAllowedTx(ctx context.Context, query rowQueryer, projectIDs ...int64) error {
+	for _, id := range projectIDs {
+		if err := ensureAdoptionWritableTx(ctx, query, id); err != nil {
+			return err
+		}
+	}
 	for _, projectID := range projectIDs {
 		var exists int
 		err := query.QueryRowContext(ctx,
@@ -53,6 +61,9 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, query rowQueryer, project
 // ensureFederatedSpokeUnsupportedTx rejects operations whose projection
 // semantics cannot be reconciled on a replica, even when general push is on.
 func ensureFederatedSpokeUnsupportedTx(ctx context.Context, query rowQueryer, projectID int64) error {
+	if err := ensureAdoptionWritableTx(ctx, query, projectID); err != nil {
+		return err
+	}
 	var role string
 	var enabled int
 	err := query.QueryRowContext(ctx,

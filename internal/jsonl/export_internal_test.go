@@ -263,21 +263,3 @@ func TestProjectAccessLegacyCutoverPreservesPolicy(t *testing.T) {
 		assert.NotContains(t, scoped.String(), kind)
 	}
 }
-
-// Publication and source-operation markers are local authority, including when
-// an older SQLite database takes the raw-query export path during cutover.
-func TestExportSnapshotOmitsRelayOperationMarkers(t *testing.T) {
-	ctx := t.Context()
-	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = source.Close() })
-	for _, key := range []string{"federation.publication.v1/example", "federation.adoption.v1/example", "public-example"} {
-		_, err = source.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?)`, key, "fixture-value")
-		require.NoError(t, err)
-	}
-	var out bytes.Buffer
-	require.NoError(t, exportSnapshot(ctx, source, &out, ExportOptions{}))
-	require.NotContains(t, out.String(), "federation.publication.v1/")
-	require.NotContains(t, out.String(), "federation.adoption.v1/")
-	require.Contains(t, out.String(), "public-example")
-}

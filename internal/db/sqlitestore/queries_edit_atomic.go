@@ -226,6 +226,29 @@ func linksChangedPayload(c db.AtomicEditChanges, ts string) ([]byte, error) {
 // Returns true when at least one row in `links` was inserted or deleted.
 // Touches the issue's updated_at exactly once at the end if changed link changed.
 func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issue, p db.EditIssueAtomicParams, changes *db.AtomicEditChanges, ts string) (bool, error) {
+	peers := []int64{issue.ID}
+	peers = append(peers, p.AddBlocks...)
+	peers = append(peers, p.AddBlockedBy...)
+	peers = append(peers, p.AddRelated...)
+	peers = append(peers, p.RemoveBlocks...)
+	peers = append(peers, p.RemoveBlockedBy...)
+	peers = append(peers, p.RemoveRelated...)
+	if p.SetParent != nil {
+		peers = append(peers, *p.SetParent)
+	}
+	if p.RemoveParent != nil {
+		peers = append(peers, *p.RemoveParent)
+	}
+	var parent int64
+	if err := tx.QueryRowContext(ctx, `SELECT to_issue_id FROM links WHERE from_issue_id=$1 AND type='parent'`, issue.ID).Scan(&parent); err == nil {
+		peers = append(peers, parent)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err := ensureAdoptionIssuesTx(ctx, tx, peers...); err != nil {
+		return false, err
+	}
+
 	changed := false
 
 	// set_parent: replaces an existing parent if present. No-op when the

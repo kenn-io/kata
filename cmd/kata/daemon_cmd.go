@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -1406,40 +1407,50 @@ func runDaemonProcess(
 		FederationWake:            federationWake,
 		EmbeddingWake:             embeddingWake,
 		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		WebDaemons:                append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		ActiveWebDaemon:           dcfg.ActiveDaemon,
-		GitHubSyncFetcher:         gitHubSyncFetcher,
-		GitHubSyncConfig:          dcfg.GitHubSync,
-		GitHubSyncWake:            gitHubSyncWake,
-		GitHubSyncProgress:        gitHubSyncProgress,
-		NotionSyncFetcher:         notionSyncFetcher,
-		NotionSyncConfig:          dcfg.NotionSync,
-		NotionSyncWake:            notionSyncWake,
-		NotionSyncProgress:        notionSyncProgress,
-		TickTickSyncFetcher:       tickTickSyncFetcher,
-		TickTickSyncConfig:        dcfg.TickTickSync,
-		TickTickSyncWake:          tickTickSyncWake,
-		TickTickSyncProgress:      tickTickSyncProgress,
-		PlaneSyncFetcher:          planeSyncFetcher,
-		PlaneSyncConfig:           dcfg.PlaneSync,
-		PlaneSyncWake:             planeSyncWake,
-		PlaneSyncProgress:         planeSyncProgress,
-		LinearSyncFetcher:         linearSyncFetcher,
-		LinearSyncConfig:          dcfg.LinearSync,
-		LinearSyncWake:            linearSyncWake,
-		LinearSyncProgress:        linearSyncProgress,
-		TwentySyncFetcher:         twentySyncFetcher,
-		TwentySyncConfig:          dcfg.TwentySync,
-		TwentySyncWake:            twentySyncWake,
-		TwentySyncProgress:        twentySyncProgress,
-		TodoistSyncFetcher:        todoistSyncFetcher,
-		TodoistSyncConfig:         dcfg.TodoistSync,
-		TodoistSyncWake:           todoistSyncWake,
-		TodoistSyncProgress:       todoistSyncProgress,
-		ExternalRootRegistry:      externalRootRegistry,
-		ExternalRootService:       externalRootService,
-		ExternalRootReconciler:    externalRootReconciler,
-		ExternalRootWake:          externalRootWake,
+		FederationAdoptionPublish: func(ctx context.Context, c config.CatalogDaemonConfig, raw []byte, preview bool) (api.FederationPublicationBody, error) {
+			h, err := federation.NewHubClient(ctx, c)
+			if err != nil {
+				return api.FederationPublicationBody{}, err
+			}
+			return h.PublishFederationProject(ctx, raw, preview)
+		},
+		FederationAdoptionSync: func(ctx context.Context, b db.FederationBinding, c config.FederationCredential, pulled func(int64, []db.Event), drained func(context.Context, db.FederationBinding) error) error {
+			return federation.SyncFederationOnceWithCallbacks(ctx, store, b, c, client.Opts{}, pulled, drained)
+		},
+		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:        dcfg.ActiveDaemon,
+		GitHubSyncFetcher:      gitHubSyncFetcher,
+		GitHubSyncConfig:       dcfg.GitHubSync,
+		GitHubSyncWake:         gitHubSyncWake,
+		GitHubSyncProgress:     gitHubSyncProgress,
+		NotionSyncFetcher:      notionSyncFetcher,
+		NotionSyncConfig:       dcfg.NotionSync,
+		NotionSyncWake:         notionSyncWake,
+		NotionSyncProgress:     notionSyncProgress,
+		TickTickSyncFetcher:    tickTickSyncFetcher,
+		TickTickSyncConfig:     dcfg.TickTickSync,
+		TickTickSyncWake:       tickTickSyncWake,
+		TickTickSyncProgress:   tickTickSyncProgress,
+		PlaneSyncFetcher:       planeSyncFetcher,
+		PlaneSyncConfig:        dcfg.PlaneSync,
+		PlaneSyncWake:          planeSyncWake,
+		PlaneSyncProgress:      planeSyncProgress,
+		LinearSyncFetcher:      linearSyncFetcher,
+		LinearSyncConfig:       dcfg.LinearSync,
+		LinearSyncWake:         linearSyncWake,
+		LinearSyncProgress:     linearSyncProgress,
+		TwentySyncFetcher:      twentySyncFetcher,
+		TwentySyncConfig:       dcfg.TwentySync,
+		TwentySyncWake:         twentySyncWake,
+		TwentySyncProgress:     twentySyncProgress,
+		TodoistSyncFetcher:     todoistSyncFetcher,
+		TodoistSyncConfig:      dcfg.TodoistSync,
+		TodoistSyncWake:        todoistSyncWake,
+		TodoistSyncProgress:    todoistSyncProgress,
+		ExternalRootRegistry:   externalRootRegistry,
+		ExternalRootService:    externalRootService,
+		ExternalRootReconciler: externalRootReconciler,
+		ExternalRootWake:       externalRootWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -1783,7 +1794,10 @@ func startFederationRunner(
 	}
 	workers.Go(func() { daemon.ForwardFederationWakes(ctx, publisher.Broadcaster, store.InstanceUID(), wakeRunner) })
 	runner := &federation.Runner{
-		DB:             store,
+		DB: store,
+		OnRelayDrained: func(ctx context.Context, b db.FederationBinding) error {
+			return daemon.FinalizeFederationAdoptionAfterSync(ctx, daemon.ServerConfig{DB: store, FederationCredentials: config.DefaultFederationCredentialStore()}, b)
+		},
 		Interval:       federationRunnerInterval(),
 		Wake:           wake,
 		DrainAdmission: drainAdmission,

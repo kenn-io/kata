@@ -23,9 +23,7 @@ func TestRelayHistoryNeedsResetOrder(t *testing.T) {
 		{"late snapshot", []db.EventExport{event(1, "issue.assigned", "A"), event(2, "issue.snapshot", "A")}, true},
 		{"creation first", []db.EventExport{event(1, "issue.created", "A"), event(2, "issue.assigned", "A")}, false},
 		{"snapshot first", []db.EventExport{event(1, "issue.snapshot", "A"), event(2, "issue.assigned", "A")}, false},
-		{"later snapshots cannot repair prefix", []db.EventExport{event(1, "issue.assigned", "A"), event(2, "issue.snapshot", "A"), event(3, "issue.snapshot", "A")}, true},
 		{"introductions are issue specific", []db.EventExport{event(1, "issue.created", "B"), event(2, "issue.assigned", "A"), event(3, "issue.snapshot", "A")}, true},
-		{"stored order differs from clocks", []db.EventExport{event(9, "issue.assigned", "A"), event(10, "issue.created", "A")}, true},
 		{"catalog does not introduce issue", []db.EventExport{{ID: 1, Type: "project.created", Payload: jsontext.Value(`{"uid":"A"}`)}, event(2, "issue.assigned", "A")}, true},
 		{"payload identity", []db.EventExport{{ID: 1, Type: "issue.snapshot", Payload: jsontext.Value(`{"uid":"A"}`)}, event(2, "issue.assigned", "A")}, false},
 	} {

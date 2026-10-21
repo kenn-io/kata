@@ -11,6 +11,10 @@ import (
 )
 
 func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int64) error {
+	if err := ensureAdoptionIssuesTx(ctx, tx, fromID, toID); err != nil {
+		return err
+	}
+
 	var fromProject, toProject int64
 	err := tx.QueryRowContext(ctx, `SELECT f.project_id,t.project_id FROM issues f JOIN issues t ON t.id=$1 WHERE f.id=$2`, toID, fromID).Scan(&fromProject, &toProject)
 	if errors.Is(err, sql.ErrNoRows) {

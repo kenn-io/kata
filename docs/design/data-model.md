@@ -253,11 +253,15 @@ one with `--force` without exposing partial restored state.
 `kata import --as-standalone` uses the same replay transaction for an independent
 copy. JSONL normalization removes federation bindings, sync status, quarantine,
 enrollments, root pins, signed provenance, root-key transition metadata, relay
-delivery and reset metadata, pending attribution state, claims, pending claim
-requests, and `token.created` / `token.revoked` events before replay. It keeps
+delivery and reset metadata, adoption and publication operation markers,
+pending attribution state, claims, pending claim requests, and `token.created`
+/ `token.revoked` events before replay. It keeps
 the fresh target's instance identity, preserves content and historical event
 identities, and requires a fresh target even when called through the library.
 Removing token events prevents a later ordinary restore of the copy from
-recreating source authority. Ordinary restore and `--new-instance` keep their
-existing authority behavior. This operation changes no schema and does not
-copy configuration or credential files.
+recreating source authority. Ordinary restore and `--new-instance` otherwise
+keep their existing authority behavior. `--new-instance` refuses a pending
+adoption marker because that source pause cannot be resumed under a different
+instance identity; use `--as-standalone` for an independent copy. This
+operation changes no schema and does not copy configuration or credential
+files.

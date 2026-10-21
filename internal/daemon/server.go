@@ -65,9 +65,12 @@ type ServerConfig struct {
 	Broadcaster     *EventBroadcaster
 	FederationWake  func()
 	// EmbeddingWake notifies the existing local worker after artifact commit.
-	EmbeddingWake                 func()
-	FederationCredentials         config.FederationCredentialStore
-	FederationCatalog             []config.CatalogDaemonConfig
+	EmbeddingWake         func()
+	FederationCredentials config.FederationCredentialStore
+	FederationCatalog     []config.CatalogDaemonConfig
+	// Hosts inject federation services to preserve daemon's dependency boundary.
+	FederationAdoptionPublish     func(context.Context, config.CatalogDaemonConfig, []byte, bool) (api.FederationPublicationBody, error)
+	FederationAdoptionSync        func(context.Context, db.FederationBinding, config.FederationCredential, func(int64, []db.Event), func(context.Context, db.FederationBinding) error) error
 	FederationRebindFetchMetadata FederationRebindMetadataFetcher
 	// DisableFederationRebind omits the rebind operation when the embedding
 	// host does not expose a catalog and exact credential replacement.

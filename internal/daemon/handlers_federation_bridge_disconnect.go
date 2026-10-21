@@ -24,6 +24,9 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 		if config.ValidateProjectName(in.ProjectName) != nil {
 			return nil, api.NewError(400, "validation", "valid local project name required", "", nil)
 		}
+		if response, handled, err := disconnectFederationAdoption(ctx, cfg, in); handled {
+			return response, err
+		}
 		credentials := cfg.federationCredentialStore()
 		replacer, replaceOK := credentials.(config.FederationCredentialReplacer)
 		remover, removeOK := credentials.(config.FederationCredentialRemover)
@@ -234,16 +237,16 @@ func resolveFederationBridgeDisconnect(ctx context.Context, store db.Storage, cr
 	switch {
 	case err == nil:
 		target.project, target.projectUID = project, project.UID
-		if localOnly {
-			binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
-			if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
-				return target, false, internalAPIError(bindingErr)
-			}
-			// Any spoke binding qualifies, including one left without relay
-			// configuration by a hub that vanished while enrollment was pending.
-			if bindingErr == nil && binding.Role == db.FederationRoleSpoke {
-				return resolveFederationBridgeBindingTarget(ctx, credentials, target, binding)
-			}
+		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			return target, false, internalAPIError(bindingErr)
+		}
+		// A relay binding identifies an established bridge by immutable
+		// project and destination identities. Pending ordinary disconnects
+		// retain the saved-name check below; local-only detach also accepts a
+		// pending spoke binding when the hub is unavailable.
+		if bindingErr == nil && binding.Role == db.FederationRoleSpoke && (localOnly || binding.RelayConfig != nil) {
+			return resolveFederationBridgeBindingTarget(ctx, credentials, target, binding, localOnly)
 		}
 	case errors.Is(err, db.ErrNotFound):
 		reader, ok := credentials.(config.FederationRelayPendingMetadataReader)
@@ -274,7 +277,7 @@ func resolveFederationBridgeDisconnect(ctx context.Context, store db.Storage, cr
 			return target, false, internalAPIError(bindingErr)
 		}
 	}
-	if !found || credential.Token == "" || credential.Provider != nil || credential.ManagedByConfig || credential.SpokeProjectName != name {
+	if !found || credential.Token == "" || credential.Provider != nil || (credential.ManagedByConfig && !managedAdoptionBridgeCredential(credential, name)) || credential.SpokeProjectName != name {
 		return target, false, api.NewError(409, "federation_credential_conflict", "selected bridge has no matching manual credential", "", nil)
 	}
 	hubURL, err := httpurl.CanonicalHTTPOrigin(credential.HubURL)
@@ -286,27 +289,37 @@ func resolveFederationBridgeDisconnect(ctx context.Context, store db.Storage, cr
 	return target, false, nil
 }
 
-// resolveFederationBridgeBindingTarget completes a local-only target from the
-// project's spoke binding. A saved credential must be this bridge's manual
-// credential so the detach can remove it; without one the detach proceeds and
-// removes nothing else. Unlike the credential-driven path it does not require
-// a token or a matching spoke project name: the detach never presents the
-// token to a hub, and the binding, not the credential, names the project.
-func resolveFederationBridgeBindingTarget(ctx context.Context, credentials config.FederationCredentialStore, target federationBridgeDisconnectTarget, binding db.FederationBinding) (federationBridgeDisconnectTarget, bool, error) {
+// resolveFederationBridgeBindingTarget identifies an established bridge by its
+// project UID and current binding. Local-only detach can proceed without a
+// saved credential or token; ordinary disconnect requires a token to revoke
+// the hub grant. The binding, not the mutable saved project name, identifies
+// the bridge.
+func resolveFederationBridgeBindingTarget(ctx context.Context, credentials config.FederationCredentialStore, target federationBridgeDisconnectTarget, binding db.FederationBinding, localOnly bool) (federationBridgeDisconnectTarget, bool, error) {
 	target.hubURL, target.hubProjectID = binding.HubURL, binding.HubProjectID
 	credential, found, err := credentials.FederationCredential(ctx, target.projectUID)
 	if err != nil {
 		return target, false, api.NewError(503, "federation_credentials_unavailable", "cannot read bridge credential", "", nil)
 	}
 	if !found {
-		return target, false, nil
+		if localOnly {
+			return target, false, nil
+		}
+		return target, false, api.NewError(409, "federation_credential_conflict", "selected bridge has no matching manual credential", "", nil)
 	}
 	credentialHubURL, err := httpurl.CanonicalHTTPOrigin(credential.HubURL)
-	if err != nil || credential.Provider != nil || credential.ManagedByConfig || credentialHubURL != binding.HubURL || credential.HubProjectID != binding.HubProjectID {
+	if err != nil || credential.Provider != nil || (credential.ManagedByConfig && !managedAdoptionBridgeCredentialIdentity(credential)) || credentialHubURL != binding.HubURL || credential.HubProjectID != binding.HubProjectID || credential.Actor != binding.Actor || (!localOnly && credential.Token == "") {
 		return target, false, api.NewError(409, "federation_credential_conflict", "saved credential does not match the selected bridge", "resolve the retained credential before retrying", nil)
 	}
 	target.credential, target.credentialFound = credential, true
 	return target, false, nil
+}
+
+func managedAdoptionBridgeCredential(credential config.FederationCredential, name string) bool {
+	return managedAdoptionBridgeCredentialIdentity(credential) && credential.SpokeProjectName == name
+}
+
+func managedAdoptionBridgeCredentialIdentity(credential config.FederationCredential) bool {
+	return credential.ManagedByConfig && credential.Provider == nil && credential.HubCatalog != "" && credential.HubProjectName != "" && db.ValidateTokenActor(credential.RequestedActor) == nil
 }
 
 func federationBridgeDisconnectAPIError(err error) error {

@@ -68,6 +68,29 @@ func TestFederationPublicationClosedEnvelope(t *testing.T) {
 	}
 }
 
+func TestFederationPublicationRejectsAuthorRewriteHistory(t *testing.T) {
+	p := publicationFixture(t)
+	_, err := ValidateFederationPublication(p)
+	require.NoError(t, err, "the original history is publishable")
+
+	const updatedAt = "2026-10-20T12:01:00.000Z"
+	issue := p.Records[1].(*IssueExport)
+	issue.Author, issue.UpdatedAt = "member", updatedAt
+	event := *p.Records[2].(*EventExport)
+	event.ID, event.UID, event.Type = 10, "01K00000000000000000000008", "project.author_rewritten"
+	event.IssueID, event.IssueUID, event.RelatedIssueID, event.RelatedIssueUID = nil, nil, nil, nil
+	event.CreatedAt = updatedAt
+	event.HLCPhysicalMS += 60_000
+	event.HLCCounter = 0
+	event.Payload = jsontext.Value(`{"project_uid":"01K00000000000000000000001","from":"writer","to":"member","issue_authors":1,"issue_owners":0,"comment_authors":0,"link_authors":0,"total":1,"updated_at":"2026-10-20T12:01:00.000Z"}`)
+	require.NoError(t, PrepareReplayEvent(&event, p.ProjectUID, event.ProjectName, true))
+	p.Records = append(p.Records, &event)
+
+	_, err = ValidateFederationPublication(p)
+	require.ErrorIs(t, err, ErrFederationPublicationInvalid)
+	require.ErrorContains(t, err, "author-rewrite history cannot be relayed")
+}
+
 func TestFederationPublicationRejectsInvalidIssueProjection(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -98,29 +121,64 @@ func TestFederationPublicationRejectsInvalidIssueProjection(t *testing.T) {
 }
 
 func TestFederationPublicationHistoryOrder(t *testing.T) {
+	t.Run("dependent first", func(t *testing.T) {
+		p := publicationFixture(t)
+		issue := p.Records[1].(*IssueExport)
+		created := p.Records[2].(*EventExport)
+		owner := "worker"
+		issue.Owner = &owner
+		issue.UpdatedAt = "2026-10-20T12:01:00.000Z"
+		assigned := *created
+		assigned.ID, assigned.UID, assigned.Type = 10, "01K00000000000000000000008", "issue.assigned"
+		assigned.CreatedAt = issue.UpdatedAt
+		assigned.HLCPhysicalMS += 60_000
+		assigned.HLCCounter = 0
+		assigned.Payload = jsontext.Value(`{"owner":"worker","updated_at":"2026-10-20T12:01:00.000Z"}`)
+		require.NoError(t, PrepareReplayEvent(&assigned, p.ProjectUID, assigned.ProjectName, true))
+		p.Records = append(p.Records, &assigned)
+		_, err := ValidateFederationPublication(p)
+		require.NoError(t, err, "the correctly ordered history is accepted")
+
+		assigned.ID = 8
+		require.NoError(t, PrepareReplayEvent(&assigned, p.ProjectUID, assigned.ProjectName, true))
+		p.Records = append(p.Records[:2], &assigned, created)
+		_, err = ValidateFederationPublication(p)
+		require.ErrorIs(t, err, ErrFederationPublicationInvalid)
+		require.ErrorContains(t, err, "retained history needs reset")
+	})
 	for _, tc := range []struct{ name, kind, payload string }{
-		{"dependent first", "issue.assigned", `{"owner":"worker"}`},
 		{"unknown event", "issue.future", `{}`},
 		{"purge", "issue.purged", `{}`},
 		{"external peer", "issue.links_changed", `{"related_removed_uids":["01K00000000000000000000007"]}`},
-		{"purged close parent", "issue.closed", `{"reason":"done","parent_uid":"01K00000000000000000000007"}`},
-		{"purged close evidence", "issue.closed", `{"reason":"duplicate","evidence":[{"type":"duplicate-of","issue_ref":"other-project#zz99"}]}`},
 		{"mismatching identity", "issue.updated", `{"uid":"01K00000000000000000000007"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := publicationFixture(t)
+			_, err := ValidateFederationPublication(p)
+			require.NoError(t, err, "the unmodified fixture is replayable")
 			e := *p.Records[2].(*EventExport)
 			e.ID, e.UID, e.Type, e.Payload = 10, "01K00000000000000000000008", tc.kind, jsontext.Value(tc.payload)
 			e.HLCCounter = 1
 			require.NoError(t, PrepareReplayEvent(&e, p.ProjectUID, e.ProjectName, true))
-			if tc.name == "dependent first" {
-				e.ID, e.HLCCounter = 1, 0
-				p.Records = append(p.Records[:2], &e, p.Records[2])
-			} else {
-				p.Records = append(p.Records, &e)
-			}
+			p.Records = append(p.Records, &e)
+			_, err = ValidateFederationPublication(p)
+			require.ErrorIs(t, err, ErrFederationPublicationInvalid)
+		})
+	}
+	for _, tc := range []struct{ name, key, value, want string }{
+		{"purged close parent", "parent_uid", `"01K00000000000000000000007"`, "outside, unresolved or not yet introduced issue reference"},
+		{"purged close evidence", "evidence", `[{"type":"duplicate-of","issue_ref":"other-project#zz99"}]`, "outside close evidence reference"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := publicationFixture(t)
+			e := publicationCloseEvent(t, &p)
+			payload := PayloadMap(e.Payload)
+			payload[tc.key] = jsontext.Value(tc.value)
+			e.Payload, _ = json.Marshal(payload)
+			require.NoError(t, PrepareReplayEvent(e, p.ProjectUID, e.ProjectName, true))
 			_, err := ValidateFederationPublication(p)
 			require.ErrorIs(t, err, ErrFederationPublicationInvalid)
+			require.ErrorContains(t, err, tc.want)
 		})
 	}
 	t.Run("catalog cannot introduce issue", func(t *testing.T) {
@@ -138,6 +196,25 @@ func TestFederationPublicationHistoryOrder(t *testing.T) {
 		_, err := ValidateFederationPublication(p)
 		require.ErrorIs(t, err, ErrFederationPublicationInvalid)
 	})
+}
+
+func publicationCloseEvent(t *testing.T, p *FederationPublication) *EventExport {
+	t.Helper()
+	const closedAt = "2026-10-20T12:01:00.000Z"
+	issue := p.Records[1].(*IssueExport)
+	reason := "done"
+	issue.Status, issue.ClosedReason, issue.ClosedAt, issue.UpdatedAt = "closed", &reason, new(closedAt), closedAt
+	event := *p.Records[2].(*EventExport)
+	event.ID, event.UID, event.Type = 10, "01K00000000000000000000008", "issue.closed"
+	event.CreatedAt = closedAt
+	event.HLCPhysicalMS += 60_000
+	event.HLCCounter = 0
+	event.Payload = jsontext.Value(`{"reason":"done","closed_at":"2026-10-20T12:01:00.000Z"}`)
+	require.NoError(t, PrepareReplayEvent(&event, p.ProjectUID, event.ProjectName, true))
+	p.Records = append(p.Records, &event)
+	_, err := ValidateFederationPublication(*p)
+	require.NoError(t, err, "the closed projection and history form an accepted control")
+	return &event
 }
 
 func TestFederationPublicationTypedPayloads(t *testing.T) {

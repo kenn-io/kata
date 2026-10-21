@@ -116,7 +116,9 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
 				continue
 			case *db.MetaKV:
-				if strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
+				if strings.HasPrefix(record.Key, "federation.publication.v1/") ||
+					strings.HasPrefix(record.Key, "federation.adoption.v1/") ||
+					strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||

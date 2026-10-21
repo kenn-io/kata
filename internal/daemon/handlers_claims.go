@@ -194,6 +194,9 @@ func handleClaimAcquire(
 		return api.ClaimActionResponseBody{}, err
 	}
 	defer finishTransport()
+	if err := rejectClaimMutationDuringAdoption(ctx, cfg.DB, projectID); err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
@@ -281,6 +284,9 @@ func handleClaimRenew(
 		return api.ClaimActionResponseBody{}, err
 	}
 	defer finishTransport()
+	if err := rejectClaimMutationDuringAdoption(ctx, cfg.DB, projectID); err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
@@ -337,6 +343,9 @@ func handleClaimRelease(
 		return api.ClaimActionResponseBody{}, err
 	}
 	defer finishTransport()
+	if err := rejectClaimMutationDuringAdoption(ctx, cfg.DB, projectID); err != nil {
+		return api.ClaimActionResponseBody{}, claimAPIError(err)
+	}
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
@@ -394,6 +403,11 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 	if err != nil {
 		return api.ClaimStatusBody{}, err
 	}
+	if status, pending, err := pendingAdoptionClaimStatus(ctx, cfg.DB, projectID, ref, time.Now().UTC()); err != nil {
+		return api.ClaimStatusBody{}, claimAPIError(err)
+	} else if pending {
+		return claimStatusBody(status), nil
+	}
 	if binding.Role == db.FederationRoleHub {
 		status, err := cfg.DB.ClaimStatus(ctx, projectID, ref, time.Now().UTC())
 		if err != nil {
@@ -448,6 +462,22 @@ func claimBinding(ctx context.Context, store db.Storage, projectID int64) (db.Fe
 	return binding, nil
 }
 
+func pendingAdoptionClaimStatus(
+	ctx context.Context, store db.Storage, projectID int64, issueRef string, now time.Time,
+) (db.ClaimStatus, bool, error) {
+	native, ok := store.(db.FederationAdoptionStore)
+	if !ok {
+		return db.ClaimStatus{}, false, nil
+	}
+	if _, err := native.FederationAdoption(ctx, projectID); errors.Is(err, db.ErrNotFound) {
+		return db.ClaimStatus{}, false, nil
+	} else if err != nil {
+		return db.ClaimStatus{}, false, err
+	}
+	status, err := store.ClaimStatusReadOnly(ctx, projectID, issueRef, now)
+	return status, true, err
+}
+
 func beginClaimFederationTransport(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -463,6 +493,23 @@ func beginClaimFederationTransport(
 		return nil, internalAPIError(fmt.Errorf("coordinate federation claim transport: %w", err))
 	}
 	return finish, nil
+}
+
+// rejectClaimMutationDuringAdoption runs while the project transport gate is
+// held, before a spoke lease action can mutate its upstream hub.
+func rejectClaimMutationDuringAdoption(ctx context.Context, store db.Storage, projectID int64) error {
+	adoptions, ok := store.(db.FederationAdoptionStore)
+	if !ok {
+		return nil
+	}
+	_, err := adoptions.FederationAdoption(ctx, projectID)
+	if err == nil {
+		return db.ErrFederationAdoptionPaused
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 func boundSpokeClaimPrincipal(
@@ -1194,6 +1241,17 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
+	}
+	status, pending, err := pendingAdoptionClaimStatus(ctx, cfg.DB, issue.ProjectID, issue.UID, time.Now().UTC())
+	if err != nil {
+		return nil, claimAPIError(err)
+	}
+	if pending {
+		if status.HubNow.IsZero() {
+			return nil, nil
+		}
+		hubNow := status.HubNow
+		return &hubNow, nil
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {

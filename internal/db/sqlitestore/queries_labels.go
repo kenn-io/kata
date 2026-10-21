@@ -24,6 +24,9 @@ func (d *Store) addLabel(ctx context.Context, issueID int64, label, author strin
 		return db.IssueLabel{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionIssuesTx(ctx, tx, issueID); err != nil {
+		return db.IssueLabel{}, err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
@@ -61,18 +64,19 @@ func classifyLabelInsertError(err error) error {
 // RemoveLabel detaches a label from an issue. Returns ErrNotFound when the row
 // doesn't exist (idempotent unlink semantics live in the handler).
 func (d *Store) RemoveLabel(ctx context.Context, issueID int64, label string) error {
-	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx,
-			`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
-			issueID, label)
-		if err != nil {
-			return fmt.Errorf("delete label: %w", err)
+	return d.relayTx(ctx, func(tx *sql.Tx) error {
+		if err := ensureAdoptionIssuesTx(ctx, tx, issueID); err != nil {
+			return err
 		}
-		n, err := res.RowsAffected()
+		result, err := tx.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id=$1 AND label=$2`, issueID, label)
 		if err != nil {
-			return fmt.Errorf("delete label rows affected: %w", err)
+			return err
 		}
-		if n == 0 {
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
 			return db.ErrNotFound
 		}
 		return nil

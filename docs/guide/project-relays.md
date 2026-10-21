@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # Share projects between hubs
@@ -14,6 +14,8 @@ can reach each other again.
 **Availability:** project relays require Kata 0.19.0 or later on every
 participating daemon.
 The connection preview checks the upstream daemon's protocol support.
+Publishing an existing local project is newer `main` functionality: the source
+needs API `0.32.0`, and the hub must advertise `relay_publication_version: 1`.
 
 ## Choose the shape you need
 
@@ -50,9 +52,10 @@ for the other choices.
 
 You need:
 
-- An existing, federation-enabled project on the upstream hub. Its operator
-  can enable it with `kata federation enable --project shared-project`, using
-  an ordinary account with project access in identity mode.
+- For a new replica, an existing, federation-enabled project on the upstream
+  hub. Its operator can enable it with
+  `kata federation enable --project shared-project`, using an ordinary account
+  with project access in identity mode.
 - A writable **ordinary account token** from that hub, issued with
   `kata tokens create`. The account must have access to the project. Expiring
   account tokens are accepted while valid; expiry suspends sync until the
@@ -61,9 +64,12 @@ You need:
   and [Team visibility](../operations/federation.md#team-visibility).
 - Owner access to the daemon receiving the replica. Bridge administration uses
   the owner CLI or API; an ordinary browser session cannot connect a bridge.
-- An unused local project name. Connect creates the replica; do not run
-  `kata init` with that name first. An unrelated project with the same name is
+- For a new replica, an unused local project name. Connect creates the replica;
+  do not run `kata init` with that name first. An unrelated project with the same name is
   a collision, even if its issues look identical.
+
+To share a populated standalone local project instead, use
+[Publish your existing local project](#publish-your-existing-local-project).
 
 Check the [checkpoint capacity](../operations/federation.md#relay-checkpoint-capacity)
 before choosing this for a large, long-lived project. Recovery currently needs
@@ -151,6 +157,77 @@ To bind a workspace to the replica after connection, run
 ordinary account with project access for this command and issue work; the
 bootstrap credential used for administration cannot perform attributed writes.
 
+## Publish your existing local project
+
+Use `--adopt-existing` to publish one standalone local project and connect that
+same identity to the hub. The hub keeps serving. Original project and issue
+UIDs, stored short IDs, comments, authors, teammates, timestamps and retained
+event history survive the first relay synchronization.
+
+For an eligible source, the source and published hub keep the complete original
+history. Downstream replicas receive all original portable events and
+issue/comment state. Host-local `project.created`, `project.renamed` and
+`project.author_rewritten` events are not replayed downstream; they do not
+rename independently named replicas or rewrite those replicas' local
+catalogs. Adoption refuses a source with an existing
+`project.author_rewritten` event because downstream issue and comment authors
+would otherwise remain stale, and later snapshots do not repair them.
+Labels retain their names and issue associations on a new replica. Native
+label snapshots recreate label attribution as `federation` with a local
+timestamp; original label authors and timestamps remain on the source and hub.
+
+Configure the upstream account as above. It must be an ordinary writable,
+unscoped database account with permission to create a project on the hub.
+You administer your local daemon; the hub needs no owner-issued direct grant.
+The local account named by `--as` must also have access to the source project
+under its current visibility and team policy. Adoption checks this before
+preflight and again in the transaction that pauses source writes.
+The first version requires the same project name locally and on the hub:
+
+```sh
+kata federation bridge connect --project source-project \
+  --hub-daemon team-hub --hub-project source-project \
+  --adopt-existing --serve-downstream --as local-member --preflight
+```
+
+Review the account, destination, issue/comment/event counts, visibility and
+source-pause warning. Native project creation currently previews visibility
+`all`; team membership does not make the published project private. This
+workflow accepts no custom visibility restriction. Preflight changes no
+project, credential or file.
+
+The source must be active, standalone and self-contained. Issues, comment
+replies and edits, labels, intra-project links and soft-deleted issues are
+supported. Existing federation, unresolved claims, integrations, automation,
+purge/reset boundaries and non-replayable history are refused. Choose a source
+without `project.author_rewritten` history. Current
+[cross-project links](../operations/federation.md#connect-a-project-through-the-daemon-catalog)
+remain unsupported. Publication also refuses historical references outside
+the project, even when the corresponding live link was removed. The frozen
+envelope must fit the 64 MiB limit and the applicable checkpoint capacity.
+
+Run the same command without `--preflight` to publish and connect. Omit
+`--serve-downstream` when this source will remain a leaf. Kata pauses source
+writes before capturing the transfer; reads and unrelated projects remain
+available. It retains the exact transfer bytes across interruption. Writes
+resume only after credentials are durable, the initial baseline is applied,
+and deliveries, root receipts, claims and quarantine are clear.
+
+```sh
+kata federation bridge status --project source-project --json
+```
+
+A `pending` connect response or `adoption_pending` bridge state means cutover
+is unfinished. `operation_uid`, `phase` and `source_paused` identify the
+retained work. Normal sync or an identical connect retry completes it; do not
+edit around the pause. See
+[publication recovery](../operations/federation.md#publish-a-populated-standalone-project)
+for retry and disconnect rules, including credential-write failures.
+
+Original authors and teammates remain source claims. The publishing account
+is accountable for publication; preserved names do not prove those people
+authenticated to the hub historically.
+
 ## Add a device below the relay
 
 On the personal hub, configure [identity tokens](../operations/remote-daemon.md#identity-tokens)
@@ -219,6 +296,8 @@ does not establish that it happened.
 | Upstream account token expired or was revoked | Update the catalog credential, restart the receiving daemon to load changed config or environment, and repeat connect for the same upstream account. This retains queued work. |
 | Team membership was removed | Have the upstream operator restore access. The existing connection rechecks authority before resuming. |
 | `signing_rejected` | Repair the signing source or hub key registration. Reconnecting is not the remedy. |
+| Adoption is pending or its publication response was lost | Repeat the identical connect command with `--adopt-existing`, the same project, catalog and account. Keep the database, credentials and frozen artifact. |
+| Adoption reports a credential-write failure | Repair local private-file access and repeat the identical connect. Published hub content remains; do not remove the retained candidate credential. |
 | Local project-name or identity collision | Resolve the existing project or choose an unused name; do not initialize another copy to bypass the conflict. |
 | Root purge or history reset | Let normal sync install the signed checkpoint. See [reset recovery](../operations/federation.md#reset-recovery) for retained-work blockers. |
 | Hub is permanently gone | Review [local-only disconnect](../operations/federation.md#detach-a-bridge-whose-hub-is-gone). It discards undelivered transport work and cannot revoke the remote grant. |
@@ -234,6 +313,11 @@ kata federation bridge disconnect --project shared-replica
 This revokes the saved upstream enrollment and keeps the local project and
 issues. Retry the same request after an interruption. Do not use `--local-only`
 as a routine sync repair.
+
+An adoption may disconnect before transmission (`preparing` or `frozen`) or
+after a definite rejection (`rejected`). An uncertain or known-published
+operation must resume and drain before ordinary disconnect; disconnect never
+abandons that source fence or deletes published hub content.
 
 The [operator reference](../operations/federation.md) owns the full credential,
 retention, reset and signing rules. The [technical notes](../design/federation.md)

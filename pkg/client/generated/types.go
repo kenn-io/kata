@@ -871,6 +871,7 @@ func (c ConfigureFederationSigningRequestBody) Validate() error {
 
 type ConnectFederationBridgeRequestBody struct {
 	Actor           *string `json:"actor,omitempty"`
+	AdoptExisting   *bool   `json:"adopt_existing,omitempty"`
 	HubCatalog      string  `json:"hub_catalog" validate:"required,min=1"`
 	HubProject      string  `json:"hub_project" validate:"required,min=1"`
 	Preflight       *bool   `json:"preflight,omitempty"`
@@ -2386,6 +2387,7 @@ func (f FederationBindingOut) Validate() error {
 }
 
 type FederationBridgeBody struct {
+	Counts          *FederationPublicationCounts  `json:"counts,omitempty"`
 	Direction       FederationBridgeBodyDirection `json:"direction" validate:"required"`
 	HubCatalog      string                        `json:"hub_catalog" validate:"required"`
 	HubInstanceUID  string                        `json:"hub_instance_uid" validate:"required"`
@@ -2393,14 +2395,26 @@ type FederationBridgeBody struct {
 	HubProjectUID   string                        `json:"hub_project_uid" validate:"required"`
 	HubURL          string                        `json:"hub_url" validate:"required"`
 	LocalAccount    string                        `json:"local_account" validate:"required"`
+	OperationUID    *string                       `json:"operation_uid,omitempty"`
+	Phase           *string                       `json:"phase,omitempty"`
 	ProjectID       *int64                        `json:"project_id,omitempty"`
 	ProjectName     string                        `json:"project_name" validate:"required"`
+	SourcePaused    bool                          `json:"source_paused"`
 	Status          FederationBridgeBodyStatus    `json:"status" validate:"required"`
 	UpstreamAccount string                        `json:"upstream_account" validate:"required"`
+	Visibility      *string                       `json:"visibility,omitempty"`
+	Warning         *string                       `json:"warning,omitempty"`
 }
 
 func (f FederationBridgeBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if f.Counts != nil {
+		if v, ok := any(f.Counts).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Counts", err)
+			}
+		}
+	}
 	if v, ok := any(f.Direction).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Direction", err)
@@ -2469,10 +2483,13 @@ type FederationBridgeStatusBody struct {
 	HubCatalog       *string                             `json:"hub_catalog,omitempty"`
 	HubURL           string                              `json:"hub_url" validate:"required"`
 	LocalAccount     string                              `json:"local_account" validate:"required"`
+	OperationUID     *string                             `json:"operation_uid,omitempty"`
+	Phase            *string                             `json:"phase,omitempty"`
 	ProjectID        *int64                              `json:"project_id,omitempty"`
 	ProjectName      string                              `json:"project_name" validate:"required"`
 	ProjectUID       string                              `json:"project_uid" validate:"required"`
 	Relay            *RelayBindingConfig                 `json:"relay,omitempty"`
+	SourcePaused     bool                                `json:"source_paused"`
 	State            FederationBridgeStatusBodyState     `json:"state" validate:"required"`
 	UpstreamAccount  string                              `json:"upstream_account" validate:"required"`
 }

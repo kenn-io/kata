@@ -63,6 +63,9 @@ func (d *Store) rebindFederationBinding(
 		return db.FederationBinding{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionWritableTx(ctx, tx, p.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 
 	if err := db.LockCronProject(ctx, tx, p.ProjectID); err != nil {
 		return db.FederationBinding{}, err
@@ -510,6 +513,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		return db.FederationBinding{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := d.adoptionSQL(tx).CheckAttachment(ctx, b.ProjectID, &b); err != nil {
+		return db.FederationBinding{}, err
+	}
 
 	if b.Role == db.FederationRoleSpoke {
 		if err := rejectIssueSyncedFederationProject(ctx, tx, b.ProjectID); err != nil {
@@ -619,6 +625,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		return db.LeaveFederationResult{}, err
 	}
 
+	if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+		return db.LeaveFederationResult{}, err
+	}
 	binding, err := federationBindingByProject(ctx, tx, projectID)
 	switch {
 	case errors.Is(err, db.ErrNotFound):
@@ -794,6 +803,9 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 		return nil, fmt.Errorf("begin remote event insert: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := d.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+		return nil, err
+	}
 
 	validator := db.NewCronReplayValidator(tx, false)
 	inserted := make([]bool, len(events))
@@ -968,6 +980,9 @@ func (d *Store) enableProjectFederationTx(
 		return db.FederationBinding{}, err
 	}
 
+	if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err == nil {
@@ -1216,6 +1231,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	validator *db.CronReplayValidator,
 	projectOnlyLinks bool,
 ) error {
+
 	// Take this lock before reading anything. Besides serializing cron
 	// state, it makes a fresh deferred transaction, such as the one
 	// materializeFederatedProject begins, a writer before it reads the event
@@ -1227,6 +1243,10 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if err := d.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+		return err
+	}
+
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
@@ -1308,6 +1328,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 		return fmt.Errorf("begin federated reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+		return err
+	}
+
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -1364,6 +1388,9 @@ func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func ensureProjectWritableTx(ctx context.Context, q sqlReader, projectID int64) error {
+	if err := ensureAdoptionWritableTx(ctx, q, projectID); err != nil {
+		return err
+	}
 	var (
 		role        string
 		enabled     int
@@ -1385,6 +1412,9 @@ func ensureProjectWritableTx(ctx context.Context, q sqlReader, projectID int64) 
 }
 
 func ensureFederatedSpokeUnsupportedTx(ctx context.Context, q sqlReader, projectID int64) error {
+	if err := ensureAdoptionWritableTx(ctx, q, projectID); err != nil {
+		return err
+	}
 	var role string
 	var enabled int
 	err := q.QueryRowContext(ctx,
@@ -1403,6 +1433,11 @@ func ensureFederatedSpokeUnsupportedTx(ctx context.Context, q sqlReader, project
 }
 
 func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs ...int64) error {
+	for _, id := range projectIDs {
+		if err := ensureAdoptionWritableTx(ctx, q, id); err != nil {
+			return err
+		}
+	}
 	for _, projectID := range projectIDs {
 		var exists int
 		err := q.QueryRowContext(ctx,
@@ -2834,6 +2869,10 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("begin federation adoption: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionWritableTx(ctx, tx, p.ProjectID); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+
 	if err := lockProjectAccess(ctx, tx); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("lock project access for federation adoption: %w", err)
 	}

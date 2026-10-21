@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # CLI reference
@@ -1880,7 +1880,9 @@ before retrying. A destination that appears during import is not overwritten.
 instance identity and no source federation or API-token authority. It keeps
 content and cross-project links from a full export. It requires a fresh target
 and cannot be combined with `--force` or `--merge`. Ordinary restore, including
-`--new-instance`, retains source authority. See
+`--new-instance`, retains source authority. `--new-instance` refuses backups
+with a pending relay adoption because the source write pause cannot be resumed
+under a different instance identity. Use `--as-standalone` for that copy. See
 [Make an independent copy](../operations/backup-restore.md#make-an-independent-copy-of-a-federated-hub)
 for the exact retained and omitted data and an isolated-home example.
 
@@ -2005,7 +2007,7 @@ Existing direct-spoke enrollment is a separate workflow. Start with
 kata federation identity
 kata federation embedding-recipe
 kata federation bridge connect --project <local-project> --hub-daemon <catalog-name> \
-  --hub-project <hub-project> [--preflight] [--serve-downstream] \
+  --hub-project <hub-project> [--preflight] [--adopt-existing] [--serve-downstream] \
   [--signing-key-id <id> (--signing-key-env <var> | --signing-key-file <path>)]
 kata federation bridge status --project <local-project>
 kata federation bridge disconnect --project <local-project> [--preflight] [--local-only]
@@ -2054,11 +2056,30 @@ narrow enrollment token. See the
 [federation guide](../operations/federation.md#connect-a-project-through-the-daemon-catalog)
 and [Bridges](../operations/federation-signing.md#bridges).
 
+On newer `main`, `--adopt-existing` publishes a populated standalone local
+project before connecting its exact identity. It requires source API `0.32.0`
+and a hub advertising `relay_publication_version: 1`. Use the same local and
+hub project name and an ordinary writable, unscoped hub account with project
+creation permission. Preflight previews native visibility, content counts and
+the source pause without persisting anything. Commit pauses writes until the
+first baseline and retained relay work are fully drained; it preserves IDs,
+comment lineage and original history. See [Publish your existing local project](../guide/project-relays.md#publish-your-existing-local-project)
+for eligibility limits and the exact commands.
+
+Retry the identical adoption command after response loss or credential-write
+failure. `pending` and `source_paused: true` mean cutover is unfinished;
+ordinary sync or the same connect completes it. Keep the frozen artifact and
+candidate credential. An unused or definitely rejected operation may disconnect;
+an uncertain or known-published operation must resume and drain first. See
+[publication recovery](../operations/federation.md#retry-or-disconnect-publication).
+
 `kata federation bridge status --project <local-project>` reads the selected
 bridge's locally recorded state without contacting its hub. It also shows a
 retained pending enrollment before the local replica exists. JSON output
 includes the negotiated path and existing sync diagnostics; no token values
-are returned. Check sync timestamps when assessing an observed connection state.
+are returned. An unfinished publication reports `adoption_pending`,
+`operation_uid`, `phase` and `source_paused`, including before a binding exists.
+Check sync timestamps when assessing an observed connection state.
 The `signing_rejected` state means the hub refused this bridge's request
 signature; the grant is intact.
 

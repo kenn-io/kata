@@ -169,3 +169,43 @@ func TestNewInstanceImportRejectsNegotiatedRelayConfigBeforeMutation(t *testing.
 	_, err = target.ProjectByName(ctx, "shared-project")
 	require.ErrorIs(t, err, db.ErrNotFound, "rejected restore must leave the target untouched")
 }
+
+func TestNewInstanceImportRejectsPendingAdoptionBeforeMutation(t *testing.T) {
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	_, err = source.BeginFederationAdoption(ctx, db.FederationAdoptionOperation{
+		OperationUID: "00000000000000000000000011", SourceInstanceUID: source.InstanceUID(),
+		ProjectUID: project.UID, ProjectID: project.ID, TargetInstanceUID: "00000000000000000000000012",
+		TargetOrigin: "https://hub.example", CatalogName: "hub", Account: "member", ProjectName: project.Name,
+	})
+	require.NoError(t, err)
+	var backup bytes.Buffer
+	require.NoError(t, Export(ctx, source, &backup, ExportOptions{}))
+
+	target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	targetUID := target.InstanceUID()
+	retained, err := target.CreateProject(ctx, "retained-target-project")
+	require.NoError(t, err)
+	retainedIssue, _, err := target.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Retained target issue", Author: "member"})
+	require.NoError(t, err)
+
+	err = ImportWithOptions(ctx, bytes.NewReader(backup.Bytes()), target, ImportOptions{NewInstance: true})
+	require.Error(t, err, "a fresh target identity cannot retain a source adoption pause")
+	require.Contains(t, err.Error(), "--as-standalone")
+	require.Equal(t, targetUID, target.InstanceUID())
+	kept, err := target.ProjectByName(ctx, retained.Name)
+	require.NoError(t, err, "rejected restore must leave existing target content untouched")
+	require.Equal(t, retained.UID, kept.UID)
+	issue, err := target.IssueByUID(ctx, retainedIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, retained.ID, issue.ProjectID)
+	require.Equal(t, retainedIssue.Title, issue.Title)
+	_, err = target.ProjectByName(ctx, project.Name)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}

@@ -39,9 +39,15 @@ func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 	}
 	if opts.NewInstance {
 		for _, record := range records {
-			binding, ok := record.(*FederationBindingExport)
-			if ok && binding.RelayConfig != nil {
-				return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
+			switch value := record.(type) {
+			case *FederationBindingExport:
+				if value.RelayConfig != nil {
+					return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
+				}
+			case *MetaKV:
+				if strings.HasPrefix(value.Key, federationAdoptionPrefix) {
+					return errors.New("--new-instance cannot restore a pending relay adoption; use --as-standalone to detach the copy")
+				}
 			}
 		}
 	}

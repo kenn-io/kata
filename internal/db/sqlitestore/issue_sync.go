@@ -28,6 +28,9 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 		if err := requireActiveProject(ctx, tx, p.ProjectID); err != nil {
 			return db.IssueSyncBinding{}, err
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, p.ProjectID); err != nil {
+			return db.IssueSyncBinding{}, err
+		}
 		if err := rejectFederationSpokeIssueSyncProject(ctx, tx, p.ProjectID); err != nil {
 			return db.IssueSyncBinding{}, err
 		}
@@ -269,6 +272,9 @@ func (d *Store) ClaimIssueSyncBinding(ctx context.Context, bindingID int64, prov
 			return db.IssueSyncBinding{}, false, fmt.Errorf("begin issue sync claim: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "issue_sync_bindings", bindingID); err != nil {
+			return db.IssueSyncBinding{}, false, err
+		}
 
 		binding, err := issueSyncBindingByID(ctx, tx, bindingID)
 		if err != nil {
@@ -415,6 +421,9 @@ func (d *Store) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindi
 			return db.IssueSyncBinding{}, fmt.Errorf("begin issue sync binding refresh: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := ensureAdoptionBackgroundTx(ctx, tx, "issue_sync_bindings", p.BindingID); err != nil {
+			return db.IssueSyncBinding{}, err
+		}
 
 		previous, err := issueSyncBindingByID(ctx, tx, p.BindingID)
 		if err != nil {

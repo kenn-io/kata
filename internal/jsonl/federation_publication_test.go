@@ -383,8 +383,6 @@ func TestFederationPublicationRichHistory(t *testing.T) {
 			capturePublication(t, source, p)
 			_, _, _, err = source.RestoreIssue(ctx, peer.ID, "writer")
 			require.NoError(t, err)
-			_, err = source.RewriteAuthorIdentity(ctx, db.RewriteAuthorIdentityParams{ProjectID: p.ID, Actor: "writer", From: "writer", To: "original-author"})
-			require.NoError(t, err)
 			p, _, _, err = source.RenameProjectAndEvent(ctx, p.ID, "renamed-project", "writer")
 			require.NoError(t, err)
 			publication := capturePublication(t, source, p)

@@ -200,6 +200,10 @@ Use it to copy a hub's data for a rehearsal or a move to a different hub.
 Ordinary restore recreates the source's federation bindings, enrollments, and
 database-managed API tokens. `--new-instance` changes the instance identity
 but keeps that authority. Neither option detaches a federated hub.
+`--new-instance` refuses a backup with a pending relay adoption because its
+write pause belongs to the source instance. Use `--as-standalone` to make an
+independent copy; standalone import removes the adoption marker and leaves the
+copy writable.
 
 Start with a full JSONL export, including deleted rows. Keep the protected
 original export: it contains the source's credential hashes and token events.

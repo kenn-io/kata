@@ -13,10 +13,13 @@ export interface FederationBridgeStatusBody {
   hub_catalog?: string
   hub_url: string
   local_account: string
+  operation_uid?: string
+  phase?: string
   project_id?: number
   project_name: string
   project_uid: string
   relay?: RelayBindingConfig
+  source_paused: boolean
   state: FederationBridgeStatusBodyState
   upstream_account: string
   [key: string]: unknown

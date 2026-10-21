@@ -268,8 +268,11 @@ func publicationLinkKey(from, to, kind string) FoldLinkKey {
 }
 
 func (x publicationIndex) validateEvent(e EventExport, introduced, comments map[string]bool) error {
+	if e.Type == "project.author_rewritten" {
+		return errors.New("author-rewrite history cannot be relayed")
+	}
 	switch e.Type {
-	case "issue.created", "issue.snapshot", "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed", "issue.assignment_expired", "issue.priority_set", "issue.priority_cleared", "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored", "issue.commented", "issue.comment_edited", "issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated", "project.created", "project.renamed", "project.metadata_updated", "project.author_rewritten":
+	case "issue.created", "issue.snapshot", "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed", "issue.assignment_expired", "issue.priority_set", "issue.priority_cleared", "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored", "issue.commented", "issue.comment_edited", "issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated", "project.created", "project.renamed", "project.metadata_updated":
 	default:
 		return errors.New("unsupported publication event type")
 	}

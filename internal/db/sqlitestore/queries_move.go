@@ -39,6 +39,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 
+	if err := lockAdoptionMoveTx(ctx, tx, in.FromProjectID, in.ToProjectID, in.IssueID); err != nil {
+		return out, err
+	}
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
 	}

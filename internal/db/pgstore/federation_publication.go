@@ -203,14 +203,28 @@ func (s *Store) publishFederationProjectTx(ctx context.Context, tx *sql.Tx, p db
 	if err != nil {
 		return result, err
 	}
-	// Check the destination's actual checkpoint budget, including the newly
-	// attributed catalog event, atomically with all imported content.
+	// Check the checkpoint after the federation baseline that adoption will
+	// immediately create. Simulate the real enable path inside this transaction
+	// so an oversized post-enable project is rejected before publication commits.
+	const capacitySavepoint = "federation_publication_capacity"
+	if _, err := tx.ExecContext(ctx, `SAVEPOINT `+capacitySavepoint); err != nil {
+		return result, err
+	}
+	if _, err := s.enableProjectFederationTx(ctx, tx, projectID, account); err != nil {
+		return result, err
+	}
 	size, err := s.relayCheckpointSizeTx(ctx, tx, result.Project, account)
 	if err != nil {
 		return result, err
 	}
 	if err = size.CapacityError(p.ProjectUID); err != nil {
 		return result, fmt.Errorf("%w: %w", db.ErrFederationPublicationTooLarge, err)
+	}
+	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT `+capacitySavepoint); err != nil {
+		return result, err
+	}
+	if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT `+capacitySavepoint); err != nil {
+		return result, err
 	}
 	want.ProjectID = projectID
 	marker, err := json.Marshal(want)

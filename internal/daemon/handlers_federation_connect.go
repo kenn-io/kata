@@ -29,6 +29,13 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if err := ensureTokenAdminAllowed(ctx); err != nil {
 			return nil, err
 		}
+		if in.Body.AdoptExisting {
+			body, err := ResumeFederationAdoption(ctx, cfg, in)
+			if err != nil {
+				return nil, err
+			}
+			return &api.ConnectFederationBridgeResponse{Body: body}, nil
+		}
 		// The local account is owner-supplied bridge metadata. It is not the
 		// bootstrap principal's attributed actor, and must not grant it ordinary
 		// write authority elsewhere.

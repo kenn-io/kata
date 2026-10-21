@@ -22,15 +22,16 @@ var labelConstraintErrors = map[string]error{
 
 // AddLabel attaches a label without emitting an event.
 func (s *Store) AddLabel(ctx context.Context, issueID int64, label, author string) (db.IssueLabel, error) {
-	var issueLabel db.IssueLabel
-	err := s.RetryTransient(ctx, func() error {
+	var out db.IssueLabel
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := ensureAdoptionIssuesTx(ctx, tx, issueID); err != nil {
+			return err
+		}
 		var err error
-		issueLabel, err = fencedQueryRow(ctx, s, scanLabel,
-			`INSERT INTO issue_labels(issue_id, label, author) VALUES($1,$2,$3)
-			 RETURNING issue_id, label, author, created_at`, issueID, label, author)
+		out, err = scanLabel(tx.QueryRowContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES($1,$2,$3) RETURNING issue_id,label,author,created_at`, issueID, label, author))
 		return mapSQLError(err, labelConstraintErrors)
 	})
-	return issueLabel, err
+	return out, err
 }
 
 // AddLabelAndEvent attaches a label, emits its event, and touches the issue in
@@ -80,11 +81,13 @@ func (s *Store) AddLabelAndEvent(
 
 // RemoveLabel detaches a label without emitting an event.
 func (s *Store) RemoveLabel(ctx context.Context, issueID int64, label string) error {
-	return s.RetryTransient(ctx, func() error {
-		result, err := s.ExecContext(ctx,
-			`DELETE FROM issue_labels WHERE issue_id = $1 AND label = $2`, issueID, label)
+	return s.relayTx(ctx, func(tx *sql.Tx) error {
+		if err := ensureAdoptionIssuesTx(ctx, tx, issueID); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id=$1 AND label=$2`, issueID, label)
 		if err != nil {
-			return mapSQLError(err, nil)
+			return err
 		}
 		count, err := result.RowsAffected()
 		if err != nil {

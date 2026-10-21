@@ -266,14 +266,15 @@ func (f FederationBridgeBodyDirection) Validate() error {
 type FederationBridgeBodyStatus string
 
 const (
-	Connected FederationBridgeBodyStatus = "connected"
-	Ready     FederationBridgeBodyStatus = "ready"
+	Connected               FederationBridgeBodyStatus = "connected"
+	FederationBridgePending FederationBridgeBodyStatus = "pending"
+	Ready                   FederationBridgeBodyStatus = "ready"
 )
 
 // Validate checks if the FederationBridgeBodyStatus value is valid
 func (f FederationBridgeBodyStatus) Validate() error {
 	switch f {
-	case Connected, Ready:
+	case Connected, FederationBridgePending, Ready:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeBodyStatus value, got: %v", f))
@@ -317,6 +318,7 @@ func (f FederationBridgeStatusBodyDirection) Validate() error {
 type FederationBridgeStatusBodyState string
 
 const (
+	AdoptionPending                          FederationBridgeStatusBodyState = "adoption_pending"
 	EnrollmentPending                        FederationBridgeStatusBodyState = "enrollment_pending"
 	FederationBridgeStatusBodyStateConnected FederationBridgeStatusBodyState = "connected"
 	Offline                                  FederationBridgeStatusBodyState = "offline"
@@ -328,7 +330,7 @@ const (
 // Validate checks if the FederationBridgeStatusBodyState value is valid
 func (f FederationBridgeStatusBodyState) Validate() error {
 	switch f {
-	case EnrollmentPending, FederationBridgeStatusBodyStateConnected, Offline, Paused, Revoked, SigningRejected:
+	case AdoptionPending, EnrollmentPending, FederationBridgeStatusBodyStateConnected, Offline, Paused, Revoked, SigningRejected:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationBridgeStatusBodyState value, got: %v", f))

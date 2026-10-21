@@ -41,6 +41,9 @@ func (s *Store) enableProjectFederationTx(
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
+	if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if err == nil {
@@ -153,6 +156,9 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 			return err
 		}
 		output = db.LeaveFederationResult{ProjectID: project.ID, ProjectUID: project.UID}
+		if err := ensureAdoptionWritableTx(ctx, tx, projectID); err != nil {
+			return err
+		}
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 		if errors.Is(err, db.ErrNotFound) {
@@ -477,6 +483,10 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if err := s.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+		return err
+	}
+
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 	if err != nil {

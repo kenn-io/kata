@@ -12,4 +12,5 @@ export const FederationBridgeStatusBodyState = {
   offline: 'offline',
   revoked: 'revoked',
   signing_rejected: 'signing_rejected',
+  adoption_pending: 'adoption_pending',
 } as const

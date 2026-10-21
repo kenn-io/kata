@@ -115,6 +115,9 @@ func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDue
 	if len(diff) == 0 {
 		return commitDueNotificationNoop(tx, out)
 	}
+	if err := ensureAdoptionWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return out, err
+	}
 
 	newRevision := issue.Revision + 1
 	timestamp := nowTimestamp()

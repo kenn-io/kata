@@ -25,7 +25,7 @@ func federationBridgeCmd() *cobra.Command {
 
 func federationBridgeConnectCmd() *cobra.Command {
 	var catalog, hubProject, signingKeyID, signingKeyFile, signingKeyEnv string
-	var preflight, serveDownstream bool
+	var preflight, serveDownstream, adoptExisting bool
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: "connect one project bidirectionally using the hub's saved account",
@@ -36,7 +36,13 @@ without enrolling. The bridge is a leaf unless --serve-downstream also relays
 the project to this daemon's own spokes. A hub that requires request signing
 needs --signing-key-id with --signing-key-env or --signing-key-file; the daemon
 reads that source, and the hub operator registers the key for the bridge's
-enrollment ID. Retrying after a lost response reuses the pending enrollment.`,
+enrollment ID. Retrying after a lost response reuses the pending enrollment.
+
+--adopt-existing publishes a standalone local project to a new hub project
+with the same name, preserving its IDs and supported history. It uses the saved
+ordinary hub account. --preflight previews visibility and counts without saving
+anything. Source writes pause until the first relay synchronization drains.
+Retry the identical command after interruptions or a pending result.`,
 		Example: `  kata federation bridge connect --project example-project --hub-daemon hub --hub-project example-project --preflight --agent
   kata federation bridge connect --project example-project --hub-daemon hub --hub-project example-project --agent`,
 		Args: cobra.NoArgs,
@@ -58,7 +64,7 @@ enrollment ID. Retrying after a lost response reuses the pending enrollment.`,
 				return err
 			}
 			response, callErr := apiClient.ConnectFederationBridgeWithResponse(a.ctx, &generated.ConnectFederationBridgeRequestOptions{Body: &generated.ConnectFederationBridgeBody{
-				HubCatalog: catalog, HubProject: hubProject, ProjectName: projectName, Actor: &actor, Preflight: &preflight, ServeDownstream: &serveDownstream,
+				HubCatalog: catalog, HubProject: hubProject, ProjectName: projectName, Actor: &actor, Preflight: &preflight, ServeDownstream: &serveDownstream, AdoptExisting: &adoptExisting,
 				SigningKeyID: optionalString(signingKeyID), SigningKeyFile: optionalString(signingKeyFile), SigningKeyEnv: optionalString(signingKeyEnv),
 			}})
 			if err := externalCLITransportError(response, callErr); err != nil {
@@ -76,15 +82,28 @@ enrollment ID. Retrying after a lost response reuses the pending enrollment.`,
 				return err
 			}
 			if currentOutputMode() == outputAgent {
+				if adoptExisting {
+					return writeAgentOKLine(cmd.OutOrStdout(), "federation-bridge-connect", agentRowField("project", body.ProjectName), agentRowField("status", body.Status), agentRowField("phase", body.Phase), agentRowField("operation_uid", body.OperationUID), agentRowField("source_paused", fmt.Sprint(body.SourcePaused)), agentRowField("visibility", body.Visibility), agentOptionalRowField("warning", &body.Warning))
+				}
 				return writeAgentOKLine(cmd.OutOrStdout(), "federation-bridge-connect", agentRowField("project", body.ProjectName), agentRowField("status", body.Status), agentRowField("direction", body.Direction), agentRowField("hub", body.HubCatalog), agentRowField("upstream_account", body.UpstreamAccount), agentRowField("local_account", body.LocalAccount))
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "bridge %s: %s (%s)\nhub: %s — account: %s; local account: %s\n", textsafe.Line(body.ProjectName), textsafe.Line(body.Status), textsafe.Line(body.Direction), textsafe.Line(body.HubCatalog), textsafe.Line(body.UpstreamAccount), textsafe.Line(body.LocalAccount))
+			if err == nil && body.Visibility != "" {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "visibility: %s\n", textsafe.Line(body.Visibility))
+			}
+			if err == nil && body.Counts != nil {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "issues: %d; comments: %d; events: %d\n", body.Counts.Issues, body.Counts.Comments, body.Counts.Events)
+			}
+			if err == nil && body.Warning != "" {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), textsafe.Line(body.Warning))
+			}
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "hub-daemon", "", "configured hub daemon holding the upstream user credential")
 	cmd.Flags().StringVar(&hubProject, "hub-project", "", "existing project on the selected hub")
 	cmd.Flags().BoolVar(&preflight, "preflight", false, "preview the selected account and project without enrollment")
+	cmd.Flags().BoolVar(&adoptExisting, "adopt-existing", false, "publish the populated standalone source, pausing writes until initial relay sync drains")
 	cmd.Flags().BoolVar(&serveDownstream, "serve-downstream", false, "also relay the selected project to this daemon's own spokes")
 	cmd.Flags().StringVar(&signingKeyID, "signing-key-id", "", "public signing key ID the hub registers for this bridge")
 	cmd.Flags().StringVar(&signingKeyFile, "signing-key-file", "", "absolute path of an owner-only signing secret file on the daemon")

@@ -25,6 +25,15 @@ func registerFederationBridgeStatus(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		if native, ok := cfg.DB.(db.FederationAdoptionStore); ok {
+			op, err := native.FederationAdoption(ctx, project.ID)
+			if err == nil {
+				return &api.FederationBridgeStatusResponse{Body: api.FederationBridgeStatusBody{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, HubCatalog: op.CatalogName, HubURL: op.TargetOrigin, LocalAccount: op.LocalAccount, UpstreamAccount: op.Account, Direction: "bidirectional", State: "adoption_pending", CredentialStatus: "adoption_pending", OperationUID: op.OperationUID, Phase: op.Phase, SourcePaused: true}}, nil
+			}
+			if !errors.Is(err, db.ErrNotFound) {
+				return nil, internalAPIError(err)
+			}
+		}
 		binding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
 		if errors.Is(err, db.ErrNotFound) || (err == nil && binding.RelayConfig == nil) {
 			credential, found, credentialErr := cfg.federationCredentialStore().FederationCredential(

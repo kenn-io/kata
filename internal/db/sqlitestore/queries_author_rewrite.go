@@ -40,6 +40,9 @@ func (d *Store) rewriteAuthorIdentity(
 		return db.RewriteAuthorIdentityResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := ensureAdoptionAuthorRewriteTx(ctx, tx, p.ProjectID, from); err != nil {
+		return db.RewriteAuthorIdentityResult{}, err
+	}
 
 	project, err := scanProject(tx.QueryRowContext(ctx,
 		projectSelect+` WHERE id = ? AND deleted_at IS NULL`, p.ProjectID))

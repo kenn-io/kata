@@ -50,8 +50,36 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "FederationAdoptionFence", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionFence(t, store)
+		return nil
+	}},
+	{name: "FederationAdoptionCAS", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionCAS(t, store)
+		return nil
+	}},
+	{name: "FederationAdoptionFinalization", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionFinalization(t, store)
+		return nil
+	}},
+	{name: "FederationAdoptionEligibility", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionEligibility(t, store)
+		return nil
+	}},
+	{name: "FederationAdoptionResetRecovery", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionResetRecovery(t, store)
+		return nil
+	}},
+	{name: "FederationAdoptionRevocationRecovery", run: func(t *testing.T, store db.Storage) error {
+		RunFederationAdoptionRevocationRecovery(t, store)
+		return nil
+	}},
 	{name: "FederationPublicationCapacity", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		RunFederationPublicationCapacity(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublicationCapacityIncludesFederationEnable", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublicationCapacityIncludesFederationEnable(t, store, backend)
 		return nil
 	}},
 	{name: "FederationPublicationRollback", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {

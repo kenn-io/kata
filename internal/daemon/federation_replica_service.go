@@ -260,10 +260,29 @@ func PrepareFederationReplicaLeave(
 	return prepareFederationReplicaLeave(ctx, store, managed, project)
 }
 
+func rejectLeaveDuringFederationAdoption(ctx context.Context, store db.Storage, projectID int64) error {
+	native, ok := store.(db.FederationAdoptionStore)
+	if !ok {
+		return nil
+	}
+	_, err := native.FederationAdoption(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read relay adoption before federation leave: %w", err)
+	}
+	return db.ErrFederationAdoptionPaused
+}
+
 func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (PrepareFederationReplicaLeaveResult, error) {
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()
+	if err := rejectLeaveDuringFederationAdoption(ctx, store, project.ID); err != nil {
+		ensureFederationReplicaMu.Unlock()
+		return PrepareFederationReplicaLeaveResult{}, err
+	}
 	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
 		ensureFederationReplicaMu.Unlock()

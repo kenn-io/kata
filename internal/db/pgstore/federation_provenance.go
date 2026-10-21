@@ -60,6 +60,9 @@ func (d *Store) PinRootAuthority(ctx context.Context, pin db.RootKeyPin) error {
 			}
 			return err
 		}
+		if err := d.checkAdoptionSyncTx(ctx, tx, projectID); err != nil {
+			return err
+		}
 		current, err := rootPinTx(ctx, tx, pin.ProjectUID, "")
 		if err == nil {
 			if current.AuthorityUID == pin.AuthorityUID && current.KeyID == pin.KeyID {

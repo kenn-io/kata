@@ -28,6 +28,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err := lockProjectAccessExclusive(ctx, tx); err != nil {
 			return err
 		}
+		if err := lockAdoptionLifecycleTx(ctx, tx, params.SourceProjectID, params.TargetProjectID); err != nil {
+			return err
+		}
 		firstID, secondID := params.SourceProjectID, params.TargetProjectID
 		if firstID > secondID {
 			firstID, secondID = secondID, firstID
@@ -38,6 +41,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		}
 		second, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, secondID))
 		if err != nil {
+			return err
+		}
+		if err := ensureAdoptionProjectsTx(ctx, tx, firstID, secondID); err != nil {
 			return err
 		}
 		source, target := first, second

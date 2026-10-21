@@ -110,6 +110,9 @@ func (s *Store) ReconcileDueNotification(ctx context.Context, input db.Reconcile
 		if len(diff) == 0 {
 			return nil
 		}
+		if err := ensureAdoptionWritableTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
 		updatedAt := mutationTimestamp()
 		newRevision := issue.Revision + 1
 		if _, err := tx.ExecContext(ctx, `UPDATE issues
