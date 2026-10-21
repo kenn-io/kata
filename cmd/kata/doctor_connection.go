@@ -24,7 +24,7 @@ func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedD
 	}
 	namedDaemon := flags.Daemon
 	if !s.workspaceValid && namedDaemon == "" && os.Getenv("KATA_SERVER") == "" {
-		cfg, err := config.ReadConfigSections("daemon")
+		cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 		if err != nil {
 			return client.ResolvedDaemon{}, err
 		}

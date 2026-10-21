@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/config"
 )
 
 // globalFlags carries the universal flags applied on every command. Sel is the
@@ -76,7 +75,7 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
-			return config.CheckConfigFile(cmd.ErrOrStderr())
+			return nil
 		},
 		// Cobra runs this only after the command's RunE succeeded.
 		PersistentPostRunE: func(cmd *cobra.Command, _ []string) error {

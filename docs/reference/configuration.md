@@ -11,32 +11,12 @@ bindings, local per-machine overrides, and daemon config.
 
 ## Validation by command
 
-Every command parses the whole `<KATA_HOME>/config.toml`. Invalid TOML and
-unknown keys fail before the command runs. The separately parsed `[display]`
-section retains its renderer-specific checks.
+TUI preferences and connection, federation spoke authentication and
+`kata federation embedding-recipe`, and doctor's daemon lookup read only the
+configuration sections they use.
 
-Semantic checks apply to the settings each command uses. Client commands,
-including the TUI and `kata ui`, do not require valid daemon browser, proxy, backup,
-search-provider, or integration settings. `kata export`, `kata import`, and
-storage operations validate their storage settings. Invalid unused sections
-produce a warning on stderr naming the section. They do not replace configured
-values with defaults. Run `kata doctor` for full configuration diagnostics;
-`kata daemon start` validates all daemon sections before serving.
-
-Starting or replacing a local-profile daemon requires full validation of that
-profile's startup configuration. Invalid startup settings leave an existing
-daemon running.
-
-Environment overrides belong to the process receiving them. For example,
-`KATA_TRUST_PRIVATE_NETWORK=1` on a daemon can authorize a non-loopback HTTP
-`[web].public_origin` even when an export sidecar receives only `KATA_HOME`.
-The sidecar warns about `[web]` and exports normally. Likewise, a daemon-only
-`KATA_SEARCH_EMBEDDINGS_MODEL` can complete a file's partial embedding settings
-without requiring unrelated clients to receive that variable.
-
-`kata mcp serve` is a daemon client. Its HTTP mode still checks its own
-`--http`, token, and private-network trust options before starting; it does not
-serve the daemon's `[web]` configuration.
+`kata daemon start` and `kata doctor`'s configuration check validate the full
+configuration.
 
 ## Closing-session transcripts
 

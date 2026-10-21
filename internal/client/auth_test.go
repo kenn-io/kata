@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -541,26 +540,6 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, "Bearer explicit-token", got)
-}
-
-func TestNewHTTPClientWithBearerKeepsPolicyWhenLocalCredentialUnavailable(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
-	t.Setenv("KATA_AUTH_TOKEN_FILE", "")
-	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
-	t.Setenv("KATA_ALLOW_INSECURE", "")
-	t.Chdir(t.TempDir())
-	require.NoError(t, writeRawConfig(home, fmt.Sprintf("[auth]\ntrust_private_network = true\ntoken_file = %q\n", filepath.Join(home, "missing-token"))))
-
-	auth, err := config.ReadAuthConfig()
-	require.ErrorIs(t, err, config.ErrCredentialSource)
-	assert.True(t, auth.TrustPrivateNetwork)
-	// Construction validates the private target without making a network call.
-	c, err := NewHTTPClientWithBearer(t.Context(), "http://10.20.30.40:7373", "explicit-token", Opts{})
-	require.NoError(t, err)
-	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClientUsesActiveDaemonTargetToken(t *testing.T) {

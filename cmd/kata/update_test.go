@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -393,29 +392,6 @@ func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
 	assert.False(t, fake.checks[0].Force)
 	assert.True(t, fake.checks[1].Force)
 	assert.Equal(t, []*selfupdate.Info{second}, fake.installed)
-}
-
-func TestUpdateInstall_UsesPreInstallNamespace(t *testing.T) {
-	resetFlags(t)
-	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
-	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
-		CurrentVersion: "v0.4.0",
-		LatestVersion:  "v0.5.0",
-		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
-	}}}
-	stubUpdateClient(t, fake)
-	home := setupKataEnv(t)
-	fake.install = func() error {
-		// A config edit during installation must not prevent restarting the
-		// original namespace, or turn a stopped daemon into an update failure.
-		return os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600)
-	}
-
-	stdout, stderr, err := executeRootCapture(t, t.Context(), "update", "--yes")
-
-	require.NoError(t, err, "%s", stderr)
-	assert.Equal(t, "installed kata v0.5.0\n", stdout)
-	assert.NotContains(t, stderr, "restarted")
 }
 
 func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) {

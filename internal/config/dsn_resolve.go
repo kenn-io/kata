@@ -22,9 +22,9 @@ import (
 // [storage].dsn would silently redirect long-running scripts to a different
 // DB the next time they re-resolved.
 //
-// The TOML branch parses the whole config file, so syntax errors and unknown
-// keys remain fatal. Semantic validation of unrelated sections does not block
-// storage resolution.
+// The TOML branch reads only the [storage] section via readStorageConfig so
+// a parse error in an unrelated section (auth, listen, close, ...) does not
+// block legacy KATA_DB callers that never cared about the daemon config.
 //
 // ctx is accepted for symmetry with other resolver-style helpers and to let
 // future implementations short-circuit a slow read; the current body does

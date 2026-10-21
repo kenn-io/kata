@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -380,19 +379,49 @@ func ReadDaemonConfigForHome(home string) (*DaemonConfig, error) {
 // unrelated daemon settings because callers may use an origin-scoped
 // credential from the selected catalog entry.
 func ReadDaemonCatalogAndAuthPolicy() (*DaemonConfig, error) {
-	cfg, err := ReadConfigSections("daemon")
+	path, err := DaemonConfigPath()
 	if err != nil {
 		return nil, err
 	}
-	clearAuthCredential(&cfg.Auth)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	if errors.Is(err, os.ErrNotExist) {
+		return &DaemonConfig{Auth: AuthConfig{TrustPrivateNetwork: EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")}}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file struct {
+		ActiveDaemon string                `toml:"active_daemon"`
+		Auth         AuthConfig            `toml:"auth"`
+		Daemons      []CatalogDaemonConfig `toml:"daemon"`
+	}
+	meta, err := toml.Decode(string(data), &file)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var unknown []string
+	for _, key := range meta.Undecoded() {
+		name := key.String()
+		if strings.HasPrefix(name, "auth.") || strings.HasPrefix(name, "daemon.") {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(unknown, ", "))
+	}
+	cfg := &DaemonConfig{
+		ActiveDaemon: file.ActiveDaemon,
+		Auth:         AuthConfig{TrustPrivateNetwork: file.Auth.TrustPrivateNetwork || EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")},
+		Daemons:      file.Daemons,
+	}
+	trimDaemonCatalog(cfg)
+	if err := normalizeDaemonCatalog(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
 func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
-	return readConfigSections(path, mergeEnv, true, []string{"*"}, nil)
-}
-
-func readConfigSections(path string, mergeEnv, credentials bool, sections []string, warnings io.Writer) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
@@ -435,12 +464,87 @@ func readConfigSections(path string, mergeEnv, credentials bool, sections []stri
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	initializeDeploymentSources(&cfg)
-	var deploymentErr error
 	if mergeEnv {
-		applyDaemonConfigEnv(&cfg, credentials)
-		deploymentErr = applyDeploymentEnv(&cfg)
+		applyDaemonConfigEnv(&cfg, true)
+		if err := applyDeploymentEnv(&cfg); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateConfigSections(&cfg, filepath.Dir(path), credentials, sections, warnings, deploymentErr); err != nil {
+	if err := resolveAuthCredential(&cfg.Auth); err != nil {
+		return nil, err
+	}
+	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
+		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")
+	}
+	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
+		return nil, err
+	}
+	cfg.Backup.Dir = strings.TrimSpace(cfg.Backup.Dir)
+	if _, _, err := cfg.Backup.Durations(); err != nil {
+		return nil, err
+	}
+	if cfg.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+			return nil, fmt.Errorf("timezone %q is not a valid IANA timezone: %w", cfg.Timezone, err)
+		}
+	}
+	if err := normalizeWebConfig(&cfg.Web, cfg.Auth.TrustPrivateNetwork); err != nil {
+		return nil, err
+	}
+	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {
+		return nil, err
+	}
+	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+		return nil, err
+	}
+	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
+		return nil, err
+	}
+	notionSync, err := NormalizeNotionSyncConfig(cfg.NotionSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.NotionSync = notionSync
+	planeSync, err := NormalizePlaneSyncConfig(cfg.PlaneSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.PlaneSync = planeSync
+	linearSync, err := NormalizeLinearSyncConfig(cfg.LinearSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LinearSync = linearSync
+	twentySync, err := NormalizeTwentySyncConfig(cfg.TwentySync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TwentySync = twentySync
+	todoistSync, err := NormalizeTodoistSyncConfig(cfg.TodoistSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TodoistSync = todoistSync
+	tickTickSync, err := NormalizeTickTickSyncConfig(cfg.TickTickSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TickTickSync = tickTickSync
+	connectors, err := NormalizeConnectorConfigs(cfg.Connectors)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Connectors = connectors
+	if err := normalizeDaemonCatalog(&cfg); err != nil {
+		return nil, err
+	}
+	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
@@ -484,6 +588,81 @@ func ReadDisplayConfig() (DisplayConfig, error) {
 		return DisplayConfig{}, fmt.Errorf("display.markdown_renderer executable must not be empty")
 	}
 	return file.Display, nil
+}
+
+// ReadTUIConfig reads only the client preferences in [tui].
+func ReadTUIConfig() (TUIConfig, error) {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return TUIConfig{}, err
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	if errors.Is(err, os.ErrNotExist) {
+		return TUIConfig{}, nil
+	}
+	if err != nil {
+		return TUIConfig{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	var file struct {
+		TUI TUIConfig `toml:"tui"`
+	}
+	meta, err := toml.Decode(string(data), &file)
+	if err != nil {
+		return TUIConfig{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var unknown []string
+	for _, key := range meta.Undecoded() {
+		if len(key) > 0 && key[0] == "tui" {
+			unknown = append(unknown, key.String())
+		}
+	}
+	if len(unknown) > 0 {
+		return TUIConfig{}, fmt.Errorf("parse %s: unknown tui key(s): %s", path, strings.Join(unknown, ", "))
+	}
+	return file.TUI, nil
+}
+
+// ReadSearchConfig reads [search] with the daemon's embedding environment
+// overrides and validation. Unrelated sections remain opaque.
+func ReadSearchConfig() (SearchConfig, error) {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return SearchConfig{}, err
+	}
+	var file struct {
+		Search SearchConfig `toml:"search"`
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	switch {
+	case err == nil:
+		meta, err := toml.Decode(string(data), &file)
+		if err != nil {
+			return SearchConfig{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		var unknown []string
+		for _, key := range meta.Undecoded() {
+			if len(key) > 0 && key[0] == "search" {
+				unknown = append(unknown, key.String())
+			}
+		}
+		if len(unknown) > 0 {
+			return SearchConfig{}, fmt.Errorf("parse %s: unknown search key(s): %s", path, strings.Join(unknown, ", "))
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// Environment-only embedding configuration still applies.
+	default:
+		return SearchConfig{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	cfg := DaemonConfig{Search: file.Search}
+	trimSearchEmbeddings(&cfg)
+	initializeDeploymentSources(&cfg)
+	if err := applyDeploymentEnv(&cfg); err != nil {
+		return SearchConfig{}, err
+	}
+	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+		return SearchConfig{}, err
+	}
+	return cfg.Search, nil
 }
 
 func isDisplayConfigKey(key toml.Key) bool {
@@ -572,17 +751,42 @@ func readAuthConfig(resolveCredential bool) (AuthConfig, error) {
 	if err != nil {
 		return AuthConfig{}, err
 	}
-	cfg, err := readConfigSections(path, true, resolveCredential, nil, nil)
-	if err != nil {
-		return AuthConfig{}, err
+	var cfg DaemonConfig
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	switch {
+	case err == nil:
+		meta, err := toml.Decode(string(data), &cfg)
+		if err != nil {
+			return AuthConfig{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if u := meta.Undecoded(); len(u) > 0 {
+			keys := make([]string, 0, len(u))
+			for _, k := range u {
+				if !isDisplayConfigKey(k) {
+					keys = append(keys, k.String())
+				}
+			}
+			if len(keys) > 0 {
+				return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			}
+		}
+		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
+		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
+	case errors.Is(err, os.ErrNotExist):
+		// Absent file: env overlays below still apply.
+	default:
+		return AuthConfig{}, fmt.Errorf("read %s: %w", path, err)
 	}
+	applyDaemonConfigEnv(&cfg, resolveCredential)
 	if resolveCredential {
-		// Explicit-token clients still need parsed policy when this source fails.
 		if err := resolveAuthCredential(&cfg.Auth); err != nil {
 			return cfg.Auth, err
 		}
 	} else {
 		clearAuthCredential(&cfg.Auth)
+	}
+	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
+		return AuthConfig{}, err
 	}
 	return cfg.Auth, nil
 }
