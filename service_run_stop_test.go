@@ -2,6 +2,7 @@ package kata
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -149,6 +150,16 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	assert.NoError(t, worker.result(errors.Join(
 		context.Canceled, fmt.Errorf("stopping: %w", context.Canceled)), context.Canceled))
 	assert.NoError(t, worker.result(context.DeadlineExceeded, context.DeadlineExceeded))
+	assert.NoError(t, worker.result(sql.ErrTxDone, context.Canceled))
+	assert.NoError(t, worker.result(
+		fmt.Errorf("commit: %w", sql.ErrTxDone), context.DeadlineExceeded))
+	assert.NoError(t, worker.result(errors.Join(
+		sql.ErrTxDone,
+		fmt.Errorf("list due notification issues: %w", context.Canceled),
+		context.Canceled,
+	), context.Canceled))
+
+	require.ErrorIs(t, worker.result(sql.ErrTxDone, nil), sql.ErrTxDone)
 
 	failure := errors.New("boom")
 	err := worker.result(failure, nil)
@@ -158,6 +169,10 @@ func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	joinedErr := worker.result(errors.Join(context.DeadlineExceeded, failure), context.DeadlineExceeded)
 	require.ErrorIs(t, joinedErr, failure)
 	assert.ErrorContains(t, joinedErr, "github-sync worker")
+
+	rollbackErr := worker.result(errors.Join(sql.ErrTxDone, context.Canceled, failure), context.Canceled)
+	require.ErrorIs(t, rollbackErr, failure)
+	assert.ErrorContains(t, rollbackErr, "github-sync worker")
 }
 
 // TestFenceRecorderPreservesStopPriorityAcrossInternalUnwind pins the boundary
