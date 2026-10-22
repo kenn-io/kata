@@ -24,8 +24,7 @@ func TestMain(m *testing.M) {
 	}
 	flag.Parse()
 	if runtime.GOOS == "windows" {
-		// The PR job calls test.yml@main, so a branch-local workflow timeout does
-		// not affect this package. Allow the Windows daemon lifecycle tests 15m.
+		// Allow the Windows daemon lifecycle tests 15m, including local runs.
 		if timeout := flag.Lookup("test.timeout"); timeout != nil && timeout.Value.String() == "10m0s" {
 			if err := flag.Set("test.timeout", "15m"); err != nil {
 				fmt.Fprintf(os.Stderr, "extend Windows test timeout: %v\n", err)
