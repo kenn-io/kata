@@ -85,14 +85,10 @@ export async function uploadAttachment(
 ): Promise<{ data: unknown; status: number; headers: Headers }> {
   const query = new URLSearchParams({ name: file.name })
   if (actor) query.set('actor', actor)
-  const response = await generatedFetch(
-    applicationURL(
-      `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments?${query}`,
-    ),
+  return orvalFetch(
+    `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments?${query}`,
     { method: 'POST', body: file, ...(headers ? { headers } : {}) },
   )
-  const data: unknown = await response.json()
-  return { data, status: response.status, headers: response.headers }
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

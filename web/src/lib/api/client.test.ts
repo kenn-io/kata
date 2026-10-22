@@ -132,6 +132,20 @@ it('uploads attachments with a filename, raw file body, and browser credentials'
   }
 })
 
+it.each([
+  [413, 'Request too large'],
+  [502, ''],
+])('returns upload status %i for a non-JSON response', async (status, body) => {
+  setGeneratedFetch(async () => new Response(body, { status }))
+  try {
+    const result = await uploadAttachment(7, 'abc4', new File(['image'], 'screen.png'), '')
+    expect(result.status).toBe(status)
+    expect(result.data).toBe(body || undefined)
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
 it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {
   const transport = vi.fn(async () => new Response('bytes'))
   setGeneratedFetch(transport as typeof fetch)
