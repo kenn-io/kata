@@ -108,6 +108,7 @@ func TestAttachmentUploadRechecksFederatedClaim(t *testing.T) {
 	defer resume()
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.Docbank = docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+		cfg.DocbankFolder = "/kata"
 	})
 	p, iss, _ := setupClaimGateProject(t, env, true)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
@@ -162,6 +163,7 @@ func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 		want, code := 503, "docbank_not_configured"
 		if configured {
 			cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+			cfg.DocbankFolder = "/kata"
 			want = 409
 			code = "federated_read_only"
 		}
@@ -280,6 +282,7 @@ func TestAttachmentScopeBeforeOutbound(t *testing.T) {
 	f := docbanktest.New(t)
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(), func(cfg *daemon.ServerConfig) {
 		cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+		cfg.DocbankFolder = "/kata"
 	})
 	p, root := seedProjectAndIssue(t, env)
 	hidden := createScopedHTTPTestIssue(t, env, p.ID, "Hidden", nil)
@@ -335,7 +338,7 @@ func TestAttachmentInvalidUploadNameBeforeBody(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Header.Set("Content-Type", "application/octet-stream")
 	res := httptest.NewRecorder()
-	daemon.NewServer(daemon.ServerConfig{DB: env.DB, Docbank: docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })}).Handler().ServeHTTP(res, req)
+	daemon.NewServer(daemon.ServerConfig{DB: env.DB, Docbank: docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil }), DocbankFolder: "/kata"}).Handler().ServeHTTP(res, req)
 	require.Equal(t, 400, res.Code, res.Body.String())
 	require.Contains(t, res.Body.String(), "attachment_invalid")
 	require.Zero(t, body.reads)

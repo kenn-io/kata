@@ -87,11 +87,7 @@ func attachmentFolder(ctx context.Context, cfg ServerConfig, projectID int64) (i
 	if err != nil {
 		return 0, internalAPIError(err)
 	}
-	folder := cfg.DocbankFolder
-	if folder == "" {
-		folder = "/kata"
-	}
-	parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(folder, project.UID))
+	parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, project.UID))
 	if err != nil {
 		return 0, docbankError(err, docbankUploadErrors)
 	}
