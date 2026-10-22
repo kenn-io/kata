@@ -65,7 +65,7 @@ These checks do not replace a session in each agent's full application.
 
 ### Browser UI development
 
-The web toolchain is pinned to Node `26.5.1` and Bun `1.3.14`; use those exact
+The web toolchain is pinned to Node `26.12.1` and Bun `1.4.4`; use those exact
 versions so the frozen lockfile and generated output match CI.
 
 Install the pinned web dependencies, then start the current Go checkout and

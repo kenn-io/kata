@@ -1,12 +1,13 @@
 {
   "private": true,
   "workspaces": ["web", "packages/*"],
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "devDependencies": {
     "vite-plus": "1.2.0"
   },
   "overrides": {
     "devalue": "5.9.4",
+    "dompurify": "3.4.17",
     "fast-uri": "3.1.8",
     "js-yaml": "4.3.2",
     "markdown-it": "14.3.3",
