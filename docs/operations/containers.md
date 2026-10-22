@@ -68,6 +68,7 @@ with `KATA_MCP_ACTOR=gateway-agent`, and mount a separate bearer file at
 `KATA_MCP_TOKEN_FILE=/run/secrets/mcp-token`. The same secret-file rules apply.
 Give the gateway the proxied `/mcp` URL and this MCP bearer; see the
 [MCP reference](../reference/mcp.md).
+Add the gateway's Host, for example `kata:7777`, to `KATA_WEB_ALLOWED_HOSTS` as described in [`[web].allowed_hosts`](../reference/configuration.md#daemon-config).
 
 Semantic search needs no seeded TOML. Set
 `KATA_SEARCH_EMBEDDINGS_BASE_URL=https://embedding.example/v1`,

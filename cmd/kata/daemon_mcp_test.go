@@ -94,6 +94,16 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			}
 			callCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 			defer stop()
+			for _, authorization := range []string{"", "Bearer example-daemon-token"} {
+				request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, nil)
+				require.NoError(t, err)
+				request.Host = tt.host
+				request.Header.Set("Authorization", authorization)
+				response, err := http.DefaultClient.Do(request)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, http.StatusUnauthorized, response.StatusCode, "Authorization: %q", authorization)
+			}
 			session, err := newMCPHTTPTestClient().Connect(callCtx, newAuthenticatedMCPHTTPTestTransport(endpoint, tt.host), nil)
 			require.NoError(t, err)
 			defer func() { _ = session.Close() }()
