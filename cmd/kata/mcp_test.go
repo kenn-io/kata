@@ -151,7 +151,11 @@ func newAuthenticatedMCPHTTPTestTransport(endpoint string, host ...string) *sdkm
 		}
 		return http.DefaultTransport.RoundTrip(clone)
 	})}
-	return &sdkmcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: httpClient, DisableStandaloneSSE: true}
+	return &sdkmcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		HTTPClient:           httpClient,
+		DisableStandaloneSSE: true,
+	}
 }
 
 func TestMCPServeHTTPServesStreamableEndpointAndHealth(t *testing.T) {

@@ -305,9 +305,10 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 		name      string
 		notionEnv string
 		planeEnv  string
+		mcpEnv    string
 	}{
-		{name: "defaults"},
-		{name: "custom", notionEnv: "EXAMPLE_NOTION_TOKEN", planeEnv: "EXAMPLE_PLANE_TOKEN"},
+		{name: "defaults", mcpEnv: "EXAMPLE_MCP_TOKEN"},
+		{name: "custom", notionEnv: "EXAMPLE_NOTION_TOKEN", planeEnv: "EXAMPLE_PLANE_TOKEN", mcpEnv: "CUSTOM_MCP_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			notionSync, err := config.NormalizeNotionSyncConfig(config.NotionSyncConfig{TokenEnv: tc.notionEnv})
@@ -316,30 +317,17 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 			require.NoError(t, err)
 			t.Setenv(notionSync.TokenEnv, "example-notion-token")
 			t.Setenv(planeSync.TokenEnv, "example-plane-token")
-			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{NotionSync: notionSync, PlaneSync: planeSync}}
+			t.Setenv(tc.mcpEnv, "example-mcp-token")
+			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{NotionSync: notionSync, PlaneSync: planeSync, MCP: config.MCPConfig{TokenEnv: tc.mcpEnv}}}
 
 			env, err := config.LocalProfileEnvironment(profile, true)
 
 			require.NoError(t, err)
 			assert.Contains(t, env, notionSync.TokenEnv+"=example-notion-token")
 			assert.Contains(t, env, planeSync.TokenEnv+"=example-plane-token")
+			assert.Contains(t, env, tc.mcpEnv+"=example-mcp-token")
 		})
 	}
-}
-
-func TestLocalProfileEnvironmentIncludesMCPTokenEnv(t *testing.T) {
-	t.Setenv("EXAMPLE_MCP_TOKEN", "example-mcp-token")
-	home := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[mcp]\nenabled = true\ntoken_env = 'EXAMPLE_MCP_TOKEN'\n"), 0o600))
-	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{
-		Name: "example-profile", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01",
-	})
-	require.NoError(t, err)
-
-	env, err := config.LocalProfileEnvironment(profile, true)
-
-	require.NoError(t, err)
-	assert.Contains(t, env, "EXAMPLE_MCP_TOKEN=example-mcp-token")
 }
 
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
