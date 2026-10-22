@@ -27,18 +27,24 @@ func TestEveryRegisteredOperationHasHostPolicy(t *testing.T) {
 			if operation == nil {
 				continue
 			}
-			policy, ok := hostOperationPolicy(operation.OperationID)
-			if !ok {
-				t.Errorf("operation %q has no host policy", operation.OperationID)
-				continue
-			}
-			if policy.Kind == "" || policy.Capability == "" {
-				t.Errorf("operation %q has incomplete host policy: %+v", operation.OperationID, policy)
-			}
 			registered[operation.OperationID] = struct{}{}
 		}
 	}
+	// Hidden operations are omitted from the OpenAPI document.
 	registered["openAPI"] = struct{}{}
+	registered["addAttachment"] = struct{}{}
+	registered["attachmentContent"] = struct{}{}
+
+	for operationID := range registered {
+		policy, ok := hostOperationPolicy(operationID)
+		if !ok {
+			t.Errorf("operation %q has no host policy", operationID)
+			continue
+		}
+		if policy.Kind == "" || policy.Capability == "" {
+			t.Errorf("operation %q has incomplete host policy: %+v", operationID, policy)
+		}
+	}
 
 	var stale []string
 	for operationID := range hostOperationPolicies {
