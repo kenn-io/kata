@@ -398,7 +398,7 @@ The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults
 [mcp]
 enabled = true
 actor = "gateway-agent" # optional; defaults to the normal actor
-projects = ["alpha"]  # optional; defaults to all projects
+projects = ["alpha"]  # optional; defaults to all projects; missing or archived names stop daemon startup
 token_file = "/run/secrets/mcp-token"
 # Alternatively: token_env = "KATA_MCP_TOKEN"
 ```

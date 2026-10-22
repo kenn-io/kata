@@ -32,11 +32,12 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 	transport.Proxy = nil
 	t.Cleanup(transport.CloseIdleConnections)
 	httpClient := &http.Client{Transport: transport}
-	for _, tt := range []struct{ name, listen, web, host string }{
-		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
-		{"expanded IPv6", "[0:0:0:0:0:0:0:1]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
-		{"expanded IPv6 wildcard", "[0:0:0:0:0:0:0:0]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
-		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", ""},
+	for _, tt := range []struct{ name, listen, web, host, contentType string }{
+		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "application/json"},
+		{"mixed-case JSON", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "Application/JSON"},
+		{"expanded IPv6", "[0:0:0:0:0:0:0:1]:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "application/json"},
+		{"expanded IPv6 wildcard", "[0:0:0:0:0:0:0:0]:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "application/json"},
+		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", "", "application/json"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.listen == "" && runtime.GOOS == "windows" {
@@ -114,6 +115,9 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				clone := request.Clone(request.Context())
 				clone.Host = tt.host
 				clone.Header.Set("Authorization", "Bearer test-mcp-token")
+				if clone.Method == http.MethodPost {
+					clone.Header.Set("Content-Type", tt.contentType)
+				}
 				return transport.RoundTrip(clone)
 			})
 			session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
@@ -230,7 +234,7 @@ func TestDaemonMCPProjectScope(t *testing.T) {
 		{name: "allowlist", projects: `["alpha"]`, wantProjects: []string{"alpha"}},
 		{name: "trimmed", projects: `[" alpha "]`, wantProjects: []string{"alpha"}},
 		{name: "unknown", projects: `["missing"]`, wantError: `[mcp] projects: project "missing" was not found`},
-		{name: "duplicate", projects: `["alpha", " alpha "]`, wantError: `[mcp] projects: duplicate project "alpha"`},
+		{name: "duplicate", projects: `["alpha", " alpha "]`, wantError: `[mcp] projects: duplicate MCP project "alpha"`},
 		{name: "empty", projects: `[" "]`, wantError: `[mcp] projects: project name must not be empty`},
 		{name: "archived", projects: `["alpha"]`, archiveAlpha: true, wantError: `[mcp] projects: project "alpha" was not found`},
 	} {

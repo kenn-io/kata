@@ -376,7 +376,7 @@ func NewServer(cfg ServerConfig) *Server {
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
 	if cfg.MCPHandler != nil {
-		mux.Handle("/mcp", cfg.MCPHandler)
+		mux.Handle(mcpPath, cfg.MCPHandler)
 	}
 	if cfg.WebHandler != nil {
 		mux.Handle("/", cfg.WebHandler)
@@ -680,7 +680,7 @@ func withCSRFGuards(next http.Handler) http.Handler {
 
 func requireJSONMutation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isMutation(r.Method) && r.ContentLength != 0 {
+		if r.URL.Path != mcpPath && isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") {
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",

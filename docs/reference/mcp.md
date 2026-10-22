@@ -100,7 +100,7 @@ the probe returns only readiness text and disables caching.
 
 For a remote gateway, enable the daemon's [`[mcp]` section](configuration.md#daemon-config) and restart.
 Route `/mcp` through the hub's HTTPS reverse proxy to the daemon. Give the gateway `https://daemon.example/mcp` and the separate MCP bearer.
-The mount serves all projects unless `[mcp] projects` lists names; names resolve to UIDs at startup, so renames don't widen scope.
+The mount serves all projects unless `[mcp] projects` lists names; names resolve to UIDs at startup, so renames don't widen scope. Missing or archived listed projects stop daemon startup.
 An allowlist limits tools to those projects and rejects project administration operations, including purge. Without an allowlist, the mount includes future projects and permits project administration.
 Treat an unrestricted MCP bearer as equivalent to the daemon's `[auth]` token.
 The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record.

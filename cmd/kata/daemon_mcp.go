@@ -78,7 +78,7 @@ func daemonMCPScope(ctx context.Context, store db.Storage, names []string) (*mcp
 	}
 	scope, err := mcpserver.NewAllowlistScope(projects)
 	if err != nil {
-		return nil, fmt.Errorf("[mcp] projects: %s", strings.Replace(err.Error(), "MCP project", "project", 1))
+		return nil, fmt.Errorf("[mcp] projects: %w", err)
 	}
 	return scope, nil
 }

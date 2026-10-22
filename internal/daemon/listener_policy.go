@@ -12,6 +12,8 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
+const mcpPath = "/mcp"
+
 // ListenerKind identifies which trust boundary accepted a request.
 type ListenerKind string
 
@@ -72,7 +74,7 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				api.WriteEnvelope(w, http.StatusBadRequest, "host_invalid", "Host header does not match listener authority")
 				return
 			}
-			if (policy.Kind == ListenerBrowser && r.URL.Path != "/mcp" && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
+			if (policy.Kind == ListenerBrowser && r.URL.Path != mcpPath && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
 				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return
@@ -179,7 +181,7 @@ func isBrowserRequest(r *http.Request) bool {
 			return true
 		}
 	}
-	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml" && r.URL.Path != "/mcp"
+	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml" && r.URL.Path != mcpPath
 }
 
 // ordinaryAPIBearerRequest classifies CLI, TUI and federation traffic, leaving
