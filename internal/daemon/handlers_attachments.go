@@ -60,9 +60,9 @@ func docbankError(err error) error {
 	return attachmentError(502, "docbank_unreachable")
 }
 
-// The nine extension entries work even on hosts without a MIME database.
+// The ten extension entries work even on hosts without a MIME database.
 var attachmentTypes = map[string]string{
-	".png": "image/png", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
 	".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime", ".webm": "video/webm", ".ogv": "video/ogg",
 }
 
@@ -118,8 +118,6 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
 		if typ := attachmentTypes[strings.ToLower(path.Ext(e.Name))]; typ != "" {
-			e.MediaType = typ
-		} else if typ := mime.TypeByExtension(strings.ToLower(path.Ext(e.Name))); inlineAttachmentType(typ) {
 			e.MediaType = typ
 		}
 		file, err := os.CreateTemp("", "kata-attachment-*")
