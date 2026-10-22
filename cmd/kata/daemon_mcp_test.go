@@ -66,7 +66,9 @@ token_env = "KATA_MCP_TEST_TOKEN"
 					if err != nil && !errors.Is(err, context.Canceled) {
 						t.Errorf("daemon did not stop cleanly: %v", err)
 					}
-				case <-time.After(3 * time.Second):
+				// HTTP shutdown gives unused new connections over five seconds to idle.
+				// Match the full-daemon federation ingress test's cleanup budget.
+				case <-time.After(15 * time.Second):
 					t.Error("daemon did not stop after context cancellation")
 				}
 			})
