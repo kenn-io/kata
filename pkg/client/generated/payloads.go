@@ -2,6 +2,10 @@
 
 package generated
 
+import (
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+)
+
 type ReconcileExternalRootByKeyBody = ReconcileExternalRootByKeyRequestBody
 
 type MapConnectorFieldBody = MapConnectorFieldRequestBody
@@ -97,6 +101,8 @@ type ReopenIssueBody = ActionRequestBody
 type RestoreIssueBody = RestoreRequestBody
 
 type UnassignIssueBody = UnassignRequestBody
+
+type AddAttachmentBody = runtime.File
 
 type BindExternalRootBody = BindExternalRootRequestBody
 

@@ -93,6 +93,27 @@ func (a ActionResponse) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type AddAttachmentResponseBody struct {
+	Attachment   Attachment `json:"attachment"`
+	AttachmentID string     `json:"attachment_id" validate:"required"`
+}
+
+func (a AddAttachmentResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(a.Attachment).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Attachment", err)
+		}
+	}
+	if err := typesValidator.Var(a.AttachmentID, "required"); err != nil {
+		errors = errors.Append("AttachmentID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type AddLabelRequestBody struct {
 	Actor *string `json:"actor,omitempty"`
 	Label string  `json:"label" validate:"required"`
@@ -173,6 +194,17 @@ type AssignRequestBody struct {
 }
 
 func (a AssignRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+}
+
+type Attachment struct {
+	DocbankVersion string `json:"docbank_version" validate:"required"`
+	MediaType      string `json:"media_type" validate:"required"`
+	Name           string `json:"name" validate:"required"`
+	Size           int64  `json:"size"`
+}
+
+func (a Attachment) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -97,6 +98,17 @@ func attachmentFolder(ctx context.Context, cfg ServerConfig, projectID int64) (i
 	return parent, nil
 }
 
+// binaryContent documents a raw byte stream, which huma cannot infer from a stream handler.
+func binaryContent(mediaType string) map[string]*huma.MediaType {
+	return map[string]*huma.MediaType{mediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}
+}
+
+// attachmentAddedResponses documents the JSON body the upload streams back.
+func attachmentAddedResponses(h huma.API) map[string]*huma.Response {
+	schema := h.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[api.AddAttachmentResponseBody](), true, "")
+	return map[string]*huma.Response{"200": {Description: "Attachment added.", Content: map[string]*huma.MediaType{"application/json": {Schema: schema}}}}
+}
+
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
@@ -104,7 +116,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, maxAttachmentBytes))))
 	}
-	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, Hidden: true, BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*huma.StreamResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}, Responses: attachmentAddedResponses(h), BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*huma.StreamResponse, error) {
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
@@ -174,13 +186,10 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		}
 		return &huma.StreamResponse{Body: func(hctx huma.Context) {
 			hctx.SetHeader("Content-Type", "application/json")
-			_ = json.MarshalWrite(hctx.BodyWriter(), struct {
-				ID         string              `json:"attachment_id"`
-				Attachment metadata.Attachment `json:"attachment"`
-			}{id, e})
+			_ = json.MarshalWrite(hctx.BodyWriter(), api.AddAttachmentResponseBody{ID: id, Attachment: e})
 		}}, nil
 	})
-	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Hidden: true}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
