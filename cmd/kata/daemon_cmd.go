@@ -806,6 +806,7 @@ func daemonRestartCmd() *cobra.Command {
 type daemonStartupPreflight struct {
 	Config         *config.DaemonConfig
 	Web            config.WebConfig
+	MCPToken       string
 	Listen         string
 	Namespace      *daemonruntime.Namespace
 	Endpoint       kitdaemon.Endpoint
@@ -825,6 +826,16 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	}
 	if err := validateFederationStartupConfig(dcfg); err != nil {
 		return daemonStartupPreflight{}, err
+	}
+	var mcpToken string
+	if dcfg.MCP.Enabled {
+		mcpToken, _, err = config.ResolveSecret("", dcfg.MCP.TokenFile, dcfg.MCP.TokenEnv)
+		if err != nil {
+			return daemonStartupPreflight{}, fmt.Errorf("[mcp]: %w", err)
+		}
+		if mcpToken == "" {
+			return daemonStartupPreflight{}, errors.New("[mcp] enabled requires token_file or token_env")
+		}
 	}
 	if listen != "" {
 		dcfg.Sources["listen"] = "--listen"
@@ -902,6 +913,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	return daemonStartupPreflight{
 		Config:         dcfg,
 		Web:            dcfg.Web,
+		MCPToken:       mcpToken,
 		Listen:         listen,
 		Namespace:      ns,
 		Endpoint:       endpoint,
@@ -1394,7 +1406,15 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
+	var mcpHandler http.Handler
+	if dcfg.MCP.Enabled {
+		mcpHandler, err = newDaemonMCPHandler(ctx, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
+		if err != nil {
+			return fmt.Errorf("build daemon MCP handler: %w", err)
+		}
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
+		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,

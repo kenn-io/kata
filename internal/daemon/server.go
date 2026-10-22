@@ -119,6 +119,8 @@ type ServerConfig struct {
 	// WebHandler serves optional public browser assets. Non-API paths bypass
 	// the bearer check. Nil keeps the server API-only without bundled assets.
 	WebHandler http.Handler
+	// MCPHandler owns its bearer authentication; the daemon token doesn't apply.
+	MCPHandler http.Handler
 
 	// WebSessions owns browser cookie+header session state. Nil keeps
 	// the browser-only routes and middleware disabled for embedded/API-only use.
@@ -373,6 +375,9 @@ func NewServer(cfg ServerConfig) *Server {
 	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
+	if cfg.MCPHandler != nil {
+		mux.Handle("/mcp", cfg.MCPHandler)
+	}
 	if cfg.WebHandler != nil {
 		mux.Handle("/", cfg.WebHandler)
 	}
