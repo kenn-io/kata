@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	if os.Getenv("KATA_STARTUP_FIXTURE") == "1" && len(os.Args) > 1 && os.Args[1] == "daemon" {
+		runStartupFixture()
+	}
 	flag.Parse()
 	if runtime.GOOS == "windows" {
 		// The PR job calls test.yml@main, so a branch-local workflow timeout does

@@ -392,14 +392,22 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
-	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"))
+	return autoStartWithMigration(ctx, dataDir, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"), true)
 }
 
+// Registered profiles require the current schema before startup and must not
+// consult migration state from the caller's unrelated default home.
 func autoStartWithEnvironment(ctx context.Context, dataDir string, env []string) (RunningDaemon, error) {
+	return autoStartWithMigration(ctx, dataDir, env, false)
+}
+
+func autoStartWithMigration(ctx context.Context, dataDir string, env []string, migrationAllowed bool) (RunningDaemon, error) {
+	exited := make(chan error, 1)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            []string{"daemon", "start", "--foreground"},
 		Env:             env,
 		RefuseEphemeral: true,
+		Exited:          func(err error) { exited <- err },
 	}
 	// The auto-started daemon outlives this process, so it must not inherit
 	// our stdio. Inheriting the caller's stderr keeps that handle open after
@@ -426,29 +434,26 @@ func autoStartWithEnvironment(ctx context.Context, dataDir string, env []string)
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}
-	deadline := time.Now().Add(daemonStartupWait)
+	var running RunningDaemon
 	var unreachable error
-	for time.Now().Before(deadline) {
+	err := waitForDaemonStartup(ctx, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
 		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
-			return RunningDaemon{}, err
+			return false, err
 		}
 		if errors.Is(err, ErrLocalDaemonUnreachable) {
 			unreachable = err
 		}
 		if found.Outcome == daemonScanCompatible {
-			return runningDaemonForLive(found.Daemon), nil
+			running = runningDaemonForLive(found.Daemon)
+			return true, nil
 		}
-		select {
-		case <-ctx.Done():
-			return RunningDaemon{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if unreachable != nil {
+		return false, nil
+	}, migrationAllowed)
+	if err != nil && errors.Is(err, ErrLocalDaemonUnreachable) && unreachable != nil {
 		return RunningDaemon{}, unreachable
 	}
-	return RunningDaemon{}, fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
+	return running, err
 }
 
 func localRunningDaemon(baseURL, address string) RunningDaemon {

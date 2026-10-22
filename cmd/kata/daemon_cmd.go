@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -319,10 +320,14 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
+	requestedEndpoint, err := chooseEndpoint(ns, effectiveListen)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
 	replacedPID := 0
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
 		address := rec.Endpoint().ConfigAddress()
-		if effectiveListen != "" && address != effectiveListen {
+		if effectiveListen != "" && !daemonEndpointMatches(requestedEndpoint, rec.Endpoint()) {
 			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
 		}
 		// An explicit start means "keep a daemon resident". An auto-started
@@ -331,23 +336,51 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
 			return daemonStartOutputFromRecord("already_running", rec), nil
 		}
-		if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
-			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
-		}
-		if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
-			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+		if err := stopIdleShutdownDaemon(ctx, ns, rec); err != nil {
+			return daemonStartOutput{}, err
 		}
 		replacedPID = rec.PID
 	}
-	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, noAutoToken)
-	if err != nil {
-		return daemonStartOutput{}, err
+	var out daemonStartOutput
+	for attempts := 0; ; attempts++ {
+		out, err = launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, noAutoToken)
+		if err != nil {
+			return daemonStartOutput{}, err
+		}
+		if out.Action != "already_running" {
+			break
+		}
+		rec, ok := liveDaemonRecord(ns.DataDir, out.PID)
+		if !ok || effectiveListen != "" && !daemonEndpointMatches(requestedEndpoint, rec.Endpoint()) {
+			return daemonStartOutput{}, errors.New("daemon disappeared or changed listener while startup was waiting")
+		}
+		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
+			out = daemonStartOutputFromRecord("already_running", rec)
+			break
+		}
+		if attempts >= 1 {
+			return daemonStartOutput{}, errors.New("auto-started daemon kept reappearing during explicit start; retry kata daemon start")
+		}
+		if err := stopIdleShutdownDaemon(ctx, ns, rec); err != nil {
+			return daemonStartOutput{}, err
+		}
+		replacedPID = rec.PID
 	}
 	if replacedPID != 0 {
 		out.Action = "replaced"
 		out.ReplacedPID = replacedPID
 	}
 	return out, nil
+}
+
+func stopIdleShutdownDaemon(ctx context.Context, ns *daemonruntime.Namespace, rec kitdaemon.RuntimeRecord) error {
+	if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
+		return fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+	}
+	if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
+		return fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+	}
+	return nil
 }
 
 // daemonRecordAdvertisesIdleShutdown reports whether the live daemon behind
@@ -385,6 +418,21 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 func defaultLaunchDetachedDaemon(
 	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken bool,
 ) (daemonStartOutput, error) {
+	ns, err := daemonruntime.NewNamespace()
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	if filepath.Clean(ns.DataDir) != filepath.Clean(dataDir) {
+		return daemonStartOutput{}, errors.New("daemon startup namespace changed while launching")
+	}
+	effectiveListen, err := effectiveDaemonListen(listen)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	requestedEndpoint, err := chooseEndpoint(ns, effectiveListen)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
 	args := []string{"daemon", "start", "--foreground"}
 	if listen != "" {
 		args = append(args, "--listen", listen)
@@ -405,39 +453,81 @@ func defaultLaunchDetachedDaemon(
 		opts.Stderr = logw
 		defer func() { _ = logw.Close() }()
 	}
-	var childProcess *os.Process
+	exited := make(chan error, 1)
 	var pid int
-	opts.AfterStart = func(cmd *exec.Cmd) {
-		childProcess = cmd.Process
-		pid = cmd.Process.Pid
+	var childExited atomic.Bool
+	opts.AfterStart = func(cmd *exec.Cmd) { pid = cmd.Process.Pid }
+	opts.Exited = func(err error) {
+		childExited.Store(true)
+		exited <- err
 	}
 	if err := kitdaemon.StartDetached(ctx, opts); err != nil {
 		return daemonStartOutput{}, fmt.Errorf("start daemon: %w", err)
 	}
 
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-
-	for {
-		if rec, ok := liveDaemonRecord(dataDir, pid); ok {
-			return daemonStartOutputFromRecord("started", rec), nil
+	var record kitdaemon.RuntimeRecord
+	adoptedConcurrentDaemon := false
+	err = client.WaitForDaemonStartup(ctx, 5*time.Second, exited, func(context.Context) (bool, error) {
+		var ok bool
+		record, ok = liveDaemonRecord(dataDir, pid)
+		if ok || !childExited.Load() {
+			return ok, nil
 		}
-		select {
-		case <-ctx.Done():
-			if childProcess != nil {
-				_ = childProcess.Kill()
-			}
-			return daemonStartOutput{}, ctx.Err()
-		case <-deadline.C:
-			if childProcess != nil {
-				_ = childProcess.Kill()
-			}
-			return daemonStartOutput{}, daemonStartTimeoutError(dataDir)
-		case <-tick.C:
+		record, ok = liveCompatibleDaemonRecord(dataDir, pid, requestedEndpoint, effectiveListen != "")
+		adoptedConcurrentDaemon = ok
+		return ok, nil
+	})
+	if err != nil {
+		if tail := daemonStartLogTail(dataDir); tail != "" {
+			err = fmt.Errorf("%w\n%s", err, tail)
 		}
+		return daemonStartOutput{}, cliDaemonTargetError(err)
 	}
+	action := "started"
+	if adoptedConcurrentDaemon {
+		action = "already_running"
+	}
+	return daemonStartOutputFromRecord(action, record), nil
+}
+
+func liveCompatibleDaemonRecord(dataDir string, excludePID int, requested kitdaemon.Endpoint, listenerSpecified bool) (kitdaemon.RuntimeRecord, bool) {
+	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false
+	}
+	for _, record := range records {
+		if record.PID == excludePID || !daemonruntime.RuntimeProcessAlive(record) {
+			continue
+		}
+		if listenerSpecified && !daemonEndpointMatches(requested, record.Endpoint()) {
+			continue
+		}
+		return record, true
+	}
+	return kitdaemon.RuntimeRecord{}, false
+}
+
+func daemonEndpointMatches(requested, actual kitdaemon.Endpoint) bool {
+	if requested.Network != actual.Network {
+		return false
+	}
+	if requested.Network != kitdaemon.NetworkTCP {
+		return filepath.Clean(requested.Address) == filepath.Clean(actual.Address)
+	}
+	requestedHost, requestedPort, requestedErr := net.SplitHostPort(requested.Address)
+	actualHost, actualPort, actualErr := net.SplitHostPort(actual.Address)
+	if requestedErr != nil || actualErr != nil || !strings.EqualFold(requestedHost, actualHost) {
+		return false
+	}
+	requestedPortNumber, requestedErr := strconv.Atoi(requestedPort)
+	actualPortNumber, actualErr := strconv.Atoi(actualPort)
+	if requestedErr != nil || actualErr != nil {
+		return false
+	}
+	if requestedPortNumber == 0 {
+		return actualPortNumber > 0 && actualPortNumber <= 65535
+	}
+	return requestedPortNumber == actualPortNumber
 }
 
 func daemonStartOutputFromRecord(action string, rec kitdaemon.RuntimeRecord) daemonStartOutput {
@@ -496,14 +586,6 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 		}
 	}
 	return kitdaemon.RuntimeRecord{}, false
-}
-
-func daemonStartTimeoutError(dataDir string) error {
-	msg := "daemon failed to start within 5s"
-	if tail := daemonStartLogTail(dataDir); tail != "" {
-		msg = msg + "\n" + tail
-	}
-	return errors.New(msg)
 }
 
 func daemonStartLogTail(dataDir string) string {
@@ -1093,6 +1175,12 @@ func runDaemonProcess(
 	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
+	}
+
+	// A foreground launch must reject an existing daemon before opening
+	// storage: a cutover cannot replace a database still owned by its writer.
+	if record, ok := liveDaemonRecord(ns.DataDir, 0); ok {
+		return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
 	}
 
 	// Wrap ctx with a local cancel so platform-specific shutdown watchers

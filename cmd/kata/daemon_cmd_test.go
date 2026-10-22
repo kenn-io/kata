@@ -938,6 +938,46 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, out.ReplacedPID)
 }
 
+func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the test helper does not install the Windows daemon stop event watcher")
+	}
+	resetFlags(t)
+	home := setupKataEnv(t)
+	child := startSleepProcess(t)
+	exited := make(chan struct{})
+	go func() {
+		_ = child.Wait()
+		close(exited)
+	}()
+	server := writeIdleDaemonHealthServer(t, true)
+	address := strings.TrimPrefix(server.URL, "http://")
+	launches := 0
+	orig := launchDetachedDaemon
+	t.Cleanup(func() { launchDetachedDaemon = orig })
+	launchDetachedDaemon = func(context.Context, string, string, bool, bool) (daemonStartOutput, error) {
+		launches++
+		if launches == 1 {
+			writeRuntimeRecordFor(t, home, address, child.Process.Pid)
+			return daemonStartOutput{Action: "already_running", PID: child.Process.Pid, Address: address}, nil
+		}
+		select {
+		case <-exited:
+			return daemonStartOutput{Action: "started", PID: 4243, Address: address}, nil
+		default:
+			return daemonStartOutput{}, errors.New("replacement started before the idle daemon stopped")
+		}
+	}
+
+	out, err := defaultStartDetachedDaemon(context.Background(), address, false, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "replaced", out.Action)
+	assert.Equal(t, 4243, out.PID)
+	assert.Equal(t, child.Process.Pid, out.ReplacedPID)
+	assert.Equal(t, 2, launches)
+}
+
 func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)

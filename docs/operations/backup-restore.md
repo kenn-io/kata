@@ -33,8 +33,8 @@ an earlier upgrade. Recovering those events requires a backup that contains them
 
 Before exporting, cutover writes any pending changes from `kata.db-wal` into
 `kata.db`, so the `kata.db.bak.*` file is complete. If another process holds
-the database open and blocks that step, startup stops with `database is in
-use; stop other kata processes and retry` and leaves the database in place.
+the database open and blocks that step, startup stops and leaves the database
+in place.
 Stop every kata process that uses the database, then start Kata again.
 
 Releases through 0.19.0 could leave the old `kata.db-wal` beside the upgraded
@@ -48,6 +48,49 @@ recover:
 4. Start Kata with a release that includes the fix. Cutover runs again.
 
 The backup can be missing the last changes made before the upgrade.
+
+## Slow or interrupted upgrade startup
+
+An SQLite upgrade exports the old database and imports a replacement before
+publishing a ready daemon. Large databases can take minutes. Detached
+`kata daemon start` and `kata daemon restart` keep waiting while an SQLite
+migration is pending and report that progress on stderr. Cancelling the CLI
+stops waiting; it does not stop the detached daemon. Use `kata daemon logs`
+to inspect progress. A daemon that exits before readiness reports its startup
+error rather than a readiness timeout.
+
+Before upgrading, stop older daemons and offline import/export processes and
+wait for them to exit. Older binaries do not participate in the cutover lock.
+A startup migration has no ready runtime record yet, so inspect OS processes
+as well as `kata daemon status` when recovering an interrupted upgrade.
+
+Cutovers from fixed binaries serialize through `<database>.import.lock`.
+If an interrupted import left `<database>.import.tmp.jsonl`,
+`<database>.import.tmp.db`, or the temporary database's WAL/SHM sidecars,
+the next cutover checks the original old-schema source, moves the partial files
+into a private `<database>.import.recovery-*` directory, and retries from that
+source. It prints the recovery directory in `kata daemon logs`. No hand deletion
+is needed. Preserve that directory until you have checked the upgraded data.
+
+If the original source database is missing, startup refuses to create an empty
+database over an interrupted swap. Preserve the import temp files and all
+`<database>.bak.*` backups and recover the original source before starting.
+Backups alone also prevent bootstrapping a missing or unrecognized source.
+If both replacement and rollback fail, cutover preserves the backup and import
+files and reports both errors so the original source can be recovered.
+A current-schema source with unexpected temp files also requires inspection;
+the standalone cutover does not guess which side of an interrupted swap to use.
+Never delete or move the original database's own WAL/SHM files by hand: they
+may contain committed data. Cutover checkpoints the source WAL before export
+and again before swapping files. If a checkpoint is busy or source WAL/SHM
+sidecars remain after closing its connection, it refuses replacement; stop all
+other database users and retry. Both the upgraded database and its rollback
+backup therefore include committed source WAL state, and old page-layout WAL
+frames cannot be paired with the replacement.
+
+Cutover also compares the checkpointed source contents before export and
+before replacement. If they changed, it retains the original source and
+refuses to install the stale export. Stop all database users before retrying.
 
 ## Full backup
 

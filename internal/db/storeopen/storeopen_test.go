@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 	_ "modernc.org/sqlite"
 )
@@ -46,6 +48,34 @@ func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	_, err = store.CreateProject(ctx, "sqlite-scheme-project")
 	require.NoError(t, err)
+}
+
+func TestOpenSQLiteDoesNotInspectSourceWhileCutoverLockIsHeld(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `PRAGMA journal_mode=WAL`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	require.NoFileExists(t, path+"-wal")
+	require.NoFileExists(t, path+"-shm")
+
+	lock := flock.New(path + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() {
+		require.NoError(t, lock.Unlock())
+		require.NoError(t, lock.Close())
+	})
+
+	store, err := storeopen.Open(ctx, path)
+	if store != nil {
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+	}
+	require.ErrorIs(t, err, jsonl.ErrCutoverInProgress)
+	require.NoFileExists(t, path+"-wal")
+	require.NoFileExists(t, path+"-shm")
 }
 
 func TestValidateAcceptsPostgresSchemes(t *testing.T) {
@@ -528,5 +558,63 @@ func TestDatabaseOpenTerminologyAvoidsMigrationLanguage(t *testing.T) {
 				t.Errorf("%s still contains stale DB-open terminology %q", file, phrase)
 			}
 		}
+	}
+}
+
+func TestOpenMissingCutoverSourceDoesNotBootstrapEmptyDatabase(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "kata.db")
+	require.NoError(t, os.WriteFile(path+".import.tmp.db-wal", []byte("partial"), 0o600))
+	store, err := storeopen.Open(t.Context(), path)
+	if store != nil {
+		require.NoError(t, store.Close())
+	}
+	require.ErrorContains(t, err, "source database is unavailable")
+	require.NoFileExists(t, path)
+	require.FileExists(t, path+".import.tmp.db-wal")
+}
+
+func TestOpenEmptyCutoverSourceDoesNotBootstrapEmptyDatabase(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "kata.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	require.NoError(t, os.WriteFile(path+".import.tmp.jsonl", []byte("partial"), 0o600))
+	store, err := storeopen.Open(t.Context(), path)
+	if store != nil {
+		require.NoError(t, store.Close())
+	}
+	require.ErrorContains(t, err, "source database is unavailable")
+	body, err := os.ReadFile(path) //nolint:gosec // test fixture path is created under t.TempDir
+	require.NoError(t, err)
+	require.Empty(t, body)
+	require.FileExists(t, path+".import.tmp.jsonl")
+}
+
+func TestOpenCutoverBackupWithoutSourceDoesNotBootstrap(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(strconv.FormatBool(empty), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			path := filepath.Join(t.TempDir(), "kata.db")
+			if empty {
+				require.NoError(t, os.WriteFile(path, nil, 0o600))
+			}
+			backup := path + ".bak.20260101T000000Z"
+			require.NoError(t, os.WriteFile(backup, []byte("original source"), 0o600))
+			store, err := storeopen.Open(t.Context(), path)
+			if store != nil {
+				_ = store.Close()
+			}
+			require.ErrorContains(t, err, "source database is unavailable")
+			body, err := os.ReadFile(backup) //nolint:gosec // backup fixture path is derived from t.TempDir
+			require.NoError(t, err)
+			require.Equal(t, "original source", string(body))
+			if empty {
+				body, err := os.ReadFile(path) //nolint:gosec // test fixture path is created under t.TempDir
+				require.NoError(t, err)
+				require.Empty(t, body)
+			} else {
+				require.NoFileExists(t, path)
+			}
+		})
 	}
 }

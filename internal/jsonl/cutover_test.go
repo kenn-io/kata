@@ -352,7 +352,7 @@ func TestAutoCutoverRefusesDatabaseInUse(t *testing.T) {
 
 	err = jsonl.AutoCutover(ctx, path)
 
-	require.ErrorContains(t, err, "stop other kata processes")
+	require.ErrorContains(t, err, "stop all database users before retrying")
 	backups, globErr := filepath.Glob(path + ".bak.*")
 	require.NoError(t, globErr)
 	assert.Empty(t, backups)

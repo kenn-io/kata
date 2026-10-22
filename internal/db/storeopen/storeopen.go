@@ -181,20 +181,30 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 	if cfg.ReadOnly {
 		return sqlitestore.Open(ctx, path, opts...)
 	}
-	ver, peekErr := sqlitestore.PeekSchemaVersion(ctx, path)
+	var ver int
+	var hasTables bool
+	var peekErr error
+	if err := jsonl.WithCutoverLock(ctx, path, func() error {
+		if err := jsonl.CheckCutoverSource(ctx, path); err != nil {
+			return err
+		}
+		ver, peekErr = sqlitestore.PeekSchemaVersion(ctx, path)
+		if peekErr == nil && ver == 0 {
+			var err error
+			hasTables, err = sqlitestore.HasUserTables(ctx, path)
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	switch {
 	case peekErr == nil && ver > db.CurrentSchemaVersion():
 		return nil, fmt.Errorf("schema_version %d at %s is newer than binary schema %d; use a newer kata binary",
 			ver, path, db.CurrentSchemaVersion())
 	case peekErr == nil && ver < db.CurrentSchemaVersion():
-		if ver == 0 {
-			hasTables, err := sqlitestore.HasUserTables(ctx, path)
-			if err != nil {
-				return nil, err
-			}
-			if !hasTables {
-				break
-			}
+		if ver == 0 && !hasTables {
+			break
 		}
 		// Pre-current SQLite gets upgraded through JSONL cutover, which
 		// exports the legacy shape and re-imports it into a fresh

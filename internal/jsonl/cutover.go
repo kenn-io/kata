@@ -5,26 +5,70 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kit/atomicfile"
 )
 
-// ErrCutoverInProgress means a previous JSONL cutover left temp files behind.
-// Operators should inspect/remove those files before retrying so we do not
-// overwrite evidence from an interrupted swap.
+// ErrCutoverInProgress identifies an active cutover or unresolved swap state.
+// Interrupted imports are preserved before retrying from an intact old source.
 var ErrCutoverInProgress = errors.New("jsonl cutover in progress")
+
+var errSourceChangedDuringCutover = errors.New("source changed during cutover; stop all database users and retry; original source retained")
 
 // AutoCutover upgrades an older SQLite database by exporting it to JSONL,
 // importing into a fresh current-schema temp DB, then swapping the temp DB into
 // place. Databases already at the current schema are left untouched.
 func AutoCutover(ctx context.Context, path string) error {
+	return autoCutover(ctx, path, cutoverOperations{exportCutoverSource, atomicfile.Replace})
+}
+
+type cutoverOperations struct {
+	exportSource func(context.Context, string, string) (int64, error)
+	replaceFile  func(string, string) error
+}
+
+func autoCutover(ctx context.Context, path string, ops cutoverOperations) error {
+	return WithCutoverLock(ctx, path, func() error {
+		return autoCutoverLocked(ctx, path, ops)
+	})
+}
+
+// WithCutoverLock runs fn while holding the SQLite source's cutover lock.
+// It coordinates source inspections with AutoCutover. fn must not call
+// AutoCutover or WithCutoverLock for the same path.
+func WithCutoverLock(ctx context.Context, path string, fn func() error) error {
+	// Keep the lock file: unlinking it after unlock lets two processes lock
+	// different inodes at the same pathname.
+	lock := flock.New(path + ".import.lock")
+	defer func() { _ = lock.Close() }()
+	// Readiness polling briefly probes this same lock. Retry transient
+	// contention before treating it as another importer holding the source.
+	lockCtx, cancel := context.WithTimeout(ctx, time.Second)
+	locked, err := lock.TryLockContext(lockCtx, 10*time.Millisecond)
+	cancel()
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock SQLite cutover: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("%w: another process holds %s; wait for migration and inspect kata daemon logs", ErrCutoverInProgress, lock.Path())
+	}
+	return fn()
+}
+
+func autoCutoverLocked(ctx context.Context, path string, ops cutoverOperations) error {
 	tmpJSONL := path + ".import.tmp.jsonl"
 	tmpDB := path + ".import.tmp.db"
-	if err := rejectCutoverTemps(tmpJSONL, tmpDB); err != nil {
+	if err := CheckCutoverSource(ctx, path); err != nil {
 		return err
 	}
 	version, err := sqlitestore.PeekSchemaVersion(ctx, path)
@@ -32,7 +76,11 @@ func AutoCutover(ctx context.Context, path string) error {
 		return err
 	}
 	if version >= db.CurrentSchemaVersion() {
-		return nil
+		return rejectCutoverTemps(cutoverTempPaths(path)...)
+	}
+
+	if err := checkpointCutoverSource(ctx, path); err != nil {
+		return err
 	}
 	// The swap renames only the main file. Fold the WAL in first so the
 	// backup is complete and no old WAL pages are left beside the new DB.
@@ -48,6 +96,14 @@ func AutoCutover(ctx context.Context, path string) error {
 		return formatUnknownViolations(path, report.UnknownViolations)
 	}
 
+	if err := preserveCutoverTemps(path); err != nil {
+		return err
+	}
+	sourceFingerprint, err := cutoverSourceFingerprint(ctx, path)
+	if err != nil {
+		return err
+	}
+
 	cleanupTemps := true
 	defer func() {
 		if cleanupTemps {
@@ -55,7 +111,7 @@ func AutoCutover(ctx context.Context, path string) error {
 			removeSQLiteFileSet(tmpDB)
 		}
 	}()
-	sourceEvents, err := exportCutoverSource(ctx, path, tmpJSONL)
+	sourceEvents, err := ops.exportSource(ctx, path, tmpJSONL)
 	if err != nil {
 		return err
 	}
@@ -66,12 +122,33 @@ func AutoCutover(ctx context.Context, path string) error {
 		return err
 	}
 
+	// Recheck after export/import: a concurrent source user may have opened
+	// or written the WAL since the first checkpoint.
+	if err := checkpointCutoverSource(ctx, path); err != nil {
+		return err
+	}
+	currentFingerprint, err := cutoverSourceFingerprint(ctx, path)
+	if err != nil {
+		return err
+	}
+	if currentFingerprint != sourceFingerprint {
+		return errSourceChangedDuringCutover
+	}
+	// Fingerprinting can take time on a large source. Reject a database user
+	// that opened WAL/SHM again while the file was being read.
+	if err := refuseCutoverSourceSidecars(path); err != nil {
+		return err
+	}
+
 	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().UTC().Format("20060102T150405Z"))
-	if err := atomicfile.Replace(path, backup); err != nil {
+	if err := ops.replaceFile(path, backup); err != nil {
 		return fmt.Errorf("backup source db: %w", err)
 	}
-	if err := atomicfile.Replace(tmpDB, path); err != nil {
-		_ = atomicfile.Replace(backup, path)
+	if err := ops.replaceFile(tmpDB, path); err != nil {
+		if restoreErr := ops.replaceFile(backup, path); restoreErr != nil {
+			cleanupTemps = false
+			return fmt.Errorf("install cutover db: %w; restore source db: %w; backup remains at %s and import files at %s; recover original source before starting", err, restoreErr, backup, tmpDB)
+		}
 		return fmt.Errorf("install cutover db: %w", err)
 	}
 	cleanupTemps = false
@@ -79,6 +156,72 @@ func AutoCutover(ctx context.Context, path string) error {
 	if line := formatOrphanSummary(report); line != "" {
 		fmt.Fprintln(os.Stderr, line)
 	}
+	return nil
+}
+
+// CheckCutoverSource prevents a missing source with cutover recovery artifacts
+// from being mistaken for a fresh database by the storage opener.
+func CheckCutoverSource(ctx context.Context, path string) error {
+	artifacts := cutoverTempPaths(path)
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("inspect cutover backups: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), filepath.Base(path)+".bak.") {
+			artifacts = append(artifacts, filepath.Join(filepath.Dir(path), entry.Name()))
+		}
+	}
+	for _, temp := range artifacts {
+		if _, err := os.Lstat(temp); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("inspect cutover temp: %w", err)
+		}
+		version, err := sqlitestore.PeekSchemaVersion(ctx, path)
+		if err == nil && version <= 0 {
+			err = errors.New("source has no recognizable schema_version")
+		}
+		if err != nil {
+			return fmt.Errorf("%w: source database is unavailable or unrecognized at %s; preserve import temp files and *.bak.* backups and recover the original source before starting: %w", ErrCutoverInProgress, path, err)
+		}
+		return nil
+	}
+	return nil
+}
+
+func cutoverTempPaths(path string) []string {
+	return []string{path + ".import.tmp.jsonl", path + ".import.tmp.db", path + ".import.tmp.db-wal", path + ".import.tmp.db-shm"}
+}
+
+func preserveCutoverTemps(path string) error {
+	var paths []string
+	for _, temp := range cutoverTempPaths(path) {
+		info, err := os.Lstat(temp)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect cutover temp: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%w: %s is not a regular import file; preserve and inspect it before retrying", ErrCutoverInProgress, temp)
+		}
+		paths = append(paths, temp)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	dir, err := os.MkdirTemp(filepath.Dir(path), filepath.Base(path)+".import.recovery-")
+	if err != nil {
+		return fmt.Errorf("preserve interrupted cutover: %w", err)
+	}
+	for _, temp := range paths {
+		if err := atomicfile.RenameNoReplace(temp, filepath.Join(dir, filepath.Base(temp))); err != nil {
+			return fmt.Errorf("preserve interrupted cutover in %s: %w", dir, err)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "kata: preserved interrupted SQLite import in %s; retrying migration from original source\n", dir)
 	return nil
 }
 
