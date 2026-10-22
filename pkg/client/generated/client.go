@@ -61,6 +61,14 @@ type pathEscapingRequestOptions struct {
 	runtime.RequestOptions
 }
 
+type binaryRequestOptions struct {
+	runtime.RequestOptions
+}
+
+func (o binaryRequestOptions) GetBody() any {
+	return nil
+}
+
 func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
 	if o.RequestOptions == nil {
 		return nil, nil
@@ -6303,7 +6311,10 @@ func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentReques
 		QueryEncoding: queryEncoding,
 	}
 
-	// The runtime defaults to JSON encoding even for binary bodies.
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
 	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
 		if options == nil || options.Body == nil {
 			return nil

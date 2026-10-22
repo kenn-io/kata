@@ -5864,7 +5864,10 @@ func (c *Client) AddAttachmentWithResponse(ctx context.Context, options *AddAtta
 		ContentType: "application/octet-stream",
 	}
 
-	// The runtime defaults to JSON encoding even for binary bodies.
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
 	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
 		if options == nil || options.Body == nil {
 			return nil

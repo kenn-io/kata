@@ -1,6 +1,8 @@
 package daemon_test
 
 import (
+	"context"
+	"net/http"
 	"testing"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -8,13 +10,26 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+type attachmentAPIClient struct {
+	runtime.APIClient
+	t *testing.T
+}
+
+func (c attachmentAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, editors ...runtime.RequestEditorFn) (*http.Request, error) {
+	if params.ContentType == "application/octet-stream" {
+		require.True(c.t, params.Options.GetBody() == nil, "binary upload must bypass runtime body encoding")
+	}
+	return c.APIClient.CreateRequest(ctx, params, editors...)
+}
+
 func TestGeneratedClientAttachmentRoundTrip(t *testing.T) {
 	for _, method := range []string{"AddAttachment", "AddAttachmentWithResponse"} {
 		t.Run(method, func(t *testing.T) {
 			env, _ := attachmentEnv(t)
 			project, issue := seedProjectAndIssue(t, env)
-			client, err := generated.NewDefaultClient(env.URL, runtime.WithHTTPClient(contextHTTPClient{client: env.HTTP}))
+			apiClient, err := runtime.NewAPIClient(env.URL, runtime.WithHTTPClient(contextHTTPClient{client: env.HTTP}))
 			require.NoError(t, err)
+			client := generated.NewClient(attachmentAPIClient{APIClient: apiClient, t: t})
 			var body generated.AddAttachmentBody
 			body.InitFromBytes([]byte("abc"), "sample.txt")
 			name, actor := "sample.txt", "operator"
