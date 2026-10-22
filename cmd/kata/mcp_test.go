@@ -142,13 +142,10 @@ func newMCPHTTPTestClient() *sdkmcp.Client {
 	}, nil)
 }
 
-func newAuthenticatedMCPHTTPTestTransport(endpoint string, host ...string) *sdkmcp.StreamableClientTransport {
+func newAuthenticatedMCPHTTPTestTransport(endpoint string) *sdkmcp.StreamableClientTransport {
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		clone := request.Clone(request.Context())
 		clone.Header.Set("Authorization", "Bearer test-mcp-token")
-		if len(host) > 0 {
-			clone.Host = host[0]
-		}
 		return http.DefaultTransport.RoundTrip(clone)
 	})}
 	return &sdkmcp.StreamableClientTransport{

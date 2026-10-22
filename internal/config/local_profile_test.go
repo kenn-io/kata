@@ -300,9 +300,13 @@ func TestLocalProfileEnvironmentIncludesPlaneToken(t *testing.T) {
 	}
 }
 
-func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *testing.T) {
+func TestLocalProfileEnvironmentIncludesConfiguredMCPNotionAndPlaneTokenEnvs(t *testing.T) {
 	mcpEnv := "EXAMPLE_MCP_TOKEN"
 	t.Setenv(mcpEnv, "example-mcp-token")
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{MCP: config.MCPConfig{TokenEnv: mcpEnv}}}
+	env, err := config.LocalProfileEnvironment(profile, true)
+	require.NoError(t, err)
+	assert.Contains(t, env, "EXAMPLE_MCP_TOKEN=example-mcp-token")
 	for _, tc := range []struct {
 		name      string
 		notionEnv string
@@ -318,14 +322,13 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 			require.NoError(t, err)
 			t.Setenv(notionSync.TokenEnv, "example-notion-token")
 			t.Setenv(planeSync.TokenEnv, "example-plane-token")
-			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{NotionSync: notionSync, PlaneSync: planeSync, MCP: config.MCPConfig{TokenEnv: mcpEnv}}}
+			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{NotionSync: notionSync, PlaneSync: planeSync}}
 
 			env, err := config.LocalProfileEnvironment(profile, true)
 
 			require.NoError(t, err)
 			assert.Contains(t, env, notionSync.TokenEnv+"=example-notion-token")
 			assert.Contains(t, env, planeSync.TokenEnv+"=example-plane-token")
-			assert.Contains(t, env, "EXAMPLE_MCP_TOKEN=example-mcp-token")
 		})
 	}
 }
