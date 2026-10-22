@@ -82,18 +82,6 @@ func inlineAttachmentType(typ string) bool {
 	return false
 }
 
-func attachmentFolder(ctx context.Context, cfg ServerConfig, projectID int64) (int64, error) {
-	project, err := cfg.DB.ProjectByID(ctx, projectID)
-	if err != nil {
-		return 0, internalAPIError(err)
-	}
-	parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, project.UID))
-	if err != nil {
-		return 0, docbankError(err, docbankUploadErrors)
-	}
-	return parent, nil
-}
-
 // binaryContent documents a raw byte stream, which huma cannot infer from a stream handler.
 func binaryContent(mediaType string) map[string]*huma.MediaType {
 	return map[string]*huma.MediaType{mediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}
@@ -159,9 +147,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
 		}
-		parent, err := attachmentFolder(ctx, cfg, in.ProjectID)
+		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, iss.ProjectUID))
 		if err != nil {
-			return nil, err
+			return nil, docbankError(err, docbankUploadErrors)
 		}
 		sha := hex.EncodeToString(hash.Sum(nil))
 		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, e.Name, file, e.Size, sha)
