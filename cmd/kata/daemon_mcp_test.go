@@ -249,6 +249,7 @@ func TestDaemonMCPProjectScope(t *testing.T) {
 			cfg, err := config.ReadDaemonConfig()
 			require.NoError(t, err)
 			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
 			alpha, err := store.CreateProject(t.Context(), "alpha")
 			require.NoError(t, err)
 			_, err = store.CreateProject(t.Context(), "beta")
