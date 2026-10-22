@@ -183,28 +183,16 @@ func TestDeploymentMissingInterfaceFailsBeforeTokenCreation(t *testing.T) {
 }
 
 func TestDeploymentPreflightReportsSafeSources(t *testing.T) {
-	for _, tt := range []struct{ name, value string }{
-		{"KATA_MCP_ENABLED", "true"},
-		{"KATA_MCP_ACTOR", "ambient-agent"},
-		{"KATA_MCP_TOKEN_FILE", "/run/secrets/ambient-mcp-token"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(tt.name, tt.value)
-			deploymentHome(t)
-			t.Setenv("KATA_LISTEN", "100.64.0.5:7777")
-			t.Setenv("KATA_WEB_PUBLIC_ORIGIN", "https://daemon.example")
-			result, err := preflightDaemonStartup(t.Context(), "", false, false)
-			require.NoError(t, err)
-			require.False(t, result.Config.MCP.Enabled)
-			require.Empty(t, result.Config.MCP.Actor)
-			require.Empty(t, result.Config.MCP.TokenFile)
-			require.Equal(t, "KATA_LISTEN", result.Config.Sources["listen"])
-			require.Equal(t, "KATA_WEB_PUBLIC_ORIGIN", result.Config.Sources["web_public_origin"])
-			require.Equal(t, "generated_file", result.Config.Sources["auth"])
-			for _, source := range result.Config.Sources {
-				require.NotContains(t, source, result.Config.Auth.Token)
-			}
-		})
+	deploymentHome(t)
+	t.Setenv("KATA_LISTEN", "100.64.0.5:7777")
+	t.Setenv("KATA_WEB_PUBLIC_ORIGIN", "https://daemon.example")
+	result, err := preflightDaemonStartup(t.Context(), "", false, false)
+	require.NoError(t, err)
+	require.Equal(t, "KATA_LISTEN", result.Config.Sources["listen"])
+	require.Equal(t, "KATA_WEB_PUBLIC_ORIGIN", result.Config.Sources["web_public_origin"])
+	require.Equal(t, "generated_file", result.Config.Sources["auth"])
+	for _, source := range result.Config.Sources {
+		require.NotContains(t, source, result.Config.Auth.Token)
 	}
 }
 

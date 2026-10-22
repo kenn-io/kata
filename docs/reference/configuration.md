@@ -403,7 +403,7 @@ token_file = "/run/secrets/mcp-token"
 
 Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
 Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
-Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header.
+Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
 Idle shutdown is intended for the default owner-local daemon rather than the
@@ -438,7 +438,7 @@ For example, mount a `0600` secret file owned by the daemon user and set
 after a period without client activity. It is off by default. The setting is
 ignored for explicit daemon starts and for daemons exposed through non-loopback
 listeners, a public web origin, trusted-proxy configuration, shared-listener
-host aliases, or an enabled `[federation.ingress]` listener. `kata daemon start` replaces a running idle-eligible auto-started
+host aliases, an enabled `[federation.ingress]` listener, or an enabled `[mcp]` endpoint. `kata daemon start` replaces a running idle-eligible auto-started
 daemon with an explicit one so it stays resident, and `kata daemon restart`
 always starts an explicit daemon. The daemon writes one
 `kata daemon: idle shutdown after ...` line to its log when it exits for this

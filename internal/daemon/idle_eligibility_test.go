@@ -47,6 +47,12 @@ func TestAutostartIdleShutdownRequiresOwnerLocalExposure(t *testing.T) {
 			}}},
 		},
 		{
+			name:   "daemon MCP endpoint",
+			daemon: localDaemon,
+			web:    localWeb,
+			config: config.DaemonConfig{MCP: config.MCPConfig{Enabled: true}},
+		},
+		{
 			name:   "restricted federation ingress",
 			daemon: localDaemon,
 			web:    localWeb,
