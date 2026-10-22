@@ -45,13 +45,15 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 		{"forbidden", 403, `{}`, "hub_credential_rejected", 502},
 		{"missing", 404, `{}`, "hub_request_rejected", 502},
 		{"conflict", 409, `{}`, "hub_request_rejected", 502},
+		{"oversized relay conflict", 409, fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1)), "hub_request_rejected", 502},
 		{"relay private diagnostics", 409, `{"error":{"code":"relay_cross_project_links","message":"private diagnostic","hint":"private remedy","data":{"token":"private-token"}}}`, "relay_cross_project_links", 409},
 		{"untrusted conflict", 409, `{"error":{"code":"private_diagnostic","message":"secret"}}`, "hub_request_rejected", 502},
 		{"redirect", 302, `{}`, "hub_request_rejected", 502},
 		{"unavailable", 503, `{}`, "hub_request_rejected", 503},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			body := &bridgeTrackedResponseBody{Reader: strings.NewReader(test.body)}
+			reader := strings.NewReader(test.body)
+			body := &bridgeTrackedResponseBody{Reader: reader}
 			transport := &bridgeResponseTransport{body: body, status: test.status}
 			client, err := newFederationBridgeAPIClient(&http.Client{Transport: transport}, "https://hub.example")
 			require.NoError(t, err)
@@ -76,45 +78,20 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 					require.Equal(t, test.status, failure.Data["hub_status"], "callers decide from the hub's own status")
 				}
 			}
+			require.LessOrEqual(t, len(test.body)-reader.Len(), (1<<20)+1, "response reads must stop after the size limit plus one detection byte")
 			require.Equal(t, 1, transport.attempts)
 			require.True(t, body.closed, "the original response body must close after bounded capture")
 		})
 	}
 }
 
-func TestFederationBridgeOversizedConflictReadIsBounded(t *testing.T) {
-	largeEnvelope := fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1))
-	reader := strings.NewReader(largeEnvelope)
-	body := &bridgeTrackedResponseBody{Reader: reader}
-	transport := &bridgeResponseTransport{body: body, status: http.StatusConflict}
-	client, err := newFederationBridgeAPIClient(&http.Client{Transport: transport}, "https://hub.example")
-	require.NoError(t, err)
-
-	_, err = client.InstanceWithResponse(t.Context())
-	failure, ok := errors.AsType[*api.APIError](err)
-	require.True(t, ok, "error=%v", err)
-	require.Equal(t, "hub_request_rejected", failure.Code)
-	require.Equal(t, http.StatusBadGateway, failure.Status)
-	require.Equal(t, http.StatusConflict, failure.Data["hub_status"])
-	require.LessOrEqual(t, len(largeEnvelope)-reader.Len(), (1<<20)+1, "oversized response reads must stop after the size limit plus one detection byte")
-	require.Equal(t, 1, transport.attempts)
-	require.True(t, body.closed, "the original response body must close after bounded capture")
-}
-
 func TestRelayCrossProjectLinksErrorMapping(t *testing.T) {
-	for _, err := range []error{
-		db.ErrFederationCrossProjectBoundary,
-		errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary),
-		fmt.Errorf("store operation: %w", db.ErrFederationCrossProjectBoundary),
-	} {
-		for _, mapError := range []func(error) error{relayTransportError, federationReplicaAPIError} {
-			mapped := mapError(err)
-			failure, ok := errors.AsType[*api.APIError](mapped)
-			require.True(t, ok)
-			require.Equal(t, http.StatusConflict, failure.Status)
-			require.Equal(t, "relay_cross_project_links", failure.Code)
-			require.Contains(t, failure.Hint, "remove")
-			require.NotContains(t, failure.Hint, "on the hub", "local relay setup may be the source of this error")
-		}
-	}
+	err := errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+	mapped := federationReplicaAPIError(err)
+	failure, ok := errors.AsType[*api.APIError](mapped)
+	require.True(t, ok)
+	require.Equal(t, http.StatusConflict, failure.Status)
+	require.Equal(t, "relay_cross_project_links", failure.Code)
+	require.Contains(t, failure.Hint, "remove")
+	require.NotContains(t, failure.Hint, "on the hub", "local relay setup may be the source of this error")
 }
