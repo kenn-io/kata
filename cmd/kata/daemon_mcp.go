@@ -21,7 +21,11 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	if err != nil {
 		return nil, err
 	}
-	resolved := client.ResolvedDaemon{Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(), Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true}
+	resolved := client.ResolvedDaemon{
+		Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
+		Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
+		AllowInsecure: auth.Token == "" && auth.AllowUnauthenticatedPrivateNetworkWrites,
+	}
 	if endpoint.Network == "unix" {
 		resolved.UnixSocket = endpoint.Address
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/telemetry"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -125,59 +127,83 @@ token_env = "KATA_MCP_TEST_TOKEN"
 }
 
 func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
-	deploymentHome(t)
-	var proxyCalls, daemonCalls atomic.Int64
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		proxyCalls.Add(1)
-		http.Error(w, "self-call reached proxy", http.StatusBadGateway)
-	}))
-	defer proxy.Close()
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		daemonCalls.Add(1)
-		if r.URL.Path != "/api/v1/projects" || r.Header.Get("Authorization") != "Bearer daemon-token" {
-			http.Error(w, "unexpected self-call", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"projects":[]}`))
-	}))
-	defer backend.Close()
-	backendURL, err := url.Parse(backend.URL)
-	require.NoError(t, err)
-	proxyURL, err := url.Parse(proxy.URL)
-	require.NoError(t, err)
-	base := http.DefaultTransport.(*http.Transport).Clone()
-	defer base.CloseIdleConnections()
-	base.Proxy = func(r *http.Request) (*url.URL, error) {
-		if r.URL.Host == backendURL.Host {
-			return proxyURL, nil
-		}
-		return nil, nil
+	for _, tt := range []struct {
+		name string
+		auth config.AuthConfig
+	}{
+		{"bearer", config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true}},
+		{"tokenless private network", config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			deploymentHome(t)
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			authorization := ""
+			if tt.auth.Token != "" {
+				authorization = "Bearer " + tt.auth.Token
+			}
+			var proxyCalls, daemonCalls atomic.Int64
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				proxyCalls.Add(1)
+				http.Error(w, "self-call reached proxy", http.StatusBadGateway)
+			}))
+			defer proxy.Close()
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				daemonCalls.Add(1)
+				if r.URL.Path != "/api/v1/projects" || r.Header.Get("Authorization") != authorization {
+					http.Error(w, "unexpected self-call", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"projects":[]}`))
+			}))
+			defer backend.Close()
+			backendURL, err := url.Parse(backend.URL)
+			require.NoError(t, err)
+			backendAddress := backendURL.Host
+			backendURL.Host = "100.64.0.5:7777"
+			require.NoError(t, daemon.CheckAuthStartup(backendURL.Host, tt.auth, false))
+			proxyURL, err := url.Parse(proxy.URL)
+			require.NoError(t, err)
+			base := http.DefaultTransport.(*http.Transport).Clone()
+			defer base.CloseIdleConnections()
+			base.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				if address == backendURL.Host {
+					address = backendAddress
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, address)
+			}
+			base.Proxy = func(r *http.Request) (*url.URL, error) {
+				if r.URL.Host == backendURL.Host {
+					return proxyURL, nil
+				}
+				return nil, nil
+			}
+			original := http.DefaultTransport
+			http.DefaultTransport = base
+			t.Cleanup(func() { http.DefaultTransport = original })
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			handler, err := newDaemonMCPHandler(ctx, config.MCPConfig{Actor: "gateway-agent"}, "test-mcp-token",
+				kitdaemon.Endpoint{Network: "tcp", Address: backendURL.Host},
+				tt.auth)
+			require.NoError(t, err)
+			gateway := httptest.NewServer(handler)
+			defer gateway.Close()
+			session, err := newMCPHTTPTestClient().Connect(ctx, newAuthenticatedMCPHTTPTestTransport(gateway.URL+"/mcp"), nil)
+			require.NoError(t, err)
+			defer func() { _ = session.Close() }()
+			loaded, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.load_projects"})
+			require.NoError(t, err)
+			require.False(t, loaded.IsError, "%v", loaded.Content)
+			before := daemonCalls.Load()
+			result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.projects", Arguments: map[string]any{}})
+			require.NoError(t, err)
+			require.Zero(t, proxyCalls.Load(), "self-call reached proxy")
+			require.False(t, result.IsError, "%v", result.Content)
+			require.Greater(t, daemonCalls.Load(), before)
+			require.Empty(t, result.StructuredContent.(map[string]any)["projects"])
+		})
 	}
-	original := http.DefaultTransport
-	http.DefaultTransport = base
-	t.Cleanup(func() { http.DefaultTransport = original })
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	handler, err := newDaemonMCPHandler(ctx, config.MCPConfig{Actor: "gateway-agent"}, "test-mcp-token",
-		kitdaemon.Endpoint{Network: "tcp", Address: backendURL.Host},
-		config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true})
-	require.NoError(t, err)
-	gateway := httptest.NewServer(handler)
-	defer gateway.Close()
-	session, err := newMCPHTTPTestClient().Connect(ctx, newAuthenticatedMCPHTTPTestTransport(gateway.URL+"/mcp"), nil)
-	require.NoError(t, err)
-	defer func() { _ = session.Close() }()
-	loaded, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.load_projects"})
-	require.NoError(t, err)
-	require.False(t, loaded.IsError, "%v", loaded.Content)
-	before := daemonCalls.Load()
-	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.projects", Arguments: map[string]any{}})
-	require.NoError(t, err)
-	require.Zero(t, proxyCalls.Load(), "self-call reached proxy")
-	require.False(t, result.IsError, "%v", result.Content)
-	require.Greater(t, daemonCalls.Load(), before)
-	require.Empty(t, result.StructuredContent.(map[string]any)["projects"])
 }
 
 func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
