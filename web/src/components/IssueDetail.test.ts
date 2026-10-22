@@ -548,7 +548,7 @@ describe('typed reply draft across edit mode', () => {
   })
 })
 
-it('disables attachment controls with stale or read-only authority', async () => {
+it('keeps attachment reads enabled with stale or read-only authority', async () => {
   const issue = makeIssue({
     metadata: {
       'attachment.01JB3Z6V2K8M4Q9T1X5W7Y0RNA': {
@@ -561,7 +561,7 @@ it('disables attachment controls with stale or read-only authority', async () =>
   })
   const view = renderDetail({ authorityBlocked: true, attachmentsEnabled: true, issue })
   expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
-    true,
+    false,
   )
   await view.rerender({ authorityBlocked: false })
   expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
@@ -569,6 +569,6 @@ it('disables attachment controls with stale or read-only authority', async () =>
   )
   await view.rerender({ actionsDisabled: true })
   expect(screen.getByRole('button', { name: 'Download screen.png' }).hasAttribute('disabled')).toBe(
-    true,
+    false,
   )
 })
