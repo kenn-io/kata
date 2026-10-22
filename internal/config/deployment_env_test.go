@@ -98,7 +98,7 @@ request_dimensions = true
 	require.False(t, ec.RequestDimensions)
 }
 
-func TestDeploymentInvalidRequestDimensionsFailLoudly(t *testing.T) {
+func TestDeploymentInvalidBoolEnvFailsLoudly(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	for _, name := range []string{"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_MCP_ENABLED"} {
 		t.Run(name, func(t *testing.T) {
