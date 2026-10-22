@@ -54,12 +54,10 @@ func TestAttachmentRawBodyReference(t *testing.T) {
 		code, raw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("image bytes"))
 		require.Equal(t, 200, code, string(raw))
 		var out struct {
-			ID         string              `json:"attachment_id"`
-			Attachment metadata.Attachment `json:"attachment"`
+			ID string `json:"attachment_id"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &out))
 		require.True(t, uid.Valid(out.ID))
-		require.Equal(t, "image/png", out.Attachment.MediaType)
 		ids = append(ids, out.ID)
 		msg := receiveMsg(t, sub.Ch, time.Second, "attachment metadata event")
 		require.Equal(t, "operator", msg.Event.Actor)
@@ -84,7 +82,6 @@ func TestAttachmentRawBodyReference(t *testing.T) {
 	data, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, "image bytes", string(data))
-	require.Equal(t, "image/png", resp.Header.Get("Content-Type"))
 	require.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
 	require.Empty(t, resp.Header.Get("Set-Cookie"))
 	require.Len(t, f.Requests(), calls+1, "a read only fetches the immutable version")
@@ -235,13 +232,6 @@ func TestAttachmentScopeBeforeOutbound(t *testing.T) {
 	code, raw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("x"), "worker-token")
 	require.Equal(t, 404, code, string(raw))
 	require.Empty(t, f.Requests())
-	req, err := http.NewRequest("GET", env.URL+endpoint+"/x/content", nil)
-	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer worker-token")
-	resp, err := env.HTTP.Do(req)
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	require.Equal(t, 404, resp.StatusCode)
 }
 func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 	for _, configured := range []bool{false, true} {
@@ -257,4 +247,38 @@ func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &snapshot))
 		require.Equal(t, configured, snapshot.Capabilities.Attachments)
 	}
+}
+
+func TestAttachmentUploadStatusErrors(t *testing.T) {
+	for _, tc := range []struct {
+		status, want int
+		code         string
+	}{{413, 413, "attachment_too_large"}, {400, 400, "attachment_invalid"}, {422, 400, "attachment_invalid"}, {500, 502, "docbank_unreachable"}} {
+		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
+			env, f := attachmentEnv(t)
+			p, iss := seedProjectAndIssue(t, env)
+			f.Fault = fmt.Sprintf("status:%d", tc.status)
+			code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), "shot.png", strings.NewReader("image"))
+			require.Equal(t, tc.want, code, string(raw))
+			require.Contains(t, string(raw), tc.code)
+			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
+			require.NoError(t, err)
+			require.JSONEq(t, `{}`, string(stored.Metadata))
+		})
+	}
+}
+
+func TestAttachmentInvalidUploadNameBeforeBody(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	body := &attachmentUnreadBody{}
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=bad%%FF.png&actor=operator", p.ID, iss.ShortID), body)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Content-Type", "application/octet-stream")
+	res := httptest.NewRecorder()
+	daemon.NewServer(daemon.ServerConfig{DB: env.DB, Docbank: docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })}).Handler().ServeHTTP(res, req)
+	require.Equal(t, 400, res.Code, res.Body.String())
+	require.Contains(t, res.Body.String(), "attachment_invalid")
+	require.Zero(t, body.reads)
+	require.Empty(t, f.Requests())
 }

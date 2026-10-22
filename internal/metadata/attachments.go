@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 	"uuid"
 )
 
@@ -19,13 +20,17 @@ type Attachment struct {
 	DocbankVersion uuid.UUID `json:"docbank_version"`
 }
 
-// Valid decodes a reference at use time. Unknown fields stay opaque in storage.
+// Valid decodes supported references at use time. Storage remains opaque.
 func Valid(raw jsontext.Value) (Attachment, bool) {
 	var e Attachment
-	if json.Unmarshal(raw, &e) != nil {
+	if json.Unmarshal(raw, &e, json.RejectUnknownMembers(true)) != nil {
 		return e, false
 	}
-	return e, e.Name != "" && len(e.Name) <= 255 && e.Name != "." && e.Name != ".." &&
-		!strings.ContainsAny(e.Name, `/\`) && !strings.ContainsFunc(e.Name, unicode.IsControl) &&
-		e.MediaType != "" && e.Size >= 0 && e.DocbankVersion != uuid.Nil()
+	return e, ValidAttachmentName(e.Name) && e.MediaType != "" && e.Size >= 0 && e.DocbankVersion != uuid.Nil()
+}
+
+// ValidAttachmentName checks the basename shared by uploads and stored references.
+func ValidAttachmentName(name string) bool {
+	return utf8.ValidString(name) && name != "" && len(name) <= 255 && name != "." && name != ".." &&
+		!strings.ContainsAny(name, `/\`) && !strings.ContainsFunc(name, unicode.IsControl)
 }

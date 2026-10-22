@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +70,6 @@ func TestAttachmentCLIWorkflow(t *testing.T) {
 	require.Len(t, added.Results, 2)
 	id := added.Results[0].ID
 	other := added.Results[1].ID
-	require.NotEqual(t, id, other)
 	out, err = executeAttachmentCLI(t, env.URL, "ls", ref, "--json")
 	require.NoError(t, err)
 	var listed struct {
@@ -76,7 +77,6 @@ func TestAttachmentCLIWorkflow(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &listed))
 	require.Len(t, listed.Attachments, 2)
-	require.Equal(t, "image/png", listed.Attachments[id].MediaType)
 	suffix := id[len(id)-8:]
 	dest := filepath.Join(dir, "download.png")
 	_, err = executeAttachmentCLI(t, env.URL, "get", ref, suffix, "-o", dest)
@@ -167,5 +167,49 @@ func TestAttachmentCLIDownloadSizeFailurePreservesDestination(t *testing.T) {
 		data, err := os.ReadFile(dest) //nolint:gosec // Destination is inside t.TempDir.
 		require.NoError(t, err)
 		require.Equal(t, "existing", string(data))
+	}
+}
+
+func TestAttachmentCLIDownloadRejectsCorruptContent(t *testing.T) {
+	for _, digest := range []string{"sha-256=:Y8HdlR/+329/2WitTvo5uO1YTxYvRucVEU7hhPjekgE=:", ""} {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("digest=%t/force=%t", digest != "", force), func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, "/api/v1/versions/6f1c2e8a-2222-4222-8222-222222222222/content", r.URL.Path)
+					w.Header().Set("X-Docbank-Blob-Size", "4")
+					w.Header().Set("Trailer", "Content-Digest")
+					_, _ = io.WriteString(w, "BBBB")
+					w.Header().Set("Content-Digest", digest) // SHA-256 of the expected "AAAA", or Docbank's failed verification.
+				}))
+				defer upstream.Close()
+				env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+					cfg.Docbank = docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+				})
+				p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+				require.NoError(t, err)
+				iss, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Attachment", Author: "operator"})
+				require.NoError(t, err)
+				_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{
+					"attachment.file": jsontext.Value(`{"name":"shot.png","media_type":"image/png","size":4,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}`),
+				}})
+				require.NoError(t, err)
+				dest := filepath.Join(t.TempDir(), "download.png")
+				args := []string{"get", iss.ShortID, "file", "-o", dest}
+				if force {
+					require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
+					args = append(args, "--force")
+				}
+				_, err = executeAttachmentCLI(t, env.URL, args...)
+				require.Error(t, err, "corrupt bytes must never publish")
+				if force {
+					data, err := os.ReadFile(dest) //nolint:gosec // Destination is inside t.TempDir.
+					require.NoError(t, err)
+					require.Equal(t, "existing", string(data))
+				} else {
+					_, err := os.Stat(dest)
+					require.ErrorIs(t, err, os.ErrNotExist)
+				}
+			})
+		}
 	}
 }

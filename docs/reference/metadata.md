@@ -74,7 +74,7 @@ changed date or assignment can surface again. Kata stores no separate reminder
 record. A reached `scheduled_on` also records an `issue.scheduled_reached`
 event for adapters; see [Reached schedules](cron.md#reached-schedules).
 
-`attachment.*` keys hold [Docbank file references](../guide/attachments.md#read-references-as-metadata). Readers ignore malformed entries and accept unknown fields.
+`attachment.*` keys hold [Docbank file references](../guide/attachments.md#read-references-as-metadata). Readers skip malformed entries and entries with unknown fields.
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query

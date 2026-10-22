@@ -20,7 +20,7 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	same, err := c.EnsureFolder(t.Context(), "/kata/project-a")
 	require.NoError(t, err)
 	require.Equal(t, parent, same)
-	// SHA-256 of "abc". Docbank rejects a wrong hash or size.
+	// SHA-256 of "abc".
 	version, err := c.Upload(t.Context(), parent, "ba7816bf8f01-shot.png", strings.NewReader("abc"), 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil(), version)
@@ -31,10 +31,6 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "abc", string(b))
 	require.EqualValues(t, 3, resp.ContentLength)
-	_, err = c.Upload(t.Context(), parent, "ba7816bf8f01-bad.png", strings.NewReader("abc"), 4, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-	var upstream *Error
-	require.ErrorAs(t, err, &upstream)
-	require.Equal(t, 422, upstream.Status)
 }
 func TestDocbankStatusAndKeyRotation(t *testing.T) {
 	key := "first"

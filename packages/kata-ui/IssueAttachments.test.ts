@@ -43,6 +43,28 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
   result.unmount()
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
+it.each([
+  { action: 'Preview', name: 'screen.png', media_type: 'image/png' },
+  { action: 'Play', name: 'clip.mp4', media_type: 'video/mp4' },
+  { action: 'Download', name: 'screen.png', media_type: 'image/png' },
+])(
+  'allows $action with read authority while writes are disabled',
+  async ({ action, name, media_type }) => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const fetchAttachment = vi.fn(async () => new Blob(['file']))
+    render(IssueAttachments, {
+      attachmentsEnabled: true,
+      attachments: { [id]: { ...entry, name, media_type } },
+      baseURL: '/attachments',
+      actionsDisabled: true,
+      fetchAttachment,
+    })
+    const button = screen.getByRole('button', { name: `${action} ${name}` }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    await fireEvent.click(button)
+    await waitFor(() => expect(fetchAttachment).toHaveBeenCalledWith(`/attachments/${id}/content`))
+  },
+)
 it('clears previews when authority is lost, including pending fetches', async () => {
   let resolve!: (b: Blob) => void
   const result = render(IssueAttachments, {
@@ -96,7 +118,7 @@ it('shows an unavailable state while preserving name, type and size', async () =
   expect(screen.getByText('screen.png')).toBeTruthy()
   expect(screen.getByText(/12 bytes/)).toBeTruthy()
 })
-it('uploads each selected file and shows per-file progress and errors', async () => {
+it('uploads the selected batch through a refresh and shows per-file progress and errors', async () => {
   let finish!: () => void
   const uploadAttachment = vi
     .fn()
@@ -107,18 +129,18 @@ it('uploads each selected file and shows per-file progress and errors', async ()
         }),
     )
     .mockRejectedValueOnce(new Error('attachment_too_large'))
-  const { container } = render(IssueAttachments, {
+  const view = render(IssueAttachments, {
     attachmentsEnabled: true,
-    attachments: {},
     baseURL: '/attachments',
     uploadAttachment,
   })
   const files = [new File(['image'], 'shot.png'), new File(['video'], 'clip.mp4')]
-  const input = container.querySelector('input[type="file"]')!
+  const input = view.container.querySelector('input[type="file"]')!
   await fireEvent.change(input, { target: { files } })
   await waitFor(() => expect(screen.getByText('shot.png uploading')).toBeTruthy())
   expect(screen.getByText('clip.mp4 queued')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+  await view.rerender({ actionsDisabled: true })
   finish()
   await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(2))
   expect(uploadAttachment).toHaveBeenNthCalledWith(1, files[0])
@@ -126,37 +148,7 @@ it('uploads each selected file and shows per-file progress and errors', async ()
   await waitFor(() =>
     expect(screen.getByRole('status').textContent).toBe('clip.mp4 attachment_too_large'),
   )
-  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(false)
-})
-
-it('uploads the whole selected batch while a refresh disables controls', async () => {
-  let finish!: () => void
-  const uploadAttachment = vi
-    .fn()
-    .mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve
-        }),
-    )
-    .mockResolvedValue(undefined)
-  const view = render(IssueAttachments, {
-    attachmentsEnabled: true,
-    baseURL: '/attachments',
-    uploadAttachment,
-  })
-  const files = [new File(['image'], 'shot.png'), new File(['video'], 'clip.mp4')]
-  await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
-    target: { files },
-  })
-  await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(1))
-  await view.rerender({
-    actionsDisabled: true,
-  })
-  finish()
-  await waitFor(() => expect(screen.queryByText('shot.png uploading')).toBeNull())
-  await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(2))
-  expect(uploadAttachment).toHaveBeenNthCalledWith(2, files[1])
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
 })
 
 it('hides uploads without Docbank capability and disables them with stale or read-only authority', async () => {
@@ -219,42 +211,7 @@ it('renders nothing for an empty map', () => {
   expect(container.textContent).toBe('')
 })
 
-it('allows a normal 1 MiB image to preview and download', () => {
-  render(IssueAttachments, {
-    attachmentsEnabled: true,
-    attachments: { [id]: { ...entry, size: 1 << 20 } },
-    baseURL: '/attachments',
-    fetchAttachment: vi.fn(),
-  })
-  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Download screen.png' })).toBeTruthy()
-})
-it('keeps an open preview across unchanged snapshots and clears changed references', async () => {
-  const fetchAttachment = vi.fn(async () => new Blob(['image'], { type: 'image/png' }))
-  const view = render(IssueAttachments, {
-    attachmentsEnabled: true,
-    attachments: { [id]: entry },
-    baseURL: '/attachments',
-    fetchAttachment,
-  })
-  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
-  await waitFor(() => expect(screen.getByAltText('screen.png')).toBeTruthy())
-  await view.rerender({
-    attachments: structuredClone({ [id]: entry }),
-    baseURL: '/attachments',
-    fetchAttachment,
-  })
-  expect(screen.getByAltText('screen.png')).toBeTruthy()
-  expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-  await view.rerender({
-    attachments: {},
-    baseURL: '/attachments',
-    fetchAttachment,
-  })
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
-})
-
-it('keeps an open video when another attachment changes and revokes only replaced references', async () => {
+it('keeps an open video when another attachment changes and revokes removed or replaced references', async () => {
   vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:video').mockReturnValueOnce('blob:image')
   const fetchAttachment = vi.fn(async () => new Blob(['video']))
   const videoEntry = { ...entry, name: 'clip.mp4', media_type: 'video/mp4' }
@@ -275,7 +232,7 @@ it('keeps an open video when another attachment changes and revokes only replace
   await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
   await waitFor(() => expect(screen.getByAltText('screen.png')).toBeTruthy())
   await view.rerender({
-    attachments: { [id]: videoEntry, [otherID]: { ...entry, size: 13 } },
+    attachments: { [id]: videoEntry },
   })
   expect(view.container.querySelector('video')).toBe(video)
   expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)

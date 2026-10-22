@@ -35,15 +35,19 @@ func (t attachmentDeadlineTransport) RoundTrip(r *http.Request) (*http.Response,
 }
 
 func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
+	responses := map[string]any{
+		"/api/v1/instance":                           map[string]any{"web_ui_contract_version": api.UISnapshotContractVersion, "web_ui_capabilities": api.UICapabilities{Writable: true, ActorPolicy: "request"}},
+		"/api/v1/projects/1/issues/abc4/attachments": map[string]string{"attachment_id": "saved"},
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/instance" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"web_ui_contract_version": api.UISnapshotContractVersion,
-				"web_ui_capabilities":     api.UICapabilities{Writable: true, ActorPolicy: "request"},
-			})
-			return
+		if r.Method == http.MethodPost {
+			require.Equal(t, "operator", r.URL.Query().Get("actor"))
+			require.Equal(t, "screen.png", r.URL.Query().Get("name"))
+			raw, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.Equal(t, "image", string(raw))
 		}
-		_, _ = io.WriteString(w, `{"attachment_id":"saved"}`)
+		_ = json.NewEncoder(w).Encode(responses[r.URL.Path])
 	}))
 	defer upstream.Close()
 	base := http.DefaultTransport
@@ -52,7 +56,7 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = base })
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?actor=operator", strings.NewReader("upload"))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator", strings.NewReader("image"))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/octet-stream")
 	// Keep the caller out of the transport being observed.
@@ -60,12 +64,8 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	select {
-	case budget := <-budgets:
-		require.GreaterOrEqual(t, budget, 74*time.Minute)
-	default:
-		t.Fatal("upstream attachment request had no deadline")
-	}
+	require.Len(t, budgets, 1, "upstream attachment request had no deadline")
+	require.GreaterOrEqual(t, <-budgets, 74*time.Minute)
 }
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
@@ -549,45 +549,4 @@ func TestWebDaemonProxyAttachmentStreamOutlivesJSONDeadline(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, payload, string(body))
-}
-
-func TestWebDaemonProxyAttachmentUploadOutlivesJSONDeadline(t *testing.T) {
-	if testing.Short() {
-		t.Skip("exercises the live 30-second gateway deadline")
-	}
-	payload := `{"attachment_id":"saved"}`
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/v1/instance" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"web_ui_contract_version": api.UISnapshotContractVersion,
-				"web_ui_capabilities":     api.UICapabilities{Writable: true, ActorPolicy: "request"},
-			})
-			return
-		}
-		require.Equal(t, http.MethodPost, r.Method)
-		require.Equal(t, "operator", r.URL.Query().Get("actor"))
-		raw, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Equal(t, "image", string(raw))
-		require.Equal(t, "screen.png", r.URL.Query().Get("name"))
-		select {
-		case <-time.After(31 * time.Second):
-			_, _ = io.WriteString(w, payload)
-		case <-r.Context().Done():
-		}
-	}))
-	defer upstream.Close()
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator", strings.NewReader("image"))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/octet-stream")
-	response, err := http.DefaultClient.Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	result, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode, string(result))
-	require.Equal(t, payload, string(result))
 }

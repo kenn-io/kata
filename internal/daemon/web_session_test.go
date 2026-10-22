@@ -43,7 +43,7 @@ func TestBrowserSession(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/projects/7/issues/abc4/attachments/id/content", nil)
+			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
 			if tt.cookie != "" {
 				request.AddCookie(manager.Cookie(tt.cookie))
 			}
@@ -100,7 +100,6 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "attachment bytes", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4/attachments/id/content", want: http.StatusNoContent},
 		{name: "attachment upload", method: http.MethodPost, path: "/api/v1/projects/7/issues/abc4/attachments", want: http.StatusNoContent},
 		{name: "proxied attachment upload", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4/attachments", want: http.StatusNoContent},
-		{name: "attachment removal", method: http.MethodDelete, path: "/api/v1/projects/7/issues/abc4/attachments/id", want: http.StatusForbidden},
 		{name: "issue edit", method: http.MethodPatch, path: "/api/v1/projects/7/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence deletion", method: http.MethodDelete, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusNoContent},
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},

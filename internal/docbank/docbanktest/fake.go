@@ -3,6 +3,7 @@ package docbanktest
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/v2"
 	"fmt"
@@ -138,10 +139,17 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
-		w.Header().Set("Set-Cookie", "must-not-leak=1")
-		_, _ = w.Write(b)
+		writeContent(w, b)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func writeContent(w http.ResponseWriter, b []byte) {
+	w.Header().Set("X-Docbank-Blob-Size", strconv.Itoa(len(b)))
+	w.Header().Set("Trailer", "Content-Digest")
+	w.Header().Set("Set-Cookie", "must-not-leak=1")
+	_, _ = w.Write(b)
+	sum := sha256.Sum256(b)
+	w.Header().Set("Content-Digest", "sha-256=:"+base64.StdEncoding.EncodeToString(sum[:])+":")
 }

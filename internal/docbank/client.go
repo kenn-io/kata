@@ -2,10 +2,14 @@
 package docbank
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json/v2"
 	"errors"
+	"hash"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -132,7 +136,41 @@ func (c *Client) Upload(ctx context.Context, parent int64, name string, body io.
 	return receipt.Node.VersionID, nil
 }
 
-// Content opens the immutable version and retains Docbank's reported content length.
+// Content verifies immutable bytes against Docbank's terminal digest and retains its reported length.
 func (c *Client) Content(ctx context.Context, version uuid.UUID) (*http.Response, error) {
-	return c.request(ctx, "GET", "/api/v1/versions/"+version.String()+"/content", nil, nil)
+	return verifiedContent(c.request(ctx, "GET", "/api/v1/versions/"+version.String()+"/content", nil, nil))
+}
+
+func verifiedContent(resp *http.Response, err error) (*http.Response, error) {
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	resp.Body = &contentStream{ReadCloser: resp.Body, reader: bufio.NewReader(io.TeeReader(resp.Body, h)), hash: h, trailer: resp.Trailer}
+	if size, err := strconv.ParseInt(resp.Header.Get("X-Docbank-Blob-Size"), 10, 64); err == nil {
+		resp.ContentLength = size
+	}
+	return resp, nil
+}
+
+type contentStream struct {
+	io.ReadCloser
+	reader  *bufio.Reader
+	hash    hash.Hash
+	trailer http.Header
+}
+
+func (s *contentStream) Read(p []byte) (int, error) {
+	n, err := s.reader.Read(p)
+	if err == nil {
+		_, err = s.reader.Peek(1)
+	}
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+	// Withhold the last chunk until Docbank has verified the complete stream.
+	if err == io.EOF && s.trailer.Get("Content-Digest") != "sha-256=:"+base64.StdEncoding.EncodeToString(s.hash.Sum(nil))+":" {
+		return 0, errors.New("docbank: content digest mismatch")
+	}
+	return n, err
 }

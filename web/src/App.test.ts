@@ -24,12 +24,12 @@ describe('App', () => {
   })
 
   it.each([
-    { actorPolicy: 'identity', outcome: 'saved' },
-    { actorPolicy: 'request', outcome: 'saved' },
-    { actorPolicy: 'request', outcome: 'uncertain' },
+    { actorPolicy: 'identity', outcome: 'saved', expectedActor: null },
+    { actorPolicy: 'request', outcome: 'saved', expectedActor: 'kata-web' },
+    { actorPolicy: 'request', outcome: 'uncertain', expectedActor: 'kata-web' },
   ])(
     'refreshes authority after a $outcome attachment upload with $actorPolicy attribution',
-    async ({ actorPolicy, outcome }) => {
+    async ({ actorPolicy, outcome, expectedActor }) => {
       history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
       sessionStorage.setItem(
         'kata.web.session.v1',
@@ -56,7 +56,6 @@ describe('App', () => {
         fail = reject
       })
       let uploadURL: URL | undefined
-      let uploadOptions: RequestInit | undefined
       let snapshotReads = 0
       vi.stubGlobal(
         'fetch',
@@ -69,7 +68,6 @@ describe('App', () => {
           if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
           if (init?.method === 'POST' && url.pathname.endsWith('/attachments')) {
             uploadURL = url
-            uploadOptions = init
             return pending
           }
           if (url.pathname.endsWith('/ui/snapshot')) snapshotReads++
@@ -78,28 +76,29 @@ describe('App', () => {
       )
       const view = render(App)
       await screen.findByRole('button', { name: 'Attach files' })
-      const file = new File(['image'], 'screen.png', { type: 'image/png' })
       await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
-        target: { files: [file] },
+        target: { files: [new File(['image'], 'screen.png', { type: 'image/png' })] },
       })
       await waitFor(() => expect(uploadURL).toBeDefined())
       const readsBeforeCompletion = snapshotReads
-      expect(uploadURL!.searchParams.get('actor')).toBe(
-        actorPolicy === 'identity' ? null : 'kata-web',
-      )
-      expect(new Headers(uploadOptions?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
-      expect(new Headers(uploadOptions?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
-      expect(uploadOptions?.body).toBe(file)
-      expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
-      expect(screen.getByRole('button', { name: 'Edit issue' }).hasAttribute('disabled')).toBe(true)
-      if (outcome === 'saved') finish(Response.json({ attachment_id: 'saved', attachment: {} }))
+      expect(uploadURL!.searchParams.get('actor')).toBe(expectedActor)
+      const edit = screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement
+      expect(edit.disabled).toBe(true)
+      if (outcome === 'saved')
+        finish(
+          Response.json({
+            attachment_id: '01JB3Z6V2K8M4Q9T1X5W7Y0RNA',
+            attachment: {
+              name: 'screen.png',
+              media_type: 'image/png',
+              size: 5,
+              docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+            },
+          }),
+        )
       else fail(new TypeError('network response unavailable'))
       await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Edit issue' }).hasAttribute('disabled')).toBe(
-          false,
-        ),
-      )
+      await waitFor(() => expect(edit.disabled).toBe(false))
       if (outcome === 'uncertain')
         expect(screen.getByRole('alert').textContent).toContain('uncertain')
     },

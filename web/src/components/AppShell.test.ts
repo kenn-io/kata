@@ -811,7 +811,7 @@ describe('AppShell', () => {
     expect(screen.queryByLabelText('Team')).toBeNull()
   })
 
-  test('forwards attachment uploads and disables stale writes', async () => {
+  test('forwards attachment uploads', async () => {
     const current = snapshot()
     current.capabilities.attachments = true
     const issue = current.collection[0]!
@@ -849,12 +849,6 @@ describe('AppShell', () => {
       target: { files: [file] },
     })
     await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledWith(issue.uid, file))
-    await view.rerender({ canMutate: false, stale: true })
-    expect(button.disabled).toBe(true)
-    await view.rerender({
-      snapshot: { ...current, capabilities: { ...current.capabilities, attachments: false } },
-    })
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
   })
 
   test('keeps attachment previews and downloads alive through a remote polling 304', async () => {

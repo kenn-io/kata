@@ -4,9 +4,47 @@ import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/m
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
+const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
+
 function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
+
+it.each([
+  { size: -1 },
+  { size: 1.5 },
+  { docbank_version: 'invalid' },
+  { docbank_version: '00000000-0000-0000-0000-000000000000' },
+  { docbank_version: undefined },
+  { name: '../shot.png' },
+  { name: 'a\\b' },
+  { name: '\u0085.png' },
+  { name: '.' },
+  { name: '..' },
+  { name: '' },
+  { name: 'é'.repeat(128) },
+  { name: '\ud800.png' },
+  { media_type: '' },
+  { schema_version: 2 },
+])('skips unsupported attachment references %j', (invalid) => {
+  const detail = projectIssueDetail({
+    issue: {
+      uid: '01TASK',
+      title: 'Files',
+      status: 'open',
+      metadata: {
+        'attachment.file': {
+          name: 'shot.png',
+          media_type: 'image/png',
+          size: 12,
+          docbank_version: versionID,
+          ...invalid,
+        },
+      },
+    },
+  })
+  expect(detail.issue.attachments).toEqual({})
+})
 
 describe('projectIssueDetail', () => {
   it('projects attachment keys and skips malformed entries', () => {
@@ -14,8 +52,7 @@ describe('projectIssueDetail', () => {
       name: 'shot.png',
       media_type: 'image/png',
       size: 12,
-      docbank_version: 'version',
-      future: true,
+      docbank_version: versionID,
     }
     const detail = projectIssueDetail({
       issue: {
@@ -34,7 +71,7 @@ describe('projectIssueDetail', () => {
       },
     })
     expect(detail.issue.attachments).toEqual({
-      file: { name: 'shot.png', media_type: 'image/png', size: 12, docbank_version: 'version' },
+      file: { name: 'shot.png', media_type: 'image/png', size: 12, docbank_version: versionID },
     })
   })
 

@@ -106,7 +106,7 @@
   }
   async function load(entry: (typeof entries)[number], preview: boolean): Promise<void> {
     const fetcher = fetchAttachment
-    if (!fetcher || actionsDisabled || !attachmentsEnabled || loading.get(entry.id)) return
+    if (!fetcher || !attachmentsEnabled || loading.get(entry.id)) return
     const accepted = generation
     const current = () => accepted === generation && references.get(entry.id) === entry.reference
     loading.set(entry.id, true)
@@ -168,7 +168,7 @@
                   <Button
                     size="sm"
                     label={`Preview ${entry.name}`}
-                    disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                    disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
                     onclick={() => load(entry, true)}
                   />
                 {/if}
@@ -176,14 +176,14 @@
                   <Button
                     size="sm"
                     label={`Play ${entry.name}`}
-                    disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                    disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
                     onclick={() => load(entry, true)}
                   />
                 {/if}
                 <Button
                   size="sm"
                   label={`Download ${entry.name}`}
-                  disabled={actionsDisabled || !fetchAttachment || Boolean(loading.get(entry.id))}
+                  disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
                   onclick={() => load(entry, false)}
                 />
               {/if}

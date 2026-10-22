@@ -35,13 +35,13 @@ kata docbank attachments get abc4 <attachment-id-or-suffix> -o screenshot.png
 kata docbank attachments rm abc4 <attachment-id-or-suffix>
 ```
 
-Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
+Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check Docbank's terminal digest and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
 
 Removal drops the reference. Docbank retains the bytes under its own retention rules.
 
 ## Read references as metadata
 
-Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. Readers ignore malformed entries and accept unknown fields.
+Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. Readers skip malformed entries and entries with unknown fields.
 
 ```sh
 kata meta get abc4
@@ -53,6 +53,6 @@ kata meta unset abc4 attachment.<ULID>
 
 Uploads are limited to 256 MiB per file. Kata determines media types from filename extensions. Other types download as `application/octet-stream`.
 
-On an issue, click **Attach files** and select one or more files. Each file shows progress or its error. Controls require a writable, current session and stay disabled while a mutation is pending. New entries arrive through the normal issue refresh.
+On an issue, click **Attach files** and select one or more files. Each file shows progress or its error. Upload controls require a writable, current session and stay disabled while a mutation is pending. New entries arrive through the normal issue refresh.
 
 Click **Preview** for PNG, JPEG, GIF, and WebP images up to 20 MiB, or **Play** for MP4, M4V, QuickTime, WebM, and Ogg videos up to 100 MiB. Playback depends on browser codec support. Downloads are available up to 100 MiB. Larger files show a `kata docbank attachments get` hint. SVG and unknown types download.

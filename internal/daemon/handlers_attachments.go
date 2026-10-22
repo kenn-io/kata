@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -41,13 +40,21 @@ type attachmentUploadContextKey struct{}
 func attachmentError(status int, code string) error {
 	return api.NewError(status, code, strings.ReplaceAll(code, "_", " "), "", nil)
 }
+
+var docbankStatusErrors = map[int]error{
+	404: attachmentError(410, "attachment_content_missing"),
+	401: attachmentError(502, "docbank_unauthorized"),
+	403: attachmentError(502, "docbank_unauthorized"),
+	413: attachmentError(413, "attachment_too_large"),
+}
+
 func docbankError(err error) error {
 	if e, ok := errors.AsType[*docbank.Error](err); ok {
-		switch e.Status {
-		case 404:
-			return attachmentError(410, "attachment_content_missing")
-		case 401, 403:
-			return attachmentError(502, "docbank_unauthorized")
+		if mapped := docbankStatusErrors[e.Status]; mapped != nil {
+			return mapped
+		}
+		if e.Status >= 400 && e.Status < 500 {
+			return attachmentError(400, "attachment_invalid")
 		}
 	}
 	return attachmentError(502, "docbank_unreachable")
@@ -90,7 +97,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		e := metadata.Attachment{Name: in.Name, MediaType: "application/octet-stream"}
-		if e.Name == "" || len(e.Name) > 255 || path.Base(e.Name) != e.Name || strings.ContainsAny(e.Name, `\`) || e.Name == "." || e.Name == ".." || strings.ContainsFunc(e.Name, unicode.IsControl) {
+		if !metadata.ValidAttachmentName(e.Name) {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
 		if typ := attachmentTypes[strings.ToLower(path.Ext(e.Name))]; typ != "" {

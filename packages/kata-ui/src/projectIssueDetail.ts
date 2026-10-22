@@ -1,4 +1,5 @@
 import type {
+  KataAttachment,
   KataCreationAttributionModel,
   KataCreationAttributionWire,
   KataIssueDetailModel,
@@ -57,6 +58,44 @@ function relationFor(
   return 'related'
 }
 
+function validAttachment(raw: unknown): raw is KataAttachment {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  const entry = raw as Record<string, unknown>
+  if (
+    Object.keys(entry).some(
+      (key) => !['name', 'media_type', 'size', 'docbank_version'].includes(key),
+    ) ||
+    typeof entry.name !== 'string' ||
+    typeof entry.media_type !== 'string' ||
+    typeof entry.size !== 'number' ||
+    typeof entry.docbank_version !== 'string'
+  )
+    return false
+  const version =
+    entry.docbank_version.length === 45 && entry.docbank_version.startsWith('urn:uuid:')
+      ? entry.docbank_version.slice(9)
+      : entry.docbank_version.length === 38 &&
+          entry.docbank_version.startsWith('{') &&
+          entry.docbank_version.endsWith('}')
+        ? entry.docbank_version.slice(1, -1)
+        : entry.docbank_version
+  return (
+    entry.name !== '' &&
+    entry.name !== '.' &&
+    entry.name !== '..' &&
+    entry.name.isWellFormed() &&
+    new TextEncoder().encode(entry.name).byteLength <= 255 &&
+    !/[/\\\p{Cc}]/u.test(entry.name) &&
+    entry.media_type !== '' &&
+    entry.media_type.isWellFormed() &&
+    Number.isInteger(entry.size) &&
+    entry.size >= 0 &&
+    entry.size < 2 ** 63 &&
+    /^(?:[a-f\d]{32}|[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12})$/i.test(version) &&
+    /[1-9a-f]/i.test(version)
+  )
+}
+
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
@@ -90,25 +129,8 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       body: issue.body ?? '',
       attachments: Object.fromEntries(
         Object.entries(issue.metadata ?? {}).flatMap(([key, raw]) => {
-          if (!key.startsWith('attachment.') || typeof raw !== 'object' || raw === null) return []
-          const entry = raw as Record<string, unknown>
-          if (
-            typeof entry.name !== 'string' ||
-            typeof entry.media_type !== 'string' ||
-            typeof entry.size !== 'number'
-          )
-            return []
-          return [
-            [
-              key.slice('attachment.'.length),
-              {
-                name: entry.name,
-                media_type: entry.media_type,
-                size: entry.size,
-                docbank_version: entry.docbank_version,
-              },
-            ],
-          ]
+          if (!key.startsWith('attachment.') || !validAttachment(raw)) return []
+          return [[key.slice('attachment.'.length), raw]]
         }),
       ),
       status: issue.status,
