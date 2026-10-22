@@ -125,11 +125,11 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := r.URL.Query().Get("name")
-		if name != files[0].Filename || !strings.HasPrefix(name, hash[:12]+"-") {
+		if name != files[0].Filename {
 			http.Error(w, "name", 400)
 			return
 		}
-		key := fmt.Sprintf("%d/%s", parent, name)
+		key := fmt.Sprintf("%d/%s/%s", parent, name, hash)
 		version, exists := f.versions[key]
 		if !exists {
 			version = fmt.Sprintf("6f1c2e8a-2222-4222-8222-%012d", len(f.versions)+1)
