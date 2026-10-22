@@ -342,6 +342,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 		portableRecipe = &recipe
+		_ = r.selectIdleHubProducers(ctx, recipe) // logs per project; never fails the pass
 		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe); err != nil {
 			r.markError(err)
 			return err

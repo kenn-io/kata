@@ -78,23 +78,29 @@ func (r *Reconciler) projectGenerationAllowed(ctx context.Context, projectUID st
 	case producer != nil && producer.Recipe == recipe:
 		return true, nil
 	}
-	return r.selectLocalProducer(ctx, project, recipe, producer == nil && err == nil)
+	return r.selectLocalProducer(ctx, project, binding, recipe)
 }
 
 // selectLocalProducer records this root as the project's producer with its
 // configured recipe. A root that produces for itself follows its own model and
 // recipe changes; otherwise its outdated selection would stop all generation.
-// unselected reports that no producer was recorded, which a legacy direct hub
-// without a pinned root may generate for.
-func (r *Reconciler) selectLocalProducer(ctx context.Context, project db.Project, recipe embedding.ArtifactIdentity, unselected bool) (bool, error) {
+// A hub with no pinned root records itself too, so spokes can find its
+// producer; a pin owned by another authority, or any non-hub role without a
+// pin, records nothing and reports false.
+func (r *Reconciler) selectLocalProducer(ctx context.Context, project db.Project, binding db.FederationBinding, recipe embedding.ArtifactIdentity) (bool, error) {
 	pin, err := r.store.RootAuthority(ctx, project.UID)
-	if errors.Is(err, db.ErrNotFound) {
-		return unselected, nil
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		if binding.Role != db.FederationRoleHub {
+			return false, nil
+		}
+		if !binding.Enabled {
+			// A paused unpinned hub keeps generating locally and records nothing.
+			return true, nil
+		}
+	case err != nil:
 		return false, err
-	}
-	if pin.AuthorityUID != r.store.InstanceUID() {
+	case pin.AuthorityUID != r.store.InstanceUID():
 		return false, nil
 	}
 	candidate := db.ProjectEmbeddingProducer{ProducerInstanceUID: r.store.InstanceUID(), Recipe: recipe}
@@ -117,6 +123,56 @@ func (r *Reconciler) selectLocalProducer(ctx context.Context, project db.Project
 		r.cfg.OnProjectEvent(changed.Event, fork)
 	}
 	return true, nil
+}
+
+// selectIdleHubProducers records this root as the producer of every enabled
+// hub project that has not selected it, so spokes find an idle hub's producer
+// without waiting for new content. Failures are logged per project and never
+// stop the pass: a lost IfMatchRev race returns false and retries next time.
+func (r *Reconciler) selectIdleHubProducers(ctx context.Context, recipe embedding.ArtifactIdentity) error {
+	bindings, err := r.store.ListFederationBindings(ctx)
+	if err != nil {
+		slog.Warn("idle hub producer selection: list bindings failed", "err", err)
+		return nil
+	}
+	self := r.store.InstanceUID()
+	recipe.ProjectUID, recipe.IssueUID, recipe.InputHash, recipe.ProducerInstanceUID = "", "", "", ""
+	for _, binding := range bindings {
+		if !binding.Enabled || binding.Role != db.FederationRoleHub {
+			continue
+		}
+		project, err := r.store.ProjectByID(ctx, binding.ProjectID)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			slog.Warn("idle hub producer selection: load project failed", "project_id", binding.ProjectID, "err", err)
+			continue
+		}
+		if project.DeletedAt != nil {
+			continue
+		}
+		producer, err := db.ProjectEmbeddingProducerFromMetadata(project.Metadata)
+		switch {
+		case err != nil:
+			// Never overwrite an unreadable selection that names another instance.
+			if db.ProjectEmbeddingProducerInstance(project.Metadata) != self {
+				continue
+			}
+		case producer != nil && producer.ProducerInstanceUID != self:
+			continue
+		case producer != nil:
+			current := producer.Recipe
+			current.ProjectUID, current.IssueUID, current.InputHash, current.ProducerInstanceUID = "", "", "", ""
+			if current == recipe {
+				continue
+			}
+		}
+		if _, err := r.selectLocalProducer(ctx, project, binding, recipe); err != nil {
+			slog.Warn("idle hub producer selection failed", "project_uid", project.UID, "err", err)
+		}
+	}
+	return nil
 }
 
 // maxProducerErrorBytes bounds the failure text kept for status.
