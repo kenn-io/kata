@@ -105,6 +105,15 @@ func attachmentAddedResponses(h huma.API) map[string]*huma.Response {
 	return map[string]*huma.Response{"200": {Description: "Attachment added.", Content: map[string]*huma.MediaType{"application/json": {Schema: schema}}}}
 }
 
+// recheckAttachmentWrite repeats the active-project and claim gates after the
+// Docbank transfer, which can outlast an archive or a lost claim.
+func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string) error {
+	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
+		return err
+	}
+	return requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor)
+}
+
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
@@ -167,7 +176,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
+		if err := recheckAttachmentWrite(ctx, cfg, in.ProjectID, iss, actor); err != nil {
 			return nil, err
 		}
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
