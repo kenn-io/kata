@@ -21,7 +21,7 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parent, same)
 	// SHA-256 of "abc".
-	version, err := c.Upload(t.Context(), parent, "ba7816bf8f01-shot.png", strings.NewReader("abc"), 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+	version, err := c.Upload(t.Context(), parent, "shot.png", strings.NewReader("abc"), 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil(), version)
 	resp, err := c.Content(t.Context(), version)

@@ -155,7 +155,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		sha := hex.EncodeToString(hash.Sum(nil))
-		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, sha[:12]+"-"+e.Name, file, e.Size, sha)
+		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, e.Name, file, e.Size, sha)
 		if err != nil {
 			return nil, docbankError(err, docbankUploadErrors)
 		}
