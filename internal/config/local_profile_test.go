@@ -327,6 +327,21 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 	}
 }
 
+func TestLocalProfileEnvironmentIncludesMCPTokenEnv(t *testing.T) {
+	t.Setenv("EXAMPLE_MCP_TOKEN", "example-mcp-token")
+	home := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[mcp]\nenabled = true\ntoken_env = 'EXAMPLE_MCP_TOKEN'\n"), 0o600))
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{
+		Name: "example-profile", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01",
+	})
+	require.NoError(t, err)
+
+	env, err := config.LocalProfileEnvironment(profile, true)
+
+	require.NoError(t, err)
+	assert.Contains(t, env, "EXAMPLE_MCP_TOKEN=example-mcp-token")
+}
+
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
 	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
 		t.Run(key, func(t *testing.T) {

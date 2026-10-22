@@ -336,20 +336,6 @@ This is a client preference; it does not change the daemon or other clients.
 
 ## Daemon config
 
-The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults to disabled. Restart after changes:
-
-```toml
-[mcp]
-enabled = true
-actor = "gateway-agent" # optional; defaults to the normal actor
-token_file = "/run/secrets/mcp-token"
-# Alternatively: token_env = "KATA_MCP_TOKEN"
-```
-
-Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
-Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
-See [MCP transport](mcp.md#transport) for gateway setup and scope.
-
 `<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and
 named daemon targets:
 
@@ -401,6 +387,21 @@ app_id = 12345
 installation_id = 67890
 private_key_path = "/var/lib/kata/github-app.pem"
 ```
+
+The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults to disabled. Restart after changes:
+
+```toml
+[mcp]
+enabled = true
+actor = "gateway-agent" # optional; defaults to the normal actor
+token_file = "/run/secrets/mcp-token"
+# Alternatively: token_env = "KATA_MCP_TOKEN"
+```
+
+Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
+Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
+Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` because the daemon MCP endpoint's REST calls carry no proxy actor header.
+See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

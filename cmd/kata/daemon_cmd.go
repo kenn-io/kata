@@ -832,6 +832,9 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		if dcfg.Auth.RequireTokenIdentity {
 			return daemonStartupPreflight{}, errors.New(`[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`)
 		}
+		if dcfg.Auth.Proxy.TrustedActorHeader != "" {
+			return daemonStartupPreflight{}, errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`)
+		}
 		dcfg.MCP.Actor, _ = resolveActor(ctx, dcfg.MCP.Actor, nil)
 		dcfg.MCP.Actor = strings.TrimSpace(dcfg.MCP.Actor)
 		if dcfg.MCP.Actor == "" {

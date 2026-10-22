@@ -103,6 +103,7 @@ Route `/mcp` through the hub's HTTPS reverse proxy to the daemon. Give the gatew
 The mount serves all projects visible to the daemon's token, including future projects, and exposes project administration tools (create, update, merge, remove, restore, purge).
 Treat the MCP bearer as equivalent to the daemon's `[auth]` token.
 The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record.
+The daemon's `/api/v1/ping` endpoint works as a container health probe.
 When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
 A gateway using a container hostname needs that host in `[web].allowed_hosts`.
 

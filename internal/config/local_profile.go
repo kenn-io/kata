@@ -166,6 +166,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	if profile.Config != nil {
 		references = append(references,
 			profile.Config.Auth.TokenEnv,
+			profile.Config.MCP.TokenEnv,
 			profile.Config.Search.Embeddings.APIKeyEnv,
 			profile.Config.GitHubSync.TokenEnvName(),
 			profile.Config.NotionSync.TokenEnv,

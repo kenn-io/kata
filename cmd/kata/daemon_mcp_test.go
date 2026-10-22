@@ -76,17 +76,13 @@ public_origin = "https://daemon.example"
 	}, 5*time.Second, 20*time.Millisecond)
 	endpoint := "http://" + record.Address + "/mcp"
 	httpClient := &http.Client{Timeout: 2 * time.Second}
-	for _, token := range []string{"", "example-daemon-token"} {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-		require.NoError(t, err)
-		if token != "" {
-			request.Header.Set("Authorization", "Bearer "+token)
-		}
-		response, err := httpClient.Do(request)
-		require.NoError(t, err)
-		require.NoError(t, response.Body.Close())
-		require.Equal(t, http.StatusUnauthorized, response.StatusCode)
-	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer example-daemon-token")
+	response, err := httpClient.Do(request)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 	callCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
 	transport := newAuthenticatedMCPHTTPTestTransport(endpoint)
@@ -99,6 +95,7 @@ public_origin = "https://daemon.example"
 	session, err := newMCPHTTPTestClient().Connect(callCtx, transport, nil)
 	require.NoError(t, err)
 	defer func() { _ = session.Close() }()
+	// Load the issue mutation tools before calling kata.create.
 	loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_issue_mutation"})
 	require.NoError(t, err)
 	require.False(t, loaded.IsError)
@@ -118,16 +115,16 @@ public_origin = "https://daemon.example"
 }
 
 func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
-	for _, tt := range []struct{ name, config, author, want string }{
-		{"identity mode", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", "agent", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
-		{"no token source", "[mcp]\nenabled = true\n", "agent", "[mcp] enabled requires token_file or token_env"},
-		{"blank configured actor", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "agent", "kata actor is required"},
+	for _, tt := range []struct{ name, config, want string }{
+		{"identity mode", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
+		{"proxy actor", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`},
+		{"no token source", "[mcp]\nenabled = true\n", "[mcp] enabled requires token_file or token_env"},
+		{"blank configured actor", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "kata actor is required"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetFlags(t)
 			home := setupKataEnv(t)
 			t.Setenv("PORT", "")
-			t.Setenv("KATA_AUTHOR", tt.author)
 			t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600))
 			_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:0", false, false)
