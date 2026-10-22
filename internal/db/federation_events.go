@@ -15,11 +15,24 @@ const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
+	return projectMetadataAdoptionPayload(metadata, false)
+}
+
+// ProjectMetadataSpokeAdoptionPayload omits the root-owned embedding producer
+// from a spoke's adoption baseline so it cannot claim that upstream policy.
+func ProjectMetadataSpokeAdoptionPayload(metadata JSONBlob) (string, error) {
+	return projectMetadataAdoptionPayload(metadata, true)
+}
+
+func projectMetadataAdoptionPayload(metadata JSONBlob, omitEmbeddingProducer bool) (string, error) {
 	current := map[string]jsontext.Value{}
 	if len(metadata) > 0 {
 		if err := json.Unmarshal([]byte(metadata), &current); err != nil {
 			return "", fmt.Errorf("decode adopted project metadata: %w", err)
 		}
+	}
+	if omitEmbeddingProducer {
+		delete(current, ProjectEmbeddingMetadataKey)
 	}
 	type diffEntry struct {
 		From any            `json:"from"`

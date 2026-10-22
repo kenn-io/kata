@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # Federation
@@ -527,6 +527,47 @@ Start with [Select an embedding producer](#select-an-embedding-producer).
 Use [Embedding status](#embedding-status) to distinguish normal waiting from a
 failed producer check. The rest of this section describes transfer and reuse.
 
+### Direct spokes reuse the hub's vectors
+
+An enabled hub records itself as the embedding producer for its federated
+projects, including when it is idle and has nothing left to embed. A paused
+(disabled) federation does not record a producer.
+
+An enabled direct spoke whose project names another instance as producer stops
+generating document embeddings for that project. It fetches the hub's vectors
+and reuses them. Query-time embedding stays local, so hybrid search keeps
+working on the spoke. The fetch runs at most once per federation pull interval
+(30 seconds by default) for each project and asks for up to 32 issues per
+request. When a project has more missing documents than that, successive
+fetches continue with the next 32 and start over after the last, so documents
+the hub has no vectors for do not hold back newer ones. Each hub request times
+out after 15 seconds, and a hub that does not answer is not asked again for
+its other projects during the same pass.
+
+The spoke's `[search.embeddings]` recipe must match the hub's. If it does not,
+`kata federation status` reports `producer_recipe_mismatch`, and the spoke
+serves lexical results for those documents without generating its own vectors.
+If a fetch fails, status reports `producer_unavailable` with the hub's status.
+A recipe mismatch takes precedence over a failed fetch.
+
+Local generation continues when no producer is recorded or the binding is
+disabled. Private projects that are not federated are unchanged.
+
+Limits:
+
+- If the hub is too old to serve the route below, the spoke reports the failure
+  and serves lexical results for undelivered documents until the hub upgrades.
+- A hub that embedded a document before portable artifacts existed (before
+  0.19.0) has no artifact to share. A spoke that joins later serves those
+  unchanged documents lexically until they are edited.
+
+The spoke fetches from this route with its federation enrollment token, which
+needs the `pull` capability. Relay credentials are rejected.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/v1/projects/{project_id}/federation/embedding-artifacts?issue_uid=...&recipe_fingerprint=...` | Return durable artifacts for up to 32 repeated `issue_uid` values. Only artifacts that match the requested recipe fingerprint and the issue's current content are returned. |
+
 ### Select an embedding producer
 
 A root with a configured encoder chooses itself when its worker first needs
@@ -612,15 +653,22 @@ recipes above 4000 dimensions. `limited` indicates the window may omit older
 artifacts. Status omits vector bytes and provider credentials and requires the
 same current project access as other federation reads.
 
-When this daemon cannot generate for a project it is selected to produce for,
-status adds a `reason`:
+When this daemon cannot generate for a project, or cannot reuse the vectors of
+the producer selected for it, status adds a `reason`:
 
 - `producer_recipe_changed`: this daemon's configured recipe differs from the
   selected recipe. After an upgrade that changes the recipe version, the
   selection can no longer be read and `state` is also `rejected`. Select the
   producer again at the root, as described in
   [Select an embedding producer](#select-an-embedding-producer).
-- `producer_unavailable`: the last producer check failed, for example because
+- `producer_recipe_mismatch`: the selected producer is another instance whose
+  recipe differs from this daemon's, so none of its artifacts can be reused
+  here. A direct spoke serves lexical results for those documents and does not
+  generate its own vectors. Align the embedding model and settings with the producer's,
+  or select a producer at the root whose recipe this daemon matches. This
+  reason takes precedence over `producer_unavailable`.
+- `producer_unavailable`: the last producer check or, on a direct spoke, the
+  last fetch of the hub's artifacts failed, for example because
   the upstream hub was unreachable, the federation credential was missing, or
   the artifact sync failed. `last_error` holds the failure, and the daemon log
   records each one. The worker retries on its next fill and clears the reason

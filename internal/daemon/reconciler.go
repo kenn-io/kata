@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"math"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -37,6 +39,10 @@ type ReconcilerConfig struct {
 	// The final argument requests artifact synchronization before authorization.
 	// Later documents in the same fill need only fresh authority checks.
 	FederationProducerAllowed func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error)
+	// FetchFederatedArtifacts asks each direct spoke's hub for the pending
+	// documents' artifacts before import. It returns the outcome of every
+	// project it attempted: nil for success. Nil disables fetching.
+	FetchFederatedArtifacts func(context.Context, embedding.ArtifactIdentity, []vector.ArtifactWant) map[string]error
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -77,6 +83,13 @@ type Reconciler struct {
 	retry chan struct{}
 	now   func() time.Time
 
+	// Artifact-want cursors rotate project selection and page each project's
+	// pending issues across passes. Only reconcileOnce touches them.
+	wantCursors       map[string]string
+	wantProjectCursor string
+	wantCursorKey     string
+	pendingWants      func(ctx context.Context, key string, perProject, scanLimit int, after map[string]string, afterProject string) ([]vector.ArtifactWant, error)
+
 	mu       sync.Mutex
 	health   ReconcilerHealth
 	progress embeddingProgress
@@ -108,7 +121,7 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Reconciler{
+	r := &Reconciler{
 		store:  store,
 		idx:    idx,
 		emb:    emb,
@@ -118,6 +131,10 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 		now:    cfg.Now,
 		health: ReconcilerHealth{Configured: true},
 	}
+	if idx != nil {
+		r.pendingWants = idx.PendingArtifactWantsAfterProject
+	}
+	return r
 }
 
 // Wake nudges the reconciler to run a cycle soon (non-blocking, coalesced).
@@ -342,6 +359,13 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 		portableRecipe = &recipe
+		_ = r.selectIdleHubProducers(ctx, recipe) // logs per project; never fails the pass
+		if fetched := r.fetchFederatedArtifacts(ctx, key, recipe); len(fetched) > 0 {
+			if _, err := r.idx.ReconcileArtifactsFor(ctx, key, r.store, recipe, fetched); err != nil {
+				r.markError(err)
+				return err
+			}
+		}
 		if _, err := r.idx.ReconcileArtifacts(ctx, key, r.store, recipe); err != nil {
 			r.markError(err)
 			return err
@@ -397,6 +421,99 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	r.setCoverage(key, embedded, skipped, backlog)
 	r.markSuccess()
 	return nil
+}
+
+// Pending wants are paged per project: each pass asks for the next
+// artifactWantsPerProject pending documents after the project's cursor, so a
+// project whose oldest documents the hub can never serve still reaches its
+// newer ones. A project that returns fewer than a full page wraps to its start.
+const (
+	artifactWantsPerProject = 32
+	artifactWantsScanLimit  = 4096
+)
+
+// fetchFederatedArtifacts asks the hub of each direct spoke for pending
+// documents' artifacts and returns the issue UIDs it asked about, so the
+// caller can import whatever is retained for them in the same pass. A failure
+// to list wants is logged and skipped; fetch outcomes are recorded per
+// project, a nil outcome clearing the project's recorded failure.
+func (r *Reconciler) fetchFederatedArtifacts(ctx context.Context, key string, recipe embedding.ArtifactIdentity) []string {
+	if r.cfg.FetchFederatedArtifacts == nil || !r.hasDirectSpokeBinding(ctx) {
+		return nil
+	}
+	if r.wantCursorKey != key {
+		r.wantCursors, r.wantProjectCursor, r.wantCursorKey = nil, "", key
+	}
+	wants, err := r.pendingWants(ctx, key, artifactWantsPerProject, artifactWantsScanLimit, r.wantCursors, r.wantProjectCursor)
+	if err != nil {
+		slog.Warn("pending artifact wants failed", "err", err)
+		return nil
+	}
+	if len(wants) == 0 {
+		return nil
+	}
+	r.wantProjectCursor = wants[len(wants)-1].ProjectUID
+	outcomes := r.cfg.FetchFederatedArtifacts(ctx, recipe, wants)
+	r.advanceWantCursors(wants, outcomes)
+	for projectUID, outcome := range outcomes {
+		if outcome == nil {
+			r.setProducerError(projectUID, ProducerFailure{})
+			continue
+		}
+		var selected db.ProjectEmbeddingProducer
+		project, err := r.store.ProjectByUID(ctx, projectUID)
+		if err != nil {
+			continue
+		}
+		if producer, decodeErr := db.ProjectEmbeddingProducerFromMetadata(project.Metadata); decodeErr == nil && producer != nil {
+			selected = *producer
+		}
+		r.setProducerError(projectUID, ProducerFailure{Message: outcome.Error(), Producer: selected})
+	}
+	issueUIDs := make([]string, len(wants))
+	for i, want := range wants {
+		issueUIDs[i] = want.IssueUID
+	}
+	return issueUIDs
+}
+
+// hasDirectSpokeBinding reports whether any enabled spoke binding talks to its
+// hub directly, the only kind that can use fetched artifacts. A lookup failure
+// is logged and treated as none this pass.
+func (r *Reconciler) hasDirectSpokeBinding(ctx context.Context) bool {
+	bindings, err := r.store.ListFederationBindings(ctx)
+	if err != nil {
+		slog.Warn("list federation bindings for artifact fetch failed", "err", err)
+		return false
+	}
+	return slices.ContainsFunc(bindings, func(b db.FederationBinding) bool {
+		return b.Role == db.FederationRoleSpoke && b.Enabled && b.RelayConfig == nil
+	})
+}
+
+// advanceWantCursors moves only projects the fetcher actually attempted. A
+// short page wraps after that attempt; skipped projects keep their cursor so a
+// throttle or a global scan boundary cannot lose their place.
+func (r *Reconciler) advanceWantCursors(wants []vector.ArtifactWant, outcomes map[string]error) {
+	counts := map[string]int{}
+	next := map[string]string{}
+	for _, want := range wants {
+		counts[want.ProjectUID]++
+		next[want.ProjectUID] = want.IssueUID // wants arrive ordered by issue UID within a project
+	}
+	for projectUID, last := range next {
+		if _, attempted := outcomes[projectUID]; !attempted {
+			continue
+		}
+		if counts[projectUID] < artifactWantsPerProject {
+			delete(r.wantCursors, projectUID)
+			continue
+		}
+		if r.wantCursors == nil {
+			r.wantCursors = map[string]string{}
+		}
+		r.wantCursors[projectUID] = last
+	}
 }
 
 func (r *Reconciler) markDocumentFilled(embedded bool) {

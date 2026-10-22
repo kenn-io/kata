@@ -2549,6 +2549,25 @@ func (f FederationEmbeddingArtifactStatus) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationEmbeddingArtifactsBody struct {
+	Artifacts []EmbeddingArtifactResponse `json:"artifacts" validate:"required"`
+}
+
+func (f FederationEmbeddingArtifactsBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.Artifacts {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Artifacts[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type FederationEmbeddingStatus struct {
 	ArtifactLimit int64                               `json:"artifact_limit"`
 	Artifacts     []FederationEmbeddingArtifactStatus `json:"artifacts" validate:"required"`
@@ -2558,7 +2577,7 @@ type FederationEmbeddingStatus struct {
 	Limited   bool                      `json:"limited"`
 	Producer  *ProjectEmbeddingProducer `json:"producer,omitempty"`
 
-	// Reason Why this daemon cannot generate for the project. producer_recipe_changed: this daemon is the selected producer, but its configured recipe differs from the selected recipe; select the producer again at the root. producer_unavailable: this daemon's last check as the selected producer failed; see last_error.
+	// Reason Why this daemon cannot generate for the project. producer_recipe_changed: this daemon is the selected producer, but its configured recipe differs from the selected recipe; select the producer again at the root. producer_recipe_mismatch: the selected producer is another instance whose recipe differs from this daemon's, so its artifacts cannot be reused here. producer_unavailable: the last producer check or artifact fetch for the selected producer failed; see last_error. A recipe reason takes precedence over producer_unavailable.
 	Reason *string `json:"reason,omitempty"`
 	State  string  `json:"state" validate:"required"`
 }

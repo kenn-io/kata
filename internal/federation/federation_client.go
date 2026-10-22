@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -78,6 +79,31 @@ func (c *Client) PollProjectEvents(
 		body.Events = []api.EventEnvelope{}
 	}
 	return body, err
+}
+
+// EmbeddingArtifacts fetches the hub's portable embedding artifacts for the
+// given issue UIDs under one recipe fingerprint. A non-2xx reply returns
+// *HubStatusError. No response size cap applies beyond the client timeout.
+func (c *Client) EmbeddingArtifacts(
+	ctx context.Context, hubProjectID int64, recipeFingerprint string, issueUIDs []string,
+) ([]embedding.EmbeddingArtifact, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return nil, err
+	}
+	query := &generated.GetFederationEmbeddingArtifactsQuery{IssueUID: issueUIDs, RecipeFingerprint: &recipeFingerprint}
+	response, callErr := apiClient.GetFederationEmbeddingArtifactsWithResponse(ctx, &generated.GetFederationEmbeddingArtifactsRequestOptions{PathParams: &generated.GetFederationEmbeddingArtifactsPath{ProjectID: hubProjectID}, Query: query})
+	if response == nil {
+		return nil, callErr
+	}
+	var body api.FederationEmbeddingArtifactsBody
+	if err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body); err != nil {
+		return nil, err
+	}
+	if body.Artifacts == nil {
+		body.Artifacts = []embedding.EmbeddingArtifact{}
+	}
+	return body.Artifacts, nil
 }
 
 // IngestProjectEvents pushes local spoke events into the hub transport

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 )
 
 // EnableProjectFederationRequest enables pull federation on one hub project.
@@ -463,6 +464,26 @@ type FederationPollEventsRequest struct {
 	Limit         OptionalInt `query:"limit,omitempty"`
 }
 
+// FederationEmbeddingArtifactsRequest asks a hub for the durable portable
+// embedding artifacts of up to 32 issues under one recipe fingerprint. It
+// carries its own bearer header because the route bypasses daemon admin auth.
+type FederationEmbeddingArtifactsRequest struct {
+	ProjectID         int64    `path:"project_id"`
+	Authorization     string   `header:"Authorization"`
+	IssueUIDs         []string `query:"issue_uid,explode" minItems:"1" maxItems:"32"`
+	RecipeFingerprint string   `query:"recipe_fingerprint" minLength:"1"`
+}
+
+// FederationEmbeddingArtifactsBody lists the artifacts served for one request.
+type FederationEmbeddingArtifactsBody struct {
+	Artifacts []embedding.EmbeddingArtifact `json:"artifacts"`
+}
+
+// FederationEmbeddingArtifactsResponse wraps FederationEmbeddingArtifactsBody.
+type FederationEmbeddingArtifactsResponse struct {
+	Body FederationEmbeddingArtifactsBody
+}
+
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
 // route.
 type FederationIngestEventsRequest struct {
@@ -706,7 +727,7 @@ type LeaveFederationReplicaResponse struct {
 type FederationEmbeddingStatus struct {
 	Producer      *db.ProjectEmbeddingProducer        `json:"producer,omitempty"`
 	State         string                              `json:"state"`
-	Reason        string                              `json:"reason,omitempty" doc:"Why this daemon cannot generate for the project. producer_recipe_changed: this daemon is the selected producer, but its configured recipe differs from the selected recipe; select the producer again at the root. producer_unavailable: this daemon's last check as the selected producer failed; see last_error."`
+	Reason        string                              `json:"reason,omitempty" doc:"Why this daemon cannot generate for the project. producer_recipe_changed: this daemon is the selected producer, but its configured recipe differs from the selected recipe; select the producer again at the root. producer_recipe_mismatch: the selected producer is another instance whose recipe differs from this daemon's, so its artifacts cannot be reused here. producer_unavailable: the last producer check or artifact fetch for the selected producer failed; see last_error. A recipe reason takes precedence over producer_unavailable."`
 	LastError     string                              `json:"last_error,omitempty" doc:"Last failed producer check on this daemon, such as an unreachable upstream hub or a missing federation credential."`
 	ArtifactLimit int                                 `json:"artifact_limit"`
 	Limited       bool                                `json:"limited"`

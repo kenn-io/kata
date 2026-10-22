@@ -150,7 +150,7 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			emitMetadataBaseline = true
 		}
 		if emitMetadataBaseline {
-			payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
+			payload, err := db.ProjectMetadataSpokeAdoptionPayload(project.Metadata)
 			if err != nil {
 				return err
 			}

@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
@@ -256,4 +257,94 @@ func TestFederationClientIngestDeclaresCommentReplyWireVersion(t *testing.T) {
 			assert.Equal(t, tc.want, gotBody.SchemaVersion)
 		})
 	}
+}
+
+func TestClientEmbeddingArtifactsSendsQueryAndBearer(t *testing.T) {
+	var gotAuth string
+	var gotUIDs []string
+	var gotFingerprint, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		gotUIDs = r.URL.Query()["issue_uid"]
+		gotFingerprint = r.URL.Query().Get("recipe_fingerprint")
+		require.NoError(t, json.NewEncoder(w).Encode(api.FederationEmbeddingArtifactsBody{
+			Artifacts: []embedding.EmbeddingArtifact{{IssueUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", InputHash: "hash-a"}},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	artifacts, err := client.EmbeddingArtifacts(context.Background(), 42, "recipe-1", []string{"uid-a", "uid-b"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer hub-token", gotAuth)
+	assert.Equal(t, "/api/v1/projects/42/federation/embedding-artifacts", gotPath)
+	assert.Equal(t, []string{"uid-a", "uid-b"}, gotUIDs)
+	assert.Equal(t, "recipe-1", gotFingerprint)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, "hash-a", artifacts[0].InputHash)
+}
+
+func TestClientEmbeddingArtifacts404IsHubStatusError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	artifacts, err := client.EmbeddingArtifacts(context.Background(), 42, "recipe-1", []string{"uid-a"})
+	assert.Nil(t, artifacts)
+	var statusErr *HubStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusNotFound, statusErr.StatusCode)
+}
+
+func TestClientEmbeddingArtifactsDecodesLargeBody(t *testing.T) {
+	const (
+		chunkCount = 80
+		dimensions = 32768
+		largeBody  = 12 << 20
+	)
+	input := strings.Repeat("x", 2000+(chunkCount-1)*(2000-200))
+	identity := embedding.ArtifactIdentity{
+		ProjectUID:          "00000000000000000000000001",
+		IssueUID:            "00000000000000000000000002",
+		ProducerInstanceUID: "00000000000000000000000003",
+		Provider:            "openai-compatible",
+		Model:               "example-model",
+		ModelRevision:       "revision-1",
+		Dimensions:          dimensions,
+		InputType:           "none",
+		Normalization:       "l2",
+		Preprocessing:       "kata.issue/v2",
+		RecipeVersion:       2,
+		SplitMaxRunes:       2000,
+		SplitOverlap:        200,
+		RecipeFingerprint:   strings.Repeat("a", 64),
+	}
+	vector := make([]float32, dimensions)
+	vectors := make([][]float32, chunkCount)
+	for i := range vectors {
+		vectors[i] = vector
+	}
+	want, err := embedding.NewArtifact(identity, input, vectors)
+	require.NoError(t, err)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		body, err := json.Marshal(api.FederationEmbeddingArtifactsBody{Artifacts: []embedding.EmbeddingArtifact{want}})
+		require.NoError(t, err)
+		require.Greater(t, len(body), largeBody)
+		_, err = w.Write(body)
+		require.NoError(t, err)
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	artifacts, err := client.EmbeddingArtifacts(context.Background(), 42, "recipe-1", []string{"uid-a"})
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, want, artifacts[0])
 }

@@ -1917,11 +1917,15 @@ func startEmbeddingReconciler(
 	if len(publishers) > 0 {
 		publisher = publishers[0]
 	}
+	// The fetcher uses the federation runner's client options, which the
+	// runner leaves at their defaults.
+	artifactFetcher := federation.NewDirectArtifactFetcher(store, config.DefaultFederationCredentialStore(), client.Opts{}, federationRunnerInterval())
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
-		BatchSize:      ec.BatchSize,
-		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
-		DrainAdmission: drainAdmission,
-		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		FetchFederatedArtifacts: artifactFetcher.Fetch,
+		BatchSize:               ec.BatchSize,
+		BatchOptions:            embeddingBatchOptions(ec, embedder.BatchSize()),
+		DrainAdmission:          drainAdmission,
+		OnProjectEvent:          func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
 		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
 			if !syncArtifacts {
 				return federation.EmbeddingProducerAuthorized(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)

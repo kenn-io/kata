@@ -2964,7 +2964,7 @@ func (d *Store) adoptProjectIntoFederation(
 		emitMetadataBaseline = true
 	}
 	if emitMetadataBaseline {
-		payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
+		payload, err := db.ProjectMetadataSpokeAdoptionPayload(project.Metadata)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}

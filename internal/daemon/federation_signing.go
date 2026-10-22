@@ -18,19 +18,20 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
-	"getFederationProjectMetadata":  {"pull", "push"},
-	"pollFederationProjectEvents":   {"pull"},
-	"ingestFederationProjectEvents": {"push"},
-	"disconnectRelayEnrollment":     {"push"},
-	"getRelayReset":                 {"pull"},
-	"offerRelayDeliveries":          {"pull"},
-	"acceptRelayDeliveries":         {"push"},
-	"ackRelayDeliveries":            {"pull"},
-	"claimIssue":                    {"claim"},
-	"acquireIssueLease":             {"claim"},
-	"renewIssueLease":               {"claim"},
-	"releaseIssueLease":             {"claim"},
-	"getIssueLeaseStatus":           {"claim"},
+	"getFederationProjectMetadata":    {"pull", "push"},
+	"pollFederationProjectEvents":     {"pull"},
+	"getFederationEmbeddingArtifacts": {"pull"},
+	"ingestFederationProjectEvents":   {"push"},
+	"disconnectRelayEnrollment":       {"push"},
+	"getRelayReset":                   {"pull"},
+	"offerRelayDeliveries":            {"pull"},
+	"acceptRelayDeliveries":           {"push"},
+	"ackRelayDeliveries":              {"pull"},
+	"claimIssue":                      {"claim"},
+	"acquireIssueLease":               {"claim"},
+	"renewIssueLease":                 {"claim"},
+	"releaseIssueLease":               {"claim"},
+	"getIssueLeaseStatus":             {"claim"},
 }
 
 type signingRoute struct {

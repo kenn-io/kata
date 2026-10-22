@@ -36,3 +36,12 @@ func SyncFederationTurnForTest(ctx context.Context, store db.Storage, binding db
 	defer finish()
 	return syncFederationOnceWithFence(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil, nil)
 }
+
+// SetClockForTest replaces the clock that spaces a direct artifact fetcher's
+// per-project requests.
+func (f *DirectArtifactFetcher) SetClockForTest(now func() time.Time) { f.now = now }
+
+// SetRequestTimeoutForTest shortens the per-request hub timeout.
+func (f *DirectArtifactFetcher) SetRequestTimeoutForTest(timeout time.Duration) {
+	f.requestTimeout = timeout
+}
