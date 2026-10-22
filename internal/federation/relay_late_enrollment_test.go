@@ -79,9 +79,10 @@ func TestRelayLateEnrollmentAfterPurgeBeforeInitialSync(t *testing.T) {
 	}
 }
 
-// A root checkpoint can withhold a cross-project creation while retaining a
-// later assignment and snapshot. The relay must forward the signed checkpoint
-// rather than replay the assignment before the leaf knows the issue.
+// An issue is created with a link to an unshared project, then the link is removed.
+// The root withholds the creation because its payload names the unshared project,
+// retains the later assignment, and adds a snapshot after it. The relay must forward
+// the signed checkpoint rather than replay the assignment before the leaf knows the issue.
 func TestRelayLeafRecoversLateSnapshot(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -127,7 +128,6 @@ func TestRelayLeafRecoversLateSnapshot(t *testing.T) {
 			enrollRelayMatrixReplica(t, relay, leaf, "leaf-alias", false)
 			binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
 			require.NoError(t, err)
-			// Store tests own boundary detection but lack this out-of-order history case.
 			required, err := relay.store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, binding.RelayConfig.BindingUID)
 			require.NoError(t, err)
 			require.True(t, required, "a retained late snapshot must select signed reset")
