@@ -122,6 +122,9 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if localProject.ID != 0 {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, localProject.ID); err != nil {
+				if errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+					return nil, api.NewError(http.StatusConflict, "relay_cross_project_links", "this daemon's copy of the project has cross-project issue links", "remove cross-project related, blocks, and parent links locally before retrying", nil)
+				}
 				return nil, relayTransportError(err)
 			}
 		}

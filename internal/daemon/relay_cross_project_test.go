@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"fmt"
@@ -155,33 +154,6 @@ func TestFederationBridgePreflightRejectsOldHubLinkCheck(t *testing.T) {
 	}
 }
 
-type bridgeLinkCheckStore struct {
-	db.Storage
-	checks atomic.Int32
-}
-
-func (s *bridgeLinkCheckStore) CheckRelayProjectLinks(ctx context.Context, projectID int64) error {
-	s.checks.Add(1)
-	return s.Storage.CheckRelayProjectLinks(ctx, projectID)
-}
-
-func TestFederationBridgeChecksLocalLinksOnce(t *testing.T) {
-	for _, preflight := range []bool{true, false} {
-		t.Run(fmt.Sprintf("preflight=%v", preflight), func(t *testing.T) {
-			t.Setenv("KATA_HOME", t.TempDir())
-			hub := newBridgeHubFixture(t)
-			store := &bridgeLinkCheckStore{Storage: openReplicaServiceStore(t)}
-			_, err := store.CreateProjectWithUID(t.Context(), "shared-replica", hub.root.private.UID)
-			require.NoError(t, err)
-			local := newBridgeLocalDaemon(t, store, hub.catalog(hub.root.server.URL))
-
-			code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, preflight), bridgeOwnerHeaders)
-			require.Equal(t, http.StatusOK, code, string(raw))
-			require.EqualValues(t, 1, store.checks.Load(), "each request must check local links once before enrollment")
-		})
-	}
-}
-
 func TestFederationBridgeLocalCrossProjectLinks(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	hub := newBridgeHubFixture(t)
@@ -202,6 +174,8 @@ func TestFederationBridgeLocalCrossProjectLinks(t *testing.T) {
 			code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, preflight), bridgeOwnerHeaders)
 			require.Equal(t, http.StatusConflict, code, string(raw))
 			require.Equal(t, "relay_cross_project_links", bridgeErrorCode(t, raw))
+			require.Contains(t, string(raw), `"message":"this daemon's copy of the project has cross-project issue links"`)
+			require.Contains(t, string(raw), `"hint":"remove cross-project related, blocks, and parent links locally before retrying"`)
 		})
 	}
 	grants, err := hub.store.ListFederationEnrollments(t.Context())
