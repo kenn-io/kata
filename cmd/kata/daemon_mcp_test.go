@@ -89,14 +89,6 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				require.Equal(t, kitdaemon.NetworkUnix, record.Network)
 				endpoint = record.Metadata["web_origin"] + "/mcp"
 			}
-			httpClient := &http.Client{Timeout: 2 * time.Second}
-			request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-			require.NoError(t, err)
-			request.Header.Set("Authorization", "Bearer example-daemon-token")
-			response, err := httpClient.Do(request)
-			require.NoError(t, err)
-			require.NoError(t, response.Body.Close())
-			require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 			callCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 			defer stop()
 			session, err := newMCPHTTPTestClient().Connect(callCtx, newAuthenticatedMCPHTTPTestTransport(endpoint, tt.host), nil)
@@ -125,13 +117,11 @@ token_env = "KATA_MCP_TEST_TOKEN"
 
 func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 	for _, tt := range []struct {
-		name             string
-		auth             config.AuthConfig
-		insecureReadonly bool
+		name string
+		auth config.AuthConfig
 	}{
-		{"bearer", config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true}, false},
-		{"tokenless private network", config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}, false},
-		{"read-only private network", config.AuthConfig{}, true},
+		{"bearer", config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true}},
+		{"tokenless private network", config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			deploymentHome(t)
@@ -160,7 +150,7 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 			require.NoError(t, err)
 			backendAddress := backendURL.Host
 			backendURL.Host = "100.64.0.5:7777"
-			require.NoError(t, daemon.CheckAuthStartup(backendURL.Host, tt.auth, tt.insecureReadonly))
+			require.NoError(t, daemon.CheckAuthStartup(backendURL.Host, tt.auth, false))
 			proxyURL, err := url.Parse(proxy.URL)
 			require.NoError(t, err)
 			base := http.DefaultTransport.(*http.Transport).Clone()

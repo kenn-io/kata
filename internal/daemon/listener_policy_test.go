@@ -87,6 +87,26 @@ func TestBrowserOriginPolicy(t *testing.T) {
 		})
 	}
 
+	for _, tt := range []struct {
+		name   string
+		origin string
+		want   int
+	}{
+		{name: "MCP without origin on browser listener", want: http.StatusNoContent},
+		{name: "MCP foreign origin on browser listener", origin: "https://attacker.example", want: http.StatusForbidden},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/mcp", nil)
+			req.Host = "127.0.0.1:27123"
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			assert.Equal(t, tt.want, response.Code)
+		})
+	}
+
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	req.Host = "127.0.0.1:27123"
 	req.Header.Set("Origin", "http://127.0.0.1:27123")
@@ -199,9 +219,13 @@ func TestLocalUISessionPolicyRequiresDirectLoopback(t *testing.T) {
 }
 
 func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
+	handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), ListenerPolicy{Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123"})
+	require.NoError(t, err)
+
 	tests := []struct {
 		name    string
-		kind    ListenerKind
 		method  string
 		path    string
 		host    string
@@ -209,15 +233,6 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 		cookie  *http.Cookie
 		want    int
 	}{
-		{
-			name: "MCP without origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123", want: http.StatusNoContent,
-		},
-		{
-			name: "MCP foreign origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123",
-			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
-		},
 		{
 			name: "MCP browser cookie without origin", method: http.MethodPost,
 			path: "/mcp", host: "127.0.0.1:27123",
@@ -266,14 +281,6 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kind := tt.kind
-			if kind == "" {
-				kind = ListenerSharedTCP
-			}
-			handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-			}), ListenerPolicy{Kind: kind, Origin: "http://127.0.0.1:27123"})
-			require.NoError(t, err)
 			method := tt.method
 			if method == "" {
 				method = http.MethodGet
