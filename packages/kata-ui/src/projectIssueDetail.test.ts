@@ -54,6 +54,9 @@ describe('projectIssueDetail', () => {
       size: 12,
       docbank_version: versionID,
     }
+    const { name, ...missingName } = entry
+    const { media_type: mediaType, ...missingType } = entry
+    const { size, ...missingSize } = entry
     const detail = projectIssueDetail({
       issue: {
         uid: '01TASK',
@@ -62,16 +65,16 @@ describe('projectIssueDetail', () => {
         metadata: {
           'attachment.file': entry,
           'attachment.junk': 'junk',
-          'attachment.missing-name': { media_type: 'image/png', size: 12 },
-          'attachment.missing-type': { name: 'shot.png', size: 12 },
-          'attachment.missing-size': { name: 'shot.png', media_type: 'image/png' },
+          'attachment.missing-name': missingName,
+          'attachment.missing-type': missingType,
+          'attachment.missing-size': missingSize,
           'attachment.wrong-size': { ...entry, size: '12' },
           'work.branch': 'feature',
         },
       },
     })
     expect(detail.issue.attachments).toEqual({
-      file: { name: 'shot.png', media_type: 'image/png', size: 12, docbank_version: versionID },
+      file: { name, media_type: mediaType, size, docbank_version: versionID },
     })
   })
 
