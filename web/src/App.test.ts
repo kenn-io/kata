@@ -1102,9 +1102,9 @@ describe('App', () => {
 
     expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
-    expect(
-      (screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    )
   })
 
   it('shows configured-origin login without probing authority or losing the requested route', () => {
@@ -1756,9 +1756,9 @@ describe('App', () => {
           request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
       )
       expect(mutation).toBeDefined()
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      )
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull()
     })
     const mutation = requests.find(
       (request) => request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
@@ -2213,9 +2213,9 @@ describe('App', () => {
     )
     await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
     await waitFor(() =>
       expect(
@@ -2302,8 +2302,8 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
     expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
-    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
     )
     expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
 
@@ -2312,9 +2312,9 @@ describe('App', () => {
       await screen.findByRole('button', { name: /Previously existing shared issue/ }),
     ).not.toBeNull()
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2), { timeout: 5000 })
     await waitFor(() =>
@@ -2587,8 +2587,8 @@ describe('App', () => {
     )
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
-    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
     )
     expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
 
@@ -2597,9 +2597,9 @@ describe('App', () => {
       await screen.findByRole('button', { name: /Previously existing shared issue/ }),
     ).not.toBeNull()
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
   }, 15_000)
 
@@ -2678,7 +2678,7 @@ describe('App', () => {
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     await waitFor(() =>
-      expect(screen.queryByRole('status', { name: 'Stale Kata data' })).toBeNull(),
+      expect(screen.queryByText('Snapshot may be out of date. Changes are paused.')).toBeNull(),
     )
   })
 
