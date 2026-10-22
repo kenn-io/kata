@@ -175,9 +175,6 @@ func federationEnrollCmd() *cobra.Command {
 			}
 			allowInsecure = effectiveAllowInsecure
 			hub := hubAPI(ctx, hubBaseURL, hubClient)
-			if err := preflightLegacyFederationEnrollment(hub); err != nil {
-				return federationEnrollHTTPClientError(err)
-			}
 			requestActor := strings.TrimSpace(actor)
 			if requestActor == "" {
 				requestActor, _ = resolveActor(ctx, flags.As, nil)
@@ -247,39 +244,6 @@ func federationEnrollCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow plaintext HTTP hub URL for enrollment and later spoke transport")
 	cmd.Flags().BoolVar(&adoptExistingFlag, "adopt-existing", false, "mark enrollment for adopting an existing spoke project")
 	return cmd
-}
-
-// Check the selected hub credential before resolving (and possibly creating)
-// or enabling a project. The enrollment endpoint still authorizes the final
-// request, including changes to the credential after this read.
-func preflightLegacyFederationEnrollment(hub daemonAPI) error {
-	apiClient, err := kataclient.NewWithHTTPClient(hub.baseURL, hub.client)
-	if err != nil {
-		return err
-	}
-	resp, callErr := apiClient.InstanceWithResponse(hub.ctx)
-	if err := externalCLITransportError(resp, callErr); err != nil {
-		return err
-	}
-	if resp == nil {
-		return externalCLITransportError(resp, callErr)
-	}
-	if err := externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
-		return err
-	}
-	var instance struct {
-		Auth struct {
-			Kind string `json:"kind"`
-		} `json:"auth"`
-	}
-	if err := json.Unmarshal(resp.Body, &instance); err != nil {
-		return err
-	}
-	switch instance.Auth.Kind {
-	case "db_token":
-		return &cliError{Message: "database account tokens must use relay enrollments; use kata federation bridge connect for an existing hub project", Code: "federation_enrollment_requires_relay", Kind: kindForStatus(http.StatusForbidden), HTTPStatus: http.StatusForbidden, ExitCode: mapStatusToExit(http.StatusForbidden, "federation_enrollment_requires_relay")}
-	}
-	return nil
 }
 
 func federationEnrollHTTPClient(ctx context.Context, hubBaseURL string, allowInsecure bool) (*http.Client, error) {
