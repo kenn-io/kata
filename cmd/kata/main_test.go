@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
@@ -710,4 +711,106 @@ func TestNegativePositional_ProducesUsefulError(t *testing.T) {
 		assert.Contains(t, ce.Message, "--",
 			"useful error must mention the `--` separator workaround")
 	}
+}
+
+func TestRoot_RejectsEmptyActorOverride(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "env-actor")
+	for _, mode := range []string{"human", "json", "agent"} {
+		for _, empty := range [][]string{{"--as", ""}, {"--as="}} {
+			for _, command := range [][]string{nil, {"whoami"}, {"version"}, {"--version"}, {"probe", "write"}} {
+				for _, before := range []bool{false, true} {
+					args := append([]string{"--format", mode}, command...)
+					if before {
+						args = append(append([]string{}, empty...), args...)
+					} else {
+						args = append(args, empty...)
+					}
+					t.Run(strings.Join(args, " "), func(t *testing.T) {
+						resetFlags(t)
+						cmd := newRootCmd()
+						ran := false
+						probe := &cobra.Command{Use: "probe"}
+						probe.AddCommand(&cobra.Command{Use: "write", Run: func(*cobra.Command, []string) { ran = true }})
+						cmd.AddCommand(probe)
+						var stdout, stderr bytes.Buffer
+						cmd.SetOut(&stdout)
+						cmd.SetErr(&stderr)
+						cmd.SetArgs(args)
+						err := cmd.Execute()
+						var ce *cliError
+						require.ErrorAs(t, err, &ce)
+						assert.Equal(t, kindValidation, ce.Kind)
+						assert.Equal(t, ExitValidation, ce.ExitCode)
+						assert.Equal(t, "--as must be non-empty", ce.Message)
+						assert.Empty(t, stdout.String())
+						assert.False(t, ran)
+						emitRootError(&stderr, cmd, args, err, runEEntered)
+						switch mode {
+						case "json":
+							got := parseErrorEnvelope(t, stderr.Bytes())
+							assert.Equal(t, "validation", got.Error.Kind)
+							assert.Equal(t, ExitValidation, got.Error.ExitCode)
+						case "agent":
+							assert.Contains(t, stderr.String(), " validation: --as must be non-empty")
+						default:
+							assert.Contains(t, stderr.String(), "kata: --as must be non-empty")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestRoot_HelpWithEmptyActorOverride(t *testing.T) {
+	out := executeRoot(t, newRootCmd(), "whoami", "--help", "--as=")
+	assert.Contains(t, string(out), "kata whoami [flags]")
+}
+
+func FuzzRootActorOverride(f *testing.F) {
+	for _, actor := range []string{"", "operator", " ", "--agent", "a\x00b", "λ"} {
+		f.Add(actor, true, true, true)
+	}
+	f.Add("", false, false, false)
+	f.Fuzz(func(t *testing.T, actor string, present, equals, before bool) {
+		resetFlags(t)
+		t.Setenv("KATA_AUTHOR", "env-actor")
+		cmd := newRootCmd()
+		var gotActor, gotSource string
+		probe := &cobra.Command{Use: "probe"}
+		probe.AddCommand(&cobra.Command{Use: "write", Run: func(cmd *cobra.Command, _ []string) {
+			gotActor, gotSource = resolveActor(cmd.Context(), flags.As, nil)
+		}})
+		cmd.AddCommand(probe)
+		args := []string{"probe", "write"}
+		if present {
+			override := []string{"--as", actor}
+			if equals {
+				override = []string{"--as=" + actor}
+			}
+			if before {
+				args = append(override, args...)
+			} else {
+				args = append(args, override...)
+			}
+		}
+		cmd.SetArgs(args)
+		err := cmd.Execute()
+		if present && actor == "" {
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			assert.Equal(t, kindValidation, ce.Kind)
+			assert.Equal(t, ExitValidation, ce.ExitCode)
+			assert.Empty(t, gotSource, "command must not run")
+			return
+		}
+		require.NoError(t, err)
+		if present {
+			assert.Equal(t, actor, gotActor)
+			assert.Equal(t, "flag", gotSource)
+		} else {
+			assert.Equal(t, "env-actor", gotActor)
+			assert.Equal(t, "env", gotSource)
+		}
+	})
 }

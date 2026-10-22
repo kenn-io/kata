@@ -75,6 +75,9 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
+			if cmd.Flags().Changed("as") && flags.As == "" {
+				return &cliError{Message: "--as must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+			}
 			return nil
 		},
 		// Cobra runs this only after the command's RunE succeeded.

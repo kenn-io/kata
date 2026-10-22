@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # CLI reference
@@ -23,7 +23,7 @@ compactly; `kata --help` has their full descriptions.
 | `--workspace <path>` | Resolve project context from a specific workspace. |
 | `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
-| `--as <actor>` | Override the actor for this command. |
+| `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
 | `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
 | `--agent` | Emit an `OK` or `ERR` status line, then command-specific details. Use in agent sessions. |
 | `--json` | Emit the full JSON envelope for scripts. |
