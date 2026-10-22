@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
 	"hash"
@@ -130,13 +130,13 @@ func (c *Client) Upload(ctx context.Context, parent int64, name string, body io.
 			VersionID uuid.UUID `json:"current_version_id"`
 		} `json:"node"`
 	}
-	if json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), &receipt) != nil {
+	if json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), &receipt) != nil || receipt.Node.VersionID == uuid.Nil() {
 		return uuid.Nil(), &Error{}
 	}
 	return receipt.Node.VersionID, nil
 }
 
-// Content verifies immutable bytes against Docbank's terminal digest and retains its reported length.
+// Content verifies immutable bytes against Docbank's blob hash and retains its reported length.
 func (c *Client) Content(ctx context.Context, version uuid.UUID) (*http.Response, error) {
 	return verifiedContent(c.request(ctx, "GET", "/api/v1/versions/"+version.String()+"/content", nil, nil))
 }
@@ -146,7 +146,7 @@ func verifiedContent(resp *http.Response, err error) (*http.Response, error) {
 		return nil, err
 	}
 	h := sha256.New()
-	resp.Body = &contentStream{ReadCloser: resp.Body, reader: bufio.NewReader(io.TeeReader(resp.Body, h)), hash: h, trailer: resp.Trailer}
+	resp.Body = &contentStream{ReadCloser: resp.Body, reader: bufio.NewReader(io.TeeReader(resp.Body, h)), hash: h, expected: resp.Header.Get("X-Docbank-Blob-Hash")}
 	if size, err := strconv.ParseInt(resp.Header.Get("X-Docbank-Blob-Size"), 10, 64); err == nil {
 		resp.ContentLength = size
 	}
@@ -155,9 +155,9 @@ func verifiedContent(resp *http.Response, err error) (*http.Response, error) {
 
 type contentStream struct {
 	io.ReadCloser
-	reader  *bufio.Reader
-	hash    hash.Hash
-	trailer http.Header
+	reader   *bufio.Reader
+	hash     hash.Hash
+	expected string
 }
 
 func (s *contentStream) Read(p []byte) (int, error) {
@@ -168,8 +168,8 @@ func (s *contentStream) Read(p []byte) (int, error) {
 	if err != nil && err != io.EOF {
 		return 0, err
 	}
-	// Withhold the last chunk until Docbank has verified the complete stream.
-	if err == io.EOF && s.trailer.Get("Content-Digest") != "sha-256=:"+base64.StdEncoding.EncodeToString(s.hash.Sum(nil))+":" {
+	// Withhold the last chunk until the complete stream matches Docbank's blob hash.
+	if err == io.EOF && s.expected != hex.EncodeToString(s.hash.Sum(nil)) {
 		return 0, errors.New("docbank: content digest mismatch")
 	}
 	return n, err

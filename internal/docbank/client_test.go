@@ -33,28 +33,56 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	require.Equal(t, "abc", string(b))
 	require.EqualValues(t, 3, resp.ContentLength)
 }
+func TestDocbankContentWithoutTrailer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Docbank-Blob-Hash", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+		_, _ = io.WriteString(w, "abc")
+	}))
+	defer upstream.Close()
+	c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+	resp, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "abc", string(b))
+}
+
 func TestDocbankContentRejectsCorruptContent(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "wrong digest", true: "missing digest"}[missing], func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/api/v1/versions/6f1c2e8a-2222-4222-8222-222222222222/content", r.URL.Path)
 				w.Header().Set("X-Docbank-Blob-Size", "4")
-				w.Header().Set("Trailer", "Content-Digest")
-				_, _ = io.WriteString(w, "BBBB")
 				if !missing {
 					// SHA-256 of "AAAA".
-					w.Header().Set("Content-Digest", "sha-256=:Y8HdlR/+329/2WitTvo5uO1YTxYvRucVEU7hhPjekgE=:")
+					w.Header().Set("X-Docbank-Blob-Hash", "63c1dd951ffedf6f7fd968ad4efa39b8ed584f162f46e715114ee184f8de9201")
 				}
+				_, _ = io.WriteString(w, "BBBB")
 			}))
 			defer upstream.Close()
 			c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
 			resp, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
 			require.NoError(t, err)
 			defer func() { _ = resp.Body.Close() }()
-			_, err = io.ReadAll(resp.Body)
+			b, err := io.ReadAll(resp.Body)
 			require.EqualError(t, err, "docbank: content digest mismatch")
+			require.Empty(t, b, "the final chunk must be withheld")
 		})
 	}
+}
+
+func TestDocbankUploadRejectsMissingVersion(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/uploads", r.URL.Path)
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = io.WriteString(w, `{"node":{}}`)
+	}))
+	defer upstream.Close()
+	c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+	version, err := c.Upload(t.Context(), 1, "sample.txt", strings.NewReader("abc"), 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+	require.Error(t, err)
+	require.Equal(t, uuid.Nil(), version)
 }
 func TestDocbankStatusAndKeyRotation(t *testing.T) {
 	key := "first"

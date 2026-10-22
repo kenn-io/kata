@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 # Issue attachments
@@ -35,7 +35,7 @@ kata docbank attachments get abc4 <attachment-id-or-suffix> -o screenshot.png
 kata docbank attachments rm abc4 <attachment-id-or-suffix>
 ```
 
-Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check Docbank's terminal digest and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
+Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
 
 Removal drops the reference. Docbank retains the bytes under its own retention rules.
 
