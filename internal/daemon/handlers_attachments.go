@@ -74,6 +74,23 @@ func inlineAttachmentType(typ string) bool {
 	}
 	return false
 }
+
+func attachmentFolder(ctx context.Context, cfg ServerConfig, projectID int64) (int64, error) {
+	project, err := cfg.DB.ProjectByID(ctx, projectID)
+	if err != nil {
+		return 0, internalAPIError(err)
+	}
+	folder := cfg.DocbankFolder
+	if folder == "" {
+		folder = "/kata"
+	}
+	parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(folder, project.UID))
+	if err != nil {
+		return 0, docbankError(err)
+	}
+	return parent, nil
+}
+
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
@@ -121,17 +138,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
 		}
-		project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
+		parent, err := attachmentFolder(ctx, cfg, in.ProjectID)
 		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		folder := cfg.DocbankFolder
-		if folder == "" {
-			folder = "/kata"
-		}
-		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(folder, project.UID))
-		if err != nil {
-			return nil, docbankError(err)
+			return nil, err
 		}
 		sha := hex.EncodeToString(hash.Sum(nil))
 		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, sha[:12]+"-"+e.Name, file, e.Size, sha)
@@ -145,6 +154,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		raw, err := json.Marshal(e)
 		if err != nil {
 			return nil, internalAPIError(err)
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
+			return nil, err
 		}
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
 		if errors.Is(err, db.ErrFederatedReadOnly) {

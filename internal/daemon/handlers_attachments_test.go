@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
@@ -85,6 +87,62 @@ func TestAttachmentRawBodyReference(t *testing.T) {
 	require.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
 	require.Empty(t, resp.Header.Get("Set-Cookie"))
 	require.Len(t, f.Requests(), calls+1, "a read only fetches the immutable version")
+}
+
+func TestAttachmentUploadRechecksFederatedClaim(t *testing.T) {
+	f := docbanktest.New(t)
+	uploadStarted, resumeUpload := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(resumeUpload) })
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads" {
+			close(uploadStarted)
+			select {
+			case <-resumeUpload:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		f.Server.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	defer resume()
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+	})
+	p, iss, _ := setupClaimGateProject(t, env, true)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint+"?name=shot.png&actor=operator", strings.NewReader("image bytes"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	completed := make(chan result, 1)
+	go func() {
+		resp, err := env.HTTP.Do(req)
+		completed <- result{resp, err}
+	}()
+	select {
+	case <-uploadStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upload did not reach Docbank")
+	}
+	acquireClaimGateIssue(t, env, p, iss, "other")
+	resume()
+	out := <-completed
+	require.NoError(t, out.err)
+	defer func() { _ = out.resp.Body.Close() }()
+	raw, err := io.ReadAll(out.resp.Body)
+	require.NoError(t, err)
+
+	// A new request exercises the early gate against the same conflicting claim.
+	code, earlyRaw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("image bytes"))
+	assertAPIError(t, code, earlyRaw, http.StatusConflict, "claim_denied")
+	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	assert.Equal(t, string(iss.Metadata), string(stored.Metadata), "upload must leave attachment metadata unchanged")
+	assertAPIError(t, out.resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 type attachmentUnreadBody struct{ reads int }
