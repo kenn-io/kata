@@ -41,16 +41,22 @@ func attachmentError(status int, code string) error {
 	return api.NewError(status, code, strings.ReplaceAll(code, "_", " "), "", nil)
 }
 
-var docbankStatusErrors = map[int]error{
-	404: attachmentError(410, "attachment_content_missing"),
+// Only a content read treats 404 as missing content; on upload it is a bad request.
+var docbankUploadErrors = map[int]error{
 	401: attachmentError(502, "docbank_unauthorized"),
 	403: attachmentError(502, "docbank_unauthorized"),
 	413: attachmentError(413, "attachment_too_large"),
 }
 
-func docbankError(err error) error {
+var docbankContentErrors = map[int]error{
+	401: attachmentError(502, "docbank_unauthorized"),
+	403: attachmentError(502, "docbank_unauthorized"),
+	404: attachmentError(410, "attachment_content_missing"),
+}
+
+func docbankError(err error, statusErrors map[int]error) error {
 	if e, ok := errors.AsType[*docbank.Error](err); ok {
-		if mapped := docbankStatusErrors[e.Status]; mapped != nil {
+		if mapped := statusErrors[e.Status]; mapped != nil {
 			return mapped
 		}
 		if e.Status >= 400 && e.Status < 500 {
@@ -86,7 +92,7 @@ func attachmentFolder(ctx context.Context, cfg ServerConfig, projectID int64) (i
 	}
 	parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(folder, project.UID))
 	if err != nil {
-		return 0, docbankError(err)
+		return 0, docbankError(err, docbankUploadErrors)
 	}
 	return parent, nil
 }
@@ -143,7 +149,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		sha := hex.EncodeToString(hash.Sum(nil))
 		e.DocbankVersion, err = cfg.Docbank.Upload(ctx, parent, sha[:12]+"-"+e.Name, file, e.Size, sha)
 		if err != nil {
-			return nil, docbankError(err)
+			return nil, docbankError(err, docbankUploadErrors)
 		}
 		id, err := uid.New()
 		if err != nil {
@@ -196,7 +202,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		}
 		resp, err := cfg.Docbank.Content(ctx, e.DocbankVersion)
 		if err != nil {
-			return nil, docbankError(err)
+			return nil, docbankError(err, docbankContentErrors)
 		}
 		typ, disposition := "application/octet-stream", "attachment"
 		if inlineAttachmentType(e.MediaType) {

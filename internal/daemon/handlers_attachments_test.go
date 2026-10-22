@@ -311,7 +311,7 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 	for _, tc := range []struct {
 		status, want int
 		code         string
-	}{{413, 413, "attachment_too_large"}, {400, 400, "attachment_invalid"}, {422, 400, "attachment_invalid"}, {500, 502, "docbank_unreachable"}} {
+	}{{413, 413, "attachment_too_large"}, {400, 400, "attachment_invalid"}, {404, 400, "attachment_invalid"}, {422, 400, "attachment_invalid"}, {500, 502, "docbank_unreachable"}} {
 		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
 			env, f := attachmentEnv(t)
 			p, iss := seedProjectAndIssue(t, env)
