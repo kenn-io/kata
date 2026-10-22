@@ -21,6 +21,10 @@ public_origin = "https://old.example"
 base_url = "https://old.example/v1"
 model = "old-model"
 dims = 128
+[mcp]
+enabled = false
+actor = "old-agent"
+token_file = "/run/secrets/old-mcp-token"
 `), 0o600))
 	t.Setenv("KATA_LISTEN", " 127.0.0.1:7777 ")
 	t.Setenv("KATA_WEB_LISTEN", "127.0.0.1:7778")
@@ -30,6 +34,9 @@ dims = 128
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example-model")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "1024")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "/run/secrets/embedding-key")
+	t.Setenv("KATA_MCP_ENABLED", " true ")
+	t.Setenv("KATA_MCP_ACTOR", " gateway-agent ")
+	t.Setenv("KATA_MCP_TOKEN_FILE", " /run/secrets/mcp-token ")
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:7777", cfg.Listen)
@@ -39,6 +46,9 @@ dims = 128
 	require.Equal(t, "example-model", cfg.Search.Embeddings.Model)
 	require.Equal(t, 1024, cfg.Search.Embeddings.Dims)
 	require.Equal(t, "/run/secrets/embedding-key", cfg.Search.Embeddings.APIKeyFile)
+	require.True(t, cfg.MCP.Enabled)
+	require.Equal(t, "gateway-agent", cfg.MCP.Actor)
+	require.Equal(t, "/run/secrets/mcp-token", cfg.MCP.TokenFile)
 	auth, err := config.ReadAuthConfig()
 	require.NoError(t, err)
 	require.True(t, auth.TrustPrivateNetwork)
@@ -87,9 +97,13 @@ request_dimensions = true
 
 func TestDeploymentInvalidRequestDimensionsFailLoudly(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv("KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "sometimes")
-	_, err := config.ReadDaemonConfig()
-	require.ErrorContains(t, err, "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS")
+	for _, name := range []string{"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_MCP_ENABLED"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "sometimes")
+			_, err := config.ReadDaemonConfig()
+			require.ErrorContains(t, err, name)
+		})
+	}
 }
 
 func TestLocalProfileRejectsDeploymentControlReferences(t *testing.T) {

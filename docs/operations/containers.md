@@ -1,7 +1,7 @@
 ---
 title: Containers
 description: Run the stock Kata image using environment settings, mounted secrets, and persistent storage.
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # Containers
@@ -62,6 +62,12 @@ a nonempty `KATA_AUTH_TOKEN` preserves its legacy override. A selected file
 failure stops startup rather than falling back or minting a replacement.
 See [configuration](../reference/configuration.md#daemon-config) for file limits
 and the auto-token opt-out.
+
+Enable the daemon's `/mcp` endpoint with `KATA_MCP_ENABLED=true`, set its actor
+with `KATA_MCP_ACTOR=gateway-agent`, and mount a separate bearer file at
+`KATA_MCP_TOKEN_FILE=/run/secrets/mcp-token`. The same secret-file rules apply.
+Give the gateway the proxied `/mcp` URL and this MCP bearer; see the
+[MCP reference](../reference/mcp.md).
 
 Semantic search needs no seeded TOML. Set
 `KATA_SEARCH_EMBEDDINGS_BASE_URL=https://embedding.example/v1`,

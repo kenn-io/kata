@@ -31,6 +31,7 @@ import (
 
 // cliUseTelemetry is the daemon's reporter; block holds use reports until closed.
 type cliUseTelemetry struct {
+	fakeTelemetryReporter
 	block    chan struct{}
 	started  chan struct{}
 	mu       sync.Mutex

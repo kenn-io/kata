@@ -24,7 +24,7 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	resolved := client.ResolvedDaemon{
 		Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
 		Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
-		AllowInsecure: auth.Token == "" && auth.AllowUnauthenticatedPrivateNetworkWrites,
+		AllowInsecure: auth.Token == "",
 	}
 	if endpoint.Network == "unix" {
 		resolved.UnixSocket = endpoint.Address
@@ -56,16 +56,17 @@ func daemonMCPSelfEndpoint(endpoint kitdaemon.Endpoint) (kitdaemon.Endpoint, err
 	if endpoint.Network == kitdaemon.NetworkUnix {
 		return endpoint, nil
 	}
-	address, err := net.ResolveTCPAddr("tcp", endpoint.Address)
+	host, port, err := net.SplitHostPort(endpoint.Address)
 	if err != nil {
 		return kitdaemon.Endpoint{}, err
 	}
-	if len(address.IP) == 0 || address.IP.Equal(net.IPv4zero) {
-		address.IP = net.IPv4(127, 0, 0, 1)
-	} else if address.IP.Equal(net.IPv6zero) {
-		address.IP = net.IPv6loopback
+	ip := net.ParseIP(host)
+	if host == "" || ip.Equal(net.IPv4zero) {
+		host = "127.0.0.1"
+	} else if ip.Equal(net.IPv6zero) {
+		host = "::1"
 	}
-	endpoint.Address = address.String()
+	endpoint.Address = net.JoinHostPort(host, port)
 	return endpoint, nil
 }
 

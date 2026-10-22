@@ -25,14 +25,11 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-type daemonMCPTelemetry struct{ fakeTelemetryReporter }
-
-func (*daemonMCPTelemetry) EventAllowed(event string) bool { return event == "agent_active" }
-
 // The daemon mount uses its own MCP bearer and calls its authenticated REST API.
 func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 	for _, tt := range []struct{ name, listen, web, host string }{
 		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
+		{"expanded IPv6", "[0:0:0:0:0:0:0:1]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
 		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,7 +41,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 			t.Setenv("KATA_AUTH_TOKEN", "example-daemon-token")
 			t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
-			capture := &daemonMCPTelemetry{}
+			capture := &cliUseTelemetry{}
 			orig := newTelemetryReporter
 			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return capture }
 			t.Cleanup(func() { newTelemetryReporter = orig })
@@ -120,7 +117,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			require.Eventually(t, func() bool {
 				capture.mu.Lock()
 				defer capture.mu.Unlock()
-				return slices.ContainsFunc(capture.events, func(e fakeTelemetryEvent) bool { return e.event == "agent_active" })
+				return slices.Contains(capture.events, "agent_active")
 			}, 5*time.Second, time.Millisecond)
 		})
 	}
@@ -128,11 +125,13 @@ token_env = "KATA_MCP_TEST_TOKEN"
 
 func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 	for _, tt := range []struct {
-		name string
-		auth config.AuthConfig
+		name             string
+		auth             config.AuthConfig
+		insecureReadonly bool
 	}{
-		{"bearer", config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true}},
-		{"tokenless private network", config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
+		{"bearer", config.AuthConfig{Token: "daemon-token", TrustPrivateNetwork: true}, false},
+		{"tokenless private network", config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}, false},
+		{"read-only private network", config.AuthConfig{}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			deploymentHome(t)
@@ -161,7 +160,7 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 			require.NoError(t, err)
 			backendAddress := backendURL.Host
 			backendURL.Host = "100.64.0.5:7777"
-			require.NoError(t, daemon.CheckAuthStartup(backendURL.Host, tt.auth, false))
+			require.NoError(t, daemon.CheckAuthStartup(backendURL.Host, tt.auth, tt.insecureReadonly))
 			proxyURL, err := url.Parse(proxy.URL)
 			require.NoError(t, err)
 			base := http.DefaultTransport.(*http.Transport).Clone()
