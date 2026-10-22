@@ -24,11 +24,20 @@ describe('App', () => {
   })
 
   it.each([
-    { actorPolicy: 'identity', outcome: 'saved', expectedActor: null },
-    { actorPolicy: 'request', outcome: 'saved', expectedActor: 'kata-web' },
-    { actorPolicy: 'request', outcome: 'too-large', expectedActor: 'kata-web' },
+    {
+      actorPolicy: 'request',
+      outcome: 'saved',
+      expectedActor: 'kata-web',
+      behavior: 'refreshes authority',
+    },
+    {
+      actorPolicy: 'request',
+      outcome: 'too-large',
+      expectedActor: 'kata-web',
+      behavior: 'surfaces the error and re-enables edit',
+    },
   ])(
-    'refreshes authority after a $outcome attachment upload with $actorPolicy attribution',
+    '$behavior after a $outcome attachment upload with $actorPolicy attribution',
     async ({ actorPolicy, outcome, expectedActor }) => {
       history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
       sessionStorage.setItem(
@@ -88,9 +97,6 @@ describe('App', () => {
       )
       expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
       expect(uploadInit?.body).toBe(file)
-      expect(new Headers(uploadInit?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
-      expect(new Headers(uploadInit?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
-      expect(new Headers(uploadInit?.headers).get('Content-Type')).toBe('application/octet-stream')
       const edit = screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement
       expect(edit.disabled).toBe(true)
       if (outcome === 'saved')

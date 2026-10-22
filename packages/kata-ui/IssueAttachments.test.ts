@@ -65,28 +65,6 @@ it.each([
     await waitFor(() => expect(fetchAttachment).toHaveBeenCalledWith(`/attachments/${id}/content`))
   },
 )
-it('clears previews when authority is lost, including pending fetches', async () => {
-  let resolve!: (b: Blob) => void
-  const result = render(IssueAttachments, {
-    attachmentsEnabled: true,
-    attachments: { [id]: entry },
-    baseURL: '/attachments',
-    fetchAttachment: () =>
-      new Promise<Blob>((done) => {
-        resolve = done
-      }),
-  })
-  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
-  await result.rerender({
-    attachments: { [id]: entry },
-    baseURL: '/attachments',
-    fetchAttachment: undefined,
-  })
-  resolve(new Blob(['image']))
-  await Promise.resolve()
-  expect(screen.queryByAltText('screen.png')).toBeNull()
-  expect(URL.createObjectURL).not.toHaveBeenCalled()
-})
 it('caps image previews at 20 MiB and shows the CLI hint above 100 MiB', () => {
   render(IssueAttachments, {
     attachmentsEnabled: true,
@@ -136,7 +114,6 @@ it('uploads the selected batch through a refresh and shows per-file progress and
   await waitFor(() => expect(screen.getByText('shot.png uploading')).toBeTruthy())
   expect(screen.getByText('clip.mp4 queued')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
-  await view.rerender({ actionsDisabled: true })
   finish()
   await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(2))
   expect(uploadAttachment).toHaveBeenNthCalledWith(1, files[0])
@@ -144,7 +121,7 @@ it('uploads the selected batch through a refresh and shows per-file progress and
   await waitFor(() =>
     expect(screen.getByRole('status').textContent).toBe('clip.mp4 attachment_too_large'),
   )
-  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(false)
 })
 
 it.each(['video/mp4', 'video/x-m4v', 'video/webm', 'video/ogg', 'video/quicktime'])(

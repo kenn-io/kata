@@ -38,13 +38,6 @@ describe('Kata browser API credentials', () => {
     [null, undefined, 204, undefined],
     ['', 'text/plain', 200, undefined],
     ['plain response', 'text/plain', 200, 'plain response'],
-    ['null', 'application/json', 200, null],
-    [
-      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]),
-      'image/png',
-      200,
-      [0x89, 0x50, 0x4e, 0x47, 0xff],
-    ],
   ])(
     'preserves response body %j with Content-Type %s',
     async (body, contentType, status, expected) => {
@@ -57,23 +50,34 @@ describe('Kata browser API credentials', () => {
       )
       setGeneratedFetch(upstream as typeof fetch)
       try {
-        const result =
-          body instanceof Uint8Array
-            ? await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
-            : await orvalFetch<{ data: unknown }>('/api/v1/ui/references', { method: 'GET' })
-        if (body instanceof Uint8Array) {
-          expect(result.data).toBeInstanceOf(Blob)
-          expect(Array.from(new Uint8Array(await (result.data as Blob).arrayBuffer()))).toEqual(
-            expected,
-          )
-        } else {
-          expect(result.data).toBe(expected)
-        }
+        const result = await orvalFetch<{ data: unknown }>('/api/v1/ui/references', {
+          method: 'GET',
+        })
+        expect(result.data).toBe(expected)
       } finally {
         setGeneratedFetch(createCredentialedFetch())
       }
     },
   )
+
+  it('preserves binary attachment response bytes as a Blob', async () => {
+    const upstream = vi.fn(
+      async () =>
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]), {
+          headers: { 'Content-Type': 'image/png' },
+        }),
+    )
+    setGeneratedFetch(upstream as typeof fetch)
+    try {
+      const result = await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
+      expect(result.data).toBeInstanceOf(Blob)
+      expect(Array.from(new Uint8Array(await (result.data as Blob).arrayBuffer()))).toEqual([
+        0x89, 0x50, 0x4e, 0x47, 0xff,
+      ])
+    } finally {
+      setGeneratedFetch(createCredentialedFetch())
+    }
+  })
 
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []

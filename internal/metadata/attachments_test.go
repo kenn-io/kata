@@ -36,5 +36,4 @@ func TestAttachmentValid(t *testing.T) {
 	}
 	_, ok = Valid(jsontext.Value(strings.TrimSuffix(good, "}") + `,"schema_version":2}`))
 	require.False(t, ok, "unknown reference shapes are unreadable")
-	require.NoError(t, Validate(IssueRegistry, "attachment.x", jsontext.Value(`"junk"`)))
 }

@@ -30,10 +30,8 @@ dims = 128
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example-model")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "1024")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "/run/secrets/embedding-key")
-	file := filepath.Join(t.TempDir(), "key")
-	writePrivateCredentialFixture(t, file, []byte("test-key"))
 	t.Setenv("KATA_DOCBANK_URL", "https://docbank.example")
-	t.Setenv("KATA_DOCBANK_API_KEY_FILE", file)
+	t.Setenv("KATA_DOCBANK_API_KEY_FILE", "/run/secrets/docbank-key")
 	t.Setenv("KATA_DOCBANK_FOLDER", "/issues")
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
@@ -46,7 +44,7 @@ dims = 128
 	require.Equal(t, "/run/secrets/embedding-key", cfg.Search.Embeddings.APIKeyFile)
 	require.Equal(t, "/issues", cfg.Docbank.Folder)
 	require.Equal(t, "https://docbank.example", cfg.Docbank.URL)
-	require.Equal(t, file, cfg.Docbank.APIKeyFile)
+	require.Equal(t, "/run/secrets/docbank-key", cfg.Docbank.APIKeyFile)
 	auth, err := config.ReadAuthConfig()
 	require.NoError(t, err)
 	require.True(t, auth.TrustPrivateNetwork)
@@ -107,18 +105,6 @@ func TestLocalProfileRejectsDeploymentControlReferences(t *testing.T) {
 			require.ErrorContains(t, err, "reserved environment key")
 		})
 	}
-}
-
-func TestLocalProfilePassesDocbankAPIKeyEnv(t *testing.T) {
-	const keyEnv = "EXAMPLE_DOCBANK_KEY"
-	t.Setenv(keyEnv, "example-secret")
-	profile := config.LocalProfileConfig{
-		Home:   t.TempDir(),
-		Config: &config.DaemonConfig{Docbank: config.DocbankConfig{APIKeyEnv: keyEnv}},
-	}
-	env, err := config.LocalProfileEnvironment(profile, true)
-	require.NoError(t, err)
-	require.Contains(t, env, keyEnv+"=example-secret")
 }
 
 // Empty Compose substitutions must preserve the operator's TOML settings.

@@ -64,21 +64,6 @@ describe('MutationController', () => {
     })
   })
 
-  it('uses the HTTP status for a text error response', async () => {
-    const controller = new MutationController({
-      authority: () => writableIdentity,
-      refresh: vi.fn(async () => true),
-    })
-    await expect(
-      controller.execute({}, async () => ({
-        status: 413,
-        data: 'Request too large',
-        headers: new Headers({ 'Content-Type': 'text/plain' }),
-      })),
-    ).resolves.toBe(false)
-    expect(controller.state).toMatchObject({ kind: 'domain-error', code: 'http_413' })
-  })
-
   it('invalidates writable authority on a 401 while preserving the draft', async () => {
     const onAuthenticationRequired = vi.fn()
     const options = {

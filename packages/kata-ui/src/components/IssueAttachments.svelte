@@ -46,7 +46,6 @@
   )
   const references = new Map<string, string>()
   let previousBaseURL: string | undefined
-  let previousFetcher: Props['fetchAttachment']
   function clearPreviews(): void {
     generation++
     for (const url of previews.values()) URL.revokeObjectURL(url)
@@ -66,7 +65,7 @@
   $effect(() => {
     const next = new Map(entries.map((e) => [e.id, e.reference]))
     if (baseURL !== previousBaseURL) untrack(clearUploads)
-    if (baseURL !== previousBaseURL || fetchAttachment !== previousFetcher) untrack(clearPreviews)
+    if (baseURL !== previousBaseURL) untrack(clearPreviews)
     else
       untrack(() => {
         for (const [id, reference] of references) {
@@ -81,7 +80,6 @@
     references.clear()
     for (const [id, reference] of next) references.set(id, reference)
     previousBaseURL = baseURL
-    previousFetcher = fetchAttachment
   })
   async function attachFiles(): Promise<void> {
     const uploader = uploadAttachment
