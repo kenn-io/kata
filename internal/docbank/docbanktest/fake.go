@@ -89,7 +89,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream", f.UploadStatus)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+		r.Body = http.MaxBytesReader(w, r.Body, (256<<20)+(1<<20))
 		if err := r.ParseMultipartForm(1 << 20); err != nil { //nolint:gosec // Bounded by MaxBytesReader above.
 			http.Error(w, "multipart", 400)
 			return
