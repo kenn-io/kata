@@ -28,6 +28,13 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 			cfg.Sources[deploymentSourceKey(name)] = name
 		}
 	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_PROJECTS")); value != "" {
+		cfg.MCP.Projects = strings.Split(value, ",")
+		for i, name := range cfg.MCP.Projects {
+			cfg.MCP.Projects[i] = strings.TrimSpace(name)
+		}
+		cfg.Sources["mcp_projects"] = "KATA_MCP_PROJECTS"
+	}
 	if value := strings.TrimSpace(os.Getenv("KATA_MCP_ENABLED")); value != "" {
 		enabled, err := strconv.ParseBool(value)
 		if err != nil {

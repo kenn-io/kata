@@ -80,10 +80,11 @@ type DaemonConfig struct {
 
 // MCPConfig configures the daemon's /mcp endpoint. Secrets resolve at startup.
 type MCPConfig struct {
-	Enabled   bool   `toml:"enabled"`
-	Actor     string `toml:"actor"`
-	TokenFile string `toml:"token_file"`
-	TokenEnv  string `toml:"token_env"`
+	Enabled   bool     `toml:"enabled"`
+	Actor     string   `toml:"actor"`
+	Projects  []string `toml:"projects"`
+	TokenFile string   `toml:"token_file"`
+	TokenEnv  string   `toml:"token_env"`
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery

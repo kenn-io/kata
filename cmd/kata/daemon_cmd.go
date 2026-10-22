@@ -1402,7 +1402,7 @@ func runDaemonProcess(
 	}
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
-		mcpHandler, err = newDaemonMCPHandler(ctx, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
+		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
 		if err != nil {
 			return fmt.Errorf("build daemon MCP handler: %w", err)
 		}

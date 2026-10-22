@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Limit the daemon's MCP endpoint to named projects with `[mcp] projects` or `KATA_MCP_PROJECTS`. Names resolve to stable project UIDs at startup; an unset allowlist keeps all-project access.
 - Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
   under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
   Route `/mcp` through an HTTPS reverse proxy, then give the gateway

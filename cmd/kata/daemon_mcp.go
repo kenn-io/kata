@@ -11,13 +11,18 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
-	endpoint, err := daemonMCPSelfEndpoint(endpoint)
+func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, token string, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
+	scope, err := daemonMCPScope(ctx, store, cfg.Projects)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err = daemonMCPSelfEndpoint(endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +45,7 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 	server, err := mcpserver.New(mcpserver.Options{
 		Client: apiClient, LongRunningClient: longRunningClient,
-		Scope: mcpserver.NewAllScope(), Actor: cfg.Actor, Version: version.Version,
+		Scope: scope, Actor: cfg.Actor, Version: version.Version,
 		ObserveToolCall: observe,
 	})
 	if err != nil {
@@ -50,6 +55,32 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	context.AfterFunc(ctx, stopReporting)
 	// ApplyListenerPolicy owns the daemon mount's Host validation.
 	return newMCPHTTPHandler(server, token, true), nil
+}
+
+func daemonMCPScope(ctx context.Context, store db.Storage, names []string) (*mcpserver.Scope, error) {
+	if len(names) == 0 {
+		return mcpserver.NewAllScope(), nil
+	}
+	projects := make([]mcpserver.ProjectIdentity, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, errors.New("[mcp] projects: project name must not be empty")
+		}
+		project, err := store.ProjectByName(ctx, name)
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, fmt.Errorf("[mcp] projects: project %q was not found", name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("[mcp] projects: %w", err)
+		}
+		projects = append(projects, mcpserver.ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
+	}
+	scope, err := mcpserver.NewAllowlistScope(projects)
+	if err != nil {
+		return nil, fmt.Errorf("[mcp] projects: %s", strings.Replace(err.Error(), "MCP project", "project", 1))
+	}
+	return scope, nil
 }
 
 func daemonMCPSelfEndpoint(endpoint kitdaemon.Endpoint) (kitdaemon.Endpoint, error) {

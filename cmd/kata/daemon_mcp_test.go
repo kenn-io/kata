@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/telemetry"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -196,7 +197,7 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 			t.Cleanup(func() { http.DefaultTransport = original })
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			handler, err := newDaemonMCPHandler(ctx, config.MCPConfig{Actor: "gateway-agent"}, "test-mcp-token",
+			handler, err := newDaemonMCPHandler(ctx, nil, config.MCPConfig{Actor: "gateway-agent"}, "test-mcp-token",
 				kitdaemon.Endpoint{Network: "tcp", Address: backendURL.Host},
 				tt.auth)
 			require.NoError(t, err)
@@ -215,6 +216,83 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 			require.False(t, result.IsError, "%v", result.Content)
 			require.Greater(t, daemonCalls.Load(), before)
 			require.Empty(t, result.StructuredContent.(map[string]any)["projects"])
+		})
+	}
+}
+
+func TestDaemonMCPProjectScope(t *testing.T) {
+	for _, tt := range []struct {
+		name, projects, wantError string
+		wantProjects              []string
+		archiveAlpha              bool
+	}{
+		{name: "all by default", wantProjects: []string{"alpha", "beta"}},
+		{name: "allowlist", projects: `["alpha"]`, wantProjects: []string{"alpha"}},
+		{name: "trimmed", projects: `[" alpha "]`, wantProjects: []string{"alpha"}},
+		{name: "unknown", projects: `["missing"]`, wantError: `[mcp] projects: project "missing" was not found`},
+		{name: "duplicate", projects: `["alpha", " alpha "]`, wantError: `[mcp] projects: duplicate project "alpha"`},
+		{name: "empty", projects: `[" "]`, wantError: `[mcp] projects: project name must not be empty`},
+		{name: "archived", projects: `["alpha"]`, archiveAlpha: true, wantError: `[mcp] projects: project "alpha" was not found`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := deploymentHome(t)
+			contents := "[mcp]\nactor = 'gateway-agent'\n"
+			if tt.projects != "" {
+				contents += "projects = " + tt.projects + "\n"
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(contents), 0o600))
+			cfg, err := config.ReadDaemonConfig()
+			require.NoError(t, err)
+			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+			alpha, err := store.CreateProject(t.Context(), "alpha")
+			require.NoError(t, err)
+			_, err = store.CreateProject(t.Context(), "beta")
+			require.NoError(t, err)
+			if tt.archiveAlpha {
+				_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: alpha.ID, Actor: "gateway-agent"})
+				require.NoError(t, err)
+			}
+			backend := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{Token: "daemon-token"}})
+			t.Cleanup(func() { require.NoError(t, backend.Close()) })
+			rest := httptest.NewServer(backend.Handler())
+			t.Cleanup(rest.Close)
+			address, err := url.Parse(rest.URL)
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			handler, err := newDaemonMCPHandler(ctx, store, cfg.MCP, "test-mcp-token", kitdaemon.Endpoint{Network: "tcp", Address: address.Host}, config.AuthConfig{Token: "daemon-token"})
+			if tt.wantError != "" {
+				require.EqualError(t, err, tt.wantError)
+				return
+			}
+			require.NoError(t, err)
+			gateway := httptest.NewServer(handler)
+			t.Cleanup(gateway.Close)
+			session, err := newMCPHTTPTestClient().Connect(ctx, newAuthenticatedMCPHTTPTestTransport(gateway.URL+"/mcp"), nil)
+			require.NoError(t, err)
+			defer func() { _ = session.Close() }()
+			loaded, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.load_projects"})
+			require.NoError(t, err)
+			require.False(t, loaded.IsError, "%v", loaded.Content)
+			result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.projects"})
+			require.NoError(t, err)
+			require.False(t, result.IsError, "%v", result.Content)
+			var names []string
+			for _, project := range result.StructuredContent.(map[string]any)["projects"].([]any) {
+				names = append(names, project.(map[string]any)["name"].(string))
+			}
+			require.ElementsMatch(t, tt.wantProjects, names)
+			if tt.projects != "" {
+				loaded, err = session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
+				require.NoError(t, err)
+				require.False(t, loaded.IsError, "%v", loaded.Content)
+				result, err = session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.show", Arguments: map[string]any{"ref": "beta#abcd"}})
+				require.NoError(t, err)
+				require.True(t, result.IsError)
+				content, err := json.Marshal(result.Content)
+				require.NoError(t, err)
+				require.Contains(t, string(content), "outside the MCP startup scope")
+			}
 		})
 	}
 }
