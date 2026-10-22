@@ -107,13 +107,16 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment. With hub API `0.31.0` or newer, it also rejects existing
 cross-project issue links with `409 relay_cross_project_links` on the hub or
-this daemon's existing copy of the project. Remove the project's cross-project
+this daemon's existing copy of the project. The error identifies links "on the hub"
+or in "this daemon's copy of the project". Remove the project's cross-project
 related, blocks, and parent links on the side identified by the error before
 retrying; ask an operator on that side to remove links to projects you cannot access.
 The check includes incoming links and closed issues. Historical links that
 have already been removed do not block enrollment. Preflight refuses older hubs
 with `409 hub_link_check_unsupported`; upgrade the hub to API `0.31.0` or newer
 so preflight can check for cross-project links.
+Connecting directly to an older hub still returns that hub's old error when
+cross-project links block enrollment.
 
 Direct callers can request the same read-only check with
 `GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.

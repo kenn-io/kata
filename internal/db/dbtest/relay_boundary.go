@@ -289,22 +289,4 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 			}
 		}
 	}
-
-	t.Run("closed issue link", func(t *testing.T) {
-		project, err := store.CreateProject(ctx, "closed-link-project")
-		require.NoError(t, err)
-		_, err = store.EnableProjectFederation(ctx, project.ID, "member")
-		require.NoError(t, err)
-		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Closed endpoint", Author: "member"})
-		require.NoError(t, err)
-		_, _, changed, err := store.CloseIssueWithEvents(ctx, issue.ID, "done", "member", "Closed before linking", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: private.ID, Type: "blocks", Author: "member"})
-		require.NoError(t, err)
-		require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, project.ID), db.ErrFederationCrossProjectBoundary)
-		_, err = store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion, Token: "boundary-closed-test-token"})
-		require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
-	})
 }

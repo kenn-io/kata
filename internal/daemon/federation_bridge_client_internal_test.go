@@ -65,6 +65,8 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 				require.Equal(t, test.code, failure.Code)
 				require.Equal(t, test.localStatus, failure.Status, "a hub rejection must not look like a local authorization failure")
 				if test.code == "relay_cross_project_links" {
+					require.Contains(t, failure.Message, "on the hub")
+					require.Contains(t, failure.Hint, "on the hub")
 					require.Contains(t, failure.Hint, "remove")
 					require.NotContains(t, failure.Message, "private")
 					require.NotContains(t, failure.Hint, "private")

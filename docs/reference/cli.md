@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # CLI reference
@@ -2059,7 +2059,8 @@ that daemon's catalog.
 
 `kata federation bridge connect` connects one project bidirectionally. The CLI sends the catalog
 name, project names and local actor; the hub credential stays in the daemon. `--preflight`
-previews the accounts, identity and project without issuing a grant. Add `--serve-downstream`
+previews the accounts, identity, and project and checks cross-project issue links without issuing a grant.
+Preflight refuses hubs older than API `0.31.0`. Add `--serve-downstream`
 only when this daemon will also relay the project to its own spokes; without it the bridge is a
 leaf. A hub that requires request signing needs `--signing-key-id` with `--signing-key-env` or
 an absolute `--signing-key-file` on the daemon; otherwise connect and preflight return

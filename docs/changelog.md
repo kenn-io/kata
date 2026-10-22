@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Identify which copy of a project needs its cross-project issue links removed
+  when bridge preflight or connect returns `409 relay_cross_project_links`.
+  Preflight refuses hubs older than API `0.31.0`, which cannot check those links.
+  A direct connect to an older hub still returns that hub's old error when links
+  block enrollment. See [Bridge setup](operations/federation.md#connect-a-project-through-the-daemon-catalog).
 
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`

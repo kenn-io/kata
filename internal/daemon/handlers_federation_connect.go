@@ -123,7 +123,7 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if localProject.ID != 0 {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, localProject.ID); err != nil {
 				if errors.Is(err, db.ErrFederationCrossProjectBoundary) {
-					return nil, api.NewError(http.StatusConflict, "relay_cross_project_links", "this daemon's copy of the project has cross-project issue links", "remove cross-project related, blocks, and parent links locally before retrying", nil)
+					return nil, newRelayCrossProjectLinksError("local")
 				}
 				return nil, relayTransportError(err)
 			}
@@ -395,7 +395,7 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 			if readErr == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code == "relay_cross_project_links" {
 				// Map only this public conflict to its known, endpoint-free message and
 				// remedy. Never forward arbitrary upstream diagnostic text or data.
-				failure := relayCrossProjectLinksAPIError(db.ErrFederationCrossProjectBoundary)
+				failure := newRelayCrossProjectLinksError("hub")
 				failure.Data = map[string]any{"hub_status": response.StatusCode}
 				return nil, failure
 			}

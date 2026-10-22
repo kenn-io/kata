@@ -81,6 +81,7 @@ func TestFederationBridgeCrossProjectLinks(t *testing.T) {
 				code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, preflight), bridgeOwnerHeaders)
 				require.Equal(t, http.StatusConflict, code, "preflight=%v: %s", preflight, raw)
 				require.Equal(t, "relay_cross_project_links", bridgeErrorCode(t, raw))
+				require.Contains(t, string(raw), "on the hub")
 				if phase == "metadata" {
 					require.Contains(t, string(raw), "remove")
 					require.NotContains(t, string(raw), "check account access")
