@@ -13,7 +13,6 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/version"
-	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -22,15 +21,15 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	if err != nil {
 		return nil, err
 	}
-	resolved := client.ResolvedDaemon{
-		Address: endpoint.Address, Network: endpoint.Network,
-		BaseURL: endpoint.BaseURL(),
-		Token:   auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork,
-	}
+	resolved := client.ResolvedDaemon{Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(), Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true}
 	if endpoint.Network == "unix" {
 		resolved.UnixSocket = endpoint.Address
 	}
-	apiClient, longRunningClient, err := newDaemonMCPClients(endpoint, auth)
+	httpClient, err := httpClientForResolved(ctx, resolved)
+	if err != nil {
+		return nil, err
+	}
+	apiClient, longRunningClient, err := newMCPAPIClients(ctx, resolved, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -64,33 +63,6 @@ func daemonMCPSelfEndpoint(endpoint kitdaemon.Endpoint) (kitdaemon.Endpoint, err
 	}
 	endpoint.Address = address.String()
 	return endpoint, nil
-}
-
-func newDaemonMCPClients(endpoint kitdaemon.Endpoint, auth config.AuthConfig) (*kataclient.Client, *kataclient.Client, error) {
-	httpClient := endpoint.HTTPClient(kitdaemon.HTTPClientOptions{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
-	policy := config.BearerPolicy{TrustPrivateNetwork: auth.TrustPrivateNetwork}
-	origin, err := policy.OriginForBaseURL(endpoint.BaseURL())
-	if err != nil {
-		return nil, nil, err
-	}
-	httpClient.Transport = policy.Transport(httpClient.Transport, auth.Token, origin)
-	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	longRunningHTTPClient := *httpClient
-	longRunningHTTPClient.Timeout = 0
-	httpClient, err = markDaemonHTTPClient(endpoint.BaseURL(), httpClient)
-	if err != nil {
-		return nil, nil, err
-	}
-	longRunning, err := markDaemonHTTPClient(endpoint.BaseURL(), &longRunningHTTPClient)
-	if err != nil {
-		return nil, nil, err
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(endpoint.BaseURL(), httpClient)
-	if err != nil {
-		return nil, nil, err
-	}
-	longRunningClient, err := kataclient.NewWithHTTPClient(endpoint.BaseURL(), longRunning)
-	return apiClient, longRunningClient, err
 }
 
 func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endpoint kitdaemon.Endpoint) (string, error) {

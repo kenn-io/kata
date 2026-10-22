@@ -31,17 +31,16 @@ func (*daemonMCPTelemetry) EventAllowed(event string) bool { return event == "ag
 
 // The daemon mount uses its own MCP bearer and calls its authenticated REST API.
 func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
-	for _, tt := range []struct{ name, listen, web string }{
-		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n"},
-		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n"},
+	for _, tt := range []struct{ name, listen, web, host string }{
+		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
+		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.listen == "" && runtime.GOOS == "windows" {
 				t.Skip("Unix sockets are not supported on Windows")
 			}
 			resetFlags(t)
-			home := setupKataEnv(t)
-			t.Setenv("PORT", "")
+			home := deploymentHome(t)
 			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 			t.Setenv("KATA_AUTH_TOKEN", "example-daemon-token")
 			t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
@@ -103,16 +102,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 			callCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 			defer stop()
-			transport := newAuthenticatedMCPHTTPTestTransport(endpoint)
-			baseTransport := transport.HTTPClient.Transport
-			transport.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				clone := r.Clone(r.Context())
-				if tt.listen != "" {
-					clone.Host = "daemon.example"
-				}
-				return baseTransport.RoundTrip(clone)
-			})
-			session, err := newMCPHTTPTestClient().Connect(callCtx, transport, nil)
+			session, err := newMCPHTTPTestClient().Connect(callCtx, newAuthenticatedMCPHTTPTestTransport(endpoint, tt.host), nil)
 			require.NoError(t, err)
 			defer func() { _ = session.Close() }()
 			// Load the issue mutation tools before calling kata.create.
@@ -137,7 +127,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 }
 
 func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
-	setupKataEnv(t)
+	deploymentHome(t)
 	var proxyCalls, daemonCalls atomic.Int64
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		proxyCalls.Add(1)
@@ -221,8 +211,7 @@ func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetFlags(t)
-			home := setupKataEnv(t)
-			t.Setenv("PORT", "")
+			home := deploymentHome(t)
 			t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600))
 			_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:7777", false, false)

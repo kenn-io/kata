@@ -393,7 +393,7 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 		}
 		return c, err
 	}
-	if d.LocalProfile != nil {
+	if d.LocalProfile != nil || d.Direct {
 		base, ok := http.DefaultTransport.(*http.Transport)
 		if !ok {
 			return nil, errors.New("http.DefaultTransport is not *http.Transport")
