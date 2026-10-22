@@ -827,27 +827,6 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err := validateFederationStartupConfig(dcfg); err != nil {
 		return daemonStartupPreflight{}, err
 	}
-	var mcpToken string
-	if dcfg.MCP.Enabled {
-		if dcfg.Auth.RequireTokenIdentity {
-			return daemonStartupPreflight{}, errors.New(`[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`)
-		}
-		if dcfg.Auth.Proxy.TrustedActorHeader != "" {
-			return daemonStartupPreflight{}, errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`)
-		}
-		dcfg.MCP.Actor, _ = resolveActor(ctx, dcfg.MCP.Actor, nil)
-		dcfg.MCP.Actor = strings.TrimSpace(dcfg.MCP.Actor)
-		if dcfg.MCP.Actor == "" {
-			return daemonStartupPreflight{}, errors.New("[mcp]: kata actor is required")
-		}
-		mcpToken, _, err = config.ResolveSecret("", dcfg.MCP.TokenFile, dcfg.MCP.TokenEnv)
-		if err != nil {
-			return daemonStartupPreflight{}, fmt.Errorf("[mcp]: %w", err)
-		}
-		if mcpToken == "" {
-			return daemonStartupPreflight{}, errors.New("[mcp] enabled requires token_file or token_env")
-		}
-	}
 	if listen != "" {
 		dcfg.Sources["listen"] = "--listen"
 	} else if dcfg.Listen == "" {
@@ -864,6 +843,10 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	endpoint, err := chooseEndpoint(ns, listen)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	mcpToken, err := resolveDaemonMCPStartup(ctx, dcfg, endpoint)
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}

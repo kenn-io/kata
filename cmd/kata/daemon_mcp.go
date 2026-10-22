@@ -2,43 +2,35 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"strings"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/version"
+	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
-	resolved := client.ResolvedDaemon{
-		Address: endpoint.Address, Network: endpoint.Network,
-		Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork,
-	}
-	if endpoint.Network == "unix" {
-		resolved.UnixSocket = endpoint.Address
-		resolved.BaseURL = client.UnixBase
-	} else {
-		host, port, err := net.SplitHostPort(endpoint.Address)
-		if err != nil {
-			return nil, err
-		}
-		switch host {
-		case "", "0.0.0.0":
-			host = "127.0.0.1"
-		case "::":
-			host = "::1"
-		}
-		resolved.Address = net.JoinHostPort(host, port)
-		resolved.BaseURL = "http://" + resolved.Address
-	}
-	httpClient, err := httpClientForResolved(ctx, resolved)
+	endpoint, err := daemonMCPSelfEndpoint(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	apiClient, longRunningClient, err := newMCPAPIClients(ctx, resolved, httpClient)
+	resolved := client.ResolvedDaemon{
+		Address: endpoint.Address, Network: endpoint.Network,
+		BaseURL: endpoint.BaseURL(),
+		Token:   auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork,
+	}
+	if endpoint.Network == "unix" {
+		resolved.UnixSocket = endpoint.Address
+	}
+	apiClient, longRunningClient, err := newDaemonMCPClients(endpoint, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -55,4 +47,77 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	context.AfterFunc(ctx, stopReporting)
 	// ApplyListenerPolicy owns the daemon mount's Host validation.
 	return newMCPHTTPHandler(server, token, true), nil
+}
+
+func daemonMCPSelfEndpoint(endpoint kitdaemon.Endpoint) (kitdaemon.Endpoint, error) {
+	if endpoint.Network == kitdaemon.NetworkUnix {
+		return endpoint, nil
+	}
+	address, err := net.ResolveTCPAddr("tcp", endpoint.Address)
+	if err != nil {
+		return kitdaemon.Endpoint{}, err
+	}
+	if len(address.IP) == 0 || address.IP.Equal(net.IPv4zero) {
+		address.IP = net.IPv4(127, 0, 0, 1)
+	} else if address.IP.Equal(net.IPv6zero) {
+		address.IP = net.IPv6loopback
+	}
+	endpoint.Address = address.String()
+	return endpoint, nil
+}
+
+func newDaemonMCPClients(endpoint kitdaemon.Endpoint, auth config.AuthConfig) (*kataclient.Client, *kataclient.Client, error) {
+	httpClient := endpoint.HTTPClient(kitdaemon.HTTPClientOptions{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
+	policy := config.BearerPolicy{TrustPrivateNetwork: auth.TrustPrivateNetwork}
+	origin, err := policy.OriginForBaseURL(endpoint.BaseURL())
+	if err != nil {
+		return nil, nil, err
+	}
+	httpClient.Transport = policy.Transport(httpClient.Transport, auth.Token, origin)
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	longRunningHTTPClient := *httpClient
+	longRunningHTTPClient.Timeout = 0
+	httpClient, err = markDaemonHTTPClient(endpoint.BaseURL(), httpClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	longRunning, err := markDaemonHTTPClient(endpoint.BaseURL(), &longRunningHTTPClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(endpoint.BaseURL(), httpClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	longRunningClient, err := kataclient.NewWithHTTPClient(endpoint.BaseURL(), longRunning)
+	return apiClient, longRunningClient, err
+}
+
+func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endpoint kitdaemon.Endpoint) (string, error) {
+	if !cfg.MCP.Enabled {
+		return "", nil
+	}
+	if cfg.Auth.RequireTokenIdentity {
+		return "", errors.New(`[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`)
+	}
+	self, err := daemonMCPSelfEndpoint(endpoint)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader) != "" && daemon.TrustedProxyListener(self.Address, cfg.Auth.Proxy.TrustedProxyListeners) {
+		return "", errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`)
+	}
+	cfg.MCP.Actor, _ = resolveActor(ctx, cfg.MCP.Actor, nil)
+	cfg.MCP.Actor = strings.TrimSpace(cfg.MCP.Actor)
+	if cfg.MCP.Actor == "" {
+		return "", errors.New("[mcp]: kata actor is required")
+	}
+	token, _, err := config.ResolveSecret("", cfg.MCP.TokenFile, cfg.MCP.TokenEnv)
+	if err != nil {
+		return "", fmt.Errorf("[mcp]: %w", err)
+	}
+	if token == "" {
+		return "", errors.New("[mcp] enabled requires token_file or token_env")
+	}
+	return token, nil
 }

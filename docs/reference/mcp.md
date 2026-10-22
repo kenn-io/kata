@@ -105,7 +105,8 @@ Treat the MCP bearer as equivalent to the daemon's `[auth]` token.
 The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record.
 The daemon's `/api/v1/ping` endpoint works as a container health probe.
 When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
-A gateway using a container hostname needs that host in `[web].allowed_hosts`.
+With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
+With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
 
 You can also run a separate MCP process alongside the hub using [Client configuration](#client-configuration).
 Route `/mcp` to this listener through the HTTPS proxy and give the gateway its separate MCP bearer:

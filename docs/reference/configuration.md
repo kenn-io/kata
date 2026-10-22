@@ -400,7 +400,7 @@ token_file = "/run/secrets/mcp-token"
 
 Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
 Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
-Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` because the daemon MCP endpoint's REST calls carry no proxy actor header.
+Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
 Idle shutdown is intended for the default owner-local daemon rather than the
