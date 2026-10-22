@@ -49,16 +49,24 @@ export function setGeneratedFetch(fetcher: typeof fetch): void {
   generatedFetch = fetcher
 }
 
+async function readResponseBody(response: Response): Promise<unknown> {
+  const contentType = response.headers.get('Content-Type')
+  if (contentType && !contentType.includes('json') && !contentType.startsWith('text/')) {
+    return response.blob()
+  }
+  const text = await response.text()
+  return text ? (contentType?.includes('json') ? JSON.parse(text) : text) : undefined
+}
+
 export async function orvalFetch<T>(
   url: string,
   options: RequestInit,
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
   const response = await fetcher(applicationURL(url), options)
-  const text = await response.text()
-  const data = response.headers.get('Content-Type')?.includes('json') ? JSON.parse(text) : text
+  const data = await readResponseBody(response)
   return {
-    data: text ? data : undefined,
+    data,
     status: response.status,
     headers: response.headers,
   } as T
@@ -74,21 +82,6 @@ export async function fetchAttachmentBlob(url: string): Promise<Blob> {
     throw new Error(body?.error?.code ?? 'docbank_unreachable')
   }
   return response.blob()
-}
-
-export async function uploadAttachment(
-  projectID: number,
-  ref: string,
-  file: File,
-  actor: string,
-  headers?: Headers,
-): Promise<{ data: unknown; status: number; headers: Headers }> {
-  const query = new URLSearchParams({ name: file.name })
-  if (actor) query.set('actor', actor)
-  return orvalFetch(
-    `/api/v1/projects/${projectID}/issues/${encodeURIComponent(ref)}/attachments?${query}`,
-    { method: 'POST', body: file, ...(headers ? { headers } : {}) },
-  )
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

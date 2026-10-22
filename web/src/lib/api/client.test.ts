@@ -6,9 +6,26 @@ import {
   setGeneratedFetch,
   orvalFetch,
   responseTriggeredAuthenticationTransition,
-  uploadAttachment,
 } from './client'
-import { getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl } from './generated'
+
+it('returns exact binary bytes from generated attachmentContent', async () => {
+  setGeneratedFetch(
+    async () =>
+      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]), {
+        headers: { 'Content-Type': 'image/png' },
+      }),
+  )
+  try {
+    const result = await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
+    expect(result.data).toBeInstanceOf(Blob)
+    expect(Array.from(new Uint8Array(await (result.data as Blob).arrayBuffer()))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0xff,
+    ])
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -34,6 +51,32 @@ describe('Kata browser API credentials', () => {
 
     expect(result.data.issues[0]?.title).toBe('Generated client request')
   })
+
+  it.each([
+    [null, undefined, 204, undefined],
+    ['plain response', undefined, 200, 'plain response'],
+    ['', 'text/plain', 200, undefined],
+    ['plain response', 'text/plain', 200, 'plain response'],
+    ['null', 'application/json', 200, null],
+  ])(
+    'preserves response body %j with Content-Type %s',
+    async (body, contentType, status, expected) => {
+      const upstream = vi.fn(
+        async () =>
+          new Response(body, {
+            status,
+            headers: contentType ? { 'Content-Type': contentType } : {},
+          }),
+      )
+      const result = await orvalFetch<{ data: unknown }>(
+        '/api/v1/ui/references',
+        { method: 'GET' },
+        upstream as typeof fetch,
+      )
+
+      expect(result.data).toBe(expected)
+    },
+  )
 
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
@@ -98,52 +141,6 @@ describe('Kata browser API credentials', () => {
     expect(onAuthenticationRequired).not.toHaveBeenCalled()
     expect(responseTriggeredAuthenticationTransition(result)).toBe(false)
   })
-})
-
-it('uploads attachments with a filename, raw file body, and browser credentials', async () => {
-  const upstream = vi.fn<typeof fetch>(async () => Response.json({ attachment_id: 'saved' }))
-  setGeneratedFetch(
-    createCredentialedFetch(
-      () => ({ session: 'tab-session', csrf: 'tab-csrf' }),
-      upstream as typeof fetch,
-    ),
-  )
-  try {
-    const file = new File(['image'], 'screen.png', { type: 'image/png' })
-    await uploadAttachment(7, 'abc4', file, 'kata-web')
-    const [input, init] = upstream.mock.calls[0]!
-    const url = new URL(String(input), 'https://daemon.example')
-    expect(url.pathname).toBe('/api/v1/projects/7/issues/abc4/attachments')
-    expect(url.searchParams.get('actor')).toBe('kata-web')
-    expect(url.searchParams.get('name')).toBe('screen.png')
-    expect(init?.method).toBe('POST')
-    expect(new Headers(init?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
-    expect(new Headers(init?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
-    expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
-    expect(init?.body).toBe(file)
-    setGeneratedFetch(async () =>
-      Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }),
-    )
-    const rejected = await uploadAttachment(7, 'abc4', file, '')
-    expect(rejected.status).toBe(413)
-    expect(rejected.data).toEqual({ error: { code: 'attachment_too_large' } })
-  } finally {
-    setGeneratedFetch(createCredentialedFetch())
-  }
-})
-
-it.each([
-  [413, 'Request too large'],
-  [502, ''],
-])('returns upload status %i for a non-JSON response', async (status, body) => {
-  setGeneratedFetch(async () => new Response(body, { status }))
-  try {
-    const result = await uploadAttachment(7, 'abc4', new File(['image'], 'screen.png'), '')
-    expect(result.status).toBe(status)
-    expect(result.data).toBe(body || undefined)
-  } finally {
-    setGeneratedFetch(createCredentialedFetch())
-  }
 })
 
 it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {

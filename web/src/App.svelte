@@ -12,8 +12,9 @@
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
-  import { createCredentialedFetch, setGeneratedFetch, uploadAttachment } from './lib/api/client'
+  import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
+    addAttachment,
     addLabel as addLabelRequest,
     assignIssue,
     captureTelemetryEvent,
@@ -575,12 +576,11 @@
     const target = selectedMutationTarget(uid)
     if (!target) throw new Error('issue_not_found')
     const accepted = await runMutation({ draft: file }, (context) =>
-      uploadAttachment(
-        target.project_id,
-        target.ref,
+      addAttachment(
+        { projectId: target.project_id, ref: target.ref },
         file,
-        context.body<{ actor?: string }>({}, requestActor).actor ?? '',
-        context.headers,
+        { name: file.name, ...context.body<{ actor?: string }>({}, requestActor) },
+        { headers: context.headers },
       ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'attachment_upload_failed')

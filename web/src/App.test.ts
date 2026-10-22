@@ -27,6 +27,9 @@ describe('App', () => {
     { actorPolicy: 'identity', outcome: 'saved', expectedActor: null },
     { actorPolicy: 'request', outcome: 'saved', expectedActor: 'kata-web' },
     { actorPolicy: 'request', outcome: 'uncertain', expectedActor: 'kata-web' },
+    { actorPolicy: 'request', outcome: 'too-large', expectedActor: 'kata-web' },
+    { actorPolicy: 'request', outcome: 'text-error', expectedActor: 'kata-web' },
+    { actorPolicy: 'request', outcome: 'empty-error', expectedActor: 'kata-web' },
   ])(
     'refreshes authority after a $outcome attachment upload with $actorPolicy attribution',
     async ({ actorPolicy, outcome, expectedActor }) => {
@@ -56,6 +59,7 @@ describe('App', () => {
         fail = reject
       })
       let uploadURL: URL | undefined
+      let uploadInit: RequestInit | undefined
       let snapshotReads = 0
       vi.stubGlobal(
         'fetch',
@@ -68,6 +72,7 @@ describe('App', () => {
           if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
           if (init?.method === 'POST' && url.pathname.endsWith('/attachments')) {
             uploadURL = url
+            uploadInit = init
             return pending
           }
           if (url.pathname.endsWith('/ui/snapshot')) snapshotReads++
@@ -76,12 +81,21 @@ describe('App', () => {
       )
       const view = render(App)
       await screen.findByRole('button', { name: 'Attach files' })
+      const file = new File(['image'], 'screen.png', { type: 'image/png' })
       await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
-        target: { files: [new File(['image'], 'screen.png', { type: 'image/png' })] },
+        target: { files: [file] },
       })
       await waitFor(() => expect(uploadURL).toBeDefined())
       const readsBeforeCompletion = snapshotReads
       expect(uploadURL!.searchParams.get('actor')).toBe(expectedActor)
+      expect(uploadURL!.pathname).toBe(
+        '/api/v1/projects/7/issues/01J00000000000000000000001/attachments',
+      )
+      expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
+      expect(uploadInit?.body).toBe(file)
+      expect(new Headers(uploadInit?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
+      expect(new Headers(uploadInit?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
+      expect(new Headers(uploadInit?.headers).get('Content-Type')).toBe('application/octet-stream')
       const edit = screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement
       expect(edit.disabled).toBe(true)
       if (outcome === 'saved')
@@ -96,11 +110,20 @@ describe('App', () => {
             },
           }),
         )
+      else if (outcome === 'too-large')
+        finish(Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }))
+      else if (outcome === 'text-error') finish(new Response('Request too large', { status: 413 }))
+      else if (outcome === 'empty-error') finish(new Response('', { status: 502 }))
       else fail(new TypeError('network response unavailable'))
-      await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
+      if (outcome === 'saved' || outcome === 'uncertain' || outcome === 'empty-error')
+        await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
       await waitFor(() => expect(edit.disabled).toBe(false))
-      if (outcome === 'uncertain')
+      if (outcome === 'uncertain' || outcome === 'empty-error')
         expect(screen.getByRole('alert').textContent).toContain('uncertain')
+      if (outcome === 'too-large')
+        expect(screen.getByRole('alert').textContent).toContain('attachment_too_large')
+      if (outcome === 'text-error')
+        expect(screen.getByRole('alert').textContent).toContain('http_413')
     },
   )
 
