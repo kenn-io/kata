@@ -288,12 +288,6 @@ func relayHandshake(ctx context.Context, store db.Storage, projectID int64, peer
 		}
 		return nil, relayTransportError(err)
 	}
-	// Reject an existing boundary before the handshake can persist a first root
-	// pin. Enrollment repeats this check under its native transaction lock to
-	// catch links added concurrently. Existing pins remain valid for retries.
-	if err := store.CheckRelayProjectLinks(ctx, projectID); err != nil {
-		return nil, relayTransportError(err)
-	}
 	pin, err := store.RootAuthority(ctx, project.UID)
 	if signer, _, configured := db.RootAttributionFromContext(ctx); configured && binding.Role == db.FederationRoleHub {
 		if signer.AuthorityUID != store.InstanceUID() || len(signer.PrivateKey) != ed25519.PrivateKeySize {

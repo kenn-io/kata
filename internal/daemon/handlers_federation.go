@@ -91,14 +91,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation",
 	}, func(ctx context.Context, in *api.ProjectFederationRequest) (*api.ProjectFederationResponse, error) {
+		body, err := projectFederationBody(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		if in.RelayProtocolVersion != 0 {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, in.ProjectID); err != nil {
 				return nil, relayTransportError(err)
 			}
-		}
-		body, err := projectFederationBody(ctx, cfg.DB, in.ProjectID)
-		if err != nil {
-			return nil, err
 		}
 		return &api.ProjectFederationResponse{Body: body}, nil
 	})

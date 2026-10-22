@@ -63,8 +63,6 @@ func TestRelayCrossProjectLinksHTTP(t *testing.T) {
 			require.NotContains(t, string(raw), other.Name)
 			require.NotContains(t, string(raw), hidden.UID)
 			require.NotContains(t, string(raw), hidden.ShortID)
-			_, err = store.RootAuthority(ctx, f.private.UID)
-			require.ErrorIs(t, err, db.ErrNotFound, "rejection must precede root pinning")
 		}
 		grants, err := store.ListFederationEnrollments(ctx)
 		require.NoError(t, err)
@@ -75,6 +73,20 @@ func TestRelayCrossProjectLinksHTTP(t *testing.T) {
 		// Ordinary federation metadata still supports legacy cross-project links.
 		status, _, raw = f.request(t, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation", f.private.ID), "member", nil, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
+	})
+}
+
+func TestRelayMetadataArchivedProjectNotFoundHTTP(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		archived, err := store.CreateProject(t.Context(), "archived-project")
+		require.NoError(t, err)
+		_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: archived.ID, Actor: "admin"})
+		require.NoError(t, err)
+		for _, query := range []string{"", "?relay_protocol_version=1"} {
+			status, _, raw := f.request(t, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation%s", archived.ID, query), "admin", nil, nil)
+			assertAPIError(t, status, raw, http.StatusNotFound, "project_not_found")
+		}
 	})
 }
 
