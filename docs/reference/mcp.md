@@ -100,9 +100,10 @@ the probe returns only readiness text and disables caching.
 
 For a remote gateway, enable the daemon's [`[mcp]` section](configuration.md#daemon-config) and restart.
 Route `/mcp` through the hub's HTTPS reverse proxy to the daemon. Give the gateway `https://daemon.example/mcp` and the separate MCP bearer.
-The mount serves all projects unless `[mcp] projects` lists names; names resolve to UIDs at startup, so renames don't widen scope. Missing or archived listed projects stop daemon startup.
+The mount serves all projects unless `[mcp] projects` lists names; names resolve to UIDs at startup, so renames don't widen scope. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart.
 An allowlist limits tools to those projects and rejects project administration operations, including purge. Without an allowlist, the mount includes future projects and permits project administration.
 Treat an unrestricted MCP bearer as equivalent to the daemon's `[auth]` token.
+The mount never exposes token administration; use `kata mcp serve --all --enable-token-admin` with an identity-mode token.
 The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record.
 The daemon's `/api/v1/ping` endpoint works as a container health probe.
 When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.

@@ -120,7 +120,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_WEB_PUBLIC_ORIGIN` | Overrides `[web].public_origin`, the exact root browser origin. Non-loopback plain HTTP requires private-network trust. |
 | `KATA_MCP_ENABLED` | Overrides `[mcp].enabled`. Takes a boolean; an invalid value stops startup. |
 | `KATA_MCP_ACTOR` | Overrides `[mcp].actor`, the actor for daemon MCP mutations. |
-| `KATA_MCP_PROJECTS` | Overrides `[mcp].projects` with comma-separated project names. Names are trimmed and resolve at startup. |
+| `KATA_MCP_PROJECTS` | Overrides `[mcp].projects` with comma-separated project names. Names are trimmed and resolve at startup. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart. |
 | `KATA_MCP_TOKEN_FILE` | Overrides `[mcp].token_file`, the file containing the daemon MCP bearer token. |
 | `KATA_SEARCH_EMBEDDINGS_BASE_URL` | Overrides `[search.embeddings].base_url`. |
 | `KATA_SEARCH_EMBEDDINGS_MODEL` | Overrides `[search.embeddings].model`. |

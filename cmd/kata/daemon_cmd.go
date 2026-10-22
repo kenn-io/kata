@@ -1404,7 +1404,7 @@ func runDaemonProcess(
 	if dcfg.MCP.Enabled {
 		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
 		if err != nil {
-			return fmt.Errorf("build daemon MCP handler: %w", err)
+			mcpHandler = daemonMCPUnavailableHandler(err)
 		}
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{

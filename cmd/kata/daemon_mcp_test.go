@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,17 +29,45 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
+func TestDaemonMCPUnavailableHandler(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+	handler := daemonMCPUnavailableHandler(errors.New(`project "missing" was not found`))
+	buildLog := logs.String()
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal([]byte(buildLog), &entry))
+	require.Equal(t, "ERROR", entry["level"])
+	require.Equal(t, "daemon MCP endpoint disabled", entry["msg"])
+	require.Equal(t, `project "missing" was not found`, entry["err"])
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(method, "/mcp", nil))
+		require.Equal(t, http.StatusServiceUnavailable, response.Code)
+		require.Equal(t, "application/json", response.Header().Get("Content-Type"))
+		require.JSONEq(t, `{"error":"kata MCP endpoint unavailable; see daemon log"}`, response.Body.String())
+		require.NotContains(t, response.Body.String(), "missing")
+	}
+	require.Equal(t, buildLog, logs.String(), "requests must not repeat the startup log")
+}
+
 // The daemon mount uses its own MCP bearer and calls its authenticated REST API.
 func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	t.Cleanup(transport.CloseIdleConnections)
 	httpClient := &http.Client{Transport: transport}
-	for _, tt := range []struct{ name, listen, web, host, contentType string }{
-		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "application/json"},
-		{"mixed-case JSON", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "Application/JSON"},
-		{"expanded IPv6 wildcard", "[0:0:0:0:0:0:0:0]:0", "public_origin = 'https://daemon.example'\n", "daemon.example", "application/json"},
-		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", "", "application/json"},
+	for _, tt := range []struct {
+		name, listen, web, host, contentType, projects string
+		archiveProject                                 bool
+	}{
+		{name: "shared TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json"},
+		{name: "mixed-case JSON", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "Application/JSON"},
+		{name: "expanded IPv6 wildcard", listen: "[0:0:0:0:0:0:0:0]:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json"},
+		{name: "Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json"},
+		{name: "missing project", listen: "127.0.0.1:0", projects: `projects = ["missing"]`},
+		{name: "archived project", listen: "127.0.0.1:0", projects: `projects = ["example-project"]`, archiveProject: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.listen == "" && runtime.GOOS == "windows" {
@@ -55,11 +86,16 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 enabled = true
 actor = " gateway-agent "
 token_env = "KATA_MCP_TEST_TOKEN"
+`+tt.projects+`
 [web]
 `+tt.web), 0o600))
 			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
-			_, err := store.CreateProject(t.Context(), "example-project")
+			project, err := store.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
+			if tt.archiveProject {
+				_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "gateway-agent"})
+				require.NoError(t, err)
+			}
 			require.NoError(t, store.Close())
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -86,6 +122,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			require.Eventually(t, func() bool { //nolint:kennlint // daemon startup publishes readiness only through its runtime record file
 				select {
 				case err := <-done:
+					done <- err
 					t.Fatalf("daemon exited during startup: %v", err)
 				default:
 				}
@@ -99,6 +136,26 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			}
 			callCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 			defer stop()
+			if tt.projects != "" {
+				request, err := http.NewRequestWithContext(callCtx, http.MethodGet, "http://"+record.Address+"/api/v1/ping", nil)
+				require.NoError(t, err)
+				response, err := httpClient.Do(request)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, http.StatusOK, response.StatusCode)
+
+				request, err = http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, nil)
+				require.NoError(t, err)
+				response, err = httpClient.Do(request)
+				require.NoError(t, err)
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+				require.Equal(t, "application/json", response.Header.Get("Content-Type"))
+				require.JSONEq(t, `{"error":"kata MCP endpoint unavailable; see daemon log"}`, string(body))
+				return
+			}
 			if tt.name == "shared TCP" {
 				request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, nil)
 				require.NoError(t, err)
@@ -122,6 +179,14 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
 			require.NoError(t, err)
 			defer func() { _ = session.Close() }()
+			if tt.name == "shared TCP" {
+				loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_tokens"})
+				require.NoError(t, err)
+				require.False(t, loaded.IsError)
+				section := loaded.StructuredContent.(map[string]any)
+				require.Equal(t, false, section["available"])
+				require.Equal(t, false, section["loaded"])
+			}
 			// Load the issue mutation tools before calling kata.create.
 			loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_issue_mutation"})
 			require.NoError(t, err)

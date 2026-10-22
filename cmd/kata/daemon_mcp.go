@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -16,6 +17,15 @@ import (
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func daemonMCPUnavailableHandler(err error) http.Handler {
+	slog.Error("daemon MCP endpoint disabled", "err", err)
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"kata MCP endpoint unavailable; see daemon log"}`))
+	})
+}
 
 func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, token string, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
 	scope, err := daemonMCPScope(ctx, store, cfg.Projects)
@@ -43,6 +53,7 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 		return nil, err
 	}
 	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+	// Token admin is sidecar-only: the mount needs require_token_identity off, under which token creation 409s.
 	server, err := mcpserver.New(mcpserver.Options{
 		Client: apiClient, LongRunningClient: longRunningClient,
 		Scope: scope, Actor: cfg.Actor, Version: version.Version,
