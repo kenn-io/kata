@@ -90,6 +90,19 @@ func mcpHTTPHostAllowsTrustedPrivateNetwork(host string) bool {
 
 var mcpHTTPCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
+func newMCPHTTPHandler(server *sdkmcp.Server, token string, disableLocalhostProtection bool) http.Handler {
+	var handler http.Handler = sdkmcp.NewStreamableHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return server },
+		&sdkmcp.StreamableHTTPOptions{
+			SessionTimeout:               30 * time.Minute,
+			PropagateRequestCancellation: true,
+			DisableLocalhostProtection:   disableLocalhostProtection,
+		},
+	)
+	handler = http.NewCrossOriginProtection().Handler(handler)
+	return requireMCPHTTPBearer(token, handler)
+}
+
 func serveMCPHTTP(
 	ctx context.Context,
 	status io.Writer,
@@ -104,16 +117,8 @@ func serveMCPHTTP(
 	}
 	defer func() { _ = listener.Close() }()
 
-	var mcpHandler http.Handler = sdkmcp.NewStreamableHTTPHandler(
-		func(*http.Request) *sdkmcp.Server { return server },
-		&sdkmcp.StreamableHTTPOptions{
-			SessionTimeout:               30 * time.Minute,
-			PropagateRequestCancellation: true,
-		},
-	)
-	mcpHandler = http.NewCrossOriginProtection().Handler(mcpHandler)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", requireMCPHTTPBearer(token, mcpHandler))
+	mux.Handle("/mcp", newMCPHTTPHandler(server, token, false))
 	mux.HandleFunc("/healthz", serveMCPHTTPHealth)
 	var handler http.Handler = mux
 	reportedAuthority := listener.Addr().String()

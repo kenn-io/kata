@@ -87,6 +87,26 @@ func TestBrowserOriginPolicy(t *testing.T) {
 		})
 	}
 
+	for _, tt := range []struct {
+		name   string
+		origin string
+		want   int
+	}{
+		{name: "MCP without origin on browser listener", want: http.StatusNoContent},
+		{name: "MCP foreign origin on browser listener", origin: "https://attacker.example", want: http.StatusForbidden},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/mcp", nil)
+			req.Host = "127.0.0.1:27123"
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			assert.Equal(t, tt.want, response.Code)
+		})
+	}
+
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	req.Host = "127.0.0.1:27123"
 	req.Header.Set("Origin", "http://127.0.0.1:27123")
@@ -214,6 +234,15 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 		want    int
 	}{
 		{
+			name: "MCP browser cookie without origin", method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123",
+			cookie: &http.Cookie{
+				Name: "kata_session_instance_a", Value: "cookie-session",
+				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+			},
+			want: http.StatusForbidden,
+		},
+		{
 			name: "health request on shared daemon address",
 			path: "/api/v1/health", host: "spoke-b:7777", want: http.StatusBadRequest,
 		},
@@ -298,27 +327,35 @@ func TestSharedTCPHostPolicyAcceptsBackendAndPublicAuthorities(t *testing.T) {
 }
 
 func TestSharedTCPHostPolicyAcceptsExplicitBackendAuthority(t *testing.T) {
-	handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}), ListenerPolicy{
-		Kind:             ListenerSharedTCP,
-		Origin:           "http://127.0.0.1:27123",
-		BackendAuthority: "0.0.0.0:7374",
-		AllowedHosts:     []string{"spoke-a:7374"},
-	})
-	require.NoError(t, err)
+	for _, backend := range []string{"0.0.0.0:7374", "[0:0:0:0:0:0:0:0]:7374"} {
+		t.Run(backend, func(t *testing.T) {
+			handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}), ListenerPolicy{
+				Kind:             ListenerSharedTCP,
+				Origin:           "http://127.0.0.1:27123",
+				BackendAuthority: backend,
+				AllowedHosts:     []string{"spoke-a:7374"},
+			})
+			require.NoError(t, err)
 
-	for host, want := range map[string]int{
-		"spoke-a:7374":          http.StatusNoContent,
-		"attacker.example:7374": http.StatusBadRequest,
-	} {
-		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/instance", nil)
-		request.Host = host
-		response := httptest.NewRecorder()
+			for host, want := range map[string]int{
+				"spoke-a:7374":          http.StatusNoContent,
+				"127.0.0.1:7374":        http.StatusNoContent,
+				"localhost:7374":        http.StatusNoContent,
+				"[::1]:7374":            http.StatusNoContent,
+				"[::1]:7375":            http.StatusBadRequest,
+				"attacker.example:7374": http.StatusBadRequest,
+			} {
+				request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/instance", nil)
+				request.Host = host
+				response := httptest.NewRecorder()
 
-		handler.ServeHTTP(response, request)
+				handler.ServeHTTP(response, request)
 
-		assert.Equal(t, want, response.Code, host)
+				assert.Equal(t, want, response.Code, host)
+			}
+		})
 	}
 }
 

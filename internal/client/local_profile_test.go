@@ -372,15 +372,24 @@ func TestLocalProfileHTTPClientIgnoresParentProxy(t *testing.T) {
 	transport.Proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
 	http.DefaultTransport = transport
 	defer func() { http.DefaultTransport = original; transport.CloseIdleConnections() }()
-	resolved := ResolvedDaemon{BaseURL: target.URL, Token: "work-token", LocalProfile: &LocalProfileIdentity{Home: t.TempDir()}}
-	hc, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{})
-	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL+"/api/v1/instance", nil)
-	require.NoError(t, err)
-	response, err := hc.Do(req)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	assert.Equal(t, http.StatusNoContent, response.StatusCode)
+	for _, tc := range []struct {
+		name     string
+		resolved ResolvedDaemon
+	}{
+		{"local profile", ResolvedDaemon{BaseURL: target.URL, Token: "work-token", LocalProfile: &LocalProfileIdentity{Home: t.TempDir()}}},
+		{"Direct", ResolvedDaemon{BaseURL: target.URL, Token: "work-token", Direct: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hc, err := NewHTTPClientForResolved(t.Context(), tc.resolved, Opts{})
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL+"/api/v1/instance", nil)
+			require.NoError(t, err)
+			response, err := hc.Do(req)
+			require.NoError(t, err)
+			defer func() { _ = response.Body.Close() }()
+			assert.Equal(t, http.StatusNoContent, response.StatusCode)
+		})
+	}
 }
 
 func TestLocalProfileRemoteViewCannotFallThroughToActiveRemote(t *testing.T) {

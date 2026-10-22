@@ -9,6 +9,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
+  under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
+  Route `/mcp` through an HTTPS reverse proxy, then give the gateway
+  `https://daemon.example/mcp` and the MCP bearer. See the
+  [MCP reference](reference/mcp.md).
+- Limit the daemon's MCP endpoint to named projects with `[mcp] projects` or
+  `KATA_MCP_PROJECTS`. Names resolve to stable project UIDs at startup; an unset
+  allowlist keeps all-project access.
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
   event per scheduled value, with the date's raw value, timezone, and UTC

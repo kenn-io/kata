@@ -54,6 +54,8 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
+	// MCP configures the optional daemon-mounted MCP listener.
+	MCP MCPConfig `toml:"mcp"`
 	// Web carries browser-listener and externally published origin settings.
 	Web    WebConfig    `toml:"web"`
 	Backup BackupConfig `toml:"backup"`
@@ -74,6 +76,15 @@ type DaemonConfig struct {
 	TickTickSync TickTickSyncConfig `toml:"ticktick_sync"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
+}
+
+// MCPConfig configures the daemon's /mcp endpoint. Secrets resolve at startup.
+type MCPConfig struct {
+	Enabled   bool     `toml:"enabled"`
+	Actor     string   `toml:"actor"`
+	Projects  []string `toml:"projects"`
+	TokenFile string   `toml:"token_file"`
+	TokenEnv  string   `toml:"token_env"`
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery
