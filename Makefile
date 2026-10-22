@@ -132,7 +132,7 @@ LINT_NEW_FLAGS ?= --new-from-merge-base=origin/main
 endif
 
 $(CURDIR)/.cache/golangci-lint/custom-gcl: .custom-gcl.yml go.mod
-	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.13.1
+	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.14.0
 
 lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
 	@if [ "$${GITHUB_ACTIONS:-}" = true ] && [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
