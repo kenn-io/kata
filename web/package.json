@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "scripts": {
     "generate": "bun run scripts/generate-api.ts",
     "generate:check": "bun run scripts/generate-api.ts --check",
