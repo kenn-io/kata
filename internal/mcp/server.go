@@ -44,14 +44,6 @@ type Options struct {
 	ObserveToolCall func()
 }
 
-// ValidateActor checks the fixed actor before starting an MCP server.
-func ValidateActor(actor string) error {
-	if strings.TrimSpace(actor) == "" {
-		return errors.New("kata actor is required")
-	}
-	return nil
-}
-
 // New creates a tools-only MCP server for one startup project scope.
 func New(options Options) (*sdkmcp.Server, error) {
 	if options.Client == nil {
@@ -78,8 +70,8 @@ func New(options Options) (*sdkmcp.Server, error) {
 	if err := teammate.Validate(options.Teammate); err != nil {
 		return nil, err
 	}
-	if err := ValidateActor(options.Actor); err != nil {
-		return nil, err
+	if strings.TrimSpace(options.Actor) == "" {
+		return nil, errors.New("kata actor is required")
 	}
 	if strings.TrimSpace(options.Version) == "" {
 		return nil, errors.New("kata server version is required")

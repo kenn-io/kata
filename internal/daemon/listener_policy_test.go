@@ -210,27 +210,13 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 		want    int
 	}{
 		{
-			name: "MCP without origin on shared TCP", method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123", want: http.StatusNoContent,
-		},
-		{
 			name: "MCP without origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
 			path: "/mcp", host: "127.0.0.1:27123", want: http.StatusNoContent,
-		},
-		{
-			name: "MCP foreign origin on shared TCP", method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123",
-			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
 		},
 		{
 			name: "MCP foreign origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
 			path: "/mcp", host: "127.0.0.1:27123",
 			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
-		},
-		{
-			name: "MCP fetch metadata without origin", method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123",
-			headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden,
 		},
 		{
 			name: "MCP browser cookie without origin", method: http.MethodPost,

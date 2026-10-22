@@ -336,8 +336,7 @@ This is a client preference; it does not change the daemon or other clients.
 
 ## Daemon config
 
-The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults
-to disabled and requires a separate MCP bearer. Changes require a restart:
+The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults to disabled. Restart after changes:
 
 ```toml
 [mcp]
@@ -347,11 +346,9 @@ token_file = "/run/secrets/mcp-token"
 # Alternatively: token_env = "KATA_MCP_TOKEN"
 ```
 
-The token file wins over the environment variable. Secrets resolve at daemon
-startup. See [MCP transport](mcp.md#transport) for gateway setup and scope.
-
-`[mcp]` isn't supported with `[auth] require_token_identity`; use
-`kata mcp serve --http` with a user token.
+Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
+Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
+See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
 `<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and
 named daemon targets:

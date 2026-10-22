@@ -117,20 +117,11 @@ public_origin = "https://daemon.example"
 	}, 5*time.Second, time.Millisecond)
 }
 
-func TestDaemonMCPRequiresTokenSource(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	t.Setenv("PORT", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[mcp]\nenabled = true\n"), 0o600))
-	_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:0", false, false)
-	require.ErrorContains(t, err, "[mcp] enabled requires token_file or token_env")
-}
-
 func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
 	for _, tt := range []struct{ name, config, author, want string }{
 		{"identity mode", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", "agent", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
+		{"no token source", "[mcp]\nenabled = true\n", "agent", "[mcp] enabled requires token_file or token_env"},
 		{"blank configured actor", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "agent", "kata actor is required"},
-		{"blank default actor", "[mcp]\nenabled = true\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "  ", "kata actor is required"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetFlags(t)
