@@ -206,19 +206,20 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 }
 
 func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
-	for _, tt := range []struct{ name, config, want string }{
-		{"identity mode", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
-		{"proxy actor", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`},
-		{"proxy actor on another listener", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:8888']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", ""},
-		{"no token source", "[mcp]\nenabled = true\n", "[mcp] enabled requires token_file or token_env"},
-		{"blank configured actor", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "kata actor is required"},
+	for _, tt := range []struct{ name, listen, config, want string }{
+		{"identity mode", "127.0.0.1:7777", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
+		{"proxy actor", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`},
+		{"proxy actor on expanded IPv6", "[0:0:0:0:0:0:0:1]:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['[::1]:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`},
+		{"proxy actor on another listener", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:8888']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", ""},
+		{"no token source", "127.0.0.1:7777", "[mcp]\nenabled = true\n", "[mcp] enabled requires token_file or token_env"},
+		{"blank configured actor", "127.0.0.1:7777", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "kata actor is required"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetFlags(t)
 			home := deploymentHome(t)
 			t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600))
-			_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:7777", false, false)
+			_, err := preflightDaemonStartup(t.Context(), tt.listen, false, false)
 			if tt.want == "" {
 				require.NoError(t, err)
 			} else {

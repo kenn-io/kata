@@ -81,8 +81,18 @@ func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endp
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader) != "" && daemon.TrustedProxyListener(self.Address, cfg.Auth.Proxy.TrustedProxyListeners) {
-		return "", errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`)
+	if strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader) != "" {
+		listener := self.Address
+		if self.Network == kitdaemon.NetworkTCP {
+			addr, err := net.ResolveTCPAddr("tcp", listener)
+			if err != nil {
+				return "", fmt.Errorf("resolve daemon MCP listener: %w", err)
+			}
+			listener = addr.String()
+		}
+		if daemon.TrustedProxyListener(listener, cfg.Auth.Proxy.TrustedProxyListeners) {
+			return "", errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" instead`)
+		}
 	}
 	cfg.MCP.Actor, _ = resolveActor(ctx, cfg.MCP.Actor, nil)
 	cfg.MCP.Actor = strings.TrimSpace(cfg.MCP.Actor)
