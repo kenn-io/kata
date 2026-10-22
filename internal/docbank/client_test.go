@@ -34,7 +34,7 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	require.EqualValues(t, 3, resp.ContentLength)
 }
 func TestDocbankContentWithoutTrailer(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Docbank-Blob-Hash", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 		_, _ = io.WriteString(w, "abc")
 	}))

@@ -114,6 +114,12 @@ it('uploads the selected batch through a refresh and shows per-file progress and
   await waitFor(() => expect(screen.getByText('shot.png uploading')).toBeTruthy())
   expect(screen.getByText('clip.mp4 queued')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+  await view.rerender({
+    attachments: { [id]: { ...entry, name: 'shot.png', size: files[0]!.size } },
+  })
+  expect(screen.getByText('shot.png')).toBeTruthy()
+  expect(screen.getByText('shot.png uploading')).toBeTruthy()
+  expect(screen.getByText('clip.mp4 queued')).toBeTruthy()
   finish()
   await waitFor(() => expect(uploadAttachment).toHaveBeenCalledTimes(2))
   expect(uploadAttachment).toHaveBeenNthCalledWith(1, files[0])
