@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"fmt"
@@ -143,13 +144,40 @@ func TestFederationBridgePreflightRejectsOldHubLinkCheck(t *testing.T) {
 			require.Equal(t, "hub_link_check_unsupported", bridgeErrorCode(t, raw))
 			require.Contains(t, string(raw), "cross-project links")
 			require.Contains(t, string(raw), "upgrade the hub")
-			require.Contains(t, string(raw), "connect without --preflight")
+			require.Contains(t, string(raw), "upgrade the hub to API 0.31.0 or newer so preflight can check for cross-project links")
 			require.EqualValues(t, 1, healthCalls.Load())
 
 			code, _, raw = local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, false), bridgeOwnerHeaders)
 			require.Equal(t, http.StatusOK, code, string(raw))
 			require.Contains(t, string(raw), `"status":"connected"`)
 			require.EqualValues(t, 1, healthCalls.Load(), "connect must not check the hub API schema version")
+		})
+	}
+}
+
+type bridgeLinkCheckStore struct {
+	db.Storage
+	checks atomic.Int32
+}
+
+func (s *bridgeLinkCheckStore) CheckRelayProjectLinks(ctx context.Context, projectID int64) error {
+	s.checks.Add(1)
+	return s.Storage.CheckRelayProjectLinks(ctx, projectID)
+}
+
+func TestFederationBridgeChecksLocalLinksOnce(t *testing.T) {
+	for _, preflight := range []bool{true, false} {
+		t.Run(fmt.Sprintf("preflight=%v", preflight), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			hub := newBridgeHubFixture(t)
+			store := &bridgeLinkCheckStore{Storage: openReplicaServiceStore(t)}
+			_, err := store.CreateProjectWithUID(t.Context(), "shared-replica", hub.root.private.UID)
+			require.NoError(t, err)
+			local := newBridgeLocalDaemon(t, store, hub.catalog(hub.root.server.URL))
+
+			code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, preflight), bridgeOwnerHeaders)
+			require.Equal(t, http.StatusOK, code, string(raw))
+			require.EqualValues(t, 1, store.checks.Load(), "each request must check local links once before enrollment")
 		})
 	}
 }

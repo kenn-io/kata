@@ -111,8 +111,8 @@ project's cross-project related, blocks and parent links on the hub before
 retrying; ask a hub operator to remove links to projects you cannot access.
 The check includes incoming links and closed issues. Historical links that
 have already been removed do not block enrollment. Preflight refuses older hubs
-with `409 hub_link_check_unsupported`; upgrade the hub or connect without
-`--preflight` to use its enrollment-time check.
+with `409 hub_link_check_unsupported`; upgrade the hub to API `0.31.0` or newer
+so preflight can check for cross-project links.
 
 Direct callers can request the same read-only check with
 `GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.

@@ -116,8 +116,14 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if metadata.ProjectID != resolved.Project.ID || metadata.ProjectUID != resolved.Project.UID || !uid.Valid(metadata.ProjectUID) || metadata.ReplayHorizonEventID <= 0 {
 			return nil, api.NewError(409, "hub_project_conflict", "hub returned inconsistent project metadata", "", nil)
 		}
-		if err := federationBridgeProjectCollision(ctx, cfg.DB, metadata.ProjectUID, in.Body.ProjectName); err != nil {
+		localProject, err := federationBridgeProjectCollision(ctx, cfg.DB, metadata.ProjectUID, in.Body.ProjectName)
+		if err != nil {
 			return nil, err
+		}
+		if localProject.ID != 0 {
+			if err := cfg.DB.CheckRelayProjectLinks(ctx, localProject.ID); err != nil {
+				return nil, relayTransportError(err)
+			}
 		}
 		signing, err := federationBridgeSigningSource(ctx, cfg, in, hubURL, metadata.ProjectUID, peer.FederationSigningRequired)
 		if err != nil {
@@ -135,7 +141,7 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			if semver.Compare("v"+strings.TrimPrefix(health.Body.APISchemaVersion, "v"), minimumRelayLinkCheckAPISchemaVersion) < 0 {
-				return nil, api.NewError(http.StatusConflict, "hub_link_check_unsupported", "hub cannot check the project for cross-project links", "upgrade the hub or connect without --preflight", nil)
+				return nil, api.NewError(http.StatusConflict, "hub_link_check_unsupported", "hub cannot check the project for cross-project links", "upgrade the hub to API 0.31.0 or newer so preflight can check for cross-project links", nil)
 			}
 			return &api.ConnectFederationBridgeResponse{Body: body}, nil
 		}
@@ -222,27 +228,25 @@ func beginFederationBridgeEnrollment(
 	}, nil
 }
 
-func federationBridgeProjectCollision(ctx context.Context, store db.Storage, projectUID, name string) error {
+func federationBridgeProjectCollision(ctx context.Context, store db.Storage, projectUID, name string) (db.Project, error) {
 	project, err := store.ProjectByNameIncludingArchived(ctx, name)
 	if err == nil && project.UID != projectUID {
-		return api.NewError(409, "project_name_collision", "local project name belongs to another project", "choose a different local project name", nil)
+		return db.Project{}, api.NewError(409, "project_name_collision", "local project name belongs to another project", "choose a different local project name", nil)
 	}
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return internalAPIError(err)
+		return db.Project{}, internalAPIError(err)
 	}
 	project, err = store.ProjectByUID(ctx, projectUID)
 	if err == nil && (project.Name != name || project.DeletedAt != nil) {
-		return api.NewError(409, "project_identity_collision", "shared project already exists under another name or is archived", "resolve the existing local project before connecting", nil)
+		return db.Project{}, api.NewError(409, "project_identity_collision", "shared project already exists under another name or is archived", "resolve the existing local project before connecting", nil)
 	}
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return internalAPIError(err)
+		return db.Project{}, internalAPIError(err)
 	}
-	if err == nil {
-		if err := store.CheckRelayProjectLinks(ctx, project.ID); err != nil {
-			return relayTransportError(err)
-		}
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Project{}, nil
 	}
-	return nil
+	return project, nil
 }
 
 func federationBridgePendingCredentialCollision(
@@ -277,7 +281,7 @@ func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, cr
 	if federationReplicaTransitions.state(key) == federationReplicaLeavePending {
 		return config.FederationCredential{}, federationReplicaAPIError(federationReplicaTransitions.leaveBlockedError(key))
 	}
-	if err := federationBridgeProjectCollision(ctx, store, body.HubProjectUID, body.ProjectName); err != nil {
+	if _, err := federationBridgeProjectCollision(ctx, store, body.HubProjectUID, body.ProjectName); err != nil {
 		return config.FederationCredential{}, err
 	}
 	if err := federationBridgePendingCredentialCollision(
