@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/githubsync"
@@ -146,7 +147,9 @@ type ServerConfig struct {
 
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
-	Embedder *embedding.Client
+	Embedder      *embedding.Client
+	Docbank       *docbank.Client
+	DocbankFolder string
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
@@ -677,9 +680,10 @@ func requireJSONMutation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
-			if !strings.HasPrefix(ct, "application/json") {
+			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
+				message := "Content-Type must be application/json"
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
-					"Content-Type must be application/json")
+					message)
 				return
 			}
 		}
@@ -722,6 +726,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerDestructive(humaAPI, cfg)
 	registerRecurrences(humaAPI, cfg)
 	registerMetadata(humaAPI, cfg)
+	registerAttachmentHandlers(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
 	registerFederationHandlers(humaAPI, cfg)

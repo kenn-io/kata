@@ -74,6 +74,8 @@ changed date or assignment can surface again. Kata stores no separate reminder
 record. A reached `scheduled_on` also records an `issue.scheduled_reached`
 event for adapters; see [Reached schedules](cron.md#reached-schedules).
 
+`attachment.*` keys hold [Docbank file references](../guide/attachments.md#read-references-as-metadata). The browser checks field types for display; the daemon validates the full reference when serving content.
+
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
 performance, the documented promotion path is a **SQLite expression index** over

@@ -9,6 +9,7 @@ export interface UICapabilities {
   account?: string
   actor_policy: string
   allowed_actions?: string[]
+  attachments?: boolean
   /** How this request authenticated; matches the instance auth kind. Never contains credentials. */
   auth_kind?: string
   close_requires_evidence?: boolean

@@ -78,6 +78,7 @@ func (c *{{$clientName}}) {{$op.ID}}WithResponse(ctx context.Context{{ if $op.Ha
         {{- end }}
     }
 
+    {{ template "binaryRequestEditor" $op }}
     req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
     if err != nil {
         return nil, fmt.Errorf("error creating request: %w", err)

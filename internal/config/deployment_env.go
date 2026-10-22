@@ -11,6 +11,9 @@ import (
 // Empty values leave TOML settings intact, including empty Compose substitutions.
 func applyDeploymentEnv(cfg *DaemonConfig) error {
 	for name, field := range map[string]*string{
+		"KATA_DOCBANK_URL":                    &cfg.Docbank.URL,
+		"KATA_DOCBANK_API_KEY_FILE":           &cfg.Docbank.APIKeyFile,
+		"KATA_DOCBANK_FOLDER":                 &cfg.Docbank.Folder,
 		"KATA_LISTEN":                         &cfg.Listen,
 		"KATA_WEB_LISTEN":                     &cfg.Web.Listen,
 		"KATA_WEB_PUBLIC_ORIGIN":              &cfg.Web.PublicOrigin,

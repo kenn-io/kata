@@ -1,3 +1,25 @@
+{{ define "binaryRequestEditor" }}
+    {{- if and .Body (eq .Body.ContentType "application/octet-stream") }}
+    // Keep binary bodies out of the runtime's JSON encoder.
+    if options != nil {
+        reqParams.Options = binaryRequestOptions{RequestOptions: options}
+    }
+    reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+        if options == nil || options.Body == nil {
+            return nil
+        }
+        body, err := options.Body.Reader()
+        if err != nil {
+            return err
+        }
+        req.Body = body
+        req.ContentLength = options.Body.FileSize()
+        req.GetBody = options.Body.Reader
+        return nil
+    }}, reqEditors...)
+    {{- end }}
+{{ end }}
+
 {{ define "client" }}
 {{ $args := . }}
 {{ $config := $args.config }}
@@ -50,6 +72,14 @@ func isNilRequestOptions(options runtime.RequestOptions) bool {
 
 type pathEscapingRequestOptions struct {
     runtime.RequestOptions
+}
+
+type binaryRequestOptions struct {
+    runtime.RequestOptions
+}
+
+func (o binaryRequestOptions) GetBody() any {
+    return nil
 }
 
 func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
@@ -167,6 +197,7 @@ func (c *{{$clientName}}) {{$op.ID}}(ctx context.Context{{ if $op.HasRequestOpti
         {{- end }}
     }
 
+    {{ template "binaryRequestEditor" $op }}
     req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
     if err != nil {
         return nil, fmt.Errorf("error creating request: %w", err)

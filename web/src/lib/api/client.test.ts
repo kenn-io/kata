@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createCredentialedFetch,
+  fetchAttachmentBlob,
+  setGeneratedFetch,
   orvalFetch,
   responseTriggeredAuthenticationTransition,
 } from './client'
-import { getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -30,6 +32,51 @@ describe('Kata browser API credentials', () => {
     }>('/api/v1/ui/references', { method: 'GET' }, upstream as typeof fetch)
 
     expect(result.data.issues[0]?.title).toBe('Generated client request')
+  })
+
+  it.each([
+    [null, undefined, 204, undefined],
+    ['', 'text/plain', 200, undefined],
+    ['plain response', 'text/plain', 200, 'plain response'],
+  ])(
+    'preserves response body %j with Content-Type %s',
+    async (body, contentType, status, expected) => {
+      const upstream = vi.fn(
+        async () =>
+          new Response(body, {
+            status,
+            headers: contentType ? { 'Content-Type': contentType } : {},
+          }),
+      )
+      setGeneratedFetch(upstream as typeof fetch)
+      try {
+        const result = await orvalFetch<{ data: unknown }>('/api/v1/ui/references', {
+          method: 'GET',
+        })
+        expect(result.data).toBe(expected)
+      } finally {
+        setGeneratedFetch(createCredentialedFetch())
+      }
+    },
+  )
+
+  it('preserves binary attachment response bytes as a Blob', async () => {
+    const upstream = vi.fn(
+      async () =>
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff]), {
+          headers: { 'Content-Type': 'image/png' },
+        }),
+    )
+    setGeneratedFetch(upstream as typeof fetch)
+    try {
+      const result = await attachmentContent({ projectId: 7, ref: 'abc4', attachmentId: 'saved' })
+      expect(result.data).toBeInstanceOf(Blob)
+      expect(Array.from(new Uint8Array(await (result.data as Blob).arrayBuffer()))).toEqual([
+        0x89, 0x50, 0x4e, 0x47, 0xff,
+      ])
+    } finally {
+      setGeneratedFetch(createCredentialedFetch())
+    }
   })
 
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
@@ -95,4 +142,21 @@ describe('Kata browser API credentials', () => {
     expect(onAuthenticationRequired).not.toHaveBeenCalled()
     expect(responseTriggeredAuthenticationTransition(result)).toBe(false)
   })
+})
+
+it('fetches attachment blobs through the active browser transport and exposes stable errors', async () => {
+  const transport = vi.fn(async () => new Response('bytes'))
+  setGeneratedFetch(transport as typeof fetch)
+  try {
+    expect(await (await fetchAttachmentBlob('/attachments/content')).text()).toBe('bytes')
+    expect(transport).toHaveBeenCalled()
+    setGeneratedFetch(async () =>
+      Response.json({ error: { code: 'docbank_not_configured' } }, { status: 503 }),
+    )
+    await expect(fetchAttachmentBlob('/attachments/content')).rejects.toThrow(
+      'docbank_not_configured',
+    )
+  } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
 })

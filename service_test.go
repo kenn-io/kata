@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,8 +16,37 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/webui"
 )
+
+func TestServiceDocbankAttachments(t *testing.T) {
+	vault := docbanktest.New(t)
+	service, err := kata.New(t.Context(), kata.Config{
+		DSN:     filepath.Join(t.TempDir(), "service.db"),
+		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
+		Docbank: kata.DocbankConfig{URL: vault.Server.URL, APIKey: "test-key", Folder: "/embedded"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	resp, err := http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues", server.URL, project.Project.ID), "application/json", strings.NewReader(`{"title":"Attach files","actor":"user-a"}`))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var issue struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&issue))
+	require.NoError(t, resp.Body.Close())
+	resp, err = http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?name=file.txt&actor=user-a", server.URL, project.Project.ID, issue.Issue.UID), "application/octet-stream", strings.NewReader("ok"))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+}
 
 func TestServiceMountRunAndClose(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "service.db")

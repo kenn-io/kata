@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +19,62 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
+
+type attachmentDeadlineTransport struct {
+	base   http.RoundTripper
+	budget chan time.Duration
+}
+
+func (t attachmentDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if (r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments")) ||
+		(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content")) {
+		if deadline, ok := r.Context().Deadline(); ok {
+			t.budget <- time.Until(deadline)
+		}
+	}
+	return t.base.RoundTrip(r)
+}
+
+func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
+	responses := map[string]any{
+		"/api/v1/instance":                           map[string]any{"web_ui_contract_version": api.UISnapshotContractVersion, "web_ui_capabilities": api.UICapabilities{Writable: true, ActorPolicy: "request"}},
+		"/api/v1/projects/1/issues/abc4/attachments": map[string]string{"attachment_id": "saved"},
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			assert.Equal(t, "operator", r.URL.Query().Get("actor"))
+			assert.Equal(t, "screen.png", r.URL.Query().Get("name"))
+			raw, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, "image", string(raw))
+		}
+		_ = json.NewEncoder(w).Encode(responses[r.URL.Path])
+	}))
+	defer upstream.Close()
+	base := http.DefaultTransport
+	budgets := make(chan time.Duration, 1)
+	http.DefaultTransport = attachmentDeadlineTransport{base: base, budget: budgets}
+	defer func() { http.DefaultTransport = base }()
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator"},
+		{http.MethodGet, "/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(context.Background(), tc.method, server.URL+"/api/v1/ui/proxy"+tc.path, strings.NewReader("image"))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/octet-stream")
+			// Keep the caller out of the transport being observed.
+			resp, err := (&http.Client{Transport: base}).Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Len(t, budgets, 1, "upstream attachment request had no deadline")
+			require.GreaterOrEqual(t, <-budgets, 74*time.Minute)
+		})
+	}
+}
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	connected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +251,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
 		w.Header().Set("Set-Cookie", "upstream=secret")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`,
+		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"sse","actor_policy":"request"}}`,
 			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(upstream.Close)
@@ -223,7 +281,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`,
+	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"attachments":true,"writable":true,"updates":"poll","actor_policy":"request"}}`,
 		api.UISnapshotContractVersion), string(body))
 	assert.Empty(t, response.Header.Get("Set-Cookie"))
 }

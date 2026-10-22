@@ -221,11 +221,11 @@ func TestMergeLocalProfileReplacesRoutingAsOneTarget(t *testing.T) {
 
 func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 	for key, value := range map[string]string{
-		"KATA_HOME": "personal-home", "KATA_DB": "personal.db", "KATA_DSN": "personal-dsn", "KATA_SERVER": "http://127.0.0.1:7790", "KATA_AUTH_TOKEN": "personal-token", "KATA_POSTGRES_SCHEMA": "personal_schema", "PGPASSWORD": "personal-secret", "HTTP_PROXY": "http://proxy.example", "HTTPS_PROXY": "http://proxy.example", "PORT": "8888", "WORK_TOKEN": "work-token", "PATH": os.Getenv("PATH"),
+		"KATA_HOME": "personal-home", "KATA_DB": "personal.db", "KATA_DSN": "personal-dsn", "KATA_SERVER": "http://127.0.0.1:7790", "KATA_AUTH_TOKEN": "personal-token", "KATA_POSTGRES_SCHEMA": "personal_schema", "PGPASSWORD": "personal-secret", "HTTP_PROXY": "http://proxy.example", "HTTPS_PROXY": "http://proxy.example", "PORT": "8888", "WORK_TOKEN": "work-token", "EXAMPLE_DOCBANK_KEY": "example-secret", "PATH": os.Getenv("PATH"),
 	} {
 		t.Setenv(key, value)
 	}
-	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: "WORK_TOKEN"}}}}
+	profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{Search: config.SearchConfig{Embeddings: config.EmbeddingsConfig{APIKeyEnv: "WORK_TOKEN"}}, Docbank: config.DocbankConfig{APIKeyEnv: "EXAMPLE_DOCBANK_KEY"}}}
 	env, err := config.LocalProfileEnvironment(profile, true)
 	require.NoError(t, err)
 	values := map[string]string{}
@@ -235,6 +235,7 @@ func TestLocalProfileEnvironmentIsolatesDaemonOverrides(t *testing.T) {
 	}
 	assert.Equal(t, profile.Home, values["KATA_HOME"])
 	assert.Equal(t, "work-token", values["WORK_TOKEN"])
+	assert.Equal(t, "example-secret", values["EXAMPLE_DOCBANK_KEY"])
 	assert.Equal(t, os.Getenv("PATH"), values["PATH"])
 	assert.Equal(t, "1", values["KATA_AUTOSTART"])
 	for _, key := range []string{"KATA_DB", "KATA_DSN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_POSTGRES_SCHEMA", "PGPASSWORD", "HTTP_PROXY", "HTTPS_PROXY", "PORT"} {

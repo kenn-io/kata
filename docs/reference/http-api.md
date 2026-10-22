@@ -174,6 +174,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.31.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
 | `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
@@ -815,6 +816,15 @@ original author, UID, creation time, and thread position. This is the supported
 primitive for redacting comment text before enrolling a project in federation.
 It is not a purge mechanism for data that has already crossed into another
 federated event log.
+
+## Attachment Endpoints
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`
+uploads the raw request body as `application/octet-stream` to Docbank and
+returns the new `attachment_id` with its stored reference. `GET
+/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
+streams the file back. Both return `docbank_not_configured` when the daemon has
+no Docbank. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

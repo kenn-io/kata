@@ -547,3 +547,14 @@ describe('typed reply draft across edit mode', () => {
     expect(composer.value).toBe(draft)
   })
 })
+
+it('disables attachment uploads with blocked authority or disabled actions', async () => {
+  const view = renderDetail({
+    authorityBlocked: true,
+    attachmentsEnabled: true,
+    onUploadAttachment: vi.fn(async () => {}),
+  })
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+  await view.rerender({ authorityBlocked: false, actionsDisabled: true })
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+})

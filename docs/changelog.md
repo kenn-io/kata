@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Attach screenshots and recordings to issues through the web UI or `kata docbank attachments`. Configure Docbank on the daemon to store the files. Images preview inline, and videos play in the issue. See [Issue attachments](guide/attachments.md).
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
   event per scheduled value, with the date's raw value, timezone, and UTC

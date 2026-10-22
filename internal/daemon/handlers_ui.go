@@ -729,7 +729,8 @@ func uiValidationError(field, message string, data map[string]any) error {
 
 func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+		Attachments: cfg.Docbank != nil,
+		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
