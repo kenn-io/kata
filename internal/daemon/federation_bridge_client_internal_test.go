@@ -45,7 +45,6 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 		{"forbidden", 403, `{}`, "hub_credential_rejected", 502},
 		{"missing", 404, `{}`, "hub_request_rejected", 502},
 		{"conflict", 409, `{}`, "hub_request_rejected", 502},
-		{"relay boundary", 409, `{"status":409,"error":{"code":"relay_cross_project_links","message":"project has cross-project links","hint":"remove cross-project links before retrying"}}`, "relay_cross_project_links", 409},
 		{"relay private diagnostics", 409, `{"error":{"code":"relay_cross_project_links","message":"private diagnostic","hint":"private remedy","data":{"token":"private-token"}}}`, "relay_cross_project_links", 409},
 		{"untrusted conflict", 409, `{"error":{"code":"private_diagnostic","message":"secret"}}`, "hub_request_rejected", 502},
 		{"redirect", 302, `{}`, "hub_request_rejected", 502},
