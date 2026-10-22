@@ -14,6 +14,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   Preflight refuses hubs older than API `0.31.0`, which cannot check those links.
   A direct connect to an older hub still returns that hub's old error when links
   block enrollment. See [Bridge setup](operations/federation.md#connect-a-project-through-the-daemon-catalog).
+- Record every value when `kata close` repeats `--pr`, `--commit`, or `--test`.
+  Before, only the last value of each flag was kept, so a fix that landed in two
+  pull requests recorded only the second one. An empty value such as `--pr ""`
+  is now rejected like `--evidence pr:` instead of ignored.
 
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`

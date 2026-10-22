@@ -926,6 +926,9 @@ kata close <ref> --done --message <text> \
   [--dry]
 ```
 
+Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
+more than one item, for example a fix that landed in two pull requests.
+
 `--dry` validates the close without changing the issue and reports the close
 event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
 
