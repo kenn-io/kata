@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- A new device connecting through a relay now receives the signed checkpoint
+  and the full issue when the issue's creation was withheld and only later
+  events, such as an assignment, were kept. Before, the device couldn't apply
+  the assignment, and sync stalled.
 
 - Record every value when `kata close` repeats `--pr`, `--commit`, or `--test`.
   Before, only the last value of each flag was kept, so a fix that landed in two
