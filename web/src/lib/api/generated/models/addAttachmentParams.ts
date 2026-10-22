@@ -3,6 +3,6 @@
  */
 
 export type AddAttachmentParams = {
-  name?: string
+  name: string
   actor?: string
 }

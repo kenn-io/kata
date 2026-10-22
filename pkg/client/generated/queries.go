@@ -286,8 +286,12 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	Name  *string `json:"name,omitempty"`
+	Name  string  `json:"name" validate:"required"`
 	Actor *string `json:"actor,omitempty"`
+}
+
+func (a AddAttachmentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
 type UnbindExternalRootQuery struct {

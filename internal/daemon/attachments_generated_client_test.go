@@ -1,12 +1,32 @@
 package daemon_test
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+func TestAttachmentUploadRequiresName(t *testing.T) {
+	env, f := attachmentEnv(t)
+	project, issue := seedProjectAndIssue(t, env)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?actor=operator", env.URL, project.ID, issue.ShortID), strings.NewReader("abc"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := env.HTTP.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	require.Contains(t, string(raw), "name: required query parameter is missing")
+	require.Empty(t, f.Requests())
+}
 
 func TestGeneratedClientAttachmentRoundTrip(t *testing.T) {
 	for _, method := range []string{"AddAttachment", "AddAttachmentWithResponse"} {
@@ -21,7 +41,7 @@ func TestGeneratedClientAttachmentRoundTrip(t *testing.T) {
 			name, actor := "sample.txt", "operator"
 			options := &generated.AddAttachmentRequestOptions{
 				PathParams: &generated.AddAttachmentPath{ProjectID: project.ID, Ref: issue.ShortID},
-				Query:      &generated.AddAttachmentQuery{Name: &name, Actor: &actor},
+				Query:      &generated.AddAttachmentQuery{Name: name, Actor: &actor},
 				Body:       &body,
 			}
 			var id string

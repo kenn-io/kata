@@ -6,7 +6,7 @@ import "go.kenn.io/kata/internal/metadata"
 type AddAttachmentRequest struct {
 	ProjectID int64  `path:"project_id"`
 	Ref       string `path:"ref"`
-	Name      string `query:"name"`
+	Name      string `query:"name" required:"true"`
 	Actor     string `query:"actor"`
 }
 type AttachmentReadRequest struct {

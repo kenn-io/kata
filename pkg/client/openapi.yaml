@@ -10025,6 +10025,7 @@ paths:
         - explode: false
           in: query
           name: name
+          required: true
           schema:
             type: string
         - explode: false

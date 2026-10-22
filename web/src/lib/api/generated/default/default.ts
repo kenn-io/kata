@@ -4356,7 +4356,7 @@ export type addAttachmentResponse = addAttachmentResponseSuccess | addAttachment
 
 export const getAddAttachmentUrl = (
   { projectId, ref }: AddAttachmentPathParameters,
-  params?: AddAttachmentParams,
+  params: AddAttachmentParams,
 ) => {
   const normalizedParams = new URLSearchParams()
 
@@ -4376,7 +4376,7 @@ export const getAddAttachmentUrl = (
 export const addAttachment = async (
   { projectId, ref }: AddAttachmentPathParameters,
   addAttachmentBody: Blob,
-  params?: AddAttachmentParams,
+  params: AddAttachmentParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<addAttachmentResponse> => {
   const getHeaders = (
