@@ -222,6 +222,11 @@ func federationBridgeProjectCollision(ctx context.Context, store db.Storage, pro
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return internalAPIError(err)
 	}
+	if err == nil {
+		if err := store.CheckRelayProjectLinks(ctx, project.ID); err != nil {
+			return relayTransportError(err)
+		}
+	}
 	return nil
 }
 

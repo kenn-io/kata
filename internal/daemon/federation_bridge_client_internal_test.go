@@ -20,17 +20,6 @@ type bridgeTrackedResponseBody struct {
 
 func (b *bridgeTrackedResponseBody) Close() error { b.closed = true; return nil }
 
-type bridgeCountingReader struct {
-	io.Reader
-	bytesRead int
-}
-
-func (r *bridgeCountingReader) Read(p []byte) (int, error) {
-	n, err := r.Reader.Read(p)
-	r.bytesRead += n
-	return n, err
-}
-
 type bridgeResponseTransport struct {
 	body             *bridgeTrackedResponseBody
 	status, attempts int
@@ -94,7 +83,7 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 
 func TestFederationBridgeOversizedConflictReadIsBounded(t *testing.T) {
 	largeEnvelope := fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1))
-	reader := &bridgeCountingReader{Reader: strings.NewReader(largeEnvelope)}
+	reader := strings.NewReader(largeEnvelope)
 	body := &bridgeTrackedResponseBody{Reader: reader}
 	transport := &bridgeResponseTransport{body: body, status: http.StatusConflict}
 	client, err := newFederationBridgeAPIClient(&http.Client{Transport: transport}, "https://hub.example")
@@ -106,7 +95,7 @@ func TestFederationBridgeOversizedConflictReadIsBounded(t *testing.T) {
 	require.Equal(t, "hub_request_rejected", failure.Code)
 	require.Equal(t, http.StatusBadGateway, failure.Status)
 	require.Equal(t, http.StatusConflict, failure.Data["hub_status"])
-	require.LessOrEqual(t, reader.bytesRead, (1<<20)+1, "oversized response reads must stop after the size limit plus one detection byte")
+	require.LessOrEqual(t, len(largeEnvelope)-reader.Len(), (1<<20)+1, "oversized response reads must stop after the size limit plus one detection byte")
 	require.Equal(t, 1, transport.attempts)
 	require.True(t, body.closed, "the original response body must close after bounded capture")
 }

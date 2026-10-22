@@ -116,9 +116,7 @@ their enrollment-time check but cannot report this blocker during preflight.
 Direct callers can request the same read-only check with
 `GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.
 Omitting the parameter preserves ordinary federation metadata behavior.
-Rejected enrollment attempts check links before creating a root key pin;
-the enrollment transaction repeats the check to catch concurrent changes.
-A pin that already exists is retained.
+Enrollment checks links again inside its transaction to catch concurrent changes.
 
 Set `preflight` to `false` to connect. `serve_downstream`
 defaults to `false`. Set it to `true` only when this daemon will relay the

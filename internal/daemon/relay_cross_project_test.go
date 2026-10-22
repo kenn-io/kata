@@ -115,6 +115,36 @@ func TestFederationBridgeCrossProjectLinks(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestFederationBridgeLocalCrossProjectLinks(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	hub := newBridgeHubFixture(t)
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(t.Context(), "shared-replica", hub.root.private.UID)
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Local issue", Author: "admin"})
+	require.NoError(t, err)
+	other, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	otherIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: other.ID, Title: "Other issue", Author: "admin"})
+	require.NoError(t, err)
+	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: otherIssue.ID, Type: "blocks", Author: "admin"})
+	require.NoError(t, err)
+	local := newBridgeLocalDaemon(t, store, hub.catalog(hub.root.server.URL))
+	for _, preflight := range []bool{true, false} {
+		t.Run(fmt.Sprintf("preflight=%v", preflight), func(t *testing.T) {
+			code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, preflight), bridgeOwnerHeaders)
+			require.Equal(t, http.StatusConflict, code, string(raw))
+			require.Equal(t, "relay_cross_project_links", bridgeErrorCode(t, raw))
+		})
+	}
+	grants, err := hub.store.ListFederationEnrollments(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, grants)
+	_, found, err := config.DefaultFederationCredentialStore().FederationCredential(t.Context(), project.UID)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 // A link may appear after metadata was read. The enrollment-time conflict
 // still keeps its actionable meaning across the downstream daemon.
 func TestFederationBridgeCrossProjectLinksAtEnrollment(t *testing.T) {
