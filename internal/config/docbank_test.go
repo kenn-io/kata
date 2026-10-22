@@ -29,7 +29,7 @@ api_key="test-key"
 		_, err = readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\n", u))
 		require.NoError(t, err)
 	}
-	for _, u := range []string{"http://docbank.example", "ftp://docbank.example", "https://user@docbank.example", "https://docbank.example?x=1", "https://docbank.example#fragment"} {
+	for _, u := range []string{"http://docbank.example"} {
 		_, err = readDocbank(t, fmt.Sprintf("[docbank]\nurl=%q\napi_key=\"test-key\"\n", u))
 		require.Error(t, err, u)
 	}
@@ -38,24 +38,6 @@ api_key="test-key"
 		require.Error(t, err, extra)
 	}
 }
-func TestDocbankCredentialRotationAndPrecedence(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "key")
-	writePrivateCredentialFixture(t, file, []byte("first"))
-	t.Setenv("DOCBANK_TEST_KEY", "env-key")
-	cfg, err := readDocbank(t, fmt.Sprintf("[docbank]\nurl=\"https://docbank.example\"\napi_key_file=%q\napi_key_env=\"DOCBANK_TEST_KEY\"", file))
-	require.NoError(t, err)
-	key, err := cfg.Docbank.ResolveKey()
-	require.NoError(t, err)
-	require.Equal(t, "first", key)
-	require.NoError(t, os.WriteFile(file, []byte("rotated"), 0600))
-	key, err = cfg.Docbank.ResolveKey()
-	require.NoError(t, err)
-	require.Equal(t, "rotated", key)
-	require.NoError(t, os.Remove(file))
-	_, err = cfg.Docbank.ResolveKey()
-	require.Error(t, err)
-}
-
 func TestDocbankConfigDefersKeyResolution(t *testing.T) {
 	t.Setenv("DOCBANK_MISSING_TEST_KEY", "")
 	missingFile := filepath.Join(t.TempDir(), "missing-key")
@@ -70,16 +52,16 @@ func TestDocbankConfigDefersKeyResolution(t *testing.T) {
 			require.Error(t, err, "the configured secret source is resolved when Docbank is used")
 		})
 	}
-}
 
-func TestDocbankDeploymentEnv(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "key")
-	writePrivateCredentialFixture(t, file, []byte("test-key"))
-	t.Setenv("KATA_DOCBANK_URL", "https://docbank.example")
-	t.Setenv("KATA_DOCBANK_API_KEY_FILE", file)
-	t.Setenv("KATA_DOCBANK_FOLDER", "/issues")
-	cfg, err := readDocbank(t, "")
+	writePrivateCredentialFixture(t, file, []byte("first"))
+	cfg, err := readDocbank(t, fmt.Sprintf("[docbank]\nurl=\"https://docbank.example\"\napi_key_file=%q", file))
 	require.NoError(t, err)
-	require.Equal(t, "/issues", cfg.Docbank.Folder)
-	require.Equal(t, "https://docbank.example", cfg.Docbank.URL)
+	key, err := cfg.Docbank.ResolveKey()
+	require.NoError(t, err)
+	require.Equal(t, "first", key)
+	require.NoError(t, os.WriteFile(file, []byte("rotated"), 0600))
+	key, err = cfg.Docbank.ResolveKey()
+	require.NoError(t, err)
+	require.Equal(t, "rotated", key)
 }

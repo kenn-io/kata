@@ -8,6 +8,7 @@ import (
 	"testing"
 	"uuid"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 )
@@ -31,6 +32,29 @@ func TestDocbankUploadAndContent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "abc", string(b))
 	require.EqualValues(t, 3, resp.ContentLength)
+}
+func TestDocbankContentRejectsCorruptContent(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "wrong digest", true: "missing digest"}[missing], func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/v1/versions/6f1c2e8a-2222-4222-8222-222222222222/content", r.URL.Path)
+				w.Header().Set("X-Docbank-Blob-Size", "4")
+				w.Header().Set("Trailer", "Content-Digest")
+				_, _ = io.WriteString(w, "BBBB")
+				if !missing {
+					// SHA-256 of "AAAA".
+					w.Header().Set("Content-Digest", "sha-256=:Y8HdlR/+329/2WitTvo5uO1YTxYvRucVEU7hhPjekgE=:")
+				}
+			}))
+			defer upstream.Close()
+			c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+			resp, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			_, err = io.ReadAll(resp.Body)
+			require.EqualError(t, err, "docbank: content digest mismatch")
+		})
+	}
 }
 func TestDocbankStatusAndKeyRotation(t *testing.T) {
 	key := "first"

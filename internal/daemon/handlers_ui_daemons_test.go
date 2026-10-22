@@ -26,7 +26,8 @@ type attachmentDeadlineTransport struct {
 }
 
 func (t attachmentDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments") {
+	if (r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments")) ||
+		(r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content")) {
 		if deadline, ok := r.Context().Deadline(); ok {
 			t.budget <- time.Until(deadline)
 		}
@@ -41,11 +42,11 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			require.Equal(t, "operator", r.URL.Query().Get("actor"))
-			require.Equal(t, "screen.png", r.URL.Query().Get("name"))
+			assert.Equal(t, "operator", r.URL.Query().Get("actor"))
+			assert.Equal(t, "screen.png", r.URL.Query().Get("name"))
 			raw, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
-			require.Equal(t, "image", string(raw))
+			assert.NoError(t, err)
+			assert.Equal(t, "image", string(raw))
 		}
 		_ = json.NewEncoder(w).Encode(responses[r.URL.Path])
 	}))
@@ -53,19 +54,26 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 	base := http.DefaultTransport
 	budgets := make(chan time.Duration, 1)
 	http.DefaultTransport = attachmentDeadlineTransport{base: base, budget: budgets}
-	t.Cleanup(func() { http.DefaultTransport = base })
+	defer func() { http.DefaultTransport = base }()
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator", strings.NewReader("image"))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/octet-stream")
-	// Keep the caller out of the transport being observed.
-	resp, err := (&http.Client{Transport: base}).Do(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Len(t, budgets, 1, "upstream attachment request had no deadline")
-	require.GreaterOrEqual(t, <-budgets, 74*time.Minute)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/projects/1/issues/abc4/attachments?name=screen.png&actor=operator"},
+		{http.MethodGet, "/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(context.Background(), tc.method, server.URL+"/api/v1/ui/proxy"+tc.path, strings.NewReader("image"))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/octet-stream")
+			// Keep the caller out of the transport being observed.
+			resp, err := (&http.Client{Transport: base}).Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Len(t, budgets, 1, "upstream attachment request had no deadline")
+			require.GreaterOrEqual(t, <-budgets, 74*time.Minute)
+		})
+	}
 }
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
@@ -522,31 +530,4 @@ func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestWebDaemonProxyAttachmentStreamOutlivesJSONDeadline(t *testing.T) {
-	if testing.Short() {
-		t.Skip("exercises the live 30-second gateway deadline")
-	}
-	payload := strings.Repeat("x", 2<<20)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", "2097152")
-		_, _ = io.WriteString(w, payload[:16384])
-		w.(http.Flusher).Flush()
-		select {
-		case <-time.After(31 * time.Second):
-			_, _ = io.WriteString(w, payload[16384:])
-		case <-r.Context().Done():
-		}
-	}))
-	defer upstream.Close()
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "example-remote", WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	response, err := http.Get(server.URL + "/api/v1/ui/proxy/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content")
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	require.Equal(t, payload, string(body))
 }

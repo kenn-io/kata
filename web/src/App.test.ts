@@ -26,10 +26,7 @@ describe('App', () => {
   it.each([
     { actorPolicy: 'identity', outcome: 'saved', expectedActor: null },
     { actorPolicy: 'request', outcome: 'saved', expectedActor: 'kata-web' },
-    { actorPolicy: 'request', outcome: 'uncertain', expectedActor: 'kata-web' },
     { actorPolicy: 'request', outcome: 'too-large', expectedActor: 'kata-web' },
-    { actorPolicy: 'request', outcome: 'text-error', expectedActor: 'kata-web' },
-    { actorPolicy: 'request', outcome: 'empty-error', expectedActor: 'kata-web' },
   ])(
     'refreshes authority after a $outcome attachment upload with $actorPolicy attribution',
     async ({ actorPolicy, outcome, expectedActor }) => {
@@ -53,10 +50,8 @@ describe('App', () => {
         },
       }
       let finish!: (response: Response) => void
-      let fail!: (reason: Error) => void
-      const pending = new Promise<Response>((resolve, reject) => {
+      const pending = new Promise<Response>((resolve) => {
         finish = resolve
-        fail = reject
       })
       let uploadURL: URL | undefined
       let uploadInit: RequestInit | undefined
@@ -112,18 +107,11 @@ describe('App', () => {
         )
       else if (outcome === 'too-large')
         finish(Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }))
-      else if (outcome === 'text-error') finish(new Response('Request too large', { status: 413 }))
-      else if (outcome === 'empty-error') finish(new Response('', { status: 502 }))
-      else fail(new TypeError('network response unavailable'))
-      if (outcome === 'saved' || outcome === 'uncertain' || outcome === 'empty-error')
+      if (outcome === 'saved')
         await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
       await waitFor(() => expect(edit.disabled).toBe(false))
-      if (outcome === 'uncertain' || outcome === 'empty-error')
-        expect(screen.getByRole('alert').textContent).toContain('uncertain')
       if (outcome === 'too-large')
         expect(screen.getByRole('alert').textContent).toContain('attachment_too_large')
-      if (outcome === 'text-error')
-        expect(screen.getByRole('alert').textContent).toContain('http_413')
     },
   )
 

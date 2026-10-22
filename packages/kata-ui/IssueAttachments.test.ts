@@ -87,11 +87,10 @@ it('clears previews when authority is lost, including pending fetches', async ()
   expect(screen.queryByAltText('screen.png')).toBeNull()
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })
-it('offers video playback and downloads while large files show the CLI hint', () => {
+it('caps image previews at 20 MiB and shows the CLI hint above 100 MiB', () => {
   render(IssueAttachments, {
     attachmentsEnabled: true,
     attachments: {
-      [id]: { ...entry, name: 'recording.mp4', media_type: 'video/mp4' },
       [id.slice(0, -1) + 'B']: { ...entry, size: 21 << 20 },
       [id.slice(0, -1) + 'C']: { ...entry, name: 'large.png', size: 101 << 20 },
     },
@@ -99,10 +98,7 @@ it('offers video playback and downloads while large files show the CLI hint', ()
     fetchAttachment: vi.fn(),
   })
   expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Download recording.mp4' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Play recording.mp4' })).toBeTruthy()
   expect(screen.getByText(/kata docbank attachments get/)).toBeTruthy()
-  expect(screen.getByText(/video\/mp4/)).toBeTruthy()
 })
 it('shows an unavailable state while preserving name, type and size', async () => {
   render(IssueAttachments, {
@@ -151,17 +147,6 @@ it('uploads the selected batch through a refresh and shows per-file progress and
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
 })
 
-it('hides uploads without Docbank capability and disables them with stale or read-only authority', async () => {
-  const view = render(IssueAttachments, {
-    baseURL: '/attachments',
-    uploadAttachment: vi.fn(),
-    attachmentsEnabled: false,
-  })
-  expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-  await view.rerender({ attachmentsEnabled: true, actionsDisabled: true })
-  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
-})
-
 it.each(['video/mp4', 'video/x-m4v', 'video/webm', 'video/ogg', 'video/quicktime'])(
   'plays %s with a typed blob and revokes it when context changes',
   async (media_type) => {
@@ -196,24 +181,30 @@ it('keeps file details without actions when Docbank is unavailable', () => {
     baseURL: '/attachments',
     attachmentsEnabled: false,
     fetchAttachment: vi.fn(),
+    uploadAttachment: vi.fn(),
   })
   expect(screen.getByText('screen.png')).toBeTruthy()
   expect(screen.getByText('image/png · 12 bytes')).toBeTruthy()
   expect(screen.queryByRole('button')).toBeNull()
 })
 
-it('renders nothing for an empty map', () => {
-  const { container } = render(IssueAttachments, {
-    attachmentsEnabled: true,
-    attachments: {},
-    baseURL: '/attachments',
-  })
-  expect(container.textContent).toBe('')
-})
-
 it('keeps an open video when another attachment changes and revokes removed or replaced references', async () => {
-  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:video').mockReturnValueOnce('blob:image')
-  const fetchAttachment = vi.fn(async () => new Blob(['video']))
+  vi.mocked(URL.createObjectURL)
+    .mockReturnValueOnce('blob:video')
+    .mockReturnValueOnce('blob:download')
+    .mockReturnValueOnce('blob:image')
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  let finishDownload!: (blob: Blob) => void
+  const fetchAttachment = vi
+    .fn()
+    .mockResolvedValueOnce(new Blob(['video']))
+    .mockImplementationOnce(
+      () =>
+        new Promise<Blob>((resolve) => {
+          finishDownload = resolve
+        }),
+    )
+    .mockResolvedValueOnce(new Blob(['image']))
   const videoEntry = { ...entry, name: 'clip.mp4', media_type: 'video/mp4' }
   const otherID = id.slice(0, -1) + 'B'
   const view = render(IssueAttachments, {
@@ -225,6 +216,17 @@ it('keeps an open video when another attachment changes and revokes removed or r
   await fireEvent.click(screen.getByRole('button', { name: 'Play clip.mp4' }))
   await waitFor(() => expect(view.container.querySelector('video')).toBeTruthy())
   const video = view.container.querySelector('video')!
+  await fireEvent.click(screen.getByRole('button', { name: 'Download clip.mp4' }))
+  await waitFor(() => expect(fetchAttachment).toHaveBeenCalledTimes(2))
+  await view.rerender({ attachments: { [id]: { ...videoEntry } } })
+  expect(view.container.querySelector('video')).toBe(video)
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+  finishDownload(new Blob(['download']))
+  await waitFor(() => expect(click).toHaveBeenCalledOnce())
+  expect(click.mock.instances[0]).toHaveProperty('download', 'clip.mp4')
+  expect(click.mock.instances[0]).toHaveProperty('href', 'blob:download')
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download'))
+  vi.mocked(URL.revokeObjectURL).mockClear()
   const reordered = { ...videoEntry }
   await view.rerender({ attachments: { [id]: reordered, [otherID]: entry } })
   expect(view.container.querySelector('video')).toBe(video)

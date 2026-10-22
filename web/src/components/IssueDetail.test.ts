@@ -548,27 +548,13 @@ describe('typed reply draft across edit mode', () => {
   })
 })
 
-it('keeps attachment reads enabled with stale or read-only authority', async () => {
-  const issue = makeIssue({
-    metadata: {
-      'attachment.01JB3Z6V2K8M4Q9T1X5W7Y0RNA': {
-        name: 'screen.png',
-        media_type: 'image/png',
-        size: 12,
-        docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
-      },
-    },
+it('disables attachment uploads with blocked authority or disabled actions', async () => {
+  const view = renderDetail({
+    authorityBlocked: true,
+    attachmentsEnabled: true,
+    onUploadAttachment: vi.fn(async () => {}),
   })
-  const view = renderDetail({ authorityBlocked: true, attachmentsEnabled: true, issue })
-  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
-    false,
-  )
-  await view.rerender({ authorityBlocked: false })
-  expect(screen.getByRole('button', { name: 'Preview screen.png' }).hasAttribute('disabled')).toBe(
-    false,
-  )
-  await view.rerender({ actionsDisabled: true })
-  expect(screen.getByRole('button', { name: 'Download screen.png' }).hasAttribute('disabled')).toBe(
-    false,
-  )
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
+  await view.rerender({ authorityBlocked: false, actionsDisabled: true })
+  expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(true)
 })

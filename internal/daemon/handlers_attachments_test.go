@@ -92,10 +92,11 @@ func TestAttachmentRawBodyReference(t *testing.T) {
 func TestAttachmentUploadRechecksFederatedClaim(t *testing.T) {
 	f := docbanktest.New(t)
 	uploadStarted, resumeUpload := make(chan struct{}), make(chan struct{})
+	started := sync.OnceFunc(func() { close(uploadStarted) })
 	resume := sync.OnceFunc(func() { close(resumeUpload) })
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/uploads" {
-			close(uploadStarted)
+			started()
 			select {
 			case <-resumeUpload:
 			case <-r.Context().Done():
@@ -138,8 +139,10 @@ func TestAttachmentUploadRechecksFederatedClaim(t *testing.T) {
 	require.NoError(t, err)
 
 	// A new request exercises the early gate against the same conflicting claim.
+	requestsBefore := f.Requests()
 	code, earlyRaw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("image bytes"))
 	assertAPIError(t, code, earlyRaw, http.StatusConflict, "claim_denied")
+	assert.Equal(t, requestsBefore, f.Requests(), "the early gate must reject before another vault upload")
 	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
 	require.NoError(t, err)
 	assert.Equal(t, string(iss.Metadata), string(stored.Metadata), "upload must leave attachment metadata unchanged")
@@ -150,64 +153,63 @@ type attachmentUnreadBody struct{ reads int }
 
 func (b *attachmentUnreadBody) Read([]byte) (int, error) { b.reads++; return 0, io.ErrUnexpectedEOF }
 func TestAttachmentAdmissionBeforeBody(t *testing.T) {
-	env, f := attachmentEnv(t)
-	p, iss := seedProjectAndIssue(t, env)
-	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=shot.png&actor=operator", p.ID, iss.ShortID)
-	binding, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
-		ProjectID: p.ID, Role: db.FederationRoleSpoke, Enabled: true, PushEnabled: false, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: p.UID,
-	})
-	require.NoError(t, err)
-	require.False(t, binding.PushEnabled)
-	for _, configured := range []bool{false, true} {
-		cfg := daemon.ServerConfig{DB: env.DB}
-		want, code := 503, "docbank_not_configured"
-		if configured {
-			cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
-			cfg.DocbankFolder = "/kata"
-			want = 409
-			code = "federated_read_only"
-		}
-		body := &attachmentUnreadBody{}
-		req := httptest.NewRequest("POST", endpoint, body)
-		req.RemoteAddr = "127.0.0.1:1234"
-		req.Header.Set("Content-Type", "application/octet-stream")
-		res := httptest.NewRecorder()
-		daemon.NewServer(cfg).Handler().ServeHTTP(res, req)
-		require.Equal(t, want, res.Code, res.Body.String())
-		require.Contains(t, res.Body.String(), code)
-		require.Zero(t, body.reads)
+	for _, tc := range []struct {
+		name                 string
+		configured, readOnly bool
+		filename             string
+		want                 int
+		code                 string
+	}{
+		{"unconfigured", false, false, "shot.png", 503, "docbank_not_configured"},
+		{"read-only", true, true, "shot.png", 409, "federated_read_only"},
+		{"invalid name", true, false, "bad%FF.png", 400, "attachment_invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, f := attachmentEnv(t)
+			p, iss := seedProjectAndIssue(t, env)
+			if tc.readOnly {
+				_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+					ProjectID: p.ID, Role: db.FederationRoleSpoke, Enabled: true, PushEnabled: false, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: p.UID,
+				})
+				require.NoError(t, err)
+			}
+			cfg := daemon.ServerConfig{DB: env.DB}
+			if tc.configured {
+				cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+				cfg.DocbankFolder = "/kata"
+			}
+			body := &attachmentUnreadBody{}
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=%s&actor=operator", p.ID, iss.ShortID, tc.filename)
+			req := httptest.NewRequest("POST", endpoint, body)
+			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set("Content-Type", "application/octet-stream")
+			res := httptest.NewRecorder()
+			daemon.NewServer(cfg).Handler().ServeHTTP(res, req)
+			require.Equal(t, tc.want, res.Code, res.Body.String())
+			require.Contains(t, res.Body.String(), tc.code)
+			require.Zero(t, body.reads)
+			require.Empty(t, f.Requests())
+		})
 	}
-	require.Empty(t, f.Requests())
 }
 
 type attachmentZeros struct{}
 
 func (attachmentZeros) Read(b []byte) (int, error) { clear(b); return len(b), nil }
-func TestAttachmentOversizeAndUpstreamFailure(t *testing.T) {
-	for _, upstream := range []bool{false, true} {
-		t.Run(fmt.Sprint(upstream), func(t *testing.T) {
-			env, f := attachmentEnv(t)
-			p, iss := seedProjectAndIssue(t, env)
-			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
-			body := io.LimitReader(attachmentZeros{}, (256<<20)+1)
-			want, code := 413, "attachment_too_large"
-			if upstream {
-				f.Fault = "status:503"
-				body = strings.NewReader("image")
-				want = 502
-				code = "docbank_unreachable"
-			}
-			status, raw := attachmentUpload(t, env, endpoint, "shot.png", body)
-			require.Equal(t, want, status, string(raw))
-			require.Contains(t, string(raw), code)
-			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
-			require.NoError(t, err)
-			require.JSONEq(t, `{}`, string(stored.Metadata))
-			if !upstream {
-				require.Empty(t, f.Requests())
-			}
-		})
-	}
+
+// TestAttachmentOversizeBeforeVault streams 256 MiB through a temporary file.
+func TestAttachmentOversizeBeforeVault(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
+	body := io.LimitReader(attachmentZeros{}, (256<<20)+1)
+	status, raw := attachmentUpload(t, env, endpoint, "shot.png", body)
+	require.Equal(t, 413, status, string(raw))
+	require.Contains(t, string(raw), "attachment_too_large")
+	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(stored.Metadata))
+	require.Empty(t, f.Requests())
 }
 func TestAttachmentContentTypesAndReportedLength(t *testing.T) {
 	for _, tc := range []struct{ name, typ string }{
@@ -312,15 +314,31 @@ func TestUIAttachmentCapabilityFollowsDocbankConfiguration(t *testing.T) {
 
 func TestAttachmentUploadStatusErrors(t *testing.T) {
 	for _, tc := range []struct {
-		status, want int
-		code         string
-	}{{413, 413, "attachment_too_large"}, {400, 400, "attachment_invalid"}, {404, 400, "attachment_invalid"}, {422, 400, "attachment_invalid"}, {500, 502, "docbank_unreachable"}} {
-		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
+		name          string
+		status, want  int
+		code          string
+		folderFailure bool
+	}{
+		{"413", 413, 413, "attachment_too_large", false},
+		{"400", 400, 400, "attachment_invalid", false},
+		{"404", 404, 400, "attachment_invalid", false},
+		{"500", 500, 502, "docbank_unreachable", false},
+		{"folder step fails", 503, 502, "docbank_unreachable", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			env, f := attachmentEnv(t)
 			p, iss := seedProjectAndIssue(t, env)
-			f.UploadStatus = tc.status
+			if tc.folderFailure {
+				f.Fault = "status:503"
+			} else {
+				f.UploadStatus = tc.status
+			}
 			code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), "shot.png", strings.NewReader("image"))
-			require.Contains(t, f.Requests(), "POST /api/v1/uploads")
+			if tc.folderFailure {
+				require.NotContains(t, f.Requests(), "POST /api/v1/uploads")
+			} else {
+				require.Contains(t, f.Requests(), "POST /api/v1/uploads")
+			}
 			require.Equal(t, tc.want, code, string(raw))
 			require.Contains(t, string(raw), tc.code)
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
@@ -328,19 +346,4 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 			require.JSONEq(t, `{}`, string(stored.Metadata))
 		})
 	}
-}
-
-func TestAttachmentInvalidUploadNameBeforeBody(t *testing.T) {
-	env, f := attachmentEnv(t)
-	p, iss := seedProjectAndIssue(t, env)
-	body := &attachmentUnreadBody{}
-	req := httptest.NewRequest("POST", fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=bad%%FF.png&actor=operator", p.ID, iss.ShortID), body)
-	req.RemoteAddr = "127.0.0.1:1234"
-	req.Header.Set("Content-Type", "application/octet-stream")
-	res := httptest.NewRecorder()
-	daemon.NewServer(daemon.ServerConfig{DB: env.DB, Docbank: docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil }), DocbankFolder: "/kata"}).Handler().ServeHTTP(res, req)
-	require.Equal(t, 400, res.Code, res.Body.String())
-	require.Contains(t, res.Body.String(), "attachment_invalid")
-	require.Zero(t, body.reads)
-	require.Empty(t, f.Requests())
 }

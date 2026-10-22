@@ -16,27 +16,27 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
 
-it.each([
-  ['non-object entry', 'junk'],
-  ['missing name', { ...attachment, name: undefined }],
-  ['wrong media_type type', { ...attachment, media_type: 12 }],
-  ['wrong size type', { ...attachment, size: '12' }],
-  ['missing docbank_version', { ...attachment, docbank_version: undefined }],
-])('skips malformed attachment shape: %s', (_rule, invalid) => {
-  const detail = projectIssueDetail({
-    issue: {
-      uid: '01TASK',
-      title: 'Files',
-      status: 'open',
-      metadata: {
-        'attachment.file': invalid,
-      },
-    },
-  })
-  expect(detail.issue.attachments).toEqual({})
-})
-
 describe('projectIssueDetail', () => {
+  it.each([
+    ['non-object entry', 'junk'],
+    ['missing name', { ...attachment, name: undefined }],
+    ['wrong media_type type', { ...attachment, media_type: 12 }],
+    ['wrong size type', { ...attachment, size: '12' }],
+    ['missing docbank_version', { ...attachment, docbank_version: undefined }],
+  ])('skips malformed attachment shape: %s', (_rule, invalid) => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Files',
+        status: 'open',
+        metadata: {
+          'attachment.file': invalid,
+        },
+      },
+    })
+    expect(detail.issue.attachments).toEqual({})
+  })
+
   it('projects attachment keys', () => {
     const detail = projectIssueDetail({
       issue: {
