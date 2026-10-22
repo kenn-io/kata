@@ -449,3 +449,68 @@ func TestEmbeddingProducerStatusReportsOutdatedRecipeVersion(t *testing.T) {
 		}
 	})
 }
+
+// statusWithRemoteProducer selects another instance as the producer under
+// remoteRecipe, serves status from a daemon configured with localModel, and
+// returns the project's federation status response.
+func statusWithRemoteProducer(t *testing.T, store db.Storage, remoteModel, localModel string, failure string) string {
+	t.Helper()
+	ctx := t.Context()
+	f := newProjectAccessFixture(t, store)
+	_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: f.private.ID, Role: db.FederationRoleHub, HubProjectID: f.private.ID, HubProjectUID: f.private.UID, Enabled: true})
+	require.NoError(t, err)
+	remoteClient, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:1", Model: remoteModel, Dims: 2})
+	require.NoError(t, err)
+	remoteRecipe, err := remoteClient.ArtifactIdentity("", "", "")
+	require.NoError(t, err)
+	selected := db.ProjectEmbeddingProducer{ProducerInstanceUID: "00000000000000000000000002", Recipe: remoteRecipe}
+	raw, err := json.Marshal(selected)
+	require.NoError(t, err)
+	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: f.private.ID, Actor: "owner", Patch: map[string]jsontext.Value{db.ProjectEmbeddingMetadataKey: raw}})
+	require.NoError(t, err)
+	local, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:1", Model: localModel, Dims: 2})
+	require.NoError(t, err)
+	health := daemon.ReconcilerHealth{Configured: true}
+	if failure != "" {
+		health.ProducerErrors = map[string]daemon.ProducerFailure{f.private.UID: {Message: failure, Producer: selected}}
+	}
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, Embedder: local, ReconcilerHealth: func() daemon.ReconcilerHealth { return health }, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	f.server = httptest.NewServer(server.Handler())
+	t.Cleanup(f.server.Close)
+	code, _, response := f.request(t, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/status", f.private.ID), "member", nil, nil)
+	require.Equal(t, http.StatusOK, code, string(response))
+	return string(response)
+}
+
+// A remote producer whose recipe differs from this daemon's is named, since
+// nothing here can use its artifacts.
+func TestEmbeddingStatusRecipeMismatch(t *testing.T) {
+	embeddingStatusBackends(t, func(t *testing.T, store db.Storage) {
+		response := statusWithRemoteProducer(t, store, "example-model-a", "example-model-b", "")
+		require.Contains(t, response, `"reason":"producer_recipe_mismatch"`)
+		require.NotContains(t, response, "producer_recipe_changed")
+	})
+}
+
+// The mismatch is the actionable cause, so it takes precedence over a fetch
+// failure recorded under the same selection.
+func TestEmbeddingStatusRecipeMismatchOutranksFailure(t *testing.T) {
+	embeddingStatusBackends(t, func(t *testing.T, store db.Storage) {
+		response := statusWithRemoteProducer(t, store, "example-model-a", "example-model-b", "hub fetch failed")
+		require.Contains(t, response, `"reason":"producer_recipe_mismatch"`)
+		require.NotContains(t, response, "producer_unavailable")
+		require.NotContains(t, response, "last_error")
+	})
+}
+
+// A spoke that is not the producer reports a failure recorded under the
+// current selection, such as a failed artifact fetch from the producer.
+func TestEmbeddingStatusShowsNonProducerFailure(t *testing.T) {
+	embeddingStatusBackends(t, func(t *testing.T, store db.Storage) {
+		response := statusWithRemoteProducer(t, store, "example-model-a", "example-model-a", "hub fetch failed")
+		require.Contains(t, response, `"reason":"producer_unavailable"`)
+		require.Contains(t, response, `"last_error":"hub fetch failed"`)
+		require.NotContains(t, response, "producer_recipe_mismatch")
+	})
+}

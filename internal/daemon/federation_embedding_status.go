@@ -66,16 +66,24 @@ func federationEmbeddingStatus(ctx context.Context, cfg ServerConfig, project db
 		}
 		localRecipe = &recipe
 	}
-	if producer != nil && localRecipe != nil && producer.ProducerInstanceUID == cfg.DB.InstanceUID() {
+	if producer != nil && localRecipe != nil {
 		configured := *localRecipe
 		configured.ProjectUID, configured.IssueUID, configured.InputHash, configured.ProducerInstanceUID = "", "", "", ""
 		if producer.Recipe != configured {
-			status.Reason = "producer_recipe_changed"
+			// The selection is this daemon's own stale one, or another
+			// instance's recipe that this daemon cannot reuse.
+			if producer.ProducerInstanceUID == cfg.DB.InstanceUID() {
+				status.Reason = "producer_recipe_changed"
+			} else {
+				status.Reason = "producer_recipe_mismatch"
+			}
 		}
 	}
-	// A failure belongs to the selection it was observed under. Another
-	// producer, or a newer selection, makes it obsolete.
-	if status.Reason == "" && producer != nil && producer.ProducerInstanceUID == cfg.DB.InstanceUID() && cfg.ReconcilerHealth != nil {
+	// A failure belongs to the selection it was observed under: another
+	// producer, or a newer selection, makes it obsolete. Either role can record
+	// one (a producer's upstream check, a spoke's artifact fetch). A recipe
+	// reason outranks it, since it names the cause.
+	if status.Reason == "" && producer != nil && cfg.ReconcilerHealth != nil {
 		if failure, ok := cfg.ReconcilerHealth().ProducerErrors[project.UID]; ok && failure.Message != "" && failure.Producer == *producer {
 			status.Reason, status.LastError = "producer_unavailable", failure.Message
 		}

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Reuse the hub's embedding vectors on a direct federation spoke instead of
+  generating them again. An enabled hub records itself as the producer, and a
+  spoke with a matching `[search.embeddings]` recipe fetches its vectors while
+  still embedding queries locally. A different recipe shows
+  `producer_recipe_mismatch` in `kata federation status`. Documents a hub
+  embedded before 0.19.0 stay lexical on a later-joining spoke until they are
+  edited. See
+  [Direct spokes reuse the hub's vectors](operations/federation.md#direct-spokes-reuse-the-hubs-vectors).
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
   event per scheduled value, with the date's raw value, timezone, and UTC

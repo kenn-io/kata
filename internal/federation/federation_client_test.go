@@ -302,26 +302,42 @@ func TestClientEmbeddingArtifacts404IsHubStatusError(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, statusErr.StatusCode)
 }
 
-func TestClientEmbeddingArtifactsNilBecomesEmpty(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"artifacts":null}`))
-	}))
-	t.Cleanup(srv.Close)
-
-	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
-	require.NoError(t, err)
-	artifacts, err := client.EmbeddingArtifacts(context.Background(), 42, "recipe-1", []string{"uid-a"})
-	require.NoError(t, err)
-	assert.NotNil(t, artifacts)
-	assert.Empty(t, artifacts)
-}
-
 func TestClientEmbeddingArtifactsDecodesLargeBody(t *testing.T) {
-	const digestBytes = 12 << 20
+	const (
+		chunkCount = 80
+		dimensions = 32768
+		largeBody  = 12 << 20
+	)
+	input := strings.Repeat("x", 2000+(chunkCount-1)*(2000-200))
+	identity := embedding.ArtifactIdentity{
+		ProjectUID:          "00000000000000000000000001",
+		IssueUID:            "00000000000000000000000002",
+		ProducerInstanceUID: "00000000000000000000000003",
+		Provider:            "openai-compatible",
+		Model:               "example-model",
+		ModelRevision:       "revision-1",
+		Dimensions:          dimensions,
+		InputType:           "none",
+		Normalization:       "l2",
+		Preprocessing:       "kata.issue/v2",
+		RecipeVersion:       2,
+		SplitMaxRunes:       2000,
+		SplitOverlap:        200,
+		RecipeFingerprint:   strings.Repeat("a", 64),
+	}
+	vector := make([]float32, dimensions)
+	vectors := make([][]float32, chunkCount)
+	for i := range vectors {
+		vectors[i] = vector
+	}
+	want, err := embedding.NewArtifact(identity, input, vectors)
+	require.NoError(t, err)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(api.FederationEmbeddingArtifactsBody{
-			Artifacts: []embedding.EmbeddingArtifact{{Digest: strings.Repeat("d", digestBytes)}},
-		}))
+		body, err := json.Marshal(api.FederationEmbeddingArtifactsBody{Artifacts: []embedding.EmbeddingArtifact{want}})
+		require.NoError(t, err)
+		require.Greater(t, len(body), largeBody)
+		_, err = w.Write(body)
+		require.NoError(t, err)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -330,5 +346,5 @@ func TestClientEmbeddingArtifactsDecodesLargeBody(t *testing.T) {
 	artifacts, err := client.EmbeddingArtifacts(context.Background(), 42, "recipe-1", []string{"uid-a"})
 	require.NoError(t, err)
 	require.Len(t, artifacts, 1)
-	assert.Len(t, artifacts[0].Digest, digestBytes)
+	assert.Equal(t, want, artifacts[0])
 }

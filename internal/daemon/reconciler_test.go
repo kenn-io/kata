@@ -823,3 +823,113 @@ func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {
 		assert.GreaterOrEqual(t, emb.callCount(), 2)
 	})
 }
+
+// directSpokeReconcileFixture is a direct spoke whose hub is the project's
+// selected producer under this daemon's recipe, with one document pending.
+type directSpokeReconcileFixture struct {
+	store    *sqlitestore.Store
+	idx      *vector.Index
+	emb      *reconcilerArtifactEmbedder
+	project  db.Project
+	issue    db.Issue
+	producer db.ProjectEmbeddingProducer
+}
+
+func newDirectSpokeReconcileFixture(t *testing.T) *directSpokeReconcileFixture {
+	t.Helper()
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	emb := newReconcilerArtifactEmbedder(t, "example-model")
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "hub embedded", Body: "body", Author: "member"})
+	require.NoError(t, err)
+	hubUID, err := uid.New()
+	require.NoError(t, err)
+	recipe, err := emb.ArtifactIdentity("", "", "")
+	require.NoError(t, err)
+	producer := db.ProjectEmbeddingProducer{ProducerInstanceUID: hubUID, Recipe: recipe}
+	raw, err := json.Marshal(producer)
+	require.NoError(t, err)
+	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: project.ID, Actor: "system", Patch: map[string]jsontext.Value{db.ProjectEmbeddingMetadataKey: raw}})
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true,
+	})
+	require.NoError(t, err)
+	project, err = store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	return &directSpokeReconcileFixture{store: store, idx: openTestVectorIndex(t), emb: emb, project: project, issue: issue, producer: producer}
+}
+
+func (f *directSpokeReconcileFixture) retainHubArtifact(t *testing.T) {
+	t.Helper()
+	identity, err := f.emb.ArtifactIdentity(f.project.UID, f.issue.UID, f.producer.ProducerInstanceUID)
+	require.NoError(t, err)
+	artifact, err := embedding.NewArtifact(identity, embedding.EmbedText(f.issue.Title, f.issue.Body), [][]float32{{1, 0}})
+	require.NoError(t, err)
+	durable, err := f.store.RetainEmbeddingArtifact(context.Background(), artifact)
+	require.NoError(t, err)
+	require.True(t, durable)
+}
+
+func TestReconcileFetchesArtifactsBeforeImport(t *testing.T) {
+	ctx := context.Background()
+	f := newDirectSpokeReconcileFixture(t)
+	var gotRecipe embedding.ArtifactIdentity
+	var gotWants []vector.ArtifactWant
+	r := NewReconciler(f.store, f.idx, f.emb, ReconcilerConfig{
+		BatchSize: 64,
+		FetchFederatedArtifacts: func(_ context.Context, recipe embedding.ArtifactIdentity, wants []vector.ArtifactWant) map[string]error {
+			gotRecipe, gotWants = recipe, wants
+			f.retainHubArtifact(t)
+			return map[string]error{f.project.UID: nil}
+		},
+	})
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Equal(t, []vector.ArtifactWant{{
+		IssueUID: f.issue.UID, ProjectUID: f.project.UID,
+		InputHash: embedding.ArtifactInputHash(embedding.EmbedText(f.issue.Title, f.issue.Body)),
+	}}, gotWants)
+	require.Empty(t, gotRecipe.ProjectUID)
+	require.Equal(t, f.producer.Recipe.Model, gotRecipe.Model)
+	require.Empty(t, f.emb.inputs(), "the hub's bytes are imported without encoding")
+	_, _, backlog, err := f.idx.Coverage(ctx, f.emb.Generation().Fingerprint())
+	require.NoError(t, err)
+	require.Zero(t, backlog)
+	require.Empty(t, r.Health().ProducerErrors)
+}
+
+func TestReconcileRecordsFetchFailure(t *testing.T) {
+	ctx := context.Background()
+	f := newDirectSpokeReconcileFixture(t)
+	outcome := error(errors.New("hub fetch failed"))
+	r := NewReconciler(f.store, f.idx, f.emb, ReconcilerConfig{
+		BatchSize: 64,
+		FetchFederatedArtifacts: func(context.Context, embedding.ArtifactIdentity, []vector.ArtifactWant) map[string]error {
+			return map[string]error{f.project.UID: outcome}
+		},
+	})
+	require.NoError(t, r.reconcileOnce(ctx), "a fetch failure never fails the pass")
+	failure, ok := r.Health().ProducerErrors[f.project.UID]
+	require.True(t, ok)
+	require.Equal(t, "hub fetch failed", failure.Message)
+	require.Equal(t, f.producer, failure.Producer)
+
+	outcome = nil
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Empty(t, r.Health().ProducerErrors, "a later success clears the failure")
+}
+
+func TestReconcileWithoutFetchHook(t *testing.T) {
+	ctx := context.Background()
+	f := newDirectSpokeReconcileFixture(t)
+	r := NewReconciler(f.store, f.idx, f.emb, ReconcilerConfig{BatchSize: 64})
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Empty(t, f.emb.inputs(), "a direct spoke still defers to its producer")
+	_, _, backlog, err := f.idx.Coverage(ctx, f.emb.Generation().Fingerprint())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, backlog)
+	require.Empty(t, r.Health().ProducerErrors)
+}

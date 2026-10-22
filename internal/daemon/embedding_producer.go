@@ -38,9 +38,10 @@ func (r *Reconciler) projectGenerationAllowed(ctx context.Context, projectUID st
 	}
 	if binding.Role == db.FederationRoleSpoke {
 		// Negotiated replicas require a live authenticated producer check.
-		// Legacy direct federation retains its existing local worker behavior.
+		// A direct spoke generates locally unless an enabled binding names
+		// another instance as the producer, in which case it defers to it.
 		if binding.RelayConfig == nil {
-			return true, nil
+			return r.directSpokeGenerationAllowed(project, binding, recipe), nil
 		}
 		if r.cfg.FederationProducerAllowed == nil {
 			return false, nil
@@ -79,6 +80,32 @@ func (r *Reconciler) projectGenerationAllowed(ctx context.Context, projectUID st
 		return true, nil
 	}
 	return r.selectLocalProducer(ctx, project, binding, recipe)
+}
+
+// directSpokeGenerationAllowed denies a direct spoke's local generation when
+// its binding is enabled and the project's readable producer is another
+// instance. An absent or unreadable selection, a selection of this instance, or
+// a disabled binding keeps the local worker. A remote producer whose recipe
+// differs from this daemon's is reported so status can say why nothing here
+// will use its artifacts. A matching recipe clears only that recorded
+// mismatch, leaving fetch failures to their own reporter.
+func (r *Reconciler) directSpokeGenerationAllowed(project db.Project, binding db.FederationBinding, recipe embedding.ArtifactIdentity) bool {
+	if !binding.Enabled {
+		// Local generation resumes, so a recorded fetch failure no longer applies.
+		r.setProducerError(project.UID, ProducerFailure{})
+		return true
+	}
+	producer, err := db.ProjectEmbeddingProducerFromMetadata(project.Metadata)
+	if err != nil || producer == nil || producer.ProducerInstanceUID == r.store.InstanceUID() {
+		return true
+	}
+	recipe.ProjectUID, recipe.IssueUID, recipe.InputHash, recipe.ProducerInstanceUID = "", "", "", ""
+	if producer.Recipe != recipe {
+		r.setProducerError(project.UID, ProducerFailure{Message: recipeMismatchMessage, Producer: *producer})
+	} else {
+		r.clearProducerError(project.UID, recipeMismatchMessage)
+	}
+	return false
 }
 
 // selectLocalProducer records this root as the project's producer with its
@@ -173,6 +200,20 @@ func (r *Reconciler) selectIdleHubProducers(ctx context.Context, recipe embeddin
 		}
 	}
 	return nil
+}
+
+// recipeMismatchMessage is recorded for a direct spoke whose remote producer
+// uses a different recipe than this daemon.
+const recipeMismatchMessage = "producer recipe differs from this daemon's embedding recipe"
+
+// clearProducerError removes a project's recorded failure only when its
+// message is exactly message.
+func (r *Reconciler) clearProducerError(projectUID, message string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.health.ProducerErrors[projectUID].Message == message {
+		delete(r.health.ProducerErrors, projectUID)
+	}
 }
 
 // maxProducerErrorBytes bounds the failure text kept for status.

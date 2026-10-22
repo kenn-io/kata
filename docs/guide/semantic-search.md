@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-10-07
+last_edited: 2026-10-22
 ---
 
 # Semantic search
@@ -208,8 +208,13 @@ That is the consent boundary. For sensitive projects, prefer a local endpoint
 (such as Ollama on loopback) so issue text never leaves the host. The embedding
 API key is only ever sent to the configured `base_url` origin.
 
-Embeddings are local derived state and **do not federate**: each daemon embeds
-only what it stores, and no vectors are sent to or pulled from federated hubs.
+Embeddings are local derived state. Private projects embed only what the
+local daemon stores, and nothing leaves the host except the provider requests
+you configure. A federated project can share vectors: its hub records itself as
+the producer, and a direct spoke with the same `[search.embeddings]` recipe
+fetches the hub's vectors instead of generating its own. The spoke still embeds
+search queries locally, so hybrid search keeps working. See
+[Sharing embedding vectors](../operations/federation.md#sharing-embedding-vectors).
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
 tables in its selected Kata schema when that optional extension is installed.
 They are not included in JSONL

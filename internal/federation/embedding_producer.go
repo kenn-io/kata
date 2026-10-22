@@ -127,36 +127,75 @@ func embeddingProducerConnected(ctx context.Context, store db.Storage, credentia
 	if !slices.Contains(allowed, projectUID) {
 		return false, ctx.Err()
 	}
-	credential, found, err := credentials.FederationCredential(ctx, projectUID)
+	credential, ok, err := bindingTransportCredential(ctx, store, credentials, projectUID, binding)
 	if err != nil {
-		return producerUnavailable(ctx, "read federation credential", err)
+		if failure, ok := errors.AsType[*credentialCheckError](err); ok {
+			return producerUnavailable(ctx, failure.stage, failure.err)
+		}
+		return false, err
 	}
-	if found && (credential.LeavePending || credential.RelayEnrollmentPending) {
+	if !ok {
 		return false, ctx.Err()
 	}
-	if !found || credential.Token == "" {
-		return producerUnavailable(ctx, "no federation credential for this project", nil)
-	}
-	if credential.Actor != binding.Actor || credential.HubProjectID != binding.HubProjectID {
-		return producerUnavailable(ctx, "federation credential does not match the binding", nil)
-	}
-	// The token never leaves for another origin. Report the mismatch without
-	// either URL, which could carry credentials.
-	bindingOrigin, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if err != nil {
-		return producerUnavailable(ctx, "federation binding hub URL is invalid", nil)
-	}
-	credentialOrigin, err := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
-	if err != nil || bindingOrigin != credentialOrigin {
-		return producerUnavailable(ctx, "federation credential hub origin does not match the binding", nil)
-	}
-	credential = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential)
 	check := producerCheck{store: store, project: project, binding: binding, credential: credential, selected: selected}
 	connected, err := check.upstreamCurrent(ctx, requireSynced)
 	if err != nil || !connected {
 		return false, err
 	}
 	return check.stillLocal(ctx)
+}
+
+// credentialCheckError reports why a binding has no usable transport
+// credential. stage names the failed check for status reporting; missing marks
+// the benign case of no credential having been stored.
+type credentialCheckError struct {
+	stage   string
+	err     error
+	missing bool
+}
+
+func (e *credentialCheckError) Error() string {
+	if e.err == nil {
+		return e.stage
+	}
+	return e.stage + ": " + e.err.Error()
+}
+
+func (e *credentialCheckError) Unwrap() error { return e.err }
+
+// bindingTransportCredential returns the credential a binding may send to its
+// hub. ok=false with a nil error means skip silently: a leave or relay
+// enrollment is pending. Otherwise an unreadable, missing or mismatched
+// credential is a *credentialCheckError whose message never carries a URL, and
+// the token is never returned for an origin other than the binding's.
+func bindingTransportCredential(ctx context.Context, _ db.Storage, credentials config.FederationCredentialStore, projectUID string, binding db.FederationBinding) (config.FederationCredential, bool, error) {
+	if credentials == nil {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "no federation credential for this project", missing: true}
+	}
+	credential, found, err := credentials.FederationCredential(ctx, projectUID)
+	if err != nil {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "read federation credential", err: err}
+	}
+	if found && (credential.LeavePending || credential.RelayEnrollmentPending) {
+		return config.FederationCredential{}, false, nil
+	}
+	if !found || credential.Token == "" {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "no federation credential for this project", missing: true}
+	}
+	if credential.Actor != binding.Actor || credential.HubProjectID != binding.HubProjectID {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "federation credential does not match the binding"}
+	}
+	// The token never leaves for another origin. Report the mismatch without
+	// either URL, which could carry credentials.
+	bindingOrigin, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+	if err != nil {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "federation binding hub URL is invalid"}
+	}
+	credentialOrigin, err := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
+	if err != nil || bindingOrigin != credentialOrigin {
+		return config.FederationCredential{}, false, &credentialCheckError{stage: "federation credential hub origin does not match the binding"}
+	}
+	return config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential), true, nil
 }
 
 // producerCheck carries one producer authorization through its network and
