@@ -6303,6 +6303,21 @@ func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentReques
 		QueryEncoding: queryEncoding,
 	}
 
+	// The runtime defaults to JSON encoding even for binary bodies.
+	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+		if options == nil || options.Body == nil {
+			return nil
+		}
+		body, err := options.Body.Reader()
+		if err != nil {
+			return err
+		}
+		req.Body = body
+		req.ContentLength = options.Body.FileSize()
+		req.GetBody = options.Body.Reader
+		return nil
+	}}, reqEditors...)
+
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
