@@ -43,6 +43,7 @@
   or verified section in pull request descriptions.
 - User or Developer Benefit: Pull requests must have a user-facing benefit or improve the developer
   experience, and the body must say which one.
+- English: Write issues and pull requests in English.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
 - No Bash Content-Assertion Tests: Do not add bash tests that assert shell
