@@ -63,6 +63,7 @@ failure stops startup rather than falling back or minting a replacement.
 See [configuration](../reference/configuration.md#daemon-config) for file limits
 and the auto-token opt-out.
 
+These MCP settings require an image newer than 0.19.0.
 Enable the daemon's `/mcp` endpoint with `KATA_MCP_ENABLED=true`, set its actor
 with `KATA_MCP_ACTOR=gateway-agent`, and mount a separate bearer file at
 `KATA_MCP_TOKEN_FILE=/run/secrets/mcp-token`. The same secret-file rules apply.

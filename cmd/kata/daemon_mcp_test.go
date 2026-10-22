@@ -27,6 +27,10 @@ import (
 
 // The daemon mount uses its own MCP bearer and calls its authenticated REST API.
 func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	t.Cleanup(transport.CloseIdleConnections)
+	httpClient := &http.Client{Transport: transport}
 	for _, tt := range []struct{ name, listen, web, host string }{
 		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
 		{"expanded IPv6", "[0:0:0:0:0:0:0:1]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
@@ -99,12 +103,19 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				require.NoError(t, err)
 				request.Host = tt.host
 				request.Header.Set("Authorization", authorization)
-				response, err := http.DefaultClient.Do(request)
+				response, err := httpClient.Do(request)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				require.Equal(t, http.StatusUnauthorized, response.StatusCode, "Authorization: %q", authorization)
 			}
-			session, err := newMCPHTTPTestClient().Connect(callCtx, newAuthenticatedMCPHTTPTestTransport(endpoint, tt.host), nil)
+			mcpTransport := newAuthenticatedMCPHTTPTestTransport(endpoint, tt.host)
+			mcpTransport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				clone := request.Clone(request.Context())
+				clone.Host = tt.host
+				clone.Header.Set("Authorization", "Bearer test-mcp-token")
+				return transport.RoundTrip(clone)
+			})
+			session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
 			require.NoError(t, err)
 			defer func() { _ = session.Close() }()
 			// Load the issue mutation tools before calling kata.create.
