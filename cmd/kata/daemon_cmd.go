@@ -36,6 +36,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
+	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
@@ -829,6 +830,14 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	}
 	var mcpToken string
 	if dcfg.MCP.Enabled {
+		if dcfg.Auth.RequireTokenIdentity {
+			return daemonStartupPreflight{}, errors.New(`[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`)
+		}
+		dcfg.MCP.Actor, _ = resolveActor(ctx, dcfg.MCP.Actor, nil)
+		dcfg.MCP.Actor = strings.TrimSpace(dcfg.MCP.Actor)
+		if err := mcpserver.ValidateActor(dcfg.MCP.Actor); err != nil {
+			return daemonStartupPreflight{}, fmt.Errorf("[mcp]: %w", err)
+		}
 		mcpToken, _, err = config.ResolveSecret("", dcfg.MCP.TokenFile, dcfg.MCP.TokenEnv)
 		if err != nil {
 			return daemonStartupPreflight{}, fmt.Errorf("[mcp]: %w", err)

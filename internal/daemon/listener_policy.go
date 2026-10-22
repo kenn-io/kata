@@ -72,7 +72,7 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				api.WriteEnvelope(w, http.StatusBadRequest, "host_invalid", "Host header does not match listener authority")
 				return
 			}
-			if (policy.Kind == ListenerBrowser && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
+			if (policy.Kind == ListenerBrowser && r.URL.Path != "/mcp" && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
 				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return

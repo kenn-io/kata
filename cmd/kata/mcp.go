@@ -114,18 +114,7 @@ func newMCPServeCmd() *cobra.Command {
 			stopKeepalive := startMCPIdleKeepalive(ctx, httpClient, baseURL, health)
 			defer stopKeepalive()
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
-			if err != nil {
-				return err
-			}
-			// Sync passes, bounded waits, and SSE streams use their own
-			// request contexts and may legitimately outlive the ordinary
-			// request budget or delay response headers until completion.
-			longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
-			if err != nil {
-				return err
-			}
-			longRunningAPIClient, err := kataclient.NewWithHTTPClient(baseURL, longRunningHTTPClient)
+			apiClient, longRunningAPIClient, err := newMCPAPIClients(ctx, resolved, httpClient)
 			if err != nil {
 				return err
 			}
@@ -154,12 +143,8 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			var observe func()
-			if posthog.Eligible("KATA", version.Version) {
-				var stopReporting context.CancelFunc
-				observe, stopReporting = startMCPAgentUseReporter(ctx, apiClient, resolved)
-				defer stopReporting()
-			}
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+			defer stopReporting()
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,
 				ObserveToolCall:   observe,
@@ -214,7 +199,24 @@ func newMCPServeCmd() *cobra.Command {
 	return command
 }
 
+func newMCPAPIClients(ctx context.Context, resolved client.ResolvedDaemon, httpClient *http.Client) (*kataclient.Client, *kataclient.Client, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, httpClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Sync passes, bounded waits, and SSE streams use their own request contexts.
+	longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
+	if err != nil {
+		return nil, nil, err
+	}
+	longRunningAPIClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, longRunningHTTPClient)
+	return apiClient, longRunningAPIClient, err
+}
+
 func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
+	if !posthog.Eligible("KATA", version.Version) {
+		return nil, func() {}
+	}
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
 	marker := client.TelemetryDayMarkerPath(target, "agent-full-")

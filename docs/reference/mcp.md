@@ -103,9 +103,16 @@ For a remote gateway that takes an endpoint URL, enable the daemon's
 Keep the hub behind its existing HTTPS reverse proxy.
 
 Route `/mcp` to the daemon and give the gateway `https://daemon.example/mcp`
-and the separate MCP bearer token. The endpoint serves all projects visible to
-the daemon's token and calls its REST API with that token. It uses the actor
-chosen at startup and has no `/healthz` probe or `kata mcp status` record.
+and the separate MCP bearer token. The endpoint uses all-projects scope, like
+`kata mcp serve --all`. It serves every project visible to the daemon's token,
+including projects created later, and exposes the project administration tools
+(create, update, merge, remove, restore, purge). Treat the MCP bearer as equivalent
+to the daemon's `[auth]` token. To limit an agent to specific projects, run
+`kata mcp serve --http --projects <names>` as a sidecar instead. It uses the actor
+chosen at startup and has no `/healthz` probe or `kata mcp status` record. When
+`actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then
+`anonymous`. A gateway reaching the daemon by a container hostname needs that
+host in `[web].allowed_hosts`.
 
 You can also run the MCP listener alongside the hub as a separate process
 behind the same HTTPS reverse proxy. It reaches the hub daemon through the

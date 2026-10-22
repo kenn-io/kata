@@ -9,7 +9,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/version"
-	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -39,28 +38,21 @@ func newDaemonMCPHandler(ctx context.Context, cfg config.MCPConfig, token string
 	if err != nil {
 		return nil, err
 	}
-	apiClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, httpClient)
+	apiClient, longRunningClient, err := newMCPAPIClients(ctx, resolved, httpClient)
 	if err != nil {
 		return nil, err
 	}
-	longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
-	if err != nil {
-		return nil, err
-	}
-	longRunningClient, err := kataclient.NewWithHTTPClient(resolved.BaseURL, longRunningHTTPClient)
-	if err != nil {
-		return nil, err
-	}
-	actor := cfg.Actor
-	if actor == "" {
-		actor, _ = resolveActor(ctx, "", nil)
-	}
+	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 	server, err := mcpserver.New(mcpserver.Options{
 		Client: apiClient, LongRunningClient: longRunningClient,
-		Scope: mcpserver.NewAllScope(), Actor: actor, Version: version.Version,
+		Scope: mcpserver.NewAllScope(), Actor: cfg.Actor, Version: version.Version,
+		ObserveToolCall: observe,
 	})
 	if err != nil {
+		stopReporting()
 		return nil, err
 	}
-	return newMCPHTTPHandler(server, token), nil
+	context.AfterFunc(ctx, stopReporting)
+	// ApplyListenerPolicy owns the daemon mount's Host validation.
+	return newMCPHTTPHandler(server, token, true), nil
 }

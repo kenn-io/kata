@@ -350,6 +350,9 @@ token_file = "/run/secrets/mcp-token"
 The token file wins over the environment variable. Secrets resolve at daemon
 startup. See [MCP transport](mcp.md#transport) for gateway setup and scope.
 
+`[mcp]` isn't supported with `[auth] require_token_identity`; use
+`kata mcp serve --http` with a user token.
+
 `<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and
 named daemon targets:
 

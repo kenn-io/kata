@@ -199,13 +199,9 @@ func TestLocalUISessionPolicyRequiresDirectLoopback(t *testing.T) {
 }
 
 func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
-	handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}), ListenerPolicy{Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123"})
-	require.NoError(t, err)
-
 	tests := []struct {
 		name    string
+		kind    ListenerKind
 		method  string
 		path    string
 		host    string
@@ -213,6 +209,38 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 		cookie  *http.Cookie
 		want    int
 	}{
+		{
+			name: "MCP without origin on shared TCP", method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123", want: http.StatusNoContent,
+		},
+		{
+			name: "MCP without origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123", want: http.StatusNoContent,
+		},
+		{
+			name: "MCP foreign origin on shared TCP", method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123",
+			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
+		},
+		{
+			name: "MCP foreign origin on browser listener", kind: ListenerBrowser, method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123",
+			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
+		},
+		{
+			name: "MCP fetch metadata without origin", method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123",
+			headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden,
+		},
+		{
+			name: "MCP browser cookie without origin", method: http.MethodPost,
+			path: "/mcp", host: "127.0.0.1:27123",
+			cookie: &http.Cookie{
+				Name: "kata_session_instance_a", Value: "cookie-session",
+				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+			},
+			want: http.StatusForbidden,
+		},
 		{
 			name: "health request on shared daemon address",
 			path: "/api/v1/health", host: "spoke-b:7777", want: http.StatusBadRequest,
@@ -252,6 +280,14 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			kind := tt.kind
+			if kind == "" {
+				kind = ListenerSharedTCP
+			}
+			handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}), ListenerPolicy{Kind: kind, Origin: "http://127.0.0.1:27123"})
+			require.NoError(t, err)
 			method := tt.method
 			if method == "" {
 				method = http.MethodGet
