@@ -5,41 +5,31 @@ import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
 const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
+const attachment = {
+  name: 'shot.png',
+  media_type: 'image/png',
+  size: 12,
+  docbank_version: versionID,
+}
 
 function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
 
 it.each([
-  { size: -1 },
-  { size: 1.5 },
-  { docbank_version: 'invalid' },
-  { docbank_version: '00000000-0000-0000-0000-000000000000' },
-  { docbank_version: undefined },
-  { name: '../shot.png' },
-  { name: 'a\\b' },
-  { name: '\u0085.png' },
-  { name: '.' },
-  { name: '..' },
-  { name: '' },
-  { name: 'é'.repeat(128) },
-  { name: '\ud800.png' },
-  { media_type: '' },
-  { schema_version: 2 },
-])('skips unsupported attachment references %j', (invalid) => {
+  ['non-object entry', 'junk'],
+  ['missing name', { ...attachment, name: undefined }],
+  ['wrong media_type type', { ...attachment, media_type: 12 }],
+  ['wrong size type', { ...attachment, size: '12' }],
+  ['missing docbank_version', { ...attachment, docbank_version: undefined }],
+])('skips malformed attachment shape: %s', (_rule, invalid) => {
   const detail = projectIssueDetail({
     issue: {
       uid: '01TASK',
       title: 'Files',
       status: 'open',
       metadata: {
-        'attachment.file': {
-          name: 'shot.png',
-          media_type: 'image/png',
-          size: 12,
-          docbank_version: versionID,
-          ...invalid,
-        },
+        'attachment.file': invalid,
       },
     },
   })
@@ -47,34 +37,20 @@ it.each([
 })
 
 describe('projectIssueDetail', () => {
-  it('projects attachment keys and skips malformed entries', () => {
-    const entry = {
-      name: 'shot.png',
-      media_type: 'image/png',
-      size: 12,
-      docbank_version: versionID,
-    }
-    const { name, ...missingName } = entry
-    const { media_type: mediaType, ...missingType } = entry
-    const { size, ...missingSize } = entry
+  it('projects attachment keys', () => {
     const detail = projectIssueDetail({
       issue: {
         uid: '01TASK',
         title: 'Files',
         status: 'open',
         metadata: {
-          'attachment.file': entry,
-          'attachment.junk': 'junk',
-          'attachment.missing-name': missingName,
-          'attachment.missing-type': missingType,
-          'attachment.missing-size': missingSize,
-          'attachment.wrong-size': { ...entry, size: '12' },
+          'attachment.file': attachment,
           'work.branch': 'feature',
         },
       },
     })
     expect(detail.issue.attachments).toEqual({
-      file: { name, media_type: mediaType, size, docbank_version: versionID },
+      file: attachment,
     })
   })
 

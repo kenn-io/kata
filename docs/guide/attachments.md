@@ -41,7 +41,7 @@ Removal drops the reference. Docbank retains the bytes under its own retention r
 
 ## Read references as metadata
 
-Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. Readers skip malformed entries and entries with unknown fields.
+Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content.
 
 ```sh
 kata meta get abc4

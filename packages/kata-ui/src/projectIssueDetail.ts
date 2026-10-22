@@ -58,41 +58,16 @@ function relationFor(
   return 'related'
 }
 
-function validAttachment(raw: unknown): raw is KataAttachment {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
-  const entry = raw as Record<string, unknown>
-  if (
-    Object.keys(entry).some(
-      (key) => !['name', 'media_type', 'size', 'docbank_version'].includes(key),
-    ) ||
-    typeof entry.name !== 'string' ||
-    typeof entry.media_type !== 'string' ||
-    typeof entry.size !== 'number' ||
-    typeof entry.docbank_version !== 'string'
-  )
-    return false
-  const version =
-    entry.docbank_version.length === 45 && entry.docbank_version.startsWith('urn:uuid:')
-      ? entry.docbank_version.slice(9)
-      : entry.docbank_version.length === 38 &&
-          entry.docbank_version.startsWith('{') &&
-          entry.docbank_version.endsWith('}')
-        ? entry.docbank_version.slice(1, -1)
-        : entry.docbank_version
+function validAttachment(value: unknown): value is KataAttachment {
+  const raw = value as Record<string, unknown>
   return (
-    entry.name !== '' &&
-    entry.name !== '.' &&
-    entry.name !== '..' &&
-    entry.name.isWellFormed() &&
-    new TextEncoder().encode(entry.name).byteLength <= 255 &&
-    !/[/\\\p{Cc}]/u.test(entry.name) &&
-    entry.media_type !== '' &&
-    entry.media_type.isWellFormed() &&
-    Number.isInteger(entry.size) &&
-    entry.size >= 0 &&
-    entry.size < 2 ** 63 &&
-    /^(?:[a-f\d]{32}|[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12})$/i.test(version) &&
-    /[1-9a-f]/i.test(version)
+    typeof raw === 'object' &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    typeof raw.name === 'string' &&
+    typeof raw.media_type === 'string' &&
+    typeof raw.size === 'number' &&
+    typeof raw.docbank_version === 'string'
   )
 }
 
