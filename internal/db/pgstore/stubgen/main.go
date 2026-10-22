@@ -68,6 +68,7 @@ var alreadyImplemented = map[string]bool{
 
 	"AcceptRelayDeliveries":    true, // native relay storage
 	"AckRelayDeliveries":       true, // native relay storage
+	"CheckRelayProjectLinks":   true, // native relay storage
 	"CreateRelayEnrollment":    true, // native relay storage
 	"ExportRelayState":         true, // native relay storage
 	"PendingRelayDeliveries":   true, // native relay storage

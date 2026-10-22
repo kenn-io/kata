@@ -174,7 +174,8 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
-| `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
+| `0.31.0` | Adds account-authorized `POST /api/v1/federation/publications` with preflight, exact-operation retry, and preserved project identity and history. Instance responses advertise `relay_publication_version: 1`. |
+| `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. Project federation metadata also accepts optional `relay_protocol_version=1` to check cross-project issue links before enrollment; metadata, bridge preflight and connect preserve `409 relay_cross_project_links`. |
 | `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |

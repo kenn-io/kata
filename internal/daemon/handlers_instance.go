@@ -38,6 +38,7 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Version = version.Version
 		out.Body.SchemaVersion = sv
 		out.Body.RelayProtocolVersion = db.RelayProtocolVersion
+		out.Body.RelayPublicationVersion = 1
 		out.Body.ProvenanceProtocolVersion = 1
 		out.Body.EmbeddingArtifactProtocolVersion = 1
 		out.Body.WebUIContractVersion = api.UISnapshotContractVersion

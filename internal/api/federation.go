@@ -18,7 +18,8 @@ type EnableProjectFederationRequest struct {
 
 // ProjectFederationRequest reads federation metadata for one project.
 type ProjectFederationRequest struct {
-	ProjectID int64 `path:"project_id"`
+	ProjectID            int64 `path:"project_id"`
+	RelayProtocolVersion int   `query:"relay_protocol_version" minimum:"1" maximum:"1" doc:"Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed."`
 }
 
 // RewriteAuthorIdentityRequest rewrites one exact author identity across a

@@ -102,6 +102,7 @@ import type {
   FederationEnrollmentOut,
   FederationIngestEventsBody,
   FederationIngestEventsRequestBody,
+  FederationPublicationBody,
   FederationQuarantineSummary,
   FederationRootKeyRepinResult,
   FederationStatusBody,
@@ -118,6 +119,7 @@ import type {
   GetIssueMetadataResponseBody,
   GetIssueSyncStatusPathParameters,
   GetProjectAccessPathParameters,
+  GetProjectFederationParams,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
@@ -196,6 +198,7 @@ import type {
   ProjectPurgeRequestBody,
   ProjectPurgeResponseBody,
   ProjectResolveBody,
+  PublishFederationProjectBody,
   PurgeIssuePathParameters,
   PurgeProjectPathParameters,
   PurgeResponseBody,
@@ -1074,6 +1077,101 @@ export const revokeFederationEnrollment = async (
       method: 'POST',
     },
   )
+}
+
+export type publishFederationProjectResponse200 = {
+  data: FederationPublicationBody
+  status: 200
+}
+
+export type publishFederationProjectResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type publishFederationProjectResponse401 = {
+  data: ErrorEnvelope
+  status: 401
+}
+
+export type publishFederationProjectResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type publishFederationProjectResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type publishFederationProjectResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type publishFederationProjectResponse413 = {
+  data: ErrorEnvelope
+  status: 413
+}
+
+export type publishFederationProjectResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type publishFederationProjectResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type publishFederationProjectResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type publishFederationProjectResponseSuccess = publishFederationProjectResponse200 & {
+  headers: Headers
+}
+export type publishFederationProjectResponseError = (
+  | publishFederationProjectResponse400
+  | publishFederationProjectResponse401
+  | publishFederationProjectResponse403
+  | publishFederationProjectResponse404
+  | publishFederationProjectResponse409
+  | publishFederationProjectResponse413
+  | publishFederationProjectResponse422
+  | publishFederationProjectResponse500
+  | publishFederationProjectResponse503
+) & {
+  headers: Headers
+}
+
+export type publishFederationProjectResponse =
+  | publishFederationProjectResponseSuccess
+  | publishFederationProjectResponseError
+
+export const getPublishFederationProjectUrl = () => {
+  return `/api/v1/federation/publications`
+}
+
+export const publishFederationProject = async (
+  publishFederationProjectBody: PublishFederationProjectBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<publishFederationProjectResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<publishFederationProjectResponse>(getPublishFederationProjectUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(publishFederationProjectBody),
+  })
 }
 
 export type createFederationReplicaResponse200 = {
@@ -2878,18 +2976,37 @@ export type getProjectFederationResponse =
   | getProjectFederationResponseSuccess
   | getProjectFederationResponseError
 
-export const getGetProjectFederationUrl = ({ projectId }: GetProjectFederationPathParameters) => {
-  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation`
+export const getGetProjectFederationUrl = (
+  { projectId }: GetProjectFederationPathParameters,
+  params?: GetProjectFederationParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation`
 }
 
 export const getProjectFederation = async (
   { projectId }: GetProjectFederationPathParameters,
+  params?: GetProjectFederationParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<getProjectFederationResponse> => {
-  return orvalFetch<getProjectFederationResponse>(getGetProjectFederationUrl({ projectId }), {
-    ...options,
-    method: 'GET',
-  })
+  return orvalFetch<getProjectFederationResponse>(
+    getGetProjectFederationUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type enableProjectFederationResponse200 = {

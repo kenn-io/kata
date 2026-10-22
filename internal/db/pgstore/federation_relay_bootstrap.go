@@ -206,6 +206,11 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 }
 
 func relayHistoryNeedsResetTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) (bool, error) {
+	var history db.RelayHistoryOrderValidator
+	return relayHistoryNeedsResetWithOrderTx(ctx, tx, projectID, projectUID, &history)
+}
+
+func relayHistoryNeedsResetWithOrderTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string, history *db.RelayHistoryOrderValidator) (bool, error) {
 	var required bool
 	err := tx.QueryRowContext(ctx, `SELECT
  EXISTS(SELECT 1 FROM purge_log WHERE project_id=$1 AND purge_reset_after_event_id IS NOT NULL)
@@ -215,7 +220,40 @@ func relayHistoryNeedsResetTx(ctx context.Context, tx *sql.Tx, projectID int64, 
 	if err != nil || required {
 		return required, err
 	}
+	if required, err := relayHistoryOrderAfterTx(ctx, tx, projectID, 0, history); err != nil || required {
+		return required, err
+	}
 	return relayHistoryHasBoundaryTx(ctx, tx, projectID)
+}
+
+func relayHistoryOrderAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64, history *db.RelayHistoryOrderValidator) (bool, error) {
+	// Read the same retained stream enrollment would seed, in immutable local
+	// ID order. Finding a snapshot anywhere is insufficient: a fresh child
+	// rejects a preceding mutation of an issue it has not seen introduced.
+	// #nosec G202 -- Only the fixed event-type predicate is concatenated; values use placeholders.
+	rows, err := tx.QueryContext(ctx, `SELECT e.id,e.type,e.issue_uid,e.payload FROM events e WHERE e.project_id=$1 AND e.id>$2 AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id`, projectID, after)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var event db.EventExport
+		var payload string
+		if err := rows.Scan(&event.ID, &event.Type, &event.IssueUID, &payload); err != nil {
+			return false, err
+		}
+		event.Payload = []byte(payload)
+		if required, err := history.Observe(event); err != nil || required {
+			return required, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // Retained checkpoints are exact retry identities until a later root purge or

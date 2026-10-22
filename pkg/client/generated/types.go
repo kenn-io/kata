@@ -2804,6 +2804,120 @@ func (f FederationProjectStatus) Validate() error {
 	return errors
 }
 
+type FederationPublicationBody struct {
+	Account     string                              `json:"account" validate:"required"`
+	Counts      FederationPublicationCounts         `json:"counts"`
+	ProjectID   *int64                              `json:"project_id,omitempty"`
+	ProjectName string                              `json:"project_name" validate:"required"`
+	ProjectUID  string                              `json:"project_uid" validate:"required"`
+	Replayed    bool                                `json:"replayed"`
+	Status      FederationPublicationBodyStatus     `json:"status" validate:"required"`
+	Visibility  FederationPublicationBodyVisibility `json:"visibility" validate:"required"`
+}
+
+func (f FederationPublicationBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Account, "required"); err != nil {
+		errors = errors.Append("Account", err)
+	}
+	if v, ok := any(f.Counts).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Counts", err)
+		}
+	}
+	if err := typesValidator.Var(f.ProjectName, "required"); err != nil {
+		errors = errors.Append("ProjectName", err)
+	}
+	if err := typesValidator.Var(f.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if v, ok := any(f.Status).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Status", err)
+		}
+	}
+	if v, ok := any(f.Visibility).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Visibility", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationPublicationCounts struct {
+	Comments int64 `json:"comments"`
+	Events   int64 `json:"events"`
+	Issues   int64 `json:"issues"`
+}
+
+type FederationPublicationEnvelope struct {
+	Digest            string                               `json:"digest" validate:"required"`
+	OperationUID      string                               `json:"operation_uid" validate:"required"`
+	ProjectName       string                               `json:"project_name" validate:"required"`
+	ProjectUID        string                               `json:"project_uid" validate:"required"`
+	Records           []FederationPublicationRecord        `json:"records" validate:"required"`
+	SourceInstanceUID string                               `json:"source_instance_uid" validate:"required"`
+	TargetInstanceUID string                               `json:"target_instance_uid" validate:"required"`
+	Version           FederationPublicationEnvelopeVersion `json:"version"`
+}
+
+func (f FederationPublicationEnvelope) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Digest, "required"); err != nil {
+		errors = errors.Append("Digest", err)
+	}
+	if err := typesValidator.Var(f.OperationUID, "required"); err != nil {
+		errors = errors.Append("OperationUID", err)
+	}
+	if err := typesValidator.Var(f.ProjectName, "required"); err != nil {
+		errors = errors.Append("ProjectName", err)
+	}
+	if err := typesValidator.Var(f.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	for i, item := range f.Records {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Records[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(f.SourceInstanceUID, "required"); err != nil {
+		errors = errors.Append("SourceInstanceUID", err)
+	}
+	if err := typesValidator.Var(f.TargetInstanceUID, "required"); err != nil {
+		errors = errors.Append("TargetInstanceUID", err)
+	}
+	if v, ok := any(f.Version).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Version", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationPublicationRecord struct {
+	Data json.RawMessage                 `json:"data"`
+	Kind FederationPublicationRecordKind `json:"kind" validate:"required"`
+}
+
+func (f FederationPublicationRecord) Validate() error {
+	if err := f.Kind.Validate(); err != nil {
+		return err
+	}
+	var object map[string]json.RawMessage
+	if len(f.Data) == 0 || json.Unmarshal(f.Data, &object) != nil || object == nil {
+		return runtime.NewValidationErrorsFromString("Data", "must be a JSON object")
+	}
+	return nil
+}
+
 type FederationQuarantineSummary struct {
 	CreatedAt    time.Time `json:"created_at" validate:"required"`
 	Direction    string    `json:"direction" validate:"required"`
@@ -3294,6 +3408,7 @@ type InstanceResponseBody struct {
 	IssueSubtreeTokens        bool           `json:"issue_subtree_tokens"`
 	ProvenanceProtocolVersion *int64         `json:"provenance_protocol_version,omitempty"`
 	RelayProtocolVersion      *int64         `json:"relay_protocol_version,omitempty"`
+	RelayPublicationVersion   *int64         `json:"relay_publication_version,omitempty"`
 	SchemaVersion             int64          `json:"schema_version"`
 	Version                   string         `json:"version" validate:"required"`
 	WebUICapabilities         UICapabilities `json:"web_ui_capabilities"`
@@ -4931,6 +5046,24 @@ type ProjectStatsOut struct {
 
 func (p ProjectStatsOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type PublishFederationProjectBody struct {
+	Envelope  FederationPublicationEnvelope `json:"envelope"`
+	Preflight bool                          `json:"preflight"`
+}
+
+func (p PublishFederationProjectBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(p.Envelope).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Envelope", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type PurgeLog struct {

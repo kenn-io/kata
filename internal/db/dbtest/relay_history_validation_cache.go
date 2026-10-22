@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -93,6 +95,37 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	require.NoError(t, err)
 	require.False(t, required)
 	require.Equal(t, 3, fullScans, "purge markers invalidate previously validated history")
+
+	// The upstream may withhold an introduction while retaining a mutation.
+	// Prime the cache above, then introduce only that mutation to its next scan.
+	late, created, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Withheld introduction", Author: "example-assistant",
+	})
+	require.NoError(t, err)
+	title := "Mutation before introduction"
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: late.ID, Actor: "example-assistant", Title: &title})
+	require.NoError(t, err)
+	query := "DELETE FROM events WHERE id=?"
+	if backend.Name == "postgres" {
+		query = "DELETE FROM events WHERE id=$1"
+	}
+	_, err = store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}).ExecContext(ctx, query, created.ID)
+	require.NoError(t, err)
+	peerUID, err = uid.New()
+	require.NoError(t, err)
+	second, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peerUID,
+		ProtocolVersion: db.RelayProtocolVersion, Token: "second-history-child-test-token",
+	})
+	require.NoError(t, err)
+	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, second.Enrollment.RelayBindingUID)
+	require.NoError(t, err)
+	require.True(t, required, "cached enrollment must detect newly retained mutations without introductions")
+	offers, err := store.PendingRelayDeliveries(ctx, second.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.Empty(t, offers)
 
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	_, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)

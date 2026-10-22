@@ -556,42 +556,28 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 }
 
 func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
-	// Envelopes are untrusted input: hold imported names to the same rule
-	// the daemon's create/rename handlers enforce, or a crafted export
-	// could land a project name with control characters that every CLI/TUI
-	// surface (including cross-project qualified refs) would echo to the
-	// terminal. Names from a kata-produced envelope already passed this
-	// gate at creation time, so cutover replays are unaffected. %q keeps
-	// the hostile name escaped inside the error itself.
+	// Validate untrusted names before either restore or strict row insertion.
 	if err := config.ValidateProjectName(p.Name); err != nil {
-		return wrapImportErr(db.ImportKindProject,
-			fmt.Errorf("project %d name %q: %w", p.ID, p.Name, err))
+		return wrapImportErr(db.ImportKindProject, fmt.Errorf("project %d name %q: %w", p.ID, p.Name, err))
 	}
-	// The system project is identified by UID+name; preserve it verbatim so the
-	// post-loop ensureSystemProject treats it as already present.
-	if p.UID == db.SystemProjectUID && p.Name == db.SystemProjectName {
-		metadata := p.Metadata
-		if len(metadata) == 0 {
-			metadata = jsontext.Value(`{}`)
+	name := p.Name
+	if p.UID != db.SystemProjectUID || p.Name != db.SystemProjectName {
+		var renamed bool
+		var err error
+		name, renamed, err = uniqueProjectName(ctx, tx, p.ID, p.Name)
+		if err != nil {
+			return err
 		}
-		revision := p.Revision
-		if revision == 0 {
-			revision = 1
+		if renamed {
+			fmt.Fprintf(os.Stderr, "note: project #%d renamed from %q to %q during import\n", p.ID, p.Name, name)
 		}
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO projects(id, uid, name, created_at, deleted_at, metadata, revision)
-			 VALUES(?, ?, ?, ?, ?, ?, ?)`,
-			p.ID, p.UID, p.Name, p.CreatedAt, p.DeletedAt, string(metadata), revision)
-		return wrapImportErr(db.ImportKindProject, err)
 	}
-	original := p.Name
-	name, renamed, err := uniqueProjectName(ctx, tx, p.ID, p.Name)
-	if err != nil {
-		return err
-	}
-	if renamed {
-		fmt.Fprintf(os.Stderr, "note: project #%d renamed from %q to %q during import\n", p.ID, original, name)
-	}
+	return insertReplayProject(ctx, tx, p, name)
+}
+
+// insertReplayProject inserts a validated row without restore's name suffixing.
+// A zero numeric ID requests a native SQLite allocation.
+func insertReplayProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport, name string) error {
 	metadata := p.Metadata
 	if len(metadata) == 0 {
 		metadata = jsontext.Value(`{}`)
@@ -600,10 +586,8 @@ func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
 	if revision == 0 {
 		revision = 1
 	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO projects(id, uid, name, created_at, deleted_at, metadata, revision)
-		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.UID, name, p.CreatedAt, p.DeletedAt, string(metadata), revision)
+	_, err := tx.ExecContext(ctx, `INSERT INTO projects(id, uid, name, created_at, deleted_at, metadata, revision)
+ VALUES(NULLIF(?,0), ?, ?, ?, ?, ?, ?)`, p.ID, p.UID, name, p.CreatedAt, p.DeletedAt, string(metadata), revision)
 	return wrapImportErr(db.ImportKindProject, err)
 }
 
@@ -716,7 +700,7 @@ func importIssue(ctx context.Context, tx *sql.Tx, i *db.IssueExport) error {
 		`INSERT INTO issues(id, uid, project_id, short_id, title, body, status, closed_reason, owner, assignment_expires_on, priority, author,
 		                    created_at, updated_at, closed_at, deleted_at, metadata, revision, content_revision,
 		                    recurrence_id, occurrence_key)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(NULLIF(?,0), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.ID, i.UID, i.ProjectID, i.ShortID, i.Title, i.Body, i.Status, i.ClosedReason,
 		i.Owner, i.AssignmentExpiresOn, i.Priority, i.Author, i.CreatedAt, i.UpdatedAt, i.ClosedAt, i.DeletedAt,
 		string(metadata), revision, i.ContentRevision, recurrenceID, i.OccurrenceKey)
@@ -733,7 +717,7 @@ func importIssueEmbedding(_ context.Context, _ *sql.Tx, _ *db.IssueEmbeddingExpo
 
 func importComment(ctx context.Context, tx *sql.Tx, c *db.CommentExport) error {
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO comments(id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at) VALUES(?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+		`INSERT INTO comments(id, uid, issue_id, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at) VALUES(NULLIF(?,0), ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
 		c.ID, c.UID, c.IssueID, c.Author, c.Body, c.CreatedAt, c.Teammate, c.ReplyToUID, c.ReplyKind, c.EditedAt)
 	return wrapImportErr(db.ImportKindComment, err)
 }
@@ -774,10 +758,15 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, e
 	if dup > 0 {
 		return linkSkipDuplicate, nil
 	}
+	return linkSkipNone, insertReplayLink(ctx, tx, lk)
+}
+
+// insertReplayLink has no restore-only missing-peer or duplicate skip policy.
+func insertReplayLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) error {
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO links(id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at)
 		 VALUES(
-		   ?, ?,
+		   NULLIF(?,0), ?,
 		   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
 		   ?,
 		   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
@@ -785,7 +774,7 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, e
 		 )`,
 		lk.ID, lk.FromIssueID, lk.FromIssueUID, lk.FromIssueID,
 		lk.ToIssueID, lk.ToIssueUID, lk.ToIssueID, lk.Type, lk.Author, lk.CreatedAt)
-	return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
+	return wrapImportErr(db.ImportKindLink, err)
 }
 
 func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, skippedLinkIDs map[int64]struct{}, preserveStatus bool) (linkSkip, error) {
@@ -1252,7 +1241,7 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 		`INSERT INTO events(id, uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid, related_issue_id, related_issue_uid,
 		                    type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at)
 		 VALUES(
-		   ?, ?, ?, ?, ?, ?,
+		   NULLIF(?,0), ?, ?, ?, ?, ?,
 		   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),
 		   ?,
 		   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),

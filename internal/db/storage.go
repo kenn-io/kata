@@ -35,6 +35,9 @@ type Storage interface {
 	ExportRelayState(ctx context.Context) iter.Seq2[ImportRecord, error]
 	AcceptRelayDeliveries(ctx context.Context, bindingUID string, batch RelayBatch) (RelayAcceptance, error)
 	SetRelayBindingConfig(ctx context.Context, projectID int64, config RelayBindingConfig, expected ...RelayBindingConfig) (FederationBinding, error)
+	// CheckRelayProjectLinks reports existing cross-project links for an authorized
+	// active project without changing its root pin or enrollment state.
+	CheckRelayProjectLinks(ctx context.Context, projectID int64) error
 	CreateRelayEnrollment(ctx context.Context, p CreateRelayEnrollmentParams) (CreatedFederationEnrollment, error)
 	PendingRelayDeliveries(ctx context.Context, bindingUID, stream string, limit int) ([]RelayEnvelope, error)
 	AckRelayDeliveries(ctx context.Context, bindingUID string, epoch int64, stream string, through int64, digest string) error

@@ -1161,6 +1161,277 @@ func (c *Client) RevokeFederationEnrollmentWithResponse(ctx context.Context, opt
 	}
 }
 
+func (c *Client) PublishFederationProjectWithResponse(ctx context.Context, options *PublishFederationProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PublishFederationProjectResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/federation/publications",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/federation/publications")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &PublishFederationProjectResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(PublishFederationProjectResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 400:
+		out.JSON400 = new(PublishFederationProjectErrorResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON400); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 401:
+		out.JSON401 = new(PublishFederationProjectErrorResponseJSON)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON401); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 403:
+		out.JSON403 = new(PublishFederationProjectErrorResponseJSON403)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON403); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON403",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 404:
+		out.JSON404 = new(PublishFederationProjectErrorResponseJSON404)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON404); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON404",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 409:
+		out.JSON409 = new(PublishFederationProjectErrorResponseJSON409)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON409); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON409",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 413:
+		out.JSON413 = new(PublishFederationProjectErrorResponseJSON413)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON413); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON413",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 422:
+		out.JSON422 = new(PublishFederationProjectErrorResponseJSON422)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON422); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON422",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 500:
+		out.JSON500 = new(PublishFederationProjectErrorResponseJSON500)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON500); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON500",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 503:
+		out.JSON503 = new(PublishFederationProjectErrorResponseJSON503)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON503); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "PublishFederationProjectErrorResponseJSON503",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		if len(resp.Content) > 0 {
+			envelope := new(PublishFederationProjectErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) CreateFederationReplicaWithResponse(ctx context.Context, options *CreateFederationReplicaRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateFederationReplicaResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{

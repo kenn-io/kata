@@ -167,7 +167,7 @@ FROM project_purge_log`, "project_id", filter)
 
 // ExportMeta streams installation metadata ordered by key.
 func (s *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
-	return streamExportRows(ctx, s, "meta", `SELECT key, value FROM meta ORDER BY key ASC`, nil,
+	return streamExportRows(ctx, s, "meta", `SELECT key, value FROM meta WHERE key NOT LIKE 'federation.publication.v1/%' AND key NOT LIKE 'federation.adoption.v1/%' ORDER BY key ASC`, nil,
 		func(rows *sql.Rows) (db.MetaKV, error) {
 			var record db.MetaKV
 			if err := rows.Scan(&record.Key, &record.Value); err != nil {

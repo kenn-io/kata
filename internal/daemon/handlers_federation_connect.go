@@ -97,7 +97,11 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if err := decodeFederationBridgeResponse(resolvedRaw, callErr, &resolved); err != nil {
 			return nil, err
 		}
-		metadataResponse, callErr := bridge.GetProjectFederationWithResponse(ctx, &generated.GetProjectFederationRequestOptions{PathParams: &generated.GetProjectFederationPath{ProjectID: resolved.Project.ID}})
+		relayProtocolVersion := int64(db.RelayProtocolVersion)
+		metadataResponse, callErr := bridge.GetProjectFederationWithResponse(ctx, &generated.GetProjectFederationRequestOptions{
+			PathParams: &generated.GetProjectFederationPath{ProjectID: resolved.Project.ID},
+			Query:      &generated.GetProjectFederationQuery{RelayProtocolVersion: &relayProtocolVersion},
+		})
 		var metadataRaw []byte
 		if metadataResponse != nil {
 			metadataRaw = metadataResponse.Body
@@ -358,6 +362,17 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 	originalBody := response.Body
 	defer func() { _ = originalBody.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if response.StatusCode == http.StatusConflict {
+			raw, readErr := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+			var envelope api.ErrorEnvelope
+			if readErr == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code == "relay_cross_project_links" {
+				// Map only this public conflict to its known, endpoint-free message and
+				// remedy. Never forward arbitrary upstream diagnostic text or data.
+				failure := relayCrossProjectLinksAPIError(db.ErrFederationCrossProjectBoundary)
+				failure.Data = map[string]any{"hub_status": response.StatusCode}
+				return nil, failure
+			}
+		}
 		return nil, federationBridgeHubRejection(response.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
@@ -372,7 +387,8 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 // then the hub refused what the daemon sent. Returning the hub's own 3xx or
 // 4xx would make a hub 401, 403 or 404 look like a local authorization or
 // lookup failure, so those become 502 with the hub status in data. A hub 5xx
-// stays a retryable server status.
+// stays a retryable server status. The known relay link conflict is handled
+// separately with a safe public message and remains a 409.
 func federationBridgeHubRejection(status int) *api.APIError {
 	data := map[string]any{"hub_status": status}
 	switch {

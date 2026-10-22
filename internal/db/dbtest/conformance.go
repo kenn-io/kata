@@ -50,6 +50,26 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "FederationPublicationCapacity", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublicationCapacity(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublicationRollback", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublicationRollback(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublication", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunFederationPublication(t, store, backend)
+		return nil
+	}},
+	{name: "FederationPublicationRelatedEndpointOrder", runWithBackend: func(t *testing.T, store db.Storage, _ Backend) error {
+		RunFederationPublicationRelatedEndpointOrder(t, store)
+		return nil
+	}},
+	{name: "relay history order", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayHistoryOrder(t, store, backend)
+		return nil
+	}},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
@@ -95,6 +115,7 @@ var storageScenarios = []scenario{
 	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayIngressAtomicity(t, store); return nil }},
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
+	{name: "relay cross-project boundary", methods: []string{"CheckRelayProjectLinks"}, run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectBoundary(t, store); return nil }},
 	{name: "relay checkpoint capacity", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "ListFederationEnrollments", "PinRootAuthority", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, _ db.Storage, backend Backend) error {
 		RunRelayCheckpointCapacity(t, backend)
 		return nil

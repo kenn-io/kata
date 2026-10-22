@@ -134,6 +134,9 @@ func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, p
 }
 
 func relayTransportError(err error) error {
+	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
+		return apiErr
+	}
 	if apiErr := rootSigningKeyAPIError(err); apiErr != nil {
 		return apiErr
 	}
@@ -171,6 +174,17 @@ func relayTransportError(err error) error {
 		}
 	}
 	return api.NewError(http.StatusInternalServerError, "internal", "relay storage is unavailable", "", nil)
+}
+
+// relayCrossProjectLinksAPIError intentionally omits endpoints: a project
+// member may not be allowed to see the other project involved in a link.
+func relayCrossProjectLinksAPIError(err error) *api.APIError {
+	if !errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+		return nil
+	}
+	return api.NewError(http.StatusConflict, "relay_cross_project_links",
+		"the project has cross-project issue links that are unsupported by relay",
+		"remove the project's cross-project related, blocks and parent links before retrying; ask an operator to remove links to projects you cannot access", nil)
 }
 
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
@@ -272,6 +286,12 @@ func relayHandshake(ctx context.Context, store db.Storage, projectID int64, peer
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, federationError(err)
 		}
+		return nil, relayTransportError(err)
+	}
+	// Reject an existing boundary before the handshake can persist a first root
+	// pin. Enrollment repeats this check under its native transaction lock to
+	// catch links added concurrently. Existing pins remain valid for retries.
+	if err := store.CheckRelayProjectLinks(ctx, projectID); err != nil {
 		return nil, relayTransportError(err)
 	}
 	pin, err := store.RootAuthority(ctx, project.UID)
