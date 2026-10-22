@@ -19,13 +19,14 @@ import (
 
 // Fake keeps uploaded bytes in memory and records API requests.
 type Fake struct {
-	Server   *httptest.Server
-	Fault    string
-	mu       sync.Mutex
-	requests []string
-	dirs     map[string]int64
-	versions map[string]string
-	content  map[string][]byte
+	Server       *httptest.Server
+	Fault        string
+	UploadStatus int
+	mu           sync.Mutex
+	requests     []string
+	dirs         map[string]int64
+	versions     map[string]string
+	content      map[string][]byte
 }
 
 // New starts an isolated Docbank fake and registers its cleanup.
@@ -84,6 +85,10 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		f.dirs[in.Path] = id
 		send(map[string]any{"id": id, "kind": "dir"})
 	case r.URL.Path == "/api/v1/uploads" && r.Method == "POST":
+		if f.UploadStatus != 0 {
+			http.Error(w, "upstream", f.UploadStatus)
+			return
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 		if err := r.ParseMultipartForm(1 << 20); err != nil { //nolint:gosec // Bounded by MaxBytesReader above.
 			http.Error(w, "multipart", 400)

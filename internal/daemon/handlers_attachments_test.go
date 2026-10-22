@@ -257,8 +257,9 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
 			env, f := attachmentEnv(t)
 			p, iss := seedProjectAndIssue(t, env)
-			f.Fault = fmt.Sprintf("status:%d", tc.status)
+			f.UploadStatus = tc.status
 			code, raw := attachmentUpload(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID), "shot.png", strings.NewReader("image"))
+			require.Contains(t, f.Requests(), "POST /api/v1/uploads")
 			require.Equal(t, tc.want, code, string(raw))
 			require.Contains(t, string(raw), tc.code)
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
