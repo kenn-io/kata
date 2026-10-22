@@ -110,8 +110,9 @@ cross-project issue links with `409 relay_cross_project_links`. Remove the
 project's cross-project related, blocks and parent links on the hub before
 retrying; ask a hub operator to remove links to projects you cannot access.
 The check includes incoming links and closed issues. Historical links that
-have already been removed do not block enrollment. Older hubs still perform
-their enrollment-time check but cannot report this blocker during preflight.
+have already been removed do not block enrollment. Preflight refuses older hubs
+with `409 hub_link_check_unsupported`; upgrade the hub or connect without
+`--preflight` to use its enrollment-time check.
 
 Direct callers can request the same read-only check with
 `GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.

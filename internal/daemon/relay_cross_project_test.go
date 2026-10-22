@@ -115,6 +115,45 @@ func TestFederationBridgeCrossProjectLinks(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestFederationBridgePreflightRejectsOldHubLinkCheck(t *testing.T) {
+	for _, version := range []string{"", "0.30.9"} {
+		t.Run("api_schema_version="+version, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			hub := newBridgeHubFixture(t)
+			var healthCalls atomic.Int32
+			oldHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/v1/health" {
+					healthCalls.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					health := map[string]any{"ok": true}
+					if version != "" {
+						health["api_schema_version"] = version
+					}
+					_ = json.MarshalWrite(w, health)
+					return
+				}
+				// Older hubs ignore the relay metadata query parameter.
+				r.URL.RawQuery = ""
+				hub.root.server.Config.Handler.ServeHTTP(w, r)
+			}))
+			t.Cleanup(oldHub.Close)
+			local := newBridgeLocalDaemon(t, openReplicaServiceStore(t), hub.catalog(oldHub.URL))
+			code, _, raw := local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, true), bridgeOwnerHeaders)
+			require.Equal(t, http.StatusConflict, code, string(raw))
+			require.Equal(t, "hub_link_check_unsupported", bridgeErrorCode(t, raw))
+			require.Contains(t, string(raw), "cross-project links")
+			require.Contains(t, string(raw), "upgrade the hub")
+			require.Contains(t, string(raw), "connect without --preflight")
+			require.EqualValues(t, 1, healthCalls.Load())
+
+			code, _, raw = local.request(t, http.MethodPost, "/api/v1/federation/bridges", "", bridgeConnectBody(hub.root.private.Name, false), bridgeOwnerHeaders)
+			require.Equal(t, http.StatusOK, code, string(raw))
+			require.Contains(t, string(raw), `"status":"connected"`)
+			require.EqualValues(t, 1, healthCalls.Load(), "connect must not check the hub API schema version")
+		})
+	}
+}
+
 func TestFederationBridgeLocalCrossProjectLinks(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	hub := newBridgeHubFixture(t)
