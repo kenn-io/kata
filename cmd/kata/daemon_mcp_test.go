@@ -30,6 +30,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 	for _, tt := range []struct{ name, listen, web, host string }{
 		{"shared TCP", "127.0.0.1:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
 		{"expanded IPv6", "[0:0:0:0:0:0:0:1]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
+		{"expanded IPv6 wildcard", "[0:0:0:0:0:0:0:0]:0", "public_origin = 'https://daemon.example'\n", "daemon.example"},
 		{"Unix with web listener", "", "listen = '127.0.0.1:0'\n", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

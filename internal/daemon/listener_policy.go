@@ -151,13 +151,14 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 		}
 		allowed[strings.ToLower(alias)] = struct{}{}
 	}
+	ip := net.ParseIP(host)
 	switch {
 	case strings.EqualFold(host, "localhost"):
 		add("127.0.0.1")
 		add("::1")
-	case net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback():
+	case ip != nil && ip.IsLoopback():
 		add("localhost")
-	case host == "0.0.0.0" || host == "::":
+	case ip != nil && ip.IsUnspecified():
 		add("127.0.0.1")
 		add("localhost")
 		add("::1")
