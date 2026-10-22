@@ -25,6 +25,15 @@ func TestAttachmentValid(t *testing.T) {
 		_, valid := Valid(jsontext.Value(raw))
 		require.False(t, valid, raw)
 	}
+	for _, tc := range []struct{ name, raw string }{
+		{"missing size", strings.Replace(good, `"size":12,`, "", 1)},
+		{"null size", strings.Replace(good, `"size":12`, `"size":null`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, valid := Valid(jsontext.Value(tc.raw))
+			require.False(t, valid, tc.raw)
+		})
+	}
 	_, ok = Valid(jsontext.Value(strings.TrimSuffix(good, "}") + `,"schema_version":2}`))
 	require.False(t, ok, "unknown reference shapes are unreadable")
 	require.NoError(t, Validate(IssueRegistry, "attachment.x", jsontext.Value(`"junk"`)))
