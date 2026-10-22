@@ -771,7 +771,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 		}
 		credentials.findErr = errors.New("injected lookup failure")
 
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 
 		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
 		assert.False(t, suppressedDuringFind,
@@ -789,7 +789,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 		}
 		credentials.managedErr = errors.New("injected replacement failure")
 
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 
 		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
 		assert.False(t, suppressedDuringReplace,
@@ -810,7 +810,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 		require.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
 		credentials.findErr = errors.New("injected lookup failure")
 
-		_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 
 		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
 		assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
@@ -843,7 +843,7 @@ func TestPrepareFederationReplicaLeaveDrainsAndBlocksHubOperations(t *testing.T)
 	prepareErr := make(chan error, 1)
 	go func() {
 		result, callErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, project.ID,
+			ctx, store, credentials, project.ID, "",
 		)
 		prepared <- result
 		prepareErr <- callErr
@@ -2286,7 +2286,7 @@ func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
 	prepared := make(chan prepareResult, 1)
 	go func() {
 		result, prepareErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, project.ID,
+			ctx, store, credentials, project.ID, "",
 		)
 		prepared <- prepareResult{result: result, err: prepareErr}
 	}()
@@ -2363,7 +2363,7 @@ func TestRecordFederationReplicaPendingEnrollment(t *testing.T) {
 
 	t.Run("stamps a prepared leave", func(t *testing.T) {
 		store, credentials, project := newLeavePreparedStore(t)
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 		require.NoError(t, err)
 
 		pendingFound, err := daemon.RecordFederationReplicaPendingEnrollment(
@@ -2380,7 +2380,7 @@ func TestRecordFederationReplicaPendingEnrollment(t *testing.T) {
 
 	t.Run("restamping the same enrollment does not rewrite", func(t *testing.T) {
 		store, credentials, project := newLeavePreparedStore(t)
-		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "")
 		require.NoError(t, err)
 		_, err = daemon.RecordFederationReplicaPendingEnrollment(
 			ctx, credentials, project.Name, 71,

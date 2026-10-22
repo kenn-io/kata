@@ -108,7 +108,7 @@ func testForgejoConnectorProcessBridgeLoop(t *testing.T, publish bool) {
 	require.NoError(t, err)
 	registry, err := rootbridge.NewRegistry(t.Context(), []config.ConnectorConfig{{
 		ID: "forgejo-example", Command: executable, Args: []string{"-test.run=^TestForgejoRPCProcess$"},
-		Env:      map[string]string{"FORGEJO_TEST_PROCESS": "FORGEJO_TEST_PROCESS", "FORGEJO_TOKEN": "FORGEJO_PROCESS_VALUE"},
+		Env:      map[string]string{"FORGEJO_TEST_PROCESS": "FORGEJO_TEST_PROCESS", "FORGEJO_TOKEN": "FORGEJO_PROCESS_VALUE", "KATA_HOME": "KATA_HOME", "KATA_TEST_HOME": "KATA_HOME"},
 		Settings: map[string]any{"origin": provider.URL},
 	}}, nil)
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestForgejoConnectorProcessBridgeAcceptsProviderClockAhead(t *testing.T) {
 	require.NoError(t, err)
 	registry, err := rootbridge.NewRegistry(t.Context(), []config.ConnectorConfig{{
 		ID: "forgejo-example", Command: executable, Args: []string{"-test.run=^TestForgejoRPCProcess$"},
-		Env:      map[string]string{"FORGEJO_TEST_PROCESS": "FORGEJO_TEST_PROCESS", "FORGEJO_TOKEN": "FORGEJO_PROCESS_VALUE"},
+		Env:      map[string]string{"FORGEJO_TEST_PROCESS": "FORGEJO_TEST_PROCESS", "FORGEJO_TOKEN": "FORGEJO_PROCESS_VALUE", "KATA_HOME": "KATA_HOME", "KATA_TEST_HOME": "KATA_HOME"},
 		Settings: map[string]any{"origin": provider.URL},
 	}}, nil)
 	require.NoError(t, err)

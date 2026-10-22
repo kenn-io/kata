@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -407,7 +407,8 @@ func TestResolvedDaemonWithRunningReplacesOnlyRuntimeMetadata(t *testing.T) {
 		Source: DaemonSourceNamedCatalog, Name: "local-daemon",
 		BaseURL: "http://127.0.0.1:27123", Address: "127.0.0.1:27123",
 		Network: "tcp", Scheme: "http",
-		Token: "target-token", AllowInsecure: true, TrustPrivateNetwork: true,
+		RuntimeDir: "/tmp/example-runtime",
+		Token:      "target-token", AllowInsecure: true, TrustPrivateNetwork: true,
 	}
 	running := RunningDaemon{
 		BaseURL: UnixBase, Address: "unix:///tmp/fresh-kata.sock",
@@ -418,6 +419,7 @@ func TestResolvedDaemonWithRunningReplacesOnlyRuntimeMetadata(t *testing.T) {
 
 	assert.Equal(t, DaemonSourceNamedCatalog, refreshed.Source)
 	assert.Equal(t, "local-daemon", refreshed.Name)
+	assert.Equal(t, "/tmp/example-runtime", refreshed.RuntimeDir)
 	assert.Equal(t, "target-token", refreshed.Token)
 	assert.True(t, refreshed.AllowInsecure)
 	assert.True(t, refreshed.TrustPrivateNetwork)
@@ -439,7 +441,7 @@ func TestDiscoverResolvedPreservesScanErrors(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		home := setupKataEnv(t)
 		require.NoError(t, writeRuntimeRecord(t, home, "unix://"+filepath.Join(home, "missing.sock")))
-		namespace, err := daemon.NewNamespace()
+		namespace, err := daemonruntime.NewNamespace()
 		require.NoError(t, err)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -453,7 +455,7 @@ func TestDiscoverResolvedPreservesScanErrors(t *testing.T) {
 		home := setupKataEnv(t)
 		address := "unix://" + filepath.Join(home, "missing.sock")
 		require.NoError(t, writeRuntimeRecord(t, home, address))
-		namespace, err := daemon.NewNamespace()
+		namespace, err := daemonruntime.NewNamespace()
 		require.NoError(t, err)
 
 		_, ok, err := DiscoverResolved(t.Context(), namespace.DataDir)

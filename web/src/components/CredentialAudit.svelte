@@ -1,7 +1,7 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
-  import { SearchInput, SelectDropdown, type SelectDropdownOption } from '@kenn-io/kit-ui'
+  import { SearchInput, SelectDropdown, Table, type SelectDropdownOption } from '@kenn-io/kit-ui'
 
   import type { TokenOut } from '../lib/api/generated'
 
@@ -134,7 +134,7 @@
       <p class="refresh-status" role="status">Refreshing credentials…</p>
     {/if}
     <div class="table-scroll">
-      <table>
+      <Table bare unsorted class="credential-table">
         <thead>
           <tr>
             <th scope="col">ID</th>
@@ -195,7 +195,7 @@
             </tr>
           {/each}
         </tbody>
-      </table>
+      </Table>
     </div>
   {/if}
 </section>
@@ -310,7 +310,7 @@
     background: var(--bg-surface);
   }
 
-  table {
+  .table-scroll :global(.credential-table) {
     width: 100%;
     min-width: 1060px;
     border-collapse: collapse;
@@ -391,7 +391,7 @@
       background: transparent;
     }
 
-    table,
+    .table-scroll :global(.credential-table),
     thead,
     tbody,
     tr,

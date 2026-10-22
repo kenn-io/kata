@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -44,7 +44,7 @@ func TestFederationSigningCLIUsesSelectedDaemon(t *testing.T) {
 					child.Env = append(child.Env, key+"="+value)
 				}
 			}
-			child.Env = append(child.Env, "KATA_SIGNING_CLI_HELPER=1", "KATA_HOME="+cliHome,
+			child.Env = append(child.Env, "KATA_SIGNING_CLI_HELPER=1", "KATA_HOME="+cliHome, "KATA_TEST_HOME="+cliHome,
 				"KATA_DB="+filepath.Join(cliHome, "kata.db"), "GIT_CONFIG_NOSYSTEM=1",
 				"GIT_CONFIG_GLOBAL="+filepath.Join(cliHome, "gitconfig"))
 			if selector == "server" {
@@ -55,7 +55,7 @@ func TestFederationSigningCLIUsesSelectedDaemon(t *testing.T) {
 			all, err := config.ReadFederationCredentials()
 			require.NoError(t, err)
 			expected := credential
-			expected.Signing = &federationsigning.Source{
+			expected.Signing = &signingpolicy.Source{
 				KeyID: "key-a", KeyEnv: "TEST_DAEMON_SIGNING_KEY", HubURL: credential.HubURL,
 			}
 			require.Equal(t, expected, all.Projects[uid])

@@ -27,6 +27,7 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 		{"missing daemon config", "", "", "config.daemon", "info"},
 		{"invalid daemon config", "config.toml", "[auth]\ntoken = [secret-token\n", "config.daemon", "fail"},
 		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail"},
+		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail"},
 		{"invalid display config", "config.toml", "[display]\nmarkdown_renderer=['']", "config.daemon", "fail"},
 		{"unknown hook key", "hooks.toml", "[hooks]\npol_size=2", "config.hooks", "fail"},
 		{"missing hooks", "", "", "config.hooks", "info"},

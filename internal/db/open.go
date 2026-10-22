@@ -1,5 +1,7 @@
 package db
 
+import "time"
+
 // OpenConfig carries the mode flags shared across storage backends. New fields
 // must be safe to default: the zero value is "read-write, create-if-missing"
 // behavior for both backends.
@@ -8,6 +10,8 @@ type OpenConfig struct {
 	// backend-specific setup writes. Cutover and export paths use it for
 	// non-mutating inspection.
 	ReadOnly bool
+	// SQLiteBusyTimeout overrides SQLite connection busy handlers. Zero keeps 5s.
+	SQLiteBusyTimeout time.Duration
 	// Serving holds the backend's process-lifetime serving fence. It is used by
 	// daemons, not short-lived CLI handles, so offline restore can quiesce every
 	// host before replacing state.
@@ -37,6 +41,12 @@ func Serving() OpenOption {
 // storage handle. Tests use it; production opens keep the default.
 func WithRelayCheckpointCapacity(bytes int64) OpenOption {
 	return func(c *OpenConfig) { c.RelayCheckpointCapacity = bytes }
+}
+
+// WithSQLiteBusyTimeout configures SQLite busy handlers for this handle.
+// Other backends ignore it.
+func WithSQLiteBusyTimeout(wait time.Duration) OpenOption {
+	return func(c *OpenConfig) { c.SQLiteBusyTimeout = wait }
 }
 
 // ApplyOpenOptions folds the variadic options into a fresh OpenConfig. Backends

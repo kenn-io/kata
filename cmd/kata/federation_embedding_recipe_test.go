@@ -25,8 +25,9 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	t.Cleanup(provider.Close)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 	t.Setenv("KATA_SERVER", "https://unreachable.example")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nbase_url = \""+provider.URL+"\"\nmodel = \"example-model\"\ndims = 2\napi_key = \"recipe-test-secret-never-export\"\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nbase_url = \""+provider.URL+"\"\nmodel = \"example-model\"\ndims = 2\napi_key = \"recipe-test-secret-never-export\"\n"+untrustedWebConfig), 0600))
 	var output bytes.Buffer
 	cmd := newFederationCmd()
 	cmd.SilenceUsage = true

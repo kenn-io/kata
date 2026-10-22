@@ -47,6 +47,7 @@ var eventDescribers = map[string]eventDescriber{
 	"issue.unassigned":         staticDesc("unassigned"),
 	"issue.assignment_renewed": assignmentRenewedDesc,
 	"issue.assignment_expired": assignmentExpiredDesc,
+	"issue.scheduled_reached":  payloadDesc("scheduled date reached", "value"),
 	"issue.priority_set":       prioritySetDesc,
 	"issue.priority_cleared":   priorityClearedDesc,
 	"issue.updated":            staticDesc("updated"),

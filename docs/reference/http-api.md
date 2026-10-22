@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-17
+last_edited: 2026-10-22
 ---
 
 # HTTP API schema
@@ -174,7 +174,9 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
-| `0.29.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy; bridge preflight and connect preserve this conflict. |
+| `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy; bridge preflight and connect preserve this conflict. |
+| `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
+| `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |
@@ -608,6 +610,22 @@ endpoints published in OpenAPI:
   on the daemon that issued the target even when its roster defaults to a
   different remote daemon.
 
+Clients can count a parent's open and total children from the snapshot alone,
+without a second `GET /api/v1/issues` request. `collection_links` contains
+every link between two issues the principal can read (non-deleted issues in
+non-archived projects) that has at least one endpoint in `collection`,
+regardless of the collection's view, project_uid, status, owner, label,
+relationship, text, local_date, time_zone, or limit parameters. For each
+`parent` link whose parent (`to_issue_uid`) is in `collection`, `from_status`
+is the child's status.
+Counting those links per parent gives the same open and total values as
+`child_counts` on `IssueOut` from `GET /api/v1/issues` for the same principal
+at the same cursor. An absent `child_counts` means zero of zero. Children the
+principal cannot read are excluded from both. This holds for every daemon
+whose snapshot reports `contract_version` `2`. The daemon-switcher proxy
+(`/api/v1/ui/proxy`) does not forward `GET /api/v1/issues` or project issue
+lists, so `collection_links` is how to get child counts through it.
+
 A matching snapshot `If-None-Match` returns `304` without rebuilding the
 projection. The response cursor is captured in the same consistent storage
 read as a newly built projection. Browser events are invalidations; the SPA
@@ -708,15 +726,36 @@ actor, and adoption policy returns the same active enrollment. An attribute
 mismatch or a revoked replacement enrollment returns `409` with
 `federation_enrollment_token_conflict`.
 
-`POST /api/v1/federation/replicas/{project_id}/actions/leave` accepts two
+`POST /api/v1/federation/replicas/{project_id}/actions/leave` accepts three
 mutually exclusive coordination flags. `preflight=true` performs the existing
 read-only eligibility check. `prepare=true` validates the same local
 conditions, durably marks any config-managed credential as leaving, blocks new
 config reconciliation for that mapping, and waits for earlier enrollment or
 rotation requests to drain. Its `pending_enrollment` response gives the
-non-secret hub coordinates needed for revoke. The client then performs hub
-cleanup and calls the endpoint again without either flag for authoritative
-local teardown. Repeating prepare and finalization is safe after interruption.
+non-secret hub coordinates needed for revoke, and its `preparation_id`
+identifies this preparation. The client then performs hub cleanup and calls the
+endpoint again without any flag for authoritative local teardown. Repeating
+prepare and finalization is safe after interruption.
+
+Send prepare a random `preparation_id` of at most 128 characters. The client
+then knows the ID even if the prepare response is lost, and can retry prepare
+with the same ID: repeated prepares with one ID hold a single preparation.
+Without `preparation_id`, prepare picks one and returns it.
+
+If hub cleanup fails, or the prepare response is lost, the client sends
+`abort=true` with that `preparation_id` to release its preparation, so rebind
+and join work again without a daemon restart:
+
+- Abort releases only the named preparation of this project on this daemon.
+  Another client's preparation keeps the mapping blocked until it finishes or
+  is released.
+- Abort of an unknown or already released preparation succeeds and changes
+  nothing, so a client can retry it safely.
+- Abort returns `409 federation_leave_started` when a credential or
+  config-managed reservation is marked for leave, the project is archived, or
+  the binding is detached. Finish those leaves instead.
+- Abort without `preparation_id`, or `preparation_id` with preflight or
+  teardown, returns `400 validation`.
 
 `POST /api/v1/federation/replicas/{project_id}/actions/rebind` accepts only
 `{"hub_catalog":"<name>"}`. The server resolves that name from its own daemon

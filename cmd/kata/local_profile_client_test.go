@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -62,7 +62,7 @@ instance_uid = %q
 	defer server.Close()
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: workHome, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(workHome, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(workHome, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"})
@@ -140,7 +140,7 @@ instance_uid = %q
 
 			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: workHome, InstanceUID: uid})
 			require.NoError(t, err)
-			ns, err := daemon.NewNamespaceForHome(workHome, profile.StorageID)
+			ns, err := daemonruntime.NewNamespaceForHome(workHome, profile.StorageID)
 			require.NoError(t, err)
 			require.NoError(t, ns.EnsureDirs())
 			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"})

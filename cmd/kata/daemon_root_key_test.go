@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/telemetry"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -27,7 +27,7 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	orig := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 	t.Cleanup(func() { newTelemetryReporter = orig })
@@ -59,7 +59,7 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 			t.Error("daemon did not stop after context cancellation")
 		}
 	})
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)

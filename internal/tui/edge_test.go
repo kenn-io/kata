@@ -407,7 +407,7 @@ func TestEdge_RefetchAfterRenderFilterChangeKeepsWorkingSet(t *testing.T) {
 // project rows.
 func TestEdge_StaleRefetch_DroppedAcrossScopeToggle(t *testing.T) {
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	// Currently in all-projects scope.
 	m.scope = scope{allProjects: true}
 	m.list.loading = false

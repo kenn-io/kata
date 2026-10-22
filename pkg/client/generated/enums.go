@@ -50,13 +50,14 @@ type CaptureTelemetryEventResponseBodyStatus string
 
 const (
 	Disabled CaptureTelemetryEventResponseBodyStatus = "disabled"
+	Full     CaptureTelemetryEventResponseBodyStatus = "full"
 	Queued   CaptureTelemetryEventResponseBodyStatus = "queued"
 )
 
 // Validate checks if the CaptureTelemetryEventResponseBodyStatus value is valid
 func (c CaptureTelemetryEventResponseBodyStatus) Validate() error {
 	switch c {
-	case Disabled, Queued:
+	case Disabled, Full, Queued:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CaptureTelemetryEventResponseBodyStatus value, got: %v", c))

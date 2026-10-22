@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { DetailDrawer, IconButton, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { DetailDrawer, IconButton, Tooltip, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
   import MonitorIcon from '@lucide/svelte/icons/monitor'
@@ -266,7 +266,30 @@
       issueUID: issue.uid,
     }
   })
-  let newTaskAllowed = $derived(canMutate && (!scopedAuthority || childParent !== undefined))
+  const controlID = $props.id()
+  const newTaskReasonID = `${controlID}-new-task-reason`
+  let writeBlockedReason = $derived(
+    canMutate
+      ? undefined
+      : stale
+        ? 'Changes are paused while the snapshot may be out of date.'
+        : readOnly || !snapshot.capabilities.writable
+          ? 'This credential is read-only.'
+          : 'Changes are paused while Kata connects.',
+  )
+  let pendingReason = $derived(
+    mutationPending ? 'Wait for the current change to finish.' : undefined,
+  )
+  let newTaskBlockedReason = $derived(
+    writeBlockedReason ??
+      (scopedAuthority && childParent === undefined
+        ? 'Open a task first. This credential can only add subtasks.'
+        : pendingReason),
+  )
+  let projectCreationBlockedReason = $derived(
+    writeBlockedReason ??
+      (scopedAuthority ? 'This credential cannot create projects.' : pendingReason),
+  )
 
   function navigate(next: AppRoute): void {
     navigationGeneration += 1
@@ -369,7 +392,7 @@
   }
 
   function beginNewTask(): void {
-    if (!newTaskAllowed || mutationPending) return
+    if (newTaskBlockedReason) return
     if (scopedAuthority) {
       captureOpen = true
       return
@@ -480,6 +503,21 @@
   }
 </script>
 
+{#snippet newTaskButton()}
+  <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
+  <button
+    type="button"
+    class="accent-button header-action"
+    aria-disabled={newTaskBlockedReason ? 'true' : undefined}
+    aria-describedby={newTaskBlockedReason ? newTaskReasonID : undefined}
+    title={newTaskBlockedReason ? undefined : 'New task'}
+    onclick={beginNewTask}
+  >
+    <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+    <span>New task</span>
+  </button>
+{/snippet}
+
 {#snippet navigationSidebar()}
   <Sidebar
     {areas}
@@ -489,7 +527,7 @@
       fetched_at: currentView.fetched_at,
     }}
     {searchFilters}
-    projectCreationDisabled={!projectWideMutationAllowed || mutationPending}
+    {projectCreationBlockedReason}
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
@@ -507,6 +545,9 @@
     >
     <span>Account: <strong>{connectionAccount}</strong></span>
     <span>Credential: <strong>{connectionStatus}</strong></span>
+    {#if stale}
+      <span>Snapshot may be out of date. Changes are paused.</span>
+    {/if}
   </div>
   <TopBar class="kata-header" ariaLabel="Kata workspace">
     {#snippet left()}
@@ -569,31 +610,18 @@
               <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
             {/if}
           </IconButton>
-          <button
-            type="button"
-            class="accent-button header-action"
-            disabled={!newTaskAllowed || mutationPending}
-            title="New task"
-            onclick={beginNewTask}
-          >
-            <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-            <span>New task</span>
-          </button>
+          {#if newTaskBlockedReason}
+            <Tooltip text={newTaskBlockedReason} align="end">
+              {@render newTaskButton()}
+            </Tooltip>
+            <span id={newTaskReasonID} class="kit-sr-only">{newTaskBlockedReason}</span>
+          {:else}
+            {@render newTaskButton()}
+          {/if}
         {/if}
       </div>
     {/snippet}
   </TopBar>
-  {#if stale || readOnly}
-    <aside
-      class="authority-status"
-      role="status"
-      aria-label={stale ? 'Stale Kata data' : 'Read-only Kata session'}
-    >
-      {stale
-        ? 'Snapshot may be out of date. Changes are paused.'
-        : 'This Kata session is read-only.'}
-    </aside>
-  {/if}
   {#if selectedProject && !credentialRoute && !loading && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
@@ -773,7 +801,7 @@
 
 <QuickCapture
   open={captureOpen}
-  disabled={!newTaskAllowed || mutationPending}
+  disabled={newTaskBlockedReason !== undefined}
   {draftFenceGeneration}
   inboxName={scopedAuthority ? undefined : inboxProject?.name}
   onClose={() => {
@@ -838,22 +866,6 @@
     color: var(--accent-red);
   }
 
-  .authority-status {
-    position: absolute;
-    top: calc(var(--header-height, 44px) + var(--space-3));
-    right: var(--space-3);
-    z-index: 20;
-    max-width: min(360px, calc(100% - 24px));
-    border: 1px solid var(--accent-yellow);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-lg);
-    color: var(--text-primary);
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--font-size-sm);
-    pointer-events: none;
-  }
-
   .kata-header-actions {
     display: flex;
     align-items: center;
@@ -880,11 +892,11 @@
     font-weight: 600;
   }
 
-  .accent-button:hover:not(:disabled) {
+  .accent-button:hover:not([aria-disabled='true']) {
     filter: brightness(1.08);
   }
 
-  .accent-button:disabled {
+  .accent-button[aria-disabled='true'] {
     opacity: var(--opacity-disabled);
     cursor: not-allowed;
   }

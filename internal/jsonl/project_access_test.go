@@ -7,13 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"go.kenn.io/kata/internal/db/sqlitestore"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/jsonl"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestProjectAccessBackupRestore(t *testing.T) {
@@ -67,7 +68,7 @@ func TestProjectAccessBackupAcrossPostgres(t *testing.T) {
 	require.NoError(t, err)
 	policy, _, err := source.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin")
 	require.NoError(t, err)
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	postgres, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -25,7 +27,7 @@ func TestOpen_ConnectsAndReturnsStore(t *testing.T) {
 		t.Skip("requires postgres testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 
 	store, err := pgstore.Open(ctx, dsn)

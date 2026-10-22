@@ -15,7 +15,7 @@ env:
 jobs:
   web-static:
     name: Web static checks
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-4cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -41,7 +41,7 @@ jobs:
 
   web-browser:
     name: Web browser tests
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -53,7 +53,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Set up Node
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f  # v6.1.0
@@ -90,7 +90,7 @@ jobs:
 
   go:
     name: Go tests
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -102,7 +102,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Set up Node
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f  # v6.1.0
@@ -132,7 +132,7 @@ jobs:
 
   native-agent-plugins:
     name: Native agent plugins
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-4cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
@@ -143,7 +143,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Set up Node
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f  # v6.1.0
@@ -174,7 +174,7 @@ jobs:
   api-breaking:
     name: OpenAPI breaking changes
     if: github.event_name == 'pull_request'
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-4cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -187,7 +187,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Check for breaking API contract changes
         env:
@@ -196,7 +196,7 @@ jobs:
 
   api-check:
     name: OpenAPI artifacts
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-4cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -208,14 +208,14 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Check generated OpenAPI artifacts
         run: make api-check
 
   postgres:
     name: PostgreSQL ${{ matrix.postgres }} conformance
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -228,9 +228,12 @@ jobs:
           POSTGRES_DB: kata_test
           POSTGRES_USER: kata
           POSTGRES_PASSWORD: kata
+          # Test databases are disposable, so keep the data directory in memory.
+          PGDATA: /pgdata/data
         ports:
           - 5432:5432
         options: >-
+          --tmpfs /pgdata
           --health-cmd "pg_isready -U kata -d kata_test"
           --health-interval 5s
           --health-timeout 5s
@@ -246,7 +249,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Set up Node
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f  # v6.1.0
@@ -261,26 +264,56 @@ jobs:
       - name: Install frozen web dependencies
         run: make web-install
 
+      # Service containers cannot take server flags, so turn off durability
+      # with ALTER SYSTEM; all three settings apply on reload. TCP skips the
+      # socket-only server the image runs during initialization.
+      - name: Turn off PostgreSQL durability
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: >-
+          docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U kata -d kata_test
+          -c "ALTER SYSTEM SET fsync = off"
+          -c "ALTER SYSTEM SET synchronous_commit = off"
+          -c "ALTER SYSTEM SET full_page_writes = off"
+          -c "SELECT pg_reload_conf()"
+
       - name: Run PostgreSQL backend and operator tests
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_DSN: postgres://kata:kata@127.0.0.1:5432/kata_test?sslmode=disable
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: >-
-          env -u KATA_AUTH_TOKEN go test -count=1 -p 1
-          .
-          ./internal/testenv
-          ./internal/db/pgstore
-          ./internal/db/storeopen
-          ./internal/daemon
-          ./internal/jsonl
-          ./internal/vector
+        # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
+        run: |
+          env -u KATA_AUTH_TOKEN go test -count=1 -p 4 \
+          . \
+          ./internal/testenv \
+          ./internal/client \
+          ./internal/db/pgstore \
+          ./internal/db/storeopen \
+          ./internal/daemon \
+          ./internal/jsonl \
+          ./internal/vector \
           ./cmd/kata
-          ./e2e
+          env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
 
   windows:
-    name: Windows
+    name: ${{ matrix.name }}
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      # G-S uses measured Windows root-test times. Rebalance if a CLI shard
+      # takes longer than the remaining-package leg. Both CLI selectors derive
+      # from the single Bash pattern below.
+      matrix:
+        include:
+          - name: Windows
+            cli: false
+          - name: Windows CLI (G-S)
+            cli: true
+            shard: G-S
+          - name: Windows CLI (A-F, T-Z, and fuzz/examples)
+            cli: true
+            shard: complement
 
     steps:
       - name: Check out repository
@@ -298,27 +331,63 @@ jobs:
           }
 
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ !matrix.cli }}
+
+      # The Windows job is the only writer of the shared Go cache.
+      - name: Restore shared Go cache
+        id: restore-go-cache
+        if: matrix.cli
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5.1.0
+        with:
+          path: |
+            ${{ env.GOMODCACHE }}
+            ${{ env.GOCACHE }}
+          key: setup-go-Windows-x64-go-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.mod') }}
+
+      - name: Warn on shared Go cache miss
+        if: matrix.cli && steps.restore-go-cache.outputs.cache-hit != 'true'
+        run: echo "::warning::This CLI shard will rebuild the test binary."
 
       - name: Build
+        if: ${{ !matrix.cli }}
         run: go build ./...
 
       - name: Vet
+        if: ${{ !matrix.cli }}
         run: go vet ./...
 
       - name: Run tests
+        if: ${{ !matrix.cli }}
         shell: bash
         env:
           KATA_TEST_FAST_SQLITE: "1"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        run: env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off ./...
+        run: |
+          cli_package=$(go list ./cmd/kata)
+          packages=$(go list ./... | grep -vx "$cli_package")
+          env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
+
+      - name: Run CLI tests
+        if: matrix.cli
+        shell: bash
+        env:
+          KATA_TEST_FAST_SQLITE: "1"
+          KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
+          TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          shard_pattern='^Test[G-S]'
+          TEST_RUN="$shard_pattern"
+          TEST_SKIP=''
+          if [[ "$TEST_SHARD" == complement ]]; then TEST_RUN='.'; TEST_SKIP="$shard_pattern"; fi
+          env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
     name: golangci-lint
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -342,7 +411,7 @@ jobs:
 
   nilaway:
     name: nilaway
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -361,7 +430,7 @@ jobs:
 
   federation-stress:
     name: Federation stress tests
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -373,14 +442,14 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Run federation stress tests
         run: env -u KATA_AUTH_TOKEN make test-stress
 
   federation-docker:
     name: Federation Docker tests
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'namespace-profile-linux-8cpu' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -392,7 +461,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
 
       - name: Run federation Docker tests
         run: env -u KATA_AUTH_TOKEN make test-federation-docker

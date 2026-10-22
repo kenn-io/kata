@@ -1,5 +1,9 @@
-export function startSessionEndedReporting(post: (duration: string) => Promise<unknown>) {
-  let started = document.hidden ? undefined : performance.now()
+export function startSessionEndedReporting(
+  post: (duration: string) => Promise<unknown>,
+  quiet = false,
+) {
+  let stopped = false
+  let started = quiet || document.hidden ? undefined : performance.now()
   let elapsed = 0
   let hasInterval = started !== undefined
   let ended = false
@@ -12,7 +16,7 @@ export function startSessionEndedReporting(post: (duration: string) => Promise<u
     started = undefined
   }
   const flush = () => {
-    if (!authenticated || !ended || !hasInterval) return
+    if (quiet || !authenticated || !ended || !hasInterval) return
     const duration =
       elapsed < 60_000
         ? 'under_1m'
@@ -35,7 +39,7 @@ export function startSessionEndedReporting(post: (duration: string) => Promise<u
     flush()
   }
   const resume = () => {
-    if (authenticated && !document.hidden && !ended && started === undefined) {
+    if (!quiet && authenticated && !document.hidden && !ended && started === undefined) {
       hasInterval = true
       started = performance.now()
     }
@@ -53,10 +57,32 @@ export function startSessionEndedReporting(post: (duration: string) => Promise<u
       resume()
     }
   }
-  document.addEventListener('visibilitychange', visibility)
-  window.addEventListener('pagehide', end)
-  window.addEventListener('pageshow', resume)
+  const listen = (enabled: boolean) => {
+    if (enabled) {
+      document.addEventListener('visibilitychange', visibility)
+      window.addEventListener('pagehide', end)
+      window.addEventListener('pageshow', resume)
+    } else {
+      document.removeEventListener('visibilitychange', visibility)
+      window.removeEventListener('pagehide', end)
+      window.removeEventListener('pageshow', resume)
+    }
+  }
+  listen(!quiet)
   return {
+    setQuiet: (value: boolean) => {
+      if (stopped || quiet === value) return
+      quiet = value
+      listen(!quiet)
+      if (quiet) {
+        clearTimeout(timer)
+        pause()
+        hiddenAt = undefined
+      } else {
+        flush()
+        resume()
+      }
+    },
     pause: () => {
       authenticated = false
       pause()
@@ -67,11 +93,10 @@ export function startSessionEndedReporting(post: (duration: string) => Promise<u
       resume()
     },
     stop: () => {
+      stopped = true
       clearTimeout(timer)
       started = undefined
-      document.removeEventListener('visibilitychange', visibility)
-      window.removeEventListener('pagehide', end)
-      window.removeEventListener('pageshow', resume)
+      listen(false)
     },
   }
 }

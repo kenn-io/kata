@@ -3,14 +3,15 @@ package pgstore_test
 import (
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRootNativeAttribution(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -19,7 +20,7 @@ func TestRootNativeAttribution(t *testing.T) {
 }
 
 func TestAttributionReceiptBeforeEvent(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -28,7 +29,7 @@ func TestAttributionReceiptBeforeEvent(t *testing.T) {
 }
 
 func TestRootKeyRotationReplicaAuthority(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -37,7 +38,7 @@ func TestRootKeyRotationReplicaAuthority(t *testing.T) {
 }
 
 func TestRootSigningKeyUnavailable(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -46,7 +47,7 @@ func TestRootSigningKeyUnavailable(t *testing.T) {
 }
 
 func TestRootKeyRepin(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
 	s, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)

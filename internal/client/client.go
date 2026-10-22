@@ -20,8 +20,8 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -129,7 +129,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			return
 		}
 		for _, r := range recs {
-			if !daemon.RuntimeProcessAlive(r) {
+			if !daemonruntime.RuntimeProcessAlive(r) {
 				continue
 			}
 			ep := r.Endpoint()
@@ -272,7 +272,7 @@ const SSEHandshakeTimeout = 10 * time.Second
 // Opts shapes both NewHTTPClient and NewStreamingClient. ResponseHeaderTimeout
 // is non-zero only for SSE clients.
 type Opts struct {
-	FederationSigning     *federationsigning.Source
+	FederationSigning     *signingpolicy.Source
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool
@@ -436,7 +436,7 @@ func newHTTPClientWithoutAuth(ctx context.Context, baseURL string, opts Opts) (*
 	if !strings.HasPrefix(baseURL, UnixBase) {
 		return tcpClient(opts)
 	}
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return nil, err
 	}

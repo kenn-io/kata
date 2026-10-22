@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-17
+last_edited: 2026-10-20
 ---
 
 # CLI reference
@@ -1711,7 +1711,21 @@ returns an error identifying the installed version and directs you to
 `kata daemon restart` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.
 
-Local commands auto-start the daemon when appropriate. `daemon start` starts a
+Local commands auto-start the daemon when appropriate. When the running local
+daemon reports a different version, a local command stops it and starts one from
+the current binary. It leaves the daemon running and fails instead in these
+cases:
+
+- The database schema is newer than the current binary supports, or the current
+  binary is an older release than the daemon. Run the command with the newer
+  kata binary.
+- PostgreSQL storage uses `mode = "validate"` and its schema differs from the
+  current binary's. Validate mode never changes the schema, so a replacement
+  daemon could not start. Upgrade the schema first: stop the daemon and run the
+  current binary's `kata storage postgres migrate`, as described in
+  [PostgreSQL upgrades](../operations/postgres.md#upgrade-ceremony).
+
+The error names both versions or schemas. `daemon start` starts a
 background daemon and returns after startup is confirmed. If the running local
 daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
 stops it and starts an explicit daemon in its place, reporting the replaced

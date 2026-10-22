@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-10-09
+last_edited: 2026-10-19
 ---
 
 # Go client
@@ -10,6 +10,11 @@ Go programs talk to a Kata daemon through `go.kenn.io/kata/pkg/client`. The
 client is generated from the [HTTP API schema](http-api.md) and uses the same
 daemon selection, transports, and bearer-token rules as the Kata CLI, so an
 integration does not have to reimplement them.
+
+Importing `pkg/client` does not link the daemon, its storage engines,
+telemetry, or sync connectors, so client-only programs stay small. The
+[test server](#test-against-a-real-daemon) in `pkg/katatest` runs a real
+daemon and links all of them; import it only from tests.
 
 ```sh
 go get go.kenn.io/kata
@@ -53,6 +58,14 @@ storage and identity pass the recovery checks.
 
 Discover does not probe configured remotes. The first request reports whether
 a remote is reachable.
+
+Discover finds a PostgreSQL-backed default local daemon from its storage DSN.
+Client-only programs do not include the PostgreSQL driver, so they cannot
+resolve DSN routing options: the `host`, `port`, `dbname`, `service`, or
+`servicefile` query options, or `PGHOST`, `PGPORT`, `PGDATABASE`, or
+`PGSERVICE` filling in a part the URL leaves out. Discover then returns an
+error. Set `KATA_SERVER` to the daemon's endpoint, which `kata daemon locate`
+prints.
 
 Discover returns an error matching `client.ErrDaemonUnavailable` when no
 daemon is selected or a selected local daemon has no reachable runtime. A

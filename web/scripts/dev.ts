@@ -79,7 +79,8 @@ try {
     cmd: [
       process.execPath,
       'x',
-      'vite',
+      'vp',
+      'dev',
       '--host',
       '127.0.0.1',
       '--port',

@@ -43,6 +43,7 @@
   or verified section in pull request descriptions.
 - User or Developer Benefit: Pull requests must have a user-facing benefit or improve the developer
   experience, and the body must say which one.
+- English: Write issues and pull requests in English.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
 - No Bash Content-Assertion Tests: Do not add bash tests that assert shell
@@ -170,11 +171,9 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-Windows tests use GitHub-hosted runners. Linux tests use Namespace profiles for
-trusted runs and GitHub-hosted runners for forks. Namespace profiles use the
-[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
-which disables workload access to Namespace features and APIs. GitHub fork
-approvals, token permissions, and secrets are separate controls.
+All CI jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
+`windows-2025` for Windows. Pull requests call the reusable test workflow from
+the same commit so workflow changes are exercised before merge.
 
 ## Repository-writer trust/threat model
 
@@ -329,9 +328,11 @@ authorization service. Review browser changes against these boundaries:
   `kata ui` opens that validated origin directly. Cookie-only ambient state is ignored; a session header still
   opts into the cookie-plus-header authentication path.
 - **CSP keeps code strict while allowing required layout state.** Production
-  scripts remain same-origin-only. Dynamic component positioning and CSS custom
-  properties require the narrow `style-src-attr 'unsafe-inline'` allowance;
-  never extend that exception to scripts.
+  scripts remain same-origin-only, with `script-src 'self' 'wasm-unsafe-eval'`
+  allowing Shiki's regex engine. JavaScript eval and inline scripts stay
+  blocked. Dynamic component positioning and CSS custom properties require the
+  narrow `style-src-attr 'unsafe-inline'` allowance; never extend that exception
+  to scripts.
 - **Snapshot consistency is a security and correctness boundary.** Matching
   snapshot ETags perform no projection reads, and a built snapshot captures its
   cursor inside the same consistent backend read. SQLite and PostgreSQL must

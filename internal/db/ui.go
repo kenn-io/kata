@@ -114,9 +114,9 @@ func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
 type UILink struct {
 	Link
 	FromQualifiedID string `json:"from_qualified_id"`
-	FromStatus      string `json:"from_status"`
+	FromStatus      string `json:"from_status" doc:"Current status of the from_issue_uid issue."`
 	ToQualifiedID   string `json:"to_qualified_id"`
-	ToStatus        string `json:"to_status"`
+	ToStatus        string `json:"to_status" doc:"Current status of the to_issue_uid issue."`
 }
 
 // UIGraphEdge carries a canonical directed edge when one endpoint is not

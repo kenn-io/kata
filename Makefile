@@ -17,7 +17,7 @@ install: web-embed
 		go install -ldflags="$(LDFLAGS)" ./cmd/kata
 
 test:
-	env -u KATA_AUTH_TOKEN go test $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test $(GOFLAGS_TEST) ./...
 
 # Regenerate the committed OpenAPI schema and generated Go client.
 # Drift tests fail if the OpenAPI artifacts or generated client differ from this output.
@@ -47,7 +47,7 @@ kata-ui-test:
 	bun run --cwd packages/kata-ui test
 
 kata-ui-pack-check:
-	cd packages/kata-ui && bun x vitest run pack.test.ts
+	cd packages/kata-ui && bun x vp test pack.test.ts
 
 web-check: kata-ui-check
 	cd web && bun run check
@@ -85,12 +85,12 @@ web-embed: web-build web-assets-check
 	cd web && bun run scripts/embed-assets.ts dist
 
 web-release-check: web-embed
-	env -u KATA_AUTH_TOKEN KATA_RUN_WEB_RELEASE_CHECK=1 go test ./e2e -run '^TestReleaseBinaryContainsValidatedWebUI$$' -count=1
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK KATA_RUN_WEB_RELEASE_CHECK=1 go test ./e2e -run '^TestReleaseBinaryContainsValidatedWebUI$$' -count=1
 
 openapi: api-generate
 
 test-short:
-	env -u KATA_AUTH_TOKEN go test -short $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
 test-stress:
 	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m
@@ -132,7 +132,7 @@ LINT_NEW_FLAGS ?= --new-from-merge-base=origin/main
 endif
 
 $(CURDIR)/.cache/golangci-lint/custom-gcl: .custom-gcl.yml go.mod
-	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.13.1
+	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.14.0
 
 lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
 	@if [ "$${GITHUB_ACTIONS:-}" = true ] && [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \

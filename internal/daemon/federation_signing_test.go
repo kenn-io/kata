@@ -29,6 +29,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -38,7 +39,7 @@ import (
 func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("TEST_INGRESS_KEY", strings.Repeat("k", 64))
-		source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_KEY"}
+		source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_KEY"}
 		home := t.TempDir()
 		t.Setenv("KATA_HOME", home)
 		t.Setenv("KATA_DB", filepath.Join(home, "spoke.db"))
@@ -85,11 +86,11 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		t.Setenv("TEST_PUSH_KEY", strings.Repeat("u", 64))
 		t.Setenv("TEST_REMOVED_KEY", strings.Repeat("r", 64))
 		t.Setenv("TEST_RELAY_CLEANUP_KEY", strings.Repeat("c", 64))
-		globalSource := federationsigning.Source{KeyID: "global-key", KeyEnv: "TEST_GLOBAL_KEY"}
-		pullSource := federationsigning.Source{KeyID: "pull-key", KeyEnv: "TEST_PULL_KEY"}
-		pushSource := federationsigning.Source{KeyID: "push-key", KeyEnv: "TEST_PUSH_KEY"}
-		removedSource := federationsigning.Source{KeyID: "removed-key", KeyEnv: "TEST_REMOVED_KEY"}
-		relayCleanupSource := federationsigning.Source{KeyID: "relay-cleanup-key", KeyEnv: "TEST_RELAY_CLEANUP_KEY"}
+		globalSource := signingpolicy.Source{KeyID: "global-key", KeyEnv: "TEST_GLOBAL_KEY"}
+		pullSource := signingpolicy.Source{KeyID: "pull-key", KeyEnv: "TEST_PULL_KEY"}
+		pushSource := signingpolicy.Source{KeyID: "push-key", KeyEnv: "TEST_PUSH_KEY"}
+		removedSource := signingpolicy.Source{KeyID: "removed-key", KeyEnv: "TEST_REMOVED_KEY"}
+		relayCleanupSource := signingpolicy.Source{KeyID: "relay-cleanup-key", KeyEnv: "TEST_RELAY_CLEANUP_KEY"}
 		globalEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "global-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Capabilities: "pull", Actor: "global-actor"})
 		require.NoError(t, err)
 		pullEnrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "pull-enrollment", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ProjectID: &project.ID, Capabilities: "pull", Actor: "pull-actor"})
@@ -115,7 +116,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		base := "https://hub.example/mount"
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier(base, []federationsigning.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: pushSource, EnrollmentID: pushEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}, {Source: relayCleanupSource, EnrollmentID: relayGrant.Enrollment.ID}}, state)
+		v, err := federationsigning.NewVerifier(base, []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}, {Source: globalSource, EnrollmentID: globalEnrollment.Enrollment.ID}, {Source: pullSource, EnrollmentID: pullEnrollment.Enrollment.ID}, {Source: pushSource, EnrollmentID: pushEnrollment.Enrollment.ID}, {Source: removedSource, EnrollmentID: removedEnrollment.Enrollment.ID}, {Source: relayCleanupSource, EnrollmentID: relayGrant.Enrollment.ID}}, state)
 		t.Cleanup(func() { _ = v.Close() })
 		previous := http.DefaultTransport
 		http.DefaultTransport = public.Client().Transport
@@ -333,7 +334,7 @@ func TestSignedRelayAcceptAllowsSupportedBulkBody(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("KATA_HOME", home)
 		t.Setenv("KATA_WORKSPACE", filepath.Join(home, "workspace"))
-		source := federationsigning.Source{KeyID: "relay-key", KeyEnv: "TEST_RELAY_SIGNING_KEY"}
+		source := signingpolicy.Source{KeyID: "relay-key", KeyEnv: "TEST_RELAY_SIGNING_KEY"}
 		state := filepath.Join(home, "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
 		store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
@@ -346,7 +347,7 @@ func TestSignedRelayAcceptAllowsSupportedBulkBody(t *testing.T) {
 			Capabilities: "push", Actor: "example-actor",
 		})
 		require.NoError(t, err)
-		verifier, err := federationsigning.NewVerifier("https://daemon.example", []federationsigning.Key{{
+		verifier, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{
 			Source: source, EnrollmentID: enrollment.Enrollment.ID,
 		}}, state)
 		require.NoError(t, err)
@@ -451,8 +452,8 @@ func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
 	t.Setenv("TEST_OPTIONAL_KEY", strings.Repeat("k", 64))
 	state := filepath.Join(t.TempDir(), "state")
 	require.NoError(t, federationsigning.InitializeReplayState(state))
-	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_OPTIONAL_KEY"}
-	v, err := federationsigning.NewVerifier("https://daemon.example", []federationsigning.Key{{Source: source, EnrollmentID: 1}}, state)
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_OPTIONAL_KEY"}
+	v, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, state)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = v.Close() })
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationSigning = v })

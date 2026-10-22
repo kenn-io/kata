@@ -68,6 +68,10 @@ type Storage interface {
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
 	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 	// identity / lifecycle
+	// PrepareSetupFinished saves or reuses a delivery identity, or reports completion.
+	PrepareSetupFinished(ctx context.Context, observed time.Time) (*SetupFinishedDelivery, bool, error)
+	CompleteSetupFinished(ctx context.Context, delivery SetupFinishedDelivery) error
+
 	// ClaimScreenView records one installation/screen/UTC-day visit; Release clears a rejected enqueue.
 	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
 	ReleaseScreenView(ctx context.Context, screen, day string) error
@@ -123,6 +127,9 @@ type Storage interface {
 	IssueByID(ctx context.Context, id int64) (Issue, error)
 	IssueByShortID(ctx context.Context, projectID int64, shortID string, include IncludeDeleted) (Issue, error)
 	IssueByUID(ctx context.Context, issueUID string, include IncludeDeleted) (Issue, error)
+	// IssuesByUIDs applies IssueByUID's filters to a batch, keyed by UID.
+	// Unknown, deleted (unless included) and out-of-scope UIDs are omitted.
+	IssuesByUIDs(ctx context.Context, issueUIDs []string, include IncludeDeleted) (map[string]Issue, error)
 	IssueUIDPrefixMatch(ctx context.Context, prefix string, limit int, include IncludeDeleted) ([]Issue, error)
 	ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error)
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)
@@ -157,6 +164,9 @@ type Storage interface {
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error)
 	ReconcileDueNotification(ctx context.Context, in ReconcileDueNotificationIn) (ReconcileDueNotificationOut, error)
+	// EnsureScheduledReachedFloor stores at as the reached-schedule floor on the
+	// first call and returns the stored floor on every call.
+	EnsureScheduledReachedFloor(ctx context.Context, at time.Time) (time.Time, error)
 	IssueQualifiersByUIDs(ctx context.Context, uids []string) (map[string]IssueQualifier, error)
 	PurgeResetCheck(ctx context.Context, afterID, projectID int64) (int64, error)
 

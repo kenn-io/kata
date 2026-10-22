@@ -37,7 +37,13 @@ test('the web UI reports app_opened once per UTC day to the serving daemon', asy
   })
   expect(new URL(first.url()).origin).toBe(kata.origin)
 
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const reloadedSnapshot = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith('/api/v1/ui/snapshot'),
+  )
+  await page.reload()
+  await reloadedSnapshot
+  await expect(page.getByRole('region', { name: 'Kata workspace' })).toBeVisible()
+  expect(requests).toHaveLength(1)
 
   const now = new Date(await page.evaluate(() => Date.now()))
   const nextMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)

@@ -96,10 +96,14 @@ before starting the daemon:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
+# Or use the shared opt-out:
+export DO_NOT_TRACK=1
 ```
 
 See [Configuration](../reference/configuration.md#telemetry) for the emitted
-events and excluded data.
+events and excluded data, and [reporting rules](../reference/configuration.md#reporting-rules)
+for CI and build-version requirements. Each CLI, TUI, and MCP process applies
+its own preferences when using an enabled daemon.
 
 ## Official tap publishing
 

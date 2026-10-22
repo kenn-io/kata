@@ -83,7 +83,9 @@ test('read-only polling authority fences mutations without opening SSE', async (
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Read-only example task' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await expect(page.getByRole('status', { name: 'Read-only Kata session' })).toBeVisible()
+  await expect(page.getByRole('status', { name: 'Active connection' })).toContainText(
+    'Credential: Read-only',
+  )
   await expect(page.getByRole('button', { name: 'Edit issue' })).toBeDisabled()
   expect(streamRequests).toBe(0)
 })
@@ -96,8 +98,12 @@ test('read-only loopback listeners open directly without login ceremony', async 
   try {
     await page.goto(`${kata.origin}/kata?view=all-open`)
 
-    await expect(page.getByRole('status', { name: 'Read-only Kata session' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled()
+    await expect(page.getByRole('status', { name: 'Active connection' })).toContainText(
+      'Credential: Read-only',
+    )
+    const newTask = page.getByRole('button', { name: 'New task' })
+    await expect(newTask).toBeDisabled()
+    await expect(newTask).toHaveAccessibleDescription('This credential is read-only.')
   } finally {
     await kata.restart()
   }

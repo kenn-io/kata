@@ -50,7 +50,10 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
+	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
+	{name: "recurring tombstone adoption", run: checkRecurringTombstoneAdoption},
 	{name: "recurring adoption refusal", run: checkRecurringAdoptionRefusal},
 	{name: "recurring moved child adoption refusal", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "DispatchRecurringCron", "IssueByUID", "MoveIssueProject", "AdoptProjectIntoFederation", "EnableProjectFederation", "ReadFederation", "MaxEventID", "ProjectByUID"}, run: checkRecurringMovedChildAdoptionRefusal},
 	{name: "recurring template protection", run: checkRecurringTemplateProtection},
@@ -59,6 +62,7 @@ var storageScenarios = []scenario{
 	{name: "recurring parent project move", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "CronJob", "MaxEventID", "MoveIssueProject"}, run: checkRecurringParentProjectMove},
 	{name: "recurring metadata attachment", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "IssueByID", "IssueByUID", "DispatchRecurringCron", "CreateRecurrenceForIssue"}, runWithBackend: checkRecurringMetadataAttachment},
 	{name: "recurring owner race and fence", runWithBackend: checkRecurringOwnerRaceAndFence},
+	{name: "recurring spoke authority", run: checkRecurringSpokeAuthority},
 	{name: "recurring federation", runWithBackend: checkRecurringFederation},
 	{name: "recurring atomic rollback", runWithBackend: checkRecurringAtomicRollback},
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},
@@ -83,6 +87,7 @@ var storageScenarios = []scenario{
 	{name: "comment reply federation", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject"}, run: checkCommentReplyFederation},
 	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
 	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
+	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "creation pagination precision", methods: []string{"ListIssues", "ListAllIssues", "SearchFTS"}, run: checkCreationPaginationPrecision},
 	{name: "list pagination", methods: []string{"ListIssues", "ListAllIssues", "CountIssues", "CountAllIssues"}, run: checkListPagination},
@@ -661,6 +666,22 @@ var storageScenarios = []scenario{
 			"CreateIssue", "CreateProject", "IssueByID", "ListDueNotificationIssueIDs", "ReconcileDueNotification",
 		},
 		run: checkDueNotifications,
+	},
+	{
+		name: "scheduled reached",
+		methods: []string{
+			"CloseIssue", "CreateIssue", "CreateProject", "EventsByUIDs", "IssueByID", "PatchIssueMetadata",
+			"ReconcileDueNotification",
+		},
+		run: checkScheduledReached,
+	},
+	{
+		name: "scheduled reached floor",
+		methods: []string{
+			"CreateIssue", "CreateProject", "CreateRecurrenceForIssue", "EnableProjectFederation",
+			"EnsureScheduledReachedFloor", "InsertRemoteEvent", "PatchIssueMetadata", "ReconcileDueNotification",
+		},
+		run: checkScheduledReachedFloor,
 	},
 	{
 		name: "due notification timezones",

@@ -20,9 +20,139 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+// A binary that cannot open the storage cannot replace the daemon serving it,
+// so the live daemon must keep running.
+func TestEnsureRunningKeepsDaemonWhenStorageSchemaIsNewerThanBinary(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(tmp, "kata.db"), db.CurrentSchemaVersion()+1)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "newer-build", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "older-build", "http://replacement-daemon")
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	assert.Zero(t, state.stopCalls, "the live daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+	for _, want := range []string{
+		"newer-build", "older-build",
+		fmt.Sprintf("schema_version %d", db.CurrentSchemaVersion()+1),
+		fmt.Sprintf("binary schema %d", db.CurrentSchemaVersion()),
+		"use a newer kata binary",
+	} {
+		assert.Contains(t, err.Error(), want)
+	}
+}
+
+// Client-only programs do not install a storage inspector. They cannot tell
+// whether a replacement could open the storage, so the live daemon stays.
+func TestEnsureRunningKeepsDaemonWithoutStorageInspector(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(tmp, "kata.db"), db.CurrentSchemaVersion())
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-build", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "new-build", "http://replacement-daemon")
+	previous := storageInspector
+	UseStorageInspector(nil)
+	t.Cleanup(func() { UseStorageInspector(previous) })
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrStorageInspectorUnavailable)
+	assert.Zero(t, state.stopCalls, "the live daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+}
+
+func TestEnsureRunningReplacesDaemonWhenStorageSchemaIsSupported(t *testing.T) {
+	for _, schema := range []int{db.CurrentSchemaVersion() - 1, db.CurrentSchemaVersion()} {
+		t.Run(fmt.Sprint(schema), func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			stageStorageSchema(t, filepath.Join(tmp, "kata.db"), schema)
+			_, addr := startMockDaemonPing(t, map[string]any{
+				"ok": true, "service": "kata", "version": "old-build", "pid": os.Getpid(),
+			})
+			require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+			state := patchEnsureHooks(t, "new-build", "http://replacement-daemon")
+
+			url, err := EnsureRunning(t.Context())
+
+			require.NoError(t, err)
+			assert.Equal(t, "http://replacement-daemon", url)
+			assert.Equal(t, 1, state.stopCalls)
+			assert.Equal(t, 1, state.startCalls)
+		})
+	}
+}
+
+func TestEnsureRunningKeepsNewerReleaseDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "v0.19.0", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	state := patchEnsureHooks(t, "v0.18.0", "http://replacement-daemon")
+
+	_, err := EnsureRunning(t.Context())
+
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	assert.Zero(t, state.stopCalls, "the newer daemon must not be stopped")
+	assert.Zero(t, state.startCalls)
+	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
+	assert.Contains(t, err.Error(), "use a newer kata binary")
+}
+
+// Only two release versions have a defined order. Development builds report a
+// commit (gabc1234) or a git-describe suffix whose semver order is wrong, so
+// they keep replacing any daemon that differs.
+func TestEnsureRunningReplacesDaemonUnlessItIsANewerRelease(t *testing.T) {
+	for _, tt := range []struct{ daemon, binary string }{
+		{daemon: "v0.18.0", binary: "v0.19.0"},
+		{daemon: "v0.19.0", binary: "v0.19.0-3-gabc1234"},
+		{daemon: "v0.19.0", binary: "gabc1234-dirty"},
+		{daemon: "v0.20.0-rc.1", binary: "v0.19.0"},
+	} {
+		t.Run(tt.daemon+" from "+tt.binary, func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			_, addr := startMockDaemonPing(t, map[string]any{
+				"ok": true, "service": "kata", "version": tt.daemon, "pid": os.Getpid(),
+			})
+			require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+			state := patchEnsureHooks(t, tt.binary, "http://replacement-daemon")
+
+			url, err := EnsureRunning(t.Context())
+
+			require.NoError(t, err)
+			assert.Equal(t, "http://replacement-daemon", url)
+			assert.Equal(t, 1, state.stopCalls)
+		})
+	}
+}
+
+// stageStorageSchema creates a SQLite database at path whose
+// meta.schema_version is schema.
+func stageStorageSchema(t *testing.T, path string, schema int) {
+	t.Helper()
+	store, err := sqlitestore.Open(t.Context(), path)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(schema))
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+}
 
 func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
@@ -170,7 +300,7 @@ func TestDiscoverForEnsureThreeOutcomes(t *testing.T) {
 				wantURL, wantAddress = startMockDaemonPing(t, tt.pingPayload)
 				require.NoError(t, writeRuntimeRecord(t, tmp, wantAddress))
 			}
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 
 			got, err := discoverForEnsure(context.Background(), ns.DataDir)
@@ -199,7 +329,7 @@ func TestDiscoverForEnsurePreservesScanErrors(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		tmp := setupKataEnv(t)
 		require.NoError(t, writeRuntimeRecord(t, tmp, "unix://"+filepath.Join(tmp, "missing.sock")))
-		ns, err := daemon.NewNamespace()
+		ns, err := daemonruntime.NewNamespace()
 		require.NoError(t, err)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -229,7 +359,7 @@ func TestDiscoverWebRuntime(t *testing.T) {
 
 func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	_, addr := startMockDaemonPing(t, map[string]any{
 		"ok":      true,
@@ -263,7 +393,7 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	assert.Equal(t, addr, target.Address)
 	assert.Equal(t, []string{"daemon", "start", "--foreground"}, got.Args)
 	assert.True(t, got.RefuseEphemeral)
-	assert.Contains(t, got.Env, daemon.AutoStartMarkerEnv+"=1")
+	assert.Contains(t, got.Env, daemonruntime.AutoStartMarkerEnv+"=1")
 
 	logData, err := os.ReadFile(filepath.Join(ns.DataDir, "daemon.log"))
 	require.NoError(t, err)
@@ -384,7 +514,7 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	cmd, waitCh := startLongLivedTestProcess(t)
 
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, cmd.Process.Pid, "127.0.0.1:1"))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.ErrorIs(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash), ErrLocalDaemonUnreachable)
 
@@ -563,7 +693,7 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 		"pid":     os.Getpid(),
 	})
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	origSignal := signalDaemonStopForEnsure
@@ -583,7 +713,7 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 
 func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
 	tmp := setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	other, _ := startLongLivedTestProcess(t)
@@ -615,7 +745,7 @@ func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
 
 func TestEnsureRunningStartsAfterLegacyDaemonExits(t *testing.T) {
 	tmp := setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	unrelated, _ := startLongLivedTestProcess(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -661,7 +791,7 @@ func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
 			t.Cleanup(server.Close)
 			addr := strings.TrimPrefix(server.URL, "http://")
 			require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 			startedAt := time.Now().Add(time.Hour)
 			if staleFirst {
@@ -706,7 +836,7 @@ func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testi
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, addr))
 	unreachableAddress := "unix://" + filepath.Join(tmp, "missing.sock")
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	origSignal := signalDaemonStopForEnsure
@@ -731,7 +861,7 @@ func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
 		"pid":     os.Getpid(),
 	})
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	origSignal := signalDaemonStopForEnsure
@@ -753,7 +883,7 @@ func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T)
 		"version": "old-version",
 	})
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	err = stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash)
 	require.Error(t, err)
@@ -803,7 +933,7 @@ func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *test
 
 func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	tmp := setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
@@ -836,7 +966,7 @@ func TestDiscoverStopsProbingAfterFirstLiveDaemon(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr1))
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, helper.Process.Pid, addr2))
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
 	url, ok, err := Discover(context.Background(), ns.DataDir)
@@ -882,7 +1012,7 @@ func mismatchedProcessIdentity(t *testing.T, identity kitdaemon.ProcessIdentity)
 
 func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
 	tmp := setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
@@ -960,7 +1090,7 @@ func writeRuntimeRecord(t *testing.T, home, addr string) error {
 
 func writeRuntimeRecordForPID(t *testing.T, home string, pid int, addr string) error {
 	t.Helper()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -335,6 +336,135 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.Contains(t, uiIssueUIDs(graph.GraphIssues), closedLinked.UID,
 		"graph authority must not inherit the collection's open-status filter")
 	require.NotEmpty(t, graph.GraphLinks)
+}
+
+// RunUISnapshotChildLinkContract verifies that the parent links in a browser
+// snapshot's collection_links let a client count a parent's open and total
+// children exactly as the store's child counts do, on every storage backend.
+func RunUISnapshotChildLinkContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok, "storage backend must implement db.UIStore")
+	ctx := context.Background()
+	primary, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	spoke, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	archived, err := store.CreateProject(ctx, "archived-project")
+	require.NoError(t, err)
+
+	lonelyParent := createCursorIssue(ctx, t, store, primary.ID, "Lonely parent issue")
+	parent := createCursorIssue(ctx, t, store, primary.ID, "Parent issue")
+	openChild := createCursorIssue(ctx, t, store, primary.ID, "Open child")
+	closedChild := createCursorIssue(ctx, t, store, primary.ID, "Closed child")
+	deletedChild := createCursorIssue(ctx, t, store, primary.ID, "Deleted child")
+	spokeChild := createCursorIssue(ctx, t, store, spoke.ID, "Spoke child")
+	archivedChild := createCursorIssue(ctx, t, store, archived.ID, "Archived child")
+	archivedLonelyChild := createCursorIssue(ctx, t, store, archived.ID, "Archived lonely child")
+
+	// Label the lonely parent first and the parent last so the parent sorts
+	// first by updated_at DESC and a Limit of 1 returns it.
+	addCursorLabel(ctx, t, store, lonelyParent, "parent-row")
+	for _, child := range []db.Issue{openChild, closedChild, deletedChild, spokeChild, archivedChild} {
+		createCursorLink(ctx, t, store, child, parent, "parent")
+	}
+	createCursorLink(ctx, t, store, archivedLonelyChild, lonelyParent, "parent")
+	_, _, changed, err := store.CloseIssue(ctx, closedChild.ID, "done", "user-a", "Completed", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, _, changed, err = store.SoftDeleteIssue(ctx, deletedChild.ID, "user-a")
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archived.ID, Actor: "user-a", Force: true,
+	})
+	require.NoError(t, err)
+	addCursorLabel(ctx, t, store, parent, "parent-row")
+
+	children := []string{openChild.UID, closedChild.UID, spokeChild.UID}
+	allChildren := []string{
+		openChild.UID, closedChild.UID, deletedChild.UID, spokeChild.UID,
+		archivedChild.UID, archivedLonelyChild.UID,
+	}
+	rels, err := store.RelationshipsByIssues(ctx, []int64{parent.ID, lonelyParent.ID})
+	require.NoError(t, err)
+	require.Equal(t, db.ChildCounts{Open: 2, Total: 3}, rels[parent.ID].Children)
+	require.Equal(t, db.ChildCounts{}, rels[lonelyParent.ID].Children)
+
+	intents := map[string]db.UISnapshotQuery{
+		"label":          {View: "all-open", Labels: []string{"parent-row"}},
+		"label+project":  {View: "all-open", Labels: []string{"parent-row"}, ProjectUID: primary.UID},
+		"label+limit":    {View: "all-open", Labels: []string{"parent-row"}, Limit: 1},
+		"label+hasChild": {View: "all-open", Labels: []string{"parent-row"}, Relationships: []string{"child"}},
+		"label+text":     {View: "all-open", Labels: []string{"parent-row"}, Text: "parent issue"},
+	}
+	for name, query := range intents {
+		t.Run(name, func(t *testing.T) {
+			snap, readErr := uiStore.ReadUISnapshot(ctx, query)
+			require.NoError(t, readErr)
+			uids := uiIssueUIDs(snap.Issues)
+			require.Contains(t, uids, parent.UID)
+			for _, uid := range allChildren {
+				require.NotContains(t, uids, uid)
+			}
+			var fromUIDs []string
+			for _, link := range snap.CollectionLinks {
+				if link.Type != "parent" || link.ToIssueUID != parent.UID {
+					continue
+				}
+				fromUIDs = append(fromUIDs, link.FromIssueUID)
+				if link.FromIssueUID == closedChild.UID {
+					require.Equal(t, "closed", link.FromStatus)
+				}
+			}
+			require.ElementsMatch(t, children, fromUIDs)
+			require.Equal(t, db.ChildCounts{Open: 2, Total: 3},
+				uiParentLinkCounts(snap.CollectionLinks, parent.UID))
+			require.Equal(t, rels[parent.ID].Children,
+				uiParentLinkCounts(snap.CollectionLinks, parent.UID))
+			if name == "label" {
+				require.Contains(t, uids, lonelyParent.UID)
+			}
+			if slices.Contains(uids, lonelyParent.UID) {
+				require.Equal(t, db.ChildCounts{},
+					uiParentLinkCounts(snap.CollectionLinks, lonelyParent.UID))
+				require.Equal(t, rels[lonelyParent.ID].Children,
+					uiParentLinkCounts(snap.CollectionLinks, lonelyParent.UID))
+			}
+		})
+	}
+
+	t.Run("restricted", func(t *testing.T) {
+		scoped := db.WithAuthorizedProjects(ctx, []string{primary.UID})
+		snap, readErr := uiStore.ReadUISnapshot(scoped, intents["label"])
+		require.NoError(t, readErr)
+		scopedRels, relErr := store.RelationshipsByIssues(scoped, []int64{parent.ID, lonelyParent.ID})
+		require.NoError(t, relErr)
+		require.Contains(t, uiIssueUIDs(snap.Issues), parent.UID)
+		require.Contains(t, uiIssueUIDs(snap.Issues), lonelyParent.UID)
+		want := db.ChildCounts{Open: 1, Total: 2}
+		require.Equal(t, want, scopedRels[parent.ID].Children)
+		require.Equal(t, want, uiParentLinkCounts(snap.CollectionLinks, parent.UID))
+		require.Equal(t, db.ChildCounts{}, scopedRels[lonelyParent.ID].Children)
+		require.Equal(t, db.ChildCounts{}, uiParentLinkCounts(snap.CollectionLinks, lonelyParent.UID))
+	})
+}
+
+// uiParentLinkCounts counts a parent's children from snapshot links the way a
+// client would: open children have an open from-status.
+func uiParentLinkCounts(links []db.UILink, parentUID string) db.ChildCounts {
+	var counts db.ChildCounts
+	for _, link := range links {
+		if link.Type != "parent" || link.ToIssueUID != parentUID {
+			continue
+		}
+		counts.Total++
+		if link.FromStatus == "open" {
+			counts.Open++
+		}
+	}
+	return counts
 }
 
 // RunUISnapshotReadyAssignmentExpiryContract verifies that a timed assignment

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/federation/joincommand"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -17,7 +18,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -454,7 +454,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/replicas",
 	}, func(ctx context.Context, in *api.CreateFederationReplicaRequest) (*api.CreateFederationReplicaResponse, error) {
-		var signing *federationsigning.Source
+		var signing *signingpolicy.Source
 		if in.Body.SigningKeyID != "" || in.Body.SigningKeyFile != "" || in.Body.SigningKeyEnv != "" {
 			if err := requireSigningSourceAuthority(ctx); err != nil {
 				return nil, err
@@ -463,8 +463,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, api.NewError(400, "validation", "invalid signing hub URL", "", nil)
 			}
-			source := federationsigning.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: canonical}
-			if err := federationsigning.ValidatePolicy(source.HubURL, []federationsigning.Key{{Source: source, EnrollmentID: 1}}); err != nil {
+			source := signingpolicy.Source{KeyID: in.Body.SigningKeyID, KeyFile: in.Body.SigningKeyFile, KeyEnv: in.Body.SigningKeyEnv, HubURL: canonical}
+			if err := signingpolicy.ValidatePolicy(source.HubURL, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}); err != nil {
 				return nil, api.NewError(400, "validation", "invalid or unavailable federation signing source", "", nil)
 			}
 			signing = &source
@@ -593,6 +593,22 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		preparationID := strings.TrimSpace(in.Body.PreparationID)
+		if in.Body.Abort {
+			if in.Body.Preflight || in.Body.Prepare {
+				return nil, api.NewError(http.StatusBadRequest, "validation",
+					"abort cannot be combined with preflight or prepare", "", nil)
+			}
+			if preparationID == "" {
+				return nil, api.NewError(http.StatusBadRequest, "validation",
+					"abort requires the preparation_id that prepare returned", "", nil)
+			}
+			return abortFederationReplicaLeave(ctx, cfg, in.ProjectID, disposition, preparationID)
+		}
+		if preparationID != "" && !in.Body.Prepare {
+			return nil, api.NewError(http.StatusBadRequest, "validation",
+				"preparation_id is accepted only with prepare or abort", "", nil)
+		}
 		// Refuse a non-spoke before any teardown so an archive-leave on a hub
 		// project does not archive it and then fail to detach. A project with no
 		// binding is the idempotent resume case and is allowed (RemoveProject and
@@ -664,10 +680,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 						cfg.DB,
 						cfg.federationCredentialStore(),
 						in.ProjectID,
+						preparationID,
 					)
 					match = prepared.ManagedReservation
 					found = prepared.ManagedReservationFound
 					findErr = prepareErr
+					body.PreparationID = prepared.PreparationID
 				} else {
 					match, found, findErr = config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 				}
@@ -1002,6 +1020,36 @@ func requireFederatedProjectForArchiveLeave(ctx context.Context, store db.Storag
 		return internalAPIError(err)
 	}
 	return nil
+}
+
+// abortFederationReplicaLeave serves the leave route's abort phase: a client
+// whose hub revoke failed releases the leave it prepared.
+func abortFederationReplicaLeave(
+	ctx context.Context, cfg ServerConfig, projectID int64, disposition, preparationID string,
+) (*api.LeaveFederationReplicaResponse, error) {
+	if err := AbortFederationReplicaLeave(ctx, cfg.DB, cfg.federationCredentialStore(), projectID, preparationID); err != nil {
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+		case errors.Is(err, ErrFederationReplicaLeaveStarted):
+			return nil, api.NewError(http.StatusConflict, "federation_leave_started", err.Error(),
+				"finish the leave with kata federation leave, or kata federation leave --local-only", nil)
+		case errors.Is(err, config.ErrFederationCredentialConflict):
+			return nil, api.NewError(http.StatusConflict, "federation_credential_conflict",
+				"managed federation credential reservations conflict",
+				"resolve the conflicting credentials, then retry leave", nil)
+		default:
+			return nil, federationReplicaAPIError(err)
+		}
+	}
+	project, err := cfg.DB.ProjectByID(ctx, projectID)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	return &api.LeaveFederationReplicaResponse{Body: api.LeaveFederationReplicaResultBody{
+		Disposition: disposition,
+		Project:     dbProjectToOut(project),
+	}}, nil
 }
 
 func federationReplicaAPIError(err error) error {

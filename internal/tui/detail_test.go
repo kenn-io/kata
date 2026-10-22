@@ -17,7 +17,7 @@ import (
 // Model.Update without re-typing the boilerplate.
 func newDetailHostModel(opts Options, projectID int64) Model {
 	m := initialModel(opts)
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{projectID: projectID}
 	return m
 }
@@ -1145,7 +1145,7 @@ func TestDetail_Viewport_ScrollClampsAtEOF(t *testing.T) {
 // project_id (not the scope's, which is zero in all-projects mode).
 func TestDetail_OpenInAllProjectsScope_UsesIssueProjectID(t *testing.T) {
 	m := initialModel(Options{})
-	m.api = &Client{}
+	m.api = NewClient("http://daemon.example", nil)
 	m.scope = scope{allProjects: true}
 	iss := Issue{ProjectID: 99, UID: "01TEST-eee5", ShortID: "eee5", Title: "cross-project"}
 	out, _ := m.Update(openDetailMsg{issue: iss})
@@ -1247,6 +1247,8 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 			Payload: map[string]any{"owner": "wesm", "assignment_expires_on": "2025-01-02T17:04:00Z"}},
 		{Type: "issue.assignment_expired", Actor: "system", CreatedAt: when,
 			Payload: map[string]any{"previous_owner": "wesm", "assignment_expires_on": "2025-01-02T15:04:00Z"}},
+		{Type: "issue.scheduled_reached", Actor: "system", CreatedAt: when,
+			Payload: map[string]any{"field": "scheduled_on", "value": "2025-01-02"}},
 	}
 	out := renderEventsTab(es, 200, 20, -1, tabState{})
 	assertContainsAll(t, out,
@@ -1257,6 +1259,7 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 		"[issue.assigned] 2025-01-02 15:04 d — assigned wesm",
 		"[issue.assignment_renewed] 2025-01-02 15:04 wesm — renewed assignment for wesm until 2025-01-02T17:04:00Z",
 		"[issue.assignment_expired] 2025-01-02 15:04 system — assignment for wesm expired at 2025-01-02T15:04:00Z",
+		"[issue.scheduled_reached] 2025-01-02 15:04 system — scheduled date reached 2025-01-02",
 	)
 }
 

@@ -3,9 +3,12 @@
  */
 
 export interface LeaveFederationReplicaRequestBody {
+  abort?: boolean
   actor?: string
   disposition?: string
   force?: boolean
   preflight?: boolean
+  /** @maxLength 128 */
+  preparation_id?: string
   prepare?: boolean
 }

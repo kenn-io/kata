@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestCreateConcurrentIdempotencyAcrossPostgresDaemons(t *testing.T) {
@@ -25,7 +26,7 @@ func TestCreateConcurrentIdempotencyAcrossPostgresDaemons(t *testing.T) {
 		t.Skip("requires postgres testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	firstStore, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
@@ -115,7 +116,7 @@ func TestPostgresCreateInvalidTitlesReturnBadRequest(t *testing.T) {
 		t.Skip("requires postgres testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 		t.Skip("requires postgres testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

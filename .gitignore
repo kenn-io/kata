@@ -34,6 +34,7 @@ __pycache__/
 /.worktrees/
 
 # Local planning/work artifacts
+/tmp/
 /.superpowers/
 /docs/assets/screenshots/
 /.pi/*.json

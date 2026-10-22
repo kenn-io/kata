@@ -2,6 +2,7 @@
 package telemetry
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,6 +12,9 @@ import (
 )
 
 const (
+	// ExitWait caps how long a completed command or TUI session waits for telemetry.
+	ExitWait = 50 * time.Millisecond
+
 	applicationName = "kata"
 	envPrefix       = "KATA"
 	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.
@@ -27,6 +31,7 @@ var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 // the UI capture route reject events outside the allowlist.
 type Client interface {
 	posthog.Client
+	CaptureConfirmed(context.Context, string, map[string]any, posthog.Delivery) (posthog.Status, error)
 	EventAllowed(event string) bool
 	SanitizeProperties(event string, properties map[string]any) (map[string]any, error)
 }
@@ -64,14 +69,21 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Commit:      opts.Commit,
 		Source:      "daemon",
 	},
+		posthog.WithAllowedEvent("setup_finished"),
 		posthog.WithAllowedEvent("daemon_active",
-			posthog.AllowProperty("project_count", posthog.AllowNumber),
+			posthog.AllowProperty("project_count", projectCountBuckets),
 		),
 		posthog.WithAllowedEvent("daemon_started",
-			posthog.AllowProperty("project_count", posthog.AllowNumber),
+			posthog.AllowProperty("project_count", projectCountBuckets),
 		),
 		posthog.WithAllowedEvent("app_opened",
-			posthog.AllowProperty("surface", appOpenedSurfaces),
+			posthog.AllowProperty("surface", validSurfaces),
+		),
+		posthog.WithAllowedEvent("issue_created",
+			posthog.RequireProperty("surface", validSurfaces),
+		),
+		posthog.WithAllowedEvent("issue_closed",
+			posthog.RequireProperty("surface", validSurfaces),
 		),
 		posthog.WithAllowedEvent("session_ended",
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
@@ -104,10 +116,33 @@ func DurationBucket(elapsed time.Duration) string {
 	}
 }
 
+const (
+	projectCount0To5    = "0-5"
+	projectCount6To20   = "6-20"
+	projectCount21To100 = "21-100"
+	projectCountOver100 = "over-100"
+)
+
+// ProjectCountBucket groups project totals without sending an exact count.
+func ProjectCountBucket(count int) string {
+	switch {
+	case count <= 5:
+		return projectCount0To5
+	case count <= 20:
+		return projectCount6To20
+	case count <= 100:
+		return projectCount21To100
+	default:
+		return projectCountOver100
+	}
+}
+
+var projectCountBuckets = posthog.AllowStringValues(projectCount0To5, projectCount6To20, projectCount21To100, projectCountOver100)
+
 var agentCallCountBuckets = posthog.AllowStringValues("1-10", "11-100", "over-100")
 
-// appOpenedSurfaces is the app_opened surface filter shared by the allowlist and the daemon's daily gate.
-var appOpenedSurfaces = posthog.AllowStringValues("web", "tui", "cli")
+// validSurfaces filters interface names shared by surface-attributed events.
+var validSurfaces = posthog.AllowStringValues("web", "tui", "cli")
 
 // AppOpenedSurface returns the surface the reporter would keep for app_opened, or "" when it would keep none.
 func AppOpenedSurface(properties map[string]any) string {
@@ -115,7 +150,7 @@ func AppOpenedSurface(properties map[string]any) string {
 		if strings.TrimSpace(key) != "surface" {
 			continue
 		}
-		if kept, ok := appOpenedSurfaces(value); ok {
+		if kept, ok := validSurfaces(value); ok {
 			surface, _ := kept.(string)
 			return surface
 		}

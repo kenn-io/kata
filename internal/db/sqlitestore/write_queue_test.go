@@ -93,7 +93,7 @@ func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
-		q := newWriteQueue(time.Minute)
+		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
 		admitted := make(chan int, 3)
 		for i := range 3 {
@@ -111,23 +111,111 @@ func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 	})
 }
 
-// A writer that waits past the busy timeout gives up with an error the store
-// retries as busy contention, and the writers behind it keep their turns.
-func TestWriteQueueTimeoutIsTransient(t *testing.T) {
+// A retrying writer must retain its place even when a write takes longer
+// than SQLite's busy timeout. Virtual time makes the old five-second reset
+// deterministic without slowing the suite down.
+func TestWriteQueueRetryPreservesArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
-		q := newWriteQueue(sqliteBusyTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
-		admitted := make(chan error, 1)
-		start := time.Now()
-		err := q.acquire(ctx)
-		require.ErrorAs(t, err, &writeQueueBusyError{})
-		require.True(t, IsTransient(err), "a write queue timeout must be retried like SQLite busy contention")
-		require.Equal(t, sqliteBusyTimeout, time.Since(start))
-		go func() { admitted <- q.acquire(ctx) }()
-		synctest.Wait()
+		admitted := make(chan int, 7)
+		results := make(chan error, 7)
+		startWriter := func(id int) {
+			go func() {
+				err := db.RetryTransient(ctx, IsTransient, func() error { return q.acquire(ctx) })
+				if err == nil {
+					admitted <- id
+				}
+				results <- err
+			}()
+			synctest.Wait()
+		}
+		startWriter(0)
+		for id := 1; id <= 6; id++ {
+			time.Sleep(time.Second)
+			startWriter(id)
+		}
 		q.release()
-		require.NoError(t, <-admitted, "a writer that gave up must not keep the slot")
+		require.Equal(t, 0, <-admitted, "oldest writer must not move to the back on retry")
+		for range 6 {
+			q.release()
+			<-admitted
+		}
+		q.release()
+		for range 7 {
+			require.NoError(t, <-results)
+		}
+	})
+}
+
+func TestWriteQueueCancellation(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		q := newWriteQueue()
+		require.NoError(t, q.acquire(context.Background()))
+		ctx, cancel := context.WithCancel(context.Background())
+		result := make(chan error, 1)
+		go func() { result <- q.acquire(ctx) }()
+		synctest.Wait()
+		cancel()
+		require.ErrorIs(t, <-result, context.Canceled)
+		q.release()
+		require.NoError(t, q.acquire(context.Background()))
+		q.release()
+	})
+}
+
+func TestWriteQueueAlreadyCanceled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	q := newWriteQueue()
+	require.ErrorIs(t, q.acquire(ctx), context.Canceled)
+	require.NoError(t, q.acquire(context.Background()))
+	q.release()
+}
+
+func TestWriteQueueDeadline(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		q := newWriteQueue()
+		require.NoError(t, q.acquire(context.Background()))
+		ctx, cancel := context.WithTimeout(context.Background(), 2*sqliteBusyTimeout)
+		defer cancel()
+		started := time.Now()
+		require.ErrorIs(t, q.acquire(ctx), context.DeadlineExceeded)
+		require.Equal(t, 2*sqliteBusyTimeout, time.Since(started))
+		q.release()
+		require.NoError(t, q.acquire(context.Background()))
+		q.release()
+	})
+}
+
+func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		for range 100 {
+			q := newWriteQueue()
+			require.NoError(t, q.acquire(context.Background()))
+			ctx, cancel := context.WithCancel(context.Background())
+			result := make(chan error, 1)
+			go func() {
+				err := q.acquire(ctx)
+				if err == nil {
+					q.release()
+				}
+				result <- err
+			}()
+			synctest.Wait()
+			// Both signals are ready before the waiter can resume.
+			cancel()
+			q.release()
+			<-result
+			require.NoError(t, q.acquire(context.Background()), "canceled waiter must pass the slot on")
+			q.release()
+		}
 	})
 }

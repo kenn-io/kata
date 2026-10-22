@@ -5,14 +5,94 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/creack/pty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestRunQuitReportsSessionWhileDeliveryIsStalled(t *testing.T) {
+	terminal, tty, err := pty.Open()
+	if errors.Is(err, pty.ErrUnsupported) {
+		t.Skip("PTYs are unsupported on this platform")
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tty.Close()
+		_ = terminal.Close()
+	})
+	require.NoError(t, pty.Setsize(terminal, &pty.Winsize{Rows: 24, Cols: 100}))
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, terminal)
+		close(drained)
+	}()
+	t.Cleanup(func() {
+		_ = tty.Close()
+		<-drained
+	})
+	stdin := os.Stdin
+	os.Stdin = tty
+	t.Cleanup(func() { os.Stdin = stdin })
+	t.Setenv("TERM", "xterm-256color")
+	release := make(chan struct{})
+	recorder := &recordingTelemetry{
+		opened: make(chan struct{}), ended: make(chan map[string]any, 1), release: release,
+		finished: make(chan struct{}),
+	}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = recorder })
+	releaseReport := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseReport)
+	t.Setenv("KATA_SERVER", env.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	workspace := t.TempDir()
+	done := make(chan error, 1)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		done <- Run(ctx, Options{Stdout: tty, SkipQuitConfirm: true, Workspace: workspace})
+	}()
+	t.Cleanup(func() {
+		releaseReport()
+		cancel()
+		<-joined
+	})
+	select {
+	case <-recorder.opened:
+	case <-ctx.Done():
+		t.Fatal("TUI did not report app_opened")
+	}
+	_, err = terminal.Write([]byte("q"))
+	require.NoError(t, err)
+	select {
+	case <-recorder.ended:
+	case <-ctx.Done():
+		t.Fatal("TUI quit did not report session_ended")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("TUI quit did not return while telemetry remained held")
+	}
+	releaseReport()
+	select {
+	case <-recorder.finished:
+	case <-ctx.Done():
+		t.Fatal("released telemetry capture did not finish")
+	}
+}
 
 // TestBoot_ResolvesProject covers §4.2 case 1: cwd is bound to a registered
 // project. bootResolveScope should return single-project scope, and the
@@ -583,7 +663,7 @@ func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
 			},
 		},
 	}
-	m := buildRunModel(Options{}, &Client{}, bi)
+	m := buildRunModel(Options{}, NewClient("http://daemon.example", nil), bi)
 	assert.Equal(t, viewProjects, m.view)
 	assert.Equal(t, "kata", m.projectsByID[7])
 	assert.Equal(t, "kata", m.projectIdentByID[7])
@@ -604,7 +684,7 @@ func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
 		},
 	}
 
-	m := buildRunModel(Options{InitialIssueRef: "abc4"}, &Client{}, bi)
+	m := buildRunModel(Options{InitialIssueRef: "abc4"}, NewClient("http://daemon.example", nil), bi)
 
 	assert.Equal(t, viewDetail, m.view)
 	require.NotNil(t, m.detail.issue)
@@ -613,6 +693,7 @@ func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
 }
 
 func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	baseInit := bootInit{
 		scope: scope{projectID: 7, projectName: "example-project"},
 		view:  viewList,
@@ -625,10 +706,10 @@ func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
 		Title:     "Target",
 	}
 
-	baseBatch, ok := buildRunModel(Options{}, &Client{}, baseInit).Init()().(tea.BatchMsg)
+	baseBatch, ok := buildRunModel(Options{}, NewClient("http://daemon.example", nil), baseInit).Init()().(tea.BatchMsg)
 	require.True(t, ok)
 	directBatch, ok := buildRunModel(
-		Options{InitialIssueRef: "abc4"}, &Client{}, directInit,
+		Options{InitialIssueRef: "abc4"}, NewClient("http://daemon.example", nil), directInit,
 	).Init()().(tea.BatchMsg)
 	require.True(t, ok)
 	require.Len(t, directBatch, len(baseBatch)+1)

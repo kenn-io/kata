@@ -8,11 +8,13 @@ export interface UILink {
   from_issue_id: number
   from_issue_uid: string
   from_qualified_id: string
+  /** Current status of the from_issue_uid issue. */
   from_status: string
   id: number
   to_issue_id: number
   to_issue_uid: string
   to_qualified_id: string
+  /** Current status of the to_issue_uid issue. */
   to_status: string
   type: string
   [key: string]: unknown

@@ -2,31 +2,34 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kit/telemetry/posthog"
 
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/telemetry"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// cliUseReportTimeout bounds the use report on the command's exit path; var so tests can shorten it.
+// cliUseReportTimeout bounds the use request if the process outlives the exit wait;
+// var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
-// agentUseReportTimeout keeps exit reports within installed hook deadlines.
+// agentUseReportTimeout bounds hook requests if the process outlives the exit wait.
 var agentUseReportTimeout = 100 * time.Millisecond
 
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
 var cliUseNow = time.Now
+
+// cliUseRetryBackoff spaces attempts whose outcome the process never observed.
+const cliUseRetryBackoff = 15 * time.Minute
 
 // cliUseTarget is the resolved daemon this invocation built its own client from.
 var cliUseTarget atomic.Pointer[client.ResolvedDaemon]
@@ -40,6 +43,9 @@ func recordCLIUseTarget(resolved client.ResolvedDaemon) {
 
 // reportsCLIUse reports whether a successful cmd counts as a person's use.
 func reportsCLIUse(cmd *cobra.Command) bool {
+	if !posthog.Eligible("KATA", version.Version) {
+		return false
+	}
 	// A person at a prompt reads stdout on a terminal; agents and scripts read it through a pipe.
 	if !isTTY(os.Stdout) {
 		return false
@@ -86,84 +92,84 @@ func reportsAgentUse(cmd *cobra.Command) bool {
 func reportCLIUse(cmd *cobra.Command) {
 	agent := reportsAgentUse(cmd)
 	target := cliUseTarget.Load()
+	if agent && !posthog.Eligible("KATA", version.Version) {
+		return
+	}
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
-	day := cliUseNow().UTC().Format(time.DateOnly)
+	now := cliUseNow().UTC()
+	day := now.Format(time.DateOnly)
 	parent := cmd.Context()
 	if parent == nil {
 		parent = context.Background()
 	}
-	// Detached so a command that ends by cancelling its own context still reports.
-	timeout := cliUseReportTimeout
-	if agent {
-		timeout = agentUseReportTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
-	defer cancel()
-	if target == nil {
-		resolved, err := discoverDaemonResolved(ctx)
-		if err != nil {
+	var sends posthog.SendGroup
+	sends.Go(func() {
+		target := target
+		// Detached so a command that ends by cancelling its own context still reports.
+		timeout := cliUseReportTimeout
+		if agent {
+			timeout = agentUseReportTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+		defer cancel()
+		if target == nil {
+			key := client.InspectTelemetryTarget(ctx, workspaceStartForRemote(), flags.Daemon)
+			if key != "" && client.ReadTelemetryDayMarker(client.TelemetryDisabledMarkerPath(key)) == day {
+				return
+			}
+			resolved, err := discoverDaemonResolved(ctx)
+			if err != nil {
+				return
+			}
+			target = &resolved
+		}
+		claim, finish, report := beginCLIUseReport(*target, agent, now)
+		if !report {
 			return
 		}
-		target = &resolved
-	}
-	marker := ""
-	if !agent {
-		marker = cliUseMarkerPath(*target)
-		if readCLIUseDay(marker) == day {
-			return
-		}
-	}
-	hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
-	if err != nil {
-		return
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
-	if err != nil {
-		return
-	}
-	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
-	if agent {
-		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
-	}
-	resp, err := apiClient.CaptureTelemetryEventWithResponse(ctx, &generated.CaptureTelemetryEventRequestOptions{
-		Body: body,
+		defer finish()
+		var gate client.TelemetryGate
+		_, _ = gate.Report(ctx, client.TelemetryTargetKey(*target), claim, day, agent, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
+			hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
+			if err != nil {
+				return nil, err
+			}
+			apiClient, err := kataclient.NewWithHTTPClient(target.BaseURL, hc)
+			if err != nil {
+				return nil, err
+			}
+			body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
+			if agent {
+				body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
+			}
+			return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
+		})
 	})
-	if !agent && err == nil && resp.JSON202 != nil {
-		recordCLIUseDay(marker, day)
-	}
+	sends.Wait(telemetry.ExitWait)
 }
 
-// cliUseMarkerPath names the file holding the last UTC day target accepted a
-// report from this KATA_HOME, or "" when there is no home to keep it in.
-func cliUseMarkerPath(target client.ResolvedDaemon) string {
-	home, err := config.KataHome()
-	if err != nil {
-		return ""
+// beginCLIUseReport keeps successful days separate from unfinished CLI attempts.
+func beginCLIUseReport(target client.ResolvedDaemon, agent bool, now time.Time) (string, func(), bool) {
+	prefix := "cli-opened-"
+	if agent {
+		prefix = "agent-full-"
 	}
-	sum := sha256.Sum256([]byte(target.BaseURL + "\n" + target.UnixSocket))
-	return filepath.Join(home, "telemetry", "cli-opened-"+hex.EncodeToString(sum[:8]))
-}
-
-func readCLIUseDay(path string) string {
-	if path == "" {
-		return ""
+	claim := client.TelemetryDayMarkerPath(target, prefix)
+	day := now.Format(time.DateOnly)
+	if client.ReadTelemetryDayMarker(claim) == day {
+		return "", nil, false
 	}
-	day, err := os.ReadFile(path) //nolint:gosec // G304: path is derived from KATA_HOME, not user input.
-	if err != nil {
-		return ""
+	finish := func() {}
+	if !agent {
+		attempt := client.TelemetryDayMarkerPath(target, "cli-opened-try-")
+		previous, err := time.Parse(time.RFC3339, client.ReadTelemetryDayMarker(attempt))
+		if err == nil && previous.UTC().Format(time.DateOnly) == day && now.Sub(previous) < cliUseRetryBackoff {
+			return "", nil, false
+		}
+		client.RecordTelemetryDayMarker(attempt, now.Format(time.RFC3339))
+		finish = func() { _ = os.Remove(attempt) }
 	}
-	return string(day)
-}
-
-// recordCLIUseDay is best effort: without the marker the next command reports again.
-func recordCLIUseDay(path, day string) {
-	if path == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
-	}
-	_ = os.WriteFile(path, []byte(day), 0o600)
+	return claim, finish, true
 }

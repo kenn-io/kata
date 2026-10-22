@@ -5,7 +5,7 @@
   import PlusIcon from '@lucide/svelte/icons/plus'
   import StarIcon from '@lucide/svelte/icons/star'
   import UsersIcon from '@lucide/svelte/icons/users'
-  import { ScrollBox, showFlash } from '@kenn-io/kit-ui'
+  import { ScrollBox, showFlash, Tooltip } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
 
@@ -20,7 +20,8 @@
     areas: KataAreaSummary[]
     currentView: KataCurrentView
     searchFilters: KataTaskSearchFilters
-    projectCreationDisabled: boolean
+    /** Why project creation is blocked; undefined when it is allowed. */
+    projectCreationBlockedReason: string | undefined
     draftFenceGeneration?: number | undefined
     credentialAuditAvailable?: boolean | undefined
     credentialAuditActive?: boolean | undefined
@@ -34,7 +35,7 @@
     areas,
     currentView,
     searchFilters,
-    projectCreationDisabled,
+    projectCreationBlockedReason,
     draftFenceGeneration = 0,
     credentialAuditAvailable = false,
     credentialAuditActive = false,
@@ -43,6 +44,9 @@
     onCreateProject,
     onOpenCredentials = () => {},
   }: Props = $props()
+
+  const controlID = $props.id()
+  const createReasonID = `${controlID}-create-reason`
 
   const systemViews: Array<{
     name: KataTaskViewName
@@ -102,7 +106,7 @@
   }
 
   function startCreatingProject(): void {
-    if (projectCreationDisabled) return
+    if (projectCreationBlockedReason) return
     creatingProject = true
     createDraft = ''
     queueMicrotask(() => createInput?.focus())
@@ -115,7 +119,7 @@
 
   async function submitCreateProject(): Promise<void> {
     const name = createDraft.trim()
-    if (!name || createSaving || projectCreationDisabled) return
+    if (!name || createSaving || projectCreationBlockedReason) return
     createSaving = true
     try {
       await onCreateProject(name)
@@ -130,6 +134,20 @@
     }
   }
 </script>
+
+{#snippet createProjectButton()}
+  <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
+  <button
+    type="button"
+    class="project-create-button"
+    aria-disabled={projectCreationBlockedReason ? 'true' : undefined}
+    aria-describedby={projectCreationBlockedReason ? createReasonID : undefined}
+    onclick={startCreatingProject}
+  >
+    <PlusIcon size={13} strokeWidth={1.9} />
+    <span>New project</span>
+  </button>
+{/snippet}
 
 <div class="kata-sidebar" aria-label="Kata navigation">
   <ScrollBox label="Kata navigation">
@@ -209,19 +227,16 @@
                 cancelCreatingProject()
               }
             }}
-            disabled={createSaving || projectCreationDisabled}
+            disabled={createSaving || projectCreationBlockedReason !== undefined}
           />
         </form>
+      {:else if projectCreationBlockedReason}
+        <Tooltip text={projectCreationBlockedReason}>
+          {@render createProjectButton()}
+        </Tooltip>
+        <span id={createReasonID} class="kit-sr-only">{projectCreationBlockedReason}</span>
       {:else}
-        <button
-          type="button"
-          class="project-create-button"
-          disabled={projectCreationDisabled}
-          onclick={startCreatingProject}
-        >
-          <PlusIcon size={13} strokeWidth={1.9} />
-          <span>New project</span>
-        </button>
+        {@render createProjectButton()}
       {/if}
     </div>
   </ScrollBox>
@@ -266,9 +281,14 @@
 
   .kata-nav button:hover,
   .project-select-button:hover,
-  .project-create-button:hover {
+  .project-create-button:hover:not([aria-disabled='true']) {
     background: var(--bg-surface-hover);
     color: var(--text-primary);
+  }
+
+  .project-create-button[aria-disabled='true'] {
+    opacity: var(--opacity-disabled);
+    cursor: not-allowed;
   }
 
   .kata-nav button.active,

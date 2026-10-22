@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 // LocalProfileIdentity carries the exact namespace and persisted identity.
@@ -26,6 +26,19 @@ type DaemonSelection struct {
 // InspectSelection snapshots target configuration without probing or starting it.
 func InspectSelection(ctx context.Context, start, name string) (DaemonSelection, error) {
 	return inspectSelection(ctx, start, name, false)
+}
+
+// InspectTelemetryTarget identifies the selected daemon without contacting it.
+// An empty result leaves normal discovery responsible for choosing a target.
+func InspectTelemetryTarget(ctx context.Context, start, name string) string {
+	if value, _ := ctx.Value(BaseURLKey{}).(string); value != "" {
+		return ""
+	}
+	selection, err := InspectSelection(ctx, start, name)
+	if err != nil {
+		return ""
+	}
+	return TelemetryTargetKey(selection.Resolved)
 }
 
 func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCatalogCredential bool) (DaemonSelection, error) {
@@ -119,7 +132,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			if err != nil {
 				return DaemonSelection{}, err
 			}
-			ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 			if err != nil {
 				return DaemonSelection{}, err
 			}

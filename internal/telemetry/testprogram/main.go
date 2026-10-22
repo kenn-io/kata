@@ -2,13 +2,16 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 
 	"go.kenn.io/kata/internal/telemetry"
 )
 
 func main() {
-	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id"})
+	version := flag.String("version", "v1.2.3", "build version")
+	flag.Parse()
+	reporter, err := telemetry.NewReporter(telemetry.Options{DistinctID: "anonymous-instance-id", Version: *version})
 	if err != nil {
 		panic(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -23,7 +24,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federation/joincommand"
-	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -408,7 +409,7 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 		}
 		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, auth, opts)
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +451,7 @@ func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (cl
 	if os.Getenv("KATA_SERVER") != "" {
 		return targetAuth, nil
 	}
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadDaemonCatalogAndAuthPolicy()
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
@@ -777,7 +778,7 @@ func federationLeaveCmd() *cobra.Command {
 		Use:   "leave [project]",
 		Short: "leave a hub federation as a spoke (revoke + local teardown)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			if force && !deleteFlag {
 				return &cliError{Message: "--force requires --delete", Kind: kindValidation, ExitCode: ExitValidation}
 			}
@@ -786,6 +787,16 @@ func federationLeaveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// releasePrepared is set while this command holds a prepared leave
+			// that has not reached local teardown. Any failure in that window,
+			// such as an unreachable hub, releases it so rebind and join keep
+			// working without a daemon restart.
+			var releasePrepared func()
+			defer func() {
+				if runErr != nil && releasePrepared != nil {
+					releasePrepared()
+				}
+			}()
 			target, err := resolveSpokeForLeave(a, args)
 			if err != nil {
 				return err
@@ -857,7 +868,15 @@ func federationLeaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Prepare: new(true)}})
+				// Name the preparation before asking for it, so a failure
+				// after the daemon prepared, such as a lost response, still
+				// releases it. Aborting a preparation the daemon never made
+				// changes nothing.
+				preparationID := rand.Text()
+				releasePrepared = func() {
+					abortFederationLeave(cmd, a, target.projectID, disposition, actor, preparationID)
+				}
+				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Prepare: new(true), PreparationID: &preparationID}})
 				if err := externalCLITransportError(callResp, callErr); err != nil {
 					return err
 				}
@@ -912,6 +931,9 @@ func federationLeaveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The teardown call may archive or detach before it fails; from
+			// here only finishing the leave clears its pending state.
+			releasePrepared = nil
 			callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor}})
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
@@ -1103,6 +1125,31 @@ func formatEnrollmentIDList(ids []int64) string {
 	return strings.Join(parts, ", ")
 }
 
+// abortFederationLeave releases a leave this command prepared and then could
+// not carry to local teardown. It reports a failed release as a warning so the
+// original error stays the command's result. The release runs even after an
+// interrupt, under its own short deadline.
+func abortFederationLeave(cmd *cobra.Command, a daemonAPI, projectID int64, disposition, actor, preparationID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx), 10*time.Second)
+	defer cancel()
+	err := func() error {
+		apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if err != nil {
+			return err
+		}
+		callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Actor: &actor, Abort: new(true), PreparationID: &preparationID}})
+		if err := externalCLITransportError(callResp, callErr); err != nil {
+			return err
+		}
+		return externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr)
+	}()
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: the daemon kept this leave pending, so rebind and join stay blocked until the leave finishes: %s\n",
+			textsafe.Line(err.Error()))
+	}
+}
+
 // federationLeaveHubError wraps a hub-side failure with guidance to retry the
 // leave with --local-only, since the local teardown is intentionally not
 // attempted when the hub revoke cannot complete.
@@ -1242,21 +1289,21 @@ func federationStatusCmd() *cobra.Command {
 }
 
 type federationJoinBundle struct {
-	HubURL                 string                    `json:"hub_url"`
-	HubProjectID           int64                     `json:"hub_project_id"`
-	HubProjectUID          string                    `json:"hub_project_uid"`
-	ProjectName            string                    `json:"project_name"`
-	ReplayHorizonEventID   int64                     `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64                     `json:"baseline_through_event_id"`
-	Token                  string                    `json:"token"`
-	Capabilities           string                    `json:"capabilities,omitempty"`
-	DisplayCapabilities    string                    `json:"-"`
-	JoinCommand            string                    `json:"join_command"`
-	Actor                  string                    `json:"actor,omitempty"`
-	AllowInsecure          bool                      `json:"allow_insecure,omitzero"`
-	PushEnabled            bool                      `json:"push_enabled,omitzero"`
-	AdoptExisting          bool                      `json:"adopt_existing,omitzero"`
-	Signing                *federationsigning.Source `json:"-"`
+	HubURL                 string                `json:"hub_url"`
+	HubProjectID           int64                 `json:"hub_project_id"`
+	HubProjectUID          string                `json:"hub_project_uid"`
+	ProjectName            string                `json:"project_name"`
+	ReplayHorizonEventID   int64                 `json:"replay_horizon_event_id"`
+	BaselineThroughEventID int64                 `json:"baseline_through_event_id"`
+	Token                  string                `json:"token"`
+	Capabilities           string                `json:"capabilities,omitempty"`
+	DisplayCapabilities    string                `json:"-"`
+	JoinCommand            string                `json:"join_command"`
+	Actor                  string                `json:"actor,omitempty"`
+	AllowInsecure          bool                  `json:"allow_insecure,omitzero"`
+	PushEnabled            bool                  `json:"push_enabled,omitzero"`
+	AdoptExisting          bool                  `json:"adopt_existing,omitzero"`
+	Signing                *signingpolicy.Source `json:"-"`
 }
 
 var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {

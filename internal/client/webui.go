@@ -16,8 +16,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/pkg/client/generated"
 
-	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -98,7 +97,7 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	if resolved.LocalProfile != nil {
 		dataDir = resolved.LocalProfile.DataDir
 	} else {
-		namespace, err := daemon.NewNamespace()
+		namespace, err := daemonruntime.NewNamespace()
 		if err != nil {
 			return PreparedWebUI{}, err
 		}
@@ -145,7 +144,7 @@ func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL, address
 		if address != "" && record.Endpoint().ConfigAddress() != address {
 			continue
 		}
-		if !daemon.RuntimeProcessAlive(record) {
+		if !daemonruntime.RuntimeProcessAlive(record) {
 			continue
 		}
 		candidate, _, ok := probeAddress(ctx, record.Endpoint().ConfigAddress())
@@ -264,7 +263,7 @@ func probeAnonymousReadonlyWebUI(
 	}
 	response := result.HTTPResponse
 	if response.StatusCode == http.StatusUnauthorized {
-		canonicalOrigin := response.Header.Get(daemon.WebOriginHeader)
+		canonicalOrigin := response.Header.Get(daemonruntime.WebOriginHeader)
 		if canonicalOrigin == "" {
 			return nil, errors.New("remote daemon did not advertise its canonical browser origin")
 		}
@@ -275,7 +274,7 @@ func probeAnonymousReadonlyWebUI(
 		if err != nil {
 			return nil, err
 		}
-		switch response.Header.Get(daemon.WebAuthenticationHeader) {
+		switch response.Header.Get(daemonruntime.WebAuthenticationHeader) {
 		case "loopback":
 			if !isLoopbackWebOrigin(origin) {
 				return nil, errors.New("remote daemon advertised loopback authentication on a non-loopback origin")
@@ -293,8 +292,11 @@ func probeAnonymousReadonlyWebUI(
 		return nil, fmt.Errorf("probe anonymous web UI returned HTTP %d", response.StatusCode)
 	}
 	var snapshot struct {
-		Capabilities api.UICapabilities `json:"capabilities"`
-		Origin       string             `json:"origin"`
+		Capabilities struct {
+			Writable bool   `json:"writable"`
+			Updates  string `json:"updates"`
+		} `json:"capabilities"`
+		Origin string `json:"origin"`
 	}
 	if err := json.Unmarshal(result.Body, &snapshot); err != nil {
 		return nil, errors.New("anonymous web UI snapshot was invalid")

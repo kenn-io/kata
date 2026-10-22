@@ -16,11 +16,11 @@ func federationEmbeddingRecipeCmd() *cobra.Command {
 		Example: "  kata federation embedding-recipe",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.ReadDaemonConfig()
+			cfg, err := config.ReadSearchConfig()
 			if err != nil {
 				return err
 			}
-			encoder, _, err := preflightEmbeddingStartup(cfg.Search.Embeddings, "")
+			encoder, _, err := preflightEmbeddingStartup(cfg.Embeddings, "")
 			if err != nil {
 				return err
 			}

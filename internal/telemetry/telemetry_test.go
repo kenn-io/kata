@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	for _, key := range []string{"CI", "DO_NOT_TRACK"} {
+		if err := os.Unsetenv(key); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 func TestSessionEndedDurationBuckets(t *testing.T) {
 	for _, tc := range []struct {
@@ -67,7 +78,7 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
-func TestStandaloneTelemetryOptOutSpellings(t *testing.T) {
+func TestStandaloneTelemetryAdmission(t *testing.T) {
 	scratch := t.TempDir()
 	binary := filepath.Join(scratch, "telemetry-opt-out")
 	if runtime.GOOS == "windows" {
@@ -76,13 +87,17 @@ func TestStandaloneTelemetryOptOutSpellings(t *testing.T) {
 	build := exec.Command("go", "build", "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
-	for _, value := range []string{"0", "false", "no", "off", " FALSE ", "No", "OFF"} {
-		t.Run(value, func(t *testing.T) {
-			command := exec.Command(binary) //nolint:gosec // test-owned standalone fixture
-			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"="+value)
+	for _, tc := range []struct{ name, env, version, want string }{
+		{"enabled", EnabledEnv + "=1", "v1.2.3", "enabled"},
+		{"0", EnabledEnv + "=0", "v1.2.3", "disabled"},
+		{"development", EnabledEnv + "=1", "dev", "disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := exec.Command(binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))
-			require.Equal(t, "disabled", strings.TrimSpace(string(output)))
+			require.Equal(t, tc.want, strings.TrimSpace(string(output)))
 		})
 	}
 }
@@ -139,4 +154,59 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestProjectCountBucket(t *testing.T) {
+	for _, tc := range []struct {
+		count  int
+		bucket string
+	}{
+		{0, "0-5"}, {1, "0-5"}, {5, "0-5"},
+		{6, "6-20"}, {20, "6-20"}, {21, "21-100"},
+		{100, "21-100"}, {101, "over-100"},
+	} {
+		assert.Equal(t, tc.bucket, ProjectCountBucket(tc.count))
+	}
+}
+
+func TestDaemonProjectCountAllowlist(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, event := range []string{"daemon_started", "daemon_active"} {
+		for _, bucket := range []string{"0-5", "6-20", "21-100", "over-100"} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": bucket})
+			require.NoError(t, err)
+			assert.Equal(t, bucket, props["project_count"])
+		}
+		for _, count := range []any{37, "37"} {
+			props, err := reporter.SanitizeProperties(event, map[string]any{"project_count": count})
+			require.NoError(t, err)
+			assert.NotContainsf(t, props, "project_count", "%s must drop count %#v", event, count)
+		}
+	}
+}
+
+func TestCoreActionSurfaceAllowlist(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, event := range []string{"issue_created", "issue_closed"} {
+		props, err := reporter.SanitizeProperties(event, map[string]any{"surface": "web"})
+		require.NoError(t, err)
+		assert.Equal(t, "web", props["surface"])
+		for _, surface := range []any{"unsupported", nil} {
+			_, err := reporter.SanitizeProperties(event, map[string]any{"surface": surface})
+			require.Error(t, err)
+		}
+		_, err = reporter.SanitizeProperties(event, nil)
+		require.Error(t, err)
+	}
+}
+
+func TestSetupFinishedProperties(t *testing.T) {
+	reporter, err := NewReporter(Options{DistinctID: "anonymous-install"})
+	require.NoError(t, err)
+	require.True(t, reporter.EventAllowed("setup_finished"))
+	properties, err := reporter.SanitizeProperties("setup_finished", map[string]any{"project_count": 1})
+	require.NoError(t, err)
+	require.NotContains(t, properties, "project_count")
 }

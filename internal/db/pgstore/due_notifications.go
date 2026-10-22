@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -54,7 +55,8 @@ func (s *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error
 
 // ReconcileDueNotification atomically rereads one issue, plans an ordinary
 // notify.* metadata patch from its dates and event history, and emits the same
-// metadata event as a manual patch.
+// metadata event as a manual patch. A newly reached scheduled_on value is also
+// recorded as issue.scheduled_reached, whether or not the inbox slot is free.
 func (s *Store) ReconcileDueNotification(ctx context.Context, input db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
 	var output db.ReconcileDueNotificationOut
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -88,12 +90,33 @@ func (s *Store) ReconcileDueNotification(ctx context.Context, input db.Reconcile
 		if issue.Owner != nil {
 			owner = *issue.Owner
 		}
+		scheduledTimezone := scheduleDefaultTimezone(recurrenceTimezone, input.DefaultTimezone)
+		var reached *db.IssuePlanningDate
+		if floor := input.ScheduledReachedFloor; floor != nil {
+			if reached, err = db.PlanScheduledReached(jsontext.Value(issue.Metadata), input.Now, *floor, scheduledTimezone, history); err != nil {
+				return err
+			}
+		}
 		patch, err := db.PlanDueNotification(
 			jsontext.Value(issue.Metadata), owner, issue.Author, input.Now,
-			input.DefaultTimezone, scheduleDefaultTimezone(recurrenceTimezone, input.DefaultTimezone), history,
+			input.DefaultTimezone, scheduledTimezone, history,
 		)
 		if err != nil {
-			return err
+			// The reached event needs no recipient, so record it regardless.
+			output.NotificationErr, patch = err, nil
+		}
+		if reached != nil {
+			payload, err := json.Marshal(reached)
+			if err != nil {
+				return fmt.Errorf("marshal scheduled reached event: %w", err)
+			}
+			event, err := s.insertEventTx(ctx, tx,
+				issueEventInput(issue, project, db.ScheduledReachedEventType, "system", string(payload)))
+			if err != nil {
+				return err
+			}
+			output.Reached = &event
+			output.Changed = true
 		}
 		if len(patch) == 0 {
 			return nil
@@ -154,11 +177,11 @@ func enabledSpokeProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) (bo
 
 func issueMetadataHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, issueUID string) ([]db.Event, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT type, payload
+		SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter, created_at
 		  FROM events
 		 WHERE (issue_id = $1 OR (issue_id IS NULL AND issue_uid = $2))
-		   AND type IN ('issue.created', 'issue.snapshot', 'issue.metadata_updated')
-		 ORDER BY id`, issueID, issueUID)
+		   AND type IN ('issue.created', 'issue.snapshot', 'issue.metadata_updated', 'issue.scheduled_reached', 'recurrence.materialized')
+		 ORDER BY hlc_physical_ms, hlc_counter, origin_instance_uid, uid`, issueID, issueUID)
 	if err != nil {
 		return nil, fmt.Errorf("read due notification history: %w", mapSQLError(err, nil))
 	}
@@ -166,8 +189,13 @@ func issueMetadataHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, issu
 	var history []db.Event
 	for rows.Next() {
 		var event db.Event
-		if err := rows.Scan(&event.Type, &event.Payload); err != nil {
+		var createdAt string
+		if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &event.Type, &event.Payload,
+			&event.HLCPhysicalMS, &event.HLCCounter, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan due notification history: %w", mapSQLError(err, nil))
+		}
+		if event.CreatedAt, err = parseStoredTime(createdAt); err != nil {
+			return nil, fmt.Errorf("parse due notification history time: %w", err)
 		}
 		history = append(history, event)
 	}
@@ -175,4 +203,16 @@ func issueMetadataHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, issu
 		return nil, fmt.Errorf("read due notification history: %w", mapSQLError(err, nil))
 	}
 	return history, nil
+}
+
+// EnsureScheduledReachedFloor stores at as the reached-schedule floor on the
+// first call and returns the stored floor on every call.
+func (s *Store) EnsureScheduledReachedFloor(ctx context.Context, at time.Time) (time.Time, error) {
+	var floor time.Time
+	err := s.withTx(ctx, sql.LevelDefault, func(tx *sql.Tx) error {
+		var err error
+		floor, err = db.EnsureScheduledReachedFloorTx(ctx, tx, at)
+		return err
+	})
+	return floor, err
 }

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -15,9 +14,8 @@ import (
 )
 
 func TestExternalModuleCanServeAndStop(t *testing.T) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	repositoryRoot := filepath.Dir(currentFile)
+	repositoryRoot, err := os.Getwd()
+	require.NoError(t, err)
 	consumerDir := t.TempDir()
 
 	goMod := fmt.Sprintf(`module example.com/kata-service-consumer
@@ -29,6 +27,9 @@ require go.kenn.io/kata v0.0.0
 replace go.kenn.io/kata => %s
 `, filepath.ToSlash(repositoryRoot))
 	require.NoError(t, os.WriteFile(filepath.Join(consumerDir, "go.mod"), []byte(goMod), 0o600))
+	sums, err := os.ReadFile("go.sum")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(consumerDir, "go.sum"), sums, 0o600)) //nolint:gosec // G703: destination is a test-owned temporary directory.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(consumerDir, "service_test.go"),
 		[]byte(externalConsumerTest),

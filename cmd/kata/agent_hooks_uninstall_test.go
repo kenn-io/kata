@@ -10,11 +10,11 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
-func TestAgentHooksUninstallAllProfiles(t *testing.T) {
+func TestAgentHooksUninstallKitManagedProfiles(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	for _, profile := range agenthook.Profiles() {
-		if profile.Agent == agenthook.AgentDroid {
+		if !agentHookUsesKit(string(profile.Agent)) {
 			continue
 		}
 		t.Run(string(profile.Agent), func(t *testing.T) {

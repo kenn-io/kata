@@ -17,8 +17,10 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/storageinspect"
 	"go.kenn.io/kata/internal/version"
 	kataapi "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kit/safefileio"
@@ -204,7 +206,7 @@ func diagnoseDaemonSelection(
 			result.State = "version_mismatch"
 			return withDiagnosisAction(result), selection, nil
 		}
-		store, err = client.OpenLocalProfileReadOnly(ctx, profile)
+		store, err = storageinspect.OpenProfileReadOnly(ctx, profile)
 		if err != nil {
 			result.State = "missing_profile_storage"
 			result.Message = err.Error()
@@ -217,7 +219,7 @@ func diagnoseDaemonSelection(
 		if err != nil {
 			return result, selection, err
 		}
-		ns, err := daemon.NewNamespace()
+		ns, err := daemonruntime.NewNamespace()
 		if err != nil {
 			return result, selection, err
 		}
@@ -323,7 +325,7 @@ func probeDaemonSelection(
 		resolved = selection.Resolved
 		found = true
 	} else {
-		ns, namespaceErr := daemon.NewNamespace()
+		ns, namespaceErr := daemonruntime.NewNamespace()
 		if namespaceErr != nil {
 			return result, selection, namespaceErr
 		}

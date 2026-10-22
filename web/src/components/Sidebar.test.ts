@@ -57,7 +57,7 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
       areas,
       currentView,
       searchFilters: allScopeFilters,
-      projectCreationDisabled: false,
+      projectCreationBlockedReason: undefined,
       onOpenView: vi.fn(),
       onOpenProject: vi.fn(),
       onCreateProject: vi.fn(),
@@ -233,19 +233,22 @@ describe('Sidebar', () => {
 
   it('blocks project creation while mutation authority is disabled', async () => {
     const onCreateProject = vi.fn(async () => ({ changed: true }))
-    const view = renderSidebar({ onCreateProject, projectCreationDisabled: true })
+    const reason = 'Example blocked reason.'
+    const view = renderSidebar({ onCreateProject, projectCreationBlockedReason: reason })
 
-    const create = screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement
-    expect(create.disabled).toBe(true)
+    const create = screen.getByRole('button', { name: 'New project', description: reason })
+    expect(create.getAttribute('aria-disabled')).toBe('true')
+    create.focus()
+    expect((await screen.findByRole('tooltip')).textContent?.trim()).toBe(reason)
     await fireEvent.click(create)
     expect(screen.queryByRole('textbox', { name: 'New project name' })).toBeNull()
 
-    await view.rerender({ projectCreationDisabled: false })
+    await view.rerender({ projectCreationBlockedReason: undefined })
     await fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     const input = screen.getByRole('textbox', { name: 'New project name' }) as HTMLInputElement
     await fireEvent.input(input, { target: { value: 'Blocked Project' } })
 
-    await view.rerender({ projectCreationDisabled: true })
+    await view.rerender({ projectCreationBlockedReason: reason })
     expect(input.disabled).toBe(true)
     await fireEvent.submit(input.closest('form')!)
     expect(onCreateProject).not.toHaveBeenCalled()

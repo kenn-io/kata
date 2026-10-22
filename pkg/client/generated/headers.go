@@ -63,6 +63,9 @@ type DisconnectRelayEnrollmentHeaders struct {
 }
 
 type CreateIssueHeaders struct {
+	// XKataSurface Client interface for action telemetry (web, tui, or cli); other values are ignored.
+	XKataSurface *string `json:"X-Kata-Surface,omitempty"`
+
 	// XKataProjectAlias Workspace alias identity; requires a name: selector
 	XKataProjectAlias *string `json:"X-Kata-Project-Alias,omitempty"`
 
@@ -84,6 +87,8 @@ type ClaimIssueHeaders struct {
 }
 
 type CloseIssueHeaders struct {
+	// XKataSurface Client interface for action telemetry (web, tui, or cli); other values are ignored.
+	XKataSurface   *string `json:"X-Kata-Surface,omitempty"`
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 	IfMatch        *string `json:"If-Match,omitempty"`
 }

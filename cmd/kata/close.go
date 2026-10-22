@@ -321,6 +321,9 @@ func runActionWithHeaders(
 		if value, ok := headers["If-Match"]; ok {
 			options.Header.IfMatch = &value
 		}
+		if reportsCLIUse(cmd) {
+			options.Header.XKataSurface = new("cli")
+		}
 		response, callErr := apiClient.CloseIssueWithResponse(ctx, options)
 		if response == nil {
 			return externalCLITransportError(response, callErr)

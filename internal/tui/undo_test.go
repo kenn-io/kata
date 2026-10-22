@@ -668,6 +668,7 @@ func TestModelCapabilityRefreshClearsHistoryForChangedPrincipal(t *testing.T) {
 }
 
 func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed"}, Changed: true}}
 	oldClient := newConnectedUndoClient(t, f)
@@ -678,7 +679,7 @@ func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) {
 	m.undoInFlight = true
 	resp, err := oldClient.Close(context.Background(), 7, "abc4", "bob")
 	require.NoError(t, err)
-	m, _ = m.installDaemonConnection(daemonConnection{api: &Client{}, init: bootInit{view: viewEmpty}})
+	m, _ = m.installDaemonConnection(daemonConnection{api: NewClient("http://daemon.example", nil), init: bootInit{view: viewEmpty}})
 	require.Empty(t, m.undoHistory.entries)
 	require.False(t, m.undoInFlight)
 	updated, _ := m.Update(mutationDoneMsg{connGen: 1, origin: "detail", kind: "close", resp: resp})

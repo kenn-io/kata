@@ -330,11 +330,10 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 // CheckRecurringSpokeEvent prevents replicas from rewriting hub-owned delivery state.
 // Already accepted events may be retried without becoming a new mutation.
 func CheckRecurringSpokeEvent(ctx context.Context, tx *sql.Tx, event RemoteEvent) error {
-	features, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+	protected, err := payloadHasNativeRecurringState(event.Type, string(event.Payload))
 	if err != nil {
 		return err
 	}
-	protected := RequireEventFeatures(CronEventFeature, features) != nil
 	if !protected && !strings.HasPrefix(event.Type, "cron.job.") {
 		return nil
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -32,7 +33,7 @@ func deploymentHome(t *testing.T) string {
 func TestDeploymentStatusReportsConfigSources(t *testing.T) {
 	resetFlags(t)
 	deploymentHome(t)
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777", Metadata: map[string]string{"config_listen_source": "KATA_LISTEN", "config_auth_source": "persisted_file", "db_path": "database", "unrelated": "ignored"}})

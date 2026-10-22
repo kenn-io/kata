@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -302,6 +302,22 @@ allow_insecure = true
 	assert.True(t, conn.target.resolved.AllowInsecure)
 	require.NotNil(t, conn.api)
 	require.NotNil(t, conn.sseHC)
+}
+
+func TestBootDaemonConnectionIgnoresUnusedInvalidWebConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+	server := startTUIPingServer(t)
+	t.Setenv("KATA_SERVER", server.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[web]\npublic_origin = \"http://daemon.example\"\n"), 0600))
+
+	conn, err := bootDaemonConnection(t.Context(), Options{ProjectName: "example-project"})
+
+	require.NoError(t, err)
+	assert.Equal(t, server.URL, conn.endpoint)
 }
 
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
@@ -944,7 +960,11 @@ func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T
 	})
 
 	t.Setenv("KATA_HOME", t.TempDir())
-	socket := filepath.Join(t.TempDir(), "fresh-kata.sock")
+	// This test name makes t.TempDir() exceed the macOS socket path limit.
+	socketDir, err := os.MkdirTemp("", "kata-tui-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socket := filepath.Join(socketDir, "fresh-kata.sock")
 	ln, err := net.Listen("unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
@@ -1042,7 +1062,7 @@ func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) {
 		init:    bootInit{view: viewEmpty, scope: scope{empty: true}},
 	}
 
-	m := buildRunModel(Options{}, &Client{}, conn.init, conn)
+	m := buildRunModel(Options{}, NewClient("http://daemon.example", nil), conn.init, conn)
 
 	assert.Equal(t, "shared", m.activeDaemon.Name)
 	require.Len(t, m.daemonTargets, 2)
@@ -1164,7 +1184,7 @@ func TestLocalProfileAPIAndSSEUseSameSocketAndCredentialAfterReconnect(t *testin
 	t.Cleanup(func() { _ = srv.Close() })
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: work, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(work, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(work, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "unix", Address: socket})

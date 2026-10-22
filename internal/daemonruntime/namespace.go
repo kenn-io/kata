@@ -1,6 +1,9 @@
-// Package daemon contains the in-process kata daemon: namespace resolution,
-// runtime file lifecycle, listening endpoint, and HTTP server wiring.
-package daemon
+// Package daemonruntime holds the daemon runtime contract that the daemon and
+// its clients share: per-storage namespaces, runtime-record liveness, process
+// signals, the listen-address policy, and web endpoint headers. It must stay
+// free of storage, server, and connector dependencies so client-only programs
+// can discover a daemon without linking it.
+package daemonruntime
 
 import (
 	"context"

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -158,7 +159,7 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
 	t.Setenv("TMPDIR", tmp)
-	ns, err := NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	sock := filepath.Join(ns.SocketDir, "daemon.sock")

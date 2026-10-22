@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
@@ -108,7 +108,7 @@ func pipeServer(t *testing.T) (addr string, cleanup func()) {
 // resolves from the given KATA_HOME (tmp). The test must have already called
 // t.Setenv("KATA_HOME", tmp) and t.Setenv("KATA_DB", ...) before this.
 func writeRuntimeFor(home, addr string) error {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
 	}

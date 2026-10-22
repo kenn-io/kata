@@ -8,13 +8,13 @@ import (
 	"sync"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 
 	"go.kenn.io/kata/internal/httpurl"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
-	"go.kenn.io/kata/internal/federationsigning"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
@@ -131,6 +131,8 @@ type ReserveFederationReplicaCredentialParams struct {
 type PrepareFederationReplicaLeaveResult struct {
 	ManagedReservation      config.FederationManagedCredentialReservation
 	ManagedReservationFound bool
+	// PreparationID identifies this preparation to AbortFederationReplicaLeave.
+	PreparationID string
 }
 
 // FinishFederationReplicaHubOperation records a completed enrollment for
@@ -241,11 +243,17 @@ func beginFederationReplicaHubOperation(
 
 // PrepareFederationReplicaLeave durably marks a managed reservation as leaving
 // and waits until every earlier hub operation for the project has completed.
+//
+// preparationID names the preparation for AbortFederationReplicaLeave; empty
+// picks a random ID. A client chooses it before calling so it can abort the
+// preparation even when the response is lost. Repeating prepare with the same
+// ID holds the same preparation, which one abort releases.
 func PrepareFederationReplicaLeave(
 	ctx context.Context,
 	store db.Storage,
 	credentials config.FederationCredentialStore,
 	projectID int64,
+	preparationID string,
 ) (PrepareFederationReplicaLeaveResult, error) {
 	managed, err := managedCredentialStore(credentials)
 	if err != nil {
@@ -257,11 +265,12 @@ func PrepareFederationReplicaLeave(
 			"read federation replica project before leave preparation: %w", err,
 		)
 	}
-	return prepareFederationReplicaLeave(ctx, store, managed, project)
+	return prepareFederationReplicaLeave(ctx, store, managed, project, preparationID)
 }
 
-func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (PrepareFederationReplicaLeaveResult, error) {
+func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string) (PrepareFederationReplicaLeaveResult, error) {
 	key := federationReplicaTransitionKey(store, project.Name)
+	preparation := newFederationReplicaPreparation(store, project.ID, preparationID)
 
 	ensureFederationReplicaMu.Lock()
 	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
@@ -297,9 +306,21 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// concurrent reconciler record success for a leave that then fails to
 	// prepare, and rolling the publish back would erase a completed leave's
 	// suppression when a retried prepare fails.
-	federationReplicaTransitions.markLeavePending(key)
+	federationReplicaTransitions.markLeavePending(key, preparation)
 	ensureFederationReplicaMu.Unlock()
 
+	// A prepare call that fails from here on never answers its client. Drop
+	// its hold, unless a durable leave marker keeps the mapping blocked until
+	// the leave finishes anyway.
+	durablyMarked := found
+	fail := func(err error) (PrepareFederationReplicaLeaveResult, error) {
+		if !durablyMarked {
+			ensureFederationReplicaMu.Lock()
+			federationReplicaTransitions.releaseFailedPrepare(key, preparation)
+			ensureFederationReplicaMu.Unlock()
+		}
+		return PrepareFederationReplicaLeaveResult{}, err
+	}
 	for {
 		ensureFederationReplicaMu.Lock()
 		drained, waiting := federationReplicaTransitions.drainSignal(key)
@@ -308,29 +329,106 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 			ensureFederationReplicaMu.Unlock()
 			if err != nil {
 				if errors.Is(err, config.ErrFederationCredentialConflict) {
-					return PrepareFederationReplicaLeaveResult{}, err
+					return fail(err)
 				}
-				return PrepareFederationReplicaLeaveResult{}, credentialIOError(
-					"read prepared managed reservation",
-				)
+				return fail(credentialIOError("read prepared managed reservation"))
 			}
 			if found && match.Credential.Provider != nil && project.ID != 0 {
 				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
-					return PrepareFederationReplicaLeaveResult{}, err
+					return fail(err)
 				}
 			}
 			return PrepareFederationReplicaLeaveResult{
 				ManagedReservation:      match,
 				ManagedReservationFound: found,
+				PreparationID:           preparation.id,
 			}, nil
 		}
 		ensureFederationReplicaMu.Unlock()
 		select {
 		case <-ctx.Done():
-			return PrepareFederationReplicaLeaveResult{}, ctx.Err()
+			return fail(ctx.Err())
 		case <-drained:
 		}
 	}
+}
+
+// ErrFederationReplicaLeaveStarted identifies a leave that can only be
+// finished: it holds a durable leave marker or has begun local teardown.
+var ErrFederationReplicaLeaveStarted = errors.New("federation leave has started")
+
+// AbortFederationReplicaLeave releases the PrepareFederationReplicaLeave
+// identified by preparationID after its leave stopped before local teardown,
+// such as when the hub revoke failed. Once no other preparation remains,
+// rebind, join, and config reconciliation work again without a daemon restart.
+// An unknown or already released preparation, or one that another project or
+// daemon store prepared, is a successful no-op, so a retried abort never
+// releases another leave's preparation. A rename after prepare does not hide
+// the preparation.
+//
+// A durable leave marker, a detached binding, or an archived project keeps the
+// leave pending and returns ErrFederationReplicaLeaveStarted: those leaves must
+// be finished. The durable markers are checked first, so a restart that emptied
+// the in-memory registry still reports them.
+func AbortFederationReplicaLeave(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectID int64,
+	preparationID string,
+) error {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
+	}
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("read federation replica project before releasing leave: %w", err)
+	}
+	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
+	if err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return err
+		}
+		return credentialIOError("read managed reservation before releasing leave")
+	}
+	if found && match.Credential.LeavePending {
+		return fmt.Errorf("%w: the managed reservation is marked for leave", ErrFederationReplicaLeaveStarted)
+	}
+	credential, credentialFound, err := credentials.FederationCredential(ctx, project.UID)
+	if err != nil {
+		return credentialIOError("read federation credential before releasing leave")
+	}
+	if credentialFound && credential.LeavePending {
+		return fmt.Errorf("%w: the credential is marked for leave", ErrFederationReplicaLeaveStarted)
+	}
+	// Find the preparation's own keys: the project may have been renamed since
+	// it prepared, and a provider-backed key names the provider request.
+	preparation := newFederationReplicaPreparation(store, project.ID, preparationID)
+	keys := federationReplicaTransitions.preparationKeys(preparation)
+	if len(keys) == 0 {
+		return nil
+	}
+	if project.DeletedAt != nil {
+		return fmt.Errorf("%w: the project is archived", ErrFederationReplicaLeaveStarted)
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("%w: the binding is detached", ErrFederationReplicaLeaveStarted)
+	}
+	if err != nil {
+		return fmt.Errorf("read federation replica binding before releasing leave: %w", err)
+	}
+	if binding.Role != db.FederationRoleSpoke {
+		return db.ErrFederationNotSpoke
+	}
+	for _, key := range keys {
+		federationReplicaTransitions.releasePreparedLeave(key, preparation)
+	}
+	return nil
 }
 
 // LeavePending blocks attachment first. Drain the existing project transport
@@ -989,7 +1087,7 @@ func normalizeFederationReplicaParams(
 		if canonicalSource.HubURL != "" {
 			canonicalSource.HubURL, err = normalizeFederationHubBaseURL(canonicalSource.HubURL)
 		}
-		if err != nil || (canonicalSource.HubURL != "" && canonicalSource.HubURL != hubBaseURL) || federationsigning.ValidatePolicy(hubBaseURL, []federationsigning.Key{{Source: canonicalSource, EnrollmentID: 1}}) != nil {
+		if err != nil || (canonicalSource.HubURL != "" && canonicalSource.HubURL != hubBaseURL) || signingpolicy.ValidatePolicy(hubBaseURL, []signingpolicy.Key{{Source: canonicalSource, EnrollmentID: 1}}) != nil {
 			return EnsureFederationReplicaParams{}, federationReplicaError(ErrFederationReplicaInvalidInput, "invalid or unavailable federation signing source", "")
 		}
 		p.Credential.Signing = &canonicalSource

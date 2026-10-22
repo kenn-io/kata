@@ -90,8 +90,9 @@ func TestSweepNativeListingFailureKeepsDateNotifications(t *testing.T) {
 	sink := &captureHookSink{}
 	s := daemon.NewDueNotificationSweeper(recurringListFailure{env.DB}, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), sink), "UTC")
 	require.ErrorContains(t, s.RunOnce(t.Context(), time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)), "injected native listing failure")
-	require.Len(t, sink.events, 1)
-	require.Equal(t, "issue.metadata_updated", sink.events[0].Type)
+	require.Len(t, sink.events, 2)
+	require.Equal(t, "issue.scheduled_reached", sink.events[0].Type)
+	require.Equal(t, "issue.metadata_updated", sink.events[1].Type)
 }
 
 // One sweep drains an all-catch-up backlog larger than a single dispatch batch.

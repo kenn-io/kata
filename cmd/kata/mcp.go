@@ -13,6 +13,8 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"go.kenn.io/kit/telemetry/posthog"
+
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -152,8 +154,12 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient)
-			defer stopReporting()
+			var observe func()
+			if posthog.Eligible("KATA", version.Version) {
+				var stopReporting context.CancelFunc
+				observe, stopReporting = startMCPAgentUseReporter(ctx, apiClient, resolved)
+				defer stopReporting()
+			}
 			server, err := mcpserver.New(mcpserver.Options{
 				Client:            apiClient,
 				ObserveToolCall:   observe,
@@ -208,12 +214,15 @@ func newMCPServeCmd() *cobra.Command {
 	return command
 }
 
-func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (func(), context.CancelFunc) {
+func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
+	marker := client.TelemetryDayMarkerPath(target, "agent-full-")
+	var gate client.TelemetryGate
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		fullDay := ""
 		for {
 			select {
 			case <-reportCtx.Done():
@@ -222,11 +231,20 @@ func startMCPAgentUseReporter(ctx context.Context, client *kataclient.Client) (f
 				if reportCtx.Err() != nil {
 					return
 				}
+				day := cliUseNow().UTC().Format(time.DateOnly)
+				if fullDay == day {
+					continue
+				}
 				callCtx, stop := context.WithTimeout(reportCtx, time.Second)
-				_, _ = client.CaptureTelemetryEventWithResponse(callCtx, &generated.CaptureTelemetryEventRequestOptions{
-					Body: &generated.CaptureTelemetryEventBody{Event: "agent_active"},
+				stopped, err := gate.Report(callCtx, client.TelemetryTargetKey(target), marker, day, true, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
+					return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{
+						Body: &generated.CaptureTelemetryEventBody{Event: "agent_active"},
+					})
 				})
 				stop()
+				if err == nil && stopped {
+					fullDay = day
+				}
 			}
 		}
 	}()

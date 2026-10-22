@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/federationsigning"
 )
 
 func TestFederationRebindPreflightUsesEnrollmentTokenAndPreservesPath(t *testing.T) {
@@ -173,7 +173,7 @@ func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing
 	}
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
-	source := &federationsigning.Source{
+	source := &signingpolicy.Source{
 		KeyID: "key-a", KeyEnv: "TEST_REBIND_SIGNING_KEY",
 		HubURL: "https://hub.example/old-prefix",
 	}

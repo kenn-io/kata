@@ -32,6 +32,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
@@ -45,6 +46,8 @@ import (
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
+	"go.kenn.io/kit/telemetry/posthog"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -219,7 +222,7 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 	})
 	go func() { _ = http.Serve(listener, mux) }() //nolint:gosec // test-only Unix socket
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -285,7 +288,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
@@ -315,7 +318,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
@@ -363,7 +366,7 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
@@ -418,7 +421,7 @@ func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Chdir(t.TempDir())
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	require.NoError(t, os.Chmod(ns.DataDir, 0o755)) //nolint:gosec // Deliberately non-private regression fixture.
@@ -460,7 +463,7 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -493,7 +496,7 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
@@ -522,7 +525,7 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 		}
 	})
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -607,7 +610,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "10s")
 	var configuredIdle time.Duration
 	runtimeSeen := make(chan struct{})
@@ -647,7 +650,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 		}
 	})
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -717,7 +720,7 @@ model = "example-model"
 	case <-time.After(3 * time.Second):
 		t.Fatal("daemon did not begin embedding initialization")
 	}
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -741,12 +744,12 @@ type daemonRuntimeRecordJSON struct {
 	Address string `json:"address"`
 }
 
-func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Namespace, daemonRuntimeRecordJSON) {
+func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemonruntime.Namespace, daemonRuntimeRecordJSON) {
 	t.Helper()
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 
 	orig := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
@@ -771,7 +774,7 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		}
 	})
 
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -780,7 +783,13 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		return err == nil
 	}, 3*time.Second, 10*time.Millisecond)
 
-	body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
+	// Read the way kata's runtime-record readers do. On Windows os.ReadFile
+	// does not share delete access, so it fails while the atomic rename that
+	// published the record still holds its handle.
+	file, err := safefileio.OpenCurrentUserFile(runtimePath)
+	require.NoError(t, err)
+	defer func() { _ = file.Close() }()
+	body, err := io.ReadAll(file)
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
@@ -879,7 +888,7 @@ func writeIdleDaemonHealthServer(t *testing.T, idleShutdown bool) *httptest.Serv
 
 func writeRuntimeRecordFor(t *testing.T, home, addr string, pid int) {
 	t.Helper()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -1683,7 +1692,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	require.NoError(t, os.WriteFile(
 		filepath.Join(home, "config.toml"), []byte(configBody), 0o600,
 	))
@@ -1711,7 +1720,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 		}
 	})
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -1836,7 +1845,7 @@ func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) {
 
 func TestListenFromPortEnv(t *testing.T) {
 	t.Run("PORT yields wildcard bind", func(t *testing.T) {
-		t.Setenv(daemon.AutoStartMarkerEnv, "")
+		t.Setenv(daemonruntime.AutoStartMarkerEnv, "")
 		t.Setenv("PORT", "8080")
 		addr, ok := listenFromPortEnv()
 		require.True(t, ok)
@@ -1846,13 +1855,13 @@ func TestListenFromPortEnv(t *testing.T) {
 		// The implicit auto-start child inherits the parent environment,
 		// so a stray PORT on a developer's shell must not flip it onto
 		// wildcard TCP — the spawner stamps the marker for that reason.
-		t.Setenv(daemon.AutoStartMarkerEnv, "1")
+		t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 		t.Setenv("PORT", "8080")
 		_, ok := listenFromPortEnv()
 		assert.False(t, ok)
 	})
 	t.Run("invalid PORT is ignored", func(t *testing.T) {
-		t.Setenv(daemon.AutoStartMarkerEnv, "")
+		t.Setenv(daemonruntime.AutoStartMarkerEnv, "")
 		t.Setenv("PORT", "not-a-port")
 		_, ok := listenFromPortEnv()
 		assert.False(t, ok)
@@ -1903,11 +1912,11 @@ func TestAnnounceIdleShutdownNamesTheTimeout(t *testing.T) {
 func TestWithoutEnvironmentKeyRemovesOnlyAutostartMarker(t *testing.T) {
 	got := withoutEnvironmentKey([]string{
 		"PATH=/example/bin",
-		daemon.AutoStartMarkerEnv + "=1",
+		daemonruntime.AutoStartMarkerEnv + "=1",
 		"kata_autostart=1",
 		"Kata_Autostart=1",
 		"KATA_AUTOSTART_IDLE_TIMEOUT=15m",
-	}, daemon.AutoStartMarkerEnv)
+	}, daemonruntime.AutoStartMarkerEnv)
 
 	assert.Equal(t, []string{
 		"PATH=/example/bin",
@@ -1926,7 +1935,7 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
-	t.Setenv(daemon.AutoStartMarkerEnv, "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "")
 	t.Setenv("PORT", "8081")
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
@@ -2063,20 +2072,33 @@ func TestNewDaemonTelemetryReporterSendsWithoutAgeWhenCreationTimeUnreadable(t *
 	assert.True(t, got.InstalledAt.IsZero(), "unreadable creation time passed %v", got.InstalledAt)
 }
 
-func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
-	tmp := t.TempDir()
-	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
-	defer func() { _ = store.Close() }()
-	_, err := store.CreateProject(t.Context(), "alpha")
-	require.NoError(t, err)
+func TestDaemonTelemetryProducersIncludeProjectCount(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		for i := range 37 {
+			_, err := store.CreateProject(t.Context(), fmt.Sprintf("example-project-%d", i))
+			require.NoError(t, err)
+		}
 
-	reporter := &fakeTelemetryReporter{}
-	captureDaemonStartedTelemetry(t.Context(), store, reporter)
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
+		reporter := &fakeTelemetryReporter{}
+		captureDaemonStartedTelemetry(ctx, store, reporter)
+		startDaemonTelemetryHeartbeat(ctx, workers, store, reporter)
 
-	require.Equal(t, 1, reporter.eventCount())
-	event := reporter.eventAt(0)
-	assert.Equal(t, "daemon_started", event.event)
-	assert.Equal(t, 1, event.properties["project_count"])
+		synctest.Wait()
+		require.Equal(t, 2, reporter.eventCount())
+		for i, name := range []string{"daemon_started", "daemon_active"} {
+			event := reporter.eventAt(i)
+			assert.Equal(t, name, event.event)
+			assert.Equal(t, "21-100", event.properties["project_count"])
+		}
+	})
 }
 
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
@@ -2229,7 +2251,7 @@ func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
 func TestDaemonStartGitHubSyncHTTPFetcherUsesConfigFileCredentials(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 [github_sync]
 token_env = "EXAMPLE_GITHUB_TOKEN"
@@ -2479,7 +2501,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 }
 
 func TestDefaultEndpointForOS(t *testing.T) {
-	ns := &daemon.Namespace{SocketDir: t.TempDir()}
+	ns := &daemonruntime.Namespace{SocketDir: t.TempDir()}
 
 	t.Run("windows uses loopback TCP", func(t *testing.T) {
 		ep := defaultEndpointForOS(ns, "windows")
@@ -2516,7 +2538,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
@@ -2528,7 +2550,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -2564,7 +2586,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_AUTH_TOKEN", "example-token")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
@@ -2576,7 +2598,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", true, false) }()
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -2624,13 +2646,15 @@ func TestWebAuthenticationModeAdvertisesOnlyUsableSessionIssuers(t *testing.T) {
 }
 
 type fakeTelemetryReporter struct {
-	mu     sync.Mutex
-	events []fakeTelemetryEvent
+	mu          sync.Mutex
+	events      []fakeTelemetryEvent
+	onConfirmed func(context.Context, posthog.Delivery) (posthog.Status, error)
 }
 
 type fakeTelemetryEvent struct {
 	event      string
 	properties map[string]any
+	delivery   posthog.Delivery
 }
 
 func (f *fakeTelemetryReporter) Enabled() bool { return true }
@@ -2646,6 +2670,16 @@ func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any)
 	defer f.mu.Unlock()
 	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties})
 	return nil
+}
+
+func (f *fakeTelemetryReporter) CaptureConfirmed(ctx context.Context, event string, properties map[string]any, delivery posthog.Delivery) (posthog.Status, error) {
+	f.mu.Lock()
+	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties, delivery: delivery})
+	f.mu.Unlock()
+	if f.onConfirmed != nil {
+		return f.onConfirmed(ctx, delivery)
+	}
+	return posthog.StatusDelivered, nil
 }
 
 func (f *fakeTelemetryReporter) Close() error { return nil }
@@ -2896,7 +2930,7 @@ func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
 
 func writeRuntimePID(t *testing.T, home string, pid int) {
 	t.Helper()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	// Record the process identity like a real daemon's runtime record. Without
@@ -2931,7 +2965,7 @@ func writeReusedRuntimePID(t *testing.T, home string, pid int) {
 	if encoded[len(encoded)-1] == replacement {
 		replacement = '1'
 	}
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
@@ -3164,7 +3198,7 @@ func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "10s")
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
@@ -3243,7 +3277,7 @@ func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *te
 		}
 	})
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -3268,7 +3302,7 @@ func TestDaemonStartsWithUnavailableConnectorAndServesRedactedStatus(t *testing.
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_REQUIRE_TOKEN_IDENTITY", "")
-	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	missingCommand := filepath.Join(t.TempDir(), "example-missing-connector")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`
 [[connector]]
@@ -3294,7 +3328,7 @@ command = %q
 		}
 	})
 
-	namespace, err := daemon.NewNamespace()
+	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
@@ -3816,4 +3850,52 @@ func waitRuntimeNotionRecord(t *testing.T, recorded <-chan db.IssueSyncStatus) d
 		require.FailNow(t, "scheduled Notion worker did not record durable completion")
 	}
 	return db.IssueSyncStatus{}
+}
+
+func TestDaemonWiresSetupFinished(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "First issue", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	captured := make(chan bool, 1)
+	reporter := &fakeTelemetryReporter{}
+	reporter.onConfirmed = func(context.Context, posthog.Delivery) (posthog.Status, error) {
+		reporter.mu.Lock()
+		defer reporter.mu.Unlock()
+		found := false
+		for _, event := range reporter.events {
+			found = found || event.event == "setup_finished"
+		}
+		captured <- found
+		return posthog.StatusDelivered, nil
+	}
+	original := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return reporter }
+	t.Cleanup(func() { newTelemetryReporter = original })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after cancellation")
+		}
+	})
+	select {
+	case got := <-captured:
+		require.True(t, got, "daemon reports setup_finished")
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not report setup_finished")
+	}
 }

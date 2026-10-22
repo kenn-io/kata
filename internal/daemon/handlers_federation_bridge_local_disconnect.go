@@ -75,7 +75,7 @@ func disconnectFederationBridgeLocally(ctx context.Context, cfg ServerConfig, na
 		}
 	}
 	if err == nil && !preflight {
-		federationReplicaTransitions.markLeavePending(key)
+		federationReplicaTransitions.markLeavePending(key, newFederationReplicaPreparation(cfg.DB, project.ID, ""))
 	}
 	ensureFederationReplicaMu.Unlock()
 	if err != nil {

@@ -321,15 +321,16 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 	store := &lostCloseResponseStore{Storage: database.db, failNext: true}
+	reporter := &scopedAgentReporter{}
 	sink := &recordingSink{}
 	broadcaster := daemon.NewEventBroadcaster()
 	subscription := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer subscription.Unsub()
 	ts := startTestServer(t, daemon.ServerConfig{
-		DB: store, StartedAt: database.now, Hooks: sink, Broadcaster: broadcaster,
+		DB: store, StartedAt: database.now, Hooks: sink, Broadcaster: broadcaster, Telemetry: reporter,
 	})
 	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
-	headers := map[string]string{"Idempotency-Key": "close-lost-response-1"}
+	headers := map[string]string{"Idempotency-Key": "close-lost-response-1", "X-Kata-Surface": "cli"}
 	body := map[string]any{
 		"actor":          "agent-one",
 		"reason":         "wontfix",
@@ -343,6 +344,7 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.body, &firstOut.Body))
 	assert.False(t, firstOut.Body.Changed)
 	assert.True(t, firstOut.Body.Reused)
+	assert.Equal(t, []string{"issue_closed"}, reporter.events)
 	require.Len(t, store.committedEvents, 2)
 	assert.Equal(t, []string{"issue.closed", "claim.released"}, []string{
 		store.committedEvents[0].Type, store.committedEvents[1].Type,

@@ -168,6 +168,7 @@ func (e EmbeddingsConfig) Enabled() bool {
 // default <KATA_HOME>/kata.db wins. See config.KataDSN.
 type StorageConfig struct {
 	DSN      string                `toml:"dsn"`
+	SQLite   SQLiteStorageConfig   `toml:"sqlite"`
 	Postgres PostgresStorageConfig `toml:"postgres"`
 }
 
@@ -476,6 +477,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
 		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")
 	}
+	if _, err := cfg.Storage.SQLite.BusyTimeoutDuration(); err != nil {
+		return nil, err
+	}
 	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
 		return nil, err
 	}
@@ -554,40 +558,77 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 // <KATA_HOME>/config.toml. It validates only the [display] section so
 // unrelated daemon and client settings do not affect renderer selection.
 func ReadDisplayConfig() (DisplayConfig, error) {
-	path, err := DaemonConfigPath()
-	if err != nil {
-		return DisplayConfig{}, err
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
-	if errors.Is(err, os.ErrNotExist) {
-		return DisplayConfig{}, nil
-	}
-	if err != nil {
-		return DisplayConfig{}, fmt.Errorf("read %s: %w", path, err)
-	}
-
 	var file struct {
 		Display DisplayConfig `toml:"display"`
 	}
-	meta, err := toml.Decode(string(data), &file)
-	if err != nil {
-		return DisplayConfig{}, fmt.Errorf("parse %s: %w", path, err)
-	}
-	var unknown []string
-	for _, key := range meta.Undecoded() {
-		if isDisplayConfigKey(key) {
-			unknown = append(unknown, key.String())
-		}
-	}
-	if len(unknown) > 0 {
-		return DisplayConfig{}, fmt.Errorf(
-			"parse %s: unknown display key(s): %s", path, strings.Join(unknown, ", "),
-		)
+	if err := decodeConfigSection("display", &file); err != nil {
+		return DisplayConfig{}, err
 	}
 	if len(file.Display.MarkdownRenderer) > 0 && file.Display.MarkdownRenderer[0] == "" {
 		return DisplayConfig{}, fmt.Errorf("display.markdown_renderer executable must not be empty")
 	}
 	return file.Display, nil
+}
+
+// ReadTUIConfig reads only the client preferences in [tui].
+func ReadTUIConfig() (TUIConfig, error) {
+	var file struct {
+		TUI TUIConfig `toml:"tui"`
+	}
+	if err := decodeConfigSection("tui", &file); err != nil {
+		return TUIConfig{}, err
+	}
+	return file.TUI, nil
+}
+
+// ReadSearchConfig reads [search] with the daemon's embedding environment
+// overrides and validation. Unrelated sections remain opaque.
+func ReadSearchConfig() (SearchConfig, error) {
+	var file struct {
+		Search SearchConfig `toml:"search"`
+	}
+	if err := decodeConfigSection("search", &file); err != nil {
+		return SearchConfig{}, err
+	}
+	// Reuse the daemon's deployment overlay so search environment overrides stay consistent.
+	cfg := DaemonConfig{Search: file.Search}
+	trimSearchEmbeddings(&cfg)
+	initializeDeploymentSources(&cfg)
+	if err := applyDeploymentEnv(&cfg); err != nil {
+		return SearchConfig{}, err
+	}
+	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+		return SearchConfig{}, err
+	}
+	return cfg.Search, nil
+}
+
+func decodeConfigSection(name string, dst any) error {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	meta, err := toml.Decode(string(data), dst)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	var unknown []string
+	for _, key := range meta.Undecoded() {
+		if len(key) > 0 && key[0] == name {
+			unknown = append(unknown, key.String())
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("parse %s: unknown %s key(s): %s", path, name, strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 func isDisplayConfigKey(key toml.Key) bool {
@@ -898,6 +939,7 @@ func applyDaemonConfigEnv(cfg *DaemonConfig, includeAuthCredentials bool) {
 		}
 	}
 	applyPostgresStorageEnv(&cfg.Storage.Postgres)
+	applySQLiteStorageEnv(&cfg.Storage.SQLite)
 }
 
 func applyPostgresStorageEnv(cfg *PostgresStorageConfig) {

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/version"
@@ -97,7 +97,7 @@ func TestDaemonDiagnoseReportsLivePrincipalCapabilities(t *testing.T) {
 			t.Cleanup(server.Close)
 			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 			require.NoError(t, err)
-			ns, err := daemon.NewNamespaceForHome(home, profile.StorageID)
+			ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
 			require.NoError(t, err)
 			require.NoError(t, ns.EnsureDirs())
 			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -149,7 +149,7 @@ func TestDaemonDiagnoseNeverAcceptsAnUnverifiedProjectAssertion(t *testing.T) {
 			if remote {
 				t.Setenv("KATA_SERVER", server.URL)
 			} else {
-				ns, err := daemon.NewNamespace()
+				ns, err := daemonruntime.NewNamespace()
 				require.NoError(t, err)
 				require.NoError(t, ns.EnsureDirs())
 				_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -182,7 +182,7 @@ func TestDaemonStatusSelectedProfileDoesNotReportPersonalReady(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
 	}))
 	defer personal.Close()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(personal.URL, "http://")})
@@ -212,7 +212,7 @@ func TestDaemonStatusHumanScopesCurrentHomeAbsenceWithReadyProfile(t *testing.T)
 	t.Cleanup(server.Close)
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemon.NewNamespaceForHome(home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -228,7 +228,7 @@ func TestDaemonStatusHumanScopesCurrentHomeAbsenceWithReadyProfile(t *testing.T)
 func TestDaemonStatusKeepsCurrentHomeListWhenSelectionIsInvalid(t *testing.T) {
 	_, _, _, _ = stoppedProfileCLI(t)
 	t.Setenv("KATA_HOME", t.TempDir())
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"})
@@ -322,7 +322,7 @@ func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"ok":true,"schema_version":29,"uptime":"1s","db_path":"personal.db"}`)
 	}))
 	defer personal.Close()
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(personal.URL, "http://")})
@@ -383,7 +383,7 @@ func TestHealthReadyProfileIncludesSelectedIdentity(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ns, err := daemon.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
+	ns, err := daemonruntime.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -590,7 +590,7 @@ func TestDaemonDiagnoseLiveVersionMismatchDoesNotStop(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"earlier-test-version","pid":%d}`, os.Getpid())
 	}))
 	defer server.Close()
-	ns, err := daemon.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
+	ns, err := daemonruntime.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -615,7 +615,7 @@ func TestDaemonDiagnoseWrongLiveDatabaseReportsLiveUID(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
 	}))
 	defer server.Close()
-	ns, err := daemon.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
+	ns, err := daemonruntime.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -638,7 +638,7 @@ func TestDaemonInspectionDoesNotRepairCurrentHomeRuntimePermissions(t *testing.T
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Chdir(t.TempDir())
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	for _, command := range []string{"status", "diagnose"} {
@@ -660,7 +660,7 @@ func TestLocalProfileLocateRetainsConfiguredSource(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
 	}))
 	t.Cleanup(server.Close)
-	ns, err := daemon.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
+	ns, err := daemonruntime.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
@@ -778,7 +778,7 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
 	}))
 	t.Cleanup(server.Close)
-	ns, err := daemon.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
+	ns, err := daemonruntime.NewNamespaceForHome(home, config.DBHash(filepath.Join(home, "kata.db")))
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})

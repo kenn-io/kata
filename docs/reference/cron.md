@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-12
+last_edited: 2026-10-20
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -44,10 +44,12 @@ kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 ```
 
 Creation requires no expected event UID. Updates, deletion, and restoration
-require the current `expected_event_uid`, either as the flag or in the request
-body; when both are present they must match. Conflicts require inspecting the
-current definition. A lost create response can be inspected using the retained
-UID. A repeated create does not silently become an update. Tombstones remain
+require the current `definition_event_uid` returned by `show`, passed as
+`--expected-event-uid` or `expected_event_uid` in the request body. When both
+are present they must match. A stale value fails with a conflict; re-read
+`show` before retrying an edit. After an uncertain create response, inspect
+`show` with the retained UID. If retrying create, reuse that same `--uid`;
+an already-created definition conflicts and never becomes an update. Tombstones remain
 readable, and `list --include-deleted` includes them. Deleting a workflow is
 refused while a live job in the project uses it; update or delete that job
 first.
@@ -61,26 +63,38 @@ option objects retain exact JSON numbers.
 
 ### Request files
 
-The `--file` body for `create` and `update` is a JSON object with a `name` and
-a `definition`. Kata trims `name`, which must then be 1–256 bytes. Optional `actor` must
+The `--file` body for `create` and `update` requires both `name` and
+`definition`. Updates replace the complete definition; they are not patches.
+Kata trims `name`, which must then be 1–256 bytes. Optional `actor` must
 match `--as` when both are given; optional `expected_event_uid` applies to
-`update` only. A job request file looks like this:
+`update` only. Create and update help includes copyable request bodies:
+
+```sh
+kata cron job create --help
+kata cron job update --help
+kata cron workflow create --help
+kata cron workflow update --help
+```
+
+For an adapter prompt job, save this as `job.json`. Configure the
+`example-project` checkout in the adapter. `options.agent` selects its prompt
+agent; option names and supported agents depend on the adapter. Kata stores
+these options without interpreting them.
 
 ```json
 {
-  "name": "Weekday review",
+  "name": "Daily summary",
   "definition": {
     "version": 1,
     "kind": "job",
     "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 9 * * 1-5", "timezone": "America/New_York"},
-    "action": {"kind": "execute", "prompt": "Review open pull requests and summarize risks."},
-    "issue": {"kind": "per-run", "title": "Weekday review", "deadline_offset_seconds": 28800},
+    "trigger": {"kind": "cron", "cron": "0 9 * * *", "timezone": "UTC"},
+    "action": {"kind": "execute", "prompt": "Review open issues and summarize next actions."},
+    "issue": {"kind": "per-run", "title": "Daily summary"},
     "overlap": "forbid",
-    "catchup": "skip",
-    "checkout_key": "main-repo",
-    "timeout_seconds": 3600,
-    "secret_refs": {"GITHUB_TOKEN": "github-review"}
+    "catchup": "latest",
+    "checkout_key": "example-project",
+    "options": {"agent": "codex"}
   }
 }
 ```
@@ -123,6 +137,43 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 | `once` | `at`: an RFC 3339 instant. |
 | `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
 | `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+
+### Cron expressions
+
+A `cron` expression has five fields: minute, hour, day of month, month, and day
+of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
+`@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
+or `H` syntax. Kata keeps the expression exactly as written.
+
+- Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
+  `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
+  means Friday and Sunday.
+- When both day of month and day of week are restricted, a day matching either
+  field runs. `0 9 15 * 1` runs on the 15th and on every Monday.
+- A range may wrap around. `0 22-2 * * *` runs at 22:00, 23:00, 00:00, 01:00,
+  and 02:00.
+- A step must be smaller than the span it steps over. Kata rejects `0 */24 * * *`
+  and `*/60 * * * *`; write `@daily` or `@hourly` instead.
+- A step that starts at one weekday continues through 7, which is Sunday.
+  `0 9 * * 5/2` runs on Fridays and Sundays.
+
+Schedules follow the trigger timezone's daylight-saving transitions:
+
+- When clocks jump forward an hour, a time inside the skipped hour runs one
+  hour later that day. In `America/New_York`, `30 2 * * *` runs at 03:30 EDT
+  (07:30 UTC) on 2026-03-08.
+- When clocks fall back, a time inside the repeated hour runs on both passes.
+  In `America/New_York`, `30 1 * * *` runs at 05:30 and 06:30 UTC on
+  2026-11-01. Hourly schedules run once per elapsed hour through the repeat.
+- On transition days in zones that shift by 30 minutes, such as
+  `Australia/Lord_Howe`, or that skip local midnight, such as
+  `America/Santiago`, a daily schedule can miss that day's occurrence.
+
+Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and
+wrapping ranges, accepts steps as large as their span, and reads `5/2` as
+Friday only. Before writing an expression that uses one of these forms, upgrade
+every hub, spoke, and adapter with its own parser that reads the job. Older
+peers reject the definition or schedule it differently.
 
 ### Actions
 
@@ -207,7 +258,8 @@ observation; a consumer may record its own execution evidence separately.
 
 Native jobs accept only `cron` and `interval` triggers and require
 `overlap: "allow"`. Calendar expressions use the trigger's IANA timezone, with
-UTC as the default. They follow that timezone's daylight-saving transitions.
+UTC as the default. They follow that timezone's daylight-saving transitions,
+as described in [Cron expressions](#cron-expressions).
 An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 `{"kind":"interval","interval_seconds":7200}` for an elapsed two-hour cadence; intervals must be at least 60 seconds;
 `@every` is not supported for native delivery. Intervals start at the first
@@ -224,9 +276,9 @@ The existing daemon sweep runs at startup and every 30 seconds by default. Keep 
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver, even with push
 writes enabled, and cannot create or edit native recurring definitions. An old
-peer that lacks `cron_notify_children_v1` cannot receive a project containing
-native recurring state. Capability refusal happens before a baseline or cursor
-change. Projects with native recurring delivery history cannot be adopted into
+peer that lacks `cron_v1` cannot receive a project containing cron state,
+including native recurring metadata on ordinary issue events. Capability refusal
+happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
 local authority and history.
 
@@ -274,28 +326,72 @@ options). Each step has these fields:
 
 ```json
 {
-  "name": "Review then test",
+  "name": "nightly-tests",
   "definition": {
     "version": 1,
-    "about": "Review a change, then run the tests.",
     "steps": [
-      {"key": "review", "kind": "prompt", "prompt": "Review the change."},
-      {"key": "test", "kind": "command", "command": "make test", "after": ["review"], "retries": 1}
+      {"key": "check", "kind": "command", "command": "git diff --check"},
+      {"key": "test", "kind": "command", "command": "go test ./...", "after": ["check"]}
     ]
   }
 }
 ```
+
+### Adapter command jobs
+
+A job runs commands by referencing a workflow. `action.kind` remains
+`execute`; use `workflow_uid` instead of `prompt`, and put each command in a
+workflow step. The referenced workflow must already exist in the same project.
+
+Save the workflow above as `workflow.json` and create it with a retained UID:
+
+```sh
+kata cron workflow create --uid 01J00000000000000000000010 --file workflow.json --json
+```
+
+The UID here is an example. Choose your own ULID and use it in both the create
+command and the following job body. Save this request as `command.json`:
+
+```json
+{
+  "name": "nightly-tests",
+  "definition": {
+    "version": 1,
+    "kind": "job",
+    "enabled": true,
+    "trigger": {"kind": "cron", "cron": "0 2 * * *", "timezone": "UTC"},
+    "action": {"kind": "execute", "workflow_uid": "01J00000000000000000000010"},
+    "issue": {"kind": "per-run", "title": "Nightly tests"},
+    "overlap": "forbid",
+    "catchup": "latest",
+    "checkout_key": "example-project"
+  }
+}
+```
+
+```sh
+kata cron job create --uid <job-uid> --file command.json --json
+```
+
+The external adapter schedules the job and runs its workflow in the configured
+checkout. Kata stores the definitions and run evidence.
 
 ## Capabilities
 
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises `cron_v1` and
-`cron_notify_children_v1`. Missing, unknown, or
-failed advertisements remain distinct outcomes. This is an ordinary project
+`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
+definitions, run observations, and native recurring child delivery. Missing,
+unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
+
+Upgrade connected hubs, spokes, and adapters together when moving from released
+0.19.0, which advertised two cron capability names. All cron support now uses
+`cron_v1`; the former recurring-delivery capability is removed with no alias.
+This deliberate protocol change does not support mixed-version rolling upgrades.
+Existing stored definitions, events, and schema stay unchanged.
 
 ## Independent run evidence
 
@@ -375,6 +471,36 @@ fallback for scheduled dates, then daemon default timezone and UTC. Deadline
 dates have no recurrence fallback. Explicit UTC values resolve to UTC. The read
 uses native civil-time and DST behavior; it evaluates no clock and changes no
 readiness or persisted state. Normal project and issue-subtree read policy applies.
+
+### Reached schedules
+
+An adapter can start date-driven work from the event stream instead of polling.
+When an open issue's `scheduled_on` is reached, the daemon's date sweeper
+records one `issue.scheduled_reached` event by `system`. Its payload is the
+planning-date object above: `field`, raw `value`, resolved `timezone`, and UTC
+`instant`.
+
+- The sweeper runs at daemon startup and every 30 seconds, so the event follows
+  the instant by up to 30 seconds. A date that passed while the daemon was down
+  is recorded at the next startup.
+- Schedules that were already overdue before the upgrade record no event. The
+  first sweep after upgrading stores its time as the database's floor. The
+  sweeper records a date only if its instant is at or after the floor, or if
+  its current value was set after the floor. Setting a past date after the
+  upgrade therefore records it at the next sweep. Overdue schedules still
+  surface through the inbox as before.
+- Each raw value is recorded once per issue. A rescheduled issue records its new
+  value when that value is reached. A value that was already recorded is not
+  recorded again, even if the date moves away and back.
+- The event does not change the issue or its revision, and it is recorded
+  whether or not the inbox slot it would notify is occupied.
+- Closed issues are skipped. An enabled spoke records no event of its own; it
+  receives the hub's event when it pulls hub changes. Hub-to-hub relay does
+  not carry the event.
+- `deadline_on` records no event; deadlines remain notification-only.
+
+`kata events --tail` and hooks subscribed to the event type, `issue.*`, or `*`
+receive it.
 
 ## Adapter responsibilities
 

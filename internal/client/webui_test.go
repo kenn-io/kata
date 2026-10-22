@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -397,7 +397,7 @@ func TestLocalProfileBrowserUsesSelectedRuntimeWithoutOuterAlias(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
 	}))
 	t.Cleanup(server.Close)
-	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Version: "test", Metadata: map[string]string{"web_origin": "http://127.0.0.1:27123", "web_origin_stable": "true", "web_capabilities": "loopback,sse"}})

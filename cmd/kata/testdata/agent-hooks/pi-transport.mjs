@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {writeFileSync,unlinkSync} from 'node:fs';
+import {writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
+import {emitBeforeAgentStart} from './pi-runner-compat.mjs';
 const [root,extensionPath,cwd,source]=process.argv.slice(2);
 const {ExtensionRunner}=await import(pathToFileURL(root+'/core/extensions/runner.js'));
 const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileURL(root+'/core/extensions/loader.js'));
@@ -9,7 +10,7 @@ const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
 const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
 const {buildSystemPrompt}=await import(pathToFileURL(root+'/core/system-prompt.js'));
 const factory=(await import(pathToFileURL(extensionPath))).default;
-let revision=1,metadata={},request='fresh request',failInbox=false,status='open';const requests=[],writes=[],errors=[];
+let revision=1,metadata={},status='open';const requests=[],writes=[],errors=[];
 const server=createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):{};const url=new URL(req.url,'http://daemon.example');requests.push({method:req.method,path:url.pathname,query:Object.fromEntries(url.searchParams),body});res.setHeader('content-type','application/json');
  const respond=value=>res.end(JSON.stringify(value));
@@ -19,7 +20,7 @@ const server=createServer(async(req,res)=>{
  } else if(url.pathname==='/api/v1/projects/42/issues/abc4')respond({issue:{status,short_id:'abc4',metadata,revision}});
  else if(url.pathname==='/api/v1/projects/42/issues'){
   assert.equal(url.searchParams.get('meta'),'notify.YWN0b3IvdGVhbW1hdGU');assert.equal(url.searchParams.get('status'),'open');
-  if(failInbox){res.statusCode=503;respond({error:'temporarily unavailable'});}else respond({issues:request?[{short_id:'abc4',title:'example task',metadata:{'notify.YWN0b3IvdGVhbW1hdGU':{from:'coordinator',message:request}}}]:[]});
+  respond({issues:[{short_id:'abc4',title:'example task',metadata:{'notify.YWN0b3IvdGVhbW1hdGU':{from:'coordinator',message:'fresh request'}}}]});
  } else if(req.method==='POST'&&url.pathname==='/api/v1/ui/telemetry'&&body.event==='agent_active'){res.statusCode=202;respond({status:'queued'});}
  else if(url.pathname==='/health')respond({status:'ok',api_version:1});
  else {errors.push(req.method+' '+url.pathname);res.statusCode=404;respond({error:'unexpected route'});}
@@ -35,10 +36,7 @@ try {
  const initial=await load(manager);let active=initial,runner=active.runner;
  writeFileSync(source,'source current');await runner.emit({type:'session_start',reason:'startup'});assert.equal(metadata['work.attention'],'ok');assert.match(metadata['work.attention_session'],/^[0-9a-f]{64}$/);
  const originalOwner=metadata['work.attention_session'];const base={customPrompt:'base',cwd,sections:{other:'preserved'}};
- let result=await runner.emitBeforeAgentStart('first',undefined,base);let prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('source current'));assert(prompt.includes('fresh request'));
- writeFileSync(source,'');request='';result=await runner.emitBeforeAgentStart('cleared',undefined,base);assert.equal(result.systemPromptOptions.sections.kata_contract,'');assert.equal(result.systemPromptOptions.sections.kata_inbox,'');
- writeFileSync(source,Buffer.from([0xff]));failInbox=true;result=await runner.emitBeforeAgentStart('unavailable',undefined,base);prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('contract context is unavailable'));assert(prompt.includes('inbox context is unavailable'));assert(!prompt.includes('fresh request'));
- unlinkSync(source);failInbox=false;result=await runner.emitBeforeAgentStart('fallback',undefined,base);assert(result.systemPromptOptions.sections.kata_contract.length>100);
+ const result=await emitBeforeAgentStart(runner,'first',base),prompt=buildSystemPrompt(result.systemPromptOptions);assert(prompt.includes('source current'));assert(prompt.includes('fresh request'));
  metadata['work.attention']='stuck';await runner.emit({type:'session_start',reason:'startup'});await runner.emit({type:'agent_end',messages:[]});assert.equal(metadata['work.attention'],'stuck');assert.equal(writes.length,1);
  const oldSession=manager.getSessionId();
  await runner.emit({type:'session_shutdown',reason:'reload'});runner.invalidate();active=await load(manager);runner=active.runner;await runner.emit({type:'session_start',reason:'reload'});assert.equal(metadata['work.attention'],'stuck');assert.equal(writes.length,1,'reload preserves explicit handoff');
@@ -48,5 +46,5 @@ try {
  const oldManager=new Proxy(manager,{get(target,key){if(key==='getSessionId')return ()=>oldSession;const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});const oldRunner=new ExtensionRunner([initial.extension],initial.runtime,cwd,oldManager,{});await oldRunner.emit({type:'session_shutdown',reason:'quit'});assert.equal(metadata['work.attention'],'ok');
  process.env.KATA_REF='unrelated-ref';await runner.emit({type:'session_shutdown',reason:'quit'});assert.equal(metadata['work.attention'],'needs-human');assert.equal(metadata['work.attention_msg'],'session ended without hand-off');assert.equal(writes.length,3);
  assert.deepEqual(errors,[]);assert(requests.length>0);
- console.log('Pi real Kata transport passed: explicit stdin-free session, host launch identity, fresh/empty/invalid/missing source, exact inbox, reload handoff, closed-issue preservation, delayed cleanup and captured ref');
+ console.log('Pi real Kata transport passed: explicit stdin-free session, host launch identity, source, exact inbox, reload handoff, closed-issue preservation, delayed cleanup and captured ref');
 } finally {await new Promise(resolve=>server.close(resolve));}

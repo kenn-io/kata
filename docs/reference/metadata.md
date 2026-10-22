@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-09-26
+last_edited: 2026-10-20
 ---
 
 # Metadata
@@ -71,7 +71,8 @@ The daemon surfaces a reached `scheduled_on` or `deadline_on` through ordinary
 when the issue is unowned. Existing manual inbox content wins until cleared.
 Clearing a generated request acknowledges that exact date and recipient; a
 changed date or assignment can surface again. Kata stores no separate reminder
-record.
+record. A reached `scheduled_on` also records an `issue.scheduled_reached`
+event for adapters; see [Reached schedules](cron.md#reached-schedules).
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query

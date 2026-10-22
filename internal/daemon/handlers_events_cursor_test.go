@@ -67,6 +67,17 @@ func TestScopedEventPayloadPreservesTypedEmitterFields(t *testing.T) {
 			},
 		},
 		{
+			name:      "scheduled date reached",
+			eventType: "issue.scheduled_reached",
+			payload:   `{"field":"scheduled_on","value":"2026-09-16","timezone":"UTC","instant":"2026-09-16T00:00:00Z"}`,
+			want: map[string]any{
+				"field":    "scheduled_on",
+				"value":    "2026-09-16",
+				"timezone": "UTC",
+				"instant":  "2026-09-16T00:00:00Z",
+			},
+		},
+		{
 			name:      "cleared priority",
 			eventType: "issue.priority_cleared",
 			payload:   `{"old_priority":2,"updated_at":"2026-09-15T01:02:03Z"}`,

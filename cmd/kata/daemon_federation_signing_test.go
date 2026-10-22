@@ -13,11 +13,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/telemetry"
 )
 
 // Contract: normal daemon startup opts into a separate restricted listener,
 // advertises its private ephemeral address and releases replay ownership on stop.
 func TestDaemonStartsConfiguredFederationIngress(t *testing.T) {
+	original := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = original })
 	for _, secret := range []string{strings.Repeat("k", 64), ""} {
 		t.Run(fmt.Sprintf("key available %t", secret != ""), func(t *testing.T) {
 			resetFlags(t)
@@ -80,8 +85,8 @@ enabled = true
 			case <-time.After(15 * time.Second):
 				t.Fatal("daemon did not stop")
 			}
-			source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_DAEMON_SIGNING_KEY"}
-			verifier, err := federationsigning.NewVerifier("https://daemon.example/federation", []federationsigning.Key{{Source: source, EnrollmentID: 1}}, filepath.Join(home, "federation-signing-replay.state"))
+			source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_DAEMON_SIGNING_KEY"}
+			verifier, err := federationsigning.NewVerifier("https://daemon.example/federation", []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, filepath.Join(home, "federation-signing-replay.state"))
 			require.NoError(t, err)
 			require.NoError(t, verifier.Close())
 		})

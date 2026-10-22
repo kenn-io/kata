@@ -76,14 +76,14 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 }
 
 func resolveTUIConfig(cmd *cobra.Command, flagValue bool) (config.TUIConfig, error) {
-	cfg, err := config.ReadDaemonConfig()
+	cfg, err := config.ReadTUIConfig()
 	if err != nil {
 		return config.TUIConfig{}, err
 	}
 	if cmd.Flags().Changed("mouse") {
-		cfg.TUI.Mouse = flagValue
+		cfg.Mouse = flagValue
 	}
-	return cfg.TUI, nil
+	return cfg, nil
 }
 
 func validTUIUIDFormat(v string) bool {

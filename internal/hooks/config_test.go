@@ -434,6 +434,17 @@ func TestMatch_AssignmentLifecycleRecognized(t *testing.T) {
 	}
 }
 
+// TestMatch_ScheduledReachedRecognized pins that hooks can start date-driven
+// work from the due sweeper's issue.scheduled_reached event.
+func TestMatch_ScheduledReachedRecognized(t *testing.T) {
+	for _, pattern := range []string{"issue.scheduled_reached", "issue.*", "*"} {
+		_, match, err := compileEventMatcher(pattern)
+		if err != nil || !match("issue.scheduled_reached") {
+			t.Fatalf("%s matcher: match=%v err=%v", pattern, match != nil && match("issue.scheduled_reached"), err)
+		}
+	}
+}
+
 // TestMatch_IssueMetadataUpdatedRecognized pins that issue.metadata_updated
 // (added alongside per-issue metadata support) is in knownEventTypes — both
 // the explicit form and the issue.* / * wildcard matchers must accept it.

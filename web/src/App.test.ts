@@ -1102,9 +1102,9 @@ describe('App', () => {
 
     expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
-    expect(
-      (screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
+      'true',
+    )
   })
 
   it('shows configured-origin login without probing authority or losing the requested route', () => {
@@ -1756,9 +1756,9 @@ describe('App', () => {
           request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
       )
       expect(mutation).toBeDefined()
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      )
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull()
     })
     const mutation = requests.find(
       (request) => request.method === 'POST' && request.url.endsWith('/api/v1/projects/7/metadata'),
@@ -2213,9 +2213,9 @@ describe('App', () => {
     )
     await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
     await waitFor(() =>
       expect(
@@ -2302,8 +2302,8 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
     expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
-    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
     )
     expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
 
@@ -2312,9 +2312,9 @@ describe('App', () => {
       await screen.findByRole('button', { name: /Previously existing shared issue/ }),
     ).not.toBeNull()
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2), { timeout: 5000 })
     await waitFor(() =>
@@ -2587,8 +2587,8 @@ describe('App', () => {
     )
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
-    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).toBe(
+      'true',
     )
     expect(screen.queryByRole('button', { name: /Previously existing shared issue/ })).toBeNull()
 
@@ -2597,9 +2597,9 @@ describe('App', () => {
       await screen.findByRole('button', { name: /Previously existing shared issue/ }),
     ).not.toBeNull()
     await waitFor(() =>
-      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
     )
   }, 15_000)
 
@@ -2678,7 +2678,7 @@ describe('App', () => {
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     await waitFor(() =>
-      expect(screen.queryByRole('status', { name: 'Stale Kata data' })).toBeNull(),
+      expect(screen.queryByText('Snapshot may be out of date. Changes are paused.')).toBeNull(),
     )
   })
 
@@ -2701,9 +2701,7 @@ describe('App', () => {
       expect(request!.headers.get('X-Kata-CSRF')).toBe(csrf)
     }
 
-    it('reports accepted screens through the serving daemon and revisits on UTC focus', async () => {
-      vi.useFakeTimers({ toFake: ['Date'] })
-      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
+    it('reports accepted screens through the serving daemon', async () => {
       storeSession()
       const telemetry: Request[] = []
       let rejectedSnapshots = 0
@@ -2744,12 +2742,49 @@ describe('App', () => {
       await waitFor(() => expect(rejectedSnapshots).toBeGreaterThan(0))
       await tick()
       expect(telemetry).toHaveLength(2)
+    })
+
+    it('removes session-ended handlers after a disabled receipt', async () => {
+      const addVisitListener = vi.spyOn(window, 'addEventListener')
+      const removeVisitListener = vi.spyOn(window, 'removeEventListener')
+      storeSession()
+      const telemetry: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === telemetryPath) {
+            telemetry.push(request)
+            if ((await request.clone().json()).properties?.screen === 'today') {
+              return Response.json({ status: 'disabled' }, { status: 202 })
+            }
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await screen.findByRole('region', { name: 'Kata workspace' })
+      await waitFor(() => expect(telemetry).toHaveLength(1))
+      await waitFor(() =>
+        expect(addVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      removeVisitListener.mockClear()
+      history.pushState(null, '', '/kata?view=today')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await waitFor(() =>
+        expect(removeVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      const reports = telemetry.length
+      history.pushState(null, '', '/kata?view=issues')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      window.dispatchEvent(new Event('pagehide'))
       window.dispatchEvent(new Event('focus'))
       await tick()
-      expect(telemetry).toHaveLength(2)
-      vi.setSystemTime(new Date('2026-10-03T00:00:30Z'))
-      window.dispatchEvent(new Event('focus'))
-      await waitFor(() => expect(telemetry).toHaveLength(3))
+      expect(telemetry).toHaveLength(reports)
     })
 
     it('reports app_opened once on load', async () => {
@@ -2874,6 +2909,74 @@ describe('App', () => {
       expectServingDaemonPost(telemetry[2], 'local-session', 'local-csrf')
     })
 
+    it('reports an ended visit after telemetry authentication recovers', async () => {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+      const addVisitListener = vi.spyOn(window, 'addEventListener')
+      storeSession()
+      let renew!: (response: Response) => void
+      const authentication = new Promise<Response>((resolve) => {
+        renew = resolve
+      })
+      let renewalRequested = false
+      const visits: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/ui/session/local') {
+            renewalRequested = true
+            return authentication
+          }
+          if (path === telemetryPath) {
+            const event = await request.clone().json()
+            if (event.event === 'session_ended') visits.push(request)
+            if (
+              event.properties?.screen === 'today' &&
+              request.headers.get('X-Kata-Web-Session') === 'tab-session'
+            ) {
+              return Response.json(
+                { error: { code: 'unauthorized', message: 'session expired' } },
+                { status: 401, headers: { 'X-Kata-Web-Authentication': 'loopback' } },
+              )
+            }
+            return telemetryAccepted()
+          }
+          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (path.endsWith('/api/v1/ui/references')) return references()
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await screen.findByRole('region', { name: 'Kata workspace' })
+      await waitFor(() =>
+        expect(addVisitListener).toHaveBeenCalledWith('pagehide', expect.any(Function)),
+      )
+      now = 120_000
+      await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+      await waitFor(() => expect(renewalRequested).toBe(true))
+      window.dispatchEvent(new Event('pagehide'))
+      expect(visits).toHaveLength(0)
+      renew(
+        Response.json({
+          session: 'renewed-session',
+          csrf: 'renewed-csrf',
+          return_path: '/kata',
+          writable: true,
+          updates: 'poll',
+          actor_policy: 'request',
+        }),
+      )
+      await waitFor(() => expect(visits).toHaveLength(1))
+      expectServingDaemonPost(visits[0], 'renewed-session', 'renewed-csrf')
+      await expect(visits[0]!.json()).resolves.toEqual({
+        event: 'session_ended',
+        properties: { surface: 'web', duration_bucket: '1_to_5m' },
+      })
+    })
+
     it('a background refresh after UTC midnight is not an opening', async () => {
       vi.useFakeTimers({ toFake: ['Date'] })
       vi.setSystemTime(new Date('2026-10-02T12:00:00Z'))
@@ -2927,6 +3030,78 @@ describe('App', () => {
       await waitFor(() => expect(telemetry).toHaveLength(2))
       expectServingDaemonPost(telemetry[1])
     })
+  })
+
+  describe('completed issue action telemetry', () => {
+    for (const action of ['create', 'close'] as const) {
+      it(`${action} sends its surface with the mutation`, async () => {
+        history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+        sessionStorage.setItem(
+          'kata.web.session.v1',
+          JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+        )
+        const base = snapshot()
+        base.catalog[0]!.project.metadata.role = 'inbox'
+        const accepted = {
+          ...base,
+          selected: {
+            state: 'available',
+            issue: base.collection[0],
+            comments: [],
+            labels: [],
+            links: [],
+            history: [],
+          },
+        }
+        const actionRequests: Request[] = []
+        let writes = 0
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const request = requestOf(input, init)
+            const path = new URL(request.url).pathname
+            if (path === '/api/v1/ui/telemetry') {
+              return telemetryAccepted()
+            }
+            if (
+              request.method === 'POST' &&
+              (path.endsWith('/issues') || path.endsWith('/close'))
+            ) {
+              actionRequests.push(request)
+              writes += 1
+              return Response.json({ changed: true })
+            }
+            if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+            if (path.endsWith('/references'))
+              return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+            return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+          }),
+        )
+        render(App)
+        if (action === 'create') {
+          await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+          await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
+            target: { value: 'Example task' },
+          })
+          await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
+        } else {
+          await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+          await fireEvent.click(await screen.findByRole('button', { name: 'Complete' }))
+          await fireEvent.input(screen.getByRole('textbox', { name: 'Evidence value' }), {
+            target: { value: 'go test ./example' },
+          })
+          await fireEvent.input(screen.getByRole('textbox', { name: /Completion note/ }), {
+            target: { value: 'Completed the requested work and checked the result.' },
+          })
+          const buttons = screen.getAllByRole('button', { name: 'Complete' })
+          await fireEvent.click(buttons[buttons.length - 1]!)
+        }
+        await waitFor(() => expect(writes).toBe(1))
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        expect(actionRequests).toHaveLength(1)
+        expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
+      })
+    }
   })
 
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
@@ -3011,5 +3186,5 @@ function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
 }
 
 function telemetryAccepted(): Response {
-  return Response.json({ status: 'disabled' }, { status: 202 })
+  return Response.json({ status: 'queued' }, { status: 202 })
 }

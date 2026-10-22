@@ -1,13 +1,22 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-14
+last_edited: 2026-10-21
 ---
 
 # Configuration
 
 kata configuration is split between environment variables, committed workspace
 bindings, local per-machine overrides, and daemon config.
+
+## Validation by command
+
+TUI preferences and connection, federation spoke authentication and
+`kata federation embedding-recipe`, and doctor's daemon lookup read only the
+configuration sections they use. They still reject bad values and unknown keys
+in the sections they read, including `[tui]`, `[search]`, and the daemon catalog.
+Other sections are checked only by `kata doctor`'s configuration check and
+`kata daemon start`, which validate the full configuration.
 
 ## Closing-session transcripts
 
@@ -104,6 +113,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
 | `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
+| `KATA_SQLITE_BUSY_TIMEOUT` | Overrides `[storage.sqlite].busy_timeout` for SQLite writer contention between processes. Default `5s`; whole milliseconds from `1ms` to `5m`. Restart the daemon to apply. |
 | `KATA_POSTGRES_SCHEMA` | Dedicated Postgres schema. Defaults to `kata`. |
 | `KATA_POSTGRES_SCHEMA_MODE` | Postgres startup policy: `bootstrap` or `validate`. Defaults to `bootstrap`. |
 | `KATA_POSTGRES_SCHEMA_OWNER` | Trusted owner role for the selected schema. Required in `validate` mode. |
@@ -131,7 +141,10 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
 | `KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION` | Set to `1` to let database-backed identity tokens administer connectors and external-root bridges. Off by default. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
-| `KATA_TELEMETRY_ENABLED` | Set to `0`, `false`, `no`, or `off` to disable anonymous PostHog telemetry. Values are case-insensitive and trimmed. |
+| `KATA_TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
+| `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
@@ -161,6 +174,30 @@ dedicated `kata` schema, prepares it under an advisory lock, and never uses
 `public` for kata tables. `KATA_DB` stays ahead of `[storage].dsn` so existing
 shells and scripts keep using their explicit database path after the
 config-file key is introduced.
+
+### SQLite writer waiting
+
+When several clients write through one daemon, local writers keep their place
+in a first-come, first-served queue until admitted or their request context ends.
+The queue has no separate five-second timer. Canceling a request removes its
+waiter without blocking writers behind it. Callers that need a total wait limit
+must supply a context deadline; the transient retry loop's elapsed-time budget
+does not interrupt an in-flight queue wait.
+
+A writer waiting for another process or database handle still uses SQLite's
+busy handler. Configure that wait in `<KATA_HOME>/config.toml`:
+
+```toml
+[storage.sqlite]
+busy_timeout = "5s"
+```
+
+The default remains `5s`. Values must be whole milliseconds from `1ms` through
+`5m`; zero, negative, fractional-millisecond, and larger durations are rejected.
+`KATA_SQLITE_BUSY_TIMEOUT` overrides the file setting. Restart the daemon after
+changing it. This setting does not change PostgreSQL or the vector sidecar.
+
+### PostgreSQL connection policy
 
 For example:
 
@@ -1021,13 +1058,21 @@ then emits an in-process `daemon_active` heartbeat once per UTC day while the
 daemon keeps running. Restarting the daemon may send another heartbeat; kata
 does not store heartbeat state in the database.
 
-The events are `daemon_started` and `daemon_active` with `project_count`,
+The `daemon_started` and `daemon_active` events report `project_count` as a
+range: `0-5`, `6-20`, `21-100`, or `over-100`. Both events also carry
 `application=kata`, build version, commit, OS/arch, source, and the database's
 stable anonymous `instance_uid` as the distinct ID. They do not send project
 names, issue refs, issue content, comments, labels, paths, or actor names. GeoIP
 collection is disabled and PostHog person-profile processing is explicitly
-turned off. Use distinct `daemon_active` counts for active-install reporting;
-`daemon_started` is only for startup-volume diagnostics.
+turned off. Every event reports OS and architecture as `goos` and `goarch`;
+kata removes the `$os`, `$os_version`, `$os_distro`, and `$go_version`
+properties the PostHog SDK would add. Use distinct `daemon_active` counts for
+active-install reporting; `daemon_started` is only for startup-volume
+diagnostics.
+
+See [Kit's shared telemetry field inventory](https://github.com/kenn-io/kit/blob/911b2612038d01ee6f1233f8c9e727abe1e87505/telemetry/posthog/fields.md)
+for every shared payload field. Kata's event properties and allowed values
+are listed below.
 
 A new database records when it created its `instance_uid` in the `meta` key
 `instance_created_at`. Events from a database with this time carry
@@ -1035,20 +1080,44 @@ A new database records when it created its `instance_uid` in the `meta` key
 installs from established ones. Databases created before kata recorded this
 time send events without it.
 
+The daemon sends `setup_finished` once per installation when it finds the first
+visible issue, including one already stored at startup. Open and closed issues
+count, including imported, synced, and agent-created issues. Deleted issues and
+issues in deleted or system projects don't count. The event has no product
+properties. The daemon saves the event identity and observation time before
+sending, then marks the milestone complete after PostHog confirms delivery.
+An interrupted send retries with that same identity and installation age, even
+if the issue is later removed. Pending delivery survives restarts and
+export/import; a new installation ID starts its own milestone. A one-minute
+check catches issues created after startup, including writes by another daemon.
+Browser clients can't send this event. Opting out leaves pending delivery
+available for a later enabled start.
+
 The web UI reports an anonymous `app_opened` event to the daemon serving it
 when the page loads, and again on the first window focus of each later UTC day.
-Background refreshes of an open tab do not count. The daemon sends the event to
-PostHog with the same fields, distinct ID, and opt-out as its own events; the
-browser never contacts PostHog. Only signed-in sessions with write access on the
-serving daemon are counted.
+Each screen reports once per UTC day, so returning to a screen sends nothing more
+that day. Background refreshes of an open tab do not count. The daemon sends the
+event to PostHog with the same fields, distinct ID, and opt-out as its own events;
+the browser never contacts PostHog. Only signed-in sessions with write access on the
+serving daemon are counted. A `disabled` receipt stops browser telemetry and
+removes visit listeners and timers until the next UTC day's load or focus checks
+again.
+
+The TUI remembers accepted app opens and screen views per daemon and UTC
+day across restarts. CLI commands, hooks, MCP, and the TUI share disabled receipts:
+one quiets that daemon through the UTC day across restarts. Switching to another
+daemon still allows reports. Telemetry requests from the TUI never start or
+restart a daemon.
 
 Closing a tab, leaving it hidden for 30 minutes, or exiting `kata tui` reports
 `session_ended` with `surface` and `duration_bucket`: `under_1m`, `1_to_5m`,
 `5_to_30m`, or `over_30m`. A browser visit adds up visible time across tab
 switches and excludes hidden time. Terminal exit reporting uses the daemon that
-recorded the opening, including after switching the displayed daemon. Delivery
-is best effort and waits at most one second; a rejected authentication request
-drops the event.
+recorded the opening, including after switching the displayed daemon.
+Delivery is best effort.
+TUI exit waits at most 50 ms; a report still in flight when `kata tui` exits
+is dropped.
+A rejected authentication request drops the event.
 
 `app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
 daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
@@ -1057,11 +1126,22 @@ more.
 
 CLI commands such as `kata create` or `kata list` that a person runs in a
 terminal report `app_opened` with `surface: cli` to the daemon they used,
-after the command succeeds. Each `KATA_HOME` reports at most once per UTC day
-to each daemon: once the daemon accepts the report, kata records the day under
-`<KATA_HOME>/telemetry/` and later commands that day send nothing. A report
-that fails is retried by the next command. The report never starts a daemon,
-waits at most one second and prints nothing.
+after the command succeeds.
+After handling an accepted response, kata records the UTC day under
+`<KATA_HOME>/telemetry/`, so later commands using that `KATA_HOME` and daemon
+send nothing that day.
+The report never starts a daemon, waits at most 50 ms at exit, and prints nothing.
+A slow remote report can miss the 50 ms exit wait and leave its daily marker
+unwritten if the process exits before handling the response.
+Human CLI reports save a separate attempt timestamp before sending.
+If the process exits before observing the outcome, commands using the same
+`KATA_HOME` and daemon skip reports for 15 minutes, then a later eligible
+command retries; a new UTC day permits a retry sooner.
+This can delay a retry even if the daemon never accepted the report.
+An outcome the process observes clears the attempt timestamp, so an observed
+failure retries on the next eligible command.
+The daemon separately deduplicates `app_opened` per surface per UTC day until
+it restarts.
 
 Only a command whose standard output is a terminal counts, because agents and
 scripts read kata's output through a pipe. Probes and local commands such as
@@ -1076,6 +1156,20 @@ a shared daemon counts that daemon's install. The daemon forwards one
 so a restart can send another the same day. Delivery is best effort and never
 shows in the terminal; count distinct installs rather than events.
 
+The daemon records completed issue creates and closes as `issue_created` and
+`issue_closed` with only `surface: web`, `tui`, or `cli`. Each committed mutation
+that changes the issue counts, including repeated actions in one day. Web issue
+removal counts as a close. Idempotent replays, reused creates, already-closed
+issues, failed writes, reopen operations, and TUI undo actions count nothing.
+
+Clients send their surface in the optional `X-Kata-Surface` mutation header.
+CLI actions follow the terminal and agent-mode rules above. Missing or
+unsupported surfaces drop the count and leave the mutation alone. Issue-scoped
+credentials count nothing. The daemon enqueues the event in memory after the
+write commits, so action telemetry adds no request or wait to a command, TUI
+exit, or web action. Delivery is best effort and follows the daemon's opt-out
+setting. Older daemons ignore the header and record no action count.
+
 Each admitted MCP tool call, including section loaders and tool errors, reports
 `agent_active` to its daemon. Initialization and tool listing send nothing.
 Successful contract hooks report the same event. Attention hooks and daemon hook
@@ -1088,10 +1182,10 @@ Ordinary piped commands send nothing.
 
 MCP reporting uses one worker with a queue of 128 observations. Tool calls enqueue
 without waiting; overflow and queued work at shutdown are discarded. Each report
-has a separate one-second deadline. Shutdown cancels and joins the worker. CLI
-hook reports wait at most 100 ms after successful execution; slow remote transports
-may drop observations. Delivery is best
-effort and preserves command output, results, and exit status.
+has a separate one-second deadline. Shutdown cancels and joins the worker.
+CLI hook reports wait at most 50 ms after successful execution; the hook
+process then exits, so slow remote transports may drop observations.
+Delivery is best effort and preserves command output, results, and exit status.
 
 The daemon counts these observations for each install and UTC day. It sends one
 `agent_active` with `call_count_bucket: 1-10`, then `agent_call_count` at calls 11
@@ -1110,6 +1204,20 @@ currently reached companion bucket. Reports share the daemon's install ID and
 opt-out and send buckets rather than exact counts, paths, tool names, or actor
 names.
 
+With daemon API `0.30.0` or newer, a successful observation at the top bucket
+returns `full`. Hooks and MCP stop posting until the next UTC day after a `full`
+receipt, or after the `disabled` receipt any daemon returns with telemetry off.
+Hooks write the daily marker only after handling a `full` or `disabled` receipt.
+A slow remote report can miss the 50 ms exit wait; exiting before receipt
+handling leaves its marker unwritten, so a later hook can retry. To share
+the stop across processes, clients save a private `agent-full-*` marker under
+`<KATA_HOME>/telemetry/`. The marker holds only the UTC date and is never sent
+anywhere. Its name derives from the daemon URL or Unix socket, so a replacement
+daemon at the same target inherits that day's marker. A daemon that turns
+telemetry back on during the day receives no agent reports from these clients
+until the next UTC day. Older daemons never return `full`, so clients keep
+reporting to them while their telemetry is on.
+
 The browser and TUI also report `screen_viewed` when a screen opens. The fixed
 names are `inbox`, `today`, `delegated`, `scheduled`, `issues`, `logbook`,
 `issue`, `graph`, `credentials`, `projects`, `daemons`, `federation`, `help`,
@@ -1120,15 +1228,37 @@ rows appear in `kata export` output. A changed
 installation ID starts a fresh count. Later-day browser focus or terminal input
 counts another visit. Delivery is best effort; a rejected enqueue can retry.
 
-Disable telemetry with:
+### Reporting rules
+
+Kata sends telemetry only from builds with a plain release version, `vX.Y.Z`
+or `X.Y.Z`. Development, prerelease, and source builds with other version
+strings send nothing. A present `CI` variable, even empty, disables telemetry.
+
+Disable telemetry with either setting:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
+# Or use the shared opt-out:
+export DO_NOT_TRACK=1
 ```
 
 `false`, `no`, and `off` also disable telemetry, ignoring surrounding
-whitespace and letter case. The global `TELEMETRY_ENABLED` switch and
-`kit_posthog_disabled` build tag retain their existing behavior.
+whitespace and letter case. `TELEMETRY_ENABLED` accepts the same opt-out values.
+`DO_NOT_TRACK` disables telemetry for every present value except trimmed,
+case-insensitive `0` or `false`. The `kit_posthog_disabled` build tag also
+disables telemetry. Kit's process-wide `posthog.DisableProcess()` switch also
+closes the reporting gate.
+
+The daemon reads its preferences at startup. Set these variables before it
+starts, or restart a running daemon after changing its environment. Kata passes
+them and `CI` to registered local profile daemons it autostarts.
+
+CLI, TUI, and MCP processes check their own build version and environment before
+forwarding activity to the daemon, even when that daemon has reporting enabled.
+An ineligible CLI or TUI also omits action attribution on issue creates and closes,
+so those operations succeed without asking the daemon to report action events.
+MCP establishes its gate before starting its server. MCP issue actions carry no
+CLI or TUI attribution. Browser reports use the serving daemon's preferences.
 
 Release archives and package-manager builds use this same telemetry policy.
 Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager

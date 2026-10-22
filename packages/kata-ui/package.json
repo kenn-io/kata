@@ -26,14 +26,14 @@
     "src/components"
   ],
   "scripts": {
-    "test": "vitest run",
+    "test": "vp test",
     "typecheck": "tsc --noEmit",
     "check:svelte": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "check": "bun run typecheck && bun run check:svelte && bun run check:usage",
     "check:usage": "kit-ui-check src && bun run scripts/check-kit-ui-usage.ts src"
   },
   "dependencies": {
-    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#0c08808dee64d41b23ca9060ce58753841a88060"
+    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#8015aec038169716dfa3fcf0effc369bdf07c380"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.1.2",
@@ -43,8 +43,9 @@
     "svelte": "5.56.3",
     "svelte-check": "4.6.0",
     "typescript": "5.9.3",
-    "vite": "8.1.3",
-    "vitest": "4.1.10"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0",
+    "vite-plus": "1.2.0",
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
     "svelte": "^5.56.3"

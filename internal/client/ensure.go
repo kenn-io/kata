@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"golang.org/x/mod/semver"
 )
 
 // DiscoveredWebRuntime is the validated browser launch metadata for one live
@@ -79,12 +80,17 @@ const (
 	daemonStartupWait       = 30 * time.Second
 )
 
+// ErrDaemonNotReplaceable means this binary left a live daemon of another
+// version running because it cannot open that daemon's storage or is an older
+// release than the daemon.
+var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
+
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
 	startDaemonForEnsure         = autoStart
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
-	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
+	signalDaemonStopForEnsure    = daemonruntime.SignalDaemonStop
 	discoverDaemonForAutoStart   = discoverForEnsure
 	checkDaemonStateForEnsure    = func(dataDir string) error {
 		return (kitdaemon.RuntimeStore{Dir: dataDir}).CheckWritable()
@@ -166,7 +172,7 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 }
 
 func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
-	ns, err := daemon.NewNamespace()
+	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return RunningDaemon{}, err
 	}
@@ -178,11 +184,87 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
 	case daemonScanStale:
+		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
+			return RunningDaemon{}, err
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+// checkDaemonReplaceable refuses to stop a live daemon that this binary could
+// not replace: a newer release, or one serving storage whose schema is newer
+// than this binary supports. Older storage stays replaceable because the
+// replacement daemon upgrades it on open, unless PostgreSQL runs in validate
+// mode, where the daemon performs no DDL and starts only on its exact schema.
+func checkDaemonReplaceable(ctx context.Context, live PingInfo) error {
+	if err := refuseDaemonDowngrade(live); err != nil {
+		return err
+	}
+	inspector, err := installedStorageInspector()
+	if err != nil {
+		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
+	}
+	storage, err := peekStorageSchemaForEnsure(ctx, inspector)
+	if err != nil {
+		return fmt.Errorf("inspect storage before replacing kata daemon %s: %w", daemonVersionLabel(live), err)
+	}
+	binarySchema := inspector.CurrentSchemaVersion()
+	switch {
+	case storage.Version > binarySchema:
+		return fmt.Errorf("%w: kata daemon %s uses storage schema_version %d, which is newer than binary schema %d of this kata binary %s; use a newer kata binary",
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, binarySchema, currentVersionForEnsure())
+	case storage.ValidateOnly && storage.Version != binarySchema:
+		return fmt.Errorf("%w: kata daemon %s uses PostgreSQL schema_version %d, but validate mode starts only on binary schema %d of this kata binary %s; stop the daemon and run this binary's kata storage postgres migrate first",
+			ErrDaemonNotReplaceable, daemonVersionLabel(live), storage.Version, binarySchema, currentVersionForEnsure())
+	}
+	return nil
+}
+
+func daemonVersionLabel(live PingInfo) string {
+	if live.Version == "" {
+		return "(version not reported)"
+	}
+	return live.Version
+}
+
+// refuseDaemonDowngrade keeps a live release daemon that is newer than this
+// release binary. Only plain release versions (vX.Y.Z) have a defined order:
+// development builds report a commit (gabc1234) or a git-describe suffix
+// (v0.19.0-3-gabc1234) that semver would misorder.
+func refuseDaemonDowngrade(live PingInfo) error {
+	running, binary := live.Version, currentVersionForEnsure()
+	if !isReleaseVersion(running) || !isReleaseVersion(binary) || semver.Compare(running, binary) <= 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: kata daemon %s is newer than this kata binary %s; use a newer kata binary",
+		ErrDaemonNotReplaceable, running, binary)
+}
+
+func isReleaseVersion(v string) bool {
+	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
+}
+
+// ensureStorageSchema is the schema of the storage a replacement daemon would
+// open. ValidateOnly means that daemon cannot migrate it: PostgreSQL storage
+// configured with mode "validate".
+type ensureStorageSchema struct {
+	Version      int
+	ValidateOnly bool
+}
+
+// peekStorageSchemaForEnsure reads, without migrating, the schema version of
+// the storage a replacement daemon would open, using the same storage settings
+// that daemon reads. The read shares the HTTP timeout budget so unreachable
+// PostgreSQL storage cannot stall the command.
+func peekStorageSchemaForEnsure(ctx context.Context, inspector StorageInspector) (ensureStorageSchema, error) {
+	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	version, validateOnly, err := inspector.PeekCurrentSchema(ctx)
+	return ensureStorageSchema{Version: version, ValidateOnly: validateOnly}, err
 }
 
 // daemonScanOutcome is the three-case answer to whether a local daemon is
@@ -287,7 +369,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		// soon as the real daemon closes its listener.
 		running := false
 		for _, record := range targets {
-			if !daemon.RuntimeProcessAlive(record) {
+			if !daemonruntime.RuntimeProcessAlive(record) {
 				continue
 			}
 			if _, err := os.Stat(record.SourcePath); errors.Is(err, os.ErrNotExist) {
@@ -310,7 +392,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
-	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"))
+	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"))
 }
 
 func autoStartWithEnvironment(ctx context.Context, dataDir string, env []string) (RunningDaemon, error) {

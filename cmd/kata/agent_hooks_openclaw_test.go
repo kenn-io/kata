@@ -59,7 +59,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		opts.Executable += ".exe"
 	}
-	build := exec.CommandContext(t.Context(), "go", "build", "-tags", "kit_posthog_disabled", "-buildvcs=false", "-o", opts.Executable, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed build arguments produce an isolated test executable.
+	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version=v1.2.3", "-o", opts.Executable, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed build arguments produce an isolated test executable.
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
 	plan, err := planOpenClawAgentHooks(opts, false)

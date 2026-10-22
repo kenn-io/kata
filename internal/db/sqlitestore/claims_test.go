@@ -1694,6 +1694,234 @@ func TestApplyClaimStatusNoLiveClaimNoopSucceeds(t *testing.T) {
 	assertLiveClaimCount(t, d, issue.UID, 0)
 }
 
+func TestCheckClaimGateReturnsWhileSQLiteWriterIsHeld(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		kind      string
+		holder    string
+		expired   bool
+		unknown   bool
+		wantError error
+	}{
+		{name: "no claim"},
+		{name: "same holder", kind: "hard", holder: "alice"},
+		{name: "different holder", kind: "hard", holder: "bob", wantError: db.ErrClaimDenied},
+		{name: "live timed claim", kind: "timed", holder: "bob", wantError: db.ErrClaimDenied},
+		{name: "expired timed claim", kind: "timed", holder: "bob", expired: true},
+		{name: "unknown issue", unknown: true, wantError: db.ErrNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d, ctx, p, issue := setupTestIssue(t)
+			now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+			principal := claimPrincipal(t, "alice")
+			if tc.kind != "" {
+				var expires *time.Time
+				if tc.kind == "timed" {
+					expires = new(now.Add(time.Hour))
+					if tc.expired {
+						expires = new(now)
+					}
+				}
+				holder := principal
+				holder.Holder = tc.holder
+				claim := cachedClaim(t, issue, holder, tc.kind, now, expires)
+				require.NoError(t, d.UpsertClaimCache(ctx, claim))
+			}
+			ref := issue.ShortID
+			if tc.unknown {
+				ref = newTestUID(t)
+			}
+			holdClaimTestWriter(t, d)
+			readCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			err := d.CheckClaimGate(readCtx, db.ClaimGateParams{
+				ProjectID: p.ID, IssueRef: ref, Principal: principal, Now: now,
+			})
+			if tc.wantError == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestApplyClaimStatusUnchangedReturnsWhileSQLiteWriterIsHeld(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"none", "hard", "timed", "stale", "normalized", "time zone"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			d, ctx, p, issue := setupTestIssue(t)
+			now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+			status := db.ClaimStatus{HubNow: now}
+			if kind != "none" {
+				claimKind := "hard"
+				var expires *time.Time
+				if kind == "timed" {
+					claimKind, expires = "timed", new(now.Add(time.Hour))
+				}
+				principal := claimPrincipal(t, "alice")
+				claim := cachedClaim(t, issue, principal, claimKind, now, expires)
+				status = db.ClaimStatus{Held: true, Holder: principal, Claim: &claim, HubNow: now}
+				require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, status))
+				status.HubNow = now.Add(time.Minute)
+				if kind == "stale" {
+					status = db.ClaimStatus{HubNow: now.Add(-time.Minute)}
+				}
+				if kind == "normalized" {
+					claim.ProjectID, claim.IssueID = 0, 0
+					claim.Holder, claim.HolderInstanceUID, claim.ClientKind = "", "", ""
+					claim.AcquiredAt, claim.UpdatedAt = time.Time{}, time.Time{}
+					claim.Revision = 0
+					status.HubNow = now
+				}
+				if kind == "time zone" {
+					claim.AcquiredAt = claim.AcquiredAt.In(time.FixedZone("offset", 3600))
+					claim.UpdatedAt = claim.UpdatedAt.In(time.FixedZone("offset", 3600))
+				}
+			}
+			holdClaimTestWriter(t, d)
+			readCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			require.NoError(t, d.ApplyClaimStatus(readCtx, p.ID, issue.UID, status))
+			if kind == "none" {
+				assertLiveClaimCount(t, d, issue.UID, 0)
+			} else {
+				assertLiveClaimHolder(t, d, issue.UID, "alice")
+				assertLiveClaimUpdatedAt(t, d, issue.UID, now)
+			}
+		})
+	}
+}
+
+// BEGIN IMMEDIATE holds both SQLite's writer and the store's in-process queue.
+// Readers must finish before cleanup releases either slot.
+func holdClaimTestWriter(t *testing.T, d *sqlitestore.Store) {
+	t.Helper()
+	conn, err := d.Conn(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK")
+		assert.NoError(t, rollbackErr)
+		assert.NoError(t, conn.Close())
+	})
+	_, err = conn.ExecContext(t.Context(), "BEGIN IMMEDIATE")
+	require.NoError(t, err)
+}
+
+func FuzzApplyClaimStatusUnchangedDoesNotWaitForWriter(f *testing.F) {
+	f.Add("edit", "cli", uint64(1), false)
+	f.Add("", "host:test", uint64(17), true)
+	f.Fuzz(func(t *testing.T, purpose, clientKind string, revision uint64, timed bool) {
+		d, ctx, p, issue := setupTestIssue(t)
+		now := time.Date(2026, 5, 23, 12, 0, 0, 123456789, time.UTC)
+		principal := claimPrincipal(t, "alice")
+		principal.ClientKind = clientKind
+		kind := "hard"
+		var expires *time.Time
+		if timed {
+			kind, expires = "timed", new(now.Add(time.Hour))
+		}
+		claim := cachedClaim(t, issue, principal, kind, now, expires)
+		claim.Purpose, claim.Revision = purpose, int64(revision>>1)
+		status := db.ClaimStatus{Held: true, Holder: principal, Claim: &claim, HubNow: now}
+		require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, status))
+		before, err := d.ClaimStatusReadOnly(ctx, p.ID, issue.UID, now)
+		require.NoError(t, err)
+		require.NotNil(t, before.Claim)
+		holdClaimTestWriter(t, d)
+		readCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		require.NoError(t, d.ApplyClaimStatus(readCtx, p.ID, issue.UID, status))
+		after, err := d.ClaimStatusReadOnly(ctx, p.ID, issue.UID, now)
+		require.NoError(t, err)
+		assert.Equal(t, before, after)
+	})
+}
+
+func TestApplyClaimStatusUnchangedSubMillisecondTimesReturnsWhileWriterIsHeld(t *testing.T) {
+	t.Parallel()
+	d, ctx, p, issue := setupTestIssue(t)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 123456789, time.UTC)
+	claim := cachedClaim(t, issue, claimPrincipal(t, "alice"), "timed", now, new(now.Add(time.Hour)))
+	status := db.ClaimStatus{Held: true, Claim: &claim, HubNow: now}
+	require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, status))
+	// SQLite persists all three timestamps at millisecond precision.
+	assertLiveClaimUpdatedAt(t, d, issue.UID, time.Date(2026, 5, 23, 12, 0, 0, 123000000, time.UTC))
+	holdClaimTestWriter(t, d)
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	require.NoError(t, d.ApplyClaimStatus(readCtx, p.ID, issue.UID, status))
+}
+
+func TestApplyClaimStatusPersistsChangedFieldsWithOneConnection(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		change func(*db.IssueClaim)
+	}{
+		{"holder", func(c *db.IssueClaim) { c.Holder = "bob" }},
+		{"instance", func(c *db.IssueClaim) { c.HolderInstanceUID = newTestUID(t) }},
+		{"client kind", func(c *db.IssueClaim) { c.ClientKind = "mcp" }},
+		{"purpose", func(c *db.IssueClaim) { c.Purpose = "review" }},
+		{"claim kind", func(c *db.IssueClaim) { c.ClaimKind, c.ExpiresAt = "hard", nil }},
+		{"acquired at", func(c *db.IssueClaim) { c.AcquiredAt = c.AcquiredAt.Add(time.Second) }},
+		{"expires at", func(c *db.IssueClaim) { c.ExpiresAt = new(c.ExpiresAt.Add(time.Hour)) }},
+		{"revision", func(c *db.IssueClaim) { c.Revision++ }},
+		{"updated at", func(c *db.IssueClaim) { c.UpdatedAt = c.UpdatedAt.Add(time.Second) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d, ctx, p, issue := setupTestIssue(t)
+			d.SetMaxOpenConns(1)
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+			claim := cachedClaim(t, issue, claimPrincipal(t, "alice"), "timed", now, new(now.Add(time.Minute)))
+			require.NoError(t, d.UpsertClaimCache(ctx, claim))
+			claim.ID = liveClaimID(t, d, issue.UID)
+			tc.change(&claim)
+			status := db.ClaimStatus{Held: true, Claim: &claim, HubNow: now.Add(time.Second)}
+			require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, status))
+			got, err := d.ClaimStatusReadOnly(ctx, p.ID, issue.UID, now)
+			require.NoError(t, err)
+			assert.Equal(t, &claim, got.Claim)
+			// Once persisted, the same refresh must release its read snapshot too.
+			require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, status))
+		})
+	}
+}
+
+func TestApplyClaimStatusRechecksAfterTakingWriter(t *testing.T) {
+	t.Parallel()
+	d, ctx, p, issue := setupTestIssue(t)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	claim := cachedClaim(t, issue, claimPrincipal(t, "alice"), "hard", now, nil)
+	require.NoError(t, d.UpsertClaimCache(ctx, claim))
+	// A fence executes after the writer is acquired. Simulate a newer cache
+	// value becoming visible after the fast-path read but before reconciliation.
+	calls := 0
+	fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
+		calls++
+		_, err := tx.ExecContext(ctx, `UPDATE issue_claims SET purpose = ?, revision = ?, updated_at = ? WHERE claim_uid = ?`,
+			"newer", 3, now.Add(2*time.Minute).Format(time.RFC3339Nano), claim.ClaimUID)
+		return err
+	})
+	claim.Purpose, claim.Revision, claim.UpdatedAt = "incoming", 2, now.Add(time.Minute)
+	require.NoError(t, d.ApplyClaimStatus(fenced, p.ID, issue.UID, db.ClaimStatus{
+		Held: true, Claim: &claim, HubNow: now.Add(time.Minute),
+	}))
+	assert.Equal(t, 1, calls)
+	got, err := d.ClaimStatusReadOnly(ctx, p.ID, issue.UID, now)
+	require.NoError(t, err)
+	require.NotNil(t, got.Claim)
+	assert.Equal(t, "newer", got.Claim.Purpose)
+	assert.Equal(t, int64(3), got.Claim.Revision)
+	assert.True(t, now.Add(2*time.Minute).Equal(got.Claim.UpdatedAt))
+}
+
 func TestAcquireClaimConcurrentAttemptsGrantExactlyOne(t *testing.T) {
 	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)

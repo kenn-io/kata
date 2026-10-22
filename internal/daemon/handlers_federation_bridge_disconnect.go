@@ -123,7 +123,7 @@ func registerFederationBridgeDisconnect(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if err == nil && !in.Body.Preflight {
-			federationReplicaTransitions.markLeavePending(federationReplicaTransitionKey(cfg.DB, in.ProjectName))
+			federationReplicaTransitions.markLeavePending(federationReplicaTransitionKey(cfg.DB, in.ProjectName), newFederationReplicaPreparation(cfg.DB, project.ID, ""))
 		}
 		ensureFederationReplicaMu.Unlock()
 		if err != nil {

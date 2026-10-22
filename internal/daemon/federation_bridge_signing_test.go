@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 const bridgeSigningHubBase = "https://hub.example"
@@ -30,7 +31,7 @@ type signingBridgeFixture struct {
 	hubProject db.Project
 	local      projectAccessFixture
 	localStore db.Storage
-	source     federationsigning.Source
+	source     signingpolicy.Source
 }
 
 func newSigningBridgeFixture(t *testing.T) signingBridgeFixture {
@@ -38,7 +39,7 @@ func newSigningBridgeFixture(t *testing.T) signingBridgeFixture {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("TEST_BRIDGE_SIGNING_KEY", strings.Repeat("b", 64))
-	source := federationsigning.Source{KeyID: "bridge-key", KeyEnv: "TEST_BRIDGE_SIGNING_KEY"}
+	source := signingpolicy.Source{KeyID: "bridge-key", KeyEnv: "TEST_BRIDGE_SIGNING_KEY"}
 	state := filepath.Join(home, "replay.state")
 	require.NoError(t, federationsigning.InitializeReplayState(state))
 	hubStore := openReplicaServiceStore(t)
@@ -54,7 +55,7 @@ func newSigningBridgeFixture(t *testing.T) signingBridgeFixture {
 	require.NoError(t, err)
 	// A fresh hub store issues the bridge's grant as enrollment 1; the hub
 	// operator registers the bridge key by that ID, as the signing guide says.
-	verifier, err := federationsigning.NewVerifier(bridgeSigningHubBase, []federationsigning.Key{{Source: source, EnrollmentID: 1}}, state)
+	verifier, err := federationsigning.NewVerifier(bridgeSigningHubBase, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, state)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = verifier.Close() })
 	hubServer := daemon.NewServer(daemon.ServerConfig{DB: hubStore, RootSigning: daemon.NewRootSigning(rootSigner), FederationSigning: verifier, FederationSigningRequired: true, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})

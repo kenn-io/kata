@@ -4,18 +4,19 @@ import (
 	"bytes"
 	"testing"
 
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/jsonl"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestNativeCronPostgresSequenceFloors(t *testing.T) {
 	fixture := buildNativeCronJSONLFixture(t)
 	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	source, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

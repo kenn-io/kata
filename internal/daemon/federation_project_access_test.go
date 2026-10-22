@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
 type revokeFederationProjectAccessOnRead struct {
@@ -58,7 +59,7 @@ func TestFederationPollDiscardsEventsReadAfterProjectMembershipRevocation(t *tes
 // restricted project's events, since the poll is a read and not a mutation.
 func runFederationPollRevocation(t *testing.T, afterRead bool) {
 	t.Setenv("TEST_FEDERATION_PROJECT_ACCESS_KEY", strings.Repeat("k", 64))
-	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_FEDERATION_PROJECT_ACCESS_KEY"}
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_FEDERATION_PROJECT_ACCESS_KEY"}
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "spoke-project")
@@ -112,7 +113,7 @@ func runFederationPollRevocation(t *testing.T, afterRead bool) {
 		synctest.Test(t, func(t *testing.T) {
 			state := filepath.Join(t.TempDir(), "replay.state")
 			require.NoError(t, federationsigning.InitializeReplayState(state))
-			verifier, err := federationsigning.NewVerifier("https://hub.example", []federationsigning.Key{
+			verifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
 				{Source: source, EnrollmentID: enrollment.Enrollment.ID},
 			}, state)
 			require.NoError(t, err)

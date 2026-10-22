@@ -27,6 +27,13 @@ type TelemetryReporter interface {
 	Capture(event string, properties map[string]any) error
 }
 
+func captureCoreAction(ctx context.Context, cfg ServerConfig, event, surface string) {
+	if cfg.Telemetry == nil || issueScopeFromContext(ctx) != nil || surface == "" {
+		return
+	}
+	_ = cfg.Telemetry.Capture(event, map[string]any{"surface": surface})
+}
+
 // appOpenedGate captures one app_opened per surface per UTC day; it forgets on restart.
 type appOpenedGate struct {
 	mu   sync.Mutex
@@ -77,7 +84,7 @@ func newAgentUseGate(path string, now func() time.Time) *agentUseGate {
 	return g
 }
 
-func (g *agentUseGate) capture(reporter TelemetryReporter) error {
+func (g *agentUseGate) capture(reporter TelemetryReporter) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	previous := g.state
@@ -113,7 +120,7 @@ func (g *agentUseGate) capture(reporter TelemetryReporter) error {
 			}
 		}
 	}
-	return err
+	return err == nil && g.state.Sent == 101, err
 }
 
 // registerTelemetryHandlers lets UI clients report allowlisted events through
@@ -142,7 +149,7 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if principal, ok := PrincipalFromContext(ctx); ok && principal.Scope != nil && event != "agent_active" {
 			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden", "issue-scoped credentials may report only agent activity", "", nil)
 		}
-		if event == "agent_call_count" || !reporter.EventAllowed(event) {
+		if event == "setup_finished" || event == "agent_call_count" || event == "issue_created" || event == "issue_closed" || !reporter.EventAllowed(event) {
 			return nil, api.NewError(http.StatusBadRequest, "unsupported_telemetry_event",
 				"unsupported telemetry event", "", nil)
 		}
@@ -152,13 +159,14 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return out, nil
 		}
 		var err error
+		var full bool
 		capture := func() bool {
 			err = reporter.Capture(in.Body.Event, in.Body.Properties)
 			return err == nil
 		}
 		switch event {
 		case "agent_active":
-			err = agentGate.capture(reporter)
+			full, err = agentGate.capture(reporter)
 		case "app_opened":
 			gate.capture(telemetry.AppOpenedSurface(in.Body.Properties), capture)
 		case "screen_viewed":
@@ -186,6 +194,9 @@ func registerTelemetryHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"capture telemetry event failed", "", nil)
 		}
 		out.Body.Status = "queued"
+		if full {
+			out.Body.Status = "full"
+		}
 		return out, nil
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2230,6 +2231,10 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	// Local binding must still be present (teardown was not run).
 	_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, bindErr, "binding should still be present after hub-unreachable abort")
+	// The failed leave releases its preparation, so rebind and join work
+	// again without restarting the daemon.
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name),
+		"a leave that failed before local teardown must not stay pending")
 
 	// With --local-only: should succeed and tear down the local binding.
 	_, _, err = runCmdCapture(t, env, "federation", "leave",
@@ -2237,6 +2242,69 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	require.NoError(t, err)
 	_, bindErr = env.DB.FederationBindingByProject(ctx, project.ID)
 	assert.ErrorIs(t, bindErr, db.ErrNotFound)
+}
+
+// The daemon can prepare a leave whose response never reaches the CLI. The
+// CLI named that preparation before asking for it, so it still releases it and
+// a retried leave starts from an unblocked mapping.
+func TestFederationLeaveReleasesPreparationWhoseResponseWasLost(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+	// Forward every request to the daemon, but drop the connection after the
+	// daemon answers a successful prepare.
+	var lostPrepares atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		forward, err := http.NewRequestWithContext(r.Context(), r.Method, env.URL+r.URL.RequestURI(), bytes.NewReader(body)) //nolint:gosec // G704: forwards to this test's loopback daemon.
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		forward.Header = r.Header.Clone()
+		resp, err := env.HTTP.Do(forward) //nolint:gosec // G704: forwards to this test's loopback daemon.
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		var phase struct {
+			Prepare bool `json:"prepare"`
+		}
+		if strings.HasSuffix(r.URL.Path, "/actions/leave") && resp.StatusCode == http.StatusOK &&
+			json.Unmarshal(body, &phase) == nil && phase.Prepare {
+			lostPrepares.Add(1)
+			panic(http.ErrAbortHandler)
+		}
+		maps.Copy(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(respBody)
+	}))
+	t.Cleanup(proxy.Close)
+	viaProxy := *env
+	viaProxy.URL = proxy.URL
+
+	for range 2 {
+		_, _, err := runCmdCapture(t, &viaProxy, "federation", "leave",
+			"--project", "spoke-project", "--yes")
+		require.Error(t, err)
+		assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name),
+			"a preparation whose response was lost must not keep the mapping pending")
+	}
+
+	require.Equal(t, int32(2), lostPrepares.Load(), "both leaves must reach a prepared daemon")
+	assert.Empty(t, hub.revokedIDs, "a leave without its prepare response must not revoke")
+	_, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err, "the binding must stay after a leave stopped before teardown")
 }
 
 func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) {

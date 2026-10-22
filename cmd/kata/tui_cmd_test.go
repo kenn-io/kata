@@ -183,7 +183,8 @@ func TestTUI_ConfirmQuitConfigModes(t *testing.T) {
 func TestTUI_MouseOptionReadsConfigToml(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nmouse = true\n"), 0o600); err != nil {
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nmouse = true\n"+untrustedWebConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cmd := newTUICmd()

@@ -3,7 +3,7 @@ package cron
 import (
 	"time"
 
-	"github.com/robfig/cron/v3"
+	"github.com/netresearch/go-cron"
 )
 
 // Validate checks the selected trigger and its kind-specific fields.
@@ -49,8 +49,13 @@ func (t Trigger) Validate() error {
 	return nil
 }
 
+// cronParser reads the shared five-field and descriptor grammar. DowOrDom keeps
+// crontab's rule that restricting both day fields matches either one.
+var cronParser = cron.MustNewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor | cron.DowOrDom)
+
 // ParseCron preserves the shared five-field and descriptor grammar. Callers
 // evaluating schedules must use this parser rather than another cron dialect.
+// The parser rejects a TZ= or CRON_TZ= directive without a following schedule.
 func ParseCron(expression string) (cron.Schedule, error) {
-	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(expression)
+	return cronParser.Parse(expression)
 }

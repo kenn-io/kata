@@ -135,3 +135,47 @@ it.each([false, true])(
     expect(post.mock.calls).toEqual([['1_to_5m']])
   },
 )
+
+it('removes listeners and hidden timers while quiet, then resumes enabled timing', () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  let now = 0
+  let hidden = false
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+  const post = vi.fn(async () => undefined)
+  const tracker = startSessionEndedReporting(post)
+  stop = tracker.stop
+  now = 120_000
+  hidden = true
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(vi.getTimerCount()).toBe(1)
+  tracker.setQuiet(true)
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(vi.getTimerCount()).toBe(0)
+  window.dispatchEvent(new Event('pagehide'))
+  expect(post).not.toHaveBeenCalled()
+  hidden = false
+  now += 600_000
+  tracker.setQuiet(false)
+  now += 30_000
+  window.dispatchEvent(new Event('pagehide'))
+  expect(post.mock.calls).toEqual([['1_to_5m']])
+})
+
+it('preserves an ended visit through authentication and quiet-state recovery', () => {
+  let now = 0
+  vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+  const post = vi.fn(async () => undefined)
+  const tracker = startSessionEndedReporting(post)
+  stop = tracker.stop
+  now = 120_000
+  tracker.pause()
+  window.dispatchEvent(new Event('pagehide'))
+  tracker.setQuiet(true)
+  now += 600_000
+  tracker.resume()
+  expect(post).not.toHaveBeenCalled()
+  tracker.setQuiet(false)
+  expect(post.mock.calls).toEqual([['1_to_5m']])
+})

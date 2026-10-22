@@ -81,6 +81,76 @@ describe('AppShell', () => {
     expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
   })
 
+  test('explains a read-only credential at each blocked write control', async () => {
+    const current = snapshot()
+    current.capabilities.writable = false
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        readOnly: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
+      'Credential: Read-only',
+    )
+    expect(screen.queryByText('This Kata session is read-only.')).toBeNull()
+
+    const reason = 'This credential is read-only.'
+    const newTask = screen.getByRole('button', { name: 'New task', description: reason })
+    expect(newTask.getAttribute('aria-disabled')).toBe('true')
+    newTask.focus()
+    expect(document.activeElement).toBe(newTask)
+    expect((await screen.findByRole('tooltip')).textContent?.trim()).toBe(reason)
+    await fireEvent.click(newTask)
+    expect(screen.queryByRole('textbox', { name: 'Quick capture' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use example-project as Inbox/ })).toBeNull()
+
+    const newProject = screen.getByRole('button', { name: 'New project', description: reason })
+    expect(newProject.getAttribute('aria-disabled')).toBe('true')
+    await fireEvent.click(newProject)
+    expect(screen.queryByRole('textbox', { name: 'New project name' })).toBeNull()
+  })
+
+  test('reports stale data in the connection summary and at blocked write controls', () => {
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        stale: true,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Snapshot may be out of date. Changes are paused.')
+    const reason = 'Changes are paused while the snapshot may be out of date.'
+    expect(
+      screen
+        .getByRole('button', { name: 'New task', description: reason })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+    expect(screen.getByRole('button', { name: 'New project', description: reason })).not.toBeNull()
+  })
+
   test.each(['stale', 'daemonSwitching', 'reconnecting', 'remote', 'expired', 'removed'])(
     'fences project sync display when authority is %s',
     async (reason) => {
@@ -1307,8 +1377,8 @@ describe('AppShell', () => {
       },
     })
 
-    const create = screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement
-    expect(create.disabled).toBe(false)
+    const create = screen.getByRole('button', { name: 'New task' })
+    expect(create.getAttribute('aria-disabled')).toBeNull()
     await fireEvent.click(create)
     await fireEvent.click(screen.getByRole('button', { name: /Use example-project as Inbox/ }))
     expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
@@ -1349,7 +1419,9 @@ describe('AppShell', () => {
     expect(screen.getByRole('status', { name: 'Kata daemon status' }).textContent).toContain(
       'Reconnecting…',
     )
-    expect(screen.getByRole('status', { name: 'Stale Kata data' })).not.toBeNull()
+    expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
+      'Snapshot may be out of date. Changes are paused.',
+    )
   })
 
   test('passes mutation authority to project creation controls', async () => {
@@ -1369,16 +1441,20 @@ describe('AppShell', () => {
       },
     })
 
-    let create = screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement
-    expect(create.disabled).toBe(true)
+    const create = () => screen.getByRole('button', { name: 'New project' })
+    expect(create().getAttribute('aria-disabled')).toBe('true')
 
     await view.rerender({ canMutate: true, mutationPending: true })
-    create = screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement
-    expect(create.disabled).toBe(true)
+    expect(create().getAttribute('aria-disabled')).toBe('true')
+    expect(
+      screen.getByRole('button', {
+        name: 'New project',
+        description: 'Wait for the current change to finish.',
+      }),
+    ).not.toBeNull()
 
     await view.rerender({ mutationPending: false })
-    create = screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement
-    expect(create.disabled).toBe(false)
+    expect(create().getAttribute('aria-disabled')).toBeNull()
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {
@@ -1470,12 +1546,17 @@ describe('AppShell', () => {
       },
     })
 
-    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
-      false,
-    )
     expect(
-      (screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+      screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+    ).toBeNull()
+    expect(
+      screen
+        .getByRole('button', {
+          name: 'New project',
+          description: 'This credential cannot create projects.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
     expect((screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
       false,
     )

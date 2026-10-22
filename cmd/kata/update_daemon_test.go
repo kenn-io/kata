@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
 )
@@ -104,13 +104,13 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			if scenario == "idle shutdown" {
 				env = append(env, "KATA_AUTOSTART=1", "KATA_AUTOSTART_IDLE_TIMEOUT=10s")
 			}
-			ns, err := daemon.NewNamespace()
+			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 			record := func() kitdaemon.RuntimeRecord {
 				records, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 				require.NoError(t, err)
 				for _, rec := range records {
-					if daemon.RuntimeProcessAlive(rec) {
+					if daemonruntime.RuntimeProcessAlive(rec) {
 						return rec
 					}
 				}
@@ -150,7 +150,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			before := record()
 			if scenario == "older daemon" {
 				// Earlier daemons do not advertise the restart signal.
-				delete(before.Metadata, daemon.RuntimeRestartMetadataKey)
+				delete(before.Metadata, daemonruntime.RuntimeRestartMetadataKey)
 				_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(before)
 				require.NoError(t, err)
 			}

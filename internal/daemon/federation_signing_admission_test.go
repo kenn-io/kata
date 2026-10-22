@@ -17,12 +17,13 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 	t.Setenv("TEST_INGRESS_POLICY_KEY", strings.Repeat("k", 64))
-	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_POLICY_KEY"}
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_POLICY_KEY"}
 	env := testenv.New(t)
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
@@ -33,7 +34,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier("https://hub.example", []federationsigning.Key{
+		v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
 			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
 		}, state)
 		require.NoError(t, err)
@@ -69,7 +70,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 // the same daemon's other admission pool. Channels control upload progress.
 func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) {
 	t.Setenv("TEST_ADMISSION_KEY", strings.Repeat("k", 64))
-	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_ADMISSION_KEY"}
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_ADMISSION_KEY"}
 	env := testenv.New(t)
 	project, issue := createClaimHubIssueNamed(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
@@ -82,7 +83,7 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 	synctest.Test(t, func(t *testing.T) {
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier("https://hub.example", []federationsigning.Key{
+		v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
 			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
 		}, state)
 		require.NoError(t, err)
@@ -174,7 +175,7 @@ func (*pausedFederationUpload) Close() error { return nil }
 // while the daemon reads and verifies a signed federation upload.
 func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 	t.Setenv("TEST_IDLE_SIGNING_KEY", strings.Repeat("k", 64))
-	source := federationsigning.Source{KeyID: "key-a", KeyEnv: "TEST_IDLE_SIGNING_KEY"}
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_IDLE_SIGNING_KEY"}
 	env := testenv.New(t)
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
@@ -187,7 +188,7 @@ func TestSignedUploadHoldsIdleForegroundDuringVerification(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		state := filepath.Join(t.TempDir(), "replay.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier("https://hub.example", []federationsigning.Key{
+		v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
 			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
 		}, state)
 		require.NoError(t, err)

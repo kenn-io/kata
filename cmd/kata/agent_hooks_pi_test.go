@@ -392,7 +392,8 @@ func piNativeTestRuntime(t *testing.T) string {
 	return ""
 }
 
-func TestPiNativeInstalledRunner(t *testing.T) {
+func piNativeInstalledCommand(t *testing.T, fixture, source string) *exec.Cmd {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node unavailable")
@@ -401,7 +402,7 @@ func TestPiNativeInstalledRunner(t *testing.T) {
 	opts := piTestOptions(t)
 	opts.Attention = true
 	opts.SourceSet = true
-	opts.Source = "contract '$;`.txt"
+	opts.Source = source
 	artifactRoot := t.TempDir()
 	fake := filepath.Join(artifactRoot, "kata '$;`.mjs")
 	executable, err := os.ReadFile("testdata/agent-hooks/pi-executable.mjs")
@@ -422,6 +423,10 @@ func TestPiNativeInstalledRunner(t *testing.T) {
 	}
 	opts.Scope = "user"
 	opts.Source = "user.txt"
+	opts.Executable = filepath.Join(artifactRoot, "user-kata.mjs")
+	if err = os.WriteFile(opts.Executable, executable, 0700); err != nil { //nolint:gosec // G306: isolated executable recorder must be runnable.
+		t.Fatal(err)
+	}
 	plan, err = planPiAgentHooks(opts, false)
 	if err != nil {
 		t.Fatal(err)
@@ -432,8 +437,13 @@ func TestPiNativeInstalledRunner(t *testing.T) {
 	}
 	state := filepath.Join(artifactRoot, "state.json")
 	calls := filepath.Join(artifactRoot, "calls.ndjson")
-	command := exec.Command(node, "testdata/agent-hooks/pi-native-runner.mjs", root, project, user, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+	command := exec.Command(node, fixture, root, project, user, opts.Dir) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 	command.Env = append(os.Environ(), "KATA_REF=issue-ref", "KATA_INBOX_USER=actor/teammate", "KATA_SERVER=https://daemon.example", "KATA_AUTHOR=actor", "KATA_TEAMMATE=teammate", "KATA_PI_TEST_STATE="+state, "KATA_PI_TEST_CALLS="+calls)
+	return command
+}
+
+func TestPiNativeInstalledRunner(t *testing.T) {
+	command := piNativeInstalledCommand(t, "testdata/agent-hooks/pi-native-runner.mjs", "contract '$;`.txt")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("installed Pi execution: %v\n%s", err, output)
@@ -564,49 +574,7 @@ func FuzzPiNativeOwnedOptionRoundTrip(f *testing.F) {
 }
 
 func TestPiNativeInstalledRuntimeReplacement(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node unavailable")
-	}
-	root := piNativeTestRuntime(t)
-	opts := piTestOptions(t)
-	opts.Attention = true
-	opts.SourceSet = true
-	opts.Source = "project.txt"
-	artifacts := t.TempDir()
-	fake := filepath.Join(artifacts, "kata.mjs")
-	executable, err := os.ReadFile("testdata/agent-hooks/pi-executable.mjs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(fake, executable, 0700); err != nil { //nolint:gosec // G306: isolated executable recorder must be runnable.
-		t.Fatal(err)
-	}
-	opts.Executable = fake
-	plan, err := planPiAgentHooks(opts, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	project := filepath.Join(artifacts, "project.mjs")
-	if err = os.WriteFile(project, plan.Changes[0].Content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	opts.Scope = "user"
-	opts.Source = "user.txt"
-	opts.Executable = filepath.Join(artifacts, "user-kata.mjs")
-	if err = os.WriteFile(opts.Executable, executable, 0700); err != nil { //nolint:gosec // G306: isolated executable recorder must be runnable.
-		t.Fatal(err)
-	}
-	plan, err = planPiAgentHooks(opts, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	user := filepath.Join(artifacts, "user.mjs")
-	if err = os.WriteFile(user, plan.Changes[0].Content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-native-replacement.mjs", root, project, user, opts.Dir) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
-	command.Env = append(os.Environ(), "KATA_INBOX_USER=actor/teammate", "KATA_SERVER=https://daemon.example", "KATA_AUTHOR=actor", "KATA_TEAMMATE=teammate", "KATA_PI_TEST_STATE="+filepath.Join(artifacts, "state.json"), "KATA_PI_TEST_CALLS="+filepath.Join(artifacts, "calls.ndjson"))
+	command := piNativeInstalledCommand(t, "testdata/agent-hooks/pi-native-replacement.mjs", "project.txt")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Pi installed runtime replacement: %v\n%s", err, output)

@@ -8,11 +8,13 @@ const themeMedia = vi.hoisted(() => {
   const listeners = new Set<EventListener>()
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
-    value: vi.fn(() => ({
+    value: vi.fn((media: string) => ({
       matches: false,
-      media: '(prefers-color-scheme: dark)',
+      media,
       onchange: null,
-      addEventListener: (_type: string, listener: EventListener) => listeners.add(listener),
+      addEventListener: (_type: string, listener: EventListener) => {
+        if (media === '(prefers-color-scheme: dark)') listeners.add(listener)
+      },
       removeEventListener: (_type: string, listener: EventListener) => listeners.delete(listener),
       addListener: vi.fn(),
       removeListener: vi.fn(),

@@ -598,18 +598,26 @@ type PatchIssueMetadataOut struct {
 
 // ReconcileDueNotificationIn identifies one issue for an atomic due-date
 // inbox reconciliation. Now is supplied by the daemon so tests and every
-// backend make the same due decision.
+// backend make the same due decision. ScheduledReachedFloor is the stored
+// floor from EnsureScheduledReachedFloor; nil records no reached schedule.
 type ReconcileDueNotificationIn struct {
-	IssueID         int64
-	Now             time.Time
-	DefaultTimezone string
+	IssueID               int64
+	Now                   time.Time
+	DefaultTimezone       string
+	ScheduledReachedFloor *time.Time
 }
 
-// ReconcileDueNotificationOut reports the ordinary metadata event created by
-// reconciliation. Event is nil when the issue needs no inbox change.
+// ReconcileDueNotificationOut reports the events created by reconciliation.
+// Event is the ordinary metadata event, nil when the issue needs no inbox
+// change. Reached is the issue.scheduled_reached event, nil unless this pass
+// first saw the current scheduled_on value reached. NotificationErr reports an
+// inbox request that could not be planned, such as an invalid recipient; the
+// reached event is still recorded.
 type ReconcileDueNotificationOut struct {
-	Event   *Event
-	Changed bool
+	Event           *Event
+	Reached         *Event
+	Changed         bool
+	NotificationErr error
 }
 
 // PatchProjectMetadataIn carries inputs for PatchProjectMetadata.

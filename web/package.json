@@ -15,16 +15,16 @@
     "format:check": "prettier --check .",
     "check": "bun run generate:check && bun run typecheck && bun run check:svelte && bun run check:kit-ui && bun run lint && bun run format:check",
     "audit": "bun audit --audit-level high",
-    "test": "vitest run",
-    "test:browser": "vitest run --project browser",
+    "test": "vp test",
+    "test:browser": "vp test --project browser",
     "test:e2e": "playwright test --grep-invert @firefox",
     "test:e2e:firefox": "playwright test --grep @firefox",
-    "build": "vite build",
-    "dev": "vite"
+    "build": "vp build",
+    "dev": "vp dev"
   },
   "dependencies": {
     "@kenn-io/kata-ui": "workspace:*",
-    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#0c08808dee64d41b23ca9060ce58753841a88060",
+    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#8015aec038169716dfa3fcf0effc369bdf07c380",
     "@lucide/svelte": "1.21.0",
     "@xyflow/svelte": "1.6.1",
     "elkjs": "0.11.1",
@@ -51,7 +51,8 @@
     "svelte-check": "4.6.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.54.0",
-    "vite": "8.1.3",
-    "vitest": "4.1.10"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0",
+    "vite-plus": "1.2.0",
+    "vitest": "5.0.5"
   }
 }

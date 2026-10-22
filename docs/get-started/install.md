@@ -5,7 +5,7 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 ## Requirements
 
-The release installers below do not require Go. Install Go 1.27 or later from
+The release installers below do not require Go. Install Go 1.27.3 or later from
 <https://go.dev/dl/> only when using `go install` or building from a clone.
 
 GitHub release binaries are available starting with `v0.5.0`. Since v0.14.0,
@@ -96,8 +96,11 @@ any reported startup problem, then run `kata daemon restart` with the daemon's
 original startup options.
 
 The daemon sends limited anonymous usage reports by default. Set
-`KATA_TELEMETRY_ENABLED=0` in the daemon's environment to turn them off; see
-[Telemetry](../reference/configuration.md#telemetry) for what is collected.
+`KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the daemon's environment
+to turn them off. See [Telemetry](../reference/configuration.md#telemetry) for
+what is collected and [reporting rules](../reference/configuration.md#reporting-rules)
+for CI and build-version requirements. Each CLI, TUI, and MCP process applies
+its own preferences when using an enabled daemon.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

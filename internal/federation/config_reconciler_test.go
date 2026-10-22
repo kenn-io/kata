@@ -814,7 +814,7 @@ func TestReconcileMappingSuppressedLeaveToleratesFailedRevocation(t *testing.T) 
 		prepared := make(chan error, 1)
 		go func() {
 			_, prepareErr := daemon.PrepareFederationReplicaLeave(
-				ctx, store, credentials, localProject.ID,
+				ctx, store, credentials, localProject.ID, "",
 			)
 			prepared <- prepareErr
 		}()
@@ -1638,7 +1638,7 @@ func TestPrepareLeaveDrainsPendingEnrollmentRecovery(t *testing.T) {
 	prepared := make(chan error, 1)
 	go func() {
 		_, prepareErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, localProject.ID,
+			ctx, store, credentials, localProject.ID, "",
 		)
 		prepared <- prepareErr
 	}()
@@ -1695,7 +1695,7 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 		prepared := make(chan error, 1)
 		go func() {
 			_, prepareErr := daemon.PrepareFederationReplicaLeave(
-				ctx, store, credentials, localProject.ID,
+				ctx, store, credentials, localProject.ID, "",
 			)
 			prepared <- prepareErr
 		}()
@@ -1770,7 +1770,7 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 		prepared := make(chan error, 1)
 		go func() {
 			_, prepareErr := daemon.PrepareFederationReplicaLeave(
-				ctx, store, credentials, localProject.ID,
+				ctx, store, credentials, localProject.ID, "",
 			)
 			prepared <- prepareErr
 		}()

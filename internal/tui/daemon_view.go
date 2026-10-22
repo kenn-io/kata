@@ -139,6 +139,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	actor := m.list.actor
 	previousView := m.view
 	m.connGen++
+	conn.api.telemetry = m.telemetry
 	m.api = newUndoClient(conn.api)
 	m.undoHistory.clear("connected to a different daemon")
 	m.undoInFlight = false
