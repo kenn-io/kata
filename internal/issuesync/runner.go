@@ -134,6 +134,9 @@ func (r *Runner) runOnce(
 		r.config.Progress.Update(bindingID, syncStartedAt, phase, completed, total, r.now())
 	})
 	result, err := r.runClaimed(ctx, binding, syncStartedAt, eventFork)
+	if r.config.Progress != nil && r.config.Progress.OnResult != nil {
+		r.config.Progress.OnResult(binding.Provider, binding.ID, err)
+	}
 	if err != nil {
 		return result, err
 	}

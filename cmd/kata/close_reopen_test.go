@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -162,6 +163,51 @@ func TestCloseCmd_SugarDoneWithCommit(t *testing.T) {
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234")
 	assert.Contains(t, out, "closed")
+}
+
+// TestCloseCmd_SugarEvidenceFlagsAreRepeatable pins that every repeated
+// --pr, --commit, and --test value becomes its own evidence item, so work
+// fixed by two pull requests records both instead of only the last one.
+func TestCloseCmd_SugarEvidenceFlagsAreRepeatable(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	out := runCLI(t, env, dir, "--json", "close", ref,
+		"--done",
+		"--message", "Fixed by two pull requests; both merged and the tests pass.",
+		"--pr", "https://example.com/pull/1", "--pr", "https://example.com/pull/2",
+		"--commit", "abc1234", "--commit", "def5678",
+		"--test", "go test ./a", "--test", "go test ./b")
+
+	var response struct {
+		Event struct {
+			Payload string `json:"payload"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
+	var payload struct {
+		Evidence []api.Evidence `json:"evidence"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
+	assert.ElementsMatch(t, []api.Evidence{
+		{Type: api.EvidencePR, URL: "https://example.com/pull/1"},
+		{Type: api.EvidencePR, URL: "https://example.com/pull/2"},
+		{Type: api.EvidenceCommit, SHA: "abc1234"},
+		{Type: api.EvidenceCommit, SHA: "def5678"},
+		{Type: api.EvidenceTest, Command: "go test ./a"},
+		{Type: api.EvidenceTest, Command: "go test ./b"},
+	}, payload.Evidence)
+}
+
+// TestCloseCmd_SugarEmptyPRRejected pins that an empty --pr value fails the
+// close even when other evidence is valid, instead of being silently dropped.
+func TestCloseCmd_SugarEmptyPRRejected(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, _, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--done",
+		"--message", "Fixed Safari callback double-submit and ran tests.",
+		"--commit", "abc1234",
+		"--pr", "")
+	_ = requireCLIError(t, err, ExitValidation)
 }
 
 func TestCloseCmd_SugarDuplicateOf(t *testing.T) {

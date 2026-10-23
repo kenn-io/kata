@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { tick } from 'svelte'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import App from './App.svelte'
 import { preferencesStorageKey } from './lib/state/preferences'
@@ -21,6 +21,183 @@ describe('App', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each([
+    { pending: false, future: false, changed: false },
+    { pending: true, future: false, changed: false },
+    { pending: true, future: false, changed: true },
+    { pending: false, future: true, changed: false },
+  ])(
+    'counts each submitted empty query after its visible results settle, %s',
+    async ({ pending, future, changed }) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const events: unknown[] = []
+      let opened = false
+      let release: (() => void) | undefined
+      let searched = false
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request =
+            input instanceof Request
+              ? input
+              : new Request(new URL(String(input), window.location.origin), init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') {
+            const body = await request.clone().json()
+            if (body.event === 'app_opened') opened = true
+            if (body.event === 'search_empty') events.push(body)
+            return telemetryAccepted()
+          }
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname.endsWith('/api/v1/ui/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          const result = snapshot()
+          if (target.searchParams.get('text') === 'missing') {
+            searched = true
+            if (pending)
+              await new Promise<void>((resolve) => {
+                release = resolve
+              })
+            if (future) result.collection[0]!.metadata = { scheduled_on: '9999-12-31' }
+            else result.collection = []
+          }
+          return Response.json(result, { headers: { ETag: '"snapshot-outcome"' } })
+        }),
+      )
+      render(App)
+      const input = await screen.findByLabelText('Search tasks')
+      await waitFor(() => expect(opened).toBe(true))
+      await tick()
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await waitFor(() => expect(searched).toBe(true))
+      expect(events).toEqual([])
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      if (pending) {
+        await fireEvent.keyDown(input, { key: 'Enter' })
+        expect(events).toEqual([])
+        if (changed) {
+          await fireEvent.input(input, { target: { value: 'Example' } })
+          await screen.findByRole('button', { name: /Example issue/ })
+          release?.()
+          await tick()
+          expect(events).toEqual([])
+          return
+        }
+        release?.()
+      }
+      await waitFor(() => expect(events).toHaveLength(1))
+      expect(events).toEqual([{ event: 'search_empty', properties: { surface: 'web' } }])
+    },
+  )
+
+  it.each([false, true])(
+    'honors query memory and disabled outcome receipts, disabled=%s',
+    async (disabled) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const telemetry: { event: string }[] = []
+      let opened = false
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') {
+            const body = await request.json()
+            telemetry.push(body)
+            if (body.event === 'app_opened') opened = true
+            return Response.json({ status: disabled ? 'disabled' : 'queued' }, { status: 202 })
+          }
+          if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (target.pathname.endsWith('/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          const result = snapshot()
+          if (target.searchParams.get('text')?.startsWith('missing')) result.collection = []
+          return Response.json(result, { headers: { ETag: '"query-memory"' } })
+        }),
+      )
+      render(App)
+      const input = await screen.findByLabelText('Search tasks')
+      await waitFor(() => expect(opened).toBe(true))
+      await tick()
+      const outcomes = () =>
+        telemetry.filter(({ event }) => event === 'search_empty' || event === 'error_shown')
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(1))
+      await fireEvent.click(screen.getByRole('combobox', { name: 'Status: Open' }))
+      await fireEvent.click(screen.getByRole('option', { name: 'All' }))
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      expect(outcomes()).toHaveLength(disabled ? 0 : 1)
+      for (const [index, query] of ['missing2', 'missing'].entries()) {
+        await fireEvent.input(input, { target: { value: query } })
+        await screen.findByText('No tasks')
+        await fireEvent.keyDown(input, { key: 'Enter' })
+        await tick()
+        if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(index + 2))
+      }
+      await fireEvent.input(input, { target: { value: 'missingx' } })
+      await tick()
+      await fireEvent.input(input, { target: { value: 'missing' } })
+      await screen.findByText('No tasks')
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      if (!disabled) await waitFor(() => expect(outcomes()).toHaveLength(4))
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      await tick()
+      expect(outcomes()).toHaveLength(disabled ? 0 : 4)
+    },
+  )
+
+  it('keeps anonymous search results current without posting outcomes', async () => {
+    const telemetry: unknown[] = []
+    const searches: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/telemetry') {
+          telemetry.push(await request.json())
+          return new Response('', { status: 401 })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') return new Response('', { status: 404 })
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        const result = snapshot()
+        result.capabilities.writable = false
+        result.capabilities.actor_policy = 'readonly'
+        const text = target.searchParams.get('text')
+        if (text) searches.push(text)
+        if (text === 'missing') result.collection = []
+        return Response.json(result, { headers: { ETag: '"anonymous-search"' } })
+      }),
+    )
+
+    render(App)
+    const input = await screen.findByLabelText('Search tasks')
+    await fireEvent.input(input, { target: { value: 'missing' } })
+    await waitFor(() => expect(searches).toContain('missing'))
+    await screen.findByText('No tasks')
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await tick()
+    expect(telemetry).toEqual([])
+    expect(screen.queryByRole('heading', { name: 'Launch Kata securely' })).toBeNull()
+    await fireEvent.input(input, { target: { value: 'Example' } })
+    await screen.findByRole('button', { name: /Example issue/ })
+    expect(searches).toContain('Example')
   })
 
   it('renders the Kata application shell while loading', () => {
@@ -3034,7 +3211,16 @@ describe('App', () => {
 
   describe('completed issue action telemetry', () => {
     for (const action of ['create', 'close'] as const) {
-      it(`${action} sends its surface with the mutation`, async () => {
+      it.each(
+        action === 'create' ? ['accepted', 'refused', 'missing-project'] : ['accepted', 'refused'],
+      )(`${action} reports refusals or marks accepted web requests, %s`, async (result) => {
+        const refused = result !== 'accepted'
+        const rejections: unknown[] = []
+        const onRejection = (error: unknown) => rejections.push(error)
+        process.on('unhandledRejection', onRejection)
+        onTestFinished(() => {
+          process.off('unhandledRejection', onRejection)
+        })
         history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
         sessionStorage.setItem(
           'kata.web.session.v1',
@@ -3054,13 +3240,18 @@ describe('App', () => {
           },
         }
         const actionRequests: Request[] = []
+        const shownErrors: unknown[] = []
         let writes = 0
+        let removeProject = false
+        let snapshotReads = 0
         vi.stubGlobal(
           'fetch',
           vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
             const request = requestOf(input, init)
             const path = new URL(request.url).pathname
             if (path === '/api/v1/ui/telemetry') {
+              const body = await request.clone().json()
+              if (body.event === 'error_shown') shownErrors.push(body)
               return telemetryAccepted()
             }
             if (
@@ -3069,11 +3260,27 @@ describe('App', () => {
             ) {
               actionRequests.push(request)
               writes += 1
-              return Response.json({ changed: true })
+              return refused
+                ? Response.json({ code: 'validation', detail: 'Action refused' }, { status: 422 })
+                : Response.json({ changed: true })
             }
-            if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+            if (path === '/api/v1/ui/daemons')
+              return Response.json({
+                daemons: [
+                  ...daemonRoster().daemons,
+                  {
+                    id: 'example-remote',
+                    url: 'https://daemon.example',
+                    auth: 'token',
+                    health: 'connected',
+                    default: false,
+                  },
+                ],
+              })
             if (path.endsWith('/references'))
               return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+            snapshotReads += 1
+            if (removeProject) delete accepted.catalog[0]!.project.metadata.role
             return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
           }),
         )
@@ -3083,6 +3290,18 @@ describe('App', () => {
           await fireEvent.input(await screen.findByRole('textbox', { name: 'Quick capture' }), {
             target: { value: 'Example task' },
           })
+          if (result === 'missing-project') {
+            const reads = snapshotReads
+            removeProject = true
+            window.dispatchEvent(new Event('focus'))
+            await waitFor(() => expect(snapshotReads).toBeGreaterThan(reads))
+            await waitFor(() =>
+              expect(screen.getByRole('button', { name: 'Capture' })).toHaveProperty(
+                'disabled',
+                false,
+              ),
+            )
+          }
           await fireEvent.click(screen.getByRole('button', { name: 'Capture' }))
         } else {
           await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
@@ -3096,10 +3315,38 @@ describe('App', () => {
           const buttons = screen.getAllByRole('button', { name: 'Complete' })
           await fireEvent.click(buttons[buttons.length - 1]!)
         }
+        if (result === 'missing-project') {
+          await waitFor(() =>
+            expect(rejections).toEqual([new Error('Task project is not available.')]),
+          )
+          expect(shownErrors).toEqual([])
+          expect(actionRequests).toHaveLength(0)
+          return
+        }
         await waitFor(() => expect(writes).toBe(1))
-        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+        if (action === 'create' && refused)
+          await waitFor(() => expect(rejections).toEqual([new Error('validation: Action refused')]))
+        if (refused) {
+          expect(await screen.findAllByText('validation: Action refused')).toHaveLength(1)
+          await waitFor(() =>
+            expect(shownErrors).toEqual([
+              {
+                event: 'error_shown',
+                properties: {
+                  surface: 'web',
+                  kind: action === 'create' ? 'issue_created' : 'issue_closed',
+                },
+              },
+            ]),
+          )
+          await tick()
+          expect(screen.getAllByText('validation: Action refused')).toHaveLength(1)
+        } else {
+          await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+          expect(shownErrors).toEqual([])
+          expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
+        }
         expect(actionRequests).toHaveLength(1)
-        expect(actionRequests[0]!.headers.get('X-Kata-Surface')).toBe('web')
       })
     }
   })

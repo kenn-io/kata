@@ -25,6 +25,9 @@ type HubStatusError struct {
 	Body       string
 }
 
+// HTTPStatus exposes the hub response code to outcome classification.
+func (e *HubStatusError) HTTPStatus() int { return e.StatusCode }
+
 func (e *HubStatusError) Error() string {
 	return fmt.Sprintf("hub %s returned %d: %s", e.Path, e.StatusCode, e.Body)
 }

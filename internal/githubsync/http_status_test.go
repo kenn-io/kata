@@ -177,6 +177,9 @@ func TestGitHubStatusRejectsRedirectsAndSanitizesFailures(t *testing.T) {
 					patches++
 					w.Header().Set("Location", foreign.URL)
 					w.Header().Set("Retry-After", "7")
+					if code == http.StatusForbidden {
+						w.Header().Set("X-RateLimit-Remaining", "0")
+					}
 					w.WriteHeader(code)
 					_, err := w.Write([]byte(`{"message":"test-secret private failure"}`))
 					require.NoError(t, err)
@@ -199,6 +202,7 @@ func TestGitHubStatusRejectsRedirectsAndSanitizesFailures(t *testing.T) {
 			require.ErrorAs(t, err, &delivery)
 			require.Equal(t, 1, patches)
 			require.Equal(t, code >= 500, delivery.Ambiguous)
+			require.Equal(t, code == http.StatusForbidden, delivery.RateLimited)
 			require.NotContains(t, err.Error(), "test-secret")
 			require.NotContains(t, err.Error(), foreign.URL)
 		})

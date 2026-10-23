@@ -231,12 +231,12 @@ func (s *clientSession) requestWithAdmission(ctx context.Context, method, path s
 			return &issuesync.StatusError{Message: "notion HTTP 429: public_api_request_blocked", HTTPStatus: status, Blocked: true}
 		}
 		retryable := (err != nil && (status == 0 || (status >= 200 && status < 300))) || status == 429 || status == 529 || status == 500 || status == 502 || status == 503 || status == 504
-		safeErr := fmt.Errorf("notion HTTP %d: %s", status, safeNotionCode(remote.Code))
+		var safeErr error = &issuesync.StatusError{Message: fmt.Sprintf("notion HTTP %d: %s", status, safeNotionCode(remote.Code)), HTTPStatus: status}
 		if err != nil {
 			if status == 0 {
-				safeErr = fmt.Errorf("notion transport or response read failed")
+				safeErr = &issuesync.StatusError{Message: "notion transport or response read failed", Cause: err}
 			} else {
-				safeErr = fmt.Errorf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code))
+				safeErr = &issuesync.StatusError{Message: fmt.Sprintf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code)), HTTPStatus: status, Cause: err}
 			}
 			if errors.Is(attemptErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 				safeErr = fmt.Errorf("%v: %w", safeErr, context.DeadlineExceeded)

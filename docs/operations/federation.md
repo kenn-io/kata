@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # Federation
@@ -12,8 +12,9 @@ keeps a local daemon and local database. It is opt-in per project.
 For a new relay connection, start with
 [Share projects between hubs](../guide/project-relays.md). It explains the
 roles and walks through preview, connection and recovery. Project relays
-require Kata 0.19.0 or later. Direct-spoke enrollment remains
-the bootstrap path for hubs using daemon-owner credentials outside identity mode.
+require Kata 0.19.0 or later. Direct-spoke enrollment uses daemon-owner
+credentials. In identity mode, the owner uses the bootstrap token and names an
+existing hub account with `--actor`.
 
 Use this page for operator details:
 
@@ -346,12 +347,39 @@ on the hub host does not bypass the hub's authentication. On a hub outside
 identity mode, create a legacy enrollment by authenticating with the hub's
 daemon token (`[auth].token`) through `--hub-token-env` or a catalog entry
 that holds it; only a keyless loopback hub accepts the command without a
-credential. In identity mode the daemon token is a bootstrap token: it can
-mint account tokens, but it cannot perform the attributed federation-enable
-step that `kata federation enroll` runs, so use `kata federation bridge
-connect` with an account token instead. If you only have the bootstrap token,
-first mint an account token as described in
-[Identity tokens](remote-daemon.md#identity-tokens).
+credential. In identity mode the daemon token is a bootstrap token. Use it with
+`kata federation enroll` to create a direct enrollment with `--actor` naming an existing hub
+account. The account must have an unscoped API token, which may be expired or
+revoked. An actor with only issue-scoped tokens cannot receive a direct grant.
+For a project-scoped grant, the account must be able to see the project; the
+hub rejects a grant the account could never use. The grant then follows that
+account's project visibility. It remains valid after the account's API tokens
+expire or are revoked. To cut off the device, revoke the grant with
+`kata federation revoke <id>` using owner authority, or remove the account's
+access to the project.
+
+For a project-scoped enrollment, first enable federation with an account token
+using `kata federation enable`. Select the project with a positional argument,
+`--project`, or a bound workspace.
+
+To replace a project-scoped enrollment token, call
+`POST /api/v1/federation/enrollments/actions/rotate`. Repeating
+`kata federation enroll` with a new token creates another grant and leaves the
+old token valid. Rotation revokes active grants for the same spoke and project
+and installs the replacement in one transaction.
+
+For example, with the hub's bootstrap token in `HUB_BOOTSTRAP_TOKEN`, replace
+the spoke UID, project ID, and actor below with your existing values:
+
+```sh
+replacement_token=$(openssl rand -hex 32)
+curl --header "Authorization: Bearer $HUB_BOOTSTRAP_TOKEN" --header 'Content-Type: application/json' --data @- https://hub.example/api/v1/federation/enrollments/actions/rotate <<JSON
+{"spoke_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EA","project_id":7,"capabilities":"pull,push","actor":"member","token":"$replacement_token"}
+JSON
+```
+
+Rotation requires an explicit replacement token. An exact retry with the same
+token and attributes returns the same grant. Treat the response as a secret.
 
 `--hub-token-env` replaces `--hub-token` for enrollment and leave. Pass only
 an environment variable's name; Kata reads its value inside the process.

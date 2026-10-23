@@ -47,6 +47,8 @@ const (
 // replace it to drive deterministic toast expiry.
 type Model struct {
 	telemetry           *telemetryGate
+	searchQuery         string
+	searchCounted       string
 	telemetryScreen     string
 	telemetryConnGen    uint64
 	telemetryDay        string
@@ -402,6 +404,13 @@ func initialFilter(_ Options) ListFilter {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m = next.(Model)
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query != m.searchQuery {
+		m.searchQuery = ""
+	}
+	if query != m.searchCounted {
+		m.searchCounted = ""
+	}
 	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
 		m.pendingDetailFollow = false
 		if len(m.detail.navStack) == 0 {
@@ -578,6 +587,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCredentialsRefreshTick(tick)
 	}
 	next, cmd := m.dispatchToView(msg)
+	switch msg.(type) {
+	case initialFetchMsg, refetchedMsg:
+		settled, report := next.(Model).settleSearch()
+		next, cmd = settled, combineCmds(cmd, report)
+	}
 	if postFetchCmd == nil {
 		return next, cmd
 	}
@@ -1240,8 +1254,9 @@ func (m Model) routeSearchInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		switch msg.String() {
 		case "enter":
 			m.list = m.list.syncSelection(m.list.visibleRows())
-			m.input.searchFocus = searchFocusResults
-			next, cmd := m.followSearchResultIfNeeded(nil)
+			m.input.searchFocus, m.input.searchSubmitted = searchFocusResults, true
+			next, cmd := m.submitSearch()
+			next, cmd = next.followSearchResultIfNeeded(cmd)
 			return next, cmd, true
 		case "up", "down":
 			m.input.searchFocus = searchFocusResults
@@ -1257,10 +1272,10 @@ func (m Model) routeSearchInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		next, cmd := m.dispatchListKey(msg)
 		return next, cmd, true
 	case "esc", "/":
-		m.input.searchFocus = searchFocusQuery
+		m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false
 		return m, nil, true
 	case "enter":
-		next, cmd := m.commitInput()
+		next, cmd := m.commitSearchResults()
 		return next, cmd, true
 	default:
 		return m, nil, true
@@ -1693,7 +1708,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
-		return m, nil
+		return m, m.reportShownError(mut.kind)
 	}
 	if m.input.kind == inputNewIssueForm {
 		m.input = inputState{}
@@ -1856,6 +1871,7 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 // the filter" intent overrides the implicit "follow the same issue
 // across refetches" intent.
 func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
+	previousSearch := m.list.filter.Search
 	m.list.filter = ListFilter{
 		Status: form.fieldValue(fieldStatus),
 		Owner:  strings.TrimSpace(form.fieldValue(fieldOwner)),
@@ -1871,6 +1887,9 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	m.list.selectedUID = ""
 	m.list.status = ""
 	m.input = inputState{}
+	if m.list.filter.Search != previousSearch {
+		return m.submitSearch()
+	}
 	return m, nil
 }
 
@@ -1894,7 +1913,7 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 		in, err := closeInputFromForm(m.input, m.list.actor)
 		if err != nil {
 			m.input.err = err.Error()
-			return m, nil
+			return m, m.reportShownError("close")
 		}
 		if m.undoCloseEntryID != 0 {
 			return m.dispatchUndoEvidenceClose(in)
@@ -1967,12 +1986,12 @@ func (m Model) commitNewIssueForm() (Model, tea.Cmd) {
 	title := m.input.fieldValue(fieldTitle)
 	if strings.TrimSpace(title) == "" {
 		m.input.err = "title is required"
-		return m, nil
+		return m, m.reportShownError("create")
 	}
 	body, err := newIssueBodyFromForm(m.input.fields, m.list.actor)
 	if err != nil {
 		m.input.err = err.Error()
-		return m, nil
+		return m, m.reportShownError("create")
 	}
 	m.input.saving = true
 	m.input.err = ""
@@ -3574,4 +3593,39 @@ func activeDaemonDisplay(target daemonTarget) string {
 
 type typedCommentAPI interface {
 	AddCommentReply(context.Context, int64, string, string, string, string, string, bool, string) (*MutationResp, error)
+}
+
+// commitSearchResults counts a search first submitted from the results list.
+func (m Model) commitSearchResults() (Model, tea.Cmd) {
+	var counted tea.Cmd
+	if !m.input.searchSubmitted {
+		m, counted = m.submitSearch()
+	}
+	next, cmd := m.commitInput()
+	return next, combineCmds(counted, cmd)
+}
+
+func (m Model) submitSearch() (Model, tea.Cmd) {
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query == "" || query == m.searchCounted {
+		return m, nil
+	}
+	m.searchQuery = query
+	return m.settleSearch()
+}
+
+func (m Model) settleSearch() (Model, tea.Cmd) {
+	if m.searchQuery == "" || m.list.loading || m.list.err != nil {
+		return m, nil
+	}
+	query := strings.TrimSpace(m.list.filter.Search)
+	if query != m.searchQuery {
+		return m, nil
+	}
+	m.searchQuery = ""
+	if len(m.list.visibleRows()) != 0 {
+		return m, nil
+	}
+	m.searchCounted = query
+	return m, m.reportOutcome("search_empty", "")
 }

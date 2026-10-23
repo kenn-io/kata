@@ -324,6 +324,7 @@ func (f *inputField) blur() {
 type inputState struct {
 	kind                   inputKind
 	searchFocus            searchFocus
+	searchSubmitted        bool
 	title                  string
 	fields                 []inputField
 	active                 int

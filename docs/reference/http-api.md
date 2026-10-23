@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # HTTP API schema
@@ -684,9 +684,16 @@ enrollment token. When the caller supplies a token, an exact retry with the
 same spoke instance UID, project ID, canonical capabilities, resolved actor,
 and adoption policy returns the same active enrollment. Reusing that token with
 different attributes, or after its enrollment was revoked, returns `409` with
-`federation_enrollment_token_conflict`. Token-auth identity resolution happens
-before this comparison, so a DB-backed identity token's actor overrides the
-request body's `actor`.
+`federation_enrollment_token_conflict`. Actor resolution happens before this
+comparison. A DB-backed account token may create a relay enrollment and supplies
+its actor; it cannot create or rotate a direct grant. In identity mode, the
+owner's bootstrap token may create or rotate direct grants with `actor` naming
+an existing account with an unscoped API token, including an expired or revoked
+token. For a project-scoped grant the account must be able to see the project,
+or the request returns `400` with `validation`. The grant follows that
+account's project visibility and remains valid after its API tokens expire or
+are revoked. See
+[Federation token boundaries](../operations/federation.md#token-boundaries).
 
 Enrollment creation accepts both `lease` and `claim`; the API returns sorted,
 de-duplicated capabilities using the canonical `claim` name. A project-scoped
@@ -719,7 +726,8 @@ an explicit replacement `token`; `actor` and
 `allow_adoption_snapshot_authors` have the same meaning as on creation. In one
 transaction the hub revokes active grants for that spoke and project and
 installs the replacement. After canonical capability normalization and
-token-authenticated actor resolution, retrying the same replacement token with
+actor resolution, including explicit account selection for bootstrap callers,
+retrying the same replacement token with
 the same spoke instance UID, project ID, canonical capabilities, resolved
 actor, and adoption policy returns the same active enrollment. An attribute
 mismatch or a revoked replacement enrollment returns `409` with

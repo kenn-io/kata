@@ -8,6 +8,7 @@
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
+
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
@@ -77,6 +78,7 @@
       | undefined
     onRefreshCredentials?: (() => void | Promise<void>) | undefined
     onBackFromCredentials?: (() => void | Promise<void>) | undefined
+    onSearchEmpty?: (() => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
@@ -139,6 +141,7 @@
     onAccessMutation = undefined,
     onRefreshCredentials = () => {},
     onBackFromCredentials = () => {},
+    onSearchEmpty = undefined,
     onNavigate,
     onCreateProject,
     onDesignateInbox,
@@ -245,6 +248,24 @@
       issues: projection.issues,
     }),
   )
+  let pendingQuery = $state('')
+  let countedQuery = $state('')
+  function submitSearch(query: string): void {
+    query = query.trim()
+    if (!query || query === countedQuery) return
+    pendingQuery = query
+  }
+  $effect(() => {
+    if (loading || stale) return
+    const query = searchFilters.query.trim()
+    if (query !== countedQuery) countedQuery = ''
+    if (!pendingQuery || query !== pendingQuery) return
+    if (currentView.groups.every((group) => group.issues.length === 0)) {
+      countedQuery = pendingQuery
+      onSearchEmpty?.()
+    }
+    pendingQuery = ''
+  })
   let areas = $derived(deriveKataAreas(projection.projects))
   let selectedProject = $derived.by(() => {
     const scope = searchFilters.scope
@@ -292,6 +313,9 @@
   )
 
   function navigate(next: AppRoute): void {
+    const query = (next.filters.text ?? '').trim()
+    if (query !== countedQuery) countedQuery = ''
+    if (query !== pendingQuery) pendingQuery = ''
     navigationGeneration += 1
     void onNavigate(next)
   }
@@ -720,6 +744,7 @@
         filters={searchFilters}
         projects={projection.projects}
         onChange={updateFilters}
+        onSubmitSearch={submitSearch}
       />
       <IssueCollection
         {navigationGeneration}

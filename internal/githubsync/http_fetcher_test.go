@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 func TestHTTPFetcherRepositoryUsesRESTBaseAndDecodesRepository(t *testing.T) {
@@ -694,4 +695,44 @@ func (t *rewriteHostRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 	rewritten.Host = t.target.Host
 	clone.URL = &rewritten
 	return nextRoundTripper(t.next).RoundTrip(clone)
+}
+
+func TestHTTPFetcherRESTAndGraphQLTypedStatusErrors(t *testing.T) {
+	for _, tc := range []struct {
+		limited    bool
+		retryAfter string
+	}{{}, {limited: true}, {limited: true, retryAfter: "31"}} {
+		for _, graphql := range []bool{false, true} {
+			t.Run(fmt.Sprintf("limited=%t/graphql=%t/retryAfter=%s", tc.limited, graphql, tc.retryAfter), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if tc.limited {
+						w.Header().Set("X-RateLimit-Remaining", "0")
+					}
+					w.Header().Set("Retry-After", tc.retryAfter)
+					w.WriteHeader(http.StatusForbidden)
+					if tc.limited {
+						_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+					}
+				}))
+				t.Cleanup(server.Close)
+				fetcher := NewHTTPFetcher(HTTPFetcherConfig{
+					Client: server.Client(), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL,
+					CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"),
+				})
+				var err error
+				if graphql {
+					_, err = fetcher.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
+				} else {
+					_, err = fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
+				}
+				var status *issuesync.StatusError
+				require.ErrorAs(t, err, &status)
+				require.Equal(t, http.StatusForbidden, status.HTTPStatus)
+				require.Equal(t, tc.limited, status.RateLimited)
+				if tc.retryAfter != "" {
+					require.ErrorIs(t, err, errGitHubRetrySingleSleepExceeded)
+				}
+			})
+		}
+	}
 }

@@ -48,6 +48,69 @@ func requireLegacyFederationEnrollmentAuthority(ctx context.Context) error {
 	return nil
 }
 
+// directFederationEnrollmentActor separates owner credential administration
+// from attributed writes. An account token must use a relay so revocation and
+// expiry cannot leave an independent grant behind. Bootstrap chooses an
+// existing account explicitly; historical unscoped tokens identify the account.
+func directFederationEnrollmentActor(ctx context.Context, store db.Storage, requestedActor string) (string, error) {
+	principal, _ := PrincipalFromContext(ctx)
+	if principal.Kind == PrincipalBootstrap {
+		actor := strings.TrimSpace(requestedActor)
+		if err := db.ValidateTokenActor(actor); err != nil {
+			return "", api.NewError(http.StatusBadRequest, "validation", "actor must name an existing hub account", "create an account token before enrolling this actor", nil)
+		}
+		tokens, err := store.ListAPITokens(ctx)
+		if err != nil {
+			return "", internalAPIError(err)
+		}
+		for _, token := range tokens {
+			if token.Actor == actor && token.Scope == nil {
+				return actor, nil
+			}
+		}
+		return "", api.NewError(http.StatusBadRequest, "validation", "actor must name an existing hub account", "create an account token before enrolling this actor", nil)
+	}
+	// Preserve attributed-write errors such as actor_header_required before
+	// checking whether this principal may administer legacy enrollments.
+	actor, err := attributedActor(ctx, requestedActor)
+	if err != nil {
+		return "", err
+	}
+	if err := db.ValidateTokenActor(actor); err != nil {
+		return "", api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+	}
+	if err := requireLegacyFederationEnrollmentAuthority(ctx); err != nil {
+		return "", err
+	}
+	return actor, nil
+}
+
+// requireEnrollmentActorProjectAccess rejects a project-scoped direct grant
+// whose actor cannot see the project. Federation requests apply the same
+// boundary, so such a grant could never be used, and rotating to it would
+// revoke the spoke's working grant.
+func requireEnrollmentActorProjectAccess(ctx context.Context, store db.Storage, projectID *int64, actor string) error {
+	if projectID == nil {
+		return nil
+	}
+	project, err := store.ProjectByID(ctx, *projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	allowed, err := store.AccessibleProjectUIDs(ctx, actor)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if !slices.Contains(allowed, project.UID) {
+		return api.NewError(http.StatusBadRequest, "validation", "actor cannot access this project",
+			"give the account access to the project before enrolling it", nil)
+	}
+	return nil
+}
+
 func rejectRelayCredentialOnLegacyEvents(principal federationPrincipal) error {
 	if principal.RelayBindingUID == "" {
 		return nil
@@ -74,6 +137,24 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		actor, err := attributedActor(ctx, requestedActor)
 		if err != nil {
+			principal, _ := PrincipalFromContext(ctx)
+			if principal.Kind == PrincipalBootstrap {
+				body, metadataErr := enabledHubFederationBody(ctx, cfg.DB, in.ProjectID)
+				if metadataErr == nil {
+					return &api.ProjectFederationResponse{Body: body}, nil
+				}
+				if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+					return nil, err
+				}
+				// Only a missing binding can be fixed by an account-token enable;
+				// it leaves disabled hubs and spoke bindings unchanged.
+				if failure, ok := errors.AsType[*api.APIError](metadataErr); !ok || failure.Code != "federation_not_found" {
+					return nil, metadataErr
+				}
+				return nil, api.NewError(http.StatusForbidden, "bootstrap_token_write_forbidden",
+					"bootstrap token cannot perform attributed writes; use a user token",
+					"enable federation on the hub with an account token first: kata federation enable", nil)
+			}
 			return nil, err
 		}
 		if _, err := cfg.DB.EnableProjectFederation(ctx, in.ProjectID, actor); err != nil {
@@ -252,7 +333,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments",
 		Summary:     "Create a federation enrollment",
-		Description: "Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.",
+		Description: "Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.",
 	}, func(ctx context.Context, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
 		if in.Body.Relay != nil {
 			return createRelayEnrollment(ctx, cfg, in)
@@ -283,14 +364,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		actor, err := attributedActor(ctx, in.Body.Actor)
+		actor, err := directFederationEnrollmentActor(ctx, cfg.DB, in.Body.Actor)
 		if err != nil {
 			return nil, err
 		}
-		if err := db.ValidateTokenActor(actor); err != nil {
-			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
-		}
-		if err := requireLegacyFederationEnrollmentAuthority(ctx); err != nil {
+		if err := requireEnrollmentActorProjectAccess(ctx, cfg.DB, in.Body.ProjectID, actor); err != nil {
 			return nil, err
 		}
 		hubURL := in.Body.HubURL
@@ -358,7 +436,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments/actions/rotate",
 		Summary:     "Rotate a federation enrollment",
-		Description: "Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. Database account tokens cannot rotate legacy grants; use relay enrollment credentials so issuer expiry and revocation remain enforced. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.",
+		Description: "Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. Database account tokens cannot rotate legacy grants; use relay enrollment credentials so issuer expiry and revocation remain enforced. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. After canonical capability normalization and actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.",
 	}, func(ctx context.Context, in *api.RotateFederationEnrollmentRequest) (*api.RotateFederationEnrollmentResponse, error) {
 		if !katauid.Valid(in.Body.SpokeInstanceUID) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_instance_uid must be a valid instance UID", "", nil)
@@ -379,17 +457,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		actor, err := attributedActor(ctx, in.Body.Actor)
+		actor, err := directFederationEnrollmentActor(ctx, cfg.DB, in.Body.Actor)
 		if err != nil {
 			return nil, err
 		}
-		if err := db.ValidateTokenActor(actor); err != nil {
-			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
-		}
-		if err := requireLegacyFederationEnrollmentAuthority(ctx); err != nil {
+		projectID := in.Body.ProjectID
+		if err := requireEnrollmentActorProjectAccess(ctx, cfg.DB, &projectID, actor); err != nil {
 			return nil, err
 		}
-		projectID := in.Body.ProjectID
 		created, err := cfg.DB.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        in.Body.Token,
 			SpokeInstanceUID:             in.Body.SpokeInstanceUID,

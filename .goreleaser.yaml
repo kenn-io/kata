@@ -190,13 +190,13 @@ nfpms:
       - rpm
     bindir: /usr/bin
 
-# `brews` is deprecated after the pinned GoReleaser v2.16.0 used by release CI.
-# Migrate this pipe when that pin is upgraded.
+# `brews` remains deprecated in the pinned GoReleaser v2.19.0.
+# Keep generating the formula candidate until the distribution migrates.
 brews:
   - name: kata
     ids:
       - kata-homebrew
-    # Pinned GoReleaser v2.16.0 skips formula generation when repository.name
+    # GoReleaser skips formula generation when repository.name
     # is absent, even with upload disabled. These fields select no credential
     # and are retained only so snapshot and release runs render the candidate.
     repository:

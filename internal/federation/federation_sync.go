@@ -817,13 +817,14 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
-	DB          db.Storage
-	Credentials config.FederationCredentialStore
-	Opts        clientpkg.Opts
-	Interval    time.Duration
-	Wake        <-chan struct{}
-	Debounce    time.Duration
-	OnError     func(error)
+	DB            db.Storage
+	Credentials   config.FederationCredentialStore
+	Opts          clientpkg.Opts
+	Interval      time.Duration
+	Wake          <-chan struct{}
+	Debounce      time.Duration
+	OnError       func(error)
+	OnSpokeResult func(projectID int64, err error)
 	// OnSyncComplete wakes local reconciliation after a sync attempt. A failed
 	// acknowledgement can leave valid artifacts durably committed.
 	OnSyncComplete func()
@@ -964,7 +965,7 @@ func (r *Runner) runSpoke(
 	credentialStore config.FederationCredentialStore,
 	validateLease func(context.Context) error,
 	drain *activity.Lease,
-) (bool, error) {
+) (remaining bool, resultErr error) {
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 		return false, err
 	}
@@ -981,6 +982,12 @@ func (r *Runner) runSpoke(
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		return false, nil
 	}
+	defer func() {
+		if r.OnSpokeResult != nil && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
+			r.OnSpokeResult(spoke.binding.ProjectID, resultErr)
+		}
+	}()
+
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
 		return false, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))

@@ -312,3 +312,10 @@ func (c *undoClient) AddCommentReply(ctx context.Context, pid int64, ref, body, 
 		return client.AddCommentReply(ctx, pid, ref, body, actor, target, kind, force, key)
 	})
 }
+
+func (c *undoClient) ReportOutcome(ctx context.Context, event, kind string) error {
+	if reporter, ok := c.KataAPI.(outcomeAPI); ok {
+		return reporter.ReportOutcome(ctx, event, kind)
+	}
+	return nil
+}

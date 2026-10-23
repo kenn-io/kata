@@ -68,7 +68,7 @@ type fakeTelemetryReporter struct {
 
 func (*fakeTelemetryReporter) EventAllowed(event string) bool {
 	event = strings.TrimSpace(event)
-	return event == "app_opened" || event == "session_ended" || event == "screen_viewed" || event == "issue_created" || event == "issue_closed" || event == "setup_finished"
+	return event == "error_shown" || event == "app_opened" || event == "session_ended" || event == "screen_viewed" || event == "issue_created" || event == "issue_closed" || event == "setup_finished" || event == "sync_failed"
 }
 func (*fakeTelemetryReporter) Enabled() bool { return true }
 func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
@@ -197,6 +197,45 @@ func TestCaptureTelemetryEventQueuesThroughEnabledReporter(t *testing.T) {
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 	}
 	assert.Equal(t, []capturedTelemetryEvent{{event: "session_ended", properties: map[string]any{"surface": "web", "duration_bucket": "1_to_5m"}}, {event: "session_ended", properties: map[string]any{"surface": "web", "duration_bucket": "1_to_5m"}}}, reporter.captured[1:])
+	for _, tc := range []struct {
+		name, body, property string
+		status               int
+	}{
+		{"empty search", `{"event":"search_empty","properties":{"surface":"web"}}`, "", 202},
+		{"shown error", `{"event":"error_shown","properties":{"surface":"web","kind":"issue_created"}}`, "", 202},
+		{"search missing surface", `{"event":"search_empty"}`, "surface", 400},
+		{"search invalid surface", `{"event":"search_empty","properties":{"surface":"unknown"}}`, "surface", 400},
+		{"error missing surface", `{"event":"error_shown","properties":{"kind":"issue_closed"}}`, "surface", 400},
+		{"error invalid surface", `{"event":"error_shown","properties":{"surface":"unknown","kind":"issue_closed"}}`, "surface", 400},
+		{"error missing kind", `{"event":"error_shown","properties":{"surface":"web"}}`, "kind", 400},
+		{"app missing surface", `{"event":"app_opened"}`, "", 202},
+		{"screen missing name", `{"event":"screen_viewed"}`, "", 202},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed, err := telemetry.NewReporter(telemetry.Options{})
+			require.NoError(t, err)
+			server := newTelemetryTestServer(t, outcomePropertyReporter{allowed}, Principal{Kind: PrincipalWebLocal})
+			response := server.post(t.Context(), t, tc.body)
+			assert.Equal(t, tc.status, response.Code, response.Body.String())
+			if tc.property != "" {
+				assert.Equal(t, "invalid_telemetry_property", decodeErrorCode(t, response))
+				var envelope struct {
+					Error struct{ Message string } `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+				assert.Contains(t, envelope.Error.Message, tc.property)
+			}
+		})
+	}
+}
+
+// Enable admission while using the real property filters without external delivery.
+type outcomePropertyReporter struct{ *telemetry.Reporter }
+
+func (outcomePropertyReporter) Enabled() bool { return true }
+func (r outcomePropertyReporter) Capture(event string, properties map[string]any) error {
+	_, err := r.SanitizeProperties(event, properties)
+	return err
 }
 
 // A TUI posts with a bearer token and no browser markers; both listener kinds must accept it.

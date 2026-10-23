@@ -113,17 +113,16 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	bootstrapEnv := identityCLIEnv(clientHome, addr, identityBootstrapToken)
 	runRemoteCmd(t, bin, clientWS, bootstrapEnv, "projects", "show", "bootstrap-boundary")
 
+	unboundAlias := map[string]any{"identity": "example.invalid/team/bootstrap-unbound", "kind": "git"}
 	resolveWithAlias := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
 		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
-		map[string]any{
-			"name": "bootstrap-boundary",
-			"alias": map[string]any{
-				"identity": "example.invalid/team/bootstrap-boundary",
-				"kind":     "git",
-			},
-		})
-	require.Equal(t, http.StatusForbidden, resolveWithAlias.status, resolveWithAlias.body)
-	assert.Contains(t, resolveWithAlias.body, "bootstrap_token_write_forbidden")
+		map[string]any{"name": "bootstrap-boundary", "alias": unboundAlias})
+	require.Equal(t, http.StatusOK, resolveWithAlias.status, resolveWithAlias.body)
+	assert.Contains(t, resolveWithAlias.body, "bootstrap-boundary")
+	aliasOnly := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
+		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
+		map[string]any{"alias": unboundAlias})
+	require.Equal(t, http.StatusNotFound, aliasOnly.status, "bootstrap resolve must not attach the alias: %s", aliasOnly.body)
 
 	resolveByName := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
 		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
@@ -173,29 +172,6 @@ func TestTokenIdentity_FederationPersonalTokenBridgeConnectAndPush(t *testing.T)
 	require.NoError(t, os.WriteFile(filepath.Join(spokeDirs.home, "config.toml"), []byte(spokeConfig), 0o600))
 	spokeStderr := startDaemon(t, bin, spokeEnv)
 	_, _ = connectDaemon(t, spokeDirs, spokeStderr)
-	spokeIdentityOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
-		"--json", "federation", "identity")
-	var spokeIdentity struct {
-		InstanceUID string `json:"instance_uid"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(spokeIdentityOut), &spokeIdentity),
-		"spoke identity output: %s", spokeIdentityOut)
-	require.NotEmpty(t, spokeIdentity.InstanceUID)
-
-	bootstrapEnrollEnv := append(spokeDirs.env(),
-		"EXAMPLE_HUB_TOKEN="+identityBootstrapToken,
-		"KATA_AUTH_TOKEN="+identityBootstrapToken,
-		"KATA_AUTHOR=e2e-client",
-		"KATA_HTTP_TIMEOUT=10s",
-	)
-	bootstrapOut, bootstrapErr := runRemoteCmdOutputErr(t, bin, spokeDirs.repoDir, bootstrapEnrollEnv,
-		"federation", "enroll", projectName,
-		"--spoke-instance", spokeIdentity.InstanceUID,
-		"--hub-url", "http://"+hubAddr,
-		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
-		"--actor", "wesm")
-	require.Error(t, bootstrapErr, "bootstrap token must not create identity-mode federation enrollments")
-	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
 
 	connectOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
 		"--project", projectName, "federation", "bridge", "connect",

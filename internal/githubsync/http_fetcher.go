@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const (
@@ -345,7 +346,7 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			}
 			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) && attempt < gitHubMaxRetryAttempts {
 				if err := f.sleepForGitHubRetry(ctx, request.Resource, attempt, headers, budget); err != nil {
-					return nil, err
+					return nil, errors.Join(statusErr, err)
 				}
 				continue
 			}
@@ -395,11 +396,17 @@ func gitHubHTTPStatusError(resource string, resp *http.Response) (error, []byte,
 	if closeErr != nil {
 		return nil, nil, fmt.Errorf("%s request failed: %s: close response body: %w", resource, resp.Status, closeErr)
 	}
-	message := strings.TrimSpace(redactTokenMaterial(string(body)))
-	if message == "" {
-		return fmt.Errorf("%s request failed: %s", resource, resp.Status), body, nil
+	return gitHubStatusError(resource, resp, body), body, nil
+}
+
+// gitHubStatusError records whether GitHub rate-limited the request, since a 403 alone reads as an auth failure.
+func gitHubStatusError(resource string, resp *http.Response, body []byte) error {
+	message := fmt.Sprintf("%s request failed: %s", resource, resp.Status)
+	if detail := strings.TrimSpace(redactTokenMaterial(string(body))); detail != "" {
+		message += ": " + detail
 	}
-	return fmt.Errorf("%s request failed: %s: %s", resource, resp.Status, message), body, nil
+	limited := resp.StatusCode == http.StatusForbidden && gitHubRESTStatusRetryable(resp.StatusCode, resp.Header, body)
+	return &issuesync.StatusError{HTTPStatus: resp.StatusCode, Message: message, RateLimited: limited}
 }
 
 func nextGitHubLinkURL(currentURL, linkHeader string) (string, error) {

@@ -1300,3 +1300,12 @@ func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body
 	}
 	return &resp, nil
 }
+
+// ReportOutcome sends only the fixed outcome properties.
+func (c *Client) ReportOutcome(ctx context.Context, event, kind string) error {
+	properties := map[string]any{"surface": "tui"}
+	if kind != "" {
+		properties["kind"] = kind
+	}
+	return c.reportUsage(ctx, event, properties)
+}

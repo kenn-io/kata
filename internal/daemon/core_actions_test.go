@@ -141,7 +141,7 @@ func TestCoreActionTelemetryScopedMutations(t *testing.T) {
 func TestCoreActionTelemetryRejectsClientPosts(t *testing.T) {
 	reporter := &fakeTelemetryReporter{}
 	server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
-	for _, event := range []string{"issue_created", "issue_closed", "setup_finished"} {
+	for _, event := range []string{"issue_created", "issue_closed", "setup_finished", "sync_failed"} {
 		response := server.post(t.Context(), t, fmt.Sprintf(`{"event":%q,"properties":{"surface":"web"}}`, event))
 		require.Equal(t, 400, response.Code)
 		assert.Equal(t, "unsupported_telemetry_event", decodeErrorCode(t, response))

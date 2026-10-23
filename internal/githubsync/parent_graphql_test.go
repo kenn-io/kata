@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) {
@@ -439,6 +441,32 @@ func TestHTTPFetcherParentDataGraphQLRateLimitRetriesHTTP200Errors(t *testing.T)
 	assert.Equal(t, []time.Duration{2 * time.Second}, sleeps)
 	assert.Equal(t, ParentScanComplete, data.Scan)
 	assert.Contains(t, data.ScannedChildIDs, 4)
+}
+
+func TestHTTPFetcherParentDataGraphQLRateLimitExhaustionKeepsStatus(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeParentGraphQLTestRequest(t, r)
+		attempts++
+		w.Header().Set("Retry-After", "2")
+		writeParentGraphQLTestResponse(t, w, `{"errors":[{"type":"RATE_LIMITED","message":"rate limited"}]}`)
+	}))
+	defer server.Close()
+	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	now := time.Now()
+	fetcher.graphQLNow = func() time.Time { return now }
+	fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
+		now = now.Add(d)
+		return nil
+	}
+
+	_, err := fetcher.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
+	require.Error(t, err)
+	status, ok := errors.AsType[*issuesync.StatusError](err)
+	require.True(t, ok, "rate limit classification lost: %v", err)
+	require.True(t, status.RateLimited)
+	require.Equal(t, http.StatusOK, status.HTTPStatus)
+	require.Equal(t, 3, attempts)
 }
 
 func TestHTTPFetcherParentDataRetryAfterCapReturnsFatal(t *testing.T) {

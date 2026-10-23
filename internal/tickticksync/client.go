@@ -173,7 +173,7 @@ func (s *clientSession) get(ctx context.Context, path string, target any) error 
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return &issuesync.StatusError{Message: "TickTick read transport failed"}
+			return &issuesync.StatusError{Message: "TickTick read transport failed", Cause: err}
 		}
 		if res.StatusCode == 429 || res.StatusCode >= 500 {
 			delay := s.client.deferRequests(res.Header.Get("Retry-After"))
@@ -190,7 +190,7 @@ func (s *clientSession) get(ctx context.Context, path string, target any) error 
 		raw, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 		_ = res.Body.Close()
 		if readErr != nil {
-			return &issuesync.StatusError{Message: "TickTick read response was incomplete"}
+			return &issuesync.StatusError{Message: "TickTick read response was incomplete", Cause: readErr}
 		}
 		if len(raw) > maxResponseBytes || string(raw) == "null" || json.Unmarshal(raw, target) != nil {
 			return blocked("invalid or oversized TickTick response")

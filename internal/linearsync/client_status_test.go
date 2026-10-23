@@ -166,6 +166,23 @@ func TestStatusMutationUnprovenOutcomesAreAmbiguous(t *testing.T) {
 		require.NotContains(t, err.Error(), "secret body")
 	}
 }
+func TestStatusWriteRejectionKeepsAuthAndRateLimitCauses(t *testing.T) {
+	for _, tc := range []struct {
+		code          string
+		auth, limited bool
+	}{{"FORBIDDEN", true, false}, {"RATELIMITED", false, true}} {
+		c := mockClient(t, statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) {
+			return response(200, `{"errors":[{"extensions":{"code":"`+tc.code+`"}}]}`), nil
+		}, wireIssue))
+		s, err := c.ForRun(context.Background(), statusConfig())
+		require.NoError(t, err)
+		_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return nil })
+		var classified *issuesync.StatusError
+		require.ErrorAs(t, err, &classified)
+		require.Equal(t, tc.auth, classified.AuthFailure, tc.code)
+		require.Equal(t, tc.limited, classified.RateLimited, tc.code)
+	}
+}
 func TestStatusScopeArchiveAndAdmissionGuards(t *testing.T) {
 	for _, change := range []func(map[string]any){func(i map[string]any) { i["team"] = map[string]any{"id": projectID} }, func(i map[string]any) { i["archivedAt"] = "2026-01-03T00:00:00Z" }, func(i map[string]any) { i["updatedAt"] = nil }} {
 		writes := 0

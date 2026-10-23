@@ -155,18 +155,107 @@ func TestFederationEnableAllowsGitHubSyncedProject(t *testing.T) {
 }
 
 func TestFederationEnableIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
+	for _, state := range []string{"absent", "disabled", "spoke"} {
+		t.Run(state, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+			ctx := t.Context()
+			project, err := env.DB.CreateProject(ctx, "hub-project")
+			require.NoError(t, err)
+			if state == "disabled" {
+				binding, err := env.DB.EnableProjectFederation(ctx, project.ID, "member")
+				require.NoError(t, err)
+				binding.Enabled = false
+				_, err = env.DB.UpsertFederationBinding(ctx, binding)
+				require.NoError(t, err)
+			}
+			if state == "spoke" {
+				hub, err := env.DB.CreateProject(ctx, "other-hub-project")
+				require.NoError(t, err)
+				_, err = env.DB.EnableProjectFederation(ctx, hub.ID, "member")
+				require.NoError(t, err)
+				_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+					ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: hub.ID, HubProjectUID: hub.UID, Enabled: true,
+				})
+				require.NoError(t, err)
+			}
+			before, err := env.DB.MaxEventID(ctx)
+			require.NoError(t, err)
+			bindingBefore, bindingErr := env.DB.FederationBindingByProject(ctx, project.ID)
+			if state == "absent" {
+				require.ErrorIs(t, bindingErr, db.ErrNotFound)
+			} else {
+				require.NoError(t, bindingErr)
+			}
+			resp, raw := envDoRaw(t, env, http.MethodPost,
+				projectPath(project.ID)+"/federation/enable",
+				map[string]any{"actor": "spoofed"}, bearer("bootstrap-token"))
+			if state == "absent" {
+				assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
+				assert.Contains(t, string(raw), "kata federation enable")
+				assert.Contains(t, string(raw), "account token")
+			} else {
+				// An account-token enable cannot turn a disabled hub or a spoke
+				// binding into an enabled hub, so do not suggest one.
+				assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_not_enabled")
+				assert.NotContains(t, string(raw), "kata federation enable")
+			}
+			after, err := env.DB.MaxEventID(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+			bindingAfter, err := env.DB.FederationBindingByProject(ctx, project.ID)
+			if state == "absent" {
+				require.ErrorIs(t, err, db.ErrNotFound)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, bindingBefore, bindingAfter)
+			}
+			grants, err := env.DB.ListFederationEnrollments(ctx)
+			require.NoError(t, err)
+			assert.Empty(t, grants)
+		})
+	}
+}
+
+func TestFederationEnableIdentityModeBootstrapPreservesProjectNotFound(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+			project, err := env.DB.CreateProject(t.Context(), "hub-project")
+			require.NoError(t, err)
+			if enabled {
+				_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "member")
+				require.NoError(t, err)
+			}
+			_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: project.ID, Actor: "member"})
+			require.NoError(t, err)
+
+			resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(project.ID)+"/federation/enable",
+				map[string]any{"actor": "member"}, bearer("bootstrap-token"))
+			assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "project_not_found")
+		})
+	}
+}
+
+func TestFederationEnableIdentityModeBootstrapReadsEnabledHub(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	ctx := context.Background()
-	project, err := env.DB.CreateProject(ctx, "hub")
+	project, err := env.DB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "member")
+	require.NoError(t, err)
+	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
-	resp, raw := envDoRaw(t, env, http.MethodPost,
-		projectPath(project.ID)+"/federation/enable",
-		map[string]any{"actor": "spoofed"},
-		bearer("bootstrap-token"))
-
-	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
-	assertFederationEventCount(t, env.DB, "project.federation_enabled", 0)
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(project.ID)+"/federation/enable",
+		map[string]any{"actor": "member"}, bearer("bootstrap-token"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var metadata api.ProjectFederationBody
+	require.NoError(t, json.Unmarshal(raw, &metadata))
+	assert.Equal(t, project.ID, metadata.ProjectID)
+	assert.Equal(t, project.UID, metadata.ProjectUID)
+	assert.Equal(t, project.Name, metadata.ProjectName)
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
 }
 
 func TestFederationEnableIdentityModeUsesDBTokenActor(t *testing.T) {
@@ -1839,70 +1928,86 @@ func TestFederationStatusUsesAdminBearerNotEnrollmentBearer(t *testing.T) {
 }
 
 func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
-	env := testenv.New(t)
+	for _, identityMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("identity=%t", identityMode), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("owner-fixture"), func(cfg *daemon.ServerConfig) { cfg.Auth.RequireTokenIdentity = identityMode })
+			var requestedProjectID *int64
+			var account db.APIToken
+			if identityMode {
+				project := createFederatedHubProject(t, env, "hub-project")
+				requestedProjectID = &project.ID
+				var err error
+				account, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "account-fixture", Actor: "alice", AdminActor: "bootstrap"})
+				require.NoError(t, err)
+			}
 
-	request := map[string]any{
-		"spoke_instance_uid":              federationTestSpokeUID,
-		"project_id":                      nil,
-		"capabilities":                    "push,pull",
-		"token":                           "explicit-enrollment-token",
-		"actor":                           "alice",
-		"allow_adoption_snapshot_authors": false,
-	}
-	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
-	assert.NotContains(t, string(raw), "token_hash")
+			request := map[string]any{
+				"spoke_instance_uid":              federationTestSpokeUID,
+				"project_id":                      requestedProjectID,
+				"capabilities":                    "push,pull",
+				"token":                           "explicit-enrollment-token",
+				"actor":                           "alice",
+				"allow_adoption_snapshot_authors": false,
+			}
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("owner-fixture"))
+			require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
+			assert.NotContains(t, string(raw), "token_hash")
 
-	var out struct {
-		ID               int64  `json:"id"`
-		SpokeInstanceUID string `json:"spoke_instance_uid"`
-		ProjectID        *int64 `json:"project_id"`
-		Capabilities     string `json:"capabilities"`
-		Actor            string `json:"actor"`
-		Token            string `json:"token"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &out))
-	assert.Positive(t, out.ID)
-	assert.Equal(t, federationTestSpokeUID, out.SpokeInstanceUID)
-	assert.Nil(t, out.ProjectID)
-	assert.Equal(t, "pull,push", out.Capabilities)
-	assert.Equal(t, "alice", out.Actor)
-	assert.Equal(t, "explicit-enrollment-token", out.Token)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			assert.Positive(t, out.ID)
+			assert.Equal(t, federationTestSpokeUID, out.SpokeInstanceUID)
+			assert.Equal(t, requestedProjectID, out.ProjectID)
+			assert.Equal(t, "pull,push", out.Capabilities)
+			assert.Equal(t, "alice", out.Actor)
+			assert.Equal(t, "explicit-enrollment-token", out.Token)
 
-	var (
-		tokenHash    string
-		projectID    sql.NullInt64
-		capabilities string
-		actor        string
-		allowMarker  int
-	)
-	require.NoError(t, env.DB.QueryRow(`
+			var (
+				tokenHash    string
+				projectID    sql.NullInt64
+				capabilities string
+				actor        string
+				allowMarker  int
+			)
+			require.NoError(t, env.DB.QueryRow(`
 		SELECT token_hash, project_id, capabilities, bound_actor, allow_adoption_snapshot_authors
 		  FROM federation_enrollments
 		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities, &actor, &allowMarker))
-	assert.Equal(t, db.FederationTokenHash("explicit-enrollment-token"), tokenHash)
-	assert.False(t, projectID.Valid)
-	assert.Equal(t, "pull,push", capabilities)
-	assert.Equal(t, "alice", actor)
-	assert.Equal(t, 0, allowMarker)
+			assert.Equal(t, db.FederationTokenHash("explicit-enrollment-token"), tokenHash)
+			assert.Equal(t, identityMode, projectID.Valid)
+			if out.ProjectID != nil {
+				assert.Equal(t, *out.ProjectID, projectID.Int64)
+			}
+			assert.Equal(t, "pull,push", capabilities)
+			assert.Equal(t, "alice", actor)
+			assert.Equal(t, 0, allowMarker)
 
-	request["capabilities"] = "pull,push"
-	replayResp, replayRaw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, nil)
-	require.Equal(t, http.StatusOK, replayResp.StatusCode, "replay enrollment response: %s", replayRaw)
-	var replayed struct {
-		ID    int64  `json:"id"`
-		Token string `json:"token"`
-	}
-	require.NoError(t, json.Unmarshal(replayRaw, &replayed))
-	assert.Equal(t, out.ID, replayed.ID)
-	assert.Equal(t, out.Token, replayed.Token)
+			if identityMode {
+				_, _, err := env.DB.RevokeAPIToken(t.Context(), account.ID, "bootstrap")
+				require.NoError(t, err)
+			}
 
-	var count int
-	require.NoError(t, env.DB.QueryRow(`
+			request["capabilities"] = "pull,push"
+			replayResp, replayRaw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("owner-fixture"))
+			require.Equal(t, http.StatusOK, replayResp.StatusCode, "replay enrollment response: %s", replayRaw)
+			var replayed api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(replayRaw, &replayed))
+			assert.Equal(t, out, replayed)
+
+			if identityMode {
+				grant, err := env.DB.AuthorizeFederationToken(t.Context(), replayed.Token, *requestedProjectID, "pull")
+				require.NoError(t, err)
+				assert.Equal(t, out.ID, grant.ID)
+			}
+
+			var count int
+			require.NoError(t, env.DB.QueryRow(`
 		SELECT COUNT(*)
 		  FROM federation_enrollments
 		 WHERE token_hash = ?`, db.FederationTokenHash("explicit-enrollment-token")).Scan(&count))
-	assert.Equal(t, 1, count)
+			assert.Equal(t, 1, count)
+		})
+	}
 }
 
 func TestRotateFederationEnrollment(t *testing.T) {
@@ -1937,85 +2042,103 @@ func TestRotateFederationEnrollment(t *testing.T) {
 	}
 
 	t.Run("admin bearer rotates and exact replay is secret safe", func(t *testing.T) {
-		env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"))
-		ctx := context.Background()
-		project, err := env.DB.CreateProject(ctx, "rotation-admin-project")
-		require.NoError(t, err)
-		old, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-			Token: "rotation-http-old-token", SpokeInstanceUID: federationTestSpokeUID,
-			ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
-		})
-		require.NoError(t, err)
-		request := map[string]any{ //nolint:gosec // test-only bearer token
-			"spoke_instance_uid": federationTestSpokeUID,
-			"project_id":         project.ID,
-			"capabilities":       "push,pull",
-			"token":              "rotation-http-replacement-token",
-			"actor":              "alice",
+		for _, identityMode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("identity=%t", identityMode), func(t *testing.T) {
+				env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"), func(cfg *daemon.ServerConfig) { cfg.Auth.RequireTokenIdentity = identityMode })
+				ctx := context.Background()
+				project, err := env.DB.CreateProject(ctx, "rotation-admin-project")
+				require.NoError(t, err)
+				var account db.APIToken
+				if identityMode {
+					_, err = env.DB.EnableProjectFederation(ctx, project.ID, "alice")
+					require.NoError(t, err)
+					account, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "rotation-account-fixture", Actor: "alice", AdminActor: "bootstrap"})
+					require.NoError(t, err)
+					_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "rotation-other-account-fixture", Actor: "bob", AdminActor: "bootstrap"})
+					require.NoError(t, err)
+				}
+
+				old, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+					Token: "rotation-http-old-token", SpokeInstanceUID: federationTestSpokeUID,
+					ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
+				})
+				require.NoError(t, err)
+				request := map[string]any{ //nolint:gosec // test-only bearer token
+					"spoke_instance_uid": federationTestSpokeUID,
+					"project_id":         project.ID,
+					"capabilities":       "push,pull",
+					"token":              "rotation-http-replacement-token",
+					"actor":              "alice",
+				}
+
+				resp, raw := envDoRaw(
+					t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", request, nil,
+				)
+				assertAPIError(t, resp.StatusCode, raw, http.StatusUnauthorized, "auth_required")
+
+				resp, raw = envDoRaw(
+					t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
+					request, bearer("rotation-admin-token"),
+				)
+				require.Equal(t, http.StatusOK, resp.StatusCode, "rotation response: %s", raw)
+				assert.NotContains(t, string(raw), "token_hash")
+				var rotated api.FederationEnrollmentOut
+				require.NoError(t, json.Unmarshal(raw, &rotated))
+				assert.Positive(t, rotated.ID)
+				assert.Equal(t, "alice", rotated.Actor)
+				assert.Equal(t, "rotation-http-replacement-token", rotated.Token)
+
+				var oldRevokedAt sql.NullString
+				require.NoError(t, env.DB.QueryRow(
+					`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, old.Enrollment.ID,
+				).Scan(&oldRevokedAt))
+				assert.True(t, oldRevokedAt.Valid)
+
+				if identityMode {
+					_, _, err = env.DB.RevokeAPIToken(ctx, account.ID, "bootstrap")
+					require.NoError(t, err)
+				}
+
+				replayResp, replayRaw := envDoRaw(
+					t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
+					request, bearer("rotation-admin-token"),
+				)
+				require.Equal(t, http.StatusOK, replayResp.StatusCode, "rotation replay response: %s", replayRaw)
+				assert.NotContains(t, string(replayRaw), "token_hash")
+				var replayed api.FederationEnrollmentOut
+				require.NoError(t, json.Unmarshal(replayRaw, &replayed))
+				assert.Equal(t, rotated, replayed)
+				if identityMode {
+					grant, err := env.DB.AuthorizeFederationToken(ctx, replayed.Token, project.ID, "pull")
+					require.NoError(t, err)
+					assert.Equal(t, rotated.ID, grant.ID)
+				}
+
+				activeBeforeConflict, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+					Token: "rotation-http-conflict-survivor", SpokeInstanceUID: federationTestSpokeUID,
+					ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
+				})
+				require.NoError(t, err)
+				request["actor"] = "bob"
+				conflictResp, conflictRaw := envDoRaw(
+					t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
+					request, bearer("rotation-admin-token"),
+				)
+				assertAPIError(
+					t, conflictResp.StatusCode, conflictRaw,
+					http.StatusConflict, "federation_enrollment_token_conflict",
+				)
+				assert.NotContains(t, string(conflictRaw), "token_hash")
+				assert.NotContains(t, string(conflictRaw), "rotation-http-replacement-token")
+
+				var survivorRevokedAt sql.NullString
+				require.NoError(t, env.DB.QueryRow(
+					`SELECT revoked_at FROM federation_enrollments WHERE id = ?`,
+					activeBeforeConflict.Enrollment.ID,
+				).Scan(&survivorRevokedAt))
+				assert.False(t, survivorRevokedAt.Valid)
+			})
 		}
-
-		resp, raw := envDoRaw(
-			t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", request, nil,
-		)
-		assertAPIError(t, resp.StatusCode, raw, http.StatusUnauthorized, "auth_required")
-
-		resp, raw = envDoRaw(
-			t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
-			request, bearer("rotation-admin-token"),
-		)
-		require.Equal(t, http.StatusOK, resp.StatusCode, "rotation response: %s", raw)
-		assert.NotContains(t, string(raw), "token_hash")
-		var rotated struct {
-			ID    int64  `json:"id"`
-			Actor string `json:"actor"`
-			Token string `json:"token"`
-		}
-		require.NoError(t, json.Unmarshal(raw, &rotated))
-		assert.Positive(t, rotated.ID)
-		assert.Equal(t, "alice", rotated.Actor)
-		assert.Equal(t, "rotation-http-replacement-token", rotated.Token)
-
-		var oldRevokedAt sql.NullString
-		require.NoError(t, env.DB.QueryRow(
-			`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, old.Enrollment.ID,
-		).Scan(&oldRevokedAt))
-		assert.True(t, oldRevokedAt.Valid)
-
-		replayResp, replayRaw := envDoRaw(
-			t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
-			request, bearer("rotation-admin-token"),
-		)
-		require.Equal(t, http.StatusOK, replayResp.StatusCode, "rotation replay response: %s", replayRaw)
-		assert.NotContains(t, string(replayRaw), "token_hash")
-		var replayed struct {
-			ID int64 `json:"id"`
-		}
-		require.NoError(t, json.Unmarshal(replayRaw, &replayed))
-		assert.Equal(t, rotated.ID, replayed.ID)
-
-		activeBeforeConflict, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-			Token: "rotation-http-conflict-survivor", SpokeInstanceUID: federationTestSpokeUID,
-			ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
-		})
-		require.NoError(t, err)
-		request["actor"] = "bob"
-		conflictResp, conflictRaw := envDoRaw(
-			t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
-			request, bearer("rotation-admin-token"),
-		)
-		assertAPIError(
-			t, conflictResp.StatusCode, conflictRaw,
-			http.StatusConflict, "federation_enrollment_token_conflict",
-		)
-		assert.NotContains(t, string(conflictRaw), "token_hash")
-		assert.NotContains(t, string(conflictRaw), "rotation-http-replacement-token")
-
-		var survivorRevokedAt sql.NullString
-		require.NoError(t, env.DB.QueryRow(
-			`SELECT revoked_at FROM federation_enrollments WHERE id = ?`,
-			activeBeforeConflict.Enrollment.ID,
-		).Scan(&survivorRevokedAt))
-		assert.False(t, survivorRevokedAt.Valid)
 	})
 
 	t.Run("account token cannot rotate a legacy grant", func(t *testing.T) {
@@ -2062,40 +2185,6 @@ func TestRotateFederationEnrollment(t *testing.T) {
 			db.FederationTokenHash("rotation-identity-replacement-token"),
 		).Scan(&replacementCount))
 		assert.Zero(t, replacementCount, "a rejected account-token rotation must not create a legacy grant")
-	})
-
-	t.Run("bootstrap identity cannot rotate with a body actor", func(t *testing.T) {
-		env := testenv.New(
-			t,
-			testenv.WithAuthToken("rotation-bootstrap-guard-token"),
-			testenv.WithRequireTokenIdentity(),
-		)
-		ctx := context.Background()
-		project, err := env.DB.CreateProject(ctx, "rotation-bootstrap-guard-project")
-		require.NoError(t, err)
-		old, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-			Token: "rotation-bootstrap-guard-old-token", SpokeInstanceUID: federationTestSpokeUID,
-			ProjectID: &project.ID, Capabilities: "pull", Actor: "alice",
-		})
-		require.NoError(t, err)
-		replacementToken := "rotation-bootstrap-guard-replacement-token"
-
-		resp, raw := envDoRaw(
-			t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate",
-			map[string]any{
-				"spoke_instance_uid": federationTestSpokeUID,
-				"project_id":         project.ID,
-				"capabilities":       "pull",
-				"token":              replacementToken,
-				"actor":              "alice",
-			},
-			bearer("rotation-bootstrap-guard-token"),
-		)
-		assertAPIError(
-			t, resp.StatusCode, raw,
-			http.StatusForbidden, "bootstrap_token_write_forbidden",
-		)
-		assertRotationRejectedWithoutMutation(t, env.DB, old.Enrollment.ID, replacementToken)
 	})
 
 	t.Run("static bearer rejects reserved body actor", func(t *testing.T) {
@@ -2369,20 +2458,6 @@ func TestFederationEnrollmentIdentityModeRequiresRelayForAccountToken(t *testing
 		  FROM federation_enrollments
 		 WHERE token_hash = ?`, db.FederationTokenHash("identity-enrollment-token")).Scan(&count))
 	assert.Zero(t, count, "account tokens cannot leave a legacy grant without issuer lifetime enforcement")
-}
-
-func TestFederationEnrollmentIdentityModeRejectsBootstrapToken(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-
-	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
-		"spoke_instance_uid": federationTestSpokeUID,
-		"project_id":         nil,
-		"capabilities":       "pull",
-		"token":              "bootstrap-enrollment-token",
-		"actor":              "alice",
-	}, bearer("bootstrap-token"))
-
-	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
 }
 
 func TestFederationEnrollmentStaticBearerRejectsReservedBodyActor(t *testing.T) {
@@ -4224,7 +4299,9 @@ func TestFederationEnrollmentJoinInstructions(t *testing.T) {
 			assert.Equal(t, float64(project.ID), join["hub_project_id"])
 			assert.Equal(t, project.UID, join["hub_project_uid"])
 			assert.Equal(t, "hub-project", join["project_name"])
-			assert.Equal(t, "join-token", join["token"])
+			assert.Equal(t, "join-token", out["token"])
+			assert.Equal(t, out["token"], join["token"])
+			assert.Equal(t, out["project_id"], join["hub_project_id"])
 			assert.Equal(t, "Example User", join["actor"])
 			assert.Equal(t, tc.adopt, join["adopt_existing"])
 			assert.Equal(t, strings.Contains(tc.caps, "push"), join["push_enabled"])

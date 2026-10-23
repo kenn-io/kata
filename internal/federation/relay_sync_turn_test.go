@@ -18,10 +18,9 @@ import (
 	"go.kenn.io/kata/internal/federation"
 )
 
-// One relay sync turn moves a bounded number of batches per stream and then
-// yields with work remaining; the next turn continues where it stopped, and
-// the runner comes back without waiting for its interval.
-func TestRelaySyncTurnYieldsWithWorkRemaining(t *testing.T) {
+// Partial relay turns defer outcome reports, and the runner resumes catch-up
+// without waiting for its interval.
+func TestRunnerDefersRelayOutcomesUntilCatchUpCompletes(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -42,22 +41,26 @@ func TestRelaySyncTurnYieldsWithWorkRemaining(t *testing.T) {
 				_, _, err := root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("Backlog issue %d", i), Author: "assistant"})
 				require.NoError(t, err)
 			}
-			binding, err := relay.store.FederationBindingByProject(ctx, relay.project.ID)
-			require.NoError(t, err)
 			mirrored := func() int {
 				issues, err := relay.store.ListIssues(ctx, db.ListIssuesParams{ProjectID: relay.project.ID})
 				require.NoError(t, err)
 				return len(issues)
 			}
-			// The third turn's only batch is short, but the stream and byte limits
-			// also cut batches short, so a turn that used its budget on a nonempty
-			// batch still reports work; only an empty batch proves the stream drained.
+			// Recovery waits until the empty fourth batch proves the stream drained;
+			// the first three turns leave the outcome observer untouched.
+			var results []error
+			outcomeRunner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, OnSpokeResult: func(id int64, err error) {
+				require.Equal(t, relay.project.ID, id)
+				results = append(results, err)
+			}}
 			for turn, want := range []int{2, 4, 5, 5} {
-				remaining, err := federation.SyncFederationTurnForTest(ctx, relay.store, binding, relay.credential)
-				require.NoError(t, err)
+				require.NoError(t, outcomeRunner.RunOnce(ctx))
 				require.Equal(t, want, mirrored(), "turn %d applies one budgeted batch", turn+1)
-				require.Equal(t, turn < 3, remaining, "turn %d reports whether deliveries may remain", turn+1)
+				if turn < 3 {
+					require.Empty(t, results, "partial turns preserve outage state")
+				}
 			}
+			require.Equal(t, []error{nil}, results, "only a full pass reports recovery")
 
 			for i := range 5 {
 				_, _, err := root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("Second backlog issue %d", i), Author: "assistant"})

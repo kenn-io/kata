@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -209,4 +210,41 @@ func TestSetupFinishedProperties(t *testing.T) {
 	properties, err := reporter.SanitizeProperties("setup_finished", map[string]any{"project_count": 1})
 	require.NoError(t, err)
 	require.NotContains(t, properties, "project_count")
+}
+
+// Outcomes send only fixed values, with unknown values collapsed to other.
+func TestOutcomesProperties(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		event       string
+		props, want map[string]any
+	}{
+		{"error_shown", map[string]any{"surface": "web"}, nil},
+		{"search_empty", map[string]any{"surface": "cli", "query": "private text"}, map[string]any{"surface": "cli"}},
+		{"error_shown", map[string]any{"surface": "tui", "kind": "issue_created"}, map[string]any{"surface": "tui", "kind": "issue_created"}},
+		{"error_shown", map[string]any{"surface": "web", "kind": "unlisted"}, map[string]any{"surface": "web", "kind": "other"}},
+		{"sync_failed", map[string]any{"reason": "auth"}, nil},
+		{"sync_failed", map[string]any{"sync_source": "github"}, nil},
+		{"sync_failed", map[string]any{"sync_source": "github", "reason": "auth"}, map[string]any{"sync_source": "github", "reason": "auth"}},
+		{"sync_failed", map[string]any{"sync_source": "unlisted", "reason": "private text"}, map[string]any{"sync_source": "other", "reason": "other"}},
+	} {
+		properties, err := reporter.SanitizeProperties(tc.event, tc.props)
+		if tc.want == nil {
+			require.Error(t, err)
+			continue
+		}
+		require.NoError(t, err)
+		maps.Copy(tc.want, map[string]any{
+			"$geoip_disable": true, "$process_person_profile": false,
+			"application": "", "commit": "", "source": "", "version": "",
+			"goarch": runtime.GOARCH, "goos": runtime.GOOS,
+		})
+		require.Equal(t, tc.want, properties)
+	}
+	for _, source := range []string{"github", "linear", "notion", "plane", "ticktick", "todoist", "twenty", "federation"} {
+		properties, err := reporter.SanitizeProperties("sync_failed", map[string]any{"sync_source": source, "reason": "server"})
+		require.NoError(t, err)
+		require.Equal(t, source, properties["sync_source"])
+	}
 }

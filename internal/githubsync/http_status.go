@@ -216,9 +216,10 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	}
 	return &issuesync.StatusError{
 		Message: fmt.Sprintf("GitHub status HTTP %d", resp.StatusCode), HTTPStatus: resp.StatusCode,
-		Ambiguous:  method == http.MethodPatch && resp.StatusCode >= 500,
-		Blocked:    !retry && resp.StatusCode != 409,
-		RetryAfter: wait,
+		Ambiguous:   method == http.MethodPatch && resp.StatusCode >= 500,
+		Blocked:     !retry && resp.StatusCode != 409,
+		RetryAfter:  wait,
+		RateLimited: resp.StatusCode == http.StatusForbidden && retry,
 	}
 }
 

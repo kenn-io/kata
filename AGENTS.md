@@ -171,11 +171,9 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-Windows tests use GitHub-hosted runners. Linux tests use Namespace profiles for
-trusted runs and GitHub-hosted runners for forks. Namespace profiles use the
-[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
-which disables workload access to Namespace features and APIs. GitHub fork
-approvals, token permissions, and secrets are separate controls.
+All CI jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
+`windows-2025` for Windows. Pull requests call the reusable test workflow from
+the same commit so workflow changes are exercised before merge.
 
 ## Repository-writer trust/threat model
 

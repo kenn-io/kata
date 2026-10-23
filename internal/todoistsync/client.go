@@ -179,7 +179,7 @@ func responseError(err error, action string) error {
 	}
 	apiErr, ok := errors.AsType[*runtime.ClientAPIError](err)
 	if !ok || apiErr.StatusCode() == 0 {
-		return &issuesync.StatusError{Message: "cannot " + action}
+		return &issuesync.StatusError{Message: "cannot " + action, Cause: err}
 	}
 	code := apiErr.StatusCode()
 	return &issuesync.StatusError{

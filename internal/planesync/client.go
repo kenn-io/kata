@@ -213,7 +213,7 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, &issuesync.StatusError{Message: "plane read request failed"}
+			return nil, &issuesync.StatusError{Message: "plane read request failed", Cause: err}
 		}
 		if response.StatusCode == 429 || response.StatusCode >= 500 {
 			s.client.deferRequests(response.Header.Get("Retry-After"), attempt)
@@ -236,7 +236,7 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, &issuesync.StatusError{Message: "cannot read Plane API response"}
+			return nil, &issuesync.StatusError{Message: "cannot read Plane API response", Cause: err}
 		}
 		if len(raw) > maxResponseBytes {
 			return nil, fmt.Errorf("plane API response exceeds 8 MiB")

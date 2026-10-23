@@ -131,10 +131,18 @@ func (dm detailModel) applyMutation(
 ) (detailModel, tea.Cmd) {
 	var applied bool
 	dm, applied = dm.applyMutationState(m)
-	if !applied || m.err != nil {
+	if !applied {
 		return dm, nil
 	}
-	return dm, dm.refetch(api)
+	return dm, dm.afterMutation(m, api)
+}
+
+// afterMutation reports an accepted refusal or refreshes after a success.
+func (dm detailModel) afterMutation(m mutationDoneMsg, api detailAPI) tea.Cmd {
+	if m.err != nil {
+		return reportShownError(api, m.kind)
+	}
+	return dm.refetch(api)
 }
 
 // applyMutationState applies the generation-guarded, user-visible portion of

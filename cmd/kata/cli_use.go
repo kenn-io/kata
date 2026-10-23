@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -98,6 +100,44 @@ func reportCLIUse(cmd *cobra.Command) {
 	if !agent && (target == nil || !reportsCLIUse(cmd)) {
 		return
 	}
+	body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
+	if agent {
+		body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
+	}
+	sendCLIEvent(cmd, body, agent, "")
+}
+
+func reportCLIOutcome(cmd *cobra.Command, event, kind string) {
+	if reportsCLIOutcome(cmd) {
+		sendCLIEvent(cmd, cliOutcomeBody(event, kind), false, "")
+	}
+}
+
+// reportCLIEmptySearch remembers only the hash of the last empty query for this daemon.
+func reportCLIEmptySearch(cmd *cobra.Command, query string) {
+	if reportsCLIOutcome(cmd) {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(query)))
+		sendCLIEvent(cmd, cliOutcomeBody("search_empty", ""), false, hex.EncodeToString(sum[:]))
+	}
+}
+
+// reportsCLIOutcome reports whether a person reads this command's output.
+func reportsCLIOutcome(cmd *cobra.Command) bool {
+	return currentOutputMode() == outputHuman && reportsCLIUse(cmd)
+}
+
+func cliOutcomeBody(event, kind string) *generated.CaptureTelemetryEventBody {
+	properties := map[string]any{"surface": "cli"}
+	if kind != "" {
+		properties["kind"] = kind
+	}
+	return &generated.CaptureTelemetryEventBody{Event: event, Properties: properties}
+}
+
+// sendCLIEvent claims search when set, the hash of an empty query, so a
+// repeat of the last empty search sends nothing once a receipt accepts it.
+func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody, agent bool, search string) {
+	target := cliUseTarget.Load()
 	now := cliUseNow().UTC()
 	day := now.Format(time.DateOnly)
 	parent := cmd.Context()
@@ -125,13 +165,13 @@ func reportCLIUse(cmd *cobra.Command) {
 			}
 			target = &resolved
 		}
-		claim, finish, report := beginCLIUseReport(*target, agent, now)
+		claim, mark, finish, report := beginCLIClaim(*target, body.Event, agent, search, now)
 		if !report {
 			return
 		}
 		defer finish()
 		var gate client.TelemetryGate
-		_, _ = gate.Report(ctx, client.TelemetryTargetKey(*target), claim, day, agent, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
+		_, _ = gate.ReportClaim(ctx, client.TelemetryTargetKey(*target), claim, mark, day, agent, func(ctx context.Context) (*generated.CaptureTelemetryEventResponse, error) {
 			hc, err := client.NewHTTPClientForResolved(ctx, *target, client.Opts{Timeout: timeout})
 			if err != nil {
 				return nil, err
@@ -140,14 +180,23 @@ func reportCLIUse(cmd *cobra.Command) {
 			if err != nil {
 				return nil, err
 			}
-			body := &generated.CaptureTelemetryEventBody{Event: "app_opened", Properties: map[string]any{"surface": "cli"}}
-			if agent {
-				body = &generated.CaptureTelemetryEventBody{Event: "agent_active"}
-			}
 			return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
 		})
 	})
 	sends.Wait(telemetry.ExitWait)
+}
+
+// beginCLIClaim picks the marker that ends repeat reports of event.
+func beginCLIClaim(target client.ResolvedDaemon, event string, agent bool, search string, now time.Time) (claim, mark string, finish func(), report bool) {
+	if search != "" {
+		return client.TelemetryDayMarkerPathForKey(client.TelemetryTargetKey(target), "cli-search-empty-"), search, func() {}, true
+	}
+	mark = now.Format(time.DateOnly)
+	if event != "app_opened" && !agent {
+		return "", mark, func() {}, true
+	}
+	claim, finish, report = beginCLIUseReport(target, agent, now)
+	return claim, mark, finish, report
 }
 
 // beginCLIUseReport keeps successful days separate from unfinished CLI attempts.

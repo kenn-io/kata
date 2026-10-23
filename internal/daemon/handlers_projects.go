@@ -112,6 +112,17 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			out := api.ProjectResolveBody{Project: scopedProjectOut(project)}
 			return &api.ResolveProjectResponse{Body: out}, nil
 		}
+		if principal, ok := PrincipalFromContext(ctx); ok &&
+			principal.Kind == PrincipalBootstrap &&
+			in.Body.Alias != nil && strings.TrimSpace(in.Body.StartPath) == "" {
+			// Bootstrap may resolve an existing alias, or fall back to the
+			// supplied project name, without attaching a first-seen alias.
+			out, err := resolveByAliasInput(ctx, cfg.DB, in.Body.Alias, in.Body.Name, false)
+			if err != nil {
+				return nil, err
+			}
+			return &api.ResolveProjectResponse{Body: *out}, nil
+		}
 		if resolveProjectRequestCanMutate(in) {
 			if err := ensureAttributedWriteAllowed(ctx); err != nil {
 				return nil, err
@@ -586,7 +597,7 @@ func resolveProjectRequestCanMutate(in *api.ResolveProjectRequest) bool {
 // projects: alias misses without a name match return 404.
 func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput, name, startPath string) (*api.ProjectResolveBody, error) {
 	if alias != nil {
-		return resolveByAliasInput(ctx, store, alias, name)
+		return resolveByAliasInput(ctx, store, alias, name, true)
 	}
 	if name != "" {
 		return resolveByName(ctx, store, name)
@@ -628,7 +639,7 @@ func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput
 // different host upgrades to the alias-first path on the next call.
 // Resolve never creates projects: an unknown alias with an unknown (or
 // absent) name returns 404.
-func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInput, name string) (*api.ProjectResolveBody, error) {
+func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInput, name string, attachFirstSeen bool) (*api.ProjectResolveBody, error) {
 	info := config.AliasInfo{
 		Identity: in.Identity,
 		Kind:     in.Kind,
@@ -682,6 +693,9 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	}
 	if err := authorizeIssueScopedProject(ctx, project); err != nil {
 		return nil, err
+	}
+	if !attachFirstSeen {
+		return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
 	}
 	// First-seen attach: bind the supplied alias to the matched project
 	// so subsequent resolves hit the alias path. Reassign=false matches

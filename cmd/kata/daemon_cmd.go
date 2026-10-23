@@ -1291,8 +1291,9 @@ func runDaemonProcess(
 			restart.watch(ctx, restartSignals, shutdownTrigger.Call)
 		})
 	}
+	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
 	federationWake := startFederationRunner(
-		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, embeddingWake,
+		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog, syncOutcome, embeddingWake,
 	)
 	startDueNotificationSweeper(
 		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
@@ -1305,37 +1306,44 @@ func runDaemonProcess(
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncProgress := githubsync.NewProgressTracker()
+	gitHubSyncProgress.OnResult = syncOutcome
 	gitHubSyncWake := startGitHubSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog, gitHubSyncProgress,
 	)
 	notionSyncFetcher := newConfiguredNotionSyncFetcher(dcfg.NotionSync)
 	notionSyncProgress := issuesync.NewProgressTracker()
+	notionSyncProgress.OnResult = syncOutcome
 	notionSyncWake := startNotionSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, notionSyncFetcher, publisher, daemonLog, notionSyncProgress,
 	)
 
 	planeSyncFetcher := newConfiguredPlaneSyncFetcher(dcfg.PlaneSync)
 	planeSyncProgress := issuesync.NewProgressTracker()
+	planeSyncProgress.OnResult = syncOutcome
 	planeSyncWake := startPlaneSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, planeSyncFetcher, publisher, daemonLog, planeSyncProgress,
 	)
 	linearSyncFetcher := newConfiguredLinearSyncFetcher(dcfg.LinearSync)
 	linearSyncProgress := issuesync.NewProgressTracker()
+	linearSyncProgress.OnResult = syncOutcome
 	linearSyncWake := startLinearSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, linearSyncFetcher, publisher, daemonLog, linearSyncProgress,
 	)
 	twentySyncFetcher := newConfiguredTwentySyncFetcher(dcfg.TwentySync)
 	twentySyncProgress := issuesync.NewProgressTracker()
+	twentySyncProgress.OnResult = syncOutcome
 	twentySyncWake := startTwentySyncRunner(
 		ctx, workers, waitableDrainAdmission, store, twentySyncFetcher, publisher, daemonLog, twentySyncProgress,
 	)
 	todoistSyncFetcher := newConfiguredTodoistSyncFetcher(dcfg.TodoistSync)
 	todoistSyncProgress := issuesync.NewProgressTracker()
+	todoistSyncProgress.OnResult = syncOutcome
 	todoistSyncWake := startTodoistSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, todoistSyncFetcher, publisher, daemonLog, todoistSyncProgress,
 	)
 	tickTickSyncFetcher := newConfiguredTickTickSyncFetcher(dcfg.TickTickSync)
 	tickTickSyncProgress := issuesync.NewProgressTracker()
+	tickTickSyncProgress.OnResult = syncOutcome
 	tickTickSyncWake := startTickTickSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, tickTickSyncFetcher, publisher, daemonLog, tickTickSyncProgress,
 	)
@@ -1780,6 +1788,7 @@ func startFederationRunner(
 	store db.Storage,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
+	onSpokeResult func(string, int64, error),
 	onSyncComplete ...func(),
 ) func() {
 	wake := make(chan struct{}, 1)
@@ -1798,6 +1807,7 @@ func startFederationRunner(
 		OnError: func(err error) {
 			daemonLog.Printf("federation: %v", err)
 		},
+		OnSpokeResult: func(projectID int64, err error) { onSpokeResult("federation", projectID, err) },
 		OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
 			publisher.EventsFrom(projectID, events, fork)
 		},

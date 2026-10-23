@@ -214,6 +214,13 @@ func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, ru
 	default:
 		emitErrorForMode(w, err, mode, runEReached)
 	}
+	if mode == outputHuman && runEReached && modeErr == nil {
+		action, _ := preParse(cmd, args)
+		kind := map[string]string{"kata create": "issue_created", "kata close": "issue_closed"}[action.CommandPath()]
+		if kind != "" {
+			reportCLIOutcome(action, "error_shown", kind)
+		}
+	}
 }
 
 func resolvedOutputModeForError(root *cobra.Command, args []string) (outputMode, error) {

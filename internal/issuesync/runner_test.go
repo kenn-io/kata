@@ -434,3 +434,47 @@ func TestRunnerFailureLogsProvider(t *testing.T) {
 	require.Contains(t, logs.String(), "issue sync binding failed")
 	require.Contains(t, logs.String(), "provider=synthetic")
 }
+
+func TestRunnerOutcomeObserver(t *testing.T) {
+	s := testStore(t)
+	binding := testBinding(t, s, "example-project", "synthetic")
+	tracker := NewProgressTracker()
+	var outcomes []error
+	tracker.OnResult = func(provider string, id int64, err error) {
+		require.Equal(t, "synthetic", provider)
+		require.Equal(t, binding.ID, id)
+		outcomes = append(outcomes, err)
+	}
+	cause := errors.New("fetch failed")
+	adapter := &testAdapter{prepare: func(_ context.Context, b db.IssueSyncBinding, at time.Time) (Prepared, error) {
+		if cause != nil {
+			return Prepared{}, cause
+		}
+		return testPrepared(b, at), nil
+	}}
+	runner := NewRunner(RunnerConfig{Store: s, Adapter: adapter, Progress: tracker})
+	for _, next := range []error{cause, cause, nil, cause, context.Canceled} {
+		cause = next
+		_, err := runner.RunOnce(t.Context(), binding.ID)
+		if next != nil {
+			require.ErrorIs(t, err, next)
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	cause = nil
+	binding, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey, RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: []byte(`{"status_sync":"two-way"}`), IntervalSeconds: 300})
+	require.NoError(t, err)
+	warning := &StatusError{Message: "status read blocked", Blocked: true}
+	runner = NewRunner(RunnerConfig{Store: s, Adapter: &statusErrorTestAdapter{testAdapter: adapter, statusErr: warning}, Progress: tracker})
+	_, err = runner.RunOnce(t.Context(), binding.ID)
+	require.ErrorIs(t, err, warning)
+
+	require.Len(t, outcomes, 6)
+	require.ErrorContains(t, outcomes[0], "fetch failed")
+	require.ErrorContains(t, outcomes[1], "fetch failed")
+	require.Nil(t, outcomes[2])
+	require.ErrorContains(t, outcomes[3], "fetch failed")
+	require.ErrorIs(t, outcomes[4], context.Canceled)
+	require.ErrorIs(t, outcomes[5], warning)
+}

@@ -4,6 +4,7 @@
   import type { KataProjectSummary, KataTaskSearchFilters } from '../lib/kata/types'
 
   interface Props {
+    onSubmitSearch?: ((query: string) => void) | undefined
     filters: KataTaskSearchFilters
     projects: readonly KataProjectSummary[]
     onChange: (
@@ -12,7 +13,7 @@
     ) => void | Promise<void>
   }
 
-  let { filters, projects, onChange }: Props = $props()
+  let { filters, projects, onChange, onSubmitSearch }: Props = $props()
   let draftOverride = $state<KataTaskSearchFilters | null>(null)
   let draft = $derived(draftOverride ?? filters)
   let lastFilters: KataTaskSearchFilters | null = null
@@ -75,6 +76,9 @@
         placeholder="Search tasks..."
         ariaLabel="Search tasks"
         oninput={(query) => emit('query', { query })}
+        onkeydown={(event) => {
+          if (event.key === 'Enter' && !event.isComposing) onSubmitSearch?.(draft.query.trim())
+        }}
       />
     </div>
 

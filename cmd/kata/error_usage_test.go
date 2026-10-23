@@ -23,6 +23,7 @@ func TestErrorUsageCloseReasons(t *testing.T) {
 		{"multiple sugar", []string{"--done", "--wontfix"}, kindUsage, ExitUsage, "multiple reason sugar flags"},
 		{"canonical and sugar", []string{"--reason", "done", "--done"}, kindUsage, ExitUsage, "corresponding sugar flag"},
 		{"duplicate evidence", []string{"--done", "--commit", "abc1234", "--evidence", "commit:abc1234"}, kindUsage, ExitUsage, "duplicate evidence item"},
+		{"duplicate repeated sugar evidence", []string{"--done", "--pr", "https://example.com/pull/1", "--pr", "https://example.com/pull/1"}, kindUsage, ExitUsage, "duplicate evidence item"},
 		{"duplicate reviewed path", []string{"--done", "--reviewed", "a", "--reviewed", "a"}, kindUsage, ExitUsage, "duplicate path"},
 		{"malformed evidence", []string{"--done", "--evidence", "broken"}, kindValidation, ExitValidation, "expected <type>:<value>"},
 		{"unknown evidence type", []string{"--done", "--evidence", "other:value"}, kindValidation, ExitValidation, "unknown type"},

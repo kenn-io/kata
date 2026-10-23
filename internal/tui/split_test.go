@@ -292,9 +292,7 @@ func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	startFollowGen := m.nextDetailFollowGen
 
 	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatalf("empty results transition returned unexpected command %T", cmd)
-	}
+	require.NotNil(t, cmd, "Enter submits the empty search")
 	if m.input.searchFocus != searchFocusResults {
 		t.Fatalf("searchFocus = %v, want results", m.input.searchFocus)
 	}

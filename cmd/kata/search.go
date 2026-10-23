@@ -140,7 +140,13 @@ per match.`,
 				return err
 			}
 			bs := response.Body
-			return printSearchResults(cmd, bs)
+			if err := printSearchResults(cmd, bs); err != nil {
+				return err
+			}
+			if cursor == "" && response.JSON200 != nil && len(response.JSON200.Results) == 0 {
+				reportCLIEmptySearch(cmd, query)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cursor, "cursor", "", "continue --lexical search with the same query and filters")

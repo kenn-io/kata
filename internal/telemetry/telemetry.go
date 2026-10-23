@@ -27,6 +27,9 @@ const (
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 
+// ErrInvalidProperty is returned when an event lacks a required property or its filter rejects it.
+var ErrInvalidProperty = posthog.ErrInvalidProperty
+
 // Client is the daemon-facing telemetry reporter contract. EventAllowed lets
 // the UI capture route reject events outside the allowlist.
 type Client interface {
@@ -84,6 +87,15 @@ func NewReporter(opts Options) (*Reporter, error) {
 		),
 		posthog.WithAllowedEvent("issue_closed",
 			posthog.RequireProperty("surface", validSurfaces),
+		),
+		posthog.WithAllowedEvent("search_empty", posthog.RequireProperty("surface", validSurfaces)),
+		posthog.WithAllowedEvent("error_shown",
+			posthog.RequireProperty("surface", validSurfaces),
+			posthog.RequireProperty("kind", outcomeValues("issue_created", "issue_closed")),
+		),
+		posthog.WithAllowedEvent("sync_failed",
+			posthog.RequireProperty("sync_source", outcomeValues("github", "linear", "notion", "plane", "ticktick", "todoist", "twenty", "federation")),
+			posthog.RequireProperty("reason", outcomeValues("auth", "rate_limit", "server", "network", "timeout")),
 		),
 		posthog.WithAllowedEvent("session_ended",
 			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
@@ -175,3 +187,14 @@ func NewReporterOrDisabled(opts Options) *Reporter {
 
 var screenNames = posthog.AllowStringValues("inbox", "today", "delegated", "scheduled", "issues", "logbook", "issue", "graph", "credentials", "projects", "daemons", "federation", "help", "empty")
 var screenSurfaces = posthog.AllowStringValues("web", "tui")
+
+// outcomeValues collapses unlisted values without sending free text.
+func outcomeValues(values ...string) func(any) (any, bool) {
+	allowed := posthog.AllowStringValues(values...)
+	return func(value any) (any, bool) {
+		if kept, ok := allowed(value); ok {
+			return kept, true
+		}
+		return "other", true
+	}
+}

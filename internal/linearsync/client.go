@@ -232,7 +232,7 @@ func (s *clientSession) query(ctx context.Context, query string, variables map[s
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, &issuesync.StatusError{Message: "linear read request failed"}
+			return nil, &issuesync.StatusError{Message: "linear read request failed", Cause: err}
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 		_ = res.Body.Close()
@@ -246,13 +246,13 @@ func (s *clientSession) query(ctx context.Context, query string, variables map[s
 			if attempt < 3 {
 				continue
 			}
-			return nil, &issuesync.StatusError{Message: "linear API temporarily unavailable", HTTPStatus: res.StatusCode, RetryAfter: s.client.cooldownRemaining()}
+			return nil, &issuesync.StatusError{Message: "linear API temporarily unavailable", HTTPStatus: res.StatusCode, RateLimited: limited, RetryAfter: s.client.cooldownRemaining()}
 		}
 		if res.StatusCode != 200 || auth {
-			return nil, &issuesync.StatusError{Message: fmt.Sprintf("linear API read failed (HTTP %d)", res.StatusCode), HTTPStatus: res.StatusCode, Blocked: true}
+			return nil, &issuesync.StatusError{Message: fmt.Sprintf("linear API read failed (HTTP %d)", res.StatusCode), HTTPStatus: res.StatusCode, AuthFailure: auth, Blocked: true}
 		}
 		if readErr != nil || len(raw) > maxResponseBytes {
-			return nil, &issuesync.StatusError{Message: "incomplete or oversized Linear response"}
+			return nil, &issuesync.StatusError{Message: "incomplete or oversized Linear response", Cause: readErr}
 		}
 		if decodeErr != nil || len(envelope.Errors) > 0 || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 			return nil, &issuesync.StatusError{Message: "invalid or partial Linear query response", Blocked: true}

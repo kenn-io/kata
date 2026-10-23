@@ -213,7 +213,7 @@ func (s *clientSession) read(ctx context.Context, method, path string, payload [
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, &issuesync.StatusError{Message: "Twenty API read request failed"}
+			return nil, &issuesync.StatusError{Message: "Twenty API read request failed", Cause: err}
 		}
 		if response.StatusCode == 429 || response.StatusCode >= 500 {
 			s.client.deferRequests(response.Header.Get("Retry-After"), attempt)
@@ -236,7 +236,7 @@ func (s *clientSession) read(ctx context.Context, method, path string, payload [
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, context.DeadlineExceeded
 			}
-			return nil, fmt.Errorf("cannot read Twenty API response")
+			return nil, &issuesync.StatusError{Message: "cannot read Twenty API response", Cause: err}
 		}
 		if len(raw) > maxResponseBytes {
 			return nil, fmt.Errorf("twenty API response exceeds 8 MiB")
@@ -264,11 +264,30 @@ func (s *clientSession) graphqlBounded(ctx context.Context, query string, variab
 			return nil, fmt.Errorf("twenty metadata exceeds 128 MiB")
 		}
 	}
+	return metadataData(raw)
+}
+
+// metadataData returns the query data. Twenty reports denied and throttled
+// queries with HTTP 200, so their error codes carry the failure class.
+func metadataData(raw []byte) ([]byte, error) {
 	var envelope struct {
 		Data   jsontext.Value `json:"data"`
-		Errors jsontext.Value `json:"errors"`
+		Errors []struct {
+			Extensions struct {
+				Code string `json:"code"`
+			} `json:"extensions"`
+		} `json:"errors"`
 	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" || (len(envelope.Errors) > 0 && string(envelope.Errors) != "[]" && string(envelope.Errors) != "null") {
+	err := json.Unmarshal(raw, &envelope)
+	for _, graphErr := range envelope.Errors {
+		switch graphErr.Extensions.Code {
+		case "UNAUTHENTICATED", "FORBIDDEN":
+			return nil, &issuesync.StatusError{Message: "Twenty API denied the metadata query", HTTPStatus: http.StatusOK, AuthFailure: true, Blocked: true}
+		case "RATE_LIMITED":
+			return nil, &issuesync.StatusError{Message: "Twenty API rate-limited the metadata query", HTTPStatus: http.StatusOK, RateLimited: true}
+		}
+	}
+	if err != nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" || len(envelope.Errors) > 0 {
 		return nil, fmt.Errorf("twenty metadata query failed or returned an unsupported schema")
 	}
 	return envelope.Data, nil

@@ -28,9 +28,9 @@ func newCloseCmd() *cobra.Command {
 		sugarAuditNoChange bool
 		sugarDuplicateOf   string
 		sugarSupersededBy  string
-		sugarCommit        string
-		sugarPR            string
-		sugarTest          string
+		sugarCommit        []string
+		sugarPR            []string
+		sugarTest          []string
 		sugarReviewed      []string
 	)
 	cmd := &cobra.Command{
@@ -112,14 +112,14 @@ The close message has a minimum length that depends on the reason:
 			}
 
 			// Resolve sugar -> evidence (appended to user-supplied --evidence values).
-			if sugarCommit != "" {
-				evidence = append(evidence, "commit:"+sugarCommit)
+			for _, sha := range sugarCommit {
+				evidence = append(evidence, "commit:"+sha)
 			}
-			if sugarPR != "" {
-				evidence = append(evidence, "pr:"+sugarPR)
+			for _, url := range sugarPR {
+				evidence = append(evidence, "pr:"+url)
 			}
-			if sugarTest != "" {
-				evidence = append(evidence, "test:"+sugarTest)
+			for _, command := range sugarTest {
+				evidence = append(evidence, "test:"+command)
 			}
 			for _, p := range sugarReviewed {
 				evidence = append(evidence, "reviewed-paths:"+p)
@@ -137,7 +137,7 @@ The close message has a minimum length that depends on the reason:
 			}
 			if dup := findDuplicateEvidence(parsed); dup != "" {
 				return &cliError{Kind: kindUsage, ExitCode: ExitUsage,
-					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided via both canonical and sugar)", dup)}
+					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided more than once via canonical and/or sugar)", dup)}
 			}
 
 			extra := map[string]any{
@@ -194,9 +194,9 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().BoolVar(&sugarAuditNoChange, "audit-no-change", false, "sugar for --reason audit-no-change")
 	cmd.Flags().StringVar(&sugarDuplicateOf, "duplicate-of", "", "sugar for --reason duplicate --evidence duplicate-of:<ref>")
 	cmd.Flags().StringVar(&sugarSupersededBy, "superseded-by", "", "sugar for --reason superseded --evidence superseded-by:<ref>")
-	cmd.Flags().StringVar(&sugarCommit, "commit", "", "sugar for --evidence commit:<sha>")
-	cmd.Flags().StringVar(&sugarPR, "pr", "", "sugar for --evidence pr:<url>")
-	cmd.Flags().StringVar(&sugarTest, "test", "", "sugar for --evidence test:<command>")
+	cmd.Flags().StringArrayVar(&sugarCommit, "commit", nil, "sugar for --evidence commit:<sha>, repeatable")
+	cmd.Flags().StringArrayVar(&sugarPR, "pr", nil, "sugar for --evidence pr:<url>, repeatable")
+	cmd.Flags().StringArrayVar(&sugarTest, "test", nil, "sugar for --evidence test:<command>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarReviewed, "reviewed", nil, "sugar for --evidence reviewed-paths:<path>, repeatable")
 	addCommentFlag(cmd)
 	cmd.Flags().SetNormalizeFunc(normalizeCloseBodyFlag)

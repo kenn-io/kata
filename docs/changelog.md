@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Record every value when `kata close` repeats `--pr`, `--commit`, or `--test`.
+  Before, only the last value of each flag was kept, so a fix that landed in two
+  pull requests recorded only the second one. An empty value such as `--pr ""`
+  is now rejected like `--evidence pr:` instead of ignored.
+- Create direct spoke enrollments with `kata federation enroll` and replace
+  their tokens through the rotation API using the hub's bootstrap token in
+  identity mode. Set `--actor` to an existing account with an unscoped API token,
+  which may be expired or revoked. Enable the hub project with an account token
+  first. See
+  [Federation token boundaries](operations/federation.md#token-boundaries).
+- Resolve projects with the bootstrap token in identity mode, including bound
+  workspaces used by `kata federation enroll`. Bootstrap resolution reads
+  existing aliases without attaching a new alias.
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
   event per scheduled value, with the date's raw value, timezone, and UTC
@@ -33,6 +46,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   of `kata.federation_leave`, passing the `preparation_id` they sent to
   `prepare`. See
   [Leaving a federation](operations/federation.md#leaving-a-federation).
+- Count submitted empty searches once per query until the text changes in the
+  web UI and TUI, and when an interactive CLI query differs from its last empty
+  query. Count failed issue creates and closes, and sync outages with anonymous
+  outcome events. See [Telemetry](reference/configuration.md#telemetry) for fixed
+  values, limits, and the opt-out setting.
 
 - Disable anonymous telemetry with `DO_NOT_TRACK` or any present `CI` variable, including in registered local profile daemons Kata autostarts. CLI, TUI, and MCP processes honor their own preferences when using an enabled daemon, including CLI and TUI action attribution. Only plain release versions send reports. See [Telemetry](reference/configuration.md#telemetry) for opt-outs and the shared field inventory.
 - Count a parent's open and total children from the browser snapshot's

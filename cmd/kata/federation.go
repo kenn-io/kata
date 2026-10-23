@@ -1345,8 +1345,10 @@ func resolveFederationProject(
 		return resolveProjectSelector(a, args[0])
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
-		if !createMissing {
-			return resolveFederationProjectByName(a, projectName)
+		project, err := resolveFederationProjectByName(a, projectName)
+		var cliErr *cliError
+		if !createMissing || !errors.As(err, &cliErr) || cliErr.HTTPStatus != http.StatusNotFound || cliErr.Code != "project_not_initialized" {
+			return project, err
 		}
 		return ensureFederationProjectByName(a, projectName, actor)
 	}

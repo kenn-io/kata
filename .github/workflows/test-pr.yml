@@ -1,6 +1,6 @@
 name: Tests
 
-# The main-pinned PR dispatcher routes trusted Linux jobs to Namespace and Windows jobs to GitHub-hosted runners.
+# Run the PR's workflow revision so CI changes are exercised before merge.
 on:
   pull_request:
 
@@ -8,4 +8,4 @@ permissions: read-all
 
 jobs:
   run:
-    uses: kenn-io/kata/.github/workflows/test.yml@main
+    uses: ./.github/workflows/test.yml

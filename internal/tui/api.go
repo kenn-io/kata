@@ -61,3 +61,8 @@ type appOpenedAPI interface {
 type screenViewedAPI interface {
 	ReportScreenViewed(ctx context.Context, screen string) error
 }
+
+// outcomeAPI reports search and action outcomes without user content.
+type outcomeAPI interface {
+	ReportOutcome(context.Context, string, string) error
+}
