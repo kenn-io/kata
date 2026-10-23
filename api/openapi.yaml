@@ -2438,6 +2438,16 @@ components:
         - digest
         - state
       type: object
+    FederationEmbeddingArtifactsBody:
+      additionalProperties: true
+      properties:
+        artifacts:
+          items:
+            $ref: "#/components/schemas/EmbeddingArtifactResponse"
+          type: array
+      required:
+        - artifacts
+      type: object
     FederationEmbeddingStatus:
       additionalProperties: true
       properties:
@@ -8878,6 +8888,48 @@ paths:
             X-Kata-Required-Event-Features:
               schema:
                 type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/embedding-artifacts:
+    get:
+      operationId: getFederationEmbeddingArtifacts
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - explode: true
+          in: query
+          name: issue_uid
+          schema:
+            items:
+              type: string
+            maxItems: 32
+            minItems: 1
+            type: array
+        - explode: false
+          in: query
+          name: recipe_fingerprint
+          schema:
+            minLength: 1
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationEmbeddingArtifactsBody"
+          description: OK
         default:
           content:
             application/json:

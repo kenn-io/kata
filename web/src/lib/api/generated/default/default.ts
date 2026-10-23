@@ -99,6 +99,7 @@ import type {
   FederationBridgeBody,
   FederationBridgeDisconnectResult,
   FederationBridgeStatusBody,
+  FederationEmbeddingArtifactsBody,
   FederationEnrollmentOut,
   FederationIngestEventsBody,
   FederationIngestEventsRequestBody,
@@ -111,6 +112,8 @@ import type {
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
+  GetFederationEmbeddingArtifactsParams,
+  GetFederationEmbeddingArtifactsPathParameters,
   GetFederationProjectMetadataPathParameters,
   GetFederationStatusParams,
   GetIssueLeaseStatusPathParameters,
@@ -2890,6 +2893,71 @@ export const getProjectFederation = async (
     ...options,
     method: 'GET',
   })
+}
+
+export type getFederationEmbeddingArtifactsResponse200 = {
+  data: FederationEmbeddingArtifactsBody
+  status: 200
+}
+
+export type getFederationEmbeddingArtifactsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getFederationEmbeddingArtifactsResponseSuccess =
+  getFederationEmbeddingArtifactsResponse200 & {
+    headers: Headers
+  }
+export type getFederationEmbeddingArtifactsResponseError =
+  getFederationEmbeddingArtifactsResponseDefault & {
+    headers: Headers
+  }
+
+export type getFederationEmbeddingArtifactsResponse =
+  | getFederationEmbeddingArtifactsResponseSuccess
+  | getFederationEmbeddingArtifactsResponseError
+
+export const getGetFederationEmbeddingArtifactsUrl = (
+  { projectId }: GetFederationEmbeddingArtifactsPathParameters,
+  params?: GetFederationEmbeddingArtifactsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['issue_uid']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/embedding-artifacts?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/embedding-artifacts`
+}
+
+export const getFederationEmbeddingArtifacts = async (
+  { projectId }: GetFederationEmbeddingArtifactsPathParameters,
+  params?: GetFederationEmbeddingArtifactsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getFederationEmbeddingArtifactsResponse> => {
+  return orvalFetch<getFederationEmbeddingArtifactsResponse>(
+    getGetFederationEmbeddingArtifactsUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type enableProjectFederationResponse200 = {

@@ -49,6 +49,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 	registerHostAccessRules(rules, hostAccessRule{
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
 	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents",
+		"getFederationEmbeddingArtifacts",
 		"ingestFederationProjectEvents", "acquireIssueLease", "renewIssueLease",
 		"releaseIssueLease", "getIssueLeaseStatus", "claimIssue")
 	registerHostAccessRules(rules, hostAccessRule{SelfAuthenticated: true},

@@ -57,3 +57,6 @@ __pycache__/
 .vercel
 .env*.local
 .env*
+
+# Hegel property-test example database
+.hegel/

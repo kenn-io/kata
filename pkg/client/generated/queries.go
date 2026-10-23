@@ -179,6 +179,15 @@ type PollProjectEventsQuery struct {
 	Limit   *int64 `json:"limit,omitempty"`
 }
 
+type GetFederationEmbeddingArtifactsQuery struct {
+	IssueUID          []string `json:"issue_uid,omitempty"`
+	RecipeFingerprint *string  `json:"recipe_fingerprint,omitempty" validate:"omitempty,min=1"`
+}
+
+func (g GetFederationEmbeddingArtifactsQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
 	Limit   *int64 `json:"limit,omitempty"`

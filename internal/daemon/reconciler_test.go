@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
@@ -296,7 +297,11 @@ func TestReconcileRecipeChangeCutsOverEligibleProjectsWithDeferredSharedContent(
 	oldEmbedder := newReconcilerArtifactEmbedder(t, "example-model-v1")
 	oldRecipe, err := oldEmbedder.ArtifactIdentity("", "", "")
 	require.NoError(t, err)
-	oldProducer := db.ProjectEmbeddingProducer{ProducerInstanceUID: store.InstanceUID(), Recipe: oldRecipe}
+	// A different instance owns the selection: an unpinned hub follows its own
+	// recipe changes, so only a foreign producer keeps content deferred.
+	foreignProducer, err := uid.New()
+	require.NoError(t, err)
+	oldProducer := db.ProjectEmbeddingProducer{ProducerInstanceUID: foreignProducer, Recipe: oldRecipe}
 	oldRaw, err := json.Marshal(oldProducer)
 	require.NoError(t, err)
 	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
