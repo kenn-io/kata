@@ -1124,3 +1124,60 @@ func TestAttentionDetailActionsAndScrollReturn(t *testing.T) {
 		}
 	}
 }
+
+func TestAttentionMessagePaging(t *testing.T) {
+	m, a := attentionFixture(t)
+	m = resizeModel(m, 80, 24)
+	var lines []string
+	for i := range 18 {
+		lines = append(lines, fmt.Sprintf("Request instruction %02d.", i))
+	}
+	a.rows[0].message = strings.Join(lines, "\n")
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	selected := m.attention.selectedUID
+	seen := stripANSI(m.View().Content)
+	require.Contains(t, seen, lines[0])
+	require.NotContains(t, seen, lines[17])
+	for range 18 {
+		m = sendKey(m, tea.KeyPgDown)
+		seen += stripANSI(m.View().Content)
+		require.Equal(t, selected, m.attention.selectedUID)
+	}
+	for _, line := range lines {
+		require.Contains(t, seen, line, "paging must expose every instruction")
+	}
+	require.Contains(t, stripANSI(m.View().Content), lines[17])
+	m = sendKey(m, tea.KeyPgUp)
+	require.NotContains(t, stripANSI(m.View().Content), lines[17], "paging must clamp at the end")
+	for range 18 {
+		m = sendKey(m, tea.KeyPgUp)
+	}
+	require.Contains(t, stripANSI(m.View().Content), lines[0])
+	m = sendKey(m, tea.KeyPgDown)
+	beforeDetail := stripANSI(m.View().Content)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, cmd = updateModel(m, cmd())
+	m = loadAttention(m, cmd)
+	require.Equal(t, beforeDetail, stripANSI(m.View().Content), "returning from detail retains the message page")
+	m = sendRune(m, 'j')
+	require.Contains(t, stripANSI(m.View().Content), "Deadline reached")
+	m = sendRune(m, 'k')
+	require.Contains(t, stripANSI(m.View().Content), lines[0], "a new selection starts at the top")
+}
+
+func TestAttentionMessagePagingAfterReplacement(t *testing.T) {
+	m, a := attentionFixture(t)
+	m = resizeModel(m, 80, 24)
+	a.rows[0].message = "Original request starts here.\n" + strings.Repeat("Original context line.\n", 18)
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m = sendKey(m, tea.KeyPgDown)
+	require.NotContains(t, stripANSI(m.View().Content), "Original request starts here.")
+	a.rows = append([]attentionRequest(nil), a.rows...)
+	a.rows[0].message = "Replacement request starts here.\n" + strings.Repeat("New context line.\n", 18)
+	m, cmd = updateModel(m, keyRune('r'))
+	m = loadAttention(m, cmd)
+	require.Contains(t, stripANSI(m.View().Content), "Replacement request starts here.")
+}

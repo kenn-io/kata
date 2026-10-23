@@ -1818,8 +1818,10 @@ in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticat
 actor, else the TUI actor. The table headings are `#`, `attention`, `title`, and
 `owner`: attention shows `work.attention` (`needs-human`, `stuck`, `ok`, or a
 dim dash when empty), and owner shows the notification sender. The panel below
-shows the message. Enter opens the ordinary issue detail with its editing and
-comment actions. Esc or Backspace returns to the same request and scroll
+shows the message, full comment reference, reply kind, and broadcast marker when
+present. PgUp/PgDn scroll the message without changing the selected request.
+Enter opens the ordinary issue detail with its editing and comment actions.
+Esc or Backspace returns to the same request and message scroll
 position; `c` clears the selected request
 (daemon API `0.13.0` or newer, guarded against a concurrent replacement);
 `r` refreshes. Press `T` or Esc to return to the previous view.

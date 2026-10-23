@@ -3,4 +3,5 @@ for alex · example-project · 0 requests · 1 skipped
 
 failed to load attention requests: boom
 
- ↑↓ move▕ ↵ open▕ c clear▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help▕ q quit
+ ↑↓ move▕ pgup/pgdn message▕ ↵ open▕ c clear▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help
+ q quit

@@ -3,4 +3,5 @@ for alex · all projects · 0 requests
 
 No requests for alex across all projects
 
- ↑↓ move▕ ↵ open▕ c clear▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help▕ q quit
+ ↑↓ move▕ pgup/pgdn message▕ ↵ open▕ c clear▕ r refresh▕ esc back▕ D daemons▕ F federation▕ C credentials▕ ? help
+ q quit

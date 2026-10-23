@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 const (
@@ -41,6 +42,34 @@ type Value struct {
 	Re        string `json:"re,omitempty"`
 	Kind      string `json:"kind,omitempty"`
 	Broadcast bool   `json:"broadcast,omitzero"`
+}
+
+// DecodeValue reads an inbox entry without letting malformed optional fields
+// hide a usable request. invalidTeammate lets clients report discarded attribution.
+func DecodeValue(raw jsontext.Value) (value Value, invalidTeammate bool, err error) {
+	var fields struct {
+		From      string         `json:"from"`
+		Message   string         `json:"message"`
+		Teammate  jsontext.Value `json:"teammate"`
+		Re        jsontext.Value `json:"re"`
+		Kind      jsontext.Value `json:"kind"`
+		Broadcast jsontext.Value `json:"broadcast"`
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return Value{}, false, err
+	}
+	if strings.TrimSpace(fields.From) == "" || strings.TrimSpace(fields.Message) == "" {
+		return Value{}, false, errors.New("notification requires a sender and message")
+	}
+	value.From, value.Message = fields.From, fields.Message
+	if len(fields.Teammate) > 0 && (json.Unmarshal(fields.Teammate, &value.Teammate) != nil || teammate.Validate(value.Teammate) != nil) {
+		value.Teammate = ""
+		invalidTeammate = true
+	}
+	_ = json.Unmarshal(fields.Re, &value.Re)
+	_ = json.Unmarshal(fields.Kind, &value.Kind)
+	_ = json.Unmarshal(fields.Broadcast, &value.Broadcast)
+	return value, invalidTeammate, nil
 }
 
 // Automatic describes a system-generated notification recognized from metadata.

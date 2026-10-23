@@ -151,7 +151,7 @@ func TestAttentionRenderBounds(t *testing.T) {
 			require.LessOrEqual(t, ansi.StringWidth(line), m.width)
 		}
 		if m.height >= 24 {
-			require.Contains(t, stripANSI(out), "…")
+			require.Contains(t, stripANSI(out), "message 1–")
 		}
 	}
 	m.attention.rows = nil

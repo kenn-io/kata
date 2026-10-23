@@ -6,10 +6,8 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"sort"
-	"strings"
 
 	"go.kenn.io/kata/internal/notification"
-	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 	"golang.org/x/mod/semver"
 )
@@ -17,6 +15,8 @@ import (
 type attentionRequest struct {
 	issue                                       Issue
 	from, teammate, message, workAttention, key string
+	re, kind                                    string
+	broadcast                                   bool
 	raw                                         jsontext.Value
 }
 
@@ -71,24 +71,21 @@ func (c *Client) ListAttentionRequests(ctx context.Context, projectID *int64, re
 		if !ok || row.Status != "open" {
 			continue
 		}
-		var value struct {
-			From     string         `json:"from"`
-			Message  string         `json:"message"`
-			Teammate jsontext.Value `json:"teammate"`
-		}
-		if json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value.From) == "" || strings.TrimSpace(value.Message) == "" {
+		value, _, err := notification.DecodeValue(raw)
+		if err != nil {
 			skipped++
 			continue
 		}
-		var handle, work string
-		if json.Unmarshal(value.Teammate, &handle) != nil || teammate.Validate(handle) != nil {
-			handle = ""
-		}
+		var work string
 		_ = json.Unmarshal(row.Metadata["work.attention"], &work)
 		if work != "needs-human" && work != "stuck" && work != "ok" {
 			work = ""
 		}
-		rows = append(rows, attentionRequest{issue: row.Issue, from: value.From, teammate: handle, message: value.Message, workAttention: work, key: key, raw: raw})
+		rows = append(rows, attentionRequest{
+			issue: row.Issue, from: value.From, teammate: value.Teammate, message: value.Message,
+			re: value.Re, kind: value.Kind, broadcast: value.Broadcast,
+			workAttention: work, key: key, raw: raw,
+		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if projectID == nil {

@@ -73,6 +73,39 @@ func TestAttentionClientDecode(t *testing.T) {
 	require.JSONEq(t, values[3], string(rows[3].raw))
 }
 
+func TestAttentionClientNotificationContext(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		want         []string
+	}{
+		{"comment request", `"re":"01ARZ3NDEKTSV4RRFFQ69G5FAV"`, []string{"re 01ARZ3NDEKTSV4RRFFQ69G5FAV", "Inspect evidence"}},
+		{"reply", `"re":"01ARZ3NDEKTSV4RRFFQ69G5FAV","kind":"refute"`, []string{"refute", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "Inspect evidence"}},
+		{"broadcast", `"broadcast":true,"re":"01ARZ3NDEKTSV4RRFFQ69G5FAV"`, []string{"broadcast", "re 01ARZ3NDEKTSV4RRFFQ69G5FAV", "Inspect evidence"}},
+		{"malformed optional fields", `"re":42,"kind":false,"broadcast":"yes","teammate":42`, []string{"Inspect evidence", "sam"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := attentionFixture(t)
+			raw := jsontext.Value(`{"from":"sam","message":"Inspect evidence",` + tc.fields + `}`)
+			m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/projects/7/issues", r.URL.Path)
+				respondJSON(t, w, map[string]any{"issues": []any{map[string]any{
+					"uid": "01ARZ3NDEKTSV4RRFFQ69G5FAA", "short_id": "5faa", "project_id": 7,
+					"status": "open", "title": "Decide on the release",
+					"metadata": map[string]any{notification.MetadataKey("alex"): raw},
+				}}})
+			})
+			m, cmd := m.transitionToAttention()
+			m = loadAttention(m, cmd)
+			require.NoError(t, m.attention.err)
+			require.Len(t, m.attention.rows, 1)
+			for _, want := range tc.want {
+				require.Contains(t, stripANSI(m.View().Content), want)
+			}
+			require.Equal(t, string(raw), string(m.attention.rows[0].raw), "clearing must guard the complete original notification")
+		})
+	}
+}
+
 func TestAttentionClientClear(t *testing.T) {
 	for _, version := range []string{"0.12.0", "", "bad", "0.13.0", "0.28.0", "failed"} {
 		t.Run(version, func(t *testing.T) {

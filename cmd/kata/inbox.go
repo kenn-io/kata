@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -173,45 +173,23 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 			ref = issue.QualifiedID
 			project = issue.ProjectName
 		}
-		// Decode optional attribution independently so a malformed teammate
-		// cannot hide an otherwise usable attention request.
-		var value struct {
-			From      string         `json:"from"`
-			Message   string         `json:"message"`
-			Teammate  jsontext.Value `json:"teammate"`
-			Re        jsontext.Value `json:"re"`
-			Kind      jsontext.Value `json:"kind"`
-			Broadcast jsontext.Value `json:"broadcast"`
-		}
-		raw, ok := issue.Metadata[key]
-		if !ok || json.Unmarshal(raw, &value) != nil ||
-			strings.TrimSpace(value.From) == "" || strings.TrimSpace(value.Message) == "" {
+		value, invalidTeammate, err := notification.DecodeValue(issue.Metadata[key])
+		if err != nil {
 			if !flags.Quiet {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 					"warning: skipped malformed notification on %s\n", textsafe.Line(ref))
 			}
 			continue
 		}
-		var handle string
-		if len(value.Teammate) > 0 {
-			if err := json.Unmarshal(value.Teammate, &handle); err != nil || teammate.Validate(handle) != nil {
-				if !flags.Quiet {
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: ignored invalid notification teammate on %s\n", textsafe.Line(ref))
-				}
-				handle = ""
-			}
+		if invalidTeammate && !flags.Quiet {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: ignored invalid notification teammate on %s\n", textsafe.Line(ref))
 		}
-		var re, kind string
-		var broadcast bool
-		_ = json.Unmarshal(value.Re, &re)
-		_ = json.Unmarshal(value.Kind, &kind)
-		_ = json.Unmarshal(value.Broadcast, &broadcast)
-		if kind != "" && re != "" && issue.ProjectID > 0 {
+		if value.Kind != "" && value.Re != "" && issue.ProjectID > 0 {
 			response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
 				PathParams: &generated.ShowIssuePath{ProjectID: issue.ProjectID, Ref: issue.ShortID},
-				Query:      &generated.ShowIssueQuery{Thread: new(re)},
+				Query:      &generated.ShowIssueQuery{Thread: new(value.Re)},
 			})
-			currentHandle := re
+			currentHandle := value.Re
 			var refreshErr error
 			if response == nil {
 				refreshErr = externalCLITransportError(response, callErr)
@@ -227,7 +205,7 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 					refreshErr = json.Unmarshal(response.Body, &detail)
 					if refreshErr == nil {
 						for _, comment := range detail.Comments {
-							if comment.UID == re && comment.Handle != "" {
+							if comment.UID == value.Re && comment.Handle != "" {
 								currentHandle = comment.Handle
 								break
 							}
@@ -239,17 +217,17 @@ func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxR
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not refresh notification on %s; using comment UID\n", textsafe.Line(ref))
 			}
 			from := value.From
-			if handle != "" {
-				from += "/" + handle
+			if value.Teammate != "" {
+				from += "/" + value.Teammate
 			}
-			note := "latest: " + kind + " " + currentHandle + " by " + from
+			note := "latest: " + value.Kind + " " + currentHandle + " by " + from
 			if !strings.HasPrefix(value.Message, "latest: ") {
 				note += ": " + value.Message
 			}
 			value.Message = note
 		}
 		requests = append(requests, inboxRequest{
-			Ref: ref, Project: project, Title: issue.Title, From: value.From, Teammate: handle, Message: value.Message, Re: re, Kind: kind, Broadcast: broadcast,
+			Ref: ref, Project: project, Title: issue.Title, From: value.From, Teammate: value.Teammate, Message: value.Message, Re: value.Re, Kind: value.Kind, Broadcast: value.Broadcast,
 		})
 	}
 	sort.Slice(requests, func(i, j int) bool { return requests[i].Ref < requests[j].Ref })

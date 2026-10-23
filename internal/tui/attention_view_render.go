@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
-	"github.com/charmbracelet/x/ansi"
 	"go.kenn.io/kit/tui/helplayout"
 )
 
@@ -23,10 +22,9 @@ func renderAttention(m Model) string {
 	}
 	body := []string{titleStyle.Render("kata / attention"), subtleStyle.Render(truncate(header, width)), ""}
 	footer := renderFooterHelpTable(modalFirstHelpRows(m.modal, attentionHelpRows(m)), width)
-	budget := max(m.height-len(body)-1-len(strings.Split(footer, "\n")), 0)
+	budget := attentionBodyBudget(m)
 	if s.err != nil {
 		body = append(body, errorStyle.Render(truncate("failed to load attention requests: "+sanitizeForLine(s.err.Error()), width)))
-		budget = max(budget-1, 0)
 	}
 	switch {
 	case s.loading && len(s.rows) == 0:
@@ -48,14 +46,41 @@ func renderAttention(m Model) string {
 	return strings.Join(body, "\n")
 }
 
+func attentionBodyBudget(m Model) int {
+	header := 3
+	if m.attention.err != nil {
+		header++
+	}
+	footer := renderFooterHelpTable(modalFirstHelpRows(m.modal, attentionHelpRows(m)), max(m.width, 1))
+	return max(m.height-header-1-len(strings.Split(footer, "\n")), 0)
+}
+
+func attentionMessageViewport(s attentionState, width, budget int) ([]string, int) {
+	row := s.rows[min(s.cursor, len(s.rows)-1)]
+	var context []string
+	if row.broadcast {
+		context = append(context, "broadcast")
+	}
+	if row.kind != "" {
+		context = append(context, sanitizeForLine(row.kind))
+	}
+	if row.re != "" {
+		context = append(context, "re "+sanitizeForLine(row.re))
+	}
+	text := row.message
+	if len(context) > 0 {
+		text = strings.Join(context, " · ") + "\n" + text
+	}
+	message := wrapBody(strings.ReplaceAll(sanitizeForDisplay(text), "\t", "    "), width)
+	panel := min(len(message), max(3, budget/3))
+	return message, min(panel, max(budget-3, 0))
+}
+
 func renderAttentionRows(s attentionState, width, budget int) []string {
 	if budget <= 0 {
 		return nil
 	}
-	row := s.rows[min(s.cursor, len(s.rows)-1)]
-	message := wrapBody(strings.ReplaceAll(sanitizeForDisplay(row.message), "\t", "    "), width)
-	panel := min(len(message), max(3, budget/3))
-	panel = min(panel, max(budget-3, 0))
+	message, panel := attentionMessageViewport(s, width, budget)
 	issueWidth := 8
 	if s.allProjects {
 		issueWidth = min(28, width/4)
@@ -125,16 +150,18 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 	out := strings.Split(t.Render(), "\n")
 
 	if panel > 0 {
-		out = append(out, "")
+		start := min(s.messageScroll, max(len(message)-panel, 0))
+		end := min(start+panel, len(message))
+		position := ""
 		if len(message) > panel {
-			message = message[:panel]
-			message[panel-1] = ansi.Truncate(message[panel-1], max(width-1, 0), "") + "…"
+			position = subtleStyle.Render(fmt.Sprintf("message %d–%d/%d", start+1, end, len(message)))
 		}
-		out = append(out, message...)
+		out = append(out, position)
+		out = append(out, message[start:end]...)
 	}
 	return out
 }
 
 func attentionHelpRows(_ Model) [][]helplayout.HelpItem {
-	return [][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "↵", Description: "open"}, {Key: "c", Description: "clear"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}
+	return [][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "pgup/pgdn", Description: "message"}, {Key: "↵", Description: "open"}, {Key: "c", Description: "clear"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}
 }

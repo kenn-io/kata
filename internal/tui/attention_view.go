@@ -15,6 +15,7 @@ import (
 type attentionState struct {
 	rows                        []attentionRequest
 	cursor                      int
+	messageScroll               int
 	selectedUID, recipient      string
 	recipientErr                error
 	allProjects                 bool
@@ -68,6 +69,7 @@ func (m Model) transitionToAttention() (Model, tea.Cmd) {
 		m.attention.projectName = m.scope.projectName
 		m.attention.rows = nil
 		m.attention.cursor = 0
+		m.attention.messageScroll = 0
 		m.attention.skipped = 0
 		m.attention.selectedUID = ""
 	}
@@ -243,6 +245,19 @@ func (m Model) prepareAttentionListNavigation() (Model, tea.Cmd) {
 }
 
 func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.keymap.PageUp.matches(msg) || m.keymap.PageDown.matches(msg) {
+		if len(m.attention.rows) > 0 {
+			lines, height := attentionMessageViewport(m.attention, max(m.width, 1), attentionBodyBudget(m))
+			step := max(height, 1)
+			if m.keymap.PageUp.matches(msg) {
+				step = -step
+			}
+			start := min(m.attention.messageScroll, max(len(lines)-height, 0))
+			m.attention.messageScroll = min(max(start+step, 0), max(len(lines)-height, 0))
+		}
+		return m, nil
+	}
+	previousCursor := m.attention.cursor
 	switch msg.String() {
 	case "enter":
 		return m.openAttentionIssue()
@@ -263,6 +278,9 @@ func (m Model) routeAttentionViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.attention.cursor = 0
 	case "G", "end":
 		m.attention.cursor = max(len(m.attention.rows)-1, 0)
+	}
+	if m.attention.cursor != previousCursor {
+		m.attention.messageScroll = 0
 	}
 	if len(m.attention.rows) > 0 {
 		m.attention.selectedUID = m.attention.rows[m.attention.cursor].issue.UID
@@ -299,6 +317,10 @@ func (m Model) handleAttentionLoaded(msg attentionLoadedMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		return m, nil
 	}
+	var previous attentionRequest
+	if len(m.attention.rows) > 0 {
+		previous = m.attention.rows[m.attention.cursor]
+	}
 	m.attention.rows = msg.rows
 	m.attention.skipped = msg.skipped
 	m.attention.cursor = min(m.attention.cursor, max(len(msg.rows)-1, 0))
@@ -310,7 +332,13 @@ func (m Model) handleAttentionLoaded(msg attentionLoadedMsg) (Model, tea.Cmd) {
 	}
 	m.attention.selectedUID = ""
 	if len(msg.rows) > 0 {
-		m.attention.selectedUID = msg.rows[m.attention.cursor].issue.UID
+		selected := msg.rows[m.attention.cursor]
+		m.attention.selectedUID = selected.issue.UID
+		if selected.issue.UID != previous.issue.UID || selected.message != previous.message || string(selected.raw) != string(previous.raw) {
+			m.attention.messageScroll = 0
+		}
+	} else {
+		m.attention.messageScroll = 0
 	}
 	return m, nil
 }
