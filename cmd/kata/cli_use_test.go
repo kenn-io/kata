@@ -503,16 +503,20 @@ func TestCLIUseBacksOffUnobservedReports(t *testing.T) {
 				return process
 			}
 			first := run(test.first, "exit")
+			stdin, err := first.StdinPipe()
+			require.NoError(t, err)
 			var output bytes.Buffer
 			first.Stdout, first.Stderr = &output, &output
 			require.NoError(t, first.Start())
 			select {
 			case <-started:
 			case <-time.After(10 * time.Second):
+				_ = stdin.Close()
 				release()
 				_ = first.Wait()
 				t.Fatal("first process did not reach the held telemetry response")
 			}
+			require.NoError(t, stdin.Close())
 			require.NoError(t, first.Wait(), "%s", output.String())
 			release()
 
@@ -540,7 +544,14 @@ func TestCLIUseBackoffProcess(t *testing.T) {
 	now, err := time.Parse(time.RFC3339, os.Getenv("KATA_CLI_USE_TEST_NOW"))
 	require.NoError(t, err)
 	setCLIUseClock(t, now)
+	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit" {
+		cliUseReportTimeout = 5 * time.Second
+	}
 	reportCLIUseTo(t, url)
+	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit" {
+		_, err := io.Copy(io.Discard, os.Stdin)
+		require.NoError(t, err)
+	}
 	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "accepted" {
 		waitCLIUseMarker(t, "cli-opened-")
 	}
