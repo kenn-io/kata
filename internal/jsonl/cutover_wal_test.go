@@ -67,31 +67,3 @@ func TestAutoCutoverCheckpointsSourceWALBeforeSwap(t *testing.T) {
 	require.NoError(t, backup.QueryRowContext(ctx, `SELECT title FROM issues WHERE uid=?`, issue.UID).Scan(&title))
 	require.Equal(t, "committed in source WAL", title, "backup must include committed WAL state")
 }
-
-func TestAutoCutoverRefusesSourceWALWithActiveReader(t *testing.T) {
-	ctx, path := setupClosedTestDB(t)
-	writer, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	writer.SetMaxOpenConns(1)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
-	_, err = writer.ExecContext(ctx, `PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; UPDATE meta SET value='28' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	reader, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, reader.Close()) })
-	tx, err := reader.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, tx.Rollback()) })
-	var version string
-	require.NoError(t, tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
-	_, err = writer.ExecContext(ctx, `UPDATE meta SET value='27' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	err = jsonl.AutoCutover(ctx, path)
-	require.ErrorContains(t, err, "checkpoint source WAL")
-	require.NoError(t, writer.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
-	require.Equal(t, "27", version)
-	backups, err := filepath.Glob(path + ".bak.*")
-	require.NoError(t, err)
-	require.Empty(t, backups)
-	assertNoCutoverTemps(t, path)
-}

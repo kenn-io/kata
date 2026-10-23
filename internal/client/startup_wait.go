@@ -11,8 +11,6 @@ import (
 	"github.com/gofrs/flock"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 const daemonChildExitGrace = 5 * time.Second
@@ -129,15 +127,14 @@ func sqliteMigrationPending(ctx context.Context) bool {
 	if err != nil || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	path := strings.TrimPrefix(dsn, "sqlite://")
-	return sqliteMigrationPendingForPath(ctx, path, sqlitestore.PeekSchemaVersion)
+	inspector, err := installedStorageInspector()
+	if err != nil {
+		return false
+	}
+	return sqliteMigrationPendingForPath(ctx, strings.TrimPrefix(dsn, "sqlite://"), inspector)
 }
 
-func sqliteMigrationPendingForPath(
-	ctx context.Context,
-	path string,
-	peekSchemaVersion func(context.Context, string) (int, error),
-) bool {
+func sqliteMigrationPendingForPath(ctx context.Context, path string, inspector StorageInspector) bool {
 	// Hold the lock through the read and its connection close. A lock probe
 	// followed by a separate peek lets a cutover start between those operations.
 	lock := flock.New(path + ".import.lock")
@@ -153,8 +150,8 @@ func sqliteMigrationPendingForPath(
 	// A read-only peek never initializes or upgrades storage. Check the source
 	// schema rather than temp-file growth: preflight and export can themselves
 	// take longer than the readiness budget, before any temp file exists.
-	version, err := peekSchemaVersion(ctx, path)
-	return err == nil && version > 0 && version < db.CurrentSchemaVersion()
+	version, _, err := inspector.PeekCurrentSchema(ctx)
+	return err == nil && version > 0 && version < inspector.CurrentSchemaVersion()
 }
 
 func sqliteCutoverLocked(ctx context.Context) bool {

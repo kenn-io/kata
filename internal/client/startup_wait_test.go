@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/storageinspect"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -222,25 +223,37 @@ func TestMigrationPendingKeepsCutoverLockThroughSchemaPeek(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 
-	peekCalled, cutoverLockAcquiredDuringPeek := false, false
-	pending := sqliteMigrationPendingForPath(t.Context(), path, func(ctx context.Context, path string) (int, error) {
-		peekCalled = true
-		competingLock := flock.New(path + ".import.lock")
-		acquired, err := competingLock.TryLock()
-		require.NoError(t, err)
-		cutoverLockAcquiredDuringPeek = acquired
-		defer func() {
-			if acquired {
-				require.NoError(t, competingLock.Unlock())
-			}
-			require.NoError(t, competingLock.Close())
-		}()
-		return sqlitestore.PeekSchemaVersion(ctx, path)
-	})
+	inspector := &lockCheckingInspector{t: t, path: path}
+	pending := sqliteMigrationPendingForPath(t.Context(), path, inspector)
 
 	require.True(t, pending)
-	require.True(t, peekCalled)
-	require.False(t, cutoverLockAcquiredDuringPeek, "schema peek must run while the cutover lock is held")
+	require.True(t, inspector.peekCalled)
+	require.False(t, inspector.cutoverLockAcquiredDuringPeek, "schema peek must run while the cutover lock is held")
+}
+
+// lockCheckingInspector reads real storage and records whether a competing
+// process could take the cutover lock during that read.
+type lockCheckingInspector struct {
+	storageinspect.Inspector
+	t                             *testing.T
+	path                          string
+	peekCalled                    bool
+	cutoverLockAcquiredDuringPeek bool
+}
+
+func (i *lockCheckingInspector) PeekCurrentSchema(ctx context.Context) (int, bool, error) {
+	i.peekCalled = true
+	competingLock := flock.New(i.path + ".import.lock")
+	acquired, err := competingLock.TryLock()
+	require.NoError(i.t, err)
+	i.cutoverLockAcquiredDuringPeek = acquired
+	defer func() {
+		if acquired {
+			require.NoError(i.t, competingLock.Unlock())
+		}
+		require.NoError(i.t, competingLock.Close())
+	}()
+	return i.Inspector.PeekCurrentSchema(ctx)
 }
 
 func TestAutoStartWaitsForReadinessAfterCutoverUnlock(t *testing.T) {
