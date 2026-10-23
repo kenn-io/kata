@@ -410,8 +410,8 @@ this daemon, accept an enrollment token, or run a full `kata federation join`;
 the bridge's enrollment token stays in the daemon's credential store.
 `kata.federation_bridge_connect` selects `project`, `hub_catalog` and
 `hub_project`; the local daemon uses that catalog account to enroll the narrow
-bridge. `preflight=true` previews without enrollment, checks cross-project issue links,
-and refuses hubs older than API `0.31.0`. Set `serve_downstream=true`
+bridge. `preflight=true` previews without enrollment and checks cross-project issue links;
+`hub_links_checked` is `false` when the hub predates that check. Set `serve_downstream=true`
 only when this daemon will also relay the project to its own spokes; it defaults
 to false. `signing_key_id` with `signing_key_env` or an absolute
 `signing_key_file` selects the daemon-side signing source that a

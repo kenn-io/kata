@@ -79,10 +79,11 @@ func TestFederationBridgeStatusUsesLocalProject(t *testing.T) {
 // Agent mode emits an OK line naming the bridge command, so consumers can
 // rely on the first token for success without parsing a row.
 func TestFederationBridgeAgentOutput(t *testing.T) {
+	hubLinksChecked := true
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/bridges":
-			writeFederationRebindJSON(t, w, map[string]any{"hub_catalog": "example-hub", "hub_url": "https://hub.example", "hub_instance_uid": "00000000000000000000000002", "hub_project_uid": "00000000000000000000000003", "hub_project_id": 7, "project_name": "shared-replica", "upstream_account": "member", "local_account": "local-member", "direction": "bidirectional", "status": "ready"})
+			writeFederationRebindJSON(t, w, map[string]any{"hub_catalog": "example-hub", "hub_url": "https://hub.example", "hub_instance_uid": "00000000000000000000000002", "hub_project_uid": "00000000000000000000000003", "hub_project_id": 7, "project_name": "shared-replica", "upstream_account": "member", "local_account": "local-member", "direction": "bidirectional", "status": "ready", "hub_links_checked": hubLinksChecked})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/bridges/shared-replica":
 			writeFederationRebindJSON(t, w, map[string]any{"project_name": "shared-replica", "project_uid": "00000000000000000000000003", "hub_catalog": "example-hub", "hub_url": "https://hub.example", "upstream_account": "member", "local_account": "local-member", "direction": "bidirectional", "state": "enrollment_pending", "credential_status": "pending"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/bridges/shared-replica/disconnect":
@@ -94,6 +95,11 @@ func TestFederationBridgeAgentOutput(t *testing.T) {
 	out, err := runFederationRebindAgainstServer(t, server.URL, "--agent", "--project", "shared-replica", "federation", "bridge", "connect", "--hub-daemon", "example-hub", "--hub-project", "shared-project", "--preflight")
 	require.NoError(t, err)
 	require.Equal(t, "OK federation-bridge-connect project=shared-replica status=ready direction=bidirectional hub=example-hub upstream_account=member local_account=local-member\n", out)
+	hubLinksChecked = false
+	out, err = runFederationRebindAgainstServer(t, server.URL, "--agent", "--project", "shared-replica", "federation", "bridge", "connect", "--hub-daemon", "example-hub", "--hub-project", "shared-project", "--preflight")
+	require.NoError(t, err)
+	require.Equal(t, "OK federation-bridge-connect project=shared-replica status=ready direction=bidirectional hub=example-hub upstream_account=member local_account=local-member warning=\"the hub did not check cross-project issue links; connect fails if the project has any\"\n", out)
+	hubLinksChecked = true
 	out, err = runFederationRebindAgainstServer(t, server.URL, "--agent", "--project", "shared-replica", "federation", "bridge", "status")
 	require.NoError(t, err)
 	require.Equal(t, "OK federation-bridge-status project=shared-replica state=enrollment_pending direction=bidirectional credential_status=pending hub=example-hub upstream_account=member local_account=local-member\n", out)

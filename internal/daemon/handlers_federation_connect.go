@@ -22,10 +22,7 @@ import (
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
-	"golang.org/x/mod/semver"
 )
-
-const minimumRelayLinkCheckAPISchemaVersion = "v0.31.0"
 
 func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{OperationID: "connectFederationBridge", Method: http.MethodPost, Path: "/api/v1/federation/bridges", Summary: "Connect one project to a configured hub"}, func(ctx context.Context, in *api.ConnectFederationBridgeRequest) (*api.ConnectFederationBridgeResponse, error) {
@@ -122,30 +119,15 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if localProject.ID != 0 {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, localProject.ID); err != nil {
-				if errors.Is(err, db.ErrFederationCrossProjectBoundary) {
-					return nil, newRelayCrossProjectLinksError("local")
-				}
-				return nil, relayTransportError(err)
+				return nil, relayProjectLinksCheckError(err)
 			}
 		}
 		signing, err := federationBridgeSigningSource(ctx, cfg, in, hubURL, metadata.ProjectUID, peer.FederationSigningRequired)
 		if err != nil {
 			return nil, err
 		}
-		body := api.FederationBridgeBody{HubCatalog: catalog.Name, HubURL: hubURL, HubInstanceUID: peer.InstanceUID, HubProjectUID: metadata.ProjectUID, HubProjectID: metadata.ProjectID, ProjectName: in.Body.ProjectName, LocalAccount: actor, UpstreamAccount: peer.Auth.Actor, Direction: "bidirectional", Status: "ready"}
+		body := api.FederationBridgeBody{HubCatalog: catalog.Name, HubURL: hubURL, HubInstanceUID: peer.InstanceUID, HubProjectUID: metadata.ProjectUID, HubProjectID: metadata.ProjectID, ProjectName: in.Body.ProjectName, LocalAccount: actor, UpstreamAccount: peer.Auth.Actor, Direction: "bidirectional", Status: "ready", HubLinksChecked: metadata.RelayLinksChecked}
 		if in.Body.Preflight {
-			healthResponse, callErr := bridge.HealthWithResponse(ctx)
-			var healthRaw []byte
-			if healthResponse != nil {
-				healthRaw = healthResponse.Body
-			}
-			var health api.HealthResponse
-			if err := decodeFederationBridgeResponse(healthRaw, callErr, &health.Body); err != nil {
-				return nil, err
-			}
-			if semver.Compare("v"+strings.TrimPrefix(health.Body.APISchemaVersion, "v"), minimumRelayLinkCheckAPISchemaVersion) < 0 {
-				return nil, api.NewError(http.StatusConflict, "hub_link_check_unsupported", "hub cannot check the project for cross-project links", "upgrade the hub to API 0.31.0 or newer so preflight can check for cross-project links", nil)
-			}
 			return &api.ConnectFederationBridgeResponse{Body: body}, nil
 		}
 		credentials := cfg.federationCredentialStore()

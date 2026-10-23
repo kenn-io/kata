@@ -185,6 +185,18 @@ func relayCrossProjectLinksAPIError(err error) *api.APIError {
 	return newRelayCrossProjectLinksError("local")
 }
 
+// relayProjectLinksCheckError maps a read-only link check outside relay
+// transport. A project archived since its lookup is not a credential failure.
+func relayProjectLinksCheckError(err error) error {
+	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
+		return apiErr
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		return api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+	}
+	return internalAPIError(err)
+}
+
 func newRelayCrossProjectLinksError(side string) *api.APIError {
 	message := "this daemon's copy of the project has cross-project issue links"
 	location := "locally"

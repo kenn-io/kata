@@ -33,6 +33,7 @@ type FederationBridgeBody struct {
 	UpstreamAccount string `json:"upstream_account"`
 	Direction       string `json:"direction" enum:"bidirectional"`
 	Status          string `json:"status" enum:"ready,connected"`
+	HubLinksChecked bool   `json:"hub_links_checked" doc:"True when the hub confirmed the project has no cross-project issue links. False when the hub predates that check; connect can still fail if links exist."`
 }
 
 // ConnectFederationBridgeResponse returns the selected bridge preflight or enrollment result.

@@ -9,11 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Identify which copy of a project needs its cross-project issue links removed
-  when bridge preflight or connect returns `409 relay_cross_project_links`.
-  Preflight refuses hubs older than API `0.31.0`, which cannot check those links.
-  A direct connect to an older hub still returns that hub's old error when links
-  block enrollment. See [Bridge setup](operations/federation.md#connect-a-project-through-the-daemon-catalog).
+- Find cross-project issue links that block a bridge before connecting.
+  `kata federation bridge connect --preflight` now returns
+  `409 relay_cross_project_links` and says whether to remove the links on the
+  hub or in this daemon's copy, where connect used to fail with a generic 500.
+  A hub older than API `0.31.0` cannot run the check; preflight reports
+  `hub_links_checked: false` and the CLI warns. See [Bridge setup](operations/federation.md#connect-a-project-through-the-daemon-catalog).
 - Record every value when `kata close` repeats `--pr`, `--commit`, or `--test`.
   Before, only the last value of each flag was kept, so a fix that landed in two
   pull requests recorded only the second one. An empty value such as `--pr ""`

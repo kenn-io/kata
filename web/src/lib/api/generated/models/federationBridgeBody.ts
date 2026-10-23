@@ -8,6 +8,8 @@ export interface FederationBridgeBody {
   direction: FederationBridgeBodyDirection
   hub_catalog: string
   hub_instance_uid: string
+  /** True when the hub confirmed the project has no cross-project issue links. False when the hub predates that check; connect can still fail if links exist. */
+  hub_links_checked: boolean
   hub_project_id: number
   hub_project_uid: string
   hub_url: string

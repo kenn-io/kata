@@ -90,6 +90,7 @@ type ProjectFederationBody struct {
 	ProjectName            string          `json:"project_name"`
 	ReplayHorizonEventID   int64           `json:"replay_horizon_event_id"`
 	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
+	RelayLinksChecked      bool            `json:"relay_links_checked,omitempty" doc:"True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it."`
 }
 
 // ProjectFederationResponse wraps ProjectFederationBody.

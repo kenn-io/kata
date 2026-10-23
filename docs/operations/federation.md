@@ -105,23 +105,26 @@ The preview returns the hub instance, selected project, upstream account,
 local account and bidirectional direction. It rejects read-only hub accounts,
 unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
-before enrollment. With hub API `0.31.0` or newer, it also rejects existing
-cross-project issue links with `409 relay_cross_project_links` on the hub or
-this daemon's existing copy of the project. The error identifies links "on the hub"
-or in "this daemon's copy of the project". Remove the project's cross-project
-related, blocks, and parent links on the side identified by the error before
-retrying; ask an operator on that side to remove links to projects you cannot access.
-The check includes incoming links and closed issues. Historical links that
-have already been removed do not block enrollment. Preflight refuses older hubs
-with `409 hub_link_check_unsupported`; upgrade the hub to API `0.31.0` or newer
-so preflight can check for cross-project links.
-Connecting directly to an older hub still returns that hub's old error when
-cross-project links block enrollment.
+before enrollment.
 
-Direct callers can request the same read-only check with
-`GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`.
-Omitting the parameter preserves ordinary federation metadata behavior.
-Enrollment checks links again inside its transaction to catch concurrent changes.
+A relayed project cannot have cross-project issue links. Preflight and connect
+return `409 relay_cross_project_links` when the project has related, blocks, or
+parent links to another project, including incoming links and links on closed
+issues. The error says whether the links are on the hub or in this daemon's copy
+of the project. Remove them on that side and retry; ask an operator there to
+remove links to projects you cannot access. Links that were already removed do
+not count.
+
+The hub runs this check, so preflight reports `hub_links_checked`. It is `false`
+when the hub predates API `0.31.0`; the preview is still ready, and the CLI warns
+that connect fails if the project has links. Connecting to such a hub reports
+the hub's older generic error in that case. Enrollment checks links again inside
+its transaction to catch concurrent changes.
+
+Direct callers can run the same read-only check with
+`GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`. A
+passing check sets `relay_links_checked: true`; omitting the parameter keeps
+ordinary metadata behavior.
 
 Set `preflight` to `false` to connect. `serve_downstream`
 defaults to `false`. Set it to `true` only when this daemon will relay the

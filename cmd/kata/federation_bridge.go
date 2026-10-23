@@ -75,10 +75,19 @@ enrollment ID. Retrying after a lost response reuses the pending enrollment.`,
 			if err := json.Unmarshal(raw, &body); err != nil {
 				return err
 			}
-			if currentOutputMode() == outputAgent {
-				return writeAgentOKLine(cmd.OutOrStdout(), "federation-bridge-connect", agentRowField("project", body.ProjectName), agentRowField("status", body.Status), agentRowField("direction", body.Direction), agentRowField("hub", body.HubCatalog), agentRowField("upstream_account", body.UpstreamAccount), agentRowField("local_account", body.LocalAccount))
+			warning := ""
+			if body.Status == "ready" && !body.HubLinksChecked {
+				warning = "the hub did not check cross-project issue links; connect fails if the project has any"
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "bridge %s: %s (%s)\nhub: %s — account: %s; local account: %s\n", textsafe.Line(body.ProjectName), textsafe.Line(body.Status), textsafe.Line(body.Direction), textsafe.Line(body.HubCatalog), textsafe.Line(body.UpstreamAccount), textsafe.Line(body.LocalAccount))
+			if currentOutputMode() == outputAgent {
+				return writeAgentOKLine(cmd.OutOrStdout(), "federation-bridge-connect", agentRowField("project", body.ProjectName), agentRowField("status", body.Status), agentRowField("direction", body.Direction), agentRowField("hub", body.HubCatalog), agentRowField("upstream_account", body.UpstreamAccount), agentRowField("local_account", body.LocalAccount), agentOptionalRowField("warning", &warning))
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "bridge %s: %s (%s)\nhub: %s — account: %s; local account: %s\n", textsafe.Line(body.ProjectName), textsafe.Line(body.Status), textsafe.Line(body.Direction), textsafe.Line(body.HubCatalog), textsafe.Line(body.UpstreamAccount), textsafe.Line(body.LocalAccount)); err != nil {
+				return err
+			}
+			if warning != "" {
+				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+			}
 			return err
 		},
 	}

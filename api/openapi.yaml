@@ -2289,6 +2289,9 @@ components:
           type: string
         hub_instance_uid:
           type: string
+        hub_links_checked:
+          description: True when the hub confirmed the project has no cross-project issue links. False when the hub predates that check; connect can still fail if links exist.
+          type: boolean
         hub_project_id:
           format: int64
           type: integer
@@ -2321,6 +2324,7 @@ components:
         - upstream_account
         - direction
         - status
+        - hub_links_checked
       type: object
     FederationBridgeDisconnectResult:
       additionalProperties: true
@@ -4778,6 +4782,9 @@ components:
           type: string
         relay:
           $ref: "#/components/schemas/RelayHandshake"
+        relay_links_checked:
+          description: True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+          type: boolean
         replay_horizon_event_id:
           format: int64
           type: integer

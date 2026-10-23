@@ -2386,17 +2386,20 @@ func (f FederationBindingOut) Validate() error {
 }
 
 type FederationBridgeBody struct {
-	Direction       FederationBridgeBodyDirection `json:"direction" validate:"required"`
-	HubCatalog      string                        `json:"hub_catalog" validate:"required"`
-	HubInstanceUID  string                        `json:"hub_instance_uid" validate:"required"`
-	HubProjectID    int64                         `json:"hub_project_id"`
-	HubProjectUID   string                        `json:"hub_project_uid" validate:"required"`
-	HubURL          string                        `json:"hub_url" validate:"required"`
-	LocalAccount    string                        `json:"local_account" validate:"required"`
-	ProjectID       *int64                        `json:"project_id,omitempty"`
-	ProjectName     string                        `json:"project_name" validate:"required"`
-	Status          FederationBridgeBodyStatus    `json:"status" validate:"required"`
-	UpstreamAccount string                        `json:"upstream_account" validate:"required"`
+	Direction      FederationBridgeBodyDirection `json:"direction" validate:"required"`
+	HubCatalog     string                        `json:"hub_catalog" validate:"required"`
+	HubInstanceUID string                        `json:"hub_instance_uid" validate:"required"`
+
+	// HubLinksChecked True when the hub confirmed the project has no cross-project issue links. False when the hub predates that check; connect can still fail if links exist.
+	HubLinksChecked bool                       `json:"hub_links_checked"`
+	HubProjectID    int64                      `json:"hub_project_id"`
+	HubProjectUID   string                     `json:"hub_project_uid" validate:"required"`
+	HubURL          string                     `json:"hub_url" validate:"required"`
+	LocalAccount    string                     `json:"local_account" validate:"required"`
+	ProjectID       *int64                     `json:"project_id,omitempty"`
+	ProjectName     string                     `json:"project_name" validate:"required"`
+	Status          FederationBridgeBodyStatus `json:"status" validate:"required"`
+	UpstreamAccount string                     `json:"upstream_account" validate:"required"`
 }
 
 func (f FederationBridgeBody) Validate() error {
@@ -4776,7 +4779,10 @@ type ProjectFederationBody struct {
 	ProjectName            string          `json:"project_name" validate:"required"`
 	ProjectUID             string          `json:"project_uid" validate:"required"`
 	Relay                  *RelayHandshake `json:"relay,omitempty"`
-	ReplayHorizonEventID   int64           `json:"replay_horizon_event_id"`
+
+	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
+	ReplayHorizonEventID int64 `json:"replay_horizon_event_id"`
 }
 
 func (p ProjectFederationBody) Validate() error {

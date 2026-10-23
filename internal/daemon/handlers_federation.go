@@ -97,8 +97,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if in.RelayProtocolVersion != 0 {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, in.ProjectID); err != nil {
-				return nil, relayTransportError(err)
+				return nil, relayProjectLinksCheckError(err)
 			}
+			body.RelayLinksChecked = true
 		}
 		return &api.ProjectFederationResponse{Body: body}, nil
 	})
