@@ -130,6 +130,10 @@
       "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "Playwright",
       "groupSlug": "playwright"
+    },
+    {
+      "matchPackageNames": ["mcr.microsoft.com/playwright"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     }
   ],
   "customManagers": [
