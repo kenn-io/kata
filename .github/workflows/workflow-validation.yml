@@ -64,6 +64,8 @@ jobs:
 
       - name: Set up image builder
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
       # `goreleaser check` intentionally exits nonzero for the pinned, deprecated
       # `brews` pipe. Executing the full snapshot validates that pipe and every
@@ -72,7 +74,7 @@ jobs:
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
         with:
           distribution: goreleaser
-          version: v2.16.0
+          version: v2.19.0
           args: release --snapshot --clean
         env:
           KATA_HOME: ${{ runner.temp }}/kata-release-snapshot/home
