@@ -65,13 +65,34 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - name: Install frozen web dependencies and browsers
+      - name: Install frozen web dependencies
+        run: make web-install
+
+      - name: Start browser server
+        id: browser-server
+        working-directory: web
         run: |
-          make web-install
-          cd web && bun x playwright install --with-deps chromium firefox
+          version=$(node -p "require('@playwright/test/package.json').version")
+          cli=$(node -p "require.resolve('@playwright/test/cli')")
+          image="mcr.microsoft.com/playwright:v${version}-noble"
+          docker pull "$image"
+          container_id=$(docker run --detach --interactive --rm --init --network host --ipc host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
+            --workdir "$GITHUB_WORKSPACE/web" \
+            "$image" node "$cli" run-server --host 127.0.0.1 --port 3000)
+          echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:3000/json; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Browser server did not become ready within 30 attempts.' >&2
+          exit 1
 
       - name: Run isolated browser tests
         env:
+          PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3000/
           KATA_HOME: ${{ runner.temp }}/kata-web-browser/home
           KATA_DB: ${{ runner.temp }}/kata-web-browser/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
@@ -87,6 +108,14 @@ jobs:
           path: web/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Stop browser server
+        if: always() && steps.browser-server.outputs.container_id != ''
+        env:
+          CONTAINER_ID: ${{ steps.browser-server.outputs.container_id }}
+        run: |
+          docker logs "$CONTAINER_ID" || true
+          docker stop "$CONTAINER_ID"
 
   go:
     name: Go tests
