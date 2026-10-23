@@ -3,7 +3,7 @@
   "workspaces": ["web", "packages/*"],
   "packageManager": "bun@1.4.4",
   "devDependencies": {
-    "vite-plus": "1.2.0"
+    "vite-plus": "1.4.0"
   },
   "overrides": {
     "devalue": "5.9.4",
@@ -13,7 +13,7 @@
     "markdown-it": "14.3.3",
     "nanoid": "3.3.18",
     "undici": "7.30.1",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.2.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
     "vitest": "5.0.5",
     "@vitest/spy": "5.0.5",
     "@vitest/utils": "5.0.5",
