@@ -49,6 +49,26 @@ test('Vite proxy flushes authenticated SSE', async ({ page }) => {
     'Idempotency-Key': crypto.randomUUID(),
   }
 
+  const missingCSRF = await page.request.post(mutationURL, { headers: baseHeaders, data: body })
+  expect(missingCSRF.status()).toBe(403)
+  expect(((await missingCSRF.json()) as { error: { code: string } }).error.code).toBe(
+    'csrf_invalid',
+  )
+
+  const wrongOrigin = await page.request.post(mutationURL, {
+    headers: {
+      ...baseHeaders,
+      Origin: 'http://daemon.example',
+      'X-Kata-CSRF': credentials!.csrf,
+      'Idempotency-Key': crypto.randomUUID(),
+    },
+    data: body,
+  })
+  expect(wrongOrigin.status()).toBe(403)
+  expect(((await wrongOrigin.json()) as { error: { code: string } }).error.code).toBe(
+    'origin_forbidden',
+  )
+
   const accepted = await page.request.post(mutationURL, {
     headers: {
       ...baseHeaders,
