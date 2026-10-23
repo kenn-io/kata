@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -13,7 +13,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
   Before, only the last value of each flag was kept, so a fix that landed in two
   pull requests recorded only the second one. An empty value such as `--pr ""`
   is now rejected like `--evidence pr:` instead of ignored.
-
+- Create direct spoke enrollments with `kata federation enroll` and replace
+  their tokens through the rotation API using the hub's bootstrap token in
+  identity mode. Set `--actor` to an existing account with an unscoped API token,
+  which may be expired or revoked. Enable the hub project with an account token
+  first. See
+  [Federation token boundaries](operations/federation.md#token-boundaries).
+- Resolve projects with the bootstrap token in identity mode, including bound
+  workspaces used by `kata federation enroll`. Bootstrap resolution reads
+  existing aliases without attaching a new alias.
 - Start date-driven work from `kata events --tail` or a hook when an issue's
   `scheduled_on` is reached. The daemon records one `issue.scheduled_reached`
   event per scheduled value, with the date's raw value, timezone, and UTC

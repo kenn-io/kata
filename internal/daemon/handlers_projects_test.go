@@ -157,7 +157,7 @@ func TestProjectMutations_RequireAttributedActor(t *testing.T) {
 	}
 }
 
-func TestResolveProject_IdentityModeBootstrapCannotMutateAliases(t *testing.T) {
+func TestResolveProject_IdentityModeBootstrapCanResolveWithoutMutatingAliases(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(context.Background(), "target")
 	require.NoError(t, err)
@@ -171,11 +171,23 @@ func TestResolveProject_IdentityModeBootstrapCannotMutateAliases(t *testing.T) {
 			},
 		},
 		map[string]string{"Authorization": "Bearer bootstrap-token"})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusForbidden, "bootstrap_token_write_forbidden")
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	var resolved struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &resolved))
+	assert.Equal(t, project.ID, resolved.Project.ID)
 
 	aliases, err := env.DB.ProjectAliases(context.Background(), project.ID)
 	require.NoError(t, err)
 	assert.Empty(t, aliases)
+
+	resp, bs = envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
+		map[string]any{"alias": map[string]any{"identity": "github.com/wesm/target", "kind": "git"}},
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 
 	resp, bs = envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
 		map[string]any{"name": "target"},

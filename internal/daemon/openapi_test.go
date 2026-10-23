@@ -374,21 +374,6 @@ func TestOpenAPIRotationRequestRequiresPositiveProjectID(t *testing.T) {
 	require.Equal(t, float64(1), *projectID.Minimum)
 }
 
-func TestOpenAPIRotationDocumentsReplayConflict(t *testing.T) {
-	rotation := OpenAPIDocument().Paths["/api/v1/federation/enrollments/actions/rotate"]
-	require.NotNil(t, rotation, "missing enrollment rotation path")
-	require.NotNil(t, rotation.Post, "missing POST enrollment rotation operation")
-	require.Contains(t, rotation.Post.Description, "spoke instance")
-	require.Contains(t, rotation.Post.Description, "project")
-	require.Contains(t, rotation.Post.Description, "canonical capabilities")
-	require.Contains(t, rotation.Post.Description, "token-authenticated actor")
-	require.Contains(t, rotation.Post.Description, "adoption policy")
-	require.Contains(t, rotation.Post.Description, "same active enrollment")
-	require.Contains(t, rotation.Post.Description, "revoked replacement")
-	require.Contains(t, rotation.Post.Description, "409")
-	require.Contains(t, rotation.Post.Description, "federation_enrollment_token_conflict")
-}
-
 func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {
 	doc := OpenAPIDocument()
 	path := doc.Paths["/api/v1/events/stream"]

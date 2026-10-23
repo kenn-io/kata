@@ -3191,7 +3191,7 @@ func TestFederationEnrollCLIAgainstOlderHub(t *testing.T) {
 }
 
 func TestFederationEnrollCLIUnauthorizedExplainsHubCredentials(t *testing.T) {
-	for _, path := range []string{"/api/v1/projects", "/federation/enable", "/api/v1/federation/enrollments"} {
+	for _, path := range []string{"/api/v1/projects/resolve", "/federation/enable", "/api/v1/federation/enrollments"} {
 		for _, structured := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/structured=%t", path, structured), func(t *testing.T) {
 				env := testenv.New(t)

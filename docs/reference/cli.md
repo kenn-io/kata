@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-20
+last_edited: 2026-10-22
 ---
 
 # CLI reference
@@ -2027,7 +2027,7 @@ kata federation bridge connect --project <local-project> --hub-daemon <catalog-n
 kata federation bridge status --project <local-project>
 kata federation bridge disconnect --project <local-project> [--preflight] [--local-only]
 kata federation enable --project <project>
-kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
+kata federation enroll [project] [--project <project>] --spoke-instance <uid> --hub-url <url> \
   --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
@@ -2116,10 +2116,21 @@ the hub credential only when its full base URL matches `--hub-url`.
 It never forwards the local
 daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
 for enrollment must pass the hub credential through `--hub-token-env` or a matching
-catalog entry. It creates `<project>` on that hub if it does
-not already exist, then enables federation and creates the enrollment. The CLI
+catalog entry. In identity mode, use the hub's bootstrap token and set `--actor`
+to an existing account with an unscoped API token, which may be expired or
+revoked. First enable the hub project with an account token using
+`kata federation enable`. Bootstrap enrollment reads the enabled hub's metadata
+and creates a grant bound to the selected
+actor's project visibility. Select the project with a positional argument,
+`--project`, or a bound workspace. Outside identity mode, enrollment can create
+a missing project selected with `--project` and enable it. The CLI
 should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
+Each `enroll` with a new token creates another grant and leaves earlier tokens
+valid. Replace a project-scoped token with the
+[rotation API](http-api.md#federation-enrollment-and-health-endpoints), which
+revokes active grants for that spoke and project. See the
+[bootstrap rotation example](../operations/federation.md#token-boundaries).
 Use `kata federation enroll --adopt-existing` when adopting a differently named
 spoke project, then edit the printed join command's `--project` value. Join
 fetches the current hub metadata when run. CLI and TUI output call the coordination

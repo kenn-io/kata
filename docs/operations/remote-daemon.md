@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-10-08
+last_edited: 2026-10-22
 ---
 
 # Remote daemon
@@ -292,6 +292,9 @@ In identity mode:
 
 - the bootstrap token can create, list, and revoke user tokens;
 - the bootstrap token can perform reads;
+- the bootstrap token can create or rotate direct federation enrollments for
+  an explicit actor with an unscoped API token, including an expired or revoked
+  token;
 - attributed writes require a DB-backed token;
 - the daemon derives the actor from the token and ignores body-provided actor
   strings for mutations.
@@ -318,9 +321,11 @@ connectors.
 The `kata federation enroll` CLI workflow authenticates to the hub with
 `--hub-token-env` or a daemon-catalog credential whose URL has the same origin; the
 local daemon's global token is never sent to the hub. On an identity-mode hub,
-use a DB-backed personal token for the actor doing the setup. The generated
+first enable the project with an account token using `kata federation enable`.
+Then enroll with the hub's bootstrap token and `--actor` naming an account
+with an unscoped API token, which may be expired or revoked. The generated
 enrollment token printed by that command is separate and is only for spoke
-transport. The enrollment is bound to the token actor in identity mode, and
+transport. The enrollment is bound to the owner-selected actor, and
 the hub rejects pushed federation events whose actor differs from that bound
 actor. See [Federation token boundaries](federation.md#token-boundaries).
 
