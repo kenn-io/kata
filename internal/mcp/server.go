@@ -28,8 +28,30 @@ const (
 	toolCallConcurrency = 8
 )
 
+// ToolAdmission bounds tool-call rate and concurrency. Share one between the
+// servers of a process so two protocol paths cannot double the limits.
+type ToolAdmission struct {
+	limiter    *rate.Limiter
+	concurrent chan struct{}
+}
+
+// NewToolAdmission creates the default process-wide tool-call limits.
+func NewToolAdmission() *ToolAdmission {
+	return newToolAdmission(toolCallsPerSecond, toolCallBurst, toolCallConcurrency)
+}
+
+func newToolAdmission(perSecond rate.Limit, burst, concurrency int) *ToolAdmission {
+	return &ToolAdmission{limiter: rate.NewLimiter(perSecond, burst), concurrent: make(chan struct{}, concurrency)}
+}
+
 // Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
+	// Events registers the MCP Events methods, which forward to the daemon. Set
+	// it for stdio and the 2026-07-28 HTTP server only; the legacy-session
+	// server must not serve Events.
+	Events bool
+	// Admission is shared across servers of one process; nil creates its own.
+	Admission         *ToolAdmission
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope
@@ -44,7 +66,7 @@ type Options struct {
 	ObserveToolCall func()
 }
 
-// New creates a tools-only MCP server for one startup project scope.
+// New creates a scoped MCP server with optional native webhook Events.
 func New(options Options) (*sdkmcp.Server, error) {
 	if options.Client == nil {
 		return nil, errors.New("kata API client is required")
@@ -92,12 +114,20 @@ func New(options Options) (*sdkmcp.Server, error) {
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
 	})
+	if options.Admission == nil {
+		options.Admission = NewToolAdmission()
+	}
 	server.AddReceivingMiddleware(toolAdmissionMiddleware(
-		rate.NewLimiter(toolCallsPerSecond, toolCallBurst),
-		make(chan struct{}, toolCallConcurrency),
+		options.Admission.limiter,
+		options.Admission.concurrent,
 		options.ObserveToolCall,
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
+	if options.Events {
+		if err := registerNativeEvents(server, options.Client, options.Scope); err != nil {
+			return nil, err
+		}
+	}
 	registerSectionLoaders(server, options)
 	return server, nil
 }
@@ -769,6 +799,7 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
+	projectUID          string
 	Author              string    `json:"author,omitempty"`
 	AccountableActor    *string   `json:"accountable_actor,omitempty"`
 	SourceActor         *string   `json:"source_actor,omitempty"`

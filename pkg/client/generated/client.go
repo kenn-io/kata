@@ -38,7 +38,7 @@ type pathEscapingAPIClient struct {
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
 	if isNilRequestOptions(params.Options) {
 		params.Options = nil
-	} else {
+	} else if _, ok := params.Options.(pathEscapingRequestOptions); !ok {
 		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
 	}
 	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
@@ -208,6 +208,22 @@ type ClientInterface interface {
 	ShowIssueByUID(ctx context.Context, options *ShowIssueByUIDRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowIssueByUIDResponse, error)
 	ShowIssueByUIDWithResponse(ctx context.Context, options *ShowIssueByUIDRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowIssueByUIDResp, error)
 
+	// McpEventsList List the MCP Events this daemon can deliver
+	McpEventsList(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventsListResponse, error)
+	McpEventsListWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventsListResp, error)
+
+	// McpEventsSubscribe Create or refresh an MCP Events webhook subscription
+	McpEventsSubscribe(ctx context.Context, options *McpEventsSubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsSubscribeResponse, error)
+	McpEventsSubscribeWithResponse(ctx context.Context, options *McpEventsSubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsSubscribeResp, error)
+
+	// McpEventSubscriptions List the caller's MCP Events subscriptions and whether Events is running
+	McpEventSubscriptions(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventSubscriptionsResponse, error)
+	McpEventSubscriptionsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventSubscriptionsResp, error)
+
+	// McpEventsUnsubscribe End an MCP Events webhook subscription
+	McpEventsUnsubscribe(ctx context.Context, options *McpEventsUnsubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsUnsubscribeResponse, error)
+	McpEventsUnsubscribeWithResponse(ctx context.Context, options *McpEventsUnsubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsUnsubscribeResp, error)
+
 	Ping(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*PingResponse, error)
 	PingWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*PingResp, error)
 
@@ -297,6 +313,9 @@ type ClientInterface interface {
 
 	PollProjectEvents(ctx context.Context, options *PollProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollProjectEventsResponse, error)
 	PollProjectEventsWithResponse(ctx context.Context, options *PollProjectEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollProjectEventsResp, error)
+
+	GetProjectEventHead(ctx context.Context, options *GetProjectEventHeadRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectEventHeadResponse, error)
+	GetProjectEventHeadWithResponse(ctx context.Context, options *GetProjectEventHeadRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectEventHeadResp, error)
 
 	GetProjectFederation(ctx context.Context, options *GetProjectFederationRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationResponse, error)
 	GetProjectFederationWithResponse(ctx context.Context, options *GetProjectFederationRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationResp, error)
@@ -2319,6 +2338,258 @@ func (c *Client) ShowIssueByUID(ctx context.Context, options *ShowIssueByUIDRequ
 	return responseParser(ctx, resp)
 }
 
+// McpEventsList List the MCP Events this daemon can deliver
+func (c *Client) McpEventsList(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventsListResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/mcp-events/list",
+		Method:     "POST",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*McpEventsListResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(McpEventsListErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "McpEventsListErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(McpEventsListResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "McpEventsListResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/mcp-events/list")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// McpEventsSubscribe Create or refresh an MCP Events webhook subscription
+func (c *Client) McpEventsSubscribe(ctx context.Context, options *McpEventsSubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsSubscribeResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/mcp-events/subscribe",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*McpEventsSubscribeResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(McpEventsSubscribeErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "McpEventsSubscribeErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(McpEventsSubscribeResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "McpEventsSubscribeResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/mcp-events/subscribe")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// McpEventSubscriptions List the caller's MCP Events subscriptions and whether Events is running
+func (c *Client) McpEventSubscriptions(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*McpEventSubscriptionsResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/mcp-events/subscriptions",
+		Method:     "GET",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*McpEventSubscriptionsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(McpEventSubscriptionsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "McpEventSubscriptionsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(McpEventSubscriptionsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "McpEventSubscriptionsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/mcp-events/subscriptions")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// McpEventsUnsubscribe End an MCP Events webhook subscription
+func (c *Client) McpEventsUnsubscribe(ctx context.Context, options *McpEventsUnsubscribeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*McpEventsUnsubscribeResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/mcp-events/unsubscribe",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*McpEventsUnsubscribeResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(McpEventsUnsubscribeErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "McpEventsUnsubscribeErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(McpEventsUnsubscribeResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "McpEventsUnsubscribeResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/mcp-events/unsubscribe")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) Ping(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*PingResponse, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -4233,6 +4504,68 @@ func (c *Client) PollProjectEvents(ctx context.Context, options *PollProjectEven
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/events")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) GetProjectEventHead(ctx context.Context, options *GetProjectEventHeadRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectEventHeadResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/events/head",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetProjectEventHeadResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetProjectEventHeadErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetProjectEventHeadErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetProjectEventHeadResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetProjectEventHeadResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/events/head")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

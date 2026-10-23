@@ -118,6 +118,7 @@ import type {
   GetIssueMetadataResponseBody,
   GetIssueSyncStatusPathParameters,
   GetProjectAccessPathParameters,
+  GetProjectEventHeadPathParameters,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
@@ -159,6 +160,12 @@ import type {
   ListRecurrencesResponseBody,
   ListTeamsResponseBody,
   ListTokensResponseBody,
+  MCPEventsListResponseBody,
+  MCPEventsSubscribeBody,
+  MCPEventsSubscribeResponseBody,
+  MCPEventsSubscriptionsResponseBody,
+  MCPEventsUnsubscribeBody,
+  MCPEventsUnsubscribeResponseBody,
   MapConnectorFieldPathParameters,
   MapConnectorFieldRequestBody,
   MergeProjectPathParameters,
@@ -192,6 +199,7 @@ import type {
   PollProjectEventsPathParameters,
   PriorityRequestBody,
   ProjectAccessResponseBody,
+  ProjectEventHeadBody,
   ProjectFederationBody,
   ProjectPurgeRequestBody,
   ProjectPurgeResponseBody,
@@ -1531,6 +1539,174 @@ export const showIssueByUID = async (
   })
 }
 
+export type mcpEventsListResponse200 = {
+  data: MCPEventsListResponseBody
+  status: 200
+}
+
+export type mcpEventsListResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsListResponseSuccess = mcpEventsListResponse200 & {
+  headers: Headers
+}
+export type mcpEventsListResponseError = mcpEventsListResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsListResponse = mcpEventsListResponseSuccess | mcpEventsListResponseError
+
+export const getMcpEventsListUrl = () => {
+  return `/api/v1/mcp-events/list`
+}
+
+/**
+ * @summary List the MCP Events this daemon can deliver
+ */
+export const mcpEventsList = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsListResponse> => {
+  return orvalFetch<mcpEventsListResponse>(getMcpEventsListUrl(), {
+    ...options,
+    method: 'POST',
+  })
+}
+
+export type mcpEventsSubscribeResponse200 = {
+  data: MCPEventsSubscribeResponseBody
+  status: 200
+}
+
+export type mcpEventsSubscribeResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsSubscribeResponseSuccess = mcpEventsSubscribeResponse200 & {
+  headers: Headers
+}
+export type mcpEventsSubscribeResponseError = mcpEventsSubscribeResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsSubscribeResponse =
+  | mcpEventsSubscribeResponseSuccess
+  | mcpEventsSubscribeResponseError
+
+export const getMcpEventsSubscribeUrl = () => {
+  return `/api/v1/mcp-events/subscribe`
+}
+
+/**
+ * @summary Create or refresh an MCP Events webhook subscription
+ */
+export const mcpEventsSubscribe = async (
+  mCPEventsSubscribeBody: MCPEventsSubscribeBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsSubscribeResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<mcpEventsSubscribeResponse>(getMcpEventsSubscribeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mCPEventsSubscribeBody),
+  })
+}
+
+export type mcpEventSubscriptionsResponse200 = {
+  data: MCPEventsSubscriptionsResponseBody
+  status: 200
+}
+
+export type mcpEventSubscriptionsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventSubscriptionsResponseSuccess = mcpEventSubscriptionsResponse200 & {
+  headers: Headers
+}
+export type mcpEventSubscriptionsResponseError = mcpEventSubscriptionsResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventSubscriptionsResponse =
+  | mcpEventSubscriptionsResponseSuccess
+  | mcpEventSubscriptionsResponseError
+
+export const getMcpEventSubscriptionsUrl = () => {
+  return `/api/v1/mcp-events/subscriptions`
+}
+
+/**
+ * @summary List the caller's MCP Events subscriptions and whether Events is running
+ */
+export const mcpEventSubscriptions = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventSubscriptionsResponse> => {
+  return orvalFetch<mcpEventSubscriptionsResponse>(getMcpEventSubscriptionsUrl(), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type mcpEventsUnsubscribeResponse200 = {
+  data: MCPEventsUnsubscribeResponseBody
+  status: 200
+}
+
+export type mcpEventsUnsubscribeResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type mcpEventsUnsubscribeResponseSuccess = mcpEventsUnsubscribeResponse200 & {
+  headers: Headers
+}
+export type mcpEventsUnsubscribeResponseError = mcpEventsUnsubscribeResponseDefault & {
+  headers: Headers
+}
+
+export type mcpEventsUnsubscribeResponse =
+  | mcpEventsUnsubscribeResponseSuccess
+  | mcpEventsUnsubscribeResponseError
+
+export const getMcpEventsUnsubscribeUrl = () => {
+  return `/api/v1/mcp-events/unsubscribe`
+}
+
+/**
+ * @summary End an MCP Events webhook subscription
+ */
+export const mcpEventsUnsubscribe = async (
+  mCPEventsUnsubscribeBody: MCPEventsUnsubscribeBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<mcpEventsUnsubscribeResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<mcpEventsUnsubscribeResponse>(getMcpEventsUnsubscribeUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mCPEventsUnsubscribeBody),
+  })
+}
+
 export type pingResponse200 = {
   data: PingResponseBody
   status: 200
@@ -2852,6 +3028,41 @@ export const pollProjectEvents = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<pollProjectEventsResponse> => {
   return orvalFetch<pollProjectEventsResponse>(getPollProjectEventsUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type getProjectEventHeadResponse200 = {
+  data: ProjectEventHeadBody
+  status: 200
+}
+
+export type getProjectEventHeadResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getProjectEventHeadResponseSuccess = getProjectEventHeadResponse200 & {
+  headers: Headers
+}
+export type getProjectEventHeadResponseError = getProjectEventHeadResponseDefault & {
+  headers: Headers
+}
+
+export type getProjectEventHeadResponse =
+  | getProjectEventHeadResponseSuccess
+  | getProjectEventHeadResponseError
+
+export const getGetProjectEventHeadUrl = ({ projectId }: GetProjectEventHeadPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/events/head`
+}
+
+export const getProjectEventHead = async (
+  { projectId }: GetProjectEventHeadPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getProjectEventHeadResponse> => {
+  return orvalFetch<getProjectEventHeadResponse>(getGetProjectEventHeadUrl({ projectId }), {
     ...options,
     method: 'GET',
   })

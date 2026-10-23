@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-10-20
 ---
 
 # Data model and durability
@@ -128,6 +128,56 @@ candidates so the caller can comment instead. This check is bypassable with
 Where the two interact, **idempotency wins**: an idempotent reuse never emits a
 duplicate even when `force_new` is set. The retry-safety guarantee takes
 precedence over the force-new escape hatch.
+
+## MCP Events subscriptions
+
+The daemon stores each MCP Events subscription in the `mcp_event_subscriptions`
+table. There is no separate delivery journal: the `events` table is the ordered
+durable log, and a subscription is a cursor over it. A row holds:
+
+- **Identity:** the `sub_` ID, which hashes the owner, event name, canonical
+  arguments, and callback URL. The owner is stored as an authority and a subject.
+- **Endpoint:** the callback URL, the AES-256-GCM sealed signing secret, the
+  previous secret during the 60-second rotation window, and the time the endpoint
+  was verified.
+- **Lifecycle:** state (`active` or `ended`), an end reason, and an optional
+  expiry. A null expiry means no expiry.
+- **Fences:** a random `incarnation` set when the row is created, and a
+  `generation` that rises on unsubscribe, end, reactivation, and reset.
+- **Cursor:** the settled `events.id` watermark, a `continuity_generation`, and
+  `gap_unacked`.
+- **Delivery:** one pending item (an event, a gap, or a terminated notice) with
+  its exact body, its stable message ID, attempt count, next attempt time, and
+  claim token and deadline.
+- **Diagnostics:** failure aging, dead-letter count, and a failure category.
+
+A cursor is `c1.<incarnation>.<continuity_generation>.<event_id>.<mac>`. The MAC
+covers the subscription ID and the other fields, under the Events key, so a
+client cannot forge or move a cursor between subscriptions. The incarnation
+detects a row that was deleted and re-created. The continuity generation rises
+at every gap, and cursors from after a gap prove that the client learned of it.
+
+One global `events.id` order is safe as a cursor because event ids become
+visible in id order. PostgreSQL inserts hold an advisory lock from before the
+insert until commit, and SQLite has a single writer. The starting point for a
+new subscription is the archive head, which includes the reserved purge-reset
+positions, so it never rediscovers a purge that has already passed.
+
+Several daemon processes can serve one PostgreSQL database, so delivery is
+claimed in the database with a conditional update. Every settlement is
+conditional on the incarnation, generation, message ID, and claim token. Fencing
+protects stored state, not bytes already on the network, so delivery is at least
+once.
+
+The `meta` row `mcp_events_key_check` holds an HMAC of a fixed string under the
+Events key. It proves which key sealed the rows without revealing it. The Events
+key itself lives in a file outside the database.
+
+Subscriptions are JSONL kind `mcp_event_subscription`. Full-database export,
+backup, and the SQLite cutover carry them and the key-check row. Project
+exports, merges, and `--as-standalone` normalization exclude both, and no
+partial import writes or replaces the destination's key check. See
+[MCP Events](../operations/mcp-events.md) for operator behavior.
 
 ## Schema evolution by JSONL cutover
 

@@ -208,3 +208,11 @@ func HookRunsPath(dbhash string) (string, error) {
 	}
 	return filepath.Join(root, "runs.jsonl"), nil
 }
+
+// MCPEventsKeyPath returns <home>/runtime/<storageID>/mcp-events.key, the
+// owner-only file holding the daemon's MCP Events encryption key. It sits in
+// the same runtime directory as the other per-storage control files and is
+// not created here.
+func MCPEventsKeyPath(home, storageID string) string {
+	return filepath.Join(home, "runtime", storageID, "mcp-events.key")
+}

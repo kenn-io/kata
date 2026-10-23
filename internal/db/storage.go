@@ -32,6 +32,33 @@ type Storage interface {
 	ExportCronWorkflows(context.Context, ExportFilter) iter.Seq2[CronWorkflowExport, error]
 	ExportCronRuns(context.Context, ExportFilter) iter.Seq2[CronRunExport, error]
 
+	// Daemon-owned MCP Events subscriptions with claim fencing.
+	ActivateMCPEventSubscription(ctx context.Context, in MCPEventActivation) (MCPEventSubscription, error)
+	RefreshMCPEventSubscription(ctx context.Context, in MCPEventRefresh) (MCPEventSubscription, error)
+	GetMCPEventSubscription(ctx context.Context, id string) (MCPEventSubscription, error)
+	ListMCPEventSubscriptions(ctx context.Context, principalKey string) ([]MCPEventSubscription, error)
+	MCPEventConsentExists(ctx context.Context, principalKey, callbackURL string) (bool, error)
+	// CountActiveMCPEventSubscriptions counts active rows daemon-wide, for a
+	// pre-check before network activity. Activate stays the authoritative check.
+	CountActiveMCPEventSubscriptions(ctx context.Context) (int, error)
+	ListDueMCPEventSubscriptions(ctx context.Context, now time.Time, limit int) ([]MCPEventSubscription, error)
+	ClaimMCPEventSubscription(ctx context.Context, in MCPEventClaim) (bool, error)
+	RenewMCPEventClaim(ctx context.Context, id, incarnation string, generation int64, token string, until time.Time) (bool, error)
+	UpdateMCPEventDelivery(ctx context.Context, in MCPEventDeliveryUpdate) (bool, error)
+	EndMCPEventSubscription(ctx context.Context, in MCPEventEnd) (MCPEventSubscription, error)
+	// ExpireMCPEventSubscriptions ends expired active grants regardless of retry or
+	// claim timing, clears pending deliveries, and fences prior workers.
+	ExpireMCPEventSubscriptions(ctx context.Context, now time.Time) (int, error)
+	PruneEndedMCPEventSubscriptions(ctx context.Context, now time.Time, caps MCPEventRetention) (int, error)
+	MCPEventsKeyCheck(ctx context.Context) (value string, ok bool, err error)
+	PutMCPEventsKeyCheckIfAbsent(ctx context.Context, value string) (stored string, err error)
+	// ImportMCPEventSubscription is a validated insert-or-replace used only by
+	// full import and cutover.
+	ImportMCPEventSubscription(ctx context.Context, s MCPEventSubscription) error
+	// ExportMCPEventSubscriptions streams every subscription for a full
+	// backup. A project-scoped filter yields nothing.
+	ExportMCPEventSubscriptions(context.Context, ExportFilter) iter.Seq2[MCPEventSubscriptionExport, error]
+
 	ExportRelayState(ctx context.Context) iter.Seq2[ImportRecord, error]
 	AcceptRelayDeliveries(ctx context.Context, bindingUID string, batch RelayBatch) (RelayAcceptance, error)
 	SetRelayBindingConfig(ctx context.Context, projectID int64, config RelayBindingConfig, expected ...RelayBindingConfig) (FederationBinding, error)

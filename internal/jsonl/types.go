@@ -51,6 +51,9 @@ const (
 	KindPurgeLog             Kind = "purge_log"
 	KindProjectPurgeLog      Kind = "project_purge_log"
 	KindSQLiteSequence       Kind = "sqlite_sequence"
+	// KindMCPEventSubscription appears only in full exports. It is written
+	// last so it never reorders the older kinds.
+	KindMCPEventSubscription Kind = "mcp_event_subscription"
 )
 
 // Sentinel errors returned by the decoder for malformed or out-of-order envelopes.
@@ -65,6 +68,7 @@ var kindOrder = map[Kind]int{
 	KindRootKey: 31, KindEventProvenance: 32, KindEntityProvenance: 33,
 	KindRelayOutbox: 34, KindRelayInbox: 35, KindRelayCursors: 36,
 	KindEmbeddingArtifact:    37,
+	KindMCPEventSubscription: 38,
 	KindMeta:                 0,
 	KindProject:              1,
 	KindProjectAlias:         2,

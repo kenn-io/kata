@@ -1007,3 +1007,49 @@ CREATE TABLE federation_embedding_artifacts (
 );
 CREATE INDEX idx_embedding_artifacts_input ON federation_embedding_artifacts(project_uid,issue_uid,input_hash,recipe_fingerprint);
 CREATE INDEX idx_embedding_artifacts_staging ON federation_embedding_artifacts(project_uid,staging_expires_at) WHERE staging_expires_at IS NOT NULL;
+
+-- Daemon-owned MCP Events subscriptions. Callback delivery state, retry state
+-- and cursors live in one row per subscription. Validation is in Go.
+CREATE TABLE mcp_event_subscriptions (
+  id TEXT PRIMARY KEY,
+  principal_authority TEXT NOT NULL,
+  principal_subject TEXT NOT NULL,
+  principal_key TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  event_name TEXT NOT NULL,
+  arguments TEXT NOT NULL,
+  callback_url TEXT NOT NULL,
+  secret_enc BYTEA NOT NULL,
+  previous_secret_enc BYTEA,
+  previous_secret_until TEXT,
+  verified_at TEXT,
+  incarnation TEXT NOT NULL,
+  generation BIGINT NOT NULL DEFAULT 0,
+  continuity_generation BIGINT NOT NULL DEFAULT 0,
+  replay_cutoff TEXT,
+  replay_head BIGINT,
+  state TEXT NOT NULL,
+  end_reason TEXT NOT NULL DEFAULT '',
+  expires_at TEXT,
+  cursor_event_id BIGINT NOT NULL DEFAULT 0,
+  gap_unacked INTEGER NOT NULL DEFAULT 0,
+  pending_kind TEXT,
+  pending_message_id TEXT,
+  pending_body BYTEA,
+  pending_next_cursor BIGINT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  claim_token TEXT,
+  claim_until TEXT,
+  failed_since TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  last_delivery_at TEXT,
+  last_error TEXT NOT NULL DEFAULT '',
+  dead_letter_count INTEGER NOT NULL DEFAULT 0,
+  ended_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_mcp_event_subscriptions_due ON mcp_event_subscriptions(state, next_attempt_at);
+CREATE INDEX idx_mcp_event_subscriptions_principal_callback ON mcp_event_subscriptions(principal_key, callback_url);
+CREATE INDEX idx_mcp_event_subscriptions_ended ON mcp_event_subscriptions(state, ended_at);

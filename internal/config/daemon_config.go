@@ -57,6 +57,8 @@ type DaemonConfig struct {
 	// Web carries browser-listener and externally published origin settings.
 	Web    WebConfig    `toml:"web"`
 	Backup BackupConfig `toml:"backup"`
+	// MCPEvents enables daemon-owned MCP Events delivery.
+	MCPEvents MCPEventsConfig `toml:"mcp_events"`
 	// Storage carries DB selection plus backend-specific startup policy; see
 	// config.KataDSN for DSN precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
@@ -485,6 +487,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	}
 	cfg.Backup.Dir = strings.TrimSpace(cfg.Backup.Dir)
 	if _, _, err := cfg.Backup.Durations(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.MCPEvents.MaxTTLDuration(); err != nil {
 		return nil, err
 	}
 	if cfg.Timezone != "" {
