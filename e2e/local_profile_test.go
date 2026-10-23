@@ -71,7 +71,7 @@ func TestLocalProfileTwoHomeRecovery(t *testing.T) {
 				result = append(result, key+"="+value)
 			}
 		}
-		return append(result, "KATA_HOME="+home, "KATA_TELEMETRY=0")
+		return append(result, "KATA_HOME="+home)
 	}
 	run := func(home, dir string, extraEnv []string, args ...string) (string, int) {
 		t.Helper()

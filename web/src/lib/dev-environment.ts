@@ -10,16 +10,7 @@ export interface DevRuntimePaths {
 }
 
 export function developmentKataBuildArguments(binary: string): string[] {
-  return [
-    'build',
-    '-tags',
-    'kit_posthog_disabled',
-    '-trimpath',
-    '-buildvcs=false',
-    '-o',
-    binary,
-    './cmd/kata',
-  ]
+  return ['build', '-trimpath', '-buildvcs=false', '-o', binary, './cmd/kata']
 }
 
 export interface BrowserTestRuntime {

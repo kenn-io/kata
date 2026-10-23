@@ -33,7 +33,7 @@ func TestVanillaDeploymentEnvironmentOnly(t *testing.T) {
 	require.NoError(t, err)
 	env = append(env, "KATA_DB="+filepath.Join(home, "kata.db"),
 		fmt.Sprintf("KATA_LISTEN=0.0.0.0:%d", port), "KATA_TRUST_PRIVATE_NETWORK=1", "KATA_WEB_PUBLIC_ORIGIN="+base,
-		"KATA_BACKUP_DIR="+filepath.Join(home, "backups"), "KATA_BACKUP_INTERVAL=100ms", "KATA_BACKUP_RETAIN=1h", "KATA_TELEMETRY_ENABLED=off")
+		"KATA_BACKUP_DIR="+filepath.Join(home, "backups"), "KATA_BACKUP_INTERVAL=100ms", "KATA_BACKUP_RETAIN=1h")
 	start := func() *exec.Cmd {
 		cmd := exec.Command(bin, "daemon", "start", "--foreground") //nolint:gosec // test-owned binary
 		cmd.Env, cmd.Dir = env, workspace

@@ -91,8 +91,9 @@ with an empty module cache and `GOPROXY=off`.
 ## Telemetry
 
 Official archives and package-manager builds use the same anonymous telemetry
-policy. Do not add distribution-specific telemetry behavior. Users can opt out
-before starting the daemon:
+policy. Do not add distribution-specific telemetry behavior. Release builds set
+the PostHog project key at link time; a package built from source without it
+sends no telemetry. Users can opt out before starting the daemon:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
