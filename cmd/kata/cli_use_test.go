@@ -121,7 +121,7 @@ func closedLoopbackAddr(t *testing.T) string {
 	return addr
 }
 
-func TestCLIUseReportsOnceThroughDaemon(t *testing.T) {
+func TestCLIUseReportsThroughDaemon(t *testing.T) {
 	baseline, err := runCmdOutput(t, newCLIUseEnv(t, nil), "projects", "list")
 	require.NoError(t, err)
 	capture := &cliUseTelemetry{}
