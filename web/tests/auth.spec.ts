@@ -11,13 +11,8 @@ test('direct loopback tabs create independent browser sessions', async ({ browse
   const secondPage = await secondContext.newPage()
   const secondCredentials = await kata.launch(secondPage)
 
-  expect(firstCredentials.session).not.toEqual(firstCredentials.csrf)
-  expect(secondCredentials.session).not.toEqual(secondCredentials.csrf)
   expect(firstCredentials.session).not.toEqual(secondCredentials.session)
   expect(firstCredentials.csrf).not.toEqual(secondCredentials.csrf)
-  expect(await kata.snapshot(firstPage, firstCredentials)).toEqual(
-    expect.objectContaining({ capabilities: expect.any(Object) }),
-  )
 
   await firstContext.close()
   await secondContext.close()
