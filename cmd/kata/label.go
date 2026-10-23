@@ -61,10 +61,10 @@ func labelAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := project.comment(bs, issue.RefForAPI, actor, comment, handle); err != nil {
+			if err := project.comment(bs, actor, comment, handle); err != nil {
 				return err
 			}
-			return printLabelMutation(cmd, bs)
+			return printLabelMutation(cmd, bs, project.name)
 		},
 	}
 	addCommentFlag(cmd)
@@ -119,7 +119,7 @@ func labelRmCmd() *cobra.Command {
 			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 				return err
 			}
-			return printLabelRemoved(cmd, bs, issue.RefForAPI, label)
+			return printLabelRemoved(cmd, bs, issue.ProjectName, label)
 		},
 	}
 	addCommentFlag(cmd)
@@ -210,7 +210,7 @@ func newLabelsCmd() *cobra.Command {
 }
 
 // printLabelMutation formats AddLabelResponse for the three output modes.
-func printLabelMutation(cmd *cobra.Command, bs []byte) error {
+func printLabelMutation(cmd *cobra.Command, bs []byte, requestedProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -220,11 +220,16 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
 	if mode == outputAgent {
 		var m agentIssueMutation
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
+		m.Issue.ShortID = displayRef
 		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, m agentIssueMutation) error {
 			if err := writeAgentField(w, "Label", agentValue(m.Label.Label)); err != nil {
 				return err
@@ -233,9 +238,6 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 		})
 	}
 	var b struct {
-		Issue struct {
-			ShortID string `json:"short_id"`
-		} `json:"issue"`
 		Label struct {
 			Label string `json:"label"`
 		} `json:"label"`
@@ -249,18 +251,17 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 	}
 	if !b.Changed {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s already labeled %q (no-op)\n",
-			b.Issue.ShortID, textsafe.Line(b.Label.Label))
+			displayRef, textsafe.Line(b.Label.Label))
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s labeled %q\n",
-		b.Issue.ShortID, textsafe.Line(b.Label.Label))
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s labeled %q\n",
+		displayRef, textsafe.Line(b.Label.Label))
 	return err
 }
 
 // printLabelRemoved formats the DELETE-label response. The MutationResponse
-// body carries only {issue, event, changed} so the line is built from the
-// (issue ref, label) the CLI used to call DELETE.
-func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
+// body carries {issue, event, changed}; the label comes from the CLI argument.
+func printLabelRemoved(cmd *cobra.Command, bs []byte, requestedProject, label string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -270,11 +271,16 @@ func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
 	}
+	ref, err := mutationIssueRefForOutput(cmd, bs, requestedProject)
+	if err != nil {
+		return err
+	}
 	if mode == outputAgent {
 		var m agentIssueMutation
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
+		m.Issue.ShortID = ref
 		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, _ agentIssueMutation) error {
 			if err := writeAgentField(w, "Label", agentValue(label)); err != nil {
 				return err
@@ -295,6 +301,6 @@ func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s label %q already removed (no-op)\n", ref, label)
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s unlabeled %q\n", ref, label)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s unlabeled %q\n", ref, label)
 	return err
 }

@@ -375,8 +375,13 @@ func extendCollidingSourceShortIDs(
 		    OR
 		    EXISTS (SELECT 1 FROM purge_log p
 		             WHERE p.project_id = ? AND p.short_id = s.short_id)
+            OR EXISTS (SELECT 1 FROM events e JOIN projects p
+                       ON p.uid=json_extract(e.payload, '$.from_project_uid')
+                       WHERE p.id=? AND e.type='issue.moved'
+                         AND json_extract(e.payload, '$.from_short_id')=s.short_id
+                         AND e.issue_uid<>s.uid)
 		  )
-		ORDER BY s.uid ASC`, sourceID, targetID, targetID)
+		ORDER BY s.uid ASC`, sourceID, targetID, targetID, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("scan source/target short_id collisions: %w", err)
 	}

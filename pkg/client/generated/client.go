@@ -38,7 +38,7 @@ type pathEscapingAPIClient struct {
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
 	if isNilRequestOptions(params.Options) {
 		params.Options = nil
-	} else {
+	} else if _, escaped := params.Options.(pathEscapingRequestOptions); !escaped {
 		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
 	}
 	return c.APIClient.CreateRequest(ctx, params, reqEditors...)

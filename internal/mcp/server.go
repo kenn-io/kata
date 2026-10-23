@@ -59,6 +59,26 @@ func New(options Options) (*sdkmcp.Server, error) {
 		}
 		options.Scope = scope
 	}
+
+	if options.Scope.Mode() != ScopeAll {
+		refs := make([]string, 0, len(options.Scope.projects))
+		for _, project := range options.Scope.projects {
+			ref := project.UID
+			if ref == "" {
+				ref = fmt.Sprintf("id:%d", project.ID)
+			}
+			refs = append(refs, ref)
+		}
+		var err error
+		options.Client, err = options.Client.WithProjectScope(refs)
+		if err != nil {
+			return nil, err
+		}
+		options.LongRunningClient, err = options.LongRunningClient.WithProjectScope(refs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if options.Scope.Mode() == ScopeBound {
 		projects, err := options.Scope.Projects(context.Background(), nil, false)
 		if err != nil {

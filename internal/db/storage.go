@@ -226,6 +226,9 @@ type Storage interface {
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
 	LookupIssueMutationIdempotency(ctx context.Context, projectID int64, eventType, key string, since time.Time) (*IdempotencyMatch, error)
+	// LookupIssueMutationIdempotencyByIssue follows one stable issue identity
+	// across project moves, including receipts written before soft deletion.
+	LookupIssueMutationIdempotencyByIssue(ctx context.Context, issueUID, eventType, key string, since time.Time) (*IdempotencyMatch, error)
 	// LookupCommentIdempotency scopes comment keys by issue UID so a committed
 	// receipt survives a later project move without making keys global.
 	LookupCommentIdempotency(ctx context.Context, issueUID, key string, since time.Time) (*CommentIdempotencyMatch, error)

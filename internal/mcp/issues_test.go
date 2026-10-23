@@ -383,7 +383,9 @@ func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, 
 			issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
 			writeJSON(writer, map[string]any{"complete": true, "issues": []any{issue}})
 		case "/api/v1/projects/2/issues/hbb1":
-			writeJSON(writer, map[string]any{"issue": issueJSON(2, "hub-project", "hbb1"), "labels": []any{}, "links": []any{}, "comments": []any{}})
+			issue := issueJSON(2, "hub-project", "hbb1")
+			issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+			writeJSON(writer, map[string]any{"issue": issue, "labels": []any{}, "links": []any{}, "comments": []any{}})
 		default:
 			http.Error(writer, `{"status":404,"error":{"code":"not_found","message":"not found"}}`, http.StatusNotFound)
 		}

@@ -371,7 +371,7 @@ func runActionWithHeaders(
 	); err != nil {
 		return err
 	}
-	return printMutation(cmd, bs)
+	return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
 }
 
 // findDuplicateEvidence returns the first duplicate "type:value" pair, or
