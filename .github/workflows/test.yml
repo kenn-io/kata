@@ -75,13 +75,23 @@ jobs:
           version=$(node -p "require('@playwright/test/package.json').version")
           cli=$(node -p "require.resolve('@playwright/test/cli')")
           image="mcr.microsoft.com/playwright:v${version}-noble"
-          docker pull "$image"
-          container_id=$(docker run --detach --interactive --rm --init --network host --ipc host \
+          for attempt in {1..3}; do
+            if docker pull "$image"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep 5
+          done
+          container_id=$(docker run --detach --interactive --init --network host --ipc host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
             --workdir "$GITHUB_WORKSPACE/web" \
             "$image" node "$cli" run-server --host 127.0.0.1 --port 3000)
           echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
           for attempt in {1..30}; do
+            if [ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != true ]; then
+              echo 'Browser server container exited before becoming ready.' >&2
+              exit 1
+            fi
             if curl --fail --silent --max-time 2 http://127.0.0.1:3000/json; then
               exit 0
             fi
@@ -115,7 +125,8 @@ jobs:
           CONTAINER_ID: ${{ steps.browser-server.outputs.container_id }}
         run: |
           docker logs "$CONTAINER_ID" || true
-          docker stop "$CONTAINER_ID"
+          docker stop "$CONTAINER_ID" || true
+          docker rm --force "$CONTAINER_ID"
 
   go:
     name: Go tests
