@@ -544,13 +544,12 @@ func TestCLIUseBackoffProcess(t *testing.T) {
 	now, err := time.Parse(time.RFC3339, os.Getenv("KATA_CLI_USE_TEST_NOW"))
 	require.NoError(t, err)
 	setCLIUseClock(t, now)
-	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit" {
-		saved := cliUseReportTimeout
-		t.Cleanup(func() { cliUseReportTimeout = saved })
-		cliUseReportTimeout = 5 * time.Second
+	exitMode := os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit"
+	if exitMode {
+		cliUseReportTimeout = 30 * time.Second
 	}
 	reportCLIUseTo(t, url)
-	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit" {
+	if exitMode {
 		_, err := io.Copy(io.Discard, os.Stdin)
 		require.NoError(t, err)
 	}
