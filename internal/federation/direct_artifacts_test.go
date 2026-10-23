@@ -286,14 +286,18 @@ func TestDirectFetcherDropsArtifactForUnrequestedIssueOrProject(t *testing.T) {
 		env := newDirectFetcherEnv(t, backend)
 		asked := env.addProject("asked-project", bindDirect, env.remote, env.recipe)
 		neighbor := env.addProject("neighbor-project", bindDirect, env.remote, env.recipe)
+		foreignIdentity, err := env.client.ArtifactIdentity(neighbor.project.UID, asked.issue.UID, env.remote)
+		require.NoError(t, err)
+		foreignProjectArtifact, err := embedding.NewArtifact(foreignIdentity, embedding.EmbedText(asked.issue.Title, asked.issue.Body), [][]float32{{1, 0}})
+		require.NoError(t, err)
 		env.hub.respond = func(hubRequest) (int, any) {
-			return http.StatusOK, api.FederationEmbeddingArtifactsBody{Artifacts: []embedding.EmbeddingArtifact{env.currentArtifact(neighbor)}}
+			return http.StatusOK, api.FederationEmbeddingArtifactsBody{Artifacts: []embedding.EmbeddingArtifact{foreignProjectArtifact}}
 		}
 
 		outcomes := env.fetcher().Fetch(t.Context(), env.recipe, []vector.ArtifactWant{asked.want})
 
 		require.Equal(t, map[string]error{asked.project.UID: nil}, outcomes)
-		require.Empty(t, env.store.retained)
+		require.Empty(t, env.store.retained, "a requested issue from a foreign project must never reach retention")
 	})
 }
 
