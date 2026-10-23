@@ -246,3 +246,92 @@ func TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal(t *testing.T) {
 		t.Errorf("layout=%v after L on too-narrow term, want splitlayout.Stacked", m.layout)
 	}
 }
+
+func TestLayoutFlipPreservesAuxiliaryView(t *testing.T) {
+	for _, view := range []viewID{viewProjects, viewDaemons, viewFederation, viewCredentials, viewAttention} {
+		m := newTestModel()
+		m = resizeModel(m, 160, 40)
+		m.view = view
+		m = resizeModel(m, 80, 24)
+		if m.view != view {
+			t.Fatalf("narrow: got %v, want %v", m.view, view)
+		}
+		m = resizeModel(m, 160, 40)
+		if m.view != view {
+			t.Fatalf("wide: got %v, want %v", m.view, view)
+		}
+	}
+}
+
+func TestLayoutFlipUnderOverlayBootstrapsSplitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view viewID
+	}{
+		{"help", viewHelp},
+		{"projects", viewProjects},
+		{"daemons", viewDaemons},
+		{"federation", viewFederation},
+		{"credentials", viewCredentials},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, cleanup := layoutTestSetup(t)
+			defer cleanup()
+			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+			m.view, m.prevView = tc.view, viewList
+
+			m, cmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
+			if m.view != tc.view {
+				t.Fatalf("layout flip changed foreground view to %v, want %v", m.view, tc.view)
+			}
+			if m.focus != focusList {
+				t.Errorf("focus=%v after stacked→split under %s, want focusList", m.focus, tc.name)
+			}
+			if cmd == nil {
+				t.Errorf("stacked→split under %s did not schedule detail bootstrap", tc.name)
+			}
+			if m.detail.issue == nil || m.detail.issue.UID != m.list.issues[0].UID {
+				t.Errorf("detail issue=%v after stacked→split under %s, want highlighted issue %s", m.detail.issue, tc.name, m.list.issues[0].UID)
+			}
+
+			if tc.view == viewHelp {
+				m = sendRune(m, '?')
+				if m.view != viewList {
+					t.Errorf("leaving Help returned to %v, want viewList", m.view)
+				}
+				if m.detail.issue == nil || m.detail.issue.UID != m.list.issues[0].UID {
+					t.Errorf("leaving Help revealed detail=%v, want highlighted issue %s", m.detail.issue, m.list.issues[0].UID)
+				}
+			}
+		})
+	}
+}
+
+func TestLayoutFlipUnderHelpPreservesFocusedDetailReturnTarget(t *testing.T) {
+	m, cleanup := layoutTestSetup(t)
+	defer cleanup()
+	m = resizeModel(m, 160, 40)
+	issue := m.list.issues[0]
+	m.detail.issue = &issue
+	m.focus = focusDetail
+	m = sendRune(m, '?')
+	if m.view != viewHelp || m.prevView != viewList {
+		t.Fatalf("setup failed: view=%v prevView=%v, want Help over list", m.view, m.prevView)
+	}
+
+	m = resizeModel(m, 100, 40)
+	if m.view != viewHelp {
+		t.Fatalf("narrowing changed foreground view to %v, want Help", m.view)
+	}
+	m = resizeModel(m, 160, 40)
+	if m.view != viewHelp {
+		t.Fatalf("widening changed foreground view to %v, want Help", m.view)
+	}
+	if m.focus != focusDetail {
+		t.Fatalf("widening under Help restored focus %v, want focusDetail", m.focus)
+	}
+	m = sendRune(m, '?')
+	if m.view != viewDetail {
+		t.Fatalf("leaving Help returned to %v, want the previously focused detail", m.view)
+	}
+}

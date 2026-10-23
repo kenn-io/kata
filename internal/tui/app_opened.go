@@ -40,6 +40,8 @@ func (m Model) screenName() string {
 		return "federation"
 	case viewCredentials:
 		return "credentials"
+	case viewAttention:
+		return "attention"
 	}
 	if m.detailIsActive() {
 		return "issue"

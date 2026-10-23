@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-10-20
+last_edited: 2026-10-23
 ---
 
 # Metadata
@@ -187,8 +187,8 @@ kata list --meta work.attention=needs-human  # issues where it equals this strin
 
 `--meta` is repeatable. A bare `key` matches on **presence**; `key=value` matches
 on **equality against a string value**. Multiple `--meta` filters are ANDed
-together. The filter is project-scoped because `kata list` is project-scoped; for
-cross-project dashboards, poll each project or consume the event stream.
+together. `kata list --all --meta` applies the same filters across the daemon's
+active projects (API 0.9.0 or newer).
 
 ## Issue creation teammate (`metadata.teammate`)
 
@@ -218,6 +218,8 @@ restores uncleared requests. The actor address does not aggregate teammate
 addresses. Requests do not change ownership or readiness. A replacement and
 clear can race, so consumers must treat the value as current attention state
 rather than a lossless message queue.
+
+The TUI shows the same requests under `T`.
 
 ## Orchestration conventions (`work.*` keys)
 

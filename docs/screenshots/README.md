@@ -3,6 +3,24 @@
 The documentation screenshots are generated from disposable synthetic Kata
 daemons and issue data. No developer workspace or installed Kata state is read.
 
+For a manual terminal capture, preserve the pane's trailing spaces and normalize
+its ANSI stream before passing it to Freeze 0.2.2:
+
+```bash
+tmux capture-pane -N -e -p -t example-session > /tmp/example-capture.ansi
+python3 docs/screenshots/normalize-ansi.py < /tmp/example-capture.ansi | \
+  freeze --language ansi -o /tmp/example-capture.svg
+```
+
+The trailing spaces carry full-width row backgrounds. Freeze 0.2.2 ignores
+selective foreground and background resets (`39` and `49`), which can dim plain
+titles or extend a background into the next row. The normalizer replaces those
+resets with full resets and restores the remaining active attributes. It
+preserves the captured colors, text, and padding.
+
+Run the converter tests with
+`python3 -m unittest discover -s docs/screenshots -p test_normalize_ansi.py`.
+
 `make docs-screenshots` regenerates the complete local preview set under the
 ignored `docs/assets/screenshots/` directory. The aggregate generator runs both
 the federation TUI capture and the focused Playwright Web UI capture. To write

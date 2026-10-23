@@ -108,6 +108,7 @@ if [[ "$missing" -ne 0 ]]; then
 fi
 
 python3 docs/scripts/check_vercel_redirects.py
+python3 -m unittest discover -s docs/screenshots -p test_normalize_ansi.py
 (cd docs && uv run --frozen python -m unittest scripts.test_check_frontmatter)
 (cd docs && uv run --frozen python scripts/check_frontmatter.py)
 

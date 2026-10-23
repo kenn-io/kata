@@ -10,24 +10,24 @@ import (
 // reads from this same value so rendered help stays in lockstep with
 // what Update actually handles.
 type keymap struct {
-	Help, Quit                                        key
-	Projects, Inbox, Daemons, Federation, Credentials key
-	ToggleLayout                                      key
-	Up, Down, PageUp, PageDown, Home, End             key
-	ScrollUp, ScrollDown                              key
-	Open, NewIssue, NewChild, Search                  key
-	ToggleIssueView                                   key
-	ExpandCollapse, Expand, Collapse, ExpandAll       key
-	SortChildren                                      key
-	FilterStatus, FilterForm, ClearFilters            key
-	Close, Reopen, Undo                               key
-	NextTab, PrevTab, JumpRef, Back                   key
-	EditBody, NewComment                              key
-	ReplyComment, NextCommentLink, PrevCommentLink    key
-	SetParent, AddBlocker, AddLink                    key
-	AddLabel, RemoveLabel, AssignOwner, ClearOwner    key
-	TimedAssignment                                   key
-	SetPriority                                       key
+	Help, Quit                                                   key
+	Projects, Inbox, Daemons, Federation, Credentials, Attention key
+	ToggleLayout                                                 key
+	Up, Down, PageUp, PageDown, Home, End                        key
+	ScrollUp, ScrollDown                                         key
+	Open, NewIssue, NewChild, Search                             key
+	ToggleIssueView                                              key
+	ExpandCollapse, Expand, Collapse, ExpandAll                  key
+	SortChildren                                                 key
+	FilterStatus, FilterForm, ClearFilters                       key
+	Close, Reopen, Undo                                          key
+	NextTab, PrevTab, JumpRef, Back                              key
+	EditBody, NewComment                                         key
+	ReplyComment, NextCommentLink, PrevCommentLink               key
+	SetParent, AddBlocker, AddLink                               key
+	AddLabel, RemoveLabel, AssignOwner, ClearOwner               key
+	TimedAssignment                                              key
+	SetPriority                                                  key
 }
 
 // key is a binding plus its human label. matches() compares against the
@@ -47,6 +47,7 @@ func newKeymap() keymap {
 		Inbox:        key{Keys: []string{"I"}, Help: "inbox"},
 		Daemons:      key{Keys: []string{"D"}, Help: "daemons"},
 		Federation:   key{Keys: []string{"F"}, Help: "federation"},
+		Attention:    key{Keys: []string{"T"}, Help: "attention"},
 		Credentials:  key{Keys: []string{"C"}, Help: "credentials"},
 		ToggleLayout: key{Keys: []string{"L"}, Help: "toggle layout"},
 		// Up/Down are the section-cursor bindings: in the detail view

@@ -27,6 +27,7 @@ const (
 	viewDaemons
 	viewFederation
 	viewCredentials
+	viewAttention
 )
 
 // Model is the top-level Bubble Tea model. Sub-views are embedded by
@@ -160,6 +161,7 @@ type Model struct {
 	// federationState in federation_view.go.
 	federation  federationState
 	credentials credentialAuditState
+	attention   attentionState
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -428,6 +430,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m = m.syncSearchDetailSnapshot(msg)
+	if mut, ok := msg.(mutationDoneMsg); ok {
+		m = m.syncAttentionReturnMutation(mut)
+	}
 	if next, cmd, ok := m.routeTopLevel(msg); ok {
 		return next, cmd
 	}
@@ -580,6 +585,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if cleared, ok := msg.(attentionClearedMsg); ok {
+		return m.handleAttentionCleared(cleared)
+	}
+	if loaded, ok := msg.(attentionLoadedMsg); ok {
+		return m.handleAttentionLoaded(loaded)
+	}
 	if loaded, ok := msg.(credentialsLoadedMsg); ok {
 		return m.handleCredentialsLoaded(loaded)
 	}
@@ -608,7 +619,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) reconcileSplitDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
+	if m.attention.returnToAttention || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
 		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
@@ -888,6 +899,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			next, cmd := m.routeFederationViewKey(msg)
 			return next, cmd, true
 		}
+		if m.view == viewAttention {
+			next, cmd := m.routeAttentionViewKey(msg)
+			return next, cmd, true
+		}
 		if m.view == viewCredentials {
 			next, cmd := m.routeCredentialsViewKey(msg)
 			return next, cmd, true
@@ -929,6 +944,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case popDetailMsg:
 		if m.staleConnMsg(msg.connGen) {
 			return m, nil, true
+		}
+		if m.attention.returnToAttention {
+			next, cmd := m.returnFromAttentionDetail()
+			return next, cmd, true
 		}
 		m.view = viewList
 		m.focus = focusList
@@ -1447,6 +1466,9 @@ func (m Model) markSearchSplitDetailOwned() Model {
 }
 
 func (m Model) followHighlightedIssueIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
+	if m.attention.returnToAttention {
+		return m, prior
+	}
 	iss, ok := pickHighlightedIssue(m.list)
 	if !ok {
 		return m, prior
@@ -2233,18 +2255,21 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.keymap.Daemons.matches(msg) {
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToDaemons()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Federation.matches(msg) {
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToFederation()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Credentials.matches(msg) {
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		next, cmd := m.transitionToCredentials()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.view == viewEmpty {
 		if msg.String() == "esc" && m.prevView == viewDaemons {
@@ -2253,20 +2278,30 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	}
+	if m.keymap.Attention.matches(msg) && m.view != viewEmpty && m.view != viewHelp {
+		if m.view == viewAttention {
+			next, cmd := m.prepareAttentionGlobalExit()
+			return next, cmd, true
+		}
+		next, cmd := m.transitionToAttention()
+		return next, cmd, true
+	}
 	if m.keymap.Help.matches(msg) {
 		m = m.prepareCredentialsGlobalExit()
 		next, helpCmd := m.toggleHelp()
 		return next, helpCmd, true
 	}
 	if m.keymap.Inbox.matches(msg) {
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.toggleInbox()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.Projects.matches(msg) {
+		m, attentionCmd := m.prepareAttentionGlobalExit()
 		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToProjects()
-		return next, cmd, true
+		return next, combineCmds(attentionCmd, cmd), true
 	}
 	if m.keymap.ToggleLayout.matches(msg) {
 		next, cmd := m.toggleLayout()
@@ -2313,16 +2348,26 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // In stacked layout the function is a no-op (the layout has only
 // one pane; tab/esc retain their per-view meanings).
 func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	if m.layout != splitlayout.Split {
+	if m.layout != splitlayout.Split || (m.view != viewList && m.view != viewDetail) {
 		return m, nil, false
 	}
 	if m.focus == focusList && msg.String() == "tab" && m.detail.issue != nil {
 		m.focus = focusDetail
 		return m, nil, true
 	}
+	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
+		m, cmd := m.prepareAttentionListNavigation()
+		m.focus = focusList
+		m.view = viewList
+		return m, cmd, true
+	}
 	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {
 			return m, nil, false
+		}
+		if m.attention.returnToAttention {
+			next, cmd := m.returnFromAttentionDetail()
+			return next, cmd, true
 		}
 		m.focus = focusList
 		m.view = viewList
@@ -3176,6 +3221,7 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if isDetailFetchMsg(msg) {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
+		m = m.syncAttentionReturnDetail(msg)
 		return m, withConnGen(cmd, m.connGen)
 	}
 	if _, isKey := msg.(tea.KeyPressMsg); isKey && m.view != viewList && m.view != viewDetail {
@@ -3307,6 +3353,9 @@ func isDetailFetchMsg(msg tea.Msg) bool {
 // observe the detail pane following the cursor without standing up
 // an http server.
 func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
+	if m.attention.returnToAttention {
+		return m, nil
+	}
 	iss, ok := pickHighlightedIssue(m.list)
 	if !ok {
 		return m, nil
@@ -3351,7 +3400,7 @@ const detailFollowDebounce = 75 * time.Millisecond
 // cursor change can drop this one's response too via applyFetched's
 // gen check.
 func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) {
-	if msg.gen != m.nextDetailFollowGen {
+	if m.attention.returnToAttention || msg.gen != m.nextDetailFollowGen {
 		return m, nil
 	}
 	if m.api == nil || m.detail.issue == nil {
@@ -3556,6 +3605,8 @@ func (m Model) viewBody() string {
 		return renderDaemons(m)
 	case viewFederation:
 		return renderFederation(m)
+	case viewAttention:
+		return renderAttention(m)
 	case viewCredentials:
 		return renderCredentials(m)
 	}
