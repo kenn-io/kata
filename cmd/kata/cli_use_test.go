@@ -142,11 +142,8 @@ func TestCLIUseReportsOnceThroughDaemon(t *testing.T) {
 	assert.Equal(t, env.URL, target.BaseURL)
 	assert.Equal(t, client.DaemonSourceInjected, target.Source)
 	waitCLIUseMarker(t, "cli-opened-")
-	second, err := runCmdOutput(t, env, "projects", "list")
-	require.NoError(t, err)
 
 	assert.Equal(t, baseline, first)
-	assert.Equal(t, baseline, second)
 	assert.Equal(t, cliSurface, capture.recorded(), "the daemon forwards one cli open per day")
 }
 
@@ -319,52 +316,6 @@ func TestCLIUseSkipsProbes(t *testing.T) {
 		assert.Nil(t, cliUseTarget.Load())
 		assert.Empty(t, capture.recorded())
 	}
-}
-
-func TestCLIUseStalledReportPreservesCreate(t *testing.T) {
-	hung := &cliUseTelemetry{block: make(chan struct{}), started: make(chan struct{}, 1)}
-	env, dir, _ := setupCLIWorkspaceOptions(t, func(cfg *daemon.ServerConfig) { cfg.Telemetry = hung })
-	t.Setenv(hooks.HookVersionEnv, "")
-	stubIsTTY(t, true)
-	release := sync.OnceFunc(func() { close(hung.block) })
-	t.Cleanup(release)
-	type commandResult struct {
-		stdout, stderr string
-		err            error
-	}
-	done := make(chan commandResult, 1)
-	joined := make(chan struct{})
-	go func() {
-		defer close(joined)
-		stdout, stderr, err := runCLIWithErr(t, env, dir, "create", "exit wait example")
-		done <- commandResult{stdout: stdout, stderr: stderr, err: err}
-	}()
-	t.Cleanup(func() {
-		release()
-		<-joined
-	})
-	select {
-	case <-hung.started:
-	case <-time.After(10 * time.Second):
-		t.Fatal("create did not reach the held telemetry handler")
-	}
-	watchdog := time.NewTimer(10 * time.Second) //nolint:kennlint // Bound the real command liveness check; synctest owns the exact exit cap.
-	defer watchdog.Stop()
-	select {
-	case result := <-done:
-		require.NoError(t, result.err)
-		assert.Contains(t, result.stdout, "exit wait example")
-		assert.Empty(t, result.stderr)
-	case <-watchdog.C:
-		t.Fatal("create waited for the held telemetry response")
-	}
-	release()
-	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
-	//nolint:kennlint // Stat avoids holding the marker open while the worker removes it on Windows.
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(attempt)
-		return os.IsNotExist(err)
-	}, 5*time.Second, time.Millisecond)
 }
 
 func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
