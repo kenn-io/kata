@@ -68,6 +68,8 @@ These checks do not replace a session in each agent's full application.
 The web toolchain is pinned to Node `26.12.1` and Bun `1.4.4`; use those exact
 versions so the frozen lockfile and generated output match CI.
 
+Keep the CI Playwright image tag and digest aligned with `@playwright/test`; Renovate groups their updates.
+
 Install the pinned web dependencies, then start the current Go checkout and
 Vite together:
 
