@@ -110,7 +110,7 @@ jobs:
             -e KATA_LISTEN=0.0.0.0:7777 -e KATA_TRUST_PRIVATE_NETWORK=1 \
             -e KATA_WEB_PUBLIC_ORIGIN=http://127.0.0.1:7777 \
             -e KATA_BACKUP_DIR=/data/backups -e KATA_BACKUP_INTERVAL=1s \
-            -e KATA_BACKUP_RETAIN=1h -e KATA_TELEMETRY_ENABLED=off "$image")
+            -e KATA_BACKUP_RETAIN=1h "$image")
           port=$(docker port "$container" 7777/tcp)
           # Docker's port proxy accepts and resets connections until the
           # daemon listens; plain --retry does not retry a reset.

@@ -779,7 +779,7 @@ func buildFederationStressKataBinary(t federationStressTB) string {
 			return
 		}
 		bin := filepath.Join(dir, "kata")
-		build := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", bin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // fixed args, test-only
+		build := exec.Command("go", "build", "-o", bin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // fixed args, test-only
 		var stderr bytes.Buffer
 		build.Stderr = &stderr
 		if err := build.Run(); err != nil {

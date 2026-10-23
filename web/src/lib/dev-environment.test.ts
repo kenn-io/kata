@@ -68,24 +68,6 @@ describe('devDaemonCommand', () => {
   })
 })
 
-describe('developmentKataBuildArguments', () => {
-  it('compiles the development daemon with Kit telemetry disabled', () => {
-    const helper = (devEnvironment as Record<string, unknown>).developmentKataBuildArguments
-
-    expect(helper).toBeTypeOf('function')
-    expect((helper as (binary: string) => string[])('/tmp/kata')).toEqual([
-      'build',
-      '-tags',
-      'kit_posthog_disabled',
-      '-trimpath',
-      '-buildvcs=false',
-      '-o',
-      '/tmp/kata',
-      './cmd/kata',
-    ])
-  })
-})
-
 describe('prepareBrowserTestRuntime', () => {
   it('embeds and builds once before workers share a binary, then restores the stub once', async () => {
     const commands: { cmd: string[]; cwd: string; env: NodeJS.ProcessEnv }[] = []
@@ -108,8 +90,6 @@ describe('prepareBrowserTestRuntime', () => {
     expect(commands[2]?.cmd).toEqual([
       'go',
       'build',
-      '-tags',
-      'kit_posthog_disabled',
       '-trimpath',
       '-buildvcs=false',
       '-o',

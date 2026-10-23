@@ -5,7 +5,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"testing"
 	"time"
 
 	"go.kenn.io/kit/telemetry/posthog"
@@ -18,9 +17,7 @@ const (
 	applicationName = "kata"
 	envPrefix       = "KATA"
 	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.
-	EnabledEnv = "KATA_TELEMETRY_ENABLED"
-	// PostHog project API keys are public ingest identifiers, not credentials.
-	postHogAPIKey   = "phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf" // #nosec G101
+	EnabledEnv      = "KATA_TELEMETRY_ENABLED"
 	postHogEndpoint = "https://us.i.posthog.com"
 )
 
@@ -54,15 +51,10 @@ type Options struct {
 }
 
 // NewReporter builds an enabled reporter, or a disabled one that keeps the
-// allowlist when telemetry is opted out or running under go test.
+// allowlist when telemetry is opted out or the build has no PostHog project
+// key. Release builds set that key at link time.
 func NewReporter(opts Options) (*Reporter, error) {
-	if testing.Testing() {
-		// Go tests never send telemetry; kit's disabled reporter still admits allowed events.
-		posthog.DisableProcess()
-	}
-
 	return posthog.NewReporter(posthog.Options{
-		APIKey:      postHogAPIKey,
 		Endpoint:    postHogEndpoint,
 		Application: applicationName,
 		EnvPrefix:   envPrefix,

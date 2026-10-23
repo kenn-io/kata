@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-22
+last_edited: 2026-10-23
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Builds from source, test binaries, and development builds no longer send
+  anonymous telemetry. Release builds set the PostHog project key at link time,
+  and builds without it send nothing. See [Telemetry reporting rules](reference/configuration.md#reporting-rules).
 - Find cross-project issue links that block a bridge before connecting.
   `kata federation bridge connect --preflight` now returns
   `409 relay_cross_project_links` and says whether to remove the links on the
