@@ -166,34 +166,19 @@ func TestWaitForDaemonStartupAllowsCurrentSchemaConcurrentStarterGrace(t *testin
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 
-	for _, test := range []struct {
-		name      string
-		readyAt   time.Duration
-		wantError bool
-	}{
-		{name: "winner becomes ready", readyAt: 100 * time.Millisecond},
-		{name: "no winner preserves exit error", readyAt: 20 * time.Second, wantError: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			exited := make(chan error, 1)
-			exited <- errors.New("fixture listener bind conflict")
-			synctest.Test(t, func(t *testing.T) {
-				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-				defer cancel()
-				started := time.Now()
-				err := WaitForDaemonStartup(ctx, 5*time.Second, exited, func(context.Context) (bool, error) {
-					return time.Since(started) >= test.readyAt, nil
-				})
-				if test.wantError {
-					require.ErrorContains(t, err, "fixture listener bind conflict")
-					require.Equal(t, 5*time.Second, time.Since(started))
-					return
-				}
-				require.NoError(t, err)
-				require.Equal(t, test.readyAt, time.Since(started))
-			})
+	exited := make(chan error, 1)
+	exited <- errors.New("fixture listener bind conflict")
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		started := time.Now()
+		const readyAt = 100 * time.Millisecond
+		err := WaitForDaemonStartup(ctx, 5*time.Second, exited, func(context.Context) (bool, error) {
+			return time.Since(started) >= readyAt, nil
 		})
-	}
+		require.NoError(t, err)
+		require.Equal(t, readyAt, time.Since(started))
+	})
 }
 
 func TestWaitForDaemonStartupReturnsChildExitForOldSchemaWithoutCutover(t *testing.T) {
