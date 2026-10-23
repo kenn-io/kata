@@ -255,6 +255,10 @@ type PollProjectEventsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type GetProjectEventHeadPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
 }

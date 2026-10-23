@@ -113,10 +113,12 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
 				*db.IssueClaimExport, *db.PendingClaimRequestExport,
 				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
-				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
+				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport,
+				*db.MCPEventSubscriptionExport:
 				continue
 			case *db.MetaKV:
-				if strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
+				if record.Key == db.MetaKeyMCPEventsKeyCheck ||
+					strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||
@@ -508,6 +510,12 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		return &rec, nil
 	case KindCronWorkflow:
 		var rec db.CronWorkflowExport
+		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case KindMCPEventSubscription:
+		var rec db.MCPEventSubscriptionExport
 		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
 			return nil, err
 		}

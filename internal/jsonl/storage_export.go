@@ -74,6 +74,10 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		if opts.ProjectID > 0 && record.Key == "project_access_revision" {
 			continue
 		}
+		// The key check travels with the subscription rows: full backups only.
+		if opts.ProjectID > 0 && record.Key == db.MetaKeyMCPEventsKeyCheck {
+			continue
+		}
 		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) && !strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix+selectedProjectUID+".") {
 			continue
 		}
@@ -180,7 +184,13 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 			return err
 		}
 	}
-	return exportEmbeddingArtifacts(ctx, enc, store, f)
+	if err := exportEmbeddingArtifacts(ctx, enc, store, f); err != nil {
+		return err
+	}
+	if f.ProjectID == nil {
+		return streamExport(enc, KindMCPEventSubscription, store.ExportMCPEventSubscriptions(ctx, f))
+	}
+	return nil
 }
 
 // streamExport ranges seq and writes each row as a kind-tagged envelope to enc.

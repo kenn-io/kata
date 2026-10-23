@@ -244,6 +244,7 @@ model context at startup.
 | `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
 | `kata.load_import` | `kata.import_issues` |
 | `kata.load_external_roots` | `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`, `kata.connector_field_unmap`, `kata.bridge_bind`, `kata.bridge_show`, `kata.bridge_reconcile`, `kata.bridge_pause`, `kata.bridge_resume`, `kata.bridge_resolve_field`, `kata.bridge_resolve_comment`, `kata.bridge_unbind` |
@@ -257,7 +258,13 @@ already-bound issues inside the startup project scope.
 
 `kata.inbox` lists open issues that carry a request for one recipient's
 attention, the same requests `kata inbox` shows, and never clears them. It
-reads up to `limit` issues and sets `truncated` when more carry requests.
+reads up to `limit` candidate issues per page (default 20, maximum 100).
+Pass the returned `next_cursor` as `cursor` with the same recipient and project
+until no cursor remains. A page can contain no valid requests and still have a
+continuation, because malformed notification metadata is filtered after paging.
+Page size may shrink to keep daemon responses below 8 MiB; an oversized single
+candidate returns an error. Requests include stable `issue_uid` and `project_uid`
+identifiers, alongside their display references. Reading never clears a request.
 `kata.status` reports an issue's owner, hold, and lease along with the actor
 the server writes as. `kata.unassign` accepts `expected_owner` so a handoff
 clears ownership only while that actor still holds the issue.
@@ -290,6 +297,8 @@ non-idempotent: the first two mint a new record on every identical retry, a
 forced storage import replaces the target again (with a fresh instance
 identity when `new_instance` is set), a lease renewal extends the expiry on
 every call, and each sync pass re-imports from the provider.
+`kata.cron_new_uid` is read-only but non-idempotent: each call returns a fresh,
+unreserved UID.
 `kata.lease_steal` acquires first and only force-releases a holder that
 denies that acquire, so a retry after a lost response keeps a lease the
 startup principal already holds instead of releasing and re-acquiring it.
@@ -308,6 +317,54 @@ assignment expiry and previous owner when present. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
+
+## Native cron through MCP
+
+Load `kata.load_cron` for job and workflow lifecycle tools, live capability
+discovery, and attributed run evidence. This interface uses cron job definitions;
+the separate `kata.load_recurrence` tools manage RRULE issue templates.
+
+| Purpose | Tools |
+| --- | --- |
+| Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
+| Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
+| Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
+| Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+
+Every operation uses the MCP server's configured daemon credentials, project
+scope, and accountable actor. Select `project` explicitly in multi-project modes.
+Run observations accept the usual per-call `teammate` override; an empty value
+suppresses the startup default without changing the actor. Issue-scoped tokens
+do not gain project-level cron authority.
+
+Call `kata.cron_new_uid` before creation and retain its returned `uid`. The helper
+creates and reserves nothing and does not bind the UID to a project. Creates use
+that caller-retained identity without an expected event UID. After a lost create
+response, read the same UID with `kata.cron_job` or `kata.cron_workflow`; repeating
+a create preserves the daemon's conflict rather than becoming an update.
+
+Update, delete, and restore require the current `expected_event_uid`. Read the
+current definition after a conflict and decide whether to retry; MCP never fetches
+a new CAS value on the caller's behalf. Delete is the existing reversible cron
+tombstone operation. Workflow-in-use checks and native parent bindings are
+preserved. Typed definitions and opaque option objects retain exact JSON numbers.
+
+`kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
+and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
+filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+`expected_revision` (`0` for new evidence), a job or workflow reference with its
+definition event UID, status, and a versioned summary. Identical retries return
+`replayed: true`; distinct run UIDs for one scheduled occurrence remain separate
+observations. Recording evidence does not launch execution, claim an issue, or
+change its status.
+
+Enabled native `notify` jobs activate the existing daemon delivery. Execution
+jobs and workflows require an installed external adapter. Check
+`kata.cron_capabilities` for the selected daemon's actual advertised features;
+permission denial, unsupported capability, and temporary unavailability remain
+distinct errors. See [Native cron](cron.md#mcp-recurring-inbox-example) for a
+complete MCP-only recurring inbox example and [MCP Events](../operations/mcp-events.md)
+for persistent signed webhook delivery.
 
 ## Scheduling and someday
 
@@ -491,16 +548,54 @@ available through MCP.
 Kata delegates protocol negotiation to the official Go MCP SDK. Stateless
 clients can use `server/discover`; session clients can use `initialize` and
 `notifications/initialized`. Stdio accepts both. The Streamable HTTP listener
-keeps sessions so section loaders can send tool-list changes, so it answers
-other calls that carry 2026-07-28 per-request metadata with an
-unsupported-version error listing the session versions it accepts. JSON-RPC
+keeps legacy sessions so section loaders can send tool-list changes. Requests
+with a `MCP-Protocol-Version` header of `2026-07-28` use the stateless core
+protocol on the same endpoint, with matching per-request metadata. Both paths
+share the configured bearer, Host, and cross-origin checks. JSON-RPC
 batches are rejected. Each compact JSON message is limited to 8 MiB.
 
-Kata advertises tools only, including tool-list changes. It does not advertise prompts, resources, roots,
-logging, sampling, subscriptions, or server-to-client requests. Discovery uses
+Kata advertises tools, including tool-list changes. Enabling native inbox
+events additionally advertises the webhook Events capability described below.
+It does not advertise prompts, resources, roots, logging, sampling, or
+server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
 a burst of 20, and at most eight concurrent daemon calls per server process.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
 endpoints remain CLI or operator workflows.
+
+## Native inbox events
+
+The daemon owns MCP Events. Turn it on with `[mcp_events] enabled = true` in the
+daemon configuration (see [MCP Events](configuration.md#mcp-events)). Then
+`kata mcp serve` forwards `events/list`, `events/subscribe`, and
+`events/unsubscribe` to the daemon and keeps no Events state of its own. It has
+no Events flag. A forwarder advertises Events on stdio and on the MCP
+2026-07-28 HTTP path. It does not advertise or serve Events on legacy-session
+HTTP, where `events/*` gets the SDK's plain HTTP 400 "not handled" answer.
+
+```bash
+kata mcp serve --all
+```
+
+`kata.inbox.changed` accepts an exact `for` recipient and optional
+`project_uids` and `issue_uid` filters. `project_uids` must be non-empty, sorted
+ascending, and free of duplicates. Every forwarder mode except `--all` (the
+default workspace scope, `--project`, and `--projects`) requires an explicit
+`project_uids` list that stays inside the projects it serves. Delivery uses a
+verified HTTPS webhook with signed receipts and durable retries. Receivers
+deduplicate by `webhook-id`, exhaust `kata.inbox` pages, and read the issue. A
+receipt does not claim, clear, or complete work.
+
+On the HTTP path, `events/subscribe` and `events/unsubscribe` need an `Mcp-Name`
+header equal to `params.name`. A missing or mismatched header gets 400 and
+`-32020`, and a body over 1 MiB gets 413. The capability is
+`extensions["io.modelcontextprotocol/events"]` plus a top-level `events` alias.
+
+The [MCP Events operator guide](../operations/mcp-events.md) owns subscription
+ownership, project selection, lifetimes, delivery and retry rules, gap and
+terminated bodies, and key handling. `kata.event_subscriptions`, available
+through `kata.load_coordination`, shows the caller's
+subscriptions and their delivery health. For a narrowed forwarder it lists only
+subscriptions inside that forwarder's projects.

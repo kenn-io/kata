@@ -115,6 +115,22 @@ type ShowIssueByUIDResponse = ShowIssueResponseBody
 
 type ShowIssueByUIDErrorResponse = ErrorEnvelope
 
+type McpEventsListResponse = MCPEventsListResponseBody
+
+type McpEventsListErrorResponse = ErrorEnvelope
+
+type McpEventsSubscribeResponse = MCPEventsSubscribeResponseBody
+
+type McpEventsSubscribeErrorResponse = ErrorEnvelope
+
+type McpEventSubscriptionsResponse = MCPEventsSubscriptionsResponseBody
+
+type McpEventSubscriptionsErrorResponse = ErrorEnvelope
+
+type McpEventsUnsubscribeResponse = MCPEventsUnsubscribeResponseBody
+
+type McpEventsUnsubscribeErrorResponse = ErrorEnvelope
+
 type PingResponse = PingResponseBody
 
 type PingErrorResponse = ErrorEnvelope
@@ -234,6 +250,10 @@ type DigestProjectErrorResponse = ErrorEnvelope
 type PollProjectEventsResponse = PollEventsBody
 
 type PollProjectEventsErrorResponse = ErrorEnvelope
+
+type GetProjectEventHeadResponse = ProjectEventHeadBody
+
+type GetProjectEventHeadErrorResponse = ErrorEnvelope
 
 type GetProjectFederationResponse = ProjectFederationBody
 
@@ -765,6 +785,34 @@ type ShowIssueByUIDResp struct {
 	JSON200      *ShowIssueByUIDResponse
 }
 
+type McpEventsListResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsListResponse
+}
+
+type McpEventsSubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsSubscribeResponse
+}
+
+type McpEventSubscriptionsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventSubscriptionsResponse
+}
+
+type McpEventsUnsubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsUnsubscribeResponse
+}
+
 type PingResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -984,6 +1032,13 @@ type PollProjectEventsResp struct {
 	StatusCode   int
 	JSON200      *PollProjectEventsResponse
 	Headers200   *PollProjectEventsResp200Headers
+}
+
+type GetProjectEventHeadResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetProjectEventHeadResponse
 }
 
 type GetProjectFederationResp200Headers struct {

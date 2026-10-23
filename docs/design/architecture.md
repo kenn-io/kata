@@ -215,9 +215,15 @@ does flag something.
 
 Some exclusions are permanent design choices rather than unbuilt features:
 workspace-local behavior overrides, per-issue SSE subscriptions, bulk mutation
-endpoints, remote webhooks, a `(kata-#N)` commit-message convention, and the
-workflow lints noted above. The list of non-goals is itself a design tool: it
-keeps the surface small enough that an agent can learn the whole system and a
-human can audit it. Features that later earned their place, such as federation,
-a constrained priority field, and token authentication, were added narrowly and only
-after real use justified them, not speculatively.
+endpoints, a `(kata-#N)` commit-message convention, and the workflow lints
+noted above. Outbound webhooks are out of scope except for MCP Events. There
+the daemon, not the MCP process, stores subscriptions and sends signed
+callbacks to a verified HTTPS endpoint. It sends them for `kata.inbox.changed`
+only, with no general webhook surface. See
+[MCP Events](../operations/mcp-events.md).
+
+The list of non-goals is itself a design tool: it keeps the surface small enough
+that an agent can learn the whole system and a human can audit it. Features that
+later earned their place, such as federation, a constrained priority field, and
+token authentication, were added narrowly and only after real use justified
+them, not speculatively.

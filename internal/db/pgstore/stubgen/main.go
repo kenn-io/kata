@@ -43,8 +43,25 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
-	"DispatchRecurringCron": true, // cron.go
-	"ListRecurringCronJobs": true, // cron.go
+	"DispatchRecurringCron":            true, // cron.go
+	"ListRecurringCronJobs":            true, // cron.go
+	"ActivateMCPEventSubscription":     true, // mcp_event_subscriptions.go
+	"RefreshMCPEventSubscription":      true, // mcp_event_subscriptions.go
+	"GetMCPEventSubscription":          true, // mcp_event_subscriptions.go
+	"ListMCPEventSubscriptions":        true, // mcp_event_subscriptions.go
+	"MCPEventConsentExists":            true, // mcp_event_subscriptions.go
+	"CountActiveMCPEventSubscriptions": true, // mcp_event_subscriptions.go
+	"ListDueMCPEventSubscriptions":     true, // mcp_event_subscriptions.go
+	"ClaimMCPEventSubscription":        true, // mcp_event_subscriptions.go
+	"RenewMCPEventClaim":               true, // mcp_event_subscriptions.go
+	"UpdateMCPEventDelivery":           true, // mcp_event_subscriptions.go
+	"EndMCPEventSubscription":          true, // mcp_event_subscriptions.go
+	"ExpireMCPEventSubscriptions":      true, // mcp_event_subscriptions.go
+	"PruneEndedMCPEventSubscriptions":  true, // mcp_event_subscriptions.go
+	"MCPEventsKeyCheck":                true, // mcp_event_subscriptions.go
+	"PutMCPEventsKeyCheckIfAbsent":     true, // mcp_event_subscriptions.go
+	"ImportMCPEventSubscription":       true, // mcp_event_subscriptions.go
+	"ExportMCPEventSubscriptions":      true, // mcp_event_subscription_export.go
 
 	"PrepareSetupFinished":  true, // setup_finished.go
 	"CompleteSetupFinished": true, // setup_finished.go

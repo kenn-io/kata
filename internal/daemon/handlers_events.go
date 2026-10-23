@@ -59,6 +59,35 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
 	})
 
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "getProjectEventHead", Method: "GET", Path: "/api/v1/projects/{project_id}/events/head",
+	}, func(ctx context.Context, in *api.ProjectEventHeadRequest) (*api.ProjectEventHeadResponse, error) {
+		if in.ProjectID <= 0 {
+			return nil, api.NewError(400, "validation", "project_id must be a positive integer", "", nil)
+		}
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		if issueScopeFromContext(ctx) != nil {
+			if err := revalidateIssueScopedPrincipal(ctx, cfg.DB); err != nil {
+				return nil, err
+			}
+		}
+		// Use the global committed sequence, including reserved reset cursors:
+		// a purge can remove the newest event and leave its reset above every row.
+		// Scoped polls also inspect global resets, so use that same boundary here.
+		head, err := cfg.DB.MaxEventID(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		reset, err := cfg.DB.PurgeResetCheck(ctx, head, 0)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		head = max(head, reset)
+		return &api.ProjectEventHeadResponse{Body: api.ProjectEventHeadBody{AfterID: head, InstanceUID: cfg.DB.InstanceUID()}}, nil
+	})
+
 	registerEventsStream(humaAPI, cfg)
 	registerEventsStreamMethodGuards(mux)
 }
@@ -138,6 +167,20 @@ func doPollEvents(
 func readVisibleEvents(
 	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int,
 ) ([]db.Event, int64, int64, error) {
+	return readVisibleEventWindow(ctx, store, afterID, projectID, throughID, limit, throughID > 0)
+}
+
+// readVisibleEventsPage bounds an ordinary page without discarding a backlog
+// when its scan budget is exhausted. The returned cursor resumes that scan.
+func readVisibleEventsPage(
+	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int,
+) ([]db.Event, int64, int64, error) {
+	return readVisibleEventWindow(ctx, store, afterID, projectID, throughID, limit, false)
+}
+
+func readVisibleEventWindow(
+	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int, resetOnOverflow bool,
+) ([]db.Event, int64, int64, error) {
 	scope := issueScopeFromContext(ctx)
 	if scope == nil {
 		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
@@ -169,7 +212,7 @@ func readVisibleEvents(
 	// Count hidden rows against each scan budget. Polling returns a partial
 	// cursor; an exhausted SSE window resets to its captured high-water mark.
 	scanLimit := pollLimitMax
-	if throughID > 0 {
+	if resetOnOverflow {
 		scanLimit = limit
 	}
 	scanned := 0
@@ -232,14 +275,16 @@ func readVisibleEvents(
 				return nil, event.ID, event.ID, nil
 			}
 		}
-		if len(rows) < batchLimit || (throughID > 0 && cursor >= throughID) {
+		// A short fetched batch reaches the head only after every fetched row
+		// has been consumed. Filling the visible page may stop within it.
+		if (len(rows) < batchLimit && cursor >= rows[len(rows)-1].ID) || (throughID > 0 && cursor >= throughID) {
 			if throughID > cursor {
 				cursor = throughID
 			}
 			break
 		}
 	}
-	if throughID > cursor && scanned == scanLimit {
+	if resetOnOverflow && throughID > cursor && scanned == scanLimit {
 		return nil, throughID, throughID, nil
 	}
 	return visible, cursor, 0, nil
@@ -451,8 +496,10 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 
 func scopedEventPayload(event db.Event) (string, bool) {
 	allowedKeys := map[string]map[string]struct{}{
-		"issue.created":        keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
-		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at"),
+		"issue.created": keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		// Provider status observations use issue.updated rather than the native
+		// close/reopen verbs. Keep visibility fields for these authorized issues.
+		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at", "status", "closed_at", "deleted_at"),
 		"issue.commented":      keySet("comment_uid", "author", "teammate", "body", "created_at"),
 		"issue.comment_edited": keySet("comment_uid", "body", "edited_at"),
 		"issue.assigned":       keySet("owner", "assignment_expires_on", "updated_at"),

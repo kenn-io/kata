@@ -225,6 +225,11 @@ func (s *Store) importReplayRecord(
 	switch rec := record.(type) {
 	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
 		return replayLinkInserted, db.ReplayCronRecord(ctx, tx, rec, true)
+	case *db.MCPEventSubscriptionExport:
+		if opts.MergeProject {
+			return replayLinkInserted, fmt.Errorf("%s records cannot be merged into a project", db.ImportKindMCPEventSubscription)
+		}
+		return replayLinkInserted, pgReplayError(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec))
 	case *db.MetaKV:
 		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
 	case *db.EmbeddingArtifactExport:

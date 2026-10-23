@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-21
+last_edited: 2026-10-22
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -59,6 +59,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Return from successful commands, agent hooks, and TUI quit after waiting at most 50 ms for usage reports. A human CLI report that fails retries on the next command; one still unanswered at exit backs off for 15 minutes or until the next UTC day. See [Telemetry](reference/configuration.md#telemetry).
 - Stop sending the PostHog SDK's `$os`, `$os_version`, `$os_distro`, and `$go_version` properties with telemetry events. Events still carry `goos` and `goarch`; update PostHog insights that group by `$os` to group by `goos`. See [Telemetry](reference/configuration.md#telemetry).
+
+- Add MCP Events to the daemon. Subscriptions live in the archive database (schema 35), survive daemon and `kata mcp serve` restarts, and are delivered by the daemon as signed webhooks. `kata mcp serve` is a stateless forwarder, so any number of forwarders can serve Events. Turn it on with `[mcp_events] enabled = true`; see [MCP Events](operations/mcp-events.md).
+- Run the daemon persistently for MCP Events and provision an `mcp-events.key` file. Daemons that share one PostgreSQL database must share that key. Full backups carry subscriptions but never the key, so restore the key with the backup.
 - Keep telemetry disabled in registered local profile daemons Kata autostarts when `TELEMETRY_ENABLED=0` is set before startup.
 - Share only a project-count range in anonymous startup and heartbeat telemetry. The `project_count` values are `0-5`, `6-20`, `21-100`, and `over-100`. PostHog insights that sum or average `project_count` now receive ranges; update them to group by these labels. See [Telemetry](reference/configuration.md#telemetry).
 

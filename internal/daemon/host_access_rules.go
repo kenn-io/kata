@@ -59,10 +59,11 @@ func buildHostAccessRules() map[string]hostAccessRule {
 		"rotateFederationEnrollment")
 	registerHostAccessRules(rules, hostAccessRule{RequiresAllProjects: true},
 		"purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
-		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses",
-		"digestProject", "deleteLink", "rewriteAuthorIdentity")
+		"importIssues", "pollProjectEvents", "getProjectEventHead", "streamEvents", "auditCloses",
+		"digestProject", "deleteLink", "rewriteAuthorIdentity", "mcpEventsSubscribe")
 	registerHostAccessRules(rules, hostAccessRule{NoProjectData: true},
-		"ping", "health", "instance", "captureTelemetryEvent", "doctor")
+		"ping", "health", "instance", "captureTelemetryEvent", "doctor",
+		"mcpEventsList", "mcpEventsUnsubscribe", "mcpEventSubscriptions")
 	return rules
 }
 

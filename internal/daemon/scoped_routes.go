@@ -27,6 +27,7 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+`),
 	scopedRoute(http.MethodGet, `/api/v1/issues(?:/[^/]+)?`),
 	scopedRoute(http.MethodGet, `/api/v1/(?:ready|digest|events|events/stream|audit/closes)`),
+	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/events/head`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/(?:digest|events|issues|labels|ready|search)`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+`),
@@ -39,6 +40,9 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/(?:graph|lease)`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/lease/actions/(?:acquire|release|renew)`),
 	scopedRoute(http.MethodGet, `/api/v1/ui/(?:issue-reference|references|snapshot)`),
+	// MCP Events: the service confines a scoped credential to its subtree.
+	scopedRoute(http.MethodPost, `/api/v1/mcp-events/(?:list|subscribe|unsubscribe)`),
+	scopedRoute(http.MethodGet, `/api/v1/mcp-events/subscriptions`),
 }
 
 func issueScopedRouteAllowed(method, path string) bool {
