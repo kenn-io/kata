@@ -463,6 +463,7 @@ func (r *Reconciler) fetchFederatedArtifacts(ctx context.Context, key string, re
 		var selected db.ProjectEmbeddingProducer
 		project, err := r.store.ProjectByUID(ctx, projectUID)
 		if err != nil {
+			slog.Warn("artifact fetch project lookup failed", "project_uid", projectUID, "err", err)
 			continue
 		}
 		if producer, decodeErr := db.ProjectEmbeddingProducerFromMetadata(project.Metadata); decodeErr == nil && producer != nil {
