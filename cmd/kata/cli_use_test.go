@@ -545,6 +545,8 @@ func TestCLIUseBackoffProcess(t *testing.T) {
 	require.NoError(t, err)
 	setCLIUseClock(t, now)
 	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit" {
+		saved := cliUseReportTimeout
+		t.Cleanup(func() { cliUseReportTimeout = saved })
 		cliUseReportTimeout = 5 * time.Second
 	}
 	reportCLIUseTo(t, url)
