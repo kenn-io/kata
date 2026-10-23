@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- A new device connecting through a relay now receives the signed checkpoint
+  and the full issue when the issue's creation was withheld and only later
+  events, such as an assignment, were kept. Before, the device couldn't apply
+  the assignment, and sync stalled.
+
 - Record every value when `kata close` repeats `--pr`, `--commit`, or `--test`.
   Before, only the last value of each flag was kept, so a fix that landed in two
   pull requests recorded only the second one. An empty value such as `--pr ""`
