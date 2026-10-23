@@ -125,9 +125,22 @@
       ],
       "groupName": "JavaScript dependencies",
       "groupSlug": "javascript-dependencies"
+    },
+    {
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "Playwright",
+      "groupSlug": "playwright"
     }
   ],
   "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/test\\.yml$/"],
+      "matchStrings": [
+        "PLAYWRIGHT_IMAGE: (?<depName>mcr\\.microsoft\\.com/playwright):(?<currentValue>v[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
     {
       "customType": "regex",
       "managerFilePatterns": ["/^\\.custom-gcl\\.yml$/"],
