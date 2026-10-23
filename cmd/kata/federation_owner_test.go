@@ -109,14 +109,12 @@ func TestFederationEnrollProjectFallbackRequiresNotFoundStatus(t *testing.T) {
 					_, _ = w.Write([]byte(`{"status":` + strconv.Itoa(tc.status) + `,"error":{"code":"` + tc.code + `","message":"request failed"}}`))
 					return
 				}
-				require.Equal(t, http.MethodPost, r.Method)
-				require.Equal(t, "/api/v1/projects", r.URL.Path)
 				initialized = true
 				_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 			}))
 			defer hub.Close()
 			_, err := resolveFederationProject(hubAPI(t.Context(), hub.URL, hub.Client()), nil, true, "member")
-			assert.False(t, initialized)
+			assert.False(t, initialized, "a non-missing resolve failure must not fall back to project init")
 			require.Error(t, err)
 		})
 	}

@@ -189,9 +189,16 @@ func TestFederationEnableIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 			resp, raw := envDoRaw(t, env, http.MethodPost,
 				projectPath(project.ID)+"/federation/enable",
 				map[string]any{"actor": "spoofed"}, bearer("bootstrap-token"))
-			assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
-			assert.Contains(t, string(raw), "kata federation enable")
-			assert.Contains(t, string(raw), "account token")
+			if state == "absent" {
+				assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
+				assert.Contains(t, string(raw), "kata federation enable")
+				assert.Contains(t, string(raw), "account token")
+			} else {
+				// An account-token enable cannot turn a disabled hub or a spoke
+				// binding into an enabled hub, so do not suggest one.
+				assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_not_enabled")
+				assert.NotContains(t, string(raw), "kata federation enable")
+			}
 			after, err := env.DB.MaxEventID(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, before, after)

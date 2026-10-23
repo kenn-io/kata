@@ -351,9 +351,12 @@ credential. In identity mode the daemon token is a bootstrap token. Use it with
 `kata federation enroll` to create a direct enrollment with `--actor` naming an existing hub
 account. The account must have an unscoped API token, which may be expired or
 revoked. An actor with only issue-scoped tokens cannot receive a direct grant.
-The grant uses that account's project visibility. It remains valid after the
-account's API tokens expire or are revoked; revoke it separately with
-`kata federation revoke <id>` using owner authority.
+For a project-scoped grant, the account must be able to see the project; the
+hub rejects a grant the account could never use. The grant then follows that
+account's project visibility. It remains valid after the account's API tokens
+expire or are revoked. To cut off the device, revoke the grant with
+`kata federation revoke <id>` using owner authority, or remove the account's
+access to the project.
 
 For a project-scoped enrollment, first enable federation with an account token
 using `kata federation enable`. Select the project with a positional argument,

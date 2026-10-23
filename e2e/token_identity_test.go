@@ -113,6 +113,17 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	bootstrapEnv := identityCLIEnv(clientHome, addr, identityBootstrapToken)
 	runRemoteCmd(t, bin, clientWS, bootstrapEnv, "projects", "show", "bootstrap-boundary")
 
+	unboundAlias := map[string]any{"identity": "example.invalid/team/bootstrap-unbound", "kind": "git"}
+	resolveWithAlias := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
+		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
+		map[string]any{"name": "bootstrap-boundary", "alias": unboundAlias})
+	require.Equal(t, http.StatusOK, resolveWithAlias.status, resolveWithAlias.body)
+	assert.Contains(t, resolveWithAlias.body, "bootstrap-boundary")
+	aliasOnly := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
+		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
+		map[string]any{"alias": unboundAlias})
+	require.Equal(t, http.StatusNotFound, aliasOnly.status, "bootstrap resolve must not attach the alias: %s", aliasOnly.body)
+
 	resolveByName := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
 		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
 		map[string]any{"name": "bootstrap-boundary"})

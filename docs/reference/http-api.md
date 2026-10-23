@@ -689,8 +689,10 @@ comparison. A DB-backed account token may create a relay enrollment and supplies
 its actor; it cannot create or rotate a direct grant. In identity mode, the
 owner's bootstrap token may create or rotate direct grants with `actor` naming
 an existing account with an unscoped API token, including an expired or revoked
-token. The grant follows that account's project visibility and remains valid
-after its API tokens expire or are revoked. See
+token. For a project-scoped grant the account must be able to see the project,
+or the request returns `400` with `validation`. The grant follows that
+account's project visibility and remains valid after its API tokens expire or
+are revoked. See
 [Federation token boundaries](../operations/federation.md#token-boundaries).
 
 Enrollment creation accepts both `lease` and `claim`; the API returns sorted,

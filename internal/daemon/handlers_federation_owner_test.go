@@ -120,3 +120,29 @@ func TestOwnerFederationEnrollmentRequiresExistingAccount(t *testing.T) {
 		})
 	})
 }
+
+func TestOwnerFederationEnrollmentRequiresActorProjectAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		ctx := t.Context()
+		_, err := store.EnableProjectFederation(ctx, f.private.ID, "member")
+		require.NoError(t, err)
+		old, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: federationTestSpokeUID, ProjectID: &f.private.ID, Actor: "member", Capabilities: "pull"})
+		require.NoError(t, err)
+		before, err := store.ListFederationEnrollments(ctx)
+		require.NoError(t, err)
+		for _, path := range []string{"/api/v1/federation/enrollments", "/api/v1/federation/enrollments/actions/rotate"} {
+			t.Run(path, func(t *testing.T) {
+				request := map[string]any{"spoke_instance_uid": federationTestSpokeUID, "project_id": f.private.ID, "capabilities": "pull", "actor": "nonmember", "token": "nonmember-enrollment-fixture"}
+				status, _, raw := f.request(t, http.MethodPost, path, "admin", request, nil)
+				assertAPIError(t, status, raw, http.StatusBadRequest, "validation")
+				assert.Contains(t, string(raw), "actor cannot access this project")
+				_, err := store.AuthorizeFederationToken(ctx, old.Token, f.private.ID, "pull")
+				require.NoError(t, err, "a rejected rotation keeps the spoke's working grant")
+				after, err := store.ListFederationEnrollments(ctx)
+				require.NoError(t, err)
+				assert.Equal(t, before, after)
+			})
+		}
+	})
+}
