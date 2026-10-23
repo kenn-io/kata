@@ -11,19 +11,21 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-// The fixture runs a real schema-28 cutover after a controlled delay, so the
-// regression does not depend on database size or host speed.
+// A parent-controlled gate keeps the current-schema timeout child alive until
+// launch returns. The other modes exercise a delayed schema-28 cutover.
 func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 	for _, mode := range []string{"readiness-timeout", "caller-cancel", "foreign-runtime"} {
 		t.Run(mode, func(t *testing.T) {
@@ -40,8 +42,20 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			for _, key := range []string{"KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_AUTH_TOKEN_FILE", "PORT"} {
 				t.Setenv(key, "")
 			}
+			childWaiting := make(chan struct{}, 1)
+			childGate := make(chan struct{})
+			releaseChild := sync.OnceFunc(func() { close(childGate) })
 			cutoverComplete := make(chan struct{}, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path == "/release-child" {
+					childWaiting <- struct{}{}
+					select {
+					case <-childGate:
+						writer.WriteHeader(http.StatusNoContent)
+					case <-request.Context().Done():
+					}
+					return
+				}
 				if request.URL.Path != "/cutover-complete" {
 					http.NotFound(writer, request)
 					return
@@ -52,12 +66,17 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 				}
 				writer.WriteHeader(http.StatusNoContent)
 			}))
-			t.Cleanup(server.Close)
+			t.Cleanup(func() {
+				releaseChild()
+				server.Close()
+			})
 			t.Setenv("KATA_STARTUP_FIXTURE_NOTIFY_URL", server.URL)
 			source, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
-			_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
-			require.NoError(t, err)
+			if mode != "readiness-timeout" {
+				_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
+				require.NoError(t, err)
+			}
 			require.NoError(t, source.Close())
 
 			// Re-execute a copy without the .test suffix: the production launcher
@@ -70,11 +89,23 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			if runtime.GOOS == "windows" {
 				exe += ".exe"
 			}
-			require.NoError(t, os.WriteFile(exe, body, 0o700))               //nolint:gosec // the copied test executable must be executable
-			cmd := exec.Command(exe, "-test.run=^TestDetachedStartFixture$") //nolint:gosec // executable is copied from this test binary into t.TempDir
+			require.NoError(t, os.WriteFile(exe, body, 0o700)) //nolint:gosec // the copied test executable must be executable
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestDetachedStartFixture$") //nolint:gosec // executable is copied from this test binary into t.TempDir
 			cmd.Env = os.Environ()
 			output, err := cmd.CombinedOutput()
-			launchErr := err
+			require.NoError(t, err, "%s", output)
+			if mode == "readiness-timeout" {
+				select {
+				case <-childWaiting:
+				case <-ctx.Done():
+					t.Fatalf("child did not reach the release gate: %s", output)
+				}
+				_, err := os.Stat(filepath.Join(home, "cutover-complete"))
+				require.ErrorIs(t, err, os.ErrNotExist, "child must still be gated when launch times out")
+			}
+			releaseChild()
 			completionDeadline := time.NewTimer(30 * time.Second)
 			defer completionDeadline.Stop()
 			select {
@@ -85,7 +116,6 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			}
 			_, cutoverErr := os.Stat(filepath.Join(home, "cutover-complete"))
 			require.NoError(t, cutoverErr, "detached child did not complete cutover: %s", output)
-			require.NoError(t, launchErr, "%s", output)
 		})
 	}
 }
@@ -232,6 +262,15 @@ func TestDetachedStartFixture(t *testing.T) {
 		listen = "127.0.0.1:17778"
 	}
 	result, err := defaultLaunchDetachedDaemon(ctx, nsDir, listen, false, true)
+	if mode == "readiness-timeout" {
+		var targetErr *cliError
+		require.ErrorAs(t, err, &targetErr)
+		require.Equal(t, kindDaemonUnavail, targetErr.Kind)
+		require.Equal(t, ExitDaemonUnavail, targetErr.ExitCode)
+		require.ErrorContains(t, err, client.ErrLocalDaemonUnreachable.Error())
+		require.ErrorContains(t, err, "daemon startup is still in progress after 5s")
+		require.Empty(t, result.Action)
+	}
 	if mode == "foreign-runtime" {
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Empty(t, result.Action)
@@ -267,8 +306,15 @@ func runStartupFixture() {
 		_, _ = os.Stderr.WriteString(err.Error())
 		os.Exit(1)
 	}
-	timer := time.NewTimer(6 * time.Second)
-	<-timer.C
+	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
+		if err := notifyStartupFixture("release-child"); err != nil {
+			_, _ = os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+	} else {
+		timer := time.NewTimer(6 * time.Second)
+		<-timer.C
+	}
 	err := jsonl.AutoCutover(context.Background(), dbPath)
 	if err != nil {
 		_, _ = os.Stderr.WriteString(err.Error())
