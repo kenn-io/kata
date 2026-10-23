@@ -44,8 +44,10 @@ func waitForDaemonStartupWithProbe(
 	defer tick.Stop()
 	var exitedWhileMigrating, exitedBeforeReadiness error
 	var sawCutoverLock, waitingAfterCutover bool
-	for {
-		locked := migrationAllowed && cutoverLocked(ctx)
+	// observeCutover reports whether the lock is held and whether this probe
+	// saw its release, which grants a fresh readiness budget.
+	observeCutover := func() (locked, released bool) {
+		locked = migrationAllowed && cutoverLocked(ctx)
 		sawCutoverLock = sawCutoverLock || locked
 		if locked && waitingAfterCutover {
 			// A new cutover phase needs its own readiness budget after unlock.
@@ -56,7 +58,12 @@ func waitForDaemonStartupWithProbe(
 			// AutoCutover returns. Give that handoff an ordinary startup budget.
 			deadline.Reset(wait)
 			waitingAfterCutover = true
+			return false, true
 		}
+		return locked, false
+	}
+	for {
+		observeCutover()
 		ok, err := ready(ctx)
 		if err != nil {
 			return err
@@ -92,7 +99,11 @@ func waitForDaemonStartupWithProbe(
 		case <-ctx.Done():
 			return fmt.Errorf("stopped waiting for daemon readiness; detached daemon was left running; inspect kata daemon logs: %w", ctx.Err())
 		case <-deadline.C:
-			cutoverActive := migrationAllowed && cutoverLocked(ctx)
+			// The lock can be released after this iteration's probe.
+			cutoverActive, released := observeCutover()
+			if released {
+				continue
+			}
 			if exitedWhileMigrating != nil && waitingAfterCutover && !cutoverActive {
 				return fmt.Errorf("daemon exited before readiness and the concurrent migration has stopped: %w; inspect kata daemon logs", exitedWhileMigrating)
 			}

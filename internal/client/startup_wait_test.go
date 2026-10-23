@@ -141,6 +141,24 @@ func TestWaitForDaemonStartupRestartsGraceAfterCutoverLockReacquisition(t *testi
 	})
 }
 
+func TestWaitForDaemonStartupGrantsReadinessBudgetWhenCutoverEndsAtDeadline(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		// The deadline falls between 50ms ticks, so the last loop probe still
+		// sees the lock and only the deadline handler sees its release.
+		const wait = 5*time.Second + 25*time.Millisecond
+		err := waitForDaemonStartupWithProbe(t.Context(), wait, make(chan error), func(context.Context) (bool, error) {
+			return time.Since(started) >= 7*time.Second, nil
+		}, true, func(context.Context) bool {
+			return time.Since(started) < 5*time.Second+10*time.Millisecond
+		})
+		require.NoError(t, err)
+		require.Equal(t, 7*time.Second, time.Since(started))
+	})
+}
+
 func TestWaitForDaemonStartupAllowsCurrentSchemaConcurrentStarterGrace(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "")
