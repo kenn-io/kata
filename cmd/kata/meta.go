@@ -124,7 +124,7 @@ func newMetaGetCmd() *cobra.Command {
 			if len(args) == 2 {
 				key = args[1]
 			}
-			if currentOutputMode() == outputAgent {
+			if currentOutputMode() == outputAgent || currentOutputMode() == outputJSON {
 				// Metadata-only responses omit stable identity. Retain the accepted
 				// input reference instead of rendering a potentially moved short ID.
 				issue.ShortID = textsafe.Line(strings.TrimSpace(args[0]))

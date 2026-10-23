@@ -82,8 +82,8 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			Actor:         actor,
 			DryRun:        in.Body.DryRun,
 			Single:        in.Body.Single,
-			AuthorizeProjects: func(ids []int64) error {
-				_, err := authorizeHostProjectScope(ctx, ids, nil, false)
+			AuthorizeProjects: func(uids []string) error {
+				_, err := authorizeHostProjectScope(ctx, nil, uids, false)
 				return err
 			},
 		})

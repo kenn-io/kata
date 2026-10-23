@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -103,7 +104,23 @@ func validateIssueMoveTreeMappings(ctx context.Context, tx *sql.Tx, inputs []Mov
 // authorizeIssueMoveProjects expands admission and then rechecks its updated
 // transaction fence. Rejected fences finish host cleanup only after rollback.
 func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn, ids []int64) error {
-	err := in.AuthorizeProjects(ids)
+	uids := make([]string, 0, len(ids))
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		var uid string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, id).Scan(&uid); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		seen[id] = true
+		uids = append(uids, uid)
+	}
+	err := in.AuthorizeProjects(uids)
 	if err == nil {
 		err = ApplyTransactionFence(ctx, tx)
 	}

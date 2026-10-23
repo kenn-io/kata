@@ -183,8 +183,8 @@ func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
 		_, err = store.MoveIssueProject(fenced, db.MoveIssueProjectIn{
 			IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID,
 			IfMatchRev: root.Revision, Actor: "worker", DryRun: dry,
-			AuthorizeProjects: func(ids []int64) error {
-				require.Contains(t, ids, other.ID)
+			AuthorizeProjects: func(uids []string) error {
+				require.ElementsMatch(t, []string{source.UID, other.UID}, uids)
 				expanded = true
 				return nil
 			},

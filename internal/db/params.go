@@ -542,8 +542,8 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
-	// AuthorizeProjects checks every source project discovered in the transaction.
-	AuthorizeProjects func([]int64) error
+	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
+	AuthorizeProjects func([]string) error
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
