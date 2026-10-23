@@ -33,10 +33,8 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
-// cliUseTelemetry is the daemon's reporter; block holds use reports until closed.
+// cliUseTelemetry is the daemon's reporter.
 type cliUseTelemetry struct {
-	block    chan struct{}
-	started  chan struct{}
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string
@@ -50,12 +48,6 @@ func (*cliUseTelemetry) SanitizeProperties(string, map[string]any) (map[string]a
 	return nil, telemetry.ErrUnsupportedEvent
 }
 func (c *cliUseTelemetry) Capture(event string, properties map[string]any) error {
-	if c.block != nil && (event == "app_opened" || event == "agent_active") {
-		if c.started != nil {
-			c.started <- struct{}{}
-		}
-		<-c.block
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.captured = append(c.captured, properties)
@@ -144,7 +136,7 @@ func TestCLIUseReportsOnceThroughDaemon(t *testing.T) {
 	waitCLIUseMarker(t, "cli-opened-")
 
 	assert.Equal(t, baseline, first)
-	assert.Equal(t, cliSurface, capture.recorded(), "the daemon forwards one cli open per day")
+	assert.Equal(t, cliSurface, capture.recorded(), "the daemon forwards the command's cli open")
 }
 
 func TestCLIUseSkipsAgentCallers(t *testing.T) {
@@ -496,16 +488,14 @@ func TestCLIUseBackoffProcess(t *testing.T) {
 	now, err := time.Parse(time.RFC3339, os.Getenv("KATA_CLI_USE_TEST_NOW"))
 	require.NoError(t, err)
 	setCLIUseClock(t, now)
-	exitMode := os.Getenv("KATA_CLI_USE_TEST_MODE") == "exit"
-	if exitMode {
-		cliUseReportTimeout = 30 * time.Second
-	}
+	mode := os.Getenv("KATA_CLI_USE_TEST_MODE")
+	cliUseReportTimeout = 30 * time.Second
 	reportCLIUseTo(t, url)
-	if exitMode {
+	if mode == "exit" {
 		_, err := io.Copy(io.Discard, os.Stdin)
 		require.NoError(t, err)
 	}
-	if os.Getenv("KATA_CLI_USE_TEST_MODE") == "accepted" {
+	if mode == "accepted" {
 		waitCLIUseMarker(t, "cli-opened-")
 	}
 }
