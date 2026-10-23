@@ -768,11 +768,14 @@ func TestRoot_HelpWithEmptyActorOverride(t *testing.T) {
 }
 
 func FuzzRootActorOverride(f *testing.F) {
-	for _, actor := range []string{"", "operator", " ", "--agent", "a\x00b", "λ"} {
+	for _, actor := range []string{"", "operator", " ", "--agent", "λ"} {
 		f.Add(actor, true, true, true)
 	}
 	f.Add("", false, false, false)
 	f.Fuzz(func(t *testing.T, actor string, present, equals, before bool) {
+		if strings.ContainsRune(actor, '\x00') {
+			t.Skip("command-line arguments cannot contain NUL bytes")
+		}
 		resetFlags(t)
 		t.Setenv("KATA_AUTHOR", "env-actor")
 		cmd := newRootCmd()
