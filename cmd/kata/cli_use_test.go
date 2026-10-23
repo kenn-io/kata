@@ -520,6 +520,7 @@ func TestCLIUseBacksOffUnobservedReports(t *testing.T) {
 			require.NoError(t, first.Wait(), "%s", output.String())
 			release()
 
+			// Nil stdin gives the follow-up child an immediate EOF for its exit-mode wait.
 			outputBytes, err := run(test.second, "exit").CombinedOutput()
 			require.NoError(t, err, "%s", outputBytes)
 			require.EqualValues(t, 1, posts.Load(), "a new process skips a report whose unseen outcome is still in backoff")
