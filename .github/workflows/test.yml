@@ -70,6 +70,7 @@ jobs:
 
       - name: Start browser server
         id: browser-server
+        timeout-minutes: 10
         working-directory: web
         run: |
           version=$(node -p "require('@playwright/test/package.json').version")
@@ -92,7 +93,7 @@ jobs:
               echo 'Browser server container exited before becoming ready.' >&2
               exit 1
             fi
-            if curl --fail --silent --max-time 2 http://127.0.0.1:3000/json; then
+            if curl --fail --silent --output /dev/null --max-time 2 http://127.0.0.1:3000/json; then
               exit 0
             fi
             sleep 1
