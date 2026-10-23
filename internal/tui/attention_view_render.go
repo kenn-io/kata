@@ -149,7 +149,7 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 		})
 	out := strings.Split(t.Render(), "\n")
 
-	if panel > 0 {
+	if len(message) > 0 && panel > 0 {
 		start := min(s.messageScroll, max(len(message)-panel, 0))
 		end := min(start+panel, len(message))
 		position := ""
