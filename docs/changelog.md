@@ -1,11 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+- Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.
 
 ## 0.20.0
 <small>2026-10-23</small>

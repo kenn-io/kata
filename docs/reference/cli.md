@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 # CLI reference
@@ -1636,6 +1636,8 @@ targets use their canonical login origin and return to the requested path
 after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
+
+`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
 
 ```sh
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
