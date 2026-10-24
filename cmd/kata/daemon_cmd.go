@@ -467,7 +467,7 @@ func defaultLaunchDetachedDaemon(
 
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
-	err = client.WaitForDaemonStartup(ctx, daemonRestartProcessWaitTimeout+5*time.Second, exited, func(context.Context) (bool, error) {
+	err = client.WaitForDaemonStartup(ctx, 5*time.Second, exited, func(context.Context) (bool, error) {
 		var ok bool
 		record, ok = liveDaemonRecord(dataDir, pid)
 		if ok || !childExited.Load() {
@@ -622,7 +622,6 @@ func daemonStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			selected, _, err := diagnoseDaemon(cmd.Context(), "")
 			if err != nil {
@@ -742,16 +741,13 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 	return r.Version
 }
 
-func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) bool {
-	skipped := false
+func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 	for _, record := range records {
 		switch kitdaemon.RuntimeProcessScope(record) {
 		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
-			skipped = true
 			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
 		}
 	}
-	return skipped
 }
 
 func daemonStopCmd() *cobra.Command {
@@ -1074,7 +1070,7 @@ func daemonReloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			skipped := noteSkippedDaemons(cmd.ErrOrStderr(), recs)
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
@@ -1101,11 +1097,7 @@ func daemonReloadCmd() *cobra.Command {
 				}
 				return nil
 			}
-			message := "no daemon running"
-			if skipped {
-				message = "no local daemon running"
-			}
-			return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: message}
+			return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "no daemon running"}
 		},
 	}
 }
@@ -1216,33 +1208,6 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
 		}
 	}
-	// Listener close removes the record before the old owner's drain ends.
-	// Allow that drain plus cleanup time before refusing a replacement.
-	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonRestartProcessWaitTimeout)
-	releaseOwner, err := runtimeStore.AcquireOwnerLock(ownerCtx)
-	ownerCancel()
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("another daemon owns this KATA_HOME's store (possibly in another PID namespace): %w", err)
-		}
-		return err
-	}
-	closeDependencies := true
-	defer func() {
-		// Unjoined workers retain storage and ownership until the process exits.
-		if closeDependencies {
-			releaseOwner()
-		}
-	}()
-	records, err = runtimeStore.List()
-	if err != nil {
-		return err
-	}
-	for _, record := range records {
-		if daemonruntime.RuntimeRecordBlocksStart(record) {
-			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
-		}
-	}
 
 	// Wrap ctx with a local cancel so platform-specific shutdown watchers
 	// (e.g. the Windows named-event fired by `kata daemon stop`) can drive
@@ -1252,6 +1217,7 @@ func runDaemonProcess(
 	defer cancel()
 	shutdownTrigger := newDaemonShutdownTrigger(cancel)
 	workers := newDaemonWorkerGroup()
+	closeDependencies := true
 	hooksClosed := false
 
 	dbPath := startup.DBPath

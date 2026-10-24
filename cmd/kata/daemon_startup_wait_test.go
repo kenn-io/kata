@@ -21,14 +21,13 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
-	"go.kenn.io/kata/internal/rootbridge"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-// A parent-controlled gate keeps the timeout and owner-drain children alive
-// until launch returns. The other modes exercise a delayed schema-28 cutover.
+// A parent-controlled gate keeps the current-schema timeout child alive until
+// launch returns. The other modes exercise a delayed schema-28 cutover.
 func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
-	for _, mode := range []string{"readiness-timeout", "caller-cancel", "foreign-runtime", "owner-drain"} {
+	for _, mode := range []string{"readiness-timeout", "caller-cancel", "foreign-runtime"} {
 		t.Run(mode, func(t *testing.T) {
 			home := setupKataEnv(t)
 			t.Setenv("KATA_DSN", "")
@@ -74,7 +73,7 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			t.Setenv("KATA_STARTUP_FIXTURE_NOTIFY_URL", server.URL)
 			source, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
-			if mode != "readiness-timeout" && mode != "owner-drain" {
+			if mode != "readiness-timeout" {
 				_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
 				require.NoError(t, err)
 			}
@@ -91,7 +90,7 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 				exe += ".exe"
 			}
 			require.NoError(t, os.WriteFile(exe, body, 0o700)) //nolint:gosec // the copied test executable must be executable
-			ctx, cancel := context.WithTimeout(t.Context(), daemonRestartProcessWaitTimeout+15*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestDetachedStartFixture$") //nolint:gosec // executable is copied from this test binary into t.TempDir
 			cmd.Env = os.Environ()
@@ -262,29 +261,14 @@ func TestDetachedStartFixture(t *testing.T) {
 		require.NoError(t, err)
 		listen = "127.0.0.1:17778"
 	}
-	if mode == "owner-drain" {
-		release, err := (kitdaemon.RuntimeStore{Dir: nsDir}).AcquireOwnerLock(t.Context())
-		require.NoError(t, err)
-		timer := time.AfterFunc(7*time.Second, release)
-		t.Cleanup(func() {
-			if timer.Stop() {
-				release()
-			}
-		})
-	}
 	result, err := defaultLaunchDetachedDaemon(ctx, nsDir, listen, false, true)
-	if mode == "owner-drain" {
-		require.NoError(t, err)
-		require.Equal(t, "started", result.Action)
-		require.Positive(t, result.PID)
-	}
 	if mode == "readiness-timeout" {
 		var targetErr *cliError
 		require.ErrorAs(t, err, &targetErr)
 		require.Equal(t, kindDaemonUnavail, targetErr.Kind)
 		require.Equal(t, ExitDaemonUnavail, targetErr.ExitCode)
 		require.ErrorContains(t, err, client.ErrLocalDaemonUnreachable.Error())
-		require.ErrorContains(t, err, "daemon startup is still in progress after ")
+		require.ErrorContains(t, err, "daemon startup is still in progress after 5s")
 		require.Empty(t, result.Action)
 	}
 	if mode == "foreign-runtime" {
@@ -322,32 +306,19 @@ func runStartupFixture() {
 		_, _ = os.Stderr.WriteString(err.Error())
 		os.Exit(1)
 	}
-	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "owner-drain" {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		runExternalRootRunner = func(context.Context, *rootbridge.Runner) error {
-			defer cancel()
-			return notifyStartupFixture("release-child")
-		}
-		if err := runDaemonProcess(ctx, "127.0.0.1:0", false, true, newDaemonRestart(os.Stderr)); err != nil {
+	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
+		if err := notifyStartupFixture("release-child"); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error())
 			os.Exit(1)
 		}
 	} else {
-		if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
-			if err := notifyStartupFixture("release-child"); err != nil {
-				_, _ = os.Stderr.WriteString(err.Error())
-				os.Exit(1)
-			}
-		} else {
-			timer := time.NewTimer(6 * time.Second)
-			<-timer.C
-		}
-		err := jsonl.AutoCutover(context.Background(), dbPath)
-		if err != nil {
-			_, _ = os.Stderr.WriteString(err.Error())
-			os.Exit(1)
-		}
+		timer := time.NewTimer(6 * time.Second)
+		<-timer.C
+	}
+	err := jsonl.AutoCutover(context.Background(), dbPath)
+	if err != nil {
+		_, _ = os.Stderr.WriteString(err.Error())
+		os.Exit(1)
 	}
 	if err := os.WriteFile(filepath.Join(home, "cutover-complete"), nil, 0o600); err != nil { //nolint:gosec // fixture path under temporary KATA_HOME
 		os.Exit(1)

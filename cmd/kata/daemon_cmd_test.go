@@ -3990,71 +3990,6 @@ func TestDaemonRestartSkipsDeadUnknownRecord(t *testing.T) {
 	assert.FileExists(t, path)
 }
 
-func TestDaemonReloadOnlyUnknownRecord(t *testing.T) {
-	setupKataEnv(t)
-	writeUnknownRuntimePID(t, 99999999)
-	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "reload")
-	require.ErrorContains(t, err, "no local daemon running")
-	assert.Contains(t, stderr, "skipping daemon pid=99999999")
-}
-
-func TestDaemonStatusNotesUnknownRecord(t *testing.T) {
-	setupKataEnv(t)
-	writeUnknownRuntimePID(t, 99999999)
-	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	require.NoError(t, err)
-	assert.Contains(t, stderr, "skipping daemon pid=99999999 (another PID namespace or unverifiable identity)")
-}
-
-func TestDaemonStartupRejectsLiveRecordBeforeOwnerLock(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	child := startSleepProcess(t)
-	writeRuntimePID(t, home, child.Process.Pid)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireOwnerLock(t.Context())
-	require.NoError(t, err)
-	defer release()
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-
-	start := time.Now()
-	err = runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard))
-	require.ErrorContains(t, err, fmt.Sprintf("daemon already running pid=%d", child.Process.Pid))
-	assert.Less(t, time.Since(start), time.Second)
-	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
-}
-
-func TestDaemonStartupWaitsForOwnerDrain(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	release, err := runtimeStore.AcquireOwnerLock(t.Context())
-	require.NoError(t, err)
-	// Listener close removes the record before workers finish draining.
-	timer := time.AfterFunc(500*time.Millisecond, release) //nolint:kennlint // OS file-lock polling requires real time outside synctest.
-	t.Cleanup(func() {
-		if timer.Stop() {
-			release()
-		}
-	})
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	originalRun := runExternalRootRunner
-	t.Cleanup(func() { runExternalRootRunner = originalRun })
-	started := false
-	runExternalRootRunner = func(context.Context, *rootbridge.Runner) error {
-		started = true
-		cancel()
-		return nil
-	}
-	require.NoError(t, runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard)))
-	assert.True(t, started, "replacement starts after the previous owner drains")
-}
-
 func TestDaemonStartupRejectsUnknownBeforeOpeningStorage(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
@@ -4082,13 +4017,6 @@ func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	defer cancel()
 	started := false
 	runExternalRootRunner = func(_ context.Context, _ *rootbridge.Runner) error {
-		lockCtx, lockCancel := context.WithTimeout(t.Context(), time.Second)
-		defer lockCancel()
-		release, lockErr := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireOwnerLock(lockCtx)
-		if lockErr == nil {
-			release()
-		}
-		assert.ErrorIs(t, lockErr, context.DeadlineExceeded, "daemon retains ownership while workers run")
 		started = true
 		cancel()
 		return nil
@@ -4096,9 +4024,4 @@ func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	t.Cleanup(func() { runExternalRootRunner = originalRun })
 	require.NoError(t, runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard)))
 	assert.True(t, started)
-	lockCtx, lockCancel := context.WithTimeout(t.Context(), time.Second)
-	defer lockCancel()
-	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireOwnerLock(lockCtx)
-	require.NoError(t, err, "teardown releases ownership before re-exec or restart")
-	release()
 }
