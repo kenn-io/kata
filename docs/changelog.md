@@ -10,6 +10,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr.
+- Keep a running daemon discoverable when sibling sandboxes share a Kata home. An exclusive owner lock prevents a second daemon from opening storage or replacing the first daemon's runtime record, while a fresh sandbox can start after the owner exits.
 - Find cross-project issue links that block a bridge before connecting.
   `kata federation bridge connect --preflight` now returns
   `409 relay_cross_project_links` and says whether to remove the links on the

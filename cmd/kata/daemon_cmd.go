@@ -1198,7 +1198,27 @@ func runDaemonProcess(
 
 	// A foreground launch must reject an existing daemon before opening
 	// storage: a cutover cannot replace a database still owned by its writer.
-	records, _ := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	ownerCtx, ownerCancel := context.WithTimeout(ctx, time.Second)
+	releaseOwner, err := runtimeStore.AcquireOwnerLock(ownerCtx)
+	ownerCancel()
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("daemon already running; wait for it to exit before starting another daemon: %w", err)
+		}
+		return err
+	}
+	closeDependencies := true
+	defer func() {
+		// Unjoined workers retain storage and ownership until the process exits.
+		if closeDependencies {
+			releaseOwner()
+		}
+	}()
+	records, err := runtimeStore.List()
+	if err != nil {
+		return err
+	}
 	for _, record := range records {
 		if daemonruntime.RuntimeRecordBlocksStart(record) {
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
@@ -1213,7 +1233,6 @@ func runDaemonProcess(
 	defer cancel()
 	shutdownTrigger := newDaemonShutdownTrigger(cancel)
 	workers := newDaemonWorkerGroup()
-	closeDependencies := true
 	hooksClosed := false
 
 	dbPath := startup.DBPath
@@ -1239,7 +1258,6 @@ func runDaemonProcess(
 		fmt.Fprintln(os.Stderr, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
 
-	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
 	if err != nil {
 		return err

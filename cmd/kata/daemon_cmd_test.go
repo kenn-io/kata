@@ -4002,6 +4002,34 @@ func TestDaemonStartupRejectsUnknownBeforeOpeningStorage(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
 }
 
+func TestDaemonStartupRejectsOwnerBeforeOpeningStorage(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	release, err := runtimeStore.AcquireOwnerLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	// A reused legacy PID passes the record guard, just as a foreign record does.
+	path, err := runtimeStore.Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), StartedAt: time.Unix(1, 0), Network: "tcp", Address: "127.0.0.1:7777",
+	})
+	require.NoError(t, err)
+	before, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	err = runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard))
+
+	require.ErrorContains(t, err, "daemon already running")
+	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
+	after, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
 func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -4018,6 +4046,13 @@ func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	defer cancel()
 	started := false
 	runExternalRootRunner = func(_ context.Context, _ *rootbridge.Runner) error {
+		lockCtx, lockCancel := context.WithTimeout(t.Context(), time.Second)
+		defer lockCancel()
+		release, lockErr := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireOwnerLock(lockCtx)
+		if lockErr == nil {
+			release()
+		}
+		assert.ErrorIs(t, lockErr, context.DeadlineExceeded, "daemon retains ownership while workers run")
 		started = true
 		cancel()
 		return nil
@@ -4025,4 +4060,9 @@ func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	t.Cleanup(func() { runExternalRootRunner = originalRun })
 	require.NoError(t, runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard)))
 	assert.True(t, started)
+	lockCtx, lockCancel := context.WithTimeout(t.Context(), time.Second)
+	defer lockCancel()
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireOwnerLock(lockCtx)
+	require.NoError(t, err, "teardown releases ownership before re-exec or restart")
+	release()
 }

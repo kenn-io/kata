@@ -47,7 +47,7 @@ func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
 func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 	return kitdaemon.RuntimeRecordBlocksStart(record) &&
-		(kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeLocal || RuntimeProcessAlive(record))
+		(record.ProcessIdentityV2 != "" || RuntimeProcessAlive(record))
 }
 
 // RuntimeRecordRestartable reports whether the record's daemon handles the

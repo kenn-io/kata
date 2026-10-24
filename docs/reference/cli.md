@@ -1637,6 +1637,10 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
+`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
+
+Daemons sharing a Kata home take an exclusive owner lock before opening storage, even when they use separate sockets or TCP listeners. A live owner blocks another daemon from starting. The kernel releases the lock when the owner exits. Older daemons that don't take this lock still need to be stopped before starting a replacement.
+
 ```sh
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
@@ -1656,8 +1660,6 @@ kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
-
-`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
 
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
