@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,11 +29,9 @@ func TestDiscoverStartWithRealKata(t *testing.T) {
 		t.Skip("starts real daemons")
 	}
 	bin := buildKataBinary(t)
+	isolateEnvironment(t, "PATH", "HOME", "USER", "TMPDIR")
 	home, workHome, lostHome := t.TempDir(), t.TempDir(), t.TempDir()
 	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_DB", "")
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_TELEMETRY", "0")
 	t.Chdir(t.TempDir())
 
@@ -77,4 +76,31 @@ func TestDiscoverStartWithRealKata(t *testing.T) {
 	entries, err := os.ReadDir(lostHome)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "recovery must not create storage in a profile home")
+}
+
+// isolateEnvironment keeps only the named variables in the process
+// environment for the rest of the test. Discover, and the kata it runs with
+// StartWith, then inherit no daemon target, storage, credential or listener
+// setting, such as KATA_DSN or PORT, from the developer's shell.
+func isolateEnvironment(t *testing.T, keep ...string) {
+	t.Helper()
+	t.Setenv("KATA_HOME", "") // Setenv rejects parallel tests, which would see this process-wide change.
+	saved := os.Environ()
+	kept := make(map[string]string, len(keep))
+	for _, key := range keep {
+		if value, ok := os.LookupEnv(key); ok {
+			kept[key] = value
+		}
+	}
+	os.Clearenv()
+	for key, value := range kept {
+		require.NoError(t, os.Setenv(key, value))
+	}
+	t.Cleanup(func() {
+		os.Clearenv()
+		for _, entry := range saved {
+			key, value, _ := strings.Cut(entry, "=")
+			_ = os.Setenv(key, value)
+		}
+	})
 }
