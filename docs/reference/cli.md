@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 # CLI reference
@@ -609,6 +609,11 @@ kata create <title> \
   [--idempotency-key KEY] \
   [--force-new]
 ```
+
+When `--priority` is omitted, `kata create` uses the optional
+[`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
+An explicit `--priority` wins. With neither a flag nor a configured default,
+priority stays unset.
 
 `--meta` binds string-valued metadata at creation and is repeatable.
 
