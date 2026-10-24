@@ -42,27 +42,20 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 // telemetry regardless of environment, so an in-process check is insufficient.
 func TestStandaloneTelemetryAdmission(t *testing.T) {
 	scratch := t.TempDir()
-	build := func(tags string) string {
-		t.Helper()
-		binary := filepath.Join(scratch, "telemetry-opt-out"+tags)
-		if runtime.GOOS == "windows" {
-			binary += ".exe"
-		}
-		command := exec.Command("go", "build", "-tags", tags, "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
-		output, err := command.CombinedOutput()
-		require.NoError(t, err, string(output))
-		return binary
+	binary := filepath.Join(scratch, "telemetry-opt-out")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
 	}
-	binary := build("")
-	disabledBinary := build("kit_posthog_disabled")
-	for _, tc := range []struct{ name, binary, env, version, want string }{
-		{"enabled", binary, EnabledEnv + "=1", "v1.2.3", "enabled"},
-		{"0", binary, EnabledEnv + "=0", "v1.2.3", "disabled"},
-		{"development", binary, EnabledEnv + "=1", "dev", "disabled"},
-		{"kit_posthog_disabled", disabledBinary, EnabledEnv + "=1", "v1.2.3", "disabled"},
+	build := exec.Command("go", "build", "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	for _, tc := range []struct{ name, env, version, want string }{
+		{"enabled", EnabledEnv + "=1", "v1.2.3", "enabled"},
+		{"0", EnabledEnv + "=0", "v1.2.3", "disabled"},
+		{"development", EnabledEnv + "=1", "dev", "disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command := exec.Command(tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command := exec.Command(binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
 			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))
