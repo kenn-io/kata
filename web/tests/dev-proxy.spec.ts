@@ -8,8 +8,6 @@ interface DevRuntime {
   runtimeFile: string
 }
 
-test.use({ trace: 'off' })
-
 test('Vite proxy flushes authenticated SSE', async ({ page }) => {
   const runtime = JSON.parse(
     await readFile(join(process.cwd(), '..', '.kata-web-dev', 'active.json'), 'utf8'),
