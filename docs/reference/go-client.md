@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 # Go client
@@ -56,8 +56,9 @@ starting it. Use `kata daemon diagnose` for stopped-profile state and recovery
 guidance; `kata daemon recover` can start a local profile after its existing
 storage and identity pass the recovery checks.
 
-Discover does not probe configured remotes. The first request reports whether
-a remote is reachable.
+Discover does not probe configured remotes, including one selected by name.
+The first request reports whether a remote is reachable; call
+`api.PingWithResponse(ctx)` to check sooner.
 
 Discover finds a PostgreSQL-backed default local daemon from its storage DSN.
 Client-only programs do not include the PostgreSQL driver, so they cannot
@@ -93,6 +94,59 @@ profile selected by `[server].daemon` or `active_daemon` is local.
 
 `ok` is false for a client built from an explicit endpoint, such as `New` or
 `NewForTarget`. `DiscoveredDaemon` exposes no credentials.
+
+### Connect to a catalog daemon by name
+
+`client.DaemonCatalog` lists the `[[daemon]]` entries in
+`<KATA_HOME>/config.toml` in file order, the same choices the TUI daemon
+switcher offers:
+
+```go
+daemons, err := client.DaemonCatalog()
+for _, d := range daemons {
+	fmt.Println(d.Name, d.Endpoint, d.HasToken, d.Active)
+}
+```
+
+| Field | Value |
+| --- | --- |
+| `Name` | The entry's `name`. |
+| `Local` | True for a `local = true` entry, including a pinned local profile. |
+| `Endpoint` | `local` for a local entry. For a remote entry, the URL's host and port, such as `daemon.example:7443`. |
+| `HasToken` | True when the entry sets `token` or `token_env`. Kata does not read the `token_env` variable here, so it can still be unset. |
+| `Active` | True for the entry `active_daemon` names. |
+
+Entries carry no token values. Without a config file the list is empty; an
+invalid catalog returns the error the CLI reports. See
+[Daemon config](configuration.md#daemon-config) for the entry fields.
+
+Set `DiscoverOptions.Daemon` to connect to one entry, as the global `--daemon`
+flag does:
+
+```go
+api, err := client.Discover(ctx, client.DiscoverOptions{Daemon: "example-workspace"})
+```
+
+The named entry replaces every other selection source, and `Workspace` is
+ignored. Discover resolves it with the same catalog rules as `--daemon`:
+
+- A remote entry sends its `token`, or the value of the variable `token_env`
+  names. `KATA_AUTH_TOKEN` overrides both.
+- A local entry sends its `token` or `token_env` value. Without either, it
+  falls back to `KATA_AUTH_TOKEN`, then the current home's `[auth].token`.
+- A `token_env` variable that is unset or empty returns an error, unless
+  `KATA_AUTH_TOKEN` overrides it for a remote entry.
+- A local entry connects to the running default local daemon. A pinned local
+  profile (`home` and `instance_uid`) connects to that profile's daemon after
+  checking its instance UID.
+- Discover never starts a stopped local entry; it returns an error matching
+  `client.ErrDaemonUnavailable`. Use `kata --daemon <name> daemon diagnose` for
+  recovery guidance.
+- A name with no catalog entry returns an error matching
+  `client.ErrDaemonNotInCatalog`.
+
+`Discovered` reports `Remote` as true for a remote entry and false for a local
+one.
 
 ## Connect to a known endpoint
 

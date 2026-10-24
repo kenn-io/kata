@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kitdaemon "go.kenn.io/kit/daemon"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -34,11 +36,16 @@ func publishLocalRuntime(t *testing.T, home, address string) {
 	t.Helper()
 	namespace, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
+	publishRuntime(t, namespace, address, map[string]string{"db_path": filepath.Join(home, "kata.db")})
+}
+
+func publishRuntime(t *testing.T, namespace *daemonruntime.Namespace, address string, metadata map[string]string) {
+	t.Helper()
 	require.NoError(t, namespace.EnsureDirs())
-	_, err = (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Write(kitdaemon.RuntimeRecord{
+	_, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       os.Getpid(),
 		Address:   address,
-		Metadata:  map[string]string{"db_path": filepath.Join(home, "kata.db")},
+		Metadata:  metadata,
 		StartedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err)
@@ -149,4 +156,147 @@ func TestDiscoveredIsAbsentForExplicitEndpointClient(t *testing.T) {
 
 	_, ok := server.Client(t).Discovered()
 	assert.False(t, ok)
+}
+
+func TestDiscoverNamedRemoteIgnoresOtherSourcesAndUsesEntryToken(t *testing.T) {
+	home := isolateKataHome(t)
+	other := katatest.New(t)
+	initProject(t, other.Client(t), "other-project")
+	t.Setenv("KATA_SERVER", other.Endpoint)
+	hub := katatest.New(t, katatest.WithToken("hub-token"))
+	initProject(t, hub.Client(t), "hub-project")
+	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+	writeDaemonCatalog(t, home, `[[daemon]]
+name = "hub"
+url = "`+hub.Endpoint+`"
+token_env = "EXAMPLE_HUB_TOKEN"
+`)
+
+	api, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "hub"})
+	require.NoError(t, err)
+
+	projects := listProjects(t, api)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "hub-project", projects[0].Name)
+	discovered, ok := api.Discovered()
+	require.True(t, ok)
+	assert.Equal(t, client.DiscoveredDaemon{Remote: true}, discovered)
+}
+
+func TestDiscoverNamedLocalOverridesActiveDaemon(t *testing.T) {
+	home := isolateKataHome(t)
+	local := katatest.New(t, katatest.WithUnixSocket(), katatest.WithToken("local-token"))
+	initProject(t, local.Client(t), "spoke-project")
+	publishLocalRuntime(t, home, local.Endpoint)
+	writeDaemonCatalog(t, home, `active_daemon = "hub"
+
+[[daemon]]
+name = "hub"
+url = "http://127.0.0.1:1"
+
+[[daemon]]
+name = "personal"
+local = true
+token = "local-token"
+`)
+
+	api, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "personal"})
+	require.NoError(t, err)
+
+	projects := listProjects(t, api)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "spoke-project", projects[0].Name)
+	discovered, ok := api.Discovered()
+	require.True(t, ok)
+	assert.Equal(t, client.DiscoveredDaemon{Remote: false}, discovered)
+}
+
+// pinnedProfile registers server as the catalog entry "work", a local profile
+// pinned to a temporary home and the server's instance UID, and returns the
+// namespace where that profile's runtime records live.
+func pinnedProfile(t *testing.T, home string, server *katatest.Server) *daemonruntime.Namespace {
+	t.Helper()
+	instance, err := server.Client(t).InstanceWithResponse(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, instance.JSON200)
+	entry := config.CatalogDaemonConfig{
+		Name: "work", Local: true, Home: t.TempDir(), InstanceUID: instance.JSON200.InstanceUID,
+	}
+	writeDaemonCatalog(t, home, fmt.Sprintf("[[daemon]]\nname = %q\nlocal = true\nhome = %q\ninstance_uid = %q\n",
+		entry.Name, entry.Home, entry.InstanceUID))
+	profile, err := config.ResolveLocalProfile(entry)
+	require.NoError(t, err)
+	namespace, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	return namespace
+}
+
+func TestDiscoverNamedPinnedLocalProfile(t *testing.T) {
+	home := isolateKataHome(t)
+	work := katatest.New(t, katatest.WithUnixSocket())
+	initProject(t, work.Client(t), "work-project")
+	publishRuntime(t, pinnedProfile(t, home, work), work.Endpoint, nil)
+
+	api, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "work"})
+	require.NoError(t, err)
+
+	projects := listProjects(t, api)
+	require.Len(t, projects, 1)
+	assert.Equal(t, "work-project", projects[0].Name)
+	discovered, ok := api.Discovered()
+	require.True(t, ok)
+	assert.Equal(t, client.DiscoveredDaemon{Remote: false}, discovered)
+}
+
+func TestDiscoverNamedStoppedLocalIsUnavailableWithoutStartingOne(t *testing.T) {
+	home := isolateKataHome(t)
+	writeDaemonCatalog(t, home, "[[daemon]]\nname = \"personal\"\nlocal = true\n")
+
+	_, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "personal"})
+	require.ErrorIs(t, err, client.ErrDaemonUnavailable)
+
+	namespace, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	records, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).List()
+	require.NoError(t, err)
+	assert.Empty(t, records, "discovery must not start a daemon in %s", home)
+}
+
+func TestDiscoverNamedRemoteIsNotProbed(t *testing.T) {
+	home := isolateKataHome(t)
+	writeDaemonCatalog(t, home, "[[daemon]]\nname = \"hub\"\nurl = \"http://127.0.0.1:1\"\n")
+
+	api, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "hub"})
+	require.NoError(t, err, "like workspace discovery, a named remote is not probed")
+	discovered, ok := api.Discovered()
+	require.True(t, ok)
+	assert.Equal(t, client.DiscoveredDaemon{Remote: true}, discovered)
+
+	_, err = api.PingWithResponse(t.Context())
+	require.Error(t, err, "the first request reports the unreachable remote")
+}
+
+func TestDiscoverNamedRejectsUnknownName(t *testing.T) {
+	home := isolateKataHome(t)
+	writeDaemonCatalog(t, home, "[[daemon]]\nname = \"hub\"\nurl = \"https://daemon.example\"\n")
+
+	_, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "example-workspace"})
+	require.ErrorIs(t, err, client.ErrDaemonNotInCatalog)
+	assert.NotErrorIs(t, err, client.ErrDaemonUnavailable)
+}
+
+func TestDiscoverNamedRemoteRequiresTokenEnvValue(t *testing.T) {
+	home := isolateKataHome(t)
+	hub := katatest.New(t, katatest.WithToken("hub-token"))
+	t.Setenv("EXAMPLE_HUB_TOKEN", "")
+	writeDaemonCatalog(t, home, `[[daemon]]
+name = "hub"
+url = "`+hub.Endpoint+`"
+token_env = "EXAMPLE_HUB_TOKEN"
+`)
+
+	_, err := client.Discover(t.Context(), client.DiscoverOptions{Daemon: "hub"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "EXAMPLE_HUB_TOKEN", "the error names the variable to set")
+	assert.NotErrorIs(t, err, client.ErrDaemonUnavailable)
 }
