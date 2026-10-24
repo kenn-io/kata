@@ -39,8 +39,8 @@ Handle notification requests in the terminal UI's Attention inbox, ask for
 replies to specific comments, broadcast to participants, and trigger work when
 scheduled dates arrive. The [0.20.0 release notes](changelog.md#0200) also cover
 SQLite upgrades, daemon restarts, cron scheduling, and contributor credits.
-Read the [upgrade guidance](get-started/install.md#upgrading-to-0200) for
-SQLite precautions and coordinated cron upgrades.
+See [Updating Kata](get-started/install.md#updating-kata) for installation
+and federation upgrade guidance.
 
 ## Quickstart
 

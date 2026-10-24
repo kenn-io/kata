@@ -19,14 +19,19 @@ It also improves SQLite upgrades, daemon restarts, and cron scheduling.
 
 **Before upgrading**
 
-Follow the [0.20.0 upgrade guide](get-started/install.md#upgrading-to-0200):
+For normal federated issue synchronization, upgrade the hub first; spokes can
+upgrade later. See [Updating Kata](get-started/install.md#updating-kata) and
+the [federation procedure](operations/federation.md#compatibility-and-rolling-upgrades).
 
 - Stop other processes using the SQLite database before upgrading. The upgrade
   fix prevents new corruption; it does not repair damage from earlier upgrades.
-- Upgrade connected cron hubs, spokes, and adapters together. Mixed-version
-  rolling upgrades from 0.19.0 are unsupported.
-- Upgrade remote daemons alongside clients. Kata 0.20.0 includes daemon API
-  `0.31.0`; release and API versions are separate.
+- Projects with cron data have separate
+  [upgrade limits](reference/cron.md#upgrade-limits). Mixed-version cron
+  operation across 0.19.0 and 0.20.0 is not fully supported; this does not
+  require coordinated upgrades for ordinary issue synchronization.
+- New client features require their corresponding daemon API. Kata 0.20.0
+  includes API `0.31.0`; release and API versions are separate. See the
+  [API version history](reference/http-api.md#version-history).
 - Source builds require Go 1.27.3 or later.
 
 **New features**
@@ -60,9 +65,10 @@ Follow the [0.20.0 upgrade guide](get-started/install.md#upgrading-to-0200):
   `@hourly` instead of a minute `*/60` step. See
   [Cron triggers](reference/cron.md#triggers).
 - Negotiate all cron support through `cron_v1` on connected hubs, spokes, and
-  adapters. Upgrade them together before using the new expression forms. The
-  former recurring-delivery capability has no alias; native delivery remains
-  hub-owned. See [Capabilities](reference/cron.md#capabilities).
+  adapters. Upgrade the peers and adapters that read a project's definitions
+  before using the new expression forms. The former recurring-delivery
+  capability has no alias; native delivery remains hub-owned. See
+  [Cron upgrade limits](reference/cron.md#upgrade-limits).
 - Copy JSON examples from cron job and workflow create/update help. The help
   also explains how to retry an uncertain create with the same `--uid`.
 - Keep local SQLite writes moving during federation pulls and claim checks,
@@ -186,12 +192,17 @@ and diagnose their setup with `kata doctor`.
 
 **Before upgrading**
 
-Follow the [0.19.0 upgrade guide](get-started/install.md#upgrading-to-0190).
-In short:
+See [Updating Kata](get-started/install.md#updating-kata) for the general
+procedure. This release also requires these changes:
 
-- Update scripts to use `kata agent-hook` instead of `kata agent-hooks`, `--all`
-  instead of `--all-projects`, and `--dry` instead of `--dry-run`. The old
-  spellings are no longer accepted. Reinstall hooks after the command rename.
+- Update scripts to use `kata agent-hook` instead of `kata agent-hooks`.
+  Use `--all` instead of `--all-projects` on `digest`, `events`, and `mcp serve`;
+  use `--dry` instead of `--dry-run` on `close` and `move`. The old spellings
+  are no longer accepted.
+- Reinstall user hooks with `kata agent-hook install`. For workspace hooks,
+  re-run `kata agent-hook install <harness> --local` or the `kata init` hook
+  option that installed them. This replaces hooks that still call the plural
+  command. See the [agent-hook reference](reference/cli.md#agent-hook).
 - Hook installation now enables available attention hooks by default. Pass
   `--contract-only` to keep contract-only setup.
 - Upgrade federated hubs before their spokes. Project relays need 0.19.0 on
@@ -200,12 +211,16 @@ In short:
   hub. Pass `--hub-token-env <env-name>` or configure a daemon catalog entry
   matching `--hub-url`.
 - Upgrade remote daemons alongside the CLI and MCP server. Kata 0.19.0 includes
-  daemon API `0.28.0`; paginated lists require `0.27.0` and comment replies
-  require `0.28.0`.
+  daemon API `0.28.0`; timed claims require `0.22.0`, `move --dry` previews
+  `0.23.0`, close session references `0.26.0`, paginated lists `0.27.0`, and
+  comment replies `0.28.0`. See the
+  [API version history](reference/http-api.md#version-history).
 - PostgreSQL operators should stop the daemon and run
-  `kata storage postgres migrate` with schema-owner credentials.
+  `kata storage postgres migrate` with schema-owner credentials. Follow the
+  [upgrade procedure](operations/postgres.md#upgrade-ceremony).
 - Go programs that embed Kata and serve the browser application must pass
-  `webui.NewEmbeddedHandler()` in `kata.Config.WebHandler`.
+  `webui.NewEmbeddedHandler()` in `kata.Config.WebHandler`. See
+  [Serve the browser application](development/embedding.md#serve-the-browser-application).
 
 **New features**
 
@@ -393,6 +408,10 @@ by status or age and receive inbox requests when planning dates arrive.
 - Issue-scoped credentials require
   [token identity mode](operations/remote-daemon.md#identity-tokens) and must
   be created on the authoritative daemon, not a spoke replica.
+- When updating from before 0.18.0, run `kata daemon restart` with the
+  original startup options after installing the new binary. The older updater
+  does not restart the daemon automatically. Reopen `kata ui` if its port
+  changed.
 
 **New features**
 
@@ -453,7 +472,7 @@ by status or age and receive inbox requests when planning dates arrive.
 - Keep the local daemon and web UI current after `kata update`. After replacing
   the binary, the updater asks a running daemon to restart with its existing
   settings. A stopped daemon stays stopped. Older daemons require a manual
-  `kata daemon restart`; see [upgrade instructions](get-started/install.md#upgrading-to-0180).
+  `kata daemon restart`; see [upgrade instructions](get-started/install.md#updating-kata).
 - Use Kata's MCP tools with the Anthropic Messages API without tool-schema
   rejection. Tool inputs no longer use unsupported top-level `oneOf` or
   `allOf` combinations.

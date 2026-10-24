@@ -27,9 +27,9 @@ Zensical at <https://katatracker.com/>.
 
 The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
 inbox to the terminal UI, requests for replies to specific comments,
-participant broadcasts, and events for reached schedules. Read the
-[upgrade guidance](docs/get-started/install.md#upgrading-to-0200) for SQLite
-upgrade precautions and coordinated cron upgrades.
+participant broadcasts, and events for reached schedules. See
+[Updating Kata](docs/get-started/install.md#updating-kata) for installation
+and federation upgrade guidance.
 
 ## Install
 
