@@ -1208,6 +1208,11 @@ func runDaemonProcess(
 			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
+	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
 
 	// Wrap ctx with a local cancel so platform-specific shutdown watchers
 	// (e.g. the Windows named-event fired by `kata daemon stop`) can drive
@@ -1242,12 +1247,6 @@ func runDaemonProcess(
 	if rootSigningHealth != nil {
 		fmt.Fprintln(os.Stderr, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
-
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = listener.Close() }()
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
 	webEndpoint, err := daemon.ResolveWebEndpoint(daemon.WebEndpointOptions{

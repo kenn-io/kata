@@ -49,6 +49,7 @@ func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
 		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), func(string) ([]kitdaemon.RuntimeRecord, error) {
 			return []kitdaemon.RuntimeRecord{record}, nil
 		}, func(context.Context, string) (string, PingInfo, error) {
+			require.Equal(t, "unix", record.Network, "foreign TCP records must be skipped before probing")
 			return "http://unix", PingInfo{PID: record.PID}, probeErr
 		}) {
 			require.NoError(t, err)
@@ -58,4 +59,6 @@ func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
 	}
 	assert.Equal(t, 1, found(nil), "a live daemon in another PID namespace is found by ping")
 	assert.Equal(t, 0, found(errors.New("endpoint unavailable")), "an unreachable one is skipped, not reported as a local daemon")
+	record.Network, record.Address = "tcp", "127.0.0.1:7777"
+	assert.Equal(t, 0, found(nil), "a foreign TCP record must be skipped before probing")
 }

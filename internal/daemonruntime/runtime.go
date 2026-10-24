@@ -30,6 +30,10 @@ func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
 	case kitdaemon.ProcessIdentityMismatch:
 		return false
 	}
+	return runtimeCreationTimeMatches(record)
+}
+
+func runtimeCreationTimeMatches(record kitdaemon.RuntimeRecord) bool {
 	if record.StartedAt.IsZero() {
 		return true
 	}
@@ -44,15 +48,18 @@ func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
 	return !time.UnixMilli(created).After(record.StartedAt)
 }
 
-// RuntimeRecordWorthProbing keeps foreign-namespace records for callers that confirm a daemon by ping.
+// RuntimeRecordWorthProbing keeps foreign-namespace Unix records for callers that confirm a daemon by ping.
 func RuntimeRecordWorthProbing(record kitdaemon.RuntimeRecord) bool {
-	return kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeForeign || RuntimeProcessAlive(record)
+	if kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeForeign {
+		return record.Endpoint().IsUnix()
+	}
+	return RuntimeProcessAlive(record)
 }
 
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
 func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 	return kitdaemon.RuntimeRecordBlocksStart(record) &&
-		(record.ProcessIdentityV2 != "" || RuntimeProcessAlive(record))
+		(record.ProcessIdentityV2 != "" || runtimeCreationTimeMatches(record))
 }
 
 // RuntimeRecordRestartable reports whether the record's daemon handles the

@@ -140,7 +140,10 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					yield(liveDaemon{}, err)
 					return
 				}
-				if kitdaemon.RuntimeProcessScope(r) == kitdaemon.ProcessScopeForeign || yield(liveDaemon{}, &localDaemonUnreachableError{
+				if kitdaemon.RuntimeProcessScope(r) == kitdaemon.ProcessScopeForeign {
+					continue
+				}
+				if yield(liveDaemon{}, &localDaemonUnreachableError{
 					pid:     r.PID,
 					address: address,
 					cause:   probeErr,
