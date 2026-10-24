@@ -144,7 +144,7 @@ func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL, address
 		if address != "" && record.Endpoint().ConfigAddress() != address {
 			continue
 		}
-		if !daemonruntime.RuntimeRecordWorthProbing(record) {
+		if !daemonruntime.RuntimeProcessAlive(record) {
 			continue
 		}
 		candidate, _, ok := probeAddress(ctx, record.Endpoint().ConfigAddress())

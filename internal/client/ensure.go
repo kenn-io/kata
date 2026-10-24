@@ -339,7 +339,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 			}
 			return err
 		}
-		if candidate.Info.Service != daemonServiceName || daemonVersionCompatible(candidate.Info) || !daemonruntime.RuntimeProcessAlive(candidate.Record) {
+		if candidate.Info.Service != daemonServiceName || daemonVersionCompatible(candidate.Info) {
 			continue
 		}
 		address := candidate.Record.Endpoint().ConfigAddress()

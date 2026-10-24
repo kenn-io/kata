@@ -48,14 +48,6 @@ func runtimeCreationTimeMatches(record kitdaemon.RuntimeRecord) bool {
 	return !time.UnixMilli(created).After(record.StartedAt)
 }
 
-// RuntimeRecordWorthProbing keeps foreign-namespace Unix records for callers that confirm a daemon by ping.
-func RuntimeRecordWorthProbing(record kitdaemon.RuntimeRecord) bool {
-	if kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeForeign {
-		return record.Endpoint().IsUnix()
-	}
-	return RuntimeProcessAlive(record)
-}
-
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
 func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 	return kitdaemon.RuntimeRecordBlocksStart(record) &&

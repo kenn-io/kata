@@ -129,7 +129,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			return
 		}
 		for _, r := range recs {
-			if !daemonruntime.RuntimeRecordWorthProbing(r) {
+			if !daemonruntime.RuntimeProcessAlive(r) {
 				continue
 			}
 			ep := r.Endpoint()
@@ -140,17 +140,14 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					yield(liveDaemon{}, err)
 					return
 				}
-				if kitdaemon.RuntimeProcessScope(r) == kitdaemon.ProcessScopeForeign {
-					continue
-				}
-				if yield(liveDaemon{}, &localDaemonUnreachableError{
+				if !yield(liveDaemon{}, &localDaemonUnreachableError{
 					pid:     r.PID,
 					address: address,
 					cause:   probeErr,
 				}) {
-					continue
+					return
 				}
-				return
+				continue
 			}
 			// A reused PID can keep an old record alive after another daemon
 			// takes over its endpoint. The responding daemon is not this record's

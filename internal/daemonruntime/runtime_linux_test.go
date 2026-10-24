@@ -1,9 +1,8 @@
 //go:build linux
 
-package client
+package daemonruntime_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -13,15 +12,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
+func TestRuntimeProcessAliveRejectsForeignNamespace(t *testing.T) {
 	if os.Getenv("KATA_PIDNS_HELPER") == "1" {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		t.SkipNow()
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestLiveDaemonsUsingForeignNamespaceRecord$") //nolint:gosec // test binary
+	child := exec.Command(os.Args[0], "-test.run=^TestRuntimeProcessAliveRejectsForeignNamespace$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,
@@ -40,25 +40,8 @@ func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
 	t.Cleanup(func() { _ = stdin.Close(); require.NoError(t, child.Wait()) })
 	identity, ok := kitdaemon.ReadProcessIdentity(child.Process.Pid)
 	require.True(t, ok)
-	record := kitdaemon.RuntimeRecord{
-		PID: 1, ProcessIdentityV2: identity, Network: "unix", Address: "/tmp/kata.sock",
-	}
+	record := kitdaemon.RuntimeRecord{PID: 1, ProcessIdentityV2: identity}
 	require.Equal(t, kitdaemon.ProcessScopeForeign, kitdaemon.RuntimeProcessScope(record))
 
-	found := func(probeErr error) (n int) {
-		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), func(string) ([]kitdaemon.RuntimeRecord, error) {
-			return []kitdaemon.RuntimeRecord{record}, nil
-		}, func(context.Context, string) (string, PingInfo, error) {
-			require.Equal(t, "unix", record.Network, "foreign TCP records must be skipped before probing")
-			return "http://unix", PingInfo{PID: record.PID}, probeErr
-		}) {
-			require.NoError(t, err)
-			n++
-		}
-		return n
-	}
-	assert.Equal(t, 1, found(nil), "a live daemon in another PID namespace is found by ping")
-	assert.Equal(t, 0, found(errors.New("endpoint unavailable")), "an unreachable one is skipped, not reported as a local daemon")
-	record.Network, record.Address = "tcp", "127.0.0.1:7777"
-	assert.Equal(t, 0, found(nil), "a foreign TCP record must be skipped before probing")
+	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
 }
