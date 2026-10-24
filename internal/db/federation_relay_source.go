@@ -12,6 +12,12 @@ func EncodeRelaySourceEvent(event RemoteEvent) ([]byte, error) {
 	if _, _, err := ValidateRemoteEventContentHash(event); err != nil {
 		return nil, err
 	}
+	return marshalRelaySourceEvent(event)
+}
+
+// marshalRelaySourceEvent is the single wire serializer. Callers validate the
+// same local event first; decoded retained events need no second hash pass.
+func marshalRelaySourceEvent(event RemoteEvent) ([]byte, error) {
 	payload := []byte(event.Payload)
 	event.Payload = nil
 	return json.Marshal(struct {

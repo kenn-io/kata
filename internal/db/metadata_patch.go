@@ -37,6 +37,33 @@ func ApplyMetadataPatch(current jsontext.Value, patch map[string]jsontext.Value)
 	return result, nil
 }
 
+// Validate checks the guard's shape without comparing current metadata or a
+// proposed patch. Native writes still check both inside their transaction.
+func (guard MetadataPatchGuard) Validate() error {
+	if err := guard.validateKey(); err != nil {
+		return err
+	}
+	return guard.validateCondition()
+}
+
+func (guard MetadataPatchGuard) validateKey() error {
+	if strings.TrimSpace(guard.Key) == "" {
+		return errors.New("metadata guard key must not be empty")
+	}
+	return nil
+}
+
+func (guard MetadataPatchGuard) validateCondition() error {
+	hasValue := len(guard.IfValue) > 0
+	if hasValue == guard.IfAbsent {
+		return errors.New("metadata guard must set exactly one of if_value or if_absent")
+	}
+	if hasValue && strings.TrimSpace(string(guard.IfValue)) == "null" {
+		return errors.New("metadata guard if_value must not be null")
+	}
+	return nil
+}
+
 // CheckMetadataPatchGuard compares one guard with the current metadata blob.
 // Callers must invoke it after reading the row inside the same transaction as
 // the subsequent write. A nil guard leaves the patch unconditional.
@@ -44,18 +71,14 @@ func CheckMetadataPatchGuard(current jsontext.Value, patch map[string]jsontext.V
 	if guard == nil {
 		return nil
 	}
-	if strings.TrimSpace(guard.Key) == "" {
-		return errors.New("metadata guard key must not be empty")
+	if err := guard.validateKey(); err != nil {
+		return err
 	}
 	if _, ok := patch[guard.Key]; !ok {
 		return fmt.Errorf("metadata guard key %q is not patched", guard.Key)
 	}
-	hasValue := len(guard.IfValue) > 0
-	if hasValue == guard.IfAbsent {
-		return errors.New("metadata guard must set exactly one of if_value or if_absent")
-	}
-	if hasValue && strings.TrimSpace(string(guard.IfValue)) == "null" {
-		return errors.New("metadata guard if_value must not be null")
+	if err := guard.validateCondition(); err != nil {
+		return err
 	}
 
 	var values map[string]jsontext.Value

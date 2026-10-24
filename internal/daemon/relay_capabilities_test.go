@@ -21,6 +21,7 @@ func TestInstanceAdvertisesSeparateRelayCapabilities(t *testing.T) {
 		for _, name := range []string{"relay_protocol_version", "provenance_protocol_version", "embedding_artifact_protocol_version"} {
 			t.Run(name, func(t *testing.T) { require.Equal(t, float64(1), record[name]) })
 		}
+		require.NotContains(t, string(body), "relay_scoped_links_v1")
 		require.NotContains(t, string(body), f.private.UID)
 		require.NotContains(t, string(body), projectAccessCanary)
 	})
