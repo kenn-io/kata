@@ -965,7 +965,11 @@ func TestProjectLifecycleRefreshesDisplayedRelationEndpoints(t *testing.T) {
 		cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 9})
 		assertDetailRefetchBatch(t, &m, cmd)
 
-		cmd = m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
+		// An idle pane schedules a refresh for any match, so a nil result
+		// here proves the unrelated project did not match.
+		idle := sseDetailFixture(7, "open", "open-issue")
+		idle.detail.comments = commentEntriesFromProjectedRecords(projected)
+		cmd = idle.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
 		if cmd != nil {
 			t.Fatalf("unrelated %s event must not refresh detail, got %T", eventType, cmd)
 		}

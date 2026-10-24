@@ -99,6 +99,12 @@ func (m Model) syncAttentionReturnDetail(msg tea.Msg) Model {
 	if m.attention.returnContext == nil || !isDetailFetchMsg(msg) {
 		return m
 	}
+	// Mirror only reads the live pane still owns. Opening an issue from
+	// Attention cancels the saved pane's reads, and their results must not
+	// overwrite the snapshot the user returns to.
+	if _, seq, _ := detailReadResult(msg); seq != 0 && !m.detail.readResultCurrent(msg) {
+		return m
+	}
 	updated, applied := m.attention.returnContext.detail.applyFetchedIfFresh(msg)
 	if !applied {
 		return m
