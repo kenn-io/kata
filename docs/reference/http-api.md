@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-22
+last_edited: 2026-10-23
 ---
 
 # HTTP API schema
@@ -155,6 +155,10 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
+Kata 0.20.0 includes API `0.31.0`, the changes from `0.29.0` through `0.31.0`
+below. Bridge preflight checks for cross-project issue links require hub API
+`0.31.0`; acknowledging a request in the TUI Attention inbox requires `0.13.0`.
+
 Kata 0.19.0 includes API `0.28.0`, the changes from `0.22.0` through `0.28.0`
 below. Timed claims require API `0.22.0`, move previews `0.23.0`, close session
 references `0.26.0`, paginated issue lists `0.27.0`, and comment replies

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-19
+last_edited: 2026-10-23
 ---
 
 # Backup and restore
@@ -45,9 +45,11 @@ recover:
 1. Stop every kata process.
 2. Move `kata.db`, `kata.db-wal`, and `kata.db-shm` out of the data directory.
 3. Copy the oldest `kata.db.bak.*` file to `kata.db`.
-4. Start Kata with a release that includes the fix. Cutover runs again.
+4. Start Kata 0.20.0 or later. Cutover runs again.
 
-The backup can be missing the last changes made before the upgrade.
+The backup can be missing the last changes made before the upgrade. Kata 0.20.0
+prevents this corruption during future upgrades; it does not repair an already
+damaged database.
 
 ## Slow or interrupted upgrade startup
 

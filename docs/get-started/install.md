@@ -109,6 +109,48 @@ owning package manager. Packagers can read the complete
 remains supported, and building from a clone is still useful for development
 builds.
 
+## Upgrading to 0.20.0
+
+Upgrade the daemon as well as the CLI and MCP server. Kata 0.20.0 includes
+daemon API `0.31.0`; release and API versions are separate. The TUI Attention
+inbox needs API `0.13.0` or newer to acknowledge requests. Federation bridge
+preflight needs hub API `0.31.0` to check cross-project issue links; older hubs
+cannot perform that check. See the
+[API version history](../reference/http-api.md#version-history).
+
+Before a SQLite upgrade, stop other daemons and offline import/export
+processes using that database and wait for them to exit. Kata 0.20.0 preserves
+pending WAL writes when replacing the database after an unclean shutdown.
+This prevents new corruption but does not repair damage from earlier upgrades.
+Follow [Backup and restore](../operations/backup-restore.md) for backup and
+recovery steps. Large upgrades report migration progress; stopping the waiting
+CLI leaves the detached daemon running. Use `kata daemon logs` to follow it.
+
+Upgrade connected cron hubs, spokes, and adapters together before using new
+expression forms. Mixed-version rolling upgrades from 0.19.0 are unsupported:
+all cron support now uses `cron_v1`, with no alias for the former
+recurring-delivery capability. Check existing expressions for steps as large
+as their field's span, which are now rejected. Use `@daily` instead of an
+hourly `*/24` step and `@hourly` instead of a minute `*/60` step. See
+[Cron triggers](../reference/cron.md#triggers) and
+[Capabilities](../reference/cron.md#capabilities).
+
+PostgreSQL operators should follow the
+[upgrade ceremony](../operations/postgres.md#upgrade-ceremony). An older binary
+leaves a newer daemon running and refuses replacement when it cannot use the
+database schema; use the matching or newer binary to manage that daemon.
+
+Source builds require Go 1.27.3 or later. Client-only Go programs that discover
+a local PostgreSQL daemon whose DSN uses routing options must set `KATA_SERVER`
+to its endpoint. See [Go client](../reference/go-client.md).
+
+Reverse proxies that set their own Content Security Policy must allow
+`'wasm-unsafe-eval'` in `script-src` for fenced-code syntax highlighting. See
+[Web UI deployment](../guide/web-ui.md#browser-authority-and-deployment).
+
+For feature details, see the [0.20.0 release notes](../changelog.md#0200).
+If upgrading from before 0.19.0, also follow the guidance below.
+
 ## Upgrading to 0.19.0
 
 Upgrade the daemon as well as the CLI and MCP server. Kata 0.19.0 includes
