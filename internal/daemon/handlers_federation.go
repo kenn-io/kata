@@ -575,6 +575,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				ProjectEventSink: func(event db.Event) {
 					deliverProjectMutation(cfg, &event)
 				},
+				ProjectResetSink: cfg.Publish().Reset,
 			},
 		)
 		if result.CreatedEvent != nil {

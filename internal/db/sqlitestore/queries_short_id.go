@@ -3,7 +3,9 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"go.kenn.io/kata/internal/db"
 
 	"go.kenn.io/kata/internal/shortid"
 )
@@ -93,7 +95,19 @@ func assignShortIDIn(ctx context.Context, tx *sql.Tx, projectIDs []int64, ulid s
 			return "", fmt.Errorf("collision check at length %d: %w", length, err)
 		}
 		if n == 0 {
-			return candidate, nil
+			for _, projectID := range projectIDs {
+				movedUID, err := db.MovedIssueUID(ctx, tx, projectID, candidate, false)
+				if err != nil && !errors.Is(err, db.ErrNotFound) {
+					return "", err
+				}
+				if err == nil && movedUID != ulid {
+					n++
+					break
+				}
+			}
+			if n == 0 {
+				return candidate, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("short_id auto-extend exhausted for ulid %s", ulid)

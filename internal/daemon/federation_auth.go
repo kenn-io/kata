@@ -99,12 +99,14 @@ func withFederationAuthorization(
 }
 
 func withFederationProjectAuthority(ctx context.Context, authorization federationAuthorization) context.Context {
+	projects := []string{authorization.projectUID}
 	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
+		projects = narrowProjectUIDs(projects, decision.fixedUIDs)
 		decision.Actor = authorization.principal.Actor
-		decision.ProjectUIDs = []string{authorization.projectUID}
-		decision.targets = []string{authorization.projectUID}
+		decision.ProjectUIDs = projects
+		decision.targets = projects
 	}
-	return db.WithAuthorizedProjects(ctx, []string{authorization.projectUID})
+	return db.WithAuthorizedProjects(ctx, projects)
 }
 
 func federationAuthorizationFromContext(

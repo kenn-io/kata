@@ -181,7 +181,7 @@ func TestWireDropsForbiddenClientResponse(t *testing.T) {
 
 func rawServerConnection(t *testing.T) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	return rawServerConnectionWithClient(t, &kataclient.Client{})
+	return rawServerConnectionWithClient(t, inertTestClient(t))
 }
 
 func rawServerConnectionWithClient(t *testing.T, client *kataclient.Client) (net.Conn, *bufio.Reader) {

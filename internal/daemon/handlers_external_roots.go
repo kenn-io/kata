@@ -151,7 +151,7 @@ func registerExternalRootHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			binding, _, callErr := cfg.ExternalRootService.Bind(ctx, rootbridge.BindParams{
-				ProjectID: in.ProjectID, IssueID: issue.ID, ConnectorInstance: in.Body.Connector,
+				ProjectID: issue.ProjectID, IssueID: issue.ID, ConnectorInstance: in.Body.Connector,
 				Locator: in.Body.External, Actor: actor, PublishComments: in.Body.PublishComments,
 			})
 			if binding.ID != 0 && cfg.ExternalRootWake != nil {
@@ -253,7 +253,7 @@ func registerExternalRootActions(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return db.Issue{}, db.ExternalRootBinding{}, externalRootHandlerError(err)
 		}
-		if binding.ProjectID != projectID || binding.IssueID != issue.ID {
+		if binding.ProjectID != issue.ProjectID || binding.IssueID != issue.ID {
 			return db.Issue{}, db.ExternalRootBinding{}, api.NewError(http.StatusNotFound, "bridge_not_found", "external root bridge not found", "", nil)
 		}
 		return issue, binding, nil
@@ -348,11 +348,20 @@ func registerExternalRootActions(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			// Cleanup permits archived projects, but historical routes must
+			// still authorize the project that currently owns the issue.
+			ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+			if err != nil {
+				return nil, err
+			}
+			if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
+				return nil, err
+			}
 			binding, err := cfg.DB.ExternalRootBindingByIssue(ctx, issue.ID)
 			if err != nil {
 				return nil, externalRootHandlerError(err)
 			}
-			if binding.ProjectID != in.ProjectID || binding.IssueID != issue.ID {
+			if binding.ProjectID != issue.ProjectID || binding.IssueID != issue.ID {
 				return nil, api.NewError(http.StatusNotFound, "bridge_not_found", "external root bridge not found", "", nil)
 			}
 			actor, err := attributedActor(ctx, in.Body.Actor)
@@ -393,11 +402,20 @@ func registerExternalRootActions(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			// Cleanup permits archived projects, but historical routes must
+			// still authorize the project that currently owns the issue.
+			ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+			if err != nil {
+				return nil, err
+			}
+			if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
+				return nil, err
+			}
 			binding, err := cfg.DB.ExternalRootBindingByIssue(ctx, issue.ID)
 			if err != nil {
 				return nil, externalRootHandlerError(err)
 			}
-			if binding.ProjectID != in.ProjectID || binding.IssueID != issue.ID {
+			if binding.ProjectID != issue.ProjectID || binding.IssueID != issue.ID {
 				return nil, api.NewError(http.StatusNotFound, "bridge_not_found", "external root bridge not found", "", nil)
 			}
 			actor, err := attributedActor(ctx, in.Actor)

@@ -178,6 +178,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.32.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
 | `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
 | `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |

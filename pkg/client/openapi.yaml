@@ -4278,6 +4278,9 @@ components:
         dry_run:
           description: Validate without moving; If-Match may be omitted for a preview.
           type: boolean
+        single:
+          description: Move only this issue instead of its subtree.
+          type: boolean
         to_project_uid:
           type: string
       required:
@@ -4292,6 +4295,10 @@ components:
           type: integer
         issue:
           $ref: "#/components/schemas/Issue"
+        issues:
+          items:
+            $ref: "#/components/schemas/Issue"
+          type: array
         new_short_id:
           type: string
       required:
@@ -6940,7 +6947,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.31.0
+  version: 0.32.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
