@@ -1883,6 +1883,12 @@ document one line. In detail, `C-j` and `C-k` cycle forward and backward
 through activity tabs and the child section. Some terminals send `C-j` as
 Enter; Tab and Shift-Tab remain available for section cycling.
 
+The detail pane requests history for the selected issue. Moving to another
+issue cancels obsolete detail reads; live event bursts coalesce into a refresh,
+with one follow-up refresh if events arrive while reads are running. A remote
+daemon must acknowledge issue-filtered event history. If the Events tab asks
+you to upgrade the daemon, update that server before retrying.
+
 The TUI appends local daemon transport diagnostics to
 `<KATA_HOME>/runtime/<dbhash>/tui.log`, including retried stale-socket failures
 and request paths. Use that file when an interactive fetch reports a local

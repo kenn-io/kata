@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +10,31 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
+
+type splitSearchRestoreAPI struct {
+	KataAPI
+	issue        *Issue
+	issueCalls   int
+	lastIssueRef string
+}
+
+func (a *splitSearchRestoreAPI) GetIssueDetail(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
+	a.issueCalls++
+	a.lastIssueRef = ref
+	return &IssueDetail{Issue: a.issue}, nil
+}
+
+func (*splitSearchRestoreAPI) ListComments(context.Context, int64, string) ([]CommentEntry, error) {
+	return nil, nil
+}
+
+func (*splitSearchRestoreAPI) ListEvents(context.Context, int64, string) ([]EventLogEntry, error) {
+	return nil, nil
+}
+
+func (*splitSearchRestoreAPI) ListLinks(context.Context, int64, string) ([]LinkEntry, error) {
+	return nil, nil
+}
 
 // In split Inbox detail, Esc goes back one level in task navigation
 // before leaving Inbox.
@@ -37,7 +63,7 @@ func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) {
 	require.NotNil(t, out.detail.issue, "the prior nav issue is restored")
 	require.Equal(t, "old9", out.detail.issue.ShortID)
 	require.Equal(t, int64(2), out.detail.scopePID)
-	require.Nil(t, cmd, "popping the nav stack is pure state")
+	require.NotNil(t, cmd, "restored detail needs fresh reads after its prior batch was canceled")
 }
 
 // splitTestSetup boots a Model into split layout (160x40) with the
@@ -1455,9 +1481,18 @@ func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testin
 	}
 }
 
-func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
+func TestSplit_SearchRetargetMutationDefersReadsUntilRestore(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
+	closed := Issue{
+		ProjectID: 7,
+		UID:       "01TEST-aaa1",
+		ShortID:   "aaa1",
+		Title:     "other row",
+		Status:    "closed",
+	}
+	api := &splitSearchRestoreAPI{KataAPI: m.api, issue: &closed}
+	m.api = api
 	m.detail.gen = 41
 	m.nextGen = 41
 	m.input.preSplitDetail.gen = 41
@@ -1483,26 +1518,23 @@ func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
 	if mutationCmd == nil {
 		t.Fatal("snapshot-only mutation returned no refresh commands")
 	}
-	batch, ok := mutationCmd().(tea.BatchMsg)
-	if !ok || len(batch) != 2 {
-		t.Fatalf("mutation refresh = %T len %d, want list debounce plus detail batch", batch, len(batch))
+	if msg := mutationCmd(); isDetailFetchMsg(msg) {
+		t.Fatalf("off-pane mutation dispatched a detail read: %T", msg)
+	} else if batch, ok := msg.(tea.BatchMsg); ok {
+		t.Fatalf("off-pane mutation dispatched unexpected batch of %d", len(batch))
 	}
 	if !m.pendingRefetch {
 		t.Fatal("snapshot-only mutation did not schedule list refetch")
 	}
 
-	closed := Issue{
-		ProjectID: 7,
-		UID:       "01TEST-aaa1",
-		ShortID:   "aaa1",
-		Title:     "other row",
-		Status:    "closed",
-	}
-	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &closed})
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cancelCmd == nil {
 		t.Fatal("snapshot cancel returned no freshness refetch")
+	}
+	m = runInboxRestoreCmd(m, cancelCmd)
+	if api.issueCalls != 1 || api.lastIssueRef != "aaa1" {
+		t.Fatalf("restoration detail reads = %d calls for %q, want one call for aaa1", api.issueCalls, api.lastIssueRef)
 	}
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.issue.Status != "closed" {
 		t.Fatalf("restored detail = %+v, want refreshed closed aaa1", m.detail.issue)
@@ -1581,11 +1613,11 @@ func TestSplit_SearchCancelRejectsOlderSameGenerationFetchResults(t *testing.T) 
 		t.Errorf("restored issue = %+v, want newer response", m.detail.issue)
 	}
 	if len(m.detail.comments) != 1 || m.detail.comments[0].Body != "newer comment response" {
-		t.Errorf("restored comments = %+v, want newer response", m.detail.comments)
+		t.Errorf("restored comments=%+v, want newer response", m.detail.comments)
 	}
 }
 
-func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) {
+func TestSplit_SearchSnapshotRejectsAllDepartedFetches(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -1624,8 +1656,8 @@ func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) {
 	m, _ = stepModel(m, newIssueCmd())
 	m, _ = stepModel(m, newCommentsCmd())
 	if m.input.preSplitDetail == nil || m.input.preSplitDetail.issue == nil ||
-		m.input.preSplitDetail.issue.Title != "newer issue response" {
-		t.Fatalf("newer snapshot-only responses did not update saved detail: %+v", m.input.preSplitDetail)
+		m.input.preSplitDetail.issue.Title != "initial detail" {
+		t.Fatalf("departed responses changed saved detail: %+v", m.input.preSplitDetail)
 	}
 	m, _ = stepModel(m, oldIssueCmd())
 	m, _ = stepModel(m, oldCommentsCmd())
@@ -1635,11 +1667,11 @@ func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) {
 	if cancelCmd == nil {
 		t.Fatal("snapshot cancel returned no freshness refetch")
 	}
-	if m.detail.issue == nil || m.detail.issue.Title != "newer issue response" {
-		t.Errorf("restored issue = %+v, want newer response", m.detail.issue)
+	if m.detail.issue == nil || m.detail.issue.Title != "initial detail" {
+		t.Errorf("restored issue = %+v, want pre-search snapshot awaiting fresh reads", m.detail.issue)
 	}
-	if len(m.detail.comments) != 1 || m.detail.comments[0].Body != "newer comment response" {
-		t.Errorf("restored comments = %+v, want newer response", m.detail.comments)
+	if len(m.detail.comments) != 0 {
+		t.Errorf("departed comments entered restored snapshot: %+v", m.detail.comments)
 	}
 }
 

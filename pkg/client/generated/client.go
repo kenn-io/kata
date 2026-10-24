@@ -4179,6 +4179,7 @@ func (c *Client) PollProjectEvents(ctx context.Context, options *PollProjectEven
 
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"after_id": {Style: "form", Explode: &[]bool{false}[0]},
+		"issue":    {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":    {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

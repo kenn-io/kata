@@ -44,9 +44,7 @@ const (
 // detailAPI is the subset of *Client the detail view needs. Mirrors
 // listAPI so detail_test.go can drive Update with a fake. ref is a
 // short_id, qualified short_id, or 26-char ULID — the daemon's path
-// resolver accepts all three; ListEvents reads the issue_short_id
-// embedded in each event row to filter the project-wide poll
-// response.
+// resolver and issue-filtered history query accept all three.
 type detailAPI interface {
 	GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error)
 	ListComments(ctx context.Context, projectID int64, ref string) ([]CommentEntry, error)
@@ -99,6 +97,10 @@ type detailAPI interface {
 // "comments: <err>") so the user can tell whether an empty tab is the
 // daemon still working or a real failure they should react to.
 type detailModel struct {
+	reads *detailReadBatch
+	// readRef is the ref the current reads target. It lets a pane restart
+	// reads before its first issue response, such as a pending link jump.
+	readRef            string
 	issue              *Issue
 	parent             *IssueRef
 	children           []Issue
@@ -162,13 +164,14 @@ type detailFetchSequences struct {
 }
 
 // newDetailModel returns a zeroed detailModel.
-func newDetailModel() detailModel { return detailModel{} }
+func newDetailModel() detailModel { return detailModel{reads: &detailReadBatch{}} }
 
 // cloneDetailModel returns a snapshot that shares no mutable issue, slice, or
 // event-payload state with dm. Error values are retained by interface because
 // detail errors are immutable once installed.
 func cloneDetailModel(dm detailModel) detailModel {
 	cloned := dm
+	cloned.reads = &detailReadBatch{}
 	cloned.issue = cloneIssue(dm.issue)
 	if dm.parent != nil {
 		parent := *dm.parent
@@ -322,6 +325,9 @@ func (dm detailModel) applyFetched(msg tea.Msg) detailModel {
 // internal messages and focused model tests that do not represent overlapping
 // requests.
 func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
+	if !dm.acceptReadResult(msg) {
+		return dm, false
+	}
 	switch m := msg.(type) {
 	case detailFetchedMsg:
 		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.issue) {
@@ -510,6 +516,9 @@ func (dm detailModel) handleNavKey(
 		return next, cmd, true
 	case km.Back.matches(msg):
 		next, cmd := dm.handleBack()
+		if next.gen != dm.gen && api != nil {
+			cmd = next.refetch(api)
+		}
 		return next, cmd, true
 	default:
 		return dm, nil, false
@@ -685,7 +694,8 @@ func (dm detailModel) handleBack() (detailModel, tea.Cmd) {
 	if len(dm.navStack) == 0 {
 		return dm, popDetailCmd()
 	}
-	prev := dm.navStack[len(dm.navStack)-1]
+	dm.cancelReads()
+	prev := cloneDetailModel(dm.navStack[len(dm.navStack)-1])
 	prev.navStack = dm.navStack[:len(dm.navStack)-1]
 	return prev, nil
 }

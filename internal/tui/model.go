@@ -404,6 +404,8 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	previousReads := m.detail.reads
+	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
 	m = next.(Model)
 	query := strings.TrimSpace(m.list.filter.Search)
@@ -424,6 +426,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg, tea.FocusMsg:
 		visit = true
 	}
+	if previousReads != nil && (previousReads != m.detail.reads || previousConn != m.connGen || previousScope != m.scopeGen) {
+		previousReads.stop()
+	}
+	cmd = combineCmds(cmd, m.finishDetailRefresh())
 	screenCmd := m.screenViewCommand(visit)
 	return m, tea.Batch(cmd, screenCmd)
 }
@@ -465,9 +471,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.staleConnMsg(mut.connGen) {
 			return m, nil
 		}
-		snapshotCmd := m.searchSnapshotMutationRefetch(mut)
-		next, cmd := m.routeMutation(mut)
-		return next, combineCmds(cmd, snapshotCmd)
+		return m.routeMutation(mut)
 	}
 	if done, ok := msg.(undoDoneMsg); ok {
 		return m.handleUndoDone(done)
@@ -649,6 +653,10 @@ func (m Model) maybeBootstrapSplitDetail() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.detail.issue != nil {
+		if m.detail.reads != nil && m.detail.reads.canceled {
+			cmd := m.detail.refetch(m.api)
+			return m, cmd
+		}
 		return m, nil
 	}
 	return m.scheduleDetailFollow()
@@ -944,6 +952,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case popDetailMsg:
 		if m.staleConnMsg(msg.connGen) {
 			return m, nil, true
+		}
+		if m.layout != splitlayout.Split {
+			m.detail.cancelReads()
 		}
 		if m.attention.returnToAttention {
 			next, cmd := m.returnFromAttentionDetail()
@@ -1324,11 +1335,10 @@ func (m Model) restoreSearchDetailIfNeeded(
 		if detailModelMatches(snapshot, iss.UID, pid) {
 			liveMatches := detailModelMatches(&m.detail, iss.UID, pid)
 			if liveMatches {
-				// Preserve the newer live generation so its outstanding responses
-				// and fetched content remain eligible, while restoring the pre-search
-				// presentation/navigation state and any mutation outcome that advanced
-				// only on the saved generation. A fresh live-generation refetch
-				// converges component data without allowing older requests to win.
+				// Preserve the newer live generation and its fetched content while
+				// restoring the pre-search presentation/navigation state and any
+				// mutation outcome that advanced only on the saved generation. The
+				// refetch replaces outstanding live reads, so older requests cannot win.
 				saved := cloneDetailModel(*snapshot)
 				m.detail.detailFocus = saved.detailFocus
 				m.detail.activeTab = saved.activeTab
@@ -1363,7 +1373,7 @@ func (m Model) restoreSearchDetailIfNeeded(
 	return m, combineCmds(prior, m.refetchRestoredDetail())
 }
 
-func (m Model) refetchRestoredDetail() tea.Cmd {
+func (m *Model) refetchRestoredDetail() tea.Cmd {
 	if m.api == nil {
 		return nil
 	}
@@ -1389,12 +1399,11 @@ func (m Model) captureSearchSplitDetail() Model {
 	return m
 }
 
-// syncSearchDetailSnapshot mirrors every generation-matched async detail
-// result into the saved pre-search model. Fetch results flow through
-// detailModel.applyFetched, while mutation completions share the state-only
-// portion of detailModel.applyMutation. This keeps fetched content plus
-// mutation status/errors converged without dispatching a duplicate refetch,
-// while preserving the snapshot's tab, cursor, scroll, and navigation state.
+// syncSearchDetailSnapshot mirrors current live read results and independent
+// generation-matched mutation outcomes into the saved pre-search model. Fetch
+// results flow through detailModel.applyFetched, while mutation completions
+// share the state-only portion of detailModel.applyMutation. The snapshot keeps
+// its tab, cursor, scroll, and navigation state; restoring it refetches.
 func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
 	if !m.input.kind.isCommandBar() || m.input.preSplitDetail == nil {
 		return m
@@ -1414,6 +1423,11 @@ func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
 	if !isDetailFetchMsg(msg) {
 		return m
 	}
+	// Synthetic zero-sequence messages remain available to focused model
+	// tests; actual reads must belong to the active dispatch before mirroring.
+	if _, seq, _ := detailReadResult(msg); seq != 0 && !m.detail.readResultCurrent(msg) {
+		return m
+	}
 	updated, applied := m.input.preSplitDetail.applyFetchedIfFresh(msg)
 	if !applied {
 		return m
@@ -1421,21 +1435,6 @@ func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
 	snapshot := cloneDetailModel(updated)
 	m.input.preSplitDetail = &snapshot
 	return m
-}
-
-// searchSnapshotMutationRefetch returns the normal post-mutation detail
-// refresh when a successful completion belongs to the saved pre-search detail
-// but can no longer reach the retargeted live pane. syncSearchDetailSnapshot
-// has already applied the mutation status to that saved model; this preserves
-// the issue and activity refresh that detailModel.applyMutation would have
-// dispatched if its generation still matched live detail.
-func (m Model) searchSnapshotMutationRefetch(mut mutationDoneMsg) tea.Cmd {
-	if m.api == nil || mut.err != nil || mut.origin != "detail" ||
-		m.input.preSplitDetail == nil || mut.gen != m.input.preSplitDetail.gen ||
-		mut.gen == m.detail.gen {
-		return nil
-	}
-	return m.input.preSplitDetail.refetch(m.api)
 }
 
 func combineCmds(first, second tea.Cmd) tea.Cmd {
@@ -1643,6 +1642,15 @@ func (m Model) detailPaneVisible() bool {
 		return false
 	}
 	return m.detailIsActive()
+}
+
+// detailRefreshEligible reports whether an open detail should receive
+// background freshness reads. Stacked Help retains the detail it covers, and
+// split layout keeps its detail current regardless of focus or overlay.
+func (m Model) detailRefreshEligible() bool {
+	return m.view == viewDetail ||
+		(m.view == viewHelp && m.prevView == viewDetail) ||
+		m.layout == splitlayout.Split
 }
 
 // listIsActive is the focusList counterpart of detailIsActive. In
@@ -2245,10 +2253,12 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	// ctrl+c bypasses the confirm modal — fast quit for power users.
 	if msg.String() == "ctrl+c" {
+		m.detail.cancelReads()
 		return m, tea.Quit, true
 	}
 	if m.keymap.Quit.matches(msg) {
 		if m.opts.SkipQuitConfirm {
+			m.detail.cancelReads()
 			return m, tea.Quit, true
 		}
 		m.modal = modalQuitConfirm
@@ -2422,6 +2432,9 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
+		return next, cmd, true
+	case detailRefreshTickMsg:
+		next, cmd := m.handleDetailRefreshTick(msg)
 		return next, cmd, true
 	case detailFollowTickMsg:
 		next, cmd := m.handleDetailFollowTick(msg)
@@ -2627,8 +2640,8 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // All four run because the event-kind alone isn't enough to know which
 // tab needs refreshing — for example, issue.commented refreshes
 // comments but issue.linked refreshes links, and issue.relabeled
-// touches the body header. Refetching all four is cheap (the daemon
-// has these in cache) and keeps every tab fresh without a kind switch.
+// touches the body header. Coalescing all four keeps every tab fresh
+// without overlapping batches or restarting useful in-flight reads.
 //
 // The match normally requires projectID and the watched issue's UID to
 // align with the event's subject — UID is canonical and the
@@ -2646,15 +2659,8 @@ func (m Model) eventAffectsView(msg eventReceivedMsg) bool {
 // prior projection dropped that endpoint. Project lifecycle events match the
 // endpoint's displayed project ID when available. Each fetch is tagged with
 // the current detail-open gen so applyFetched drops it if the user navigates.
-func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
+func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if m.api == nil {
-		return nil
-	}
-	// Detail is open if either the stacked view shows detail OR the
-	// split layout has a detail issue loaded (regardless of focus —
-	// the pane is visible either way and any SSE invalidation should
-	// keep it fresh).
-	if m.view != viewDetail && m.layout != splitlayout.Split {
 		return nil
 	}
 	if m.detail.issue == nil {
@@ -2666,19 +2672,12 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
-	pid := m.detail.scopePID
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
 	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival {
 		return nil
 	}
-	gen := m.detail.gen
-	return tea.Batch(
-		fetchIssue(m.api, pid, ref, gen),
-		fetchComments(m.api, pid, ref, gen),
-		fetchEvents(m.api, pid, ref, gen),
-		fetchLinks(m.api, pid, ref, gen),
-	)
+	return m.scheduleDetailRefresh()
 }
 
 // matchesIssue reports whether the event names the watched issue.
@@ -2908,30 +2907,21 @@ func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// refetchOpenDetail batches the four detail fetches when the user is
-// looking at a detail pane. Used by reset_required and any other path
-// that needs to repopulate the open issue without an issue-targeted
-// SSE event to drive maybeRefetchOpenDetail.
+// refetchOpenDetail batches the four detail fetches for an eligible pane.
+// Used by reset_required and paths that need to repopulate the open issue
+// without an issue-targeted SSE event to drive maybeRefetchOpenDetail.
 //
 // In M6 split layout the detail pane is always visible when an
 // issue is loaded (regardless of focus), so the same fetch fires
 // to keep it fresh even while focus is on the list.
-func (m Model) refetchOpenDetail() tea.Cmd {
+func (m *Model) refetchOpenDetail() tea.Cmd {
 	if m.api == nil || m.detail.issue == nil {
 		return nil
 	}
-	if m.view != viewDetail && m.layout != splitlayout.Split {
+	if !m.detailRefreshEligible() {
 		return nil
 	}
-	pid := m.detail.scopePID
-	ref := m.detail.issue.ShortID
-	gen := m.detail.gen
-	return tea.Batch(
-		fetchIssue(m.api, pid, ref, gen),
-		fetchComments(m.api, pid, ref, gen),
-		fetchEvents(m.api, pid, ref, gen),
-		fetchLinks(m.api, pid, ref, gen),
-	)
+	return m.detail.refetch(m.api)
 }
 
 // handleToastExpired clears m.toast iff the active toast is past its
@@ -3000,12 +2990,14 @@ func (m Model) canQuit() bool {
 // (roborev #111 finding 1).
 func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		m.detail.cancelReads()
 		return m, tea.Quit
 	}
 	switch m.modal {
 	case modalQuitConfirm:
 		switch msg.String() {
 		case "y", "Y":
+			m.detail.cancelReads()
 			return m, tea.Quit
 		case "n", "N", "esc":
 			m.modal = modalNone
@@ -3047,10 +3039,12 @@ func (m Model) handleOpenDetail(msg openDetailMsg) (tea.Model, tea.Cmd) {
 	if m.api == nil {
 		return m, nil
 	}
-	return m, m.fetchOpenDetail()
+	cmd := m.fetchOpenDetail()
+	return m, cmd
 }
 
 func (m Model) seedOpenDetail(iss Issue) Model {
+	m.detail.cancelReads()
 	pid := detailProjectID(iss, m.scope)
 	m.nextGen++
 	// Reset on open is the spec — no per-issue scroll memory.
@@ -3079,19 +3073,11 @@ func (m Model) seedOpenDetail(iss Issue) Model {
 	return m
 }
 
-func (m Model) fetchOpenDetail() tea.Cmd {
+func (m *Model) fetchOpenDetail() tea.Cmd {
 	if m.api == nil || m.detail.issue == nil {
 		return nil
 	}
-	iss := *m.detail.issue
-	pid := m.detail.scopePID
-	gen := m.detail.gen
-	return tea.Batch(
-		fetchIssue(m.api, pid, iss.ShortID, gen),
-		fetchComments(m.api, pid, iss.ShortID, gen),
-		fetchEvents(m.api, pid, iss.ShortID, gen),
-		fetchLinks(m.api, pid, iss.ShortID, gen),
-	)
+	return m.detail.refetch(m.api)
 }
 
 // handleJumpDetail performs an Enter-jump from the detail view to a
@@ -3136,7 +3122,8 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 		// or 404s. No-op the jump instead of navigating to the wrong issue.
 		return m, nil
 	}
-	prior := m.detail
+	m.detail.cancelReads()
+	prior := cloneDetailModel(m.detail)
 	prior.navStack = nil
 	m.nextGen++
 	gen := m.nextGen
@@ -3161,13 +3148,8 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 		linksLoading:       true,
 	}
 	m.detail = m.applyDetailViewportCache(next)
-	cmds := []tea.Cmd{
-		fetchIssue(m.api, pid, msg.ref, gen),
-		fetchComments(m.api, pid, msg.ref, gen),
-		fetchEvents(m.api, pid, msg.ref, gen),
-		fetchLinks(m.api, pid, msg.ref, gen),
-	}
-	return m, tea.Batch(cmds...)
+	cmd := m.detail.fetchDetail(m.api, msg.ref)
+	return m, cmd
 }
 
 // jumpProjectID resolves the project_id the jump's fetches should run
@@ -3356,8 +3338,11 @@ func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
 	if m.attention.returnToAttention {
 		return m, nil
 	}
+	m.detail.cancelReads()
 	iss, ok := pickHighlightedIssue(m.list)
 	if !ok {
+		m.nextDetailFollowGen++
+		m.detail = m.applyDetailViewportCache(newDetailModel())
 		return m, nil
 	}
 	pid := detailProjectID(iss, m.scope)
@@ -3406,15 +3391,8 @@ func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) 
 	if m.api == nil || m.detail.issue == nil {
 		return m, nil
 	}
-	pid := m.detail.scopePID
-	ref := m.detail.issue.ShortID
-	gen := m.detail.gen
-	return m, tea.Batch(
-		fetchIssue(m.api, pid, ref, gen),
-		fetchComments(m.api, pid, ref, gen),
-		fetchEvents(m.api, pid, ref, gen),
-		fetchLinks(m.api, pid, ref, gen),
-	)
+	cmd := m.detail.refetch(m.api)
+	return m, cmd
 }
 
 // View wraps viewContent in the declarative tea.View that Bubble Tea
