@@ -467,7 +467,7 @@ func defaultLaunchDetachedDaemon(
 
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
-	err = client.WaitForDaemonStartup(ctx, 5*time.Second, exited, func(context.Context) (bool, error) {
+	err = client.WaitForDaemonStartup(ctx, daemonRestartProcessWaitTimeout+5*time.Second, exited, func(context.Context) (bool, error) {
 		var ok bool
 		record, ok = liveDaemonRecord(dataDir, pid)
 		if ok || !childExited.Load() {
@@ -1207,9 +1207,18 @@ func runDaemonProcess(
 	// A foreground launch must reject an existing daemon before opening
 	// storage: a cutover cannot replace a database still owned by its writer.
 	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	records, err := runtimeStore.List()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if daemonruntime.RuntimeRecordBlocksStart(record) {
+			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
+		}
+	}
 	// Listener close removes the record before the old owner's drain ends.
 	// Allow that drain plus cleanup time before refusing a replacement.
-	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonShutdownDrainTimeout+5*time.Second)
+	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonRestartProcessWaitTimeout)
 	releaseOwner, err := runtimeStore.AcquireOwnerLock(ownerCtx)
 	ownerCancel()
 	if err != nil {
@@ -1225,7 +1234,7 @@ func runDaemonProcess(
 			releaseOwner()
 		}
 	}()
-	records, err := runtimeStore.List()
+	records, err = runtimeStore.List()
 	if err != nil {
 		return err
 	}
