@@ -469,7 +469,7 @@ updated_at=$7,closed_at=$8,priority=$9`+bump+` WHERE id=$10`,
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	event, err := s.insertEventTx(ctx, tx, eventInsert{
+	event, err := s.insertEventTx(ctx, tx, eventInsert{StatusBefore: &existing.Status,
 		ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
 		IssueID: &existing.ID, IssueUID: &existing.UID, Type: "issue.updated",
 		Actor: params.Actor, Payload: payload,

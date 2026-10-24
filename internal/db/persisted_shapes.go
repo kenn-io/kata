@@ -37,7 +37,7 @@ func ValidateFederationEnrollmentRelayShape(protocolVersion int, bindingUID *str
 		if bindingUID != nil || parentTokenID != nil || serveDownstream {
 			return errors.New("a legacy enrollment carries no relay binding, parent credential or downstream flag")
 		}
-	case RelayProtocolVersion:
+	case RelayProtocolVersion, ScopedRelayProtocolVersion:
 		if bindingUID == nil || !uid.Valid(*bindingUID) || parentTokenID == nil || projectID == nil {
 			return errors.New("a relay enrollment requires a binding identity, parent credential and project")
 		}

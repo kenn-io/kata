@@ -225,6 +225,10 @@ func (s *Store) IngestFederationEvents(
 				return err
 			}
 
+			if err := s.markScopedCanonicalEventsDirtyTx(ctx, tx, cronTargets...); err != nil {
+				return err
+			}
+
 			if !adoptionState.shouldDeferMarker {
 				err = consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx, params.ProjectID, params.FederationEnrollmentID, params.SpokeInstanceUID)
 			} else {
@@ -242,7 +246,10 @@ func (s *Store) IngestFederationEvents(
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return db.FederationIngestResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Store) insertFederationEventTx(

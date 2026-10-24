@@ -23,6 +23,8 @@ const eventSelect = `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.
   LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)`
 
 type eventInsert struct {
+	// StatusBefore is local transaction state, excluded from source/hash/wire.
+	StatusBefore      *string
 	ProjectID         int64
 	ProjectUID        string
 	ProjectName       string
@@ -427,6 +429,14 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 		}
 	} else if err := s.attachStoredRootReceiptTx(ctx, tx, event); err != nil {
 		return db.Event{}, err
+	}
+	if input.ContentHash == "" {
+		if err := s.recordScopedCanonicalCloseEventTx(ctx, tx, event, input.StatusBefore); err != nil {
+			return db.Event{}, err
+		}
+		if err := s.markScopedCanonicalEventsDirtyTx(ctx, tx, db.RemoteEventFromStored(event)); err != nil {
+			return db.Event{}, err
+		}
 	}
 	if !input.SkipRelay {
 		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {

@@ -16,6 +16,7 @@ import (
 // Request fences still run first and may themselves acquire the writer lock.
 type federationMaterialization struct {
 	projection   db.FoldProjection
+	closeIssues  map[string]db.FoldIssue
 	cronAffected bool
 	status       []federatedStatusIntentUpdate
 	binding      db.FederationBinding
@@ -78,6 +79,10 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	m.closeIssues = make(map[string]db.FoldIssue, len(m.projection.Issues))
+	for uid, issue := range m.projection.Issues {
+		m.closeIssues[uid] = issue
+	}
 	if len(issueScope) > 0 {
 		// Historical project events can affect issue authors, but an issue-only
 		// page must not reconcile unrelated project metadata.
@@ -145,6 +150,9 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 		if m.linkIDs != nil {
 			m.linkIDs[uid] = id
 		}
+	}
+	if err := persistScopedCanonicalCloseProjectionTx(ctx, tx, m.binding.HubProjectUID, m.closeIssues); err != nil {
+		return err
 	}
 	if err := applyFederatedStatusIntentTx(ctx, tx, m.status); err != nil {
 		return err

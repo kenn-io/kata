@@ -112,7 +112,7 @@ func (s *Store) observeIssueStatusTx(ctx context.Context, tx *sql.Tx, p db.Issue
 	if err != nil {
 		return false, nil, err
 	}
-	event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueID: &issue.ID, IssueUID: &issue.UID, Type: "issue.updated", Actor: actorParams.Actor, Payload: string(body)})
+	event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueID: &issue.ID, IssueUID: &issue.UID, Type: "issue.updated", Actor: actorParams.Actor, Payload: string(body), StatusBefore: &issue.Status})
 	if err != nil {
 		return false, nil, err
 	}

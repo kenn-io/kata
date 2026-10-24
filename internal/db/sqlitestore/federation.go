@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"slices"
@@ -783,7 +784,7 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 		if err != nil {
 			return nil, err
 		}
-		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
+		if err := db.ValidateFederationEventEntries(ev); err != nil {
 			return nil, err
 		}
 		payloads[i], createdAts[i] = payload, createdAt
@@ -1255,6 +1256,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
+	if err := persistScopedCanonicalCloseProjectionTx(ctx, tx, binding.HubProjectUID, projection.Issues); err != nil {
+		return err
+	}
 	if err := reconcileFederatedStatusIntentTx(ctx, tx, projectID, events, acceptedEventUIDs, projection); err != nil {
 		return err
 	}
@@ -1341,6 +1345,16 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 }
 
 func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	// Legacy replica-clear cannot settle scoped custody/generation state.
+	// The retained floor survives grant revocation and keeps canonical root
+	// originals, current proof and owed captures behind verified scoped reset.
+	var scoped bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_scoped_projects sp JOIN projects p ON p.uid=sp.project_uid WHERE p.id=$1 AND sp.protocol_floor>=$2)`, projectID, db.ScopedRelayProtocolVersion).Scan(&scoped); err != nil {
+		return err
+	}
+	if scoped {
+		return db.ErrRelayResetRequiresRootProof
+	}
 	var relayConfig *string
 	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=?`, projectID).Scan(&relayConfig); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1585,6 +1599,18 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	proof, err := readScopedCanonicalCloseTx(ctx, tx, issue.UID)
+	if err != nil {
+		return "", err
+	}
+	if err := db.ValidateScopedCanonicalCloseState(proof, issue.UID, issue.Status); err != nil {
+		return "", err
+	}
+	var closeState *db.CanonicalCloseState
+	if proof.StatusClock.EventUID != "" || proof.StatusIntentUID != "" || proof.Value != nil {
+		closeState = &proof
+	}
+
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
@@ -1605,7 +1631,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	return buildIssueCreatedPayload(issueCreatedPayload{
+	return buildIssueCreatedPayload(issueCreatedPayload{CloseState: closeState,
 		UID:                 issue.UID,
 		ShortID:             issue.ShortID,
 		Title:               issue.Title,
@@ -1833,6 +1859,9 @@ func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, err
 // Reset removes replica evidence with its event provenance after ordinary
 // pending-publication and integration guards succeed.
 func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := clearScopedCanonicalCloseProjectTx(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
 		return err
 	}
@@ -2761,7 +2790,9 @@ func pruneFederatedIssues(ctx context.Context, tx *sql.Tx, projectID int64, issu
 // deleteUnreferencedFederatedIssues removes stale projection rows, keyed by
 // issue UID, that no stored event still references.
 func deleteUnreferencedFederatedIssues(ctx context.Context, tx *sql.Tx, candidates map[string]int64) error {
-	for uid, id := range candidates {
+	var affected []string
+	for _, uid := range slices.Sorted(maps.Keys(candidates)) {
+		id := candidates[uid]
 		var refs int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT count(*)
@@ -2772,11 +2803,20 @@ func deleteUnreferencedFederatedIssues(ctx context.Context, tx *sql.Tx, candidat
 		if refs > 0 {
 			continue
 		}
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=$1`, id).Scan(&projectUID); err != nil {
+			return err
+		}
+		projects, err := removeScopedCanonicalCloseIssueTx(ctx, tx, db.Issue{ID: id, UID: uid, ProjectUID: projectUID})
+		if err != nil {
+			return err
+		}
+		affected = append(affected, projects...)
 		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, id); err != nil {
 			return fmt.Errorf("delete stale federated issue %s: %w", uid, err)
 		}
 	}
-	return nil
+	return markScopedCanonicalDirtyTx(ctx, tx, affected...)
 }
 
 func nonEmptyTime(s string) string {

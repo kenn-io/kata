@@ -14,20 +14,34 @@ import (
 // LocalActor authorizes local setup; Binding.Actor remains the upstream account.
 // Source actor labels never establish either authority.
 type RelayBindingConfig struct {
-	ProtocolVersion     int      `json:"protocol_version"`
-	BindingUID          string   `json:"binding_uid"`
-	UpstreamInstanceUID string   `json:"upstream_instance_uid"`
-	AuthorityUID        string   `json:"authority_uid"`
-	HubPath             []string `json:"hub_path"`
-	LocalActor          string   `json:"local_actor"`
-	ServeDownstream     bool     `json:"serve_downstream"`
-	ResetEpoch          int64    `json:"reset_epoch"`
-	UpstreamRevoked     bool     `json:"upstream_revoked"`
+	ScopedView          *ScopedViewKey `json:"scoped_view,omitempty"`
+	RootCutoverUID      string         `json:"root_cutover_uid,omitempty"`
+	ProtocolVersion     int            `json:"protocol_version"`
+	BindingUID          string         `json:"binding_uid"`
+	UpstreamInstanceUID string         `json:"upstream_instance_uid"`
+	AuthorityUID        string         `json:"authority_uid"`
+	HubPath             []string       `json:"hub_path"`
+	LocalActor          string         `json:"local_actor"`
+	ServeDownstream     bool           `json:"serve_downstream"`
+	ResetEpoch          int64          `json:"reset_epoch"`
+	UpstreamRevoked     bool           `json:"upstream_revoked"`
 }
 
 // Validate checks the negotiated protocol and acyclic authority path.
 func (c RelayBindingConfig) Validate(instanceUID string) error {
-	if c.ProtocolVersion != RelayProtocolVersion || !uid.Valid(c.BindingUID) || !uid.Valid(c.AuthorityUID) || !uid.Valid(c.UpstreamInstanceUID) || c.UpstreamInstanceUID == instanceUID || c.AuthorityUID == instanceUID || c.ResetEpoch <= 0 || strings.TrimSpace(c.LocalActor) == "" || c.LocalActor != strings.TrimSpace(c.LocalActor) {
+	switch c.ProtocolVersion {
+	case RelayProtocolVersion:
+		if c.ScopedView != nil || c.RootCutoverUID != "" {
+			return errors.New("v1 relay carries scoped identity")
+		}
+	case ScopedRelayProtocolVersion:
+		if c.ScopedView == nil || c.ScopedView.Validate() != nil || !uid.Valid(c.RootCutoverUID) {
+			return errors.New("v2 relay lacks scoped view/cutover identity")
+		}
+	default:
+		return errors.New("unsupported negotiated relay protocol")
+	}
+	if !uid.Valid(c.BindingUID) || !uid.Valid(c.AuthorityUID) || !uid.Valid(c.UpstreamInstanceUID) || c.UpstreamInstanceUID == instanceUID || c.AuthorityUID == instanceUID || c.ResetEpoch <= 0 || strings.TrimSpace(c.LocalActor) == "" || c.LocalActor != strings.TrimSpace(c.LocalActor) {
 		return errors.New("invalid negotiated relay identity or account")
 	}
 	maxNodes := MaxRelayHubs
@@ -163,6 +177,9 @@ func validateRelayConfigurationReplay(records []ImportRecord) error {
 			if c := r.RelayConfig; c != nil {
 				if err := c.Validate(instanceUID); err != nil {
 					return err
+				}
+				if c.ProtocolVersion == ScopedRelayProtocolVersion {
+					continue
 				}
 				project := projects[r.ProjectID]
 				if project == "" || project != r.HubProjectUID || r.Role != string(FederationRoleSpoke) || pins[project] != c.AuthorityUID || strings.TrimSpace(r.Actor) == "" {

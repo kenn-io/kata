@@ -114,7 +114,7 @@ type RelayResetBackend interface {
 	ExternalRootBindingExists(ctx context.Context, projectID int64) (bool, error)
 	// ValidateRelayResetEvents runs the backend's federation event validation
 	// over the decoded checkpoint events as a complete project replacement.
-	ValidateRelayResetEvents(projectUID string, events []RemoteEvent) error
+	ValidateRelayResetEvents(ctx context.Context, projectUID string, events []RemoteEvent) error
 	// ReplaceRelayHistory deletes every project event except daemon-local
 	// catalog history (RelayResetRetainedEventTypesSQL) and clears the
 	// federated projection. PostgreSQL serializes the event sequence first.

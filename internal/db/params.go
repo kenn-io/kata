@@ -91,6 +91,8 @@ type CreateIssueParams struct {
 // fields are written to the close event so a caller can recover its original
 // receipt after losing the response.
 type CloseIssueParams struct {
+	// CloseValue is resolved native input, never a caller-supplied wire authority.
+	CloseValue             *ScopedCloseValue `json:"-"`
 	IssueID                int64
 	ExpectedProjectID      int64
 	Reason                 string

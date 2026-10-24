@@ -258,6 +258,13 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 		return db.PurgeLog{}, db.ErrFederationResetBlockedByPendingPush
 	}
 
+	projects, err := removeScopedCanonicalCloseIssueTx(ctx, conn, issue)
+	if err != nil {
+		return db.PurgeLog{}, err
+	}
+	if err := d.markScopedCanonicalDirtyTx(ctx, conn, projects...); err != nil {
+		return db.PurgeLog{}, err
+	}
 	purgeLogID, err := purgeCascade(ctx, conn, issue, projectName, actor, reason, d.instanceUID)
 	if err != nil {
 		return db.PurgeLog{}, err

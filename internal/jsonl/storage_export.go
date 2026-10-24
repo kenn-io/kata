@@ -44,6 +44,11 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		defer func() { _ = release() }()
 		store = snapshot
 	}
+	if opts.ProjectID <= 0 && !opts.IncludeDeleted {
+		if err := checkScopedCloseExportFilter(ctx, store); err != nil {
+			return err
+		}
+	}
 	enc := NewEncoder(w)
 	f := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
 	if opts.ProjectID > 0 {
@@ -180,7 +185,13 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 			return err
 		}
 	}
-	return exportEmbeddingArtifacts(ctx, enc, store, f)
+	if err := exportEmbeddingArtifacts(ctx, enc, store, f); err != nil {
+		return err
+	}
+	if f.ProjectID == nil {
+		return exportScopedState(ctx, enc, store)
+	}
+	return nil
 }
 
 // streamExport ranges seq and writes each row as a kind-tagged envelope to enc.
@@ -236,6 +247,70 @@ func exportEmbeddingArtifacts(ctx context.Context, enc *Encoder, store any, filt
 			return err
 		}
 		if err := writeRecord(enc, KindEmbeddingArtifact, record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type scopedStateExporter interface {
+	ExportScopedState(context.Context) iter.Seq2[db.ImportRecord, error]
+}
+
+// A live-only owner export cannot detach retained close proofs from their
+// native subjects or peers. Use only Export* readers on the pinned snapshot;
+// ordinary getters on a snapshot store may still read the live pool.
+func checkScopedCloseExportFilter(ctx context.Context, store db.Storage) error {
+	exporter, ok := store.(scopedStateExporter)
+	if !ok {
+		return fmt.Errorf("store cannot export schema35 scoped state")
+	}
+	issues := map[string]bool{}
+	for record, err := range exporter.ExportScopedState(ctx) {
+		if err != nil {
+			return err
+		}
+		close, ok := record.(*db.ScopedCanonicalCloseExport)
+		if !ok {
+			continue
+		}
+		issues[close.IssueUID] = true
+		if close.ValueBytes != nil {
+			var value db.ScopedCloseValue
+			if err := db.DecodeScopedRecord(close.ValueBytes, &value); err != nil {
+				return err
+			}
+			issues[value.PeerIssueUID] = true
+		}
+	}
+	if len(issues) == 0 {
+		return nil
+	}
+	filter := db.ExportFilter{IncludeDeleted: true}
+	// ExportProjects retains archived catalog entries even for live-only
+	// exports. Only the native issue filter can omit a retained dependency.
+	for issue, err := range store.ExportIssues(ctx, filter) {
+		if err != nil {
+			return err
+		}
+		if issues[issue.UID] && issue.DeletedAt != nil {
+			return fmt.Errorf("live-only export omits scoped close-proof dependencies; include deleted rows")
+		}
+	}
+	return nil
+}
+
+// Scoped custody is private owner-backup state and never a project export.
+func exportScopedState(ctx context.Context, enc *Encoder, store any) error {
+	exporter, ok := store.(scopedStateExporter)
+	if !ok {
+		return fmt.Errorf("store cannot export schema35 scoped state")
+	}
+	for record, err := range exporter.ExportScopedState(ctx) {
+		if err != nil {
+			return err
+		}
+		if err := writeRecord(enc, Kind(record.ImportKind()), record); err != nil {
 			return err
 		}
 	}

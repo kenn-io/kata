@@ -791,31 +791,32 @@ type issueSnapshotComment struct {
 }
 
 type issueCreatedPayload struct {
-	UID                    string                 `json:"uid"`
-	ShortID                string                 `json:"short_id"`
-	Title                  string                 `json:"title"`
-	Body                   string                 `json:"body"`
-	Author                 string                 `json:"author"`
-	Owner                  *string                `json:"owner,omitempty"`
-	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
-	Priority               *int64                 `json:"priority,omitempty"`
-	Status                 string                 `json:"status"`
-	ClosedReason           *string                `json:"closed_reason,omitempty"`
-	ClosedAt               *string                `json:"closed_at,omitempty"`
-	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               jsontext.Value         `json:"metadata"`
-	Labels                 []string               `json:"labels,omitempty"`
-	Links                  []createdLinkOut       `json:"links,omitempty"`
-	Comments               []issueSnapshotComment `json:"comments,omitempty"`
-	CreatedAt              string                 `json:"created_at"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitzero"`
-	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
-	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
-	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
-	Source                 string                 `json:"source,omitempty"`
-	ExternalID             string                 `json:"external_id,omitempty"`
+	CloseState             *db.CanonicalCloseState `json:"close_state,omitempty"`
+	UID                    string                  `json:"uid"`
+	ShortID                string                  `json:"short_id"`
+	Title                  string                  `json:"title"`
+	Body                   string                  `json:"body"`
+	Author                 string                  `json:"author"`
+	Owner                  *string                 `json:"owner,omitempty"`
+	AssignmentExpiresOn    *string                 `json:"assignment_expires_on,omitempty"`
+	Priority               *int64                  `json:"priority,omitempty"`
+	Status                 string                  `json:"status"`
+	ClosedReason           *string                 `json:"closed_reason,omitempty"`
+	ClosedAt               *string                 `json:"closed_at,omitempty"`
+	DeletedAt              *string                 `json:"deleted_at,omitempty"`
+	Metadata               jsontext.Value          `json:"metadata"`
+	Labels                 []string                `json:"labels,omitempty"`
+	Links                  []createdLinkOut        `json:"links,omitempty"`
+	Comments               []issueSnapshotComment  `json:"comments,omitempty"`
+	CreatedAt              string                  `json:"created_at"`
+	UpdatedAt              string                  `json:"updated_at,omitempty"`
+	Revision               int64                   `json:"revision,omitzero"`
+	IdempotencyKey         string                  `json:"idempotency_key,omitempty"`
+	IdempotencyFingerprint string                  `json:"idempotency_fingerprint,omitempty"`
+	RecurrenceUID          string                  `json:"recurrence_uid,omitempty"`
+	OccurrenceKey          string                  `json:"occurrence_key,omitempty"`
+	Source                 string                  `json:"source,omitempty"`
+	ExternalID             string                  `json:"external_id,omitempty"`
 }
 
 func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, author string) []createdLinkOut {
@@ -1725,6 +1726,9 @@ func (d *Store) closeIssueGuarded(
 	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
 		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
+	if err := validateScopedCloseValueTx(ctx, tx, issue.UID, p.Reason, p.CloseValue); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	if issue.Status == "closed" {
 		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
@@ -1771,6 +1775,7 @@ func (d *Store) closeIssueGuarded(
 		*parentSIDForPayload = parentSID
 	}
 	payloadBytes, err := json.Marshal(struct {
+		CloseValue             *db.ScopedCloseValue   `json:"close_value,omitempty"`
 		Reason                 string                 `json:"reason"`
 		ClosedAt               string                 `json:"closed_at"`
 		Message                string                 `json:"message,omitempty"`
@@ -1781,6 +1786,7 @@ func (d *Store) closeIssueGuarded(
 		IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
 		IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 	}{
+		CloseValue:             p.CloseValue,
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
@@ -2172,6 +2178,8 @@ func scanScheduledIssue(ctx context.Context, r rowScanner) (db.Issue, string, er
 
 // eventInsert is the tx-internal payload used by insertEventTx.
 type eventInsert struct {
+	// StatusBefore is local transaction state, excluded from source/hash/wire.
+	StatusBefore      *string
 	ProjectID         int64
 	ProjectUID        string
 	ProjectName       string
@@ -2726,6 +2734,14 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 		}
 	} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
 		return db.Event{}, err
+	}
+	if in.ContentHash == "" {
+		if err := d.recordScopedCanonicalCloseEventTx(ctx, tx, e, in.StatusBefore); err != nil {
+			return db.Event{}, err
+		}
+		if err := d.markScopedCanonicalEventsDirtyTx(ctx, tx, db.RemoteEventFromStored(e)); err != nil {
+			return db.Event{}, err
+		}
 	}
 	if !in.SkipRelay {
 		if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {

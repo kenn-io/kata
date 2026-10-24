@@ -84,6 +84,16 @@ WHERE project_id=$3`, replayHorizonEventID, pullCursorEventID, projectID); err !
 }
 
 func rejectLegacyFederationResetTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	// Legacy replica-clear cannot settle scoped custody/generation state.
+	// The retained floor survives grant revocation and keeps canonical root
+	// originals, current proof and owed captures behind verified scoped reset.
+	var scoped bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_scoped_projects sp JOIN projects p ON p.uid=sp.project_uid WHERE p.id=$1 AND sp.protocol_floor>=$2)`, projectID, db.ScopedRelayProtocolVersion).Scan(&scoped); err != nil {
+		return err
+	}
+	if scoped {
+		return db.ErrRelayResetRequiresRootProof
+	}
 	var relayConfig *string
 	if err := tx.QueryRowContext(ctx, `SELECT relay_config FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&relayConfig); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -126,6 +136,9 @@ func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) e
 }
 
 func clearFederatedProjectionTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := clearScopedCanonicalCloseProjectTx(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
 		return err
 	}

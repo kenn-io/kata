@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
-	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
-	canonicalIndexFingerprint      = "a58820c23d72461fc9197d28842ee01cd500d8f414ae8673138083c11c45f611"
+	canonicalColumnFingerprint     = "80a9b63d20603e9a1c02fc92b046bc8c04068ba767764d697cc7645b8bc61176"
+	canonicalConstraintFingerprint = "b3ac4b690d243cf39fe6d6826f1ddc6bac19e25aee48ba7297feebadec23a686"
+	canonicalIndexFingerprint      = "d5294d00c3e712fe2ea1b53653225899ca6572cbc7898ba5b31000cf66e1fa90"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -24,6 +24,27 @@ const (
 
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
+	"federation_scoped_views":           "view_uid,catalog_entry_uid,authority_uid,binding_uid,epoch,accountable_actor,route_digest,destination_uid,active_generation,prepared_generation,state,reason_code,request_digest",
+	"federation_scoped_generations":     "view_uid,generation,descriptor_bytes,descriptor_digest,checkpoint_bytes,checkpoint_digest,cut_sequence,cut_digest,state,assembled_bytes,root_cutover_uid",
+	"federation_scoped_projects":        "project_uid,owner_view_uid,owner_generation,protocol_floor,root_cutover_uid,conversion_uid,serving_fenced",
+	"federation_scoped_records":         "view_uid,generation,collection,record_key,project_uid,subject_uid,peer_project_uid,peer_uid,visible_revision,present,record_bytes,digest",
+	"federation_scoped_batches":         "view_uid,generation,sequence,digest,previous_digest,capture_uid,batch_bytes",
+	"federation_scoped_work":            "view_uid,dirty_revision,captured_revision,capture_uid,capture_bytes,capture_digest,state",
+	"federation_scoped_delivery":        "binding_uid,epoch,direction,channel,sequence,object_uid,object_digest,offered_digest,header_bytes,envelope_bytes,accepted,emitted,acknowledged,upstream_binding_uid,upstream_epoch,upstream_direction,upstream_channel,upstream_sequence",
+	"federation_scoped_cursors":         "binding_uid,epoch,direction,channel,received_sequence,received_digest,accepted_sequence,accepted_digest,emitted_sequence,emitted_digest,acknowledged_sequence,acknowledged_digest",
+	"federation_source_operations":      "operation_uid,digest,source_instance_uid,command_kind,manifest_bytes,principal_bytes,principal_key,state,overlay_state,admission_bytes,terminal_bytes,cancel_requested,idempotency_key,request_fingerprint",
+	"federation_private_sources":        "event_uid,content_hash,project_uid,operation_uid,ordinal,conversion_uid,event_bytes,provenance_bytes",
+	"federation_source_custody":         "operation_uid,binding_uid,epoch,direction,principal_bytes,manifest_digest,owns_complete,result_acknowledged,invalidation_state",
+	"federation_source_dependencies":    "operation_uid,project_uid,issue_uid,establishing_operation_uid,proof_bytes,state,terminal_reason",
+	"federation_source_coverage":        "operation_uid,view_uid,generation,cut_digest,outcome,certificate_bytes",
+	"federation_control_custody":        "request_uid,binding_uid,request_digest,principal_bytes,request_bytes,result_bytes,state,result_acknowledged,conversion_uid",
+	"federation_mutation_expectations":  "token_digest,project_uid,subject_uid,predicate_kind,predicate_bytes,principal_bytes,route_digest,nonce,expires_at,consumed_operation_uid",
+	"federation_predicate_incarnations": "project_uid,subject_uid,predicate_kind,incarnation,canonical_digest",
+	"federation_canonical_close_state":  "issue_uid,project_uid,status_intent_uid,status_clock_bytes,value_bytes",
+	"federation_protocol_cutovers":      "cutover_uid,request_digest,project_uids_bytes,floor,readiness_bytes,suspended_bindings_bytes,certificate_bytes,state",
+	"federation_scoped_conversions":     "conversion_uid,request_digest,request_bytes,old_bindings_bytes,root_cutover_uid,inventory_digest,baseline_digest,phase,result_bytes",
+	"federation_conversion_obligations": "conversion_uid,obligation_uid,kind,binding_uid,object_uid,digest,epoch,sequence,principal_key,state",
+
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"cron_jobs":                      "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
@@ -73,6 +94,8 @@ var optionalVectorTableColumns = map[string]string{
 }
 
 var canonicalIndexes = strings.Fields(`
+uniq_scoped_view_selection idx_scoped_generation_state idx_scoped_project_owner idx_scoped_record_project idx_scoped_record_peer uniq_scoped_batch_digest idx_scoped_work_pending idx_scoped_delivery_outbound idx_scoped_delivery_inbound idx_source_operation_state uniq_source_operation_retry uniq_private_source_ordinal idx_private_source_conversion idx_source_custody_result idx_source_dependency_establishment idx_source_coverage_view idx_control_custody_state idx_mutation_expectation_subject idx_canonical_close_project idx_protocol_cutover_state idx_scoped_conversion_phase idx_conversion_obligation_state
+
 idx_cron_jobs_project_name idx_cron_workflows_project_name idx_cron_runs_project_time idx_cron_runs_job_time idx_events_project_cron
 idx_embedding_artifacts_input idx_embedding_artifacts_staging
 idx_relay_outbox_pending idx_relay_inbox_prefix

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-19
+last_edited: 2026-10-24
 ---
 
 # Backup and restore
@@ -105,6 +105,33 @@ unable to sync the project, and the command refuses while such relays are
 enrolled unless you pass `--strand-relays`. See [Root signing key](federation.md#root-signing-key) for the exact
 behavior and recovery commands. Foreign and retired public keys remain
 verification history; they do not require local signing secrets.
+
+## Private scoped state (unreleased)
+
+This branch uses schema 35 for private scoped-relay state. The public feature
+gate remains off. Upgrading storage does not enable enrollment, serving or the
+complete scoped relay feature. See the
+[schema 35 upgrade requirements](../development/postgres-migrations.md#schema-35-private-scoped-relay-state)
+for the offline upgrade, runtime grants and rollback procedure.
+
+Use a whole-owner export with the default inclusion of deleted rows when
+backing up this private state. It retains immutable originals, signatures,
+captures, current close proof and owed delivery bytes together. Restore checks
+their complete dependencies before replacing target data; it does not
+reconstruct missing originals or private root execution from public results.
+
+A project selector omits private scoped state. Filtering deleted rows can also
+remove an issue required by retained close proof. In that case export refuses
+before writing output. Deleted rows unrelated to retained proof may still be
+filtered. Keep the default full backup for recovery rather than removing proof
+rows to make a filtered snapshot pass.
+
+Snapshots containing scoped state refuse identity-changing or merge transforms
+that would invalidate retained commitments. Restore the complete owner snapshot
+without those transforms. JSONL still excludes private root signing keys; keep
+the separate key backup described above. Older readers that do not support
+these private records cannot restore the new snapshot. For rollback, retain
+the pre-upgrade backup and its matching binary.
 
 ## Scheduled backups
 

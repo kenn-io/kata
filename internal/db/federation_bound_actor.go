@@ -35,7 +35,7 @@ type FederationBoundActorCheck struct {
 // ValidateFederationBoundActorPayload enforces bound-actor attribution on the
 // payload of one fresh pushed event. The envelope actor is checked separately.
 func ValidateFederationBoundActorPayload(ctx context.Context, ev RemoteEvent, check FederationBoundActorCheck) error {
-	if err := ValidateFederationEntries(ev.Type, ev.EventUID, ev.Payload); err != nil {
+	if err := ValidateFederationEventEntries(ev); err != nil {
 		return err
 	}
 	boundActor := strings.TrimSpace(check.BoundActor)

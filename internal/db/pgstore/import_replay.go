@@ -222,6 +222,9 @@ func (s *Store) importReplayRecord(
 	skippedLinkIDs map[int64]struct{},
 	sequenceFloors map[string]int64,
 ) (replayLinkSkip, error) {
+	if db.IsScopedImportRecord(record) {
+		return replayLinkInserted, importScopedState(ctx, tx, record)
+	}
 	switch rec := record.(type) {
 	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
 		return replayLinkInserted, db.ReplayCronRecord(ctx, tx, rec, true)

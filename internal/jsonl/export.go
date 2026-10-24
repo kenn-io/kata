@@ -232,6 +232,11 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 			return err
 		}
 	}
+	if sourceSchemaVersion >= 35 && opts.ProjectID == 0 {
+		if err := exportScopedState(ctx, enc, d); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

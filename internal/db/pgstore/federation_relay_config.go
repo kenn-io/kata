@@ -32,7 +32,7 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if len(expected) > 1 || (len(expected) == 1 && !reflect.DeepEqual(binding.RelayConfig, &expected[0])) {
 			return db.ErrRemoteEventConflict
 		}
-		if binding.Role != db.FederationRoleSpoke || !binding.Enabled || !binding.PushEnabled || binding.Actor == "" {
+		if binding.Role != db.FederationRoleSpoke || !binding.Enabled || config.ProtocolVersion == db.RelayProtocolVersion && !binding.PushEnabled || binding.Actor == "" {
 			return db.ErrNotFound
 		}
 		var projectUID string
@@ -52,7 +52,11 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if err != nil {
 			return err
 		}
-		if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
+		if config.ProtocolVersion == db.ScopedRelayProtocolVersion {
+			if err := d.scopedIncomingConfigTx(ctx, tx, projectID, config); err != nil {
+				return err
+			}
+		} else if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
 			return err
 		}
 		if pin.AuthorityUID != config.AuthorityUID {
@@ -85,7 +89,7 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 				err = e
 				break
 			}
-			if other.BindingUID == config.BindingUID {
+			if other.BindingUID == config.BindingUID && (config.ProtocolVersion != db.ScopedRelayProtocolVersion || !reflect.DeepEqual(other, &config)) {
 				err = errors.New("relay binding UID already identifies another project")
 				break
 			}
@@ -104,12 +108,14 @@ func (d *Store) SetRelayBindingConfig(ctx context.Context, projectID int64, conf
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET relay_config=$1 WHERE project_id=$2`, string(raw), projectID); err != nil {
 			return err
 		}
-		grant := db.FederationEnrollment{ProjectID: &projectID, RelayBindingUID: config.BindingUID, RelayProtocolVersion: config.ProtocolVersion, RelayResetEpoch: config.ResetEpoch, SpokeInstanceUID: config.UpstreamInstanceUID}
-		if err := d.seedRelayLocalEventsTx(ctx, tx, grant, projectUID, binding.PushCursorEventID); err != nil {
-			return err
-		}
-		if err := d.seedRelayArtifactManifestsTx(ctx, tx, grant, projectUID); err != nil {
-			return err
+		if config.ProtocolVersion == db.RelayProtocolVersion {
+			grant := db.FederationEnrollment{ProjectID: &projectID, RelayBindingUID: config.BindingUID, RelayProtocolVersion: config.ProtocolVersion, RelayResetEpoch: config.ResetEpoch, SpokeInstanceUID: config.UpstreamInstanceUID}
+			if err := d.seedRelayLocalEventsTx(ctx, tx, grant, projectUID, binding.PushCursorEventID); err != nil {
+				return err
+			}
+			if err := d.seedRelayArtifactManifestsTx(ctx, tx, grant, projectUID); err != nil {
+				return err
+			}
 		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
 		return err

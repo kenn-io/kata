@@ -141,6 +141,13 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	); err != nil {
 		return out, err
 	}
+	projects, err := moveScopedCanonicalCloseIssueTx(ctx, tx, db.Issue{UID: issueUID, ID: in.IssueID, ProjectUID: fromProjectUID}, toProjectUID)
+	if err != nil {
+		return out, err
+	}
+	if err := d.markScopedCanonicalDirtyTx(ctx, tx, projects...); err != nil {
+		return out, err
+	}
 	// A moved issue changes who can see it, so in-flight requests recheck
 	// what they exposed exactly as they do after a policy change.
 	if err := bumpProjectAccess(ctx, tx); err != nil {

@@ -29,31 +29,32 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
   LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id`
 
 type issueCreatedPayload struct {
-	UID                    string                 `json:"uid"`
-	ShortID                string                 `json:"short_id"`
-	Title                  string                 `json:"title"`
-	Body                   string                 `json:"body"`
-	Author                 string                 `json:"author"`
-	Owner                  *string                `json:"owner,omitempty"`
-	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
-	Priority               *int64                 `json:"priority,omitempty"`
-	Status                 string                 `json:"status"`
-	ClosedReason           *string                `json:"closed_reason,omitempty"`
-	ClosedAt               *string                `json:"closed_at,omitempty"`
-	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               jsontext.Value         `json:"metadata"`
-	Labels                 []string               `json:"labels,omitempty"`
-	Links                  []createdLink          `json:"links,omitempty"`
-	Comments               []issueSnapshotComment `json:"comments,omitempty"`
-	CreatedAt              string                 `json:"created_at"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitzero"`
-	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
-	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
-	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
-	Source                 string                 `json:"source,omitempty"`
-	ExternalID             string                 `json:"external_id,omitempty"`
+	CloseState             *db.CanonicalCloseState `json:"close_state,omitempty"`
+	UID                    string                  `json:"uid"`
+	ShortID                string                  `json:"short_id"`
+	Title                  string                  `json:"title"`
+	Body                   string                  `json:"body"`
+	Author                 string                  `json:"author"`
+	Owner                  *string                 `json:"owner,omitempty"`
+	AssignmentExpiresOn    *string                 `json:"assignment_expires_on,omitempty"`
+	Priority               *int64                  `json:"priority,omitempty"`
+	Status                 string                  `json:"status"`
+	ClosedReason           *string                 `json:"closed_reason,omitempty"`
+	ClosedAt               *string                 `json:"closed_at,omitempty"`
+	DeletedAt              *string                 `json:"deleted_at,omitempty"`
+	Metadata               jsontext.Value          `json:"metadata"`
+	Labels                 []string                `json:"labels,omitempty"`
+	Links                  []createdLink           `json:"links,omitempty"`
+	Comments               []issueSnapshotComment  `json:"comments,omitempty"`
+	CreatedAt              string                  `json:"created_at"`
+	UpdatedAt              string                  `json:"updated_at,omitempty"`
+	Revision               int64                   `json:"revision,omitzero"`
+	IdempotencyKey         string                  `json:"idempotency_key,omitempty"`
+	IdempotencyFingerprint string                  `json:"idempotency_fingerprint,omitempty"`
+	RecurrenceUID          string                  `json:"recurrence_uid,omitempty"`
+	OccurrenceKey          string                  `json:"occurrence_key,omitempty"`
+	Source                 string                  `json:"source,omitempty"`
+	ExternalID             string                  `json:"external_id,omitempty"`
 }
 
 type createdLink struct {
