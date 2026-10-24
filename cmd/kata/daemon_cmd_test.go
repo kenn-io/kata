@@ -3990,6 +3990,53 @@ func TestDaemonRestartSkipsDeadUnknownRecord(t *testing.T) {
 	assert.FileExists(t, path)
 }
 
+func TestDaemonReloadOnlyUnknownRecord(t *testing.T) {
+	setupKataEnv(t)
+	writeUnknownRuntimePID(t, 99999999)
+	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "reload")
+	require.ErrorContains(t, err, "no local daemon running")
+	assert.Contains(t, stderr, "skipping daemon pid=99999999")
+}
+
+func TestDaemonStatusNotesUnknownRecord(t *testing.T) {
+	setupKataEnv(t)
+	writeUnknownRuntimePID(t, 99999999)
+	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "status")
+	require.NoError(t, err)
+	assert.Contains(t, stderr, "skipping daemon pid=99999999 (another PID namespace or unverifiable identity)")
+}
+
+func TestDaemonStartupWaitsForOwnerDrain(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	release, err := runtimeStore.AcquireOwnerLock(t.Context())
+	require.NoError(t, err)
+	// Listener close removes the record before workers finish draining.
+	path := writeUnknownRuntimePID(t, os.Getpid())
+	require.NoError(t, os.Remove(path))
+	timer := time.AfterFunc(daemonShutdownDrainTimeout+100*time.Millisecond, release)
+	t.Cleanup(func() {
+		if timer.Stop() {
+			release()
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), daemonShutdownDrainTimeout+10*time.Second)
+	defer cancel()
+	originalRun := runExternalRootRunner
+	t.Cleanup(func() { runExternalRootRunner = originalRun })
+	started := false
+	runExternalRootRunner = func(context.Context, *rootbridge.Runner) error {
+		started = true
+		cancel()
+		return nil
+	}
+	require.NoError(t, runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard)))
+	assert.True(t, started, "replacement starts after the previous owner drains")
+}
+
 func TestDaemonStartupRejectsUnknownBeforeOpeningStorage(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)

@@ -79,7 +79,8 @@ func TestDaemonStartupForeignOwner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	err = runDaemonProcess(ctx, "127.0.0.1:0", false, false, nil)
 	cancel()
-	require.ErrorContains(t, err, "daemon already running")
+	require.ErrorContains(t, err, "another daemon owns this KATA_HOME's store (possibly in another PID namespace)")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
 	after, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
 	require.NoError(t, err)

@@ -622,6 +622,7 @@ func daemonStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			selected, _, err := diagnoseDaemon(cmd.Context(), "")
 			if err != nil {
@@ -741,13 +742,16 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 	return r.Version
 }
 
-func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
+func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) bool {
+	skipped := false
 	for _, record := range records {
 		switch kitdaemon.RuntimeProcessScope(record) {
 		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
+			skipped = true
 			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
 		}
 	}
+	return skipped
 }
 
 func daemonStopCmd() *cobra.Command {
@@ -1070,7 +1074,7 @@ func daemonReloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
+			skipped := noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
@@ -1097,7 +1101,11 @@ func daemonReloadCmd() *cobra.Command {
 				}
 				return nil
 			}
-			return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "no daemon running"}
+			message := "no daemon running"
+			if skipped {
+				message = "no local daemon running"
+			}
+			return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: message}
 		},
 	}
 }
@@ -1199,12 +1207,14 @@ func runDaemonProcess(
 	// A foreground launch must reject an existing daemon before opening
 	// storage: a cutover cannot replace a database still owned by its writer.
 	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	ownerCtx, ownerCancel := context.WithTimeout(ctx, time.Second)
+	// Listener close removes the record before the old owner's drain ends.
+	// Allow that drain plus cleanup time before refusing a replacement.
+	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonShutdownDrainTimeout+5*time.Second)
 	releaseOwner, err := runtimeStore.AcquireOwnerLock(ownerCtx)
 	ownerCancel()
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("daemon already running; wait for it to exit before starting another daemon: %w", err)
+			return fmt.Errorf("another daemon owns this KATA_HOME's store (possibly in another PID namespace): %w", err)
 		}
 		return err
 	}
