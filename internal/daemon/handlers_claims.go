@@ -774,7 +774,7 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 		return nil, fmt.Errorf("%w: %v", errClaimHubTransportUnavailable, err)
 	}
 	for _, rec := range recs {
-		if !daemonruntime.RuntimeProcessAlive(rec) {
+		if !daemonruntime.RuntimeRecordWorthProbing(rec) {
 			continue
 		}
 		ep := rec.Endpoint()

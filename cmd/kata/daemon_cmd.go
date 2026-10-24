@@ -1205,7 +1205,7 @@ func runDaemonProcess(
 	}
 	for _, record := range records {
 		if daemonruntime.RuntimeRecordBlocksStart(record) {
-			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
+			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
 		}
 	}
 
