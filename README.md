@@ -25,12 +25,11 @@ Zensical at <https://katatracker.com/>.
 > **Stable:** Since v0.14.0, kata releases preserve backward compatibility
 > across upgrades.
 
-The latest release is [0.19.0](docs/changelog.md#0190). It adds
-[project relays between hubs](docs/guide/project-relays.md), task sync with
-Notion, Plane, Linear, Twenty, Todoist, and TickTick, shared cron jobs, comment
-replies, and `kata doctor`. Some commands and flags were renamed; read the
-[upgrade guidance](docs/get-started/install.md#upgrading-to-0190) before
-updating.
+The latest release is [0.20.0](docs/changelog.md#0200). It adds an Attention
+inbox to the terminal UI, requests for replies to specific comments,
+participant broadcasts, and events for reached schedules. See
+[Updating Kata](docs/get-started/install.md#updating-kata) for installation
+and federation upgrade guidance.
 
 ## Install
 

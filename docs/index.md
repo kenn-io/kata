@@ -33,14 +33,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.19.0
+## New in 0.20.0
 
-Share selected projects between hubs, sync tasks with Notion, Plane, Linear,
-Twenty, Todoist, and TickTick, and share cron jobs across devices. The
-[0.19.0 release notes](changelog.md#0190) also cover comment replies, timed
-claims, `kata doctor`, and contributor credits. Some commands and flags were
-renamed; read the [upgrade guidance](get-started/install.md#upgrading-to-0190)
-before updating.
+Handle notification requests in the terminal UI's Attention inbox, ask for
+replies to specific comments, broadcast to participants, and trigger work when
+scheduled dates arrive. The [0.20.0 release notes](changelog.md#0200) also cover
+SQLite upgrades, daemon restarts, cron scheduling, and contributor credits.
+See [Updating Kata](get-started/install.md#updating-kata) for installation
+and federation upgrade guidance.
 
 ## Quickstart
 

@@ -78,10 +78,11 @@ calls per task. At 4ms each that costs half a second.
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.
 
-In 0.19.0, hubs can share selected projects with your other devices, and Kata
-can sync tasks with Notion, Plane, Linear, Twenty, Todoist, and TickTick. See the
-[release notes](https://katatracker.com/docs/changelog/#0190) for setup links
-and upgrade requirements.
+In 0.20.0, handle notification requests in the terminal UI's Attention inbox,
+ask for replies to specific comments, broadcast to participants, and trigger
+work when scheduled dates arrive. See the
+[release notes](https://katatracker.com/docs/changelog/#0200) for setup links
+and SQLite and cron upgrade requirements.
 
 ## 04 / Discipline: a close is a completion claim
 

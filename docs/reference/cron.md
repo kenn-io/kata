@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-20
+last_edited: 2026-10-23
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -387,11 +387,31 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
-Upgrade connected hubs, spokes, and adapters together when moving from released
-0.19.0, which advertised two cron capability names. All cron support now uses
-`cron_v1`; the former recurring-delivery capability is removed with no alias.
-This deliberate protocol change does not support mixed-version rolling upgrades.
-Existing stored definitions, events, and schema stay unchanged.
+### Upgrade limits
+
+These limits apply to projects with cron data and the adapters that consume
+it. For ordinary issue synchronization, use the normal
+[hub-first upgrade procedure](../operations/federation.md#compatibility-and-rolling-upgrades);
+spokes can upgrade later.
+
+Kata 0.19.0 advertised both `cron_v1` and `cron_notify_children_v1`.
+Kata 0.20.0 advertises only `cron_v1` for all cron support, with no alias for
+the removed name. Fully compatible mixed-version cron operation is not
+supported across this change:
+
+- A 0.20.0 spoke cannot read a 0.19.0 hub project that requires the removed
+  capability for native recurring-child state. Upgrade the hub first.
+- Adapters that require `cron_notify_children_v1` must switch to `cron_v1`
+  when their daemon upgrades.
+- Upgrade every peer and adapter that reads a project's definitions before
+  using the new expression forms, such as Sunday `7` or wrap-around ranges.
+- Check existing expressions before upgrading: steps as large as their
+  field's span are now rejected. Use `@daily` instead of an hourly `*/24`
+  step, or `@hourly` instead of a minute `*/60` step.
+
+Stored definitions and events stay unchanged. Deleting a cron job does not
+remove its retained history or the project's cron capability requirement.
+See [Cron triggers](#triggers) for the expression rules.
 
 ## Independent run evidence
 

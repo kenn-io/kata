@@ -68,6 +68,17 @@ Download the package for your distribution from
 with your system package tool. Upgrade those installations with the same
 package manager; Kata will not replace a package-owned binary itself.
 
+The daemon sends limited anonymous usage reports by default. Set
+`KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the daemon's environment
+to turn them off. See [Telemetry](../reference/configuration.md#telemetry) for
+what is collected and [reporting rules](../reference/configuration.md#reporting-rules)
+for CI and build-version requirements. Each CLI, TUI, and MCP process applies
+its own preferences when using an enabled daemon.
+
+## Updating Kata
+
+Use the same installer or package manager that owns your binary. For a
+service-managed daemon, use its deployment's update and restart procedure.
 After installing a release build, check for newer releases:
 
 ```sh
@@ -95,13 +106,6 @@ command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon restart` with the daemon's
 original startup options.
 
-The daemon sends limited anonymous usage reports by default. Set
-`KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the daemon's environment
-to turn them off. See [Telemetry](../reference/configuration.md#telemetry) for
-what is collected and [reporting rules](../reference/configuration.md#reporting-rules)
-for CI and build-version requirements. Each CLI, TUI, and MCP process applies
-its own preferences when using an enabled daemon.
-
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the
 owning package manager. Packagers can read the complete
@@ -109,85 +113,21 @@ owning package manager. Packagers can read the complete
 remains supported, and building from a clone is still useful for development
 builds.
 
-## Upgrading to 0.19.0
+For normal federated issue synchronization, upgrade the hub first. Spokes can
+upgrade later; you do not need to coordinate every user's installation. See
+[Federation upgrades](../operations/federation.md#compatibility-and-rolling-upgrades)
+for the procedure and the separate limits for projects that use cron.
 
-Upgrade the daemon as well as the CLI and MCP server. Kata 0.19.0 includes
-daemon API `0.28.0`; release and API versions are separate. Timed claims
-require API `0.22.0`, `move --dry` previews `0.23.0`, close session references
-`0.26.0`, paginated lists `0.27.0`, and comment replies `0.28.0`. See the
-[API version history](../reference/http-api.md#version-history).
+Keep a [backup](../operations/backup-restore.md) before a database upgrade.
+For SQLite, stop other processes using that same database and let the new
+daemon migrate it on startup. Remote spokes use their own databases and do
+not need to stop for the hub's migration. PostgreSQL operators should follow
+the [upgrade procedure](../operations/postgres.md#upgrade-ceremony).
 
-Update scripts that call renamed commands and flags. The old spellings are no
-longer accepted:
-
-| Before 0.19.0 | 0.19.0 and later |
-| --- | --- |
-| `kata agent-hooks ...` | `kata agent-hook ...` |
-| `digest`, `events`, and `mcp serve` with `--all-projects` | `--all` |
-| `close` and `move` with `--dry-run` | `--dry` |
-
-Reinstall user hooks with `kata agent-hook install`. For workspace hooks, re-run
-`kata agent-hook install <harness> --local` or the `kata init` hook option that
-installed them. Reinstalling replaces hooks that still call the plural command.
-Hook installation now enables available attention hooks by default; pass
-`--contract-only` to keep contract-only setup. See the
-[agent-hook reference](../reference/cli.md#agent-hook).
-
-For federation, upgrade hubs before their spokes. A hub rejects pushes from a
-spoke with a newer storage schema until the hub is upgraded; the spoke retries
-automatically. Project relays need 0.19.0 on every participating daemon. See
-[rolling upgrades](../operations/federation.md#compatibility-and-rolling-upgrades).
-External-agent enrollment no longer sends the local `KATA_AUTH_TOKEN` to the
-hub; pass `--hub-token-env <env-name>` or configure a daemon catalog entry that
-matches `--hub-url`.
-
-PostgreSQL operators should stop the daemon and run
-`kata storage postgres migrate` with schema-owner credentials before starting
-the new release. Follow the [upgrade ceremony](../operations/postgres.md#upgrade-ceremony).
-
-Go programs that embed Kata and serve the browser application must now pass
-`webui.NewEmbeddedHandler()` in `kata.Config.WebHandler`. See
-[Serve the browser application](../development/embedding.md#serve-the-browser-application).
-
-For feature details, see the [0.19.0 release notes](../changelog.md#0190).
-If upgrading from before 0.18.0, also follow the guidance below.
-
-## Upgrading to 0.18.0
-
-Upgrade the daemon as well as the CLI and MCP server. Kata 0.18.0 includes
-daemon API `0.21.0`; release and API versions are separate. Status-filtered
-search requires API `0.20.0`, and `kata list --sort oldest` requires `0.21.0`.
-See the [API version history](../reference/http-api.md#version-history).
-
-Upgrade all participating daemons before relying on federation to preserve
-teammate attribution. To use issue-scoped worker credentials, enable
-[token identity mode](../operations/remote-daemon.md#identity-tokens) on the
-authoritative daemon. Spoke replicas cannot create these credentials.
-
-When updating from a release before 0.18.0, run `kata daemon restart` with the
-original startup options after installing the new binary. The older updater
-does not restart the daemon automatically. For later updates, the new
-`kata update` can restart a running local daemon; follow any manual-restart
-instructions it reports. Reopen `kata ui` if the browser port changed.
-Package-managed installations still use their package manager to update the
-binary.
-
-For feature details, see the [0.18.0 release notes](../changelog.md#0180).
-If upgrading from before 0.17.0, also follow the guidance below.
-
-## Upgrading to 0.17.0
-
-Upgrade the remote daemon alongside the CLI. Simple remote writes now select
-the project in the write request, and older daemons reject those selectors.
-See [remote command behavior](../operations/remote-daemon.md).
-
-Custom API clients must use case-sensitive request field names, send `[]`
-instead of `null` for arrays, and accept empty response collections as `[]` or
-`{}`. See the [HTTP API contract](../reference/http-api.md#version-history).
-
-Keep a [backup](../operations/backup-restore.md) before upgrading. The SQLite
-fix preserves moved-issue history during future upgrades; it cannot restore
-history lost during an earlier upgrade.
+New client features may require a newer daemon API; see the
+[API version history](../reference/http-api.md#version-history). For changes
+specific to the versions you are crossing, including renamed commands and
+cron compatibility, read the [release notes](../changelog.md).
 
 ## Install with `go install`
 

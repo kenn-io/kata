@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-22
+last_edited: 2026-10-23
 ---
 
 # Federation
@@ -2052,15 +2052,42 @@ view.
 
 ## Compatibility and rolling upgrades
 
-Push requests declare the spoke's local storage schema version. A hub accepts
-older positive schema versions, but rejects a spoke schema newer than its own
-with `unsupported_federation_schema`. The spoke treats that error as transient
+For ordinary issue synchronization, upgrade the hub first and let spokes
+upgrade later. You do not need to stop or upgrade every spoke at the same
+time. A hub database migration changes the hub's local database; each spoke
+keeps its own database.
+
+1. Back up the hub and update it through its existing deployment procedure.
+   Stop other processes using the same SQLite database during migration;
+   remote spokes do not share that database. PostgreSQL operators should use
+   the [PostgreSQL upgrade procedure](postgres.md#upgrade-ceremony).
+2. If deployment has not already restarted the hub, restart it through its
+   service manager or normal daemon command. The hub is unavailable while it
+   restarts or migrates.
+3. Check an existing issue through a connected spoke and run
+   `kata federation status` there. Confirm fresh success times for the enabled
+   sync directions and no persistent error. Spokes retry after the hub becomes
+   available.
+
+New features have their own requirements. In particular, **projects with cron
+definitions or recurring-child history have additional 0.19.0-to-0.20.0
+compatibility limits**. Read [Cron upgrade limits](../reference/cron.md#upgrade-limits)
+before upgrading those projects' peers or adapters. This cron restriction does
+not require coordinated upgrades for projects that only synchronize ordinary
+issues. A newer CLI feature may also need a newer daemon API; see the
+[API version history](../reference/http-api.md#version-history).
+
+### When a spoke is newer than its hub
+
+Push requests declare the schema version required by their event payloads.
+A hub accepts older positive schema versions, but rejects a version newer
+than its own with `unsupported_federation_schema`. The spoke treats that error as transient
 version skew: it records the sync error, leaves the push cursor unchanged, does
 not create quarantine, and retries on later sync passes.
 
-Operationally, upgrade hubs before push-enabled spokes. If a spoke runs ahead
-of its hub, `kata federation status` will show pending push and the last
-schema-skew error until the hub catches up. After the hub is upgraded, the next
+If a spoke sends events that require a newer hub, `kata federation status`
+will show pending push and the last schema-skew error until the hub catches up.
+After the hub is upgraded, the next
 sync retries the same pending events automatically.
 
 Malformed schema declarations are not rolling-upgrade skew. Missing schema

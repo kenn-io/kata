@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-21
+last_edited: 2026-10-23
 ---
 
 # Agent workflows
@@ -514,8 +514,8 @@ Point workers at the comment they need to answer. A typed link records whether
 an agent builds on, reproduces, contradicts, or replaces that finding. The log
 stays chronological; Kata stores a reference without copying the target's body.
 Comment replies require Kata 0.19.0 or later and daemon API `0.28.0`. Reply
-notifications, broadcasts, and `wait --until reply` are available in current
-development builds; the 0.19.0 release does not include them.
+notifications, broadcasts, and `wait --until reply` require Kata 0.20.0 or
+later.
 
 ### Find and use comment handles
 
