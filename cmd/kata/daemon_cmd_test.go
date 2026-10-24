@@ -3987,9 +3987,8 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			require.NoError(t, err)
 			if action == "stop" || action == "reload" {
 				assert.Contains(t, stdout, "pid="+strconv.Itoa(localPID))
-			} else {
-				assert.True(t, kitdaemon.ProcessAlive(unknownPID))
 			}
+			assert.True(t, kitdaemon.ProcessAlive(unknownPID))
 			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknownPID))
 			assert.FileExists(t, path)
 		})
