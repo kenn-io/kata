@@ -94,6 +94,13 @@ SET project_id = $1, short_id = $2, revision = $3, updated_at = $4
 WHERE id = $5`, target.ID, newShortID, newRevision, updatedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		projects, err := moveScopedCanonicalCloseIssueTx(ctx, tx, current, target.UID)
+		if err != nil {
+			return err
+		}
+		if err := s.markScopedCanonicalDirtyTx(ctx, tx, projects...); err != nil {
+			return err
+		}
 		// A moved issue changes who can see it, so in-flight requests recheck
 		// what they exposed exactly as they do after a policy change.
 		if err := bumpProjectAccess(ctx, tx); err != nil {

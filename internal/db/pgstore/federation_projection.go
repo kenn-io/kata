@@ -271,6 +271,18 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	proof, err := readScopedCanonicalCloseTx(ctx, tx, issue.UID)
+	if err != nil {
+		return "", err
+	}
+	if err := db.ValidateScopedCanonicalCloseState(proof, issue.UID, issue.Status); err != nil {
+		return "", err
+	}
+	var closeState *db.CanonicalCloseState
+	if proof.StatusClock.EventUID != "" || proof.StatusIntentUID != "" || proof.Value != nil {
+		closeState = &proof
+	}
+
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
@@ -291,7 +303,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	payload, err := json.Marshal(issueCreatedPayload{
+	payload, err := json.Marshal(issueCreatedPayload{CloseState: closeState,
 		UID: issue.UID, ShortID: issue.ShortID, Title: issue.Title, Body: issue.Body,
 		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
@@ -512,6 +524,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	}
 	issueIDs, err := s.reconcileFederatedIssues(ctx, tx, m, projection)
 	if err != nil {
+		return err
+	}
+	if err := persistScopedCanonicalCloseProjectionTx(ctx, tx, binding.HubProjectUID, projection.Issues); err != nil {
 		return err
 	}
 	if err := reconcileFederatedStatusIntentTx(ctx, tx, projectID, events, acceptedEventUIDs, projection); err != nil {
@@ -937,6 +952,39 @@ WHERE NOT EXISTS (
 	}
 	if len(unreferenced) == 0 {
 		return nil
+	}
+	// Read identities before deletion so current peer invalidation uses the
+	// same native issue membership as the existing per-issue purge helper.
+	rows, err = tx.QueryContext(ctx, `SELECT i.id,i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.id=ANY($1::bigint[]) ORDER BY i.uid`, unreferenced)
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	var removed []db.Issue
+	for rows.Next() {
+		var issue db.Issue
+		if err := rows.Scan(&issue.ID, &issue.UID, &issue.ProjectUID); err != nil {
+			_ = rows.Close()
+			return mapSQLError(err, nil)
+		}
+		removed = append(removed, issue)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return mapSQLError(err, nil)
+	}
+	var affected []string
+	for _, issue := range removed {
+		projects, err := removeScopedCanonicalCloseIssueTx(ctx, tx, issue)
+		if err != nil {
+			return err
+		}
+		affected = append(affected, projects...)
+	}
+	if err := markScopedCanonicalDirtyTx(ctx, tx, affected...); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ANY($1::bigint[])`, unreferenced)
 	return mapSQLError(err, nil)

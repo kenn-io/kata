@@ -443,6 +443,9 @@ const (
 // linkSkipNone. The replay loop counts each reason separately and emits
 // per-reason aggregate notes.
 func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
+	if db.IsScopedImportRecord(r) {
+		return linkSkipNone, importScopedState(ctx, tx, r)
+	}
 	switch rec := r.(type) {
 	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
 		return linkSkipNone, db.ReplayCronRecord(ctx, tx, rec, false)

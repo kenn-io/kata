@@ -184,7 +184,7 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 	if err := p.installBlockers(ctx, install.projectID); err != nil {
 		return err
 	}
-	if err := p.Backend.ValidateRelayResetEvents(install.projectUID, install.events); err != nil {
+	if err := p.Backend.ValidateRelayResetEvents(ctx, install.projectUID, install.events); err != nil {
 		return err
 	}
 	install.config = *binding.RelayConfig

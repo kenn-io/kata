@@ -49,6 +49,22 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 // sync uses a signed current-state checkpoint rather than rewriting or sharing
 // those historical private endpoints.
 func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
+	peer, err := db.NativeClosePeerReference(event.Type, event.Payload)
+	if err != nil {
+		return false, err
+	}
+	if peer != nil {
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+			return false, err
+		}
+		if err := validateRelayClosePeerInProject(ctx, tx, projectUID, peer); err != nil {
+			if errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+				return true, nil
+			}
+			return false, err
+		}
+	}
 	payload := db.PayloadMap(event.Payload)
 	if event.Type == "issue.closed" {
 		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload)

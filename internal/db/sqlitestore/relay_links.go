@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -15,6 +16,21 @@ func validateRelayLinkEndpointsInProject(
 	projectID int64,
 	event db.RemoteEvent,
 ) error {
+	// Typed close peers are references even though issue.closed does not
+	// alter the native link table. Validate them before the legacy fast path.
+	peer, err := db.NativeClosePeerReference(event.Type, event.Payload)
+	if err != nil {
+		return errors.Join(db.ErrFederationIngestValidation, err)
+	}
+	if peer != nil {
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+			return err
+		}
+		if err := validateRelayClosePeerInProject(ctx, tx, projectUID, peer); err != nil {
+			return err
+		}
+	}
 	if !db.FederationEventAffectsLinks(event.Type) {
 		return nil
 	}
@@ -198,4 +214,27 @@ func filterRelayCrossProjectLinkEvents(
 		}
 	}
 	return filtered, nil
+}
+
+// A declared cross-project peer never becomes valid merely by being absent
+// locally. A missing declared same-project peer can retain native deferral.
+func validateRelayClosePeerInProject(ctx context.Context, tx *sql.Tx, projectUID string, peer *db.ScopedEndpoint) error {
+	if peer == nil {
+		return nil
+	}
+	if peer.ProjectUID != projectUID {
+		return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
+	}
+	var actual string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, peer.IssueUID).Scan(&actual)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if actual != peer.ProjectUID {
+		return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
+	}
+	return nil
 }

@@ -152,7 +152,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err := db.ValidateEmbeddingProducerEvent(source, producerAuthorityUID); err != nil {
 					return err
 				}
-				if err := db.ValidateFederationEntries(source.Type, source.EventUID, source.Payload); err != nil {
+				if err := db.ValidateFederationEventEntries(source); err != nil {
 					return err
 				}
 				existing, err := federationEventHashByUID(ctx, tx, source.EventUID)
@@ -252,6 +252,13 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			// Relayed rows are stored by issue UID; name the local issues the
 			// materialization created so published events and hooks resolve them.
 			if err := resolveEventIssueIDsTx(ctx, tx, result.InsertedEvents); err != nil {
+				return err
+			}
+			events := make([]db.RemoteEvent, len(result.InsertedEvents))
+			for i, event := range result.InsertedEvents {
+				events[i] = db.RemoteEventFromStored(event)
+			}
+			if err := d.markScopedCanonicalEventsDirtyTx(ctx, tx, events...); err != nil {
 				return err
 			}
 		}

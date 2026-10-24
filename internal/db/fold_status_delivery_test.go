@@ -1,8 +1,11 @@
 package db_test
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
 	"math"
 	"testing"
 
@@ -37,6 +40,40 @@ func TestReconcileFoldStatusIntent(t *testing.T) {
 			require.Equal(t, tc.want, db.ReconcileFoldStatusIntent(previous, current, tc.pending, tc.accepted))
 		})
 	}
+
+	t.Run("scoped close proof", func(t *testing.T) {
+		subject, origin := "00000000000000000000000001", "00000000000000000000000900"
+		clock := func(n int64) db.FoldClock {
+			return db.FoldClock{HLCPhysicalMS: n, OriginInstanceUID: origin, EventUID: fmt.Sprintf("%026d", n)}
+		}
+		boundary := clock(25)
+		proof := db.CanonicalCloseState{IssueUID: subject, StatusIntentUID: boundary.EventUID, StatusClock: clock(30), CloseBoundaryClock: &boundary, Value: &db.ScopedCloseValue{Kind: "duplicate", PeerProjectUID: "00000000000000000000000003", PeerIssueUID: "00000000000000000000000004"}}
+		raw, err := json.Marshal(struct {
+			UID        string                  `json:"uid"`
+			Status     string                  `json:"status"`
+			CloseState *db.CanonicalCloseState `json:"close_state"`
+		}{subject, "closed", &proof})
+		require.NoError(t, err)
+		snapshot := db.FoldEvent{UID: clock(40).EventUID, OriginInstanceUID: origin, IssueUID: subject, Type: "issue.snapshot", HLCPhysicalMS: 40, Payload: raw}
+		previous := db.FoldIssue{UID: subject, Status: "closed", StatusClock: clock(30)}
+		canonical := db.FoldIssue{UID: subject, Status: "closed", StatusIntentUID: clock(25).EventUID}
+		for _, tc := range []struct {
+			name, pending, want string
+			events              []db.FoldEvent
+			current             db.FoldIssue
+		}{
+			{"snapshot alone no new pending", "", "", []db.FoldEvent{snapshot}, canonical},
+			{"same closed snapshot preserves pending P", clock(10).EventUID, clock(10).EventUID, []db.FoldEvent{snapshot}, canonical},
+			{"opposite snapshot clears P", clock(10).EventUID, "", []db.FoldEvent{{UID: clock(40).EventUID, OriginInstanceUID: origin, IssueUID: subject, Type: "issue.snapshot", HLCPhysicalMS: 40, Payload: jsontext.Value(`{"status":"open"}`)}}, db.FoldIssue{UID: subject, Status: "open"}},
+			{"newly accepted explicit can enqueue", "", clock(40).EventUID, []db.FoldEvent{{UID: clock(40).EventUID, OriginInstanceUID: origin, IssueUID: subject, Type: "issue.closed", HLCPhysicalMS: 40, Payload: jsontext.Value(`{"reason":"done"}`)}}, db.FoldIssue{UID: subject, Status: "closed", StatusIntentUID: clock(40).EventUID}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				before := bytes.Clone(snapshot.Payload)
+				require.Equal(t, tc.want, db.ReconcileFoldStatusIntent(previous, tc.current, tc.pending, tc.events))
+				require.Equal(t, before, []byte(snapshot.Payload), "bookkeeping must not change exact source payload")
+			})
+		}
+	})
 }
 
 // The independent oracle is lexicographic writer order. Generation deliberately

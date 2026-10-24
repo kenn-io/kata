@@ -480,7 +480,7 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: p.ProjectID, ProjectName: projectName, IssueID: &existing.ID, Type: "issue.updated", Actor: p.Actor, Payload: payload})
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{StatusBefore: &existing.Status, ProjectID: p.ProjectID, ProjectName: projectName, IssueID: &existing.ID, Type: "issue.updated", Actor: p.Actor, Payload: payload})
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}

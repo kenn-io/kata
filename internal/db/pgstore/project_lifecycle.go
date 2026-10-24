@@ -273,6 +273,13 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 			return err
 		}
 
+		if err := db.RejectScopedProjectRetirementTx(ctx, tx, project.UID); err != nil {
+			return err
+		}
+
+		if err := clearScopedCanonicalCloseProjectTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
 		counts, err := countProjectPurgeTx(ctx, tx, project.ID)
 		if err != nil {
 			return err

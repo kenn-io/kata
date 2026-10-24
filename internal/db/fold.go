@@ -81,18 +81,20 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "issue.metadata_updated":
 		uid := issueUID(e, payload)
 		if uid != "" {
-			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"])
+			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"], p.scopedMetadataTrace(uid, false, clockOf(e)))
 			p.touchIssue(uid, issueUpdatedAt(e, payload))
 		}
 	case "project.metadata_updated":
 		if e.ProjectUID != "" {
-			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
+			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"], p.scopedMetadataTrace(e.ProjectUID, true, clockOf(e)))
 		}
 	case "project.author_rewritten":
 		p.applyAuthorRewritten(e, payload)
 	case "project.federation_enabled":
 		if e.ProjectUID != "" && len(payload["metadata"]) > 0 && string(payload["metadata"]) != "null" {
+			before := p.ProjectMetadata[e.ProjectUID]
 			p.ProjectMetadata[e.ProjectUID] = canonicalJSON(payload["metadata"])
+			p.recordScopedMetadataSnapshot(e.ProjectUID, true, before, p.ProjectMetadata[e.ProjectUID], clockOf(e))
 		}
 	case "claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated":
 		// Claim events are federation audit records, not issue projection state.
@@ -108,6 +110,11 @@ func (p *FoldProjection) apply(e FoldEvent) {
 }
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
+	_, closeState, closeErr := decodeNativeCloseMachine(e.Type, e.Payload)
+	if closeErr != nil || validateNativeCloseClock(closeState, clockOf(e)) != nil {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("invalid typed close snapshot %s", e.UID))
+		return
+	}
 	var in struct {
 		UID                 string         `json:"uid"`
 		ShortID             string         `json:"short_id"`
@@ -178,13 +185,31 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
 	issue.Priority = cloneInt64Ptr(in.Priority)
 	setFoldStatus(&issue, in.Status, e, false)
+	// A snapshot envelope advances the native writer clock, not the original
+	// intent boundary. Only a genuinely later retained boundary can introduce
+	// different canonical provenance; an old proof cannot cross an open writer.
+	if in.Status == "closed" && closeState != nil && closeState.CloseBoundaryClock != nil &&
+		(issue.CloseBoundaryClock == nil || compareClock(*closeState.CloseBoundaryClock, *issue.CloseBoundaryClock) > 0) {
+		issue.StatusIntentUID = closeState.StatusIntentUID
+		issue.CloseBoundaryClock = cloneCloseBoundary(closeState.CloseBoundaryClock)
+		issue.CloseValue = cloneCloseValue(closeState.Value)
+	} else if in.Status == "closed" && closeState != nil && closeState.CloseBoundaryClock != nil &&
+		issue.CloseBoundaryClock != nil && compareClock(*closeState.CloseBoundaryClock, *issue.CloseBoundaryClock) == 0 &&
+		closeState.StatusIntentUID == issue.StatusIntentUID && closeState.Value == nil {
+		// Current membership invalidation may clear a value without replacing its
+		// intent/boundary. That null stays sticky against same-boundary snapshots;
+		// only a genuinely newer explicit intent can introduce another value.
+		issue.CloseValue = nil
+	}
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
 	issue.ProjectUID = e.ProjectUID
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
+		before := p.IssueMetadata[uid]
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
+		p.recordScopedMetadataSnapshot(uid, false, before, p.IssueMetadata[uid], clockOf(e))
 	}
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
@@ -353,12 +378,22 @@ func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.
 }
 
 func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Value) {
+	value, _, err := decodeNativeCloseMachine(e.Type, e.Payload)
+	if err != nil {
+		p.Warnings = append(p.Warnings, fmt.Sprintf("invalid typed close original %s", e.UID))
+		return
+	}
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
 	}
 	issue := p.ensureIssue(uid)
 	setFoldStatus(&issue, "closed", e, true)
+	if value != nil && value.PeerIssueUID == uid {
+		p.Warnings = append(p.Warnings, "invalid self close reference")
+		return
+	}
+	issue.CloseValue = cloneCloseValue(value)
 	clearFoldAssignmentExpiry(&issue)
 	if reason, ok := stringValue(payload["reason"]); ok {
 		issue.ClosedReason = &reason
@@ -408,6 +443,11 @@ func setFoldStatus(issue *FoldIssue, state string, event FoldEvent, explicit boo
 		issue.StatusIntentUID = event.UID
 	} else if issue.Status != state {
 		issue.StatusIntentUID = ""
+	}
+	if state == "open" || (explicit && state == "closed") {
+		boundary := clockOf(event)
+		issue.CloseBoundaryClock = &boundary
+		issue.CloseValue = nil
 	}
 	issue.Status = state
 	issue.StatusClock = clockOf(event)
@@ -651,6 +691,9 @@ func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldC
 	if typ == "parent" && present {
 		p.clearOlderParents(from, to, clock)
 	}
+	if typ == "parent" {
+		p.recordScopedParentFact(from, to, present, clock)
+	}
 	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
 }
 
@@ -806,7 +849,8 @@ func StringSlice(raw jsontext.Value) []string {
 // stringSlice is the internal alias for fold.go's existing callers.
 func stringSlice(raw jsontext.Value) []string { return StringSlice(raw) }
 
-func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value, traces ...*scopedMetadataTrace) jsontext.Value {
+	trace := metadataTrace(traces)
 	var currentMap map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		_ = json.Unmarshal(current, &currentMap)
@@ -820,11 +864,13 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 	}
 	_ = json.Unmarshal(diffRaw, &diff)
 	for key, d := range diff {
+		child := trace.child(key)
 		if len(d.To) == 0 || string(d.To) == "null" {
+			child.replace(currentMap[key], d.From, d.To, nil)
 			delete(currentMap, key)
 			continue
 		}
-		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
+		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To, child)
 	}
 	out, err := json.Marshal(currentMap, json.Deterministic(true))
 	if err != nil {
@@ -833,18 +879,25 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 	return out
 }
 
-func applyMetadataValueDiff(current, from, to jsontext.Value) jsontext.Value {
+func applyMetadataValueDiff(current, from, to jsontext.Value, traces ...*scopedMetadataTrace) jsontext.Value {
+	trace := metadataTrace(traces)
 	if !metadataObjectMergeable(current, from, to) {
-		return canonicalJSON(to)
+		out := canonicalJSON(to)
+		trace.replace(current, from, to, out)
+		return out
 	}
+	trace.beginObject(current)
 	currentObj := parseRawObject(current)
 	fromObj := parseRawObject(from)
 	toObj := parseRawObject(to)
-	merged := mergeMetadataObject(currentObj, fromObj, toObj)
+	merged := mergeMetadataObject(currentObj, fromObj, toObj, trace)
 	out, err := json.Marshal(merged, json.Deterministic(true))
 	if err != nil {
-		return canonicalJSON(to)
+		out := canonicalJSON(to)
+		trace.replace(current, from, to, out)
+		return out
 	}
+	trace.endObject(current, out)
 	return out
 }
 
@@ -862,38 +915,52 @@ func mergeMetadataObject(
 	current map[string]jsontext.Value,
 	from map[string]jsontext.Value,
 	to map[string]jsontext.Value,
+	traces ...*scopedMetadataTrace,
 ) map[string]jsontext.Value {
+	trace := metadataTrace(traces)
 	if current == nil {
 		current = map[string]jsontext.Value{}
 	}
 	seen := map[string]struct{}{}
 	for key, fromVal := range from {
+		child := trace.child(key)
 		seen[key] = struct{}{}
 		toVal, ok := to[key]
 		if !ok || string(toVal) == "null" {
+			child.replace(current[key], fromVal, toVal, nil)
 			delete(current, key)
 			continue
 		}
 		if rawJSONObject(fromVal) && rawJSONObject(toVal) && metadataObjectMergeable(current[key], fromVal, toVal) {
-			current[key] = mustMarshalRawObject(mergeMetadataObject(parseRawObject(current[key]), parseRawObject(fromVal), parseRawObject(toVal)))
+			before := current[key]
+			child.beginObject(before)
+			current[key] = mustMarshalRawObject(mergeMetadataObject(parseRawObject(current[key]), parseRawObject(fromVal), parseRawObject(toVal), child))
+			child.endObject(before, current[key])
 			continue
 		}
 		if !jsonRawEqual(fromVal, toVal) {
+			child.replace(current[key], fromVal, toVal, canonicalJSON(toVal))
 			current[key] = canonicalJSON(toVal)
 		}
 	}
 	for key, toVal := range to {
+		child := trace.child(key)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		if string(toVal) == "null" {
+			child.replace(current[key], nil, toVal, nil)
 			delete(current, key)
 			continue
 		}
 		if rawJSONObject(toVal) && metadataObjectMergeable(current[key], nil, toVal) {
-			current[key] = mustMarshalRawObject(mergeMetadataObject(parseRawObject(current[key]), nil, parseRawObject(toVal)))
+			before := current[key]
+			child.beginObject(before)
+			current[key] = mustMarshalRawObject(mergeMetadataObject(parseRawObject(current[key]), nil, parseRawObject(toVal), child))
+			child.endObject(before, current[key])
 			continue
 		}
+		child.replace(current[key], nil, toVal, canonicalJSON(toVal))
 		current[key] = canonicalJSON(toVal)
 	}
 	return current

@@ -112,6 +112,11 @@ func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artif
 					return err
 				}
 			}
+			if expiry.Valid && contentExists && input != "" {
+				if err := d.markScopedCanonicalDirtyTx(ctx, tx, artifact.ProjectUID); err != nil {
+					return err
+				}
+			}
 			durable = !expiry.Valid || contentExists
 			if durable {
 				if err := pruneSupersededArtifactsTx(ctx, tx, artifact, input); err != nil {
@@ -141,6 +146,11 @@ func (d *Store) retainEmbeddingArtifactTx(ctx context.Context, tx *sql.Tx, artif
 			return err
 		}
 		durable = contentExists
+		if durable && input != "" {
+			if err := d.markScopedCanonicalDirtyTx(ctx, tx, artifact.ProjectUID); err != nil {
+				return err
+			}
+		}
 		if durable {
 			if err := pruneSupersededArtifactsTx(ctx, tx, artifact, input); err != nil {
 				return err

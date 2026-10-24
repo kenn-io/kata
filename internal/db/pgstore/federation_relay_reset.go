@@ -41,12 +41,19 @@ func (b relayResetBackend) ExternalRootBindingExists(ctx context.Context, projec
 	return exists, err
 }
 
-func (b relayResetBackend) ValidateRelayResetEvents(projectUID string, events []db.RemoteEvent) error {
+func (b relayResetBackend) ValidateRelayResetEvents(ctx context.Context, projectUID string, events []db.RemoteEvent) error {
 	known := map[string]struct{}{}
 	for _, event := range events {
 		rememberIngestIssueUIDs(event, known)
 	}
 	for _, event := range events {
+		peer, err := db.NativeClosePeerReference(event.Type, event.Payload)
+		if err != nil {
+			return errors.Join(db.ErrFederationIngestValidation, err)
+		}
+		if err := validateRelayClosePeerInProject(ctx, b.tx, projectUID, peer); err != nil {
+			return err
+		}
 		if err := validateFederationProjectEvent(projectUID, event.OriginInstanceUID, event, known, true); err != nil {
 			return err
 		}

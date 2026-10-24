@@ -108,6 +108,9 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 			return err
 		}
 		if opts.AsStandalone {
+			if db.IsScopedImportRecord(rec) {
+				return fmt.Errorf("retained federation custody requires an exact-instance full restore; standalone transformation is unsupported")
+			}
 			switch record := rec.(type) {
 			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
@@ -231,6 +234,9 @@ func collectProjectUIDs(envs []Envelope) (map[int64]string, error) {
 }
 
 func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, projectUIDByID map[int64]string) (db.ImportRecord, error) {
+	if record, ok, err := decodeScopedImportRecord(env); ok {
+		return record, err
+	}
 	switch env.Kind {
 	case KindEmbeddingArtifact:
 		var record db.EmbeddingArtifactExport

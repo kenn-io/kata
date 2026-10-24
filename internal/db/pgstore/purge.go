@@ -50,6 +50,13 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			return db.ErrFederationResetBlockedByPendingPush
 		}
 
+		projects, err := removeScopedCanonicalCloseIssueTx(ctx, tx, issue)
+		if err != nil {
+			return err
+		}
+		if err := s.markScopedCanonicalDirtyTx(ctx, tx, projects...); err != nil {
+			return err
+		}
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events
           WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID,

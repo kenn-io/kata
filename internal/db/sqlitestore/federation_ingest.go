@@ -262,6 +262,9 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := materialization.apply(ctx, tx, p.ProjectID, cronValidator); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if err := d.markScopedCanonicalEventsDirtyTx(ctx, tx, cronTargets...); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {

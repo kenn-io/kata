@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -82,6 +83,27 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
+	return validateFederationEntries(eventType, eventUID, payloadJSON, nil, nil)
+}
+
+// ValidateFederationEventEntries also checks typed snapshot provenance against
+// its native envelope before ingest or pull can acknowledge the event.
+func ValidateFederationEventEntries(event RemoteEvent) error {
+	clock := FoldClock{HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, OriginInstanceUID: event.OriginInstanceUID, EventUID: event.EventUID}
+	return validateFederationEntries(event.Type, event.EventUID, event.Payload, &clock, event.IssueUID)
+}
+
+func validateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value, clock *FoldClock, subjectUID *string) error {
+	value, proof, err := decodeNativeCloseMachine(eventType, payloadJSON)
+	if err == nil && clock != nil {
+		err = validateNativeCloseClock(proof, *clock)
+	}
+	if err == nil && value != nil && subjectUID != nil && value.PeerIssueUID == *subjectUID {
+		err = errors.New("close value names its native envelope subject")
+	}
+	if err != nil {
+		return fmt.Errorf("%w: event %s %s typed close: %v", ErrFederationIngestValidation, eventUID, eventType, err)
+	}
 	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadJSON, &payload); err != nil {

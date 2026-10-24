@@ -63,6 +63,12 @@ func (s *acceptDuringRelayExportStore) ExportEmbeddingArtifacts(
 	return s.Storage.(db.EmbeddingArtifactExporter).ExportEmbeddingArtifacts(ctx, filter, issueUIDs...)
 }
 
+func (s *acceptDuringRelayExportStore) ExportScopedState(ctx context.Context) iter.Seq2[db.ImportRecord, error] {
+	return s.Storage.(interface {
+		ExportScopedState(context.Context) iter.Seq2[db.ImportRecord, error]
+	}).ExportScopedState(ctx)
+}
+
 // A relay acceptance committed after the export snapshot must not put its
 // inbox cursor into a backup whose event and issue projections predate it.
 func TestOwnerBackupKeepsConcurrentRelayIngressOutsideItsSnapshot(t *testing.T) {

@@ -28,17 +28,19 @@ type FoldClock struct {
 
 // FoldProjection is the folded state derived from a set of portable events.
 type FoldProjection struct {
-	CronRuns        map[string]FoldCronRun
-	CronJobs        map[string]FoldCronJob
-	CronWorkflows   map[string]FoldCronWorkflow
-	Issues          map[string]FoldIssue
-	Comments        map[string]FoldComment
-	Labels          map[FoldLabelKey]FoldElementState
-	Links           map[FoldLinkKey]FoldElementState
-	IssueMetadata   map[string]jsontext.Value
-	ProjectMetadata map[string]jsontext.Value
-	Warnings        []string
-	cronAuthors     map[string]foldCronAuthorCandidate
+	scopedParentWriters   map[string]ScopedParentWriter
+	scopedMetadataWriters map[scopedMetadataSubject]map[string]FoldClock
+	CronRuns              map[string]FoldCronRun
+	CronJobs              map[string]FoldCronJob
+	CronWorkflows         map[string]FoldCronWorkflow
+	Issues                map[string]FoldIssue
+	Comments              map[string]FoldComment
+	Labels                map[FoldLabelKey]FoldElementState
+	Links                 map[FoldLinkKey]FoldElementState
+	IssueMetadata         map[string]jsontext.Value
+	ProjectMetadata       map[string]jsontext.Value
+	Warnings              []string
+	cronAuthors           map[string]foldCronAuthorCandidate
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
@@ -79,6 +81,10 @@ type FoldIssue struct {
 	// restatements. Newly accepted intent must outrank the previous projection's
 	// writer; an older delayed event cannot manufacture a pending pointer.
 	StatusClock FoldClock `json:"-"`
+	// CloseBoundaryClock retains the original close intent or last open writer,
+	// independently of a later same-state snapshot's StatusClock.
+	CloseBoundaryClock *FoldClock        `json:"-"`
+	CloseValue         *ScopedCloseValue `json:"-"`
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.

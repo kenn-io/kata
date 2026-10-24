@@ -205,10 +205,11 @@ type ScopedReadResult struct {
 }
 
 type CanonicalCloseState struct {
-	IssueUID        string            `json:"issue_uid"`
-	StatusIntentUID string            `json:"status_intent_uid"`
-	StatusClock     FoldClock         `json:"status_clock"`
-	Value           *ScopedCloseValue `json:"value"`
+	CloseBoundaryClock *FoldClock        `json:"close_boundary_clock,omitempty"`
+	IssueUID           string            `json:"issue_uid"`
+	StatusIntentUID    string            `json:"status_intent_uid"`
+	StatusClock        FoldClock         `json:"status_clock"`
+	Value              *ScopedCloseValue `json:"value"`
 }
 
 type CanonicalViewState struct {
@@ -440,7 +441,7 @@ func (c ScopedCollections) Validate() error {
 		if err := v.Validate(); err != nil {
 			return err
 		}
-		if err := unique("definition:" + v.ProjectUID + ":" + v.UID); err != nil {
+		if err := unique("definition:" + v.ProjectUID + ":" + v.Kind + ":" + v.UID); err != nil {
 			return err
 		}
 	}

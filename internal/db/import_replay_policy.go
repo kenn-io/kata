@@ -37,6 +37,11 @@ func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 	if err := ValidateImportRecords(records); err != nil {
 		return err
 	}
+	for _, record := range records {
+		if IsScopedImportRecord(record) && (opts.NewInstance || opts.MergeProject) {
+			return errors.New("scoped owner custody requires an exact-instance full restore")
+		}
+	}
 	if opts.NewInstance {
 		for _, record := range records {
 			binding, ok := record.(*FederationBindingExport)
@@ -88,7 +93,10 @@ func ValidateImportRecords(records []ImportRecord) error {
 	if err := validateRelayConfigurationReplay(records); err != nil {
 		return err
 	}
-	return validateProvenanceReplay(records)
+	if err := validateProvenanceReplay(records); err != nil {
+		return err
+	}
+	return validateScopedImportGraph(records)
 }
 
 // Validate complete portable cron documents before either backend clears
@@ -401,7 +409,7 @@ func validateImportRecord(record ImportRecord) error {
 				return err
 			}
 		}
-		return ValidateFederationEntries(rec.Type, rec.UID, rec.Payload)
+		return ValidateFederationEventEntries(RemoteEvent{EventUID: rec.UID, OriginInstanceUID: rec.OriginInstanceUID, IssueUID: rec.IssueUID, Type: rec.Type, Payload: rec.Payload, HLCPhysicalMS: rec.HLCPhysicalMS, HLCCounter: rec.HLCCounter})
 	case *PurgeLogExport:
 		return requireImportPayload(rec, ImportKindPurgeLog)
 	case *ProjectPurgeLogExport:
@@ -409,6 +417,9 @@ func validateImportRecord(record ImportRecord) error {
 	case *SequenceExport:
 		return requireImportPayload(rec, ImportKindSQLiteSequence)
 	default:
+		if IsScopedImportRecord(record) {
+			return ValidateScopedImportRecord(record)
+		}
 		return fmt.Errorf("unknown record type %T", record)
 	}
 }
@@ -435,6 +446,9 @@ func OrderImportRecords(records []ImportRecord) []ImportRecord {
 }
 
 func importReplayRank(kind string) int {
+	if rank := ScopedImportRank(kind); rank >= 0 {
+		return rank
+	}
 	switch kind {
 	case ImportKindCronJob, ImportKindCronWorkflow, ImportKindCronRun:
 		return 2

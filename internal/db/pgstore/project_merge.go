@@ -66,6 +66,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := db.RejectScopedProjectRetirementTx(ctx, tx, source.UID); err != nil {
+			return err
+		}
 		if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
 			return err
 		}
@@ -86,6 +89,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		}
 		if len(collisions) > 0 {
 			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		if err := moveScopedCanonicalCloseProjectTx(ctx, tx, source, target.UID); err != nil {
+			return err
 		}
 		extensions, err := extendMergeShortIDsTx(ctx, tx, source.ID, target.ID)
 		if err != nil {

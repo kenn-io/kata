@@ -379,6 +379,9 @@ func (s *Store) closeIssueWithEvents(
 		if p.IfMatchRev != nil && current.Revision != *p.IfMatchRev {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
+		if err := validateScopedCloseValueTx(ctx, tx, current.UID, p.Reason, p.CloseValue); err != nil {
+			return err
+		}
 		if current.Status == "closed" {
 			issue = current
 			return nil
@@ -414,6 +417,7 @@ func (s *Store) closeIssueWithEvents(
 			return mapSQLError(parentErr, nil)
 		}
 		body, err := json.Marshal(struct {
+			CloseValue             *db.ScopedCloseValue   `json:"close_value,omitempty"`
 			Reason                 string                 `json:"reason"`
 			ClosedAt               string                 `json:"closed_at"`
 			Message                string                 `json:"message,omitempty"`
@@ -424,7 +428,7 @@ func (s *Store) closeIssueWithEvents(
 			IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
 			IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 		}{
-			Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: p.Evidence,
+			CloseValue: p.CloseValue, Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: p.Evidence,
 			Transcript: p.Transcript,
 			ParentUID:  parentUID, ParentShortID: parentShortID,
 			IdempotencyKey: p.IdempotencyKey, IdempotencyFingerprint: p.IdempotencyFingerprint,

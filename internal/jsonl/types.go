@@ -11,46 +11,66 @@ type Kind string
 
 // JSONL record kinds. Order matches the export sequence enforced by kindOrder.
 const (
-	KindEmbeddingArtifact    Kind = "federation_embedding_artifact"
-	KindRelayOutbox          Kind = "federation_relay_outbox"
-	KindRelayInbox           Kind = "federation_relay_inbox"
-	KindRelayCursors         Kind = "federation_relay_cursors"
-	KindRootKey              Kind = "federation_root_key"
-	KindEventProvenance      Kind = "federation_event_provenance"
-	KindEntityProvenance     Kind = "federation_entity_provenance"
-	KindTeam                 Kind = "team"
-	KindTeamMembership       Kind = "team_membership"
-	KindProjectAccessPolicy  Kind = "project_access_policy"
-	KindMeta                 Kind = "meta"
-	KindProject              Kind = "project"
-	KindProjectAlias         Kind = "project_alias"
-	KindIssueSyncBinding     Kind = "issue_sync_binding"
-	KindIssueSyncStatus      Kind = "issue_sync_status"
-	KindGitHubSyncBinding    Kind = "github_sync_binding"
-	KindGitHubSyncStatus     Kind = "github_sync_status"
-	KindRecurrence           Kind = "recurrence"
-	KindIssue                Kind = "issue"
-	KindIssueEmbedding       Kind = "issue_embedding"
-	KindComment              Kind = "comment"
-	KindIssueLabel           Kind = "issue_label"
-	KindLink                 Kind = "link"
-	KindImportMapping        Kind = "import_mapping"
-	KindExternalFieldMapping Kind = "external_field_mapping"
-	KindExternalRootBinding  Kind = "external_root_binding"
-	KindExternalFieldState   Kind = "external_field_state"
-	KindFederationBinding    Kind = "federation_binding"
-	KindFederationSyncStatus Kind = "federation_sync_status"
-	KindFederationQuarantine Kind = "federation_quarantine"
-	KindFederationEnrollment Kind = "federation_enrollment"
-	KindIssueClaim           Kind = "issue_claim"
-	KindPendingClaimRequest  Kind = "pending_claim_request"
-	KindCronJob              Kind = "cron_job"
-	KindCronWorkflow         Kind = "cron_workflow"
-	KindCronRun              Kind = "cron_run"
-	KindEvent                Kind = "event"
-	KindPurgeLog             Kind = "purge_log"
-	KindProjectPurgeLog      Kind = "project_purge_log"
-	KindSQLiteSequence       Kind = "sqlite_sequence"
+	KindScopedConversionObligation Kind = "federation_conversion_obligation"
+	KindScopedConversion           Kind = "federation_scoped_conversion"
+	KindScopedProtocolCutover      Kind = "federation_protocol_cutover"
+	KindScopedCanonicalClose       Kind = "federation_canonical_close_state"
+	KindScopedPredicateIncarnation Kind = "federation_predicate_incarnation"
+	KindScopedMutationExpectation  Kind = "federation_mutation_expectation"
+	KindScopedControlCustody       Kind = "federation_control_custody"
+	KindScopedSourceCoverage       Kind = "federation_source_coverage"
+	KindScopedSourceDependency     Kind = "federation_source_dependency"
+	KindScopedSourceCustody        Kind = "federation_source_custody"
+	KindScopedPrivateSource        Kind = "federation_private_source"
+	KindScopedSourceOperation      Kind = "federation_source_operation"
+	KindScopedDeliveryCursor       Kind = "federation_scoped_cursor"
+	KindScopedDelivery             Kind = "federation_scoped_delivery"
+	KindScopedWork                 Kind = "federation_scoped_work"
+	KindScopedBatch                Kind = "federation_scoped_batch"
+	KindScopedRecord               Kind = "federation_scoped_record"
+	KindScopedProject              Kind = "federation_scoped_project"
+	KindScopedGeneration           Kind = "federation_scoped_generation"
+	KindScopedView                 Kind = "federation_scoped_view"
+	KindEmbeddingArtifact          Kind = "federation_embedding_artifact"
+	KindRelayOutbox                Kind = "federation_relay_outbox"
+	KindRelayInbox                 Kind = "federation_relay_inbox"
+	KindRelayCursors               Kind = "federation_relay_cursors"
+	KindRootKey                    Kind = "federation_root_key"
+	KindEventProvenance            Kind = "federation_event_provenance"
+	KindEntityProvenance           Kind = "federation_entity_provenance"
+	KindTeam                       Kind = "team"
+	KindTeamMembership             Kind = "team_membership"
+	KindProjectAccessPolicy        Kind = "project_access_policy"
+	KindMeta                       Kind = "meta"
+	KindProject                    Kind = "project"
+	KindProjectAlias               Kind = "project_alias"
+	KindIssueSyncBinding           Kind = "issue_sync_binding"
+	KindIssueSyncStatus            Kind = "issue_sync_status"
+	KindGitHubSyncBinding          Kind = "github_sync_binding"
+	KindGitHubSyncStatus           Kind = "github_sync_status"
+	KindRecurrence                 Kind = "recurrence"
+	KindIssue                      Kind = "issue"
+	KindIssueEmbedding             Kind = "issue_embedding"
+	KindComment                    Kind = "comment"
+	KindIssueLabel                 Kind = "issue_label"
+	KindLink                       Kind = "link"
+	KindImportMapping              Kind = "import_mapping"
+	KindExternalFieldMapping       Kind = "external_field_mapping"
+	KindExternalRootBinding        Kind = "external_root_binding"
+	KindExternalFieldState         Kind = "external_field_state"
+	KindFederationBinding          Kind = "federation_binding"
+	KindFederationSyncStatus       Kind = "federation_sync_status"
+	KindFederationQuarantine       Kind = "federation_quarantine"
+	KindFederationEnrollment       Kind = "federation_enrollment"
+	KindIssueClaim                 Kind = "issue_claim"
+	KindPendingClaimRequest        Kind = "pending_claim_request"
+	KindCronJob                    Kind = "cron_job"
+	KindCronWorkflow               Kind = "cron_workflow"
+	KindCronRun                    Kind = "cron_run"
+	KindEvent                      Kind = "event"
+	KindPurgeLog                   Kind = "purge_log"
+	KindProjectPurgeLog            Kind = "project_purge_log"
+	KindSQLiteSequence             Kind = "sqlite_sequence"
 )
 
 // Sentinel errors returned by the decoder for malformed or out-of-order envelopes.
@@ -61,7 +81,27 @@ var (
 )
 
 var kindOrder = map[Kind]int{
-	KindTeam: 28, KindTeamMembership: 29, KindProjectAccessPolicy: 30,
+	KindScopedView:                 38,
+	KindScopedGeneration:           39,
+	KindScopedProject:              40,
+	KindScopedCanonicalClose:       41,
+	KindScopedPredicateIncarnation: 42,
+	KindScopedMutationExpectation:  43,
+	KindScopedProtocolCutover:      44,
+	KindScopedConversion:           45,
+	KindScopedSourceOperation:      46,
+	KindScopedPrivateSource:        47,
+	KindScopedSourceDependency:     48,
+	KindScopedSourceCustody:        49,
+	KindScopedSourceCoverage:       50,
+	KindScopedControlCustody:       51,
+	KindScopedConversionObligation: 52,
+	KindScopedWork:                 53,
+	KindScopedRecord:               54,
+	KindScopedBatch:                55,
+	KindScopedDelivery:             56,
+	KindScopedDeliveryCursor:       57,
+	KindTeam:                       28, KindTeamMembership: 29, KindProjectAccessPolicy: 30,
 	KindRootKey: 31, KindEventProvenance: 32, KindEntityProvenance: 33,
 	KindRelayOutbox: 34, KindRelayInbox: 35, KindRelayCursors: 36,
 	KindEmbeddingArtifact:    37,

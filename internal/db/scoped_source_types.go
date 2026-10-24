@@ -52,6 +52,8 @@ type SourceOperation struct {
 	Members           []SourceMember          `json:"members"`
 	Membership        []ScopedMembershipProof `json:"membership"`
 	Expectations      []MutationExpectation   `json:"expectations"`
+	OwnerGuard        *SourceOwnerGuard       `json:"owner_guard,omitempty"`
+	ImportIntent      *ScopedImportIntent     `json:"import_intent,omitempty"`
 }
 
 // OriginalBytes retains existing EncodeRelaySourceEvent bytes. WireBytes retains
@@ -72,6 +74,7 @@ type SourceResult struct {
 	Members         []SourceMember       `json:"members"`
 	Receipts        []AttributionReceipt `json:"receipts"`
 	Signatures      []ScopedSignature    `json:"signatures"`
+	ImportOutcome   *ScopedImportOutcome `json:"import_outcome,omitempty"`
 }
 
 type SourceCoverage struct {
@@ -270,7 +273,7 @@ func (s SourceSubmission) Validate() error {
 // bodies have already passed the native byte codec in this admission call.
 func (s SourceSubmission) validateSourceManifest(bodies [][]byte) error {
 	op := s.Operation
-	if op.Version != 1 || !uid.Valid(op.UID) || !uid.Valid(op.SourceInstanceUID) || !scopedDigest(op.Digest) || SourceCommandClass(op.CommandKind).Disposition != "source" {
+	if validateSourceOperationVersion(op) != nil || !uid.Valid(op.UID) || !uid.Valid(op.SourceInstanceUID) || !scopedDigest(op.Digest) || SourceCommandClass(op.CommandKind).Disposition != "source" {
 		return errors.New("invalid source operation identity or command")
 	}
 	if err := op.Principal.Validate(); err != nil {
@@ -279,6 +282,12 @@ func (s SourceSubmission) validateSourceManifest(bodies [][]byte) error {
 	digest, err := SourceOperationDigest(op)
 	if err != nil || digest != op.Digest {
 		return errors.New("source manifest digest mismatch")
+	}
+	if op.Version == 3 {
+		if len(s.Originals) != 0 || len(bodies) != 0 {
+			return errors.New("import intent cannot contain producer originals")
+		}
+		return nil
 	}
 	if len(op.Members) == 0 || len(op.Members) != len(s.Originals) {
 		return errors.New("invalid source member count")
@@ -329,6 +338,12 @@ func (s SourceSubmission) validateSourceManifest(bodies [][]byte) error {
 			}
 		default:
 			return errors.New("unknown membership proof kind")
+		}
+	}
+	if op.OwnerGuard != nil {
+		event := s.Originals[0]
+		if len(s.Originals) != 1 || event.Type != "issue.unassigned" || event.IssueUID == nil || *event.IssueUID != op.OwnerGuard.Subject.IssueUID || event.ProjectUID != op.OwnerGuard.Subject.ProjectUID || event.RelatedIssueUID != nil {
+			return errors.New("owner guard differs from sole unassignment original")
 		}
 	}
 	return nil
@@ -411,6 +426,9 @@ func (r SourceResult) Validate() error {
 	}
 	if r.State != "accepted" && len(r.Receipts) != 0 {
 		return errors.New("unsuccessful result contains receipts")
+	}
+	if r.ImportOutcome != nil && (!scopedDigest(r.ImportOutcome.Commitment) || len(r.Members) != 0 || len(r.Receipts) != 0) {
+		return errors.New("invalid exclusive import result outcome")
 	}
 	return nil
 }

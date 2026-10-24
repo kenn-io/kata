@@ -489,6 +489,27 @@ func (s *Store) validateSchema(ctx context.Context) error {
 }
 
 var canonicalTableNames = map[string]struct{}{
+	"federation_scoped_views":           {},
+	"federation_scoped_generations":     {},
+	"federation_scoped_projects":        {},
+	"federation_scoped_records":         {},
+	"federation_scoped_batches":         {},
+	"federation_scoped_work":            {},
+	"federation_scoped_delivery":        {},
+	"federation_scoped_cursors":         {},
+	"federation_source_operations":      {},
+	"federation_private_sources":        {},
+	"federation_source_custody":         {},
+	"federation_source_dependencies":    {},
+	"federation_source_coverage":        {},
+	"federation_control_custody":        {},
+	"federation_mutation_expectations":  {},
+	"federation_predicate_incarnations": {},
+	"federation_canonical_close_state":  {},
+	"federation_protocol_cutovers":      {},
+	"federation_scoped_conversions":     {},
+	"federation_conversion_obligations": {},
+
 	"teams": {}, "team_memberships": {}, "project_access_policies": {}, "project_access_teams": {},
 	"api_tokens": {}, "comments": {}, "events": {}, "external_field_mappings": {},
 	"external_field_states": {}, "external_root_bindings": {}, "federation_bindings": {},

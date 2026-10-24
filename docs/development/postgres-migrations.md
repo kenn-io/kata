@@ -1,3 +1,9 @@
+---
+title: PostgreSQL migrations
+description: Add and operate forward-only PostgreSQL schema migrations.
+last_edited: 2026-10-24
+---
+
 # PostgreSQL migrations
 
 Kata installs a new PostgreSQL database from the current canonical schema. The
@@ -196,3 +202,28 @@ normal JSONL cutover with backup and swap protections.
 Start the matching schema 34 binary after migration. Older binaries cannot open
 schema 34. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 35: private scoped relay state
+
+This unreleased branch advances schema 34 to 35 while the public scoped-relay
+gate remains off. The migration adds twenty private tables and their indexes
+for view generations, immutable captures, source custody, current close proof,
+delivery obligations and conversion state. It does not enroll a relay, activate
+a replica or enable scoped serving. Existing ordinary relay behavior remains
+on its existing path; the new tables start empty.
+
+Stop serving daemons and imports and take a pre-upgrade backup. Run
+`kata storage postgres migrate` with the schema-owner credential. The new
+tables and version stamp commit together under the existing migration lock.
+Refresh the runtime table grants using the existing
+[PostgreSQL operations procedure](../operations/postgres.md#prepare-the-schema)
+before starting the matching schema 35 binary. Validation-only runtime
+credentials cannot perform the migration. SQLite uses its existing JSONL
+cutover with backup and swap protections.
+
+Older binaries cannot open schema 35. Rollback requires the pre-upgrade backup
+and matching older binary; there is no down migration. A new backup containing
+private scoped records also needs a reader that supports those records. Full
+owner backups retain their exact bytes and dependencies; see
+[private scoped state in backups](../operations/backup-restore.md#private-scoped-state-unreleased)
+before filtering or transforming a snapshot.

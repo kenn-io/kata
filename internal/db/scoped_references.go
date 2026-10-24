@@ -87,7 +87,7 @@ func ValidateScopedReferences(event RemoteEvent, resolve func(string) (ScopedEnd
 	if err := json.Unmarshal(event.Payload, &payload); err != nil || payload == nil {
 		return nil, errors.New("invalid scoped source payload")
 	}
-	if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
+	if err := ValidateFederationEventEntries(event); err != nil {
 		return nil, err
 	}
 	result := []ScopedEndpoint{}
@@ -159,6 +159,31 @@ func ValidateScopedReferences(event RemoteEvent, resolve func(string) (ScopedEnd
 					return nil, errors.New("payload primary mismatch")
 				}
 			}
+		}
+	}
+	value, proof, err := decodeNativeCloseMachine(event.Type, event.Payload)
+	if err != nil {
+		return nil, err
+	}
+	if proof != nil {
+		if proof.IssueUID != primary {
+			return nil, errors.New("close proof primary mismatch")
+		}
+		value = proof.Value
+	}
+	if value != nil {
+		if primary == "" || value.PeerIssueUID == primary {
+			return nil, errors.New("invalid close peer")
+		}
+		if err := add(value.PeerIssueUID); err != nil {
+			return nil, err
+		}
+		endpoint, err := resolve(value.PeerIssueUID)
+		if err != nil {
+			return nil, err
+		}
+		if endpoint.ProjectUID != value.PeerProjectUID || endpoint.IssueUID != value.PeerIssueUID {
+			return nil, errors.New("close peer membership mismatch")
 		}
 	}
 	switch event.Type {

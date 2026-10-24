@@ -64,6 +64,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 			return db.ProjectMergeResult{}, err
 		}
 	}
+	if err := db.RejectScopedProjectRetirementTx(ctx, tx, source.UID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
@@ -88,6 +91,10 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	}
 	if len(mappingCollisions) > 0 {
 		return db.ProjectMergeResult{}, &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
+	}
+
+	if err := moveScopedCanonicalCloseProjectTx(ctx, tx, source, target.UID); err != nil {
+		return db.ProjectMergeResult{}, err
 	}
 
 	// Reconcile short_id collisions BEFORE the bulk UPDATE moves issues onto
