@@ -16,10 +16,23 @@ func newTUICmd() *cobra.Command {
 	var mouse bool
 	cmd := &cobra.Command{
 		Use:   "tui [issue-ref]",
-		Short: "open the interactive issue browser",
-		Long: `kata tui opens a Bubble Tea TUI scoped to the current project (per .kata.toml).
+		Short: "browse issues, jobs, runs and workflows",
+		Long: `kata tui opens native Kata / Jobs / Runs / Workflows tabs for the selected
+daemon and current project (per .kata.toml). Kata is the default issue browser.
+Press 1–4 to select a tab; forms and prompts keep their numeric input.
 Pass an optional issue ref to open that issue's detail view directly.
-Press ? for help, q to quit.
+
+Jobs define a trigger and action. Workflows contain reusable command or prompt
+steps with dependencies and retries. Runs show recorded status and evidence.
+Use kata cron --help for daemon delivery and external adapter requirements.
+
+Create a workflow with kata cron workflow create --file workflow.json --json.
+Run kata cron workflow create --help for the complete JSON example and retry rules.
+In Jobs, n creates a job and e edits one; in Workflows, e edits an existing
+definition in $EDITOR. Use kata cron job create --help to reference a workflow.
+
+Press ? for issue help on Kata; cron screens show their keys in the footer.
+Press q to quit.
 
 Mouse support is opt-in. Set [tui] mouse = true in <KATA_HOME>/config.toml
 or pass --mouse for one run. Hold Option (macOS) or Shift (Linux) for native

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 # CLI reference
@@ -1787,7 +1787,8 @@ For TCP listener auth modes, including trusted private-network bearer auth,
 read-only experiments, and explicit tokenless private-network writes, see
 [Remote daemon](../operations/remote-daemon.md).
 
-`kata tui` opens the interactive issue browser. Pass an optional issue ref,
+`kata tui` opens the native Kata issue browser, with `jobs`, `runs`, and `workflows`
+tabs in the same terminal. Pass an optional issue ref,
 such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
@@ -1887,6 +1888,59 @@ The TUI appends local daemon transport diagnostics to
 `<KATA_HOME>/runtime/<dbhash>/tui.log`, including retried stale-socket failures
 and request paths. Use that file when an interactive fetch reports a local
 daemon connection error.
+
+#### Cron tabs
+
+Press `1`–`4` or click the tab bar with `--mouse` enabled
+to select `kata カタ`, `jobs`, `runs`, or `workflows`. The Kata tab keeps its existing
+issue navigation and Tab bindings. Forms and prompts keep their numeric input.
+On cron tabs, Tab and Shift-Tab cycle the outer tabs. `K` returns to Kata.
+The bar shows running observations and catalog problems at the right. These
+counts describe loaded observations, not live worker health. Cron details and
+editors use the full terminal; return to a list to see the tab bar.
+
+Cron views use the selected daemon and project scope. Switching projects or
+daemons discards the previous cron context. In all-projects scope, each row
+keeps its project identity. Permission and connection problems appear per
+project. Rendering reads cached data; daemon events and `r` refresh it.
+
+| Control | Cron behavior |
+| --- | --- |
+| `j` / `k`, arrows | Move through rows or detail selections. |
+| `l`, right arrow, Enter | Open the selected record. |
+| `h`, left arrow, Escape | Return from detail. |
+| `/` | Filter the active list. |
+| `[` / `]` | Page the list; `]` loads more run history at the loaded boundary. |
+| `space` | Expand workflow steps. |
+| `L` | Switch between list and inspector layouts. |
+| `i` | Open the linked issue in the native Kata tab. |
+| `n` / `e` | Create or edit a job; `e` opens workflow JSON in `$VISUAL`, then `$EDITOR`, falling back to `vi`. |
+| `p` / `D` | Toggle a job's enabled state or confirm its deletion. |
+| `Ctrl+s` | Save a definition form. |
+
+Job forms preserve opaque adapter options and exact JSON numbers. For a saved
+native recurring job, the Parent issue and Action controls are read-only.
+Choose those when creating the job. Saves,
+pause changes, and deletion use the definition's current event guard.
+Conflicts keep the draft and show the newer document. An uncertain save
+reads back the result before retrying the same payload and guard. Read-only
+connections cannot edit definitions. Workflow creation and deletion use
+`kata cron workflow`; the workflow editor keeps its CHECK and NEWER panels.
+Run `kata cron workflow create --help` for a complete workflow JSON example
+and creation command. `kata cron job create --help` shows how a job references
+that workflow. `kata cron --help` explains job triggers, delivery, and recorded runs.
+
+Runs show observations recorded through the native cron API. The initial
+Runs page contains at most 100 observations per project; more history loads
+on demand. Refresh returns to the newest page. Workflow detail labels its run
+links as loaded history. Current
+definitions are labeled as current, and observations retain their recorded
+definition identifiers. An empty Runs view does not prove a recurring
+schedule has never delivered an issue.
+
+Cron screens show recorded status, attribution, occurrence, summary, times,
+and available token usage. They do not supply live agent state, logs, or an
+exact next-fire time. Saving a definition or opening a tab starts no worker.
 
 ### PostgreSQL schema operations
 
