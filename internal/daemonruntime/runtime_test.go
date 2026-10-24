@@ -96,6 +96,10 @@ func TestRuntimeProcessAliveRejectsUnknownScope(t *testing.T) {
 }
 
 func TestRuntimeRecordBlocksStart(t *testing.T) {
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getppid())
+	require.True(t, ok)
+	// A matching creation identity takes precedence over an earlier wall-clock timestamp.
+	assert.True(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), ProcessIdentity: identity, StartedAt: time.Unix(1, 0)}))
 	// The parent is a live process other than this one, which kit never blocks on.
 	assert.True(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), ProcessIdentityV2: "unverifiable", StartedAt: time.Unix(1, 0)}))
 	// A legacy record published before its PID's process was created names a reused PID.
