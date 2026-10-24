@@ -68,7 +68,7 @@ func TestNamedReadOnlyProfileDiscoveryDefersIdentityProbe(t *testing.T) {
 	require.NoError(t, err)
 	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
 
-	resolved, err := resolveNamedDaemonMode(t.Context(), "work", namedDiscoverTargetReadOnly)
+	resolved, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work", ReadOnly: true})
 	require.NoError(t, err, "read-only named discovery defers profile identity checks to the caller's bounded client")
 	require.Equal(t, profile.InstanceUID, resolved.LocalProfile.InstanceUID)
 	require.Equal(t, server.URL, resolved.BaseURL)

@@ -172,7 +172,7 @@ func TestLocalProfileDiscoveryRetainsStoppedSelection(t *testing.T) {
 	require.NotNil(t, selected.Profile)
 	assert.Equal(t, profile.Home, selected.Profile.Home)
 	assert.Equal(t, DaemonSourceLocalConfig, selected.Resolved.Source)
-	resolved, ok, err := DiscoverResolvedInWorkspace(t.Context(), root)
+	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{WorkspaceStart: root})
 	require.NoError(t, err)
 	assert.False(t, ok)
 	require.NotNil(t, resolved.LocalProfile)
@@ -221,7 +221,7 @@ func TestLocalProfileLiveIdentityUsesWorkCredential(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"})
 	require.NoError(t, err)
-	resolved, ok, err := DiscoverResolvedInWorkspace(t.Context(), root)
+	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{WorkspaceStart: root})
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, "Bearer work-token", got)
@@ -327,7 +327,7 @@ func TestLocalProfileNamedDiscoveryCannotUsePersonalRuntime(t *testing.T) {
 	profile, _ := localProfileFixture(t)
 	personal := startResolvableDaemon(t)
 	require.NoError(t, writeRuntimeRecord(t, os.Getenv("KATA_HOME"), strings.TrimPrefix(personal.URL, "http://")))
-	resolved, err := DiscoverResolvedNamed(t.Context(), "work")
+	resolved, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"})
 	require.NoError(t, err)
 	assert.Empty(t, resolved.BaseURL)
 	_, err = os.Stat(filepath.Join(profile.Home, "runtime"))
@@ -342,7 +342,7 @@ func TestLocalProfileDiscoveryDoesNotRepairRuntimePermissions(t *testing.T) {
 	dir := filepath.Join(profile.Home, "runtime", profile.StorageID)
 	require.NoError(t, os.MkdirAll(dir, 0700))
 	require.NoError(t, os.Chmod(dir, 0755)) //nolint:gosec // Regression fixture must retain deliberately non-private permissions.
-	_, _, err := DiscoverResolvedInWorkspace(t.Context(), root)
+	_, _, err := DiscoverSelected(t.Context(), DiscoverRequest{WorkspaceStart: root})
 	require.Error(t, err)
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestLocalProfileDiscoveryUsesLiveIdentityWithoutStorage(t *testing.T) {
 				PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"),
 			})
 			require.NoError(t, err)
-			resolved, found, err := DiscoverResolvedInWorkspace(t.Context(), root)
+			resolved, found, err := DiscoverSelected(t.Context(), DiscoverRequest{WorkspaceStart: root})
 			if wrongUID {
 				require.ErrorIs(t, err, ErrProfileIdentityMismatch)
 				assert.False(t, found)
@@ -633,7 +633,7 @@ func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T
 	})
 	require.NoError(t, err)
 
-	resolved, found, err := DiscoverResolvedInWorkspace(t.Context(), root)
+	resolved, found, err := DiscoverSelected(t.Context(), DiscoverRequest{WorkspaceStart: root})
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, server.URL, resolved.BaseURL)

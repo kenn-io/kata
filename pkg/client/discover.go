@@ -45,7 +45,7 @@ type DiscoveredDaemon struct {
 // remotes are not probed; the first request establishes reachability. Use
 // Client.Discovered to check whether the selected daemon is remote.
 func Discover(ctx context.Context, discover DiscoverOptions, opts ...Option) (*Client, error) {
-	resolved, ok, err := internalclient.DiscoverResolvedInWorkspace(ctx, discover.Workspace)
+	resolved, ok, err := internalclient.DiscoverSelected(ctx, internalclient.DiscoverRequest{WorkspaceStart: discover.Workspace})
 	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
