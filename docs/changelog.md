@@ -11,8 +11,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which
-  matches `kata --daemon <name>`. A Go program can offer a daemon picker
-  without reading `config.toml` or running `kata daemon locate`. See
+  matches `kata --daemon <name>`. Set `DiscoverOptions.StartWith` to a `kata`
+  executable to start a stopped local daemon, with `daemon recover` checks for
+  a pinned profile. A Go program can offer a daemon picker without reading
+  `config.toml` or running `kata daemon locate`. See
   [Go client](reference/go-client.md#connect-to-a-catalog-daemon-by-name).
 
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).

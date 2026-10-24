@@ -54,7 +54,8 @@ mode.
 Discover and `kata daemon locate` both inspect the selected daemon without
 starting it. Use `kata daemon diagnose` for stopped-profile state and recovery
 guidance; `kata daemon recover` can start a local profile after its existing
-storage and identity pass the recovery checks.
+storage and identity pass the recovery checks. Set
+[`StartWith`](#start-a-stopped-local-daemon) to have Discover start it.
 
 Discover does not probe configured remotes, including one selected by name.
 The first request reports whether a remote is reachable; call
@@ -139,14 +140,40 @@ ignored. Discover resolves it with the same catalog rules as `--daemon`:
 - A local entry connects to the running default local daemon. A pinned local
   profile (`home` and `instance_uid`) connects to that profile's daemon after
   checking its instance UID.
-- Discover never starts a stopped local entry; it returns an error matching
-  `client.ErrDaemonUnavailable`. Use `kata --daemon <name> daemon diagnose` for
-  recovery guidance.
+- A stopped local entry returns an error matching
+  `client.ErrDaemonUnavailable` unless `StartWith` is set.
 - A name with no catalog entry returns an error matching
   `client.ErrDaemonNotInCatalog`.
 
 `Discovered` reports `Remote` as true for a remote entry and false for a local
 one.
+
+### Start a stopped local daemon
+
+Set `DiscoverOptions.StartWith` to the path of a `kata` executable to start
+the selected local daemon when it is stopped, as the TUI daemon switcher does:
+
+```go
+api, err := client.Discover(ctx, client.DiscoverOptions{
+	Daemon:    "example-workspace",
+	StartWith: kataPath,
+})
+```
+
+Discover runs that executable, waits for it to exit, and connects:
+
+| Selected daemon | Command |
+| --- | --- |
+| The current home's daemon, or a plain `local = true` entry | `kata daemon start` |
+| A pinned local profile chosen by `Daemon` | `kata --daemon <name> daemon recover` |
+| A pinned local profile chosen by `.kata.local.toml` or `active_daemon` | `kata [--workspace <Workspace>] daemon recover` |
+
+`daemon recover` checks the profile's existing storage and instance UID before
+and after starting it, and never creates storage. Discover never starts a
+remote, or a local daemon whose process is running but unreachable. If the
+command fails, Discover returns an error matching `client.ErrDaemonUnavailable`
+that includes the command's output. The child inherits the calling process's
+environment and working directory.
 
 ## Connect to a known endpoint
 

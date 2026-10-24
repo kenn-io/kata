@@ -1,8 +1,12 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"go.kenn.io/kata/internal/daemonruntime"
 )
@@ -22,13 +26,21 @@ type DiscoverRequest struct {
 	// ReadOnly never creates or repairs local runtime metadata and leaves a
 	// local profile's identity check to the caller's first request.
 	ReadOnly bool
+	// StartWith is a kata executable. When the selected local daemon has no
+	// live runtime, it runs `daemon start`, or `daemon recover` for a pinned
+	// local profile, and discovery looks again. A remote is never started.
+	StartWith string
 }
 
-// DiscoverSelected finds the live daemon a request selects and never starts
-// it. A configured remote is returned as selected, probed only when
-// ProbeRemote is set. ok is false when the selected local daemon has no live
-// runtime; a pinned local profile's selection is still returned so callers can
-// diagnose it.
+// ErrDaemonStartFailed reports that DiscoverRequest.StartWith could not start
+// the selected local daemon.
+var ErrDaemonStartFailed = errors.New("start kata daemon")
+
+// DiscoverSelected finds the live daemon a request selects without starting
+// it unless StartWith is set. A configured remote is returned as selected,
+// probed only when ProbeRemote is set. ok is false when the selected local
+// daemon has no live runtime; a pinned local profile's selection is still
+// returned so callers can diagnose it.
 func DiscoverSelected(ctx context.Context, req DiscoverRequest) (ResolvedDaemon, bool, error) {
 	selection, err := InspectSelection(ctx, req.WorkspaceStart, req.Name)
 	if err != nil {
@@ -38,12 +50,16 @@ func DiscoverSelected(ctx context.Context, req DiscoverRequest) (ResolvedDaemon,
 	if req.ReadOnly {
 		up = liveDiscovery{scan: liveDaemonsReadOnly}
 	}
+	if req.StartWith != "" {
+		up = executableStart{discover: up, executable: req.StartWith, request: req}
+	}
 	return bringUpSelection(ctx, selection, req.WorkspaceStart, req.ProbeRemote, up)
 }
 
 // daemonBringUp reaches the local daemon a selection names. The adapter
-// decides whether reaching it may start it: liveDiscovery never does, and
-// inProcessStart starts it from this process.
+// decides whether reaching it may start it: liveDiscovery never does,
+// executableStart runs a kata executable, and inProcessStart starts it from
+// this process.
 type daemonBringUp interface {
 	profile(context.Context, DaemonSelection) (ResolvedDaemon, bool, error)
 	local(context.Context, DaemonSelection) (ResolvedDaemon, bool, error)
@@ -115,6 +131,47 @@ func (d liveDiscovery) local(ctx context.Context, selection DaemonSelection) (Re
 	resolved := selection.Resolved.WithRunning(found.Running())
 	resolved.UnixSocket = found.UnixSocket
 	return resolved, true, nil
+}
+
+// executableStart starts a stopped local daemon by running a kata
+// executable, for programs that are not kata themselves. kata owns the
+// start: `daemon recover` checks a pinned profile's existing storage and
+// instance UID and never creates storage.
+type executableStart struct {
+	discover   daemonBringUp
+	executable string
+	request    DiscoverRequest
+}
+
+func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	args := []string{"daemon", "recover"}
+	switch {
+	case s.request.Name != "":
+		args = append([]string{"--daemon", s.request.Name}, args...)
+	case s.request.WorkspaceStart != "":
+		args = append([]string{"--workspace", s.request.WorkspaceStart}, args...)
+	}
+	return s.startIfStopped(ctx, selection, s.discover.profile, args)
+}
+
+func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
+}
+
+func (s executableStart) startIfStopped(
+	ctx context.Context, selection DaemonSelection,
+	discover func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error), args []string,
+) (ResolvedDaemon, bool, error) {
+	resolved, ok, err := discover(ctx, selection)
+	if err != nil || ok {
+		return resolved, ok, err
+	}
+	output, err := exec.CommandContext(ctx, s.executable, args...).CombinedOutput() //nolint:gosec // G204: the caller names its kata executable; arguments are fixed or caller-selected names.
+	if err != nil {
+		return resolved, false, fmt.Errorf("%w: %s %s: %w: %s",
+			ErrDaemonStartFailed, s.executable, strings.Join(args, " "), err, bytes.TrimSpace(output))
+	}
+	return discover(ctx, selection)
 }
 
 // inProcessStart starts a stopped local daemon from this process, which is

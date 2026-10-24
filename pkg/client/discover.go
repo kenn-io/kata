@@ -9,7 +9,7 @@ import (
 )
 
 // ErrDaemonUnavailable reports that Discover found no configured remote and no
-// reachable local daemon.
+// reachable local daemon, or could not start a stopped one with StartWith.
 var ErrDaemonUnavailable = errors.New("no reachable kata daemon")
 
 // ErrDaemonNotInCatalog reports that DiscoverOptions.Daemon names no
@@ -25,6 +25,11 @@ type DiscoverOptions struct {
 	// does. It replaces every other selection source, so Workspace is ignored.
 	// DaemonCatalog lists the names.
 	Daemon string
+	// StartWith is the path of a kata executable. When it is set and the
+	// selected local daemon has no runtime, Discover runs `kata daemon start`,
+	// or `kata daemon recover` for a pinned local profile, then connects. Empty
+	// never starts a daemon, and a remote is never started.
+	StartWith string
 }
 
 // DiscoveredDaemon describes the daemon Discover selected. It carries no
@@ -51,19 +56,21 @@ type DiscoveredDaemon struct {
 // Otherwise an unset or empty token_env variable is an error. An unknown name
 // returns an error matching ErrDaemonNotInCatalog.
 //
-// Like `kata daemon locate`, Discover never starts the selected daemon. Use
-// `kata daemon diagnose` and `kata daemon recover` to inspect and recover an
-// eligible stopped local profile. A selected local daemon without a reachable
-// runtime returns an error matching ErrDaemonUnavailable; profile storage and
-// identity validation failures keep their profile-specific errors. Configured
-// remotes are not probed; the first request establishes reachability. Use
-// Client.Discovered to check whether the selected daemon is remote.
+// Like `kata daemon locate`, Discover never starts the selected daemon unless
+// DiscoverOptions.StartWith is set. Use `kata daemon diagnose` and `kata
+// daemon recover` to inspect and recover an eligible stopped local profile
+// yourself. A selected local daemon without a reachable runtime returns an
+// error matching ErrDaemonUnavailable; profile storage and identity validation
+// failures keep their profile-specific errors. Configured remotes are not
+// probed; the first request establishes reachability. Use Client.Discovered to
+// check whether the selected daemon is remote.
 func Discover(ctx context.Context, discover DiscoverOptions, opts ...Option) (*Client, error) {
 	resolved, ok, err := internalclient.DiscoverSelected(ctx, internalclient.DiscoverRequest{
 		WorkspaceStart: discover.Workspace,
 		Name:           discover.Daemon,
+		StartWith:      discover.StartWith,
 	})
-	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) {
+	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) || errors.Is(err, internalclient.ErrDaemonStartFailed) {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
 	if err != nil {
