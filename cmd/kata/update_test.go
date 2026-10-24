@@ -571,17 +571,6 @@ func executeRootCaptureWithInput(ctx context.Context, t *testing.T, stdin string
 	return so.String(), se.String(), err
 }
 
-func TestUpdateRestartSkipsUnknownRecord(t *testing.T) {
-	setupKataEnv(t)
-	child := startSleepProcess(t)
-	path := writeUnknownRuntimePID(t, child.Process.Pid)
-	var stderr bytes.Buffer
-	require.NoError(t, restartDaemonAfterUpdate(t.Context(), &stderr))
-	assert.Contains(t, stderr.String(), "skipping daemon pid=")
-	assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid))
-	assert.FileExists(t, path)
-}
-
 func TestUpdateReplacementIgnoresUnknownRecord(t *testing.T) {
 	setupKataEnv(t)
 	writeUnknownRuntimePID(t, os.Getpid())

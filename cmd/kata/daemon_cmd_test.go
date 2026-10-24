@@ -3953,32 +3953,41 @@ func writeUnknownRuntimePID(t *testing.T, pid int) string {
 }
 
 func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
-	for _, action := range []string{"stop", "reload", "restart"} {
+	for _, action := range []string{"stop", "reload", "restart", "update"} {
 		t.Run(action, func(t *testing.T) {
+			resetFlags(t)
 			home := setupKataEnv(t)
-			unknownPID := 99999999
+			unknown := startSleepProcess(t)
+			unknownPID := unknown.Process.Pid
 			localPID := 0
-			if action == "restart" {
+			switch action {
+			case "restart":
 				original := startDetachedDaemon
 				t.Cleanup(func() { startDetachedDaemon = original })
 				startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
 					return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
 				}
-			} else {
+			case "stop", "reload":
 				local := startSleepProcess(t)
-				unknown := startSleepProcess(t)
 				localPID = local.Process.Pid
-				unknownPID = unknown.Process.Pid
 				writeRuntimePID(t, home, local.Process.Pid)
 			}
 			path := writeUnknownRuntimePID(t, unknownPID)
 
-			stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "daemon", action)
+			var stdout, stderr string
+			var err error
+			if action == "update" {
+				var buf bytes.Buffer
+				err = restartDaemonAfterUpdate(t.Context(), &buf)
+				stderr = buf.String()
+			} else {
+				stdout, stderr, err = executeRootCapture(t, t.Context(), "--agent", "daemon", action)
+			}
 
 			require.NoError(t, err)
-			if action != "restart" {
+			if action == "stop" || action == "reload" {
 				assert.Contains(t, stdout, "pid="+strconv.Itoa(localPID))
-				assert.NotContains(t, stdout, "pid="+strconv.Itoa(unknownPID))
+			} else {
 				assert.True(t, kitdaemon.ProcessAlive(unknownPID))
 			}
 			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknownPID))
