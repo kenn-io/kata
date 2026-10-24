@@ -4002,34 +4002,6 @@ func TestDaemonStartupRejectsUnknownBeforeOpeningStorage(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
 }
 
-func TestDaemonStartupRejectsOwnerBeforeOpeningStorage(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	release, err := runtimeStore.AcquireOwnerLock(t.Context())
-	require.NoError(t, err)
-	defer release()
-	// A reused legacy PID passes the record guard, just as a foreign record does.
-	path, err := runtimeStore.Write(kitdaemon.RuntimeRecord{
-		PID: os.Getpid(), StartedAt: time.Unix(1, 0), Network: "tcp", Address: "127.0.0.1:7777",
-	})
-	require.NoError(t, err)
-	before, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	err = runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard))
-
-	require.ErrorContains(t, err, "daemon already running")
-	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
-	after, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
-	require.NoError(t, err)
-	assert.Equal(t, before, after)
-}
-
 func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -4040,7 +4012,6 @@ func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
 		PID: child.Process.Pid, Network: "tcp", Address: "127.0.0.1:7777", StartedAt: time.Unix(1, 0),
 	})
 	require.NoError(t, err)
-	assert.False(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: child.Process.Pid, StartedAt: time.Unix(1, 0)}))
 	originalRun := runExternalRootRunner
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

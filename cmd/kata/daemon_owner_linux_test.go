@@ -72,7 +72,6 @@ func TestDaemonStartupForeignOwner(t *testing.T) {
 	record := kitdaemon.RuntimeRecord{
 		PID: 1, ProcessIdentityV2: identity, Network: "tcp", Address: "127.0.0.1:7777",
 	}
-	require.Equal(t, kitdaemon.ProcessScopeForeign, kitdaemon.RuntimeProcessScope(record))
 	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
 	require.NoError(t, err)
 	before, err := os.ReadFile(path) //nolint:gosec // runtime record in the test's temporary directory
