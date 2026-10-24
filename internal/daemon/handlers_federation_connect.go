@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -48,11 +47,8 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil || baseErr != nil || base != hubURL || catalog.Local {
 			return nil, api.NewError(400, "validation", "hub_catalog must select a remote root HTTP(S) origin", "", nil)
 		}
-		token := strings.TrimSpace(catalog.Token)
-		if catalog.TokenEnv != "" {
-			token = strings.TrimSpace(os.Getenv(catalog.TokenEnv))
-		}
-		if token == "" {
+		token, err := catalog.ClientToken()
+		if err != nil || token == "" {
 			return nil, api.NewError(400, "hub_credential_required", "selected hub has no user credential", "", nil)
 		}
 		// Pin both the authorization header and secret-bearing enrollment body.

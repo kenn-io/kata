@@ -299,6 +299,13 @@ isolated credentials, PostgreSQL restrictions, and recovery.
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
 
+A catalog entry's `token`, or the value of the variable its `token_env` names,
+is the bearer credential clients send to that daemon. A command that connects
+to an entry whose `token_env` variable is unset or empty fails; kata never
+falls back to another credential. `kata daemon locate` reports a remote or
+plain local entry without reading its credential. `KATA_AUTH_TOKEN` replaces a
+remote entry's credential, so its `token_env` is not read then.
+
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
 

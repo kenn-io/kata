@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -545,15 +544,13 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 		}
 	}
 	resolved.baseURL = canonical
-	resolved.token = d.Token
-	if resolved.token == "" && d.TokenEnv != "" {
-		resolved.token = strings.TrimSpace(os.Getenv(d.TokenEnv))
-	}
+	// An unset token_env leaves no credential; the probe then reports auth_required.
+	resolved.token, _ = d.ClientToken()
 	return resolved
 }
 
 func webDaemonCredentialsConfigured(d config.CatalogDaemonConfig) bool {
-	return strings.TrimSpace(d.Token) != "" || strings.TrimSpace(d.TokenEnv) != ""
+	return d.HasClientToken()
 }
 
 func redactWebDaemonURL(raw string) string {

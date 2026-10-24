@@ -99,12 +99,9 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 							Source: DaemonSourceLocalRuntime,
 						}.withGlobalAuth()}, nil
 					}
-					token := entry.Token
-					if entry.TokenEnv != "" {
-						token = strings.TrimSpace(os.Getenv(entry.TokenEnv))
-						if token == "" {
-							return DaemonSelection{}, fmt.Errorf("daemon %q: configured token_env is empty", name)
-						}
+					token, err := catalogClientToken(entry)
+					if err != nil {
+						return DaemonSelection{}, err
 					}
 					return DaemonSelection{
 						Resolved:           (ResolvedDaemon{Source: DaemonSourceLocalRuntime}).withLocalTargetAuth(token),
@@ -112,10 +109,10 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 					}, nil
 				}
 				resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath}
-				token := entry.Token
-				if entry.TokenEnv != "" {
-					token = strings.TrimSpace(os.Getenv(entry.TokenEnv))
-				}
+				// Resolution reads this credential again and reports an unset
+				// token_env. Selection never fails on it, as `kata daemon
+				// locate` requires.
+				token, _ := catalogClientToken(entry)
 				if entry.Local {
 					resolved = resolved.withLocalTargetAuth(token)
 				} else {
@@ -137,14 +134,12 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 				return DaemonSelection{}, err
 			}
 			resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath, profileConfig: &profile, LocalProfile: &LocalProfileIdentity{Name: name, Home: profile.Home, DataDir: ns.DataDir, StorageID: profile.StorageID, InstanceUID: profile.InstanceUID}, Token: profile.Config.Auth.Token, TrustPrivateNetwork: profile.Config.Auth.TrustPrivateNetwork}
-			if entry.Token != "" {
-				resolved.Token = entry.Token
+			token, err := catalogClientToken(entry)
+			if err != nil {
+				return DaemonSelection{}, err
 			}
-			if entry.TokenEnv != "" {
-				resolved.Token = strings.TrimSpace(os.Getenv(entry.TokenEnv))
-				if resolved.Token == "" {
-					return DaemonSelection{}, fmt.Errorf("daemon %q: configured token_env is empty", name)
-				}
+			if token != "" {
+				resolved.Token = token
 			}
 			if _, err := config.LocalProfileEnvironment(profile, false); err != nil {
 				return DaemonSelection{}, err
@@ -161,4 +156,14 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 		resolved.Source = DaemonSourceLocalRuntime
 	}
 	return DaemonSelection{Resolved: resolved}, nil
+}
+
+// catalogClientToken is a catalog entry's credential as clients send it.
+// KATA_AUTH_TOKEN replaces a remote entry's credential, so its token_env is
+// not read then.
+func catalogClientToken(entry config.CatalogDaemonConfig) (string, error) {
+	if !entry.Local && globalAuthTokenOverrideSet() {
+		return entry.Token, nil
+	}
+	return entry.ClientToken()
 }
