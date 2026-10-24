@@ -38,65 +38,31 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 	}
 }
 
-func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
-	goEnv := exec.Command("go", "env", "GOCACHE", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned caches.
-	cacheOutput, err := goEnv.CombinedOutput()
-	require.NoErrorf(t, err, "resolve caller caches: %s", cacheOutput)
-	caches := strings.Split(strings.TrimSpace(string(cacheOutput)), "\n")
-	require.Len(t, caches, 2)
-	buildCache, moduleCache := strings.TrimSpace(caches[0]), strings.TrimSpace(caches[1])
-	require.NotEmpty(t, moduleCache)
-
-	scratch := t.TempDir()
-	binaryName := "telemetry-testprogram"
-	if runtime.GOOS == "windows" {
-		binaryName += ".exe"
-	}
-	binary := filepath.Join(scratch, binaryName)
-	home := filepath.Join(scratch, "home")
-	command := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", binary, "./testprogram") //nolint:gosec // Fixed Go tool and arguments build the test fixture.
-	command.Env = append(os.Environ(),
-		"HOME="+home,
-		"XDG_CACHE_HOME="+filepath.Join(scratch, "xdg-cache"),
-		"XDG_CONFIG_HOME="+filepath.Join(scratch, "xdg-config"),
-		"GOCACHE="+buildCache,
-		"GOMODCACHE="+moduleCache,
-		"GOPROXY=off",
-	)
-	output, err := command.CombinedOutput()
-	require.NoErrorf(t, err, "build standalone test program: %s", output)
-
-	command = exec.Command(binary) //nolint:gosec // The test owns and just built this binary in its scratch directory.
-	command.Env = append(os.Environ(),
-		"HOME="+home,
-		"XDG_CACHE_HOME="+filepath.Join(scratch, "xdg-cache"),
-		"XDG_CONFIG_HOME="+filepath.Join(scratch, "xdg-config"),
-		"TELEMETRY_ENABLED=1",
-		EnabledEnv+"=1",
-	)
-	output, err = command.CombinedOutput()
-	require.NoErrorf(t, err, "run standalone test program: %s", output)
-	assert.Equal(t, "disabled", strings.TrimSpace(string(output)))
-}
-
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
 func TestStandaloneTelemetryAdmission(t *testing.T) {
 	scratch := t.TempDir()
-	binary := filepath.Join(scratch, "telemetry-opt-out")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
+	build := func(tags string) string {
+		t.Helper()
+		binary := filepath.Join(scratch, "telemetry-opt-out"+tags)
+		if runtime.GOOS == "windows" {
+			binary += ".exe"
+		}
+		command := exec.Command("go", "build", "-tags", tags, "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		return binary
 	}
-	build := exec.Command("go", "build", "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
-	for _, tc := range []struct{ name, env, version, want string }{
-		{"enabled", EnabledEnv + "=1", "v1.2.3", "enabled"},
-		{"0", EnabledEnv + "=0", "v1.2.3", "disabled"},
-		{"development", EnabledEnv + "=1", "dev", "disabled"},
+	binary := build("")
+	disabledBinary := build("kit_posthog_disabled")
+	for _, tc := range []struct{ name, binary, env, version, want string }{
+		{"enabled", binary, EnabledEnv + "=1", "v1.2.3", "enabled"},
+		{"0", binary, EnabledEnv + "=0", "v1.2.3", "disabled"},
+		{"development", binary, EnabledEnv + "=1", "dev", "disabled"},
+		{"kit_posthog_disabled", disabledBinary, EnabledEnv + "=1", "v1.2.3", "disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command := exec.Command(binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command := exec.Command(tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
 			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))
