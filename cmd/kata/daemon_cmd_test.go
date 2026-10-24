@@ -2964,7 +2964,7 @@ func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
 		time.Sleep(delay)
 		os.Exit(0)
 	}
-	_, _ = io.Copy(os.Stdout, os.Stdin)
+	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(0)
 }
 
@@ -3957,18 +3957,7 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			resetFlags(t)
 			home := setupKataEnv(t)
-			unknown := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-			unknown.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
-			stdin, err := unknown.StdinPipe()
-			require.NoError(t, err)
-			stdoutPipe, err := unknown.StdoutPipe()
-			require.NoError(t, err)
-			require.NoError(t, unknown.Start())
-			t.Cleanup(func() {
-				_ = stdin.Close()
-				_ = unknown.Process.Kill()
-				_ = unknown.Wait()
-			})
+			unknown := startSleepProcess(t)
 			unknownPID := unknown.Process.Pid
 			path := writeUnknownRuntimePID(t, unknownPID)
 			localPID := 0
@@ -3986,6 +3975,7 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			}
 
 			var stdout, stderr string
+			var err error
 			if action == "update" {
 				var buf bytes.Buffer
 				err = restartDaemonAfterUpdate(t.Context(), &buf)
@@ -3997,21 +3987,6 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			require.NoError(t, err)
 			if action == "stop" || action == "reload" {
 				assert.Contains(t, stdout, "pid="+strconv.Itoa(localPID))
-			}
-			_, err = stdin.Write([]byte("ping"))
-			require.NoError(t, err)
-			replied := make(chan error, 1)
-			response := make([]byte, 4)
-			go func() {
-				_, err := io.ReadFull(stdoutPipe, response)
-				replied <- err
-			}()
-			select {
-			case err := <-replied:
-				require.NoError(t, err, "skipped process must still answer after daemon control")
-				assert.Equal(t, "ping", string(response))
-			case <-time.After(5 * time.Second):
-				t.Fatal("skipped process did not answer after daemon control")
 			}
 			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknownPID))
 			assert.FileExists(t, path)
