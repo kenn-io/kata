@@ -341,8 +341,9 @@ jobs:
           ./internal/db/storeopen \
           ./internal/daemon \
           ./internal/jsonl \
-          ./internal/vector \
-          ./cmd/kata
+          ./internal/vector
+          # cmd/kata PostgreSQL tests carry Postgres in their name.
+          env -u KATA_AUTH_TOKEN go test -count=1 -run Postgres ./cmd/kata
           env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
 
   windows:

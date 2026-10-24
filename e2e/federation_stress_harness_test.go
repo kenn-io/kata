@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -105,7 +104,7 @@ func newFederationStressFixture(t federationStressTB, spokeCount int) *federatio
 	t.Helper()
 	require.Positive(t, spokeCount)
 
-	bin := buildFederationStressKataBinary(t)
+	bin := buildKataBinary(t)
 	fx := &federationStressFixture{
 		bin:    bin,
 		hub:    startFederationStressHub(t, bin),
@@ -769,35 +768,6 @@ func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node *federationStr
 	}
 	require.NoError(t, rows.Err())
 }
-
-func buildFederationStressKataBinary(t federationStressTB) string {
-	t.Helper()
-	federationStressBuildOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "kata-federation-stress-bin-")
-		if err != nil {
-			federationStressBuildErr = err
-			return
-		}
-		bin := filepath.Join(dir, "kata")
-		build := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", bin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // fixed args, test-only
-		var stderr bytes.Buffer
-		build.Stderr = &stderr
-		if err := build.Run(); err != nil {
-			federationStressBuildErr = fmt.Errorf("go build kata: %w: %s", err, stderr.String())
-			return
-		}
-		federationStressBuildBin = bin
-	})
-	require.NoError(t, federationStressBuildErr)
-	require.NotEmpty(t, federationStressBuildBin)
-	return federationStressBuildBin
-}
-
-var (
-	federationStressBuildOnce sync.Once
-	federationStressBuildBin  string
-	federationStressBuildErr  error
-)
 
 func federationStressPullIntervalEnv() string {
 	return "KATA_FEDERATION_PULL_INTERVAL_MS=" + strconv.FormatInt(federationStressPullInterval.Milliseconds(), 10)

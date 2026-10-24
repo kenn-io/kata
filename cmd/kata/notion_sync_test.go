@@ -29,7 +29,7 @@ const cliNotionPage = "33333333-3333-4333-8333-333333333333"
 func notionCLIHTTP(t *testing.T, handler http.HandlerFunc) (*testenv.Env, string) {
 	t.Helper()
 	env := testenv.New(t)
-	dir := initBoundWorkspace(t, env.URL, "https://daemon.example/spoke-project.git")
+	dir, _ := initLocalBoundWorkspace(t, env, "spoke-project")
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)

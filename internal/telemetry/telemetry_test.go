@@ -39,10 +39,12 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 }
 
 func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
-	goEnv := exec.Command("go", "env", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned module cache.
-	moduleCacheOutput, err := goEnv.CombinedOutput()
-	require.NoErrorf(t, err, "resolve caller module cache: %s", moduleCacheOutput)
-	moduleCache := strings.TrimSpace(string(moduleCacheOutput))
+	goEnv := exec.Command("go", "env", "GOCACHE", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned caches.
+	cacheOutput, err := goEnv.CombinedOutput()
+	require.NoErrorf(t, err, "resolve caller caches: %s", cacheOutput)
+	caches := strings.Split(strings.TrimSpace(string(cacheOutput)), "\n")
+	require.Len(t, caches, 2)
+	buildCache, moduleCache := strings.TrimSpace(caches[0]), strings.TrimSpace(caches[1])
 	require.NotEmpty(t, moduleCache)
 
 	scratch := t.TempDir()
@@ -57,7 +59,7 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 		"HOME="+home,
 		"XDG_CACHE_HOME="+filepath.Join(scratch, "xdg-cache"),
 		"XDG_CONFIG_HOME="+filepath.Join(scratch, "xdg-config"),
-		"GOCACHE="+filepath.Join(scratch, "gocache"),
+		"GOCACHE="+buildCache,
 		"GOMODCACHE="+moduleCache,
 		"GOPROXY=off",
 	)
