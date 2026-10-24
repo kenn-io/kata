@@ -712,3 +712,95 @@ func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) {
 	assert.Equal(t, "canonical-name", cfg.Project.Name,
 		"stale .kata.toml must be rewritten to the daemon's canonical project name")
 }
+
+// GH #640: capture the wire body so absent priority is distinct from zero.
+func TestCreateDefaultPriorityRequest(t *testing.T) {
+	cases := []struct {
+		name, config string
+		args         []string
+		want         *int64
+	}{
+		{name: "missing config"},
+		{name: "default zero", config: "[create]\ndefault_priority = 0", want: new(int64(0))},
+		{name: "default three", config: "[create]\ndefault_priority = 3", want: new(int64(3))},
+		{name: "explicit zero", config: "[create]\ndefault_priority = 3", args: []string{"--priority", "0"}, want: new(int64(0))},
+		{name: "ignore invalid default", config: "[create]\ndefault_priority = 'invalid'", args: []string{"--priority", "2"}, want: new(int64(2))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600))
+			}
+			var body map[string]json.RawMessage
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/projects/resolve":
+					_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
+				case "/api/v1/projects/7/issues":
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					_, _ = io.WriteString(w, `{"issue":{"short_id":"abc4","title":"example issue","status":"open"}}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			ctx := contextWithBaseURL(t.Context(), server.URL)
+			args := append([]string{"--workspace", t.TempDir(), "--json", "create", "example issue"}, tc.args...)
+			_, _, err := executeRootCapture(t, ctx, args...)
+			require.NoError(t, err)
+			require.NotNil(t, body, "create must send a request")
+			raw, present := body["priority"]
+			if tc.want == nil {
+				assert.False(t, present, "unset priority must be omitted")
+				return
+			}
+			require.True(t, present)
+			var got *int64
+			require.NoError(t, json.Unmarshal(raw, &got))
+			require.NotNil(t, got, "priority must have a value")
+			assert.Equal(t, *tc.want, *got)
+		})
+	}
+}
+
+func TestCreateDefaultPriorityValidationBeforeNetwork(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, wantErr string
+		directory             bool
+	}{
+		{name: "invalid default", config: "[create]\ndefault_priority = 5", wantErr: "create.default_priority"},
+		{name: "config is directory", directory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			path := filepath.Join(home, "config.toml")
+			if tc.directory {
+				require.NoError(t, os.Mkdir(path, 0o700))
+			} else {
+				require.NoError(t, os.WriteFile(path, []byte(tc.config), 0o600))
+			}
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"--workspace", t.TempDir(), "create", "example issue"}
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
+			if tc.directory {
+				assert.Equal(t, ExitInternal, exitCodeForErr(err, true))
+				var pathErr *os.PathError
+				require.ErrorAs(t, err, &pathErr)
+				assert.Equal(t, path, pathErr.Path)
+			} else {
+				cliErr := requireCLIError(t, err, ExitValidation)
+				assert.Contains(t, cliErr.Message, tc.wantErr)
+			}
+			assert.Zero(t, requests.Load())
+		})
+	}
+}

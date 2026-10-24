@@ -1,11 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-23
+last_edited: 2026-10-24
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+- Set `[create].default_priority` in `<KATA_HOME>/config.toml` to file issues
+  at that priority when `kata create` omits `--priority`. An explicit
+  `--priority` wins, and `kata doctor` reports an invalid value. See
+  [Default priority for issue creation](reference/configuration.md#default-priority-for-issue-creation).
+  Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 ## 0.20.0
 <small>2026-10-23</small>
