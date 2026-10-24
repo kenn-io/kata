@@ -14,10 +14,13 @@ import (
 // restart after an update.
 const RuntimeRestartMetadataKey = "restart_signal"
 
-// RuntimeProcessAlive reports whether a runtime record still identifies the
+// RuntimeProcessAlive reports whether a runtime record still identifies a local
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.
 func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
+	if kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeLocal {
+		return false
+	}
 	if record.PID <= 0 || record.PID > math.MaxInt32 || !kitdaemon.ProcessAlive(record.PID) {
 		return false
 	}
@@ -39,6 +42,12 @@ func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
 		return true
 	}
 	return !time.UnixMilli(created).After(record.StartedAt)
+}
+
+// RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
+func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
+	return kitdaemon.RuntimeRecordBlocksStart(record) &&
+		(kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeLocal || RuntimeProcessAlive(record))
 }
 
 // RuntimeRecordRestartable reports whether the record's daemon handles the

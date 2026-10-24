@@ -1657,6 +1657,8 @@ kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
 
+`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
+
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
 [TUI preferences](configuration.md#tui-preferences).

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +19,8 @@ func TestForegroundRefusesLiveDaemonBeforeCutover(t *testing.T) {
 	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
-	writeRuntimePID(t, home, os.Getpid())
+	child := startSleepProcess(t)
+	writeRuntimePID(t, home, child.Process.Pid)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	err = runDaemon(ctx)

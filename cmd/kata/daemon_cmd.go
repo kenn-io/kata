@@ -741,6 +741,15 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 	return r.Version
 }
 
+func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
+	for _, record := range records {
+		switch kitdaemon.RuntimeProcessScope(record) {
+		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
+		}
+	}
+}
+
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
@@ -757,6 +766,7 @@ func daemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
@@ -827,6 +837,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			pids := make([]int, 0, len(recs))
 			for _, rec := range recs {
 				if !daemonruntime.RuntimeProcessAlive(rec) {
@@ -1059,6 +1070,7 @@ func daemonReloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
@@ -1186,8 +1198,11 @@ func runDaemonProcess(
 
 	// A foreground launch must reject an existing daemon before opening
 	// storage: a cutover cannot replace a database still owned by its writer.
-	if record, ok := liveDaemonRecord(ns.DataDir, 0); ok {
-		return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
+	records, _ := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+	for _, record := range records {
+		if daemonruntime.RuntimeRecordBlocksStart(record) {
+			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
+		}
 	}
 
 	// Wrap ctx with a local cancel so platform-specific shutdown watchers

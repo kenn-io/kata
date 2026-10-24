@@ -90,3 +90,10 @@ func TestRuntimeProcessAliveRejectsReusedPID(t *testing.T) {
 
 	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
 }
+
+func TestRuntimeProcessAliveRequiresLocalIdentity(t *testing.T) {
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	assert.True(t, daemonruntime.RuntimeProcessAlive(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity}))
+	assert.False(t, daemonruntime.RuntimeProcessAlive(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "unverifiable"}))
+}
