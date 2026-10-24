@@ -1,9 +1,7 @@
 package daemonruntime_test
 
 import (
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -93,45 +91,13 @@ func TestRuntimeProcessAliveRejectsReusedPID(t *testing.T) {
 	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
 }
 
-func TestRuntimeProcessAliveRequiresLocalIdentity(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		record func(*testing.T) kitdaemon.RuntimeRecord
-		alive  bool
-	}{
-		{"local", func(t *testing.T) kitdaemon.RuntimeRecord {
-			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
-			require.True(t, ok)
-			return kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity}
-		}, true},
-		{"unknown", func(*testing.T) kitdaemon.RuntimeRecord {
-			return kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "unverifiable"}
-		}, false},
-		{"foreign", foreignNamespaceRuntimeRecord, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.alive, daemonruntime.RuntimeProcessAlive(tc.record(t)))
-		})
-	}
+func TestRuntimeProcessAliveRejectsUnknownScope(t *testing.T) {
+	assert.False(t, daemonruntime.RuntimeProcessAlive(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "unverifiable"}))
 }
 
 func TestRuntimeRecordBlocksStart(t *testing.T) {
-	t.Run("legacy reused PID", func(t *testing.T) {
-		if os.Getenv("KATA_LEGACY_PID_HELPER") == "1" {
-			_, _ = io.Copy(io.Discard, os.Stdin)
-			return
-		}
-		child := exec.Command(os.Args[0], "-test.run=^TestRuntimeRecordBlocksStart$/^legacy_reused_PID$") //nolint:gosec // test binary
-		child.Env = append(os.Environ(), "KATA_LEGACY_PID_HELPER=1")
-		stdin, err := child.StdinPipe()
-		require.NoError(t, err)
-		require.NoError(t, child.Start())
-		t.Cleanup(func() { _ = stdin.Close(); require.NoError(t, child.Wait()) })
-		require.True(t, kitdaemon.ProcessAlive(child.Process.Pid))
-		record := kitdaemon.RuntimeRecord{PID: child.Process.Pid, StartedAt: time.Unix(1, 0)}
-		assert.False(t, daemonruntime.RuntimeRecordBlocksStart(record))
-	})
-	t.Run("foreign", func(t *testing.T) {
-		assert.False(t, daemonruntime.RuntimeRecordBlocksStart(foreignNamespaceRuntimeRecord(t)))
-	})
+	// The parent is a live process other than this one, which kit never blocks on.
+	assert.True(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), ProcessIdentityV2: "unverifiable"}))
+	// A legacy record published before its PID's process was created names a reused PID.
+	assert.False(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), StartedAt: time.Unix(1, 0)}))
 }

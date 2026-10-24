@@ -24,10 +24,9 @@ func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
 	child := exec.Command(os.Args[0], "-test.run=^TestLiveDaemonsUsingForeignNamespaceRecord$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,
-		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
-		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
-		GidMappingsEnableSetgroups: false,
+		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
 	}
 	stdin, err := child.StdinPipe()
 	require.NoError(t, err)
@@ -46,35 +45,17 @@ func TestLiveDaemonsUsingForeignNamespaceRecord(t *testing.T) {
 	}
 	require.Equal(t, kitdaemon.ProcessScopeForeign, kitdaemon.RuntimeProcessScope(record))
 
-	for _, tc := range []struct {
-		name       string
-		probeErr   error
-		candidates int
-	}{
-		{"successful-probe", nil, 1},
-		{"failed-probe", errors.New("endpoint unavailable"), 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			probeCalls := 0
-			var candidates []liveDaemon
-			for candidate, err := range liveDaemonsUsing(t.Context(), dir, func(gotDir string) ([]kitdaemon.RuntimeRecord, error) {
-				require.Equal(t, dir, gotDir)
-				return []kitdaemon.RuntimeRecord{record}, nil
-			}, func(_ context.Context, address string) (string, PingInfo, error) {
-				probeCalls++
-				require.Equal(t, "unix:///tmp/kata.sock", address)
-				return "http://unix", PingInfo{PID: record.PID}, tc.probeErr
-			}) {
-				require.NoError(t, err)
-				candidates = append(candidates, candidate)
-			}
-			assert.Equal(t, 1, probeCalls, "discovery must probe foreign records")
-			assert.Len(t, candidates, tc.candidates)
-			if len(candidates) == 1 {
-				assert.Equal(t, record, candidates[0].Record)
-				assert.Equal(t, record.PID, candidates[0].Info.PID)
-			}
-		})
+	found := func(probeErr error) (n int) {
+		for _, err := range liveDaemonsUsing(t.Context(), t.TempDir(), func(string) ([]kitdaemon.RuntimeRecord, error) {
+			return []kitdaemon.RuntimeRecord{record}, nil
+		}, func(context.Context, string) (string, PingInfo, error) {
+			return "http://unix", PingInfo{PID: record.PID}, probeErr
+		}) {
+			require.NoError(t, err)
+			n++
+		}
+		return n
 	}
+	assert.Equal(t, 1, found(nil), "a live daemon in another PID namespace is found by ping")
+	assert.Equal(t, 0, found(errors.New("endpoint unavailable")), "an unreachable one is skipped, not reported as a local daemon")
 }

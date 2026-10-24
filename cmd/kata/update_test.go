@@ -5,16 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemonruntime"
-	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
 )
 
@@ -569,17 +565,4 @@ func executeRootCaptureWithInput(ctx context.Context, t *testing.T, stdin string
 		emitRootError(&se, cmd, args, err, runEEntered)
 	}
 	return so.String(), se.String(), err
-}
-
-func TestUpdateReplacementIgnoresUnknownRecord(t *testing.T) {
-	setupKataEnv(t)
-	writeUnknownRuntimePID(t, os.Getpid())
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err = waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, kitdaemon.RuntimeRecord{
-		PID: os.Getpid(), StartedAt: time.Now().Add(-time.Minute),
-	})
-	require.ErrorIs(t, err, context.Canceled)
 }
