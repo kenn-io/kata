@@ -119,6 +119,11 @@ Agent workflow (add --agent to each command):
   kata label add <ref> needs-review --comment "<what remains>" --agent   # not done
 Full agent contract: kata quickstart --format contract
 
+Jobs, workflows and recorded runs:
+  kata tui                          # native Kata / Jobs / Runs / Workflows tabs
+  kata cron --help                  # jobs, reusable steps, delivery and run evidence
+  kata cron workflow create --help   # complete workflow JSON and creation example
+
 Refs: abc4 (short id in the bound project), project#abc4 (any project), or the
 26-character ULID. Legacy issue numbers such as 12 are rejected.
 Project: found from .kata.toml at or above --workspace (default: cwd). Create the

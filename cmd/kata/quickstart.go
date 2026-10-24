@@ -227,6 +227,14 @@ For live streams:
 The agent tail stream emits one OK event line per event. Use --json only
 when a consumer expects newline-delimited JSON.
 
+# Jobs, workflows and runs
+
+Use kata cron --help for job triggers/actions, reusable workflow steps, and
+recorded run evidence. For complete workflow JSON and the creation command,
+run kata cron workflow create --help. Use kata cron job create --help to
+reference that workflow in a job. Browse native Kata / Jobs / Runs / Workflows
+tabs with kata tui; press 1–4 to switch.
+
 # Selected daemon recovery
 
 Never remove a workspace override to repair a stopped daemon. Start
@@ -266,6 +274,8 @@ Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
 If create refuses a look-alike, reuse it; --force-new only if the work truly differs.
 No bound workspace: use <project>#<id> refs or --project <project>.
+Cron jobs, reusable workflows and recorded runs: kata cron --help.
+Workflow JSON and creation example: kata cron workflow create --help; browse with kata tui.
 Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
 Claim it with kata claim <ref>.

@@ -1,0 +1,24 @@
+[1medit Daily summary[m · project example-project
+
+▶ Name               Daily summary
+                     required; must be unique in the project
+  Description        —
+  Tags               —
+  Action             workflow
+  Workflow           Summary flow
+  Input              —
+  Schedule           cron
+  Cron               0 7 * * *
+  Timezone           UTC
+  Catchup            latest
+  Grace              —
+  Overlap            forbid
+  Timeout            —
+  Checkout           —
+  Issue              —
+  Existing issue     —
+  Secret refs        —
+  Other options      —
+  Enabled            yes
+
+[1mj/k[m move · [1ml/→ or enter[m edit · [1mspace[m toggle · [1mctrl+s[m save job · [1mesc[m abandon edit

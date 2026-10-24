@@ -1,0 +1,40 @@
+[1mDaily summary[m
+
+[38;5;242mdefinition      [m current · guard
+[38;5;242mtags            [m [38;5;242m(no labels)[m
+[38;5;242mschedule         [m0 7 * * *
+[38;5;242mcatchup         [m latest
+[38;5;242moverlap         [m forbid
+[38;5;242mstate            [menabled
+[38;5;242maction          [m workflow Summary flow
+[38;5;242mworkflow        [m Summary flow
+
+[1mWorkflow[m
+  2 steps: read → summarize
+
+[1mRuns · loaded history[m
+[48;5;153m▶[m[48;5;153m [m[48;5;153msucceeded[m[48;5;153m [m[48;5;153m—[m[48;5;153m [m[48;5;153m3h ago[m[48;5;153m [m[48;5;153mRecorded summary                                                                                                                           [m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[48;5;253m [m[38;5;242;48;5;253m[38;5;242mh/←[m [38;5;248mback[m[38;5;242m▕[m [38;5;242mK[m [38;5;248mkata[m[38;5;242m▕[m [38;5;242mr[m [38;5;248mreload[m[38;5;242m▕[m [38;5;242mctrl+d/u[m [38;5;248mscroll[m[38;5;242m▕[m [38;5;242mj/k[m [38;5;248mmove[m[38;5;242m▕[m [38;5;242ml/→[m [38;5;248mopen run[m[38;5;242m▕[m [38;5;242mi[m [38;5;248missue[m[38;5;242m▕[m [38;5;242mp[m [38;5;248mpause[m[38;5;242m▕[m [38;5;242me[m [38;5;248medit[m[38;5;242m▕[m [38;5;242mD[m [38;5;248mdelete[m[38;5;242m▕[m [38;5;242mq[m [38;5;248mquit[m                                               [m[48;5;253m [m

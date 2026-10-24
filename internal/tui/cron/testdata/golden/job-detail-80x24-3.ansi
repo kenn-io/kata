@@ -1,0 +1,24 @@
+[1mDaily summary[m
+
+definition       current · guard
+tags             (no labels)
+schedule         0 7 * * *
+catchup          latest
+overlap          forbid
+state            enabled
+action           workflow Summary flow
+workflow         Summary flow
+
+[1mWorkflow[m
+  2 steps: read → summarize
+
+[1mRuns · loaded history[m
+[7m▶[m[7m [m[7msucceeded[m[7m [m[7m—[m[7m [m[7m3h ago[m[7m [m[7mRecorded summary                                           [m
+
+
+
+
+
+
+ [1mh/←[m back▕ [1mK[m kata▕ [1mr[m reload▕ [1mctrl+d/u[m scroll▕ [1mj/k[m move▕ [1ml/→[m open run▕ [1mi[m issue   
+ [1mp[m pause ▕ [1me[m edit▕ [1mD[m delete▕ [1mq[m quit                                             

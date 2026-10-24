@@ -1,0 +1,40 @@
+[1medit workflow Summary flow[m
+/tmp/example-workflow.json
+
+[1mStatus[m
+  edit the draft in $VISUAL or $EDITOR
+
+[1mCheck[m
+  local workflow checks passed
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1me[m edit again · [1mctrl+s[m save · [1mesc[m cancel
