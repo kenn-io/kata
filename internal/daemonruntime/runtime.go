@@ -50,8 +50,14 @@ func runtimeCreationTimeMatches(record kitdaemon.RuntimeRecord) bool {
 
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
 func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
-	return kitdaemon.RuntimeRecordBlocksStart(record) &&
-		(kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeLocal || RuntimeProcessAlive(record))
+	if !kitdaemon.RuntimeRecordBlocksStart(record) {
+		return false
+	}
+	if kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeLocal &&
+		kitdaemon.CompareRuntimeProcessIdentity(record) == kitdaemon.ProcessIdentityUnknown {
+		return record.PID <= math.MaxInt32 && runtimeCreationTimeMatches(record)
+	}
+	return true
 }
 
 // RuntimeRecordRestartable reports whether the record's daemon handles the
