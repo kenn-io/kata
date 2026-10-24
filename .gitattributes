@@ -5,3 +5,6 @@
 # breaks every snapshot test on Windows CI. text=auto leaves detected
 # binary files untouched.
 * text=auto eol=lf
+
+# ANSI frame snapshots retain terminal padding for byte-for-byte color/geometry checks.
+internal/tui/cron/testdata/golden/* whitespace=-blank-at-eol,-blank-at-eof

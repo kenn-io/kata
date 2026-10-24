@@ -120,7 +120,11 @@ func Run(ctx context.Context, opts Options) error {
 		startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
 	started := time.Now()
-	_, err = tea.NewProgram(m, programOpts(ctx, opts)...).Run()
+	host := newCronHost(m)
+	_, err = tea.NewProgram(host, programOpts(ctx, opts)...).Run()
+	if host.board != nil {
+		err = errors.Join(err, host.board.Close())
+	}
 	elapsed := time.Since(started)
 	c.ReportSessionEnded(elapsed)
 	return err

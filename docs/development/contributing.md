@@ -175,7 +175,10 @@ Write for the person trying to use or maintain Kata:
   active exceptions with their removal conditions. Label superseded designs
   and keep them outside normal navigation.
 - Keep the website, its Markdown companions, README, and documentation in
-  agreement. Distinguish the latest release from newer `main` functionality.
+  agreement. Feature instructions describe current functionality directly,
+  without branch-status qualifiers such as "On newer main". Preserve version
+  requirements for compatibility and upgrades, and keep historical release
+  notes accurate.
 
 Technical notes under `docs/design/` explain design decisions and constraints.
 Keep them current as decisions change.

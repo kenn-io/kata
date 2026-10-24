@@ -1,0 +1,24 @@
+[1medit Daily summary[m[38;5;242m · project example-project[m
+
+▶ [38;5;242mName              [m Daily summary
+                     [38;5;242mrequired; must be unique in the project[m
+  [38;5;242mDescription       [m [38;5;240m—[m
+  [38;5;242mTags              [m [38;5;240m—[m
+  [38;5;242mAction            [m workflow
+  [38;5;242mWorkflow          [m Summary flow
+  [38;5;242mInput             [m [38;5;240m—[m
+  [38;5;242mSchedule          [m cron
+  [38;5;242mCron              [m 0 7 * * *
+  [38;5;242mTimezone          [m UTC
+  [38;5;242mCatchup           [m latest
+  [38;5;242mGrace             [m [38;5;242m—[m
+  [38;5;242mOverlap           [m forbid
+  [38;5;242mTimeout           [m [38;5;242m—[m
+  [38;5;242mCheckout          [m [38;5;242m—[m
+  [38;5;242mIssue             [m [38;5;242m—[m
+  [38;5;242mExisting issue    [m [38;5;242m—[m
+  [38;5;242mSecret refs       [m [38;5;242m—[m
+  [38;5;242mOther options     [m [38;5;240m—[m
+  [38;5;242mEnabled           [m yes
+
+[38;5;242mj/k[m [38;5;248mmove[m[38;5;248m · [m[38;5;242ml/→ or enter[m [38;5;248medit[m[38;5;248m · [m[38;5;242mspace[m [38;5;248mtoggle[m[38;5;248m · [m[38;5;242mctrl+s[m [38;5;248msave job[m[38;5;248m · [m[38;5;242mesc[m [38;5;248mabandon edit[m

@@ -79,9 +79,10 @@
   exceptions with their removal conditions. Label superseded designs and keep
   them outside normal navigation.
 - Keep the website, its Markdown companions, README, and documentation on
-  message. Distinguish the latest release from newer main functionality. Follow
-  `docs/development/contributing.md` for documentation checks and the Makefile
-  for publication commands.
+  message. Describe current functionality directly; avoid branch-status
+  qualifiers in feature instructions. Preserve version requirements for
+  compatibility and upgrades. Follow `docs/development/contributing.md` for
+  documentation checks and the Makefile for publication commands.
 
 ## Release PRs
 

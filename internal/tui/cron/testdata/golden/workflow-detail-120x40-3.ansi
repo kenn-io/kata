@@ -1,0 +1,40 @@
+[1mSummary flow[m
+definition     current · 
+
+input          none
+
+[1mSteps 2[m
+[7m▶[m[7m+[m[7m1. read  command[m
+       echo example
+ +2. summarize  prompt · retry 2
+       Summarize the results
+
+[1mUsed by 1[m
+[1m  [m[1mjob                 [m[1m [m[1mstate       [m[1m [m[1mschedule        [m[1m [m[1minput                                                     [m[1m [m[1mtimeout[m
+  Daily summary        enabled      0 7 * * *        —                                                          —      
+
+[1mRuns 1 · loaded history[m
+  succeeded   —         3h ago    Daily summary      Recorded summary                                                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ [1mh/←[m back▕ [1mj/k[m move▕ [1mspace[m step▕ [1ml/→[m open▕ [1me[m edit▕ [1mr[m reload▕ [1mK[m kata▕ [1mctrl+d/u[m scroll▕ [1mq[m quit                            
