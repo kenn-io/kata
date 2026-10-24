@@ -35,14 +35,9 @@ func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedD
 			return client.ResolvedDaemon{}, errDoctorWorkspaceUnavailable
 		}
 	}
-	if namedDaemon != "" {
-		resolved, err := client.DiscoverResolvedNamedTargetReadOnly(ctx, namedDaemon)
-		if err == nil && resolved.BaseURL == "" {
-			err = errDoctorNoRunningDaemon
-		}
-		return resolved, err
-	}
-	resolved, found, err := client.DiscoverResolvedReadOnlyInWorkspace(ctx, s.workspace)
+	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
+		WorkspaceStart: s.workspace, Name: namedDaemon, ReadOnly: true,
+	})
 	if err == nil && !found {
 		err = errDoctorNoRunningDaemon
 	}

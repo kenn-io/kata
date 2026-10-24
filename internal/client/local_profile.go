@@ -75,15 +75,7 @@ func (e *LocalProfileDirError) Error() string { return e.Err.Error() }
 func (e *LocalProfileDirError) Unwrap() error { return e.Err }
 
 func discoverLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
-	return discoverLocalProfileUsing(ctx, selection, liveDaemons)
-}
-
-func discoverLocalProfileUsing(ctx context.Context, selection DaemonSelection, scan liveDaemonScanner) (ResolvedDaemon, bool, error) {
-	return discoverLocalProfileWithVerifier(ctx, selection, scan, verifyLocalProfileInstance)
-}
-
-func discoverLocalProfileUsingWithoutIdentityProbe(ctx context.Context, selection DaemonSelection, scan liveDaemonScanner) (ResolvedDaemon, bool, error) {
-	return discoverLocalProfileWithVerifier(ctx, selection, scan, nil)
+	return discoverLocalProfileWithVerifier(ctx, selection, liveDaemons, verifyLocalProfileInstance)
 }
 
 func discoverLocalProfileWithVerifier(

@@ -21,6 +21,10 @@ type DaemonSelection struct {
 	Resolved           ResolvedDaemon
 	Profile            *config.LocalProfileConfig
 	activeLocalCatalog bool
+	// credentialErr is a catalog credential that resolving this selection
+	// needs but cannot read. Inspection itself sends no credential, so only
+	// resolution reports it.
+	credentialErr error
 }
 
 // InspectSelection snapshots target configuration without probing or starting it.
@@ -85,68 +89,60 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 		if err != nil {
 			return DaemonSelection{}, err
 		}
-		for _, entry := range cfg.Daemons {
-			if entry.Name != name {
-				continue
-			}
-			if entry.Home == "" {
-				if source == DaemonSourceLocalConfig {
-					return DaemonSelection{}, fmt.Errorf("server.daemon requires an explicit local profile with home and instance_uid")
-				}
-				if entry.Local && source == DaemonSourceActiveDaemon {
-					if !keepActiveLocalCatalogCredential {
-						return DaemonSelection{Resolved: ResolvedDaemon{
-							Source: DaemonSourceLocalRuntime,
-						}.withGlobalAuth()}, nil
-					}
-					token, err := catalogClientToken(entry)
-					if err != nil {
-						return DaemonSelection{}, err
-					}
-					return DaemonSelection{
-						Resolved:           (ResolvedDaemon{Source: DaemonSourceLocalRuntime}).withLocalTargetAuth(token),
-						activeLocalCatalog: true,
-					}, nil
-				}
-				resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath}
-				// Resolution reads this credential again and reports an unset
-				// token_env. Selection never fails on it, as `kata daemon
-				// locate` requires.
-				token, _ := catalogClientToken(entry)
-				if entry.Local {
-					resolved = resolved.withLocalTargetAuth(token)
-				} else {
-					base, err := normalizeRemoteURL(entry.URL, entry.AllowInsecure)
-					if err != nil {
-						return DaemonSelection{}, err
-					}
-					resolved = resolvedForRunning(source, name, remoteRunningDaemon(base, true)).withRemoteTargetAuth(token, entry.AllowInsecure)
-					resolved.SourcePath = sourcePath
-				}
-				return DaemonSelection{Resolved: resolved}, nil
-			}
-			profile, err := config.ResolveLocalProfile(entry)
-			if err != nil {
-				return DaemonSelection{}, err
-			}
-			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
-			if err != nil {
-				return DaemonSelection{}, err
-			}
-			resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath, profileConfig: &profile, LocalProfile: &LocalProfileIdentity{Name: name, Home: profile.Home, DataDir: ns.DataDir, StorageID: profile.StorageID, InstanceUID: profile.InstanceUID}, Token: profile.Config.Auth.Token, TrustPrivateNetwork: profile.Config.Auth.TrustPrivateNetwork}
-			token, err := catalogClientToken(entry)
-			if err != nil {
-				return DaemonSelection{}, err
-			}
-			if token != "" {
-				resolved.Token = token
-			}
-			if _, err := config.LocalProfileEnvironment(profile, false); err != nil {
-				return DaemonSelection{}, err
-			}
-			return DaemonSelection{Resolved: resolved, Profile: &profile}, nil
+		entry, ok := cfg.CatalogDaemon(name)
+		if !ok {
+			return DaemonSelection{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 		}
-		return DaemonSelection{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
+		if entry.Home == "" && source == DaemonSourceLocalConfig {
+			return DaemonSelection{}, fmt.Errorf("server.daemon requires an explicit local profile with home and instance_uid")
+		}
+		if entry.Home == "" && entry.Local && source == DaemonSourceActiveDaemon && !keepActiveLocalCatalogCredential {
+			return DaemonSelection{Resolved: ResolvedDaemon{Source: DaemonSourceLocalRuntime}.withGlobalAuth()}, nil
+		}
+		token, credentialErr := catalogClientToken(entry)
+		if entry.Home == "" {
+			if entry.Local && source == DaemonSourceActiveDaemon {
+				if credentialErr != nil {
+					return DaemonSelection{}, credentialErr
+				}
+				return DaemonSelection{
+					Resolved:           (ResolvedDaemon{Source: DaemonSourceLocalRuntime}).withLocalTargetAuth(token),
+					activeLocalCatalog: true,
+				}, nil
+			}
+			resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath}
+			if entry.Local {
+				resolved = resolved.withLocalTargetAuth(token)
+			} else {
+				base, err := normalizeRemoteURL(entry.URL, entry.AllowInsecure)
+				if err != nil {
+					return DaemonSelection{}, err
+				}
+				resolved = resolvedForRunning(source, name, remoteRunningDaemon(base, true)).withRemoteTargetAuth(token, entry.AllowInsecure)
+				resolved.SourcePath = sourcePath
+			}
+			return DaemonSelection{Resolved: resolved, credentialErr: credentialErr}, nil
+		}
+		if credentialErr != nil {
+			// The profile's identity check sends this credential.
+			return DaemonSelection{}, credentialErr
+		}
+		profile, err := config.ResolveLocalProfile(entry)
+		if err != nil {
+			return DaemonSelection{}, err
+		}
+		ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+		if err != nil {
+			return DaemonSelection{}, err
+		}
+		resolved := ResolvedDaemon{Source: source, Name: name, SourcePath: sourcePath, profileConfig: &profile, LocalProfile: &LocalProfileIdentity{Name: name, Home: profile.Home, DataDir: ns.DataDir, StorageID: profile.StorageID, InstanceUID: profile.InstanceUID}, Token: profile.Config.Auth.Token, TrustPrivateNetwork: profile.Config.Auth.TrustPrivateNetwork}
+		if token != "" {
+			resolved.Token = token
+		}
+		if _, err := config.LocalProfileEnvironment(profile, false); err != nil {
+			return DaemonSelection{}, err
+		}
+		return DaemonSelection{Resolved: resolved, Profile: &profile}, nil
 	}
 	resolved, ok, err := resolveRemoteSelection(ctx, start, remoteRequestTarget)
 	if err != nil {

@@ -465,7 +465,7 @@ func TestDiscoverResolvedPreservesScanErrors(t *testing.T) {
 	})
 }
 
-func TestDiscoverResolvedNamedLocalWithoutLiveDaemon(t *testing.T) {
+func TestDiscoverSelectedNamedLocalWithoutLiveDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRawConfig(home, `
 [[daemon]]
@@ -473,12 +473,13 @@ name = "local"
 local = true
 `))
 
-	resolved, err := DiscoverResolvedNamed(t.Context(), "local")
+	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "local"})
 	require.NoError(t, err)
+	assert.False(t, ok)
 	assert.Empty(t, resolved.BaseURL)
 }
 
-func TestDiscoverResolvedNamedPreservesLocalRuntimeMetadata(t *testing.T) {
+func TestDiscoverSelectedNamedPreservesLocalRuntimeMetadata(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRawConfig(home, `
 [[daemon]]
@@ -490,12 +491,13 @@ local = true
 	})
 	require.NoError(t, writeRuntimeRecord(t, home, address))
 
-	resolved, err := DiscoverResolvedNamed(t.Context(), "local")
+	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "local"})
 	require.NoError(t, err)
+	assert.True(t, ok)
 	assert.Equal(t, localRunningDaemon(baseURL, address), resolved.Running())
 }
 
-func TestDiscoverResolvedNamedPreservesResolutionErrors(t *testing.T) {
+func TestDiscoverSelectedProbesNamedRemoteOnRequest(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRawConfig(home, `
 [[daemon]]
@@ -503,8 +505,14 @@ name = "remote"
 url = "http://127.0.0.1:1"
 `))
 
-	_, err := DiscoverResolvedNamed(t.Context(), "remote")
+	_, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "remote", ProbeRemote: true})
 	require.ErrorIs(t, err, ErrRemoteUnavailable)
+	require.ErrorContains(t, err, `daemon "remote"`)
+
+	resolved, ok, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "remote"})
+	require.NoError(t, err, "without ProbeRemote the first request reports reachability")
+	assert.True(t, ok)
+	assert.True(t, resolved.ConfiguredRemote())
 }
 
 func TestRemoteResolutionModesShareSelectionWithoutCredentialLeak(t *testing.T) {

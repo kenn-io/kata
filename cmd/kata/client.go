@@ -119,7 +119,7 @@ func workspaceStartForRemote() string {
 //     discovery-time probe. If the later request cannot reach the selected
 //     remote, it reports a daemonTransportError mapped to exit 7; discovery
 //     never falls through to a local runtime. A named remote selected with
-//     --daemon is still probed during catalog discovery and can return
+//     --daemon is still probed during discovery and can return
 //     ErrRemoteUnavailable here.
 //  4. Local Discover (runtime files).
 //
@@ -129,15 +129,11 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
-	var resolved client.ResolvedDaemon
-	var found bool
-	var err error
-	if flags.Daemon != "" {
-		resolved, err = client.DiscoverResolvedNamed(ctx, flags.Daemon)
-		found = resolved.BaseURL != ""
-	} else {
-		resolved, found, err = client.DiscoverResolvedInWorkspace(ctx, workspaceStartForRemote())
-	}
+	resolved, found, err := client.DiscoverSelected(ctx, client.DiscoverRequest{
+		WorkspaceStart: workspaceStartForRemote(),
+		Name:           flags.Daemon,
+		ProbeRemote:    flags.Daemon != "",
+	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil {
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
