@@ -11,21 +11,30 @@ import (
 )
 
 func TestForegroundRefusesLiveDaemonBeforeCutover(t *testing.T) {
-	home := setupKataEnv(t)
-	t.Setenv("KATA_DSN", "")
-	path := filepath.Join(home, "kata.db")
-	source, err := sqlitestore.Open(t.Context(), path)
-	require.NoError(t, err)
-	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	require.NoError(t, source.Close())
-	child := startSleepProcess(t)
-	writeRuntimePID(t, home, child.Process.Pid)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	err = runDaemon(ctx)
-	require.ErrorContains(t, err, "daemon already running")
-	version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
-	require.NoError(t, err)
-	require.Equal(t, 28, version, "must refuse before migrating the live daemon's database")
+	for _, recordType := range []string{"local-live", "unknown"} {
+		t.Run(recordType, func(t *testing.T) {
+			resetFlags(t)
+			home := setupKataEnv(t)
+			t.Setenv("KATA_DSN", "")
+			path := filepath.Join(home, "kata.db")
+			source, err := sqlitestore.Open(t.Context(), path)
+			require.NoError(t, err)
+			_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
+			require.NoError(t, err)
+			require.NoError(t, source.Close())
+			child := startSleepProcess(t)
+			if recordType == "local-live" {
+				writeRuntimePID(t, home, child.Process.Pid)
+			} else {
+				writeUnknownRuntimePID(t, child.Process.Pid)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			err = runDaemon(ctx)
+			require.ErrorContains(t, err, "daemon already running")
+			version, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
+			require.NoError(t, err)
+			require.Equal(t, 28, version, "must refuse before migrating the live daemon's database")
+		})
+	}
 }

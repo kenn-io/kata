@@ -10,18 +10,17 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func TestRuntimeProcessAliveForeignNamespace(t *testing.T) {
+func foreignNamespaceRuntimeRecord(t *testing.T) kitdaemon.RuntimeRecord {
+	t.Helper()
 	if os.Getenv("KATA_PIDNS_HELPER") == "1" {
 		_, _ = io.Copy(io.Discard, os.Stdin)
-		return
+		t.SkipNow()
 	}
-	child := exec.Command(os.Args[0], "-test.run=^TestRuntimeProcessAliveForeignNamespace$") //nolint:gosec // test binary
+	child := exec.Command(os.Args[0], "-test.run=^TestRuntimeProcessAliveRequiresLocalIdentity$/^foreign$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:                 syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,
@@ -42,6 +41,5 @@ func TestRuntimeProcessAliveForeignNamespace(t *testing.T) {
 	require.True(t, ok)
 	record := kitdaemon.RuntimeRecord{PID: 1, ProcessIdentityV2: identity}
 	require.Equal(t, kitdaemon.ProcessScopeForeign, kitdaemon.RuntimeProcessScope(record))
-	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
-	assert.False(t, daemonruntime.RuntimeRecordBlocksStart(record))
+	return record
 }

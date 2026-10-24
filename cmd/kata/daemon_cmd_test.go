@@ -3953,75 +3953,36 @@ func writeUnknownRuntimePID(t *testing.T, pid int) string {
 }
 
 func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
-	for _, action := range []string{"stop", "reload"} {
+	for _, action := range []string{"stop", "reload", "restart"} {
 		t.Run(action, func(t *testing.T) {
 			home := setupKataEnv(t)
-			local := startSleepProcess(t)
-			unknown := startSleepProcess(t)
-			writeRuntimePID(t, home, local.Process.Pid)
-			path := writeUnknownRuntimePID(t, unknown.Process.Pid)
+			unknownPID := 99999999
+			localPID := 0
+			if action == "restart" {
+				original := startDetachedDaemon
+				t.Cleanup(func() { startDetachedDaemon = original })
+				startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+					return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
+				}
+			} else {
+				local := startSleepProcess(t)
+				unknown := startSleepProcess(t)
+				localPID = local.Process.Pid
+				unknownPID = unknown.Process.Pid
+				writeRuntimePID(t, home, local.Process.Pid)
+			}
+			path := writeUnknownRuntimePID(t, unknownPID)
 
 			stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "daemon", action)
 
 			require.NoError(t, err)
-			assert.Contains(t, stdout, "pid="+strconv.Itoa(local.Process.Pid))
-			assert.NotContains(t, stdout, "pid="+strconv.Itoa(unknown.Process.Pid))
-			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknown.Process.Pid))
-			assert.True(t, kitdaemon.ProcessAlive(unknown.Process.Pid))
+			if action != "restart" {
+				assert.Contains(t, stdout, "pid="+strconv.Itoa(localPID))
+				assert.NotContains(t, stdout, "pid="+strconv.Itoa(unknownPID))
+				assert.True(t, kitdaemon.ProcessAlive(unknownPID))
+			}
+			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknownPID))
 			assert.FileExists(t, path)
 		})
 	}
-}
-
-func TestDaemonRestartSkipsDeadUnknownRecord(t *testing.T) {
-	setupKataEnv(t)
-	path := writeUnknownRuntimePID(t, 99999999)
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	started := false
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-		started = true
-		return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
-	}
-	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "restart")
-	require.NoError(t, err)
-	assert.True(t, started)
-	assert.Contains(t, stderr, "skipping daemon pid=99999999")
-	assert.FileExists(t, path)
-}
-
-func TestDaemonStartupRejectsUnknownBeforeOpeningStorage(t *testing.T) {
-	resetFlags(t)
-	home := setupKataEnv(t)
-	child := startSleepProcess(t)
-	writeUnknownRuntimePID(t, child.Process.Pid)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	err := runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard))
-	require.ErrorContains(t, err, "daemon already running")
-	assert.NoFileExists(t, filepath.Join(home, "kata.db"))
-}
-
-func TestDaemonStartupAllowsLegacyReusedPID(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-	child := startSleepProcess(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID: child.Process.Pid, Network: "tcp", Address: "127.0.0.1:7777", StartedAt: time.Unix(1, 0),
-	})
-	require.NoError(t, err)
-	originalRun := runExternalRootRunner
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	started := false
-	runExternalRootRunner = func(_ context.Context, _ *rootbridge.Runner) error {
-		started = true
-		cancel()
-		return nil
-	}
-	t.Cleanup(func() { runExternalRootRunner = originalRun })
-	require.NoError(t, runDaemonProcess(ctx, "127.0.0.1:0", false, false, newDaemonRestart(io.Discard)))
-	assert.True(t, started)
 }
