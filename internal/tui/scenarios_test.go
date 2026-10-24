@@ -455,8 +455,8 @@ func TestScenario_ChildCreatedRefetchesParentDetail(t *testing.T) {
 			ToIssueUID:   parentUID,
 		},
 	})
-	if cmd == nil {
-		t.Fatal("issue.created with parent link did not dispatch parent-detail refetch")
+	if cmd == nil && (m.detail.reads == nil || !m.detail.reads.dirty) {
+		t.Fatal("issue.created with parent link did not schedule or queue parent-detail refetch")
 	}
 }
 

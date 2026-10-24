@@ -56,6 +56,13 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
+		if in.Issue != "" {
+			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, db.IncludeDeletedNo)
+			if err != nil {
+				return nil, err
+			}
+			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue)
+		}
 		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
 	})
 

@@ -1181,3 +1181,45 @@ func TestAttentionMessagePagingAfterReplacement(t *testing.T) {
 	m = loadAttention(m, cmd)
 	require.Contains(t, stripANSI(m.View().Content), "Replacement request starts here.")
 }
+
+// Reads canceled when Attention opens another issue belong to no live
+// dispatch. They must not overwrite the saved detail the user returns to.
+func TestAttentionReturnIgnoresCanceledDetailReads(t *testing.T) {
+	m, _ := attentionFixture(t)
+	m = resizeModel(m, 80, 40)
+	parent := testIssue("parent")
+	m.view, m.prevView, m.focus = viewDetail, viewList, focusDetail
+	m.detail = newDetailModel()
+	m.detail.gen = 42
+	m.detail.issue = &parent
+	m.detail.scopePID = parent.ProjectID
+	m.detail.children = []Issue{testIssue("kid1"), testIssue("kid2")}
+	m.detail.detailFocus = focusChildren
+	m.detail.childCursor = 1
+	staleReads := m.detail.refetch(m.api)
+	require.NotNil(t, staleReads)
+
+	m, cmd := m.transitionToAttention()
+	m = loadAttention(m, cmd)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, viewDetail, m.view)
+	require.NotEqual(t, parent.UID, m.detail.issue.UID)
+	for _, msg := range runCmdTree(staleReads) {
+		m, _ = updateModel(m, msg)
+	}
+	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.NotNil(t, cmd)
+	m, _ = updateModel(m, cmd())
+	require.Equal(t, viewAttention, m.view)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	require.Equal(t, viewDetail, m.view)
+	require.Equal(t, parent.UID, m.detail.issue.UID)
+	require.Len(t, m.detail.children, 2)
+	require.Equal(t, focusChildren, m.detail.detailFocus)
+	require.Equal(t, 1, m.detail.childCursor)
+	require.NoError(t, m.detail.err)
+	require.NoError(t, m.detail.commentsErr)
+	require.NoError(t, m.detail.eventsErr)
+	require.NoError(t, m.detail.linksErr)
+}

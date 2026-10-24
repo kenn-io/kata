@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/version"
@@ -975,8 +976,7 @@ func (c *Client) ListProjectsWithStats(ctx context.Context) ([]ProjectSummaryWit
 }
 
 // ListComments and ListLinks route through GET /issues/{ref} because
-// the daemon embeds both slices there. ListEvents filters client-side
-// because the poll endpoint accepts no issue-targeted query filter.
+// the daemon embeds both slices there. Events use issue-filtered polling.
 func (c *Client) ListComments(
 	ctx context.Context, projectID int64, ref string,
 ) ([]CommentEntry, error) {
@@ -987,66 +987,57 @@ func (c *Client) ListComments(
 	return body.Comments, nil
 }
 
-// ListEvents returns the events tab data for one issue. See above note
-// on the client-side filter. ref is the issue's short_id OR its UID: the
-// daemon's event rows embed both issue_short_id and issue_uid, so matching
-// either keeps the tab populated when the detail view was opened by UID
-// (the link-event jump path resolves the peer by UID). A bare short_id ref
-// still matches issue_short_id as before.
-//
-// TODO(plan-6/task-8): the 200-event window is a one-shot snapshot;
-// full pagination via next_after_id is deferred. The poll envelope's
-// reset_required is decoded but ignored here because Task 8 fetches
-// once per detail-view open; the SSE consumer (Task 11) handles
-// reset_required for the long-lived stream.
+// ListEvents paginates history filtered by the daemon before the page limit.
+// Every page must acknowledge the resolved issue UID; otherwise an older daemon
+// could silently ignore the query and download the entire project history.
+// Filtered history never resets; an unexpected reset is an error rather than
+// a partial history presented as complete.
 func (c *Client) ListEvents(ctx context.Context, projectID int64, ref string) ([]EventLogEntry, error) {
+	subjectUID := ""
+	if parsed, err := shortid.Parse(ref); err == nil {
+		subjectUID = parsed.ULID
+	}
 	var out []EventLogEntry
 	afterID := int64(0)
 	for {
-		resp, err := c.listEventsPage(ctx, projectID, afterID)
+		resp, err := c.listEventsPage(ctx, projectID, afterID, ref)
 		if err != nil {
 			return nil, err
 		}
+		if !katauid.Valid(resp.IssueUID) || (subjectUID != "" && resp.IssueUID != subjectUID) {
+			return nil, fmt.Errorf("issue-filtered event history was not acknowledged for this issue; upgrade the daemon and retry")
+		}
+		subjectUID = resp.IssueUID
+		if resp.ResetRequired {
+			return nil, fmt.Errorf("issue history changed while loading; retry")
+		}
 		for _, e := range resp.Events {
-			if eventMatchesRef(e, ref) {
+			if e.IssueUID == subjectUID {
 				out = append(out, e)
 			}
 		}
-		if resp.ResetRequired || len(resp.Events) == 0 || resp.NextAfterID <= afterID {
+		if len(resp.Events) == 0 || resp.NextAfterID <= afterID {
 			return out, nil
 		}
 		afterID = resp.NextAfterID
 	}
 }
 
-// eventMatchesRef reports whether an event belongs to the issue named by
-// ref, accepting either the issue's UID or its short_id. The UID match
-// supports detail views opened by UID (link-event jumps); the short_id match
-// preserves the original short_id-keyed contract.
-func eventMatchesRef(e EventLogEntry, ref string) bool {
-	if ref == "" {
-		return false
-	}
-	if e.IssueUID == ref {
-		return true
-	}
-	return e.IssueShortID != nil && *e.IssueShortID == ref
-}
-
 type eventsPageResp struct {
+	IssueUID      string          `json:"-"`
 	Events        []EventLogEntry `json:"events"`
 	NextAfterID   int64           `json:"next_after_id"`
 	ResetRequired bool            `json:"reset_required"`
 	ResetAfterID  int64           `json:"reset_after_id,omitzero"`
 }
 
-func (c *Client) listEventsPage(ctx context.Context, projectID, afterID int64) (eventsPageResp, error) {
+func (c *Client) listEventsPage(ctx context.Context, projectID, afterID int64, ref string) (eventsPageResp, error) {
 	var resp eventsPageResp
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return resp, err
 	}
-	params := &generated.PollProjectEventsQuery{Limit: new(int64(1000))}
+	params := &generated.PollProjectEventsQuery{Limit: new(int64(1000)), Issue: &ref}
 	if afterID > 0 {
 		params.AfterID = &afterID
 	}
@@ -1057,6 +1048,7 @@ func (c *Client) listEventsPage(ctx context.Context, projectID, afterID int64) (
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return resp, err
 	}
+	resp.IssueUID = wire.HTTPResponse.Header.Get("X-Kata-Events-Issue-UID")
 	return resp, nil
 }
 

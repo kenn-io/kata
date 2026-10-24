@@ -65,12 +65,18 @@ func sseDetailFixture(projectID int64, issueShortID, issueUID string) Model {
 // assertDetailRefetchBatch fails t unless cmd produces a tea.BatchMsg
 // containing exactly four fetches (issue + comments + events + links) —
 // the shape every detail-tab refetch must dispatch.
-func assertDetailRefetchBatch(t *testing.T, cmd tea.Cmd) {
+func assertDetailRefetchBatch(t *testing.T, m *Model, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd, got nil")
 	}
 	msg := cmd()
+	if tick, ok := msg.(detailRefreshTickMsg); ok {
+		next, work := m.handleDetailRefreshTick(tick)
+		*m = next
+		require.NotNil(t, work)
+		msg = work()
+	}
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("expected tea.BatchMsg, got %T", msg)
@@ -582,7 +588,7 @@ func TestHandleEventReceived_DetailViewRefetchesAllTabs(t *testing.T) {
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		projectID: 7, issueShortID: "abc4", issueUID: "01UID-OPEN",
 	})
-	assertDetailRefetchBatch(t, cmd)
+	assertDetailRefetchBatch(t, &m, cmd)
 }
 
 // TestHandleEventReceived_DetailViewMismatch_NoRefetch: an event with a
@@ -607,7 +613,7 @@ func checkCommentReplyEventRefreshesRelatedIssue(t *testing.T, relatedIssueUID s
 		relatedIssueUID: relatedIssueUID,
 	})
 	if relatedIssueUID == "target-issue" {
-		assertDetailRefetchBatch(t, cmd)
+		assertDetailRefetchBatch(t, &m, cmd)
 		return
 	}
 	if cmd != nil {
@@ -675,7 +681,7 @@ func TestCommentArrivalMakesPendingReplyTargetNavigable(t *testing.T) {
 			arrival := decodeEventReceived(frame{data: []byte(tc.frame)})
 			cmd := m.maybeRefetchOpenDetail(arrival)
 			require.NotNil(t, cmd, "the pending target's arrival must refetch its reply's open detail")
-			for _, fetch := range cmd().(tea.BatchMsg) {
+			for _, fetch := range detailEventBatch(t, &m, cmd) {
 				m, _ = updateModel(m, fetch())
 			}
 			jump, navigable := m.detail.jumpTarget()
@@ -732,7 +738,7 @@ func TestScopedCommentArrivalMakesRedactedReplyTargetNavigable(t *testing.T) {
 
 	cmd := m.maybeRefetchOpenDetail(arrival)
 	require.NotNil(t, cmd, "a scoped detail cannot tell which arrival resolves a redacted reply")
-	for _, fetch := range cmd().(tea.BatchMsg) {
+	for _, fetch := range detailEventBatch(t, &m, cmd) {
 		m, _ = updateModel(m, fetch())
 	}
 	jump, navigable := m.detail.jumpTarget()
@@ -780,7 +786,7 @@ func TestCommentEditRefreshesDisplayedReplyAndBacklink(t *testing.T) {
 				eventType: "issue.comment_edited", projectID: 7,
 				issueUID: test.editedIssueUID, commentUID: test.commentUID,
 			})
-			assertDetailRefetchBatch(t, cmd)
+			assertDetailRefetchBatch(t, &m, cmd)
 		})
 	}
 }
@@ -809,7 +815,7 @@ func checkCommentEditRefreshesMovedReplyEndpoint(t *testing.T, commentUID string
 		}
 		return
 	}
-	assertDetailRefetchBatch(t, cmd)
+	assertDetailRefetchBatch(t, &m, cmd)
 }
 
 func TestCommentEditIgnoresUnrepresentedComment(t *testing.T) {
@@ -876,7 +882,7 @@ func TestIssueLifecycleRefreshesDisplayedCommentEndpoints(t *testing.T) {
 			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 				eventType: test.eventType, projectID: 8, issueUID: test.issueUID,
 			})
-			assertDetailRefetchBatch(t, cmd)
+			assertDetailRefetchBatch(t, &m, cmd)
 		})
 	}
 }
@@ -937,7 +943,7 @@ func TestIssueRestoreRefreshesAfterRelationsDisappearFromProjection(t *testing.T
 			cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 				eventType: "issue.restored", projectID: 9, issueUID: "restored-endpoint-issue",
 			})
-			assertDetailRefetchBatch(t, cmd)
+			assertDetailRefetchBatch(t, &m, cmd)
 		})
 	}
 }
@@ -953,14 +959,17 @@ func TestProjectLifecycleRefreshesDisplayedRelationEndpoints(t *testing.T) {
 	require.NotNil(t, projected[0].Reply)
 	require.Equal(t, "moved", projected[0].Reply.Status)
 	require.Equal(t, int64(9), projected[0].Reply.ProjectID)
-	m := sseDetailFixture(7, "open", "open-issue")
-	m.detail.comments = commentEntriesFromProjectedRecords(projected)
-
 	for _, eventType := range []string{"project.removed", "project.renamed"} {
+		m := sseDetailFixture(7, "open", "open-issue")
+		m.detail.comments = commentEntriesFromProjectedRecords(projected)
 		cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 9})
-		assertDetailRefetchBatch(t, cmd)
+		assertDetailRefetchBatch(t, &m, cmd)
 
-		cmd = m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
+		// An idle pane schedules a refresh for any match, so a nil result
+		// here proves the unrelated project did not match.
+		idle := sseDetailFixture(7, "open", "open-issue")
+		idle.detail.comments = commentEntriesFromProjectedRecords(projected)
+		cmd = idle.maybeRefetchOpenDetail(eventReceivedMsg{eventType: eventType, projectID: 10})
 		if cmd != nil {
 			t.Fatalf("unrelated %s event must not refresh detail, got %T", eventType, cmd)
 		}
@@ -990,7 +999,7 @@ func TestProjectRestoreRefreshesRelationsAfterArchiveProjection(t *testing.T) {
 	m := sseDetailFixture(7, "open", "open-issue")
 	m.detail.comments = commentEntriesFromProjectedRecords(after)
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{eventType: "project.restored", projectID: 9})
-	assertDetailRefetchBatch(t, cmd)
+	assertDetailRefetchBatch(t, &m, cmd)
 }
 
 func TestIssueMoveIntoDisplayedProjectRefreshesMissingBacklink(t *testing.T) {
@@ -1005,7 +1014,7 @@ func TestIssueMoveIntoDisplayedProjectRefreshesMissingBacklink(t *testing.T) {
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType: "issue.moved", projectID: 7, issueUID: "moved-backlink-source",
 	})
-	assertDetailRefetchBatch(t, cmd)
+	assertDetailRefetchBatch(t, &m, cmd)
 }
 
 func commentEntriesFromProjectedRecords(records []commentref.Record) []CommentEntry {
@@ -1047,7 +1056,7 @@ func TestFederatedCommentIdentityRefreshesPendingReplyTarget(t *testing.T) {
 			}}}
 			msg := federatedCommentIdentityEvent(t, eventType, "target-comment")
 
-			assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+			assertDetailRefetchBatch(t, &m, m.maybeRefetchOpenDetail(msg))
 		})
 	}
 }
@@ -1057,7 +1066,7 @@ func TestFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(t *testing.T
 	m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
 	msg := federatedCommentIdentityEvent(t, "issue.commented", "incoming-comment", "displayed-comment")
 
-	assertDetailRefetchBatch(t, m.maybeRefetchOpenDetail(msg))
+	assertDetailRefetchBatch(t, &m, m.maybeRefetchOpenDetail(msg))
 }
 
 func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
@@ -1076,7 +1085,7 @@ func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
 			msg := federatedCommentIdentityEvent(t, "issue.snapshot", "incoming-comment", tt.replyToUID)
 			cmd := m.maybeRefetchOpenDetail(msg)
 			if tt.wantRefresh {
-				assertDetailRefetchBatch(t, cmd)
+				assertDetailRefetchBatch(t, &m, cmd)
 			} else {
 				assert.Nil(t, cmd)
 			}
@@ -1165,7 +1174,7 @@ func TestMaybeRefetchOpenDetail_ListView_NoRefetch(t *testing.T) {
 func TestRefetchOpenDetail_BatchShape(t *testing.T) {
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 
-	assertDetailRefetchBatch(t, m.refetchOpenDetail())
+	assertDetailRefetchBatch(t, &m, m.refetchOpenDetail())
 }
 
 // TestRefetchOpenDetail_NoOpInList: when the active view is the list,
@@ -1581,3 +1590,19 @@ func TestHandleResetRequired_ClearsProjectsState(t *testing.T) {
 // when the next round of tests inevitably reintroduces a Sprintf call;
 // the linter complains otherwise.
 var _ = fmt.Sprintf
+
+// Existing matching tests exercise the debounce tick before the fetch batch.
+func detailEventBatch(t *testing.T, m *Model, cmd tea.Cmd) tea.BatchMsg {
+	t.Helper()
+	require.NotNil(t, cmd)
+	msg := cmd()
+	if tick, ok := msg.(detailRefreshTickMsg); ok {
+		next, work := m.handleDetailRefreshTick(tick)
+		*m = next
+		require.NotNil(t, work)
+		msg = work()
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "expected fetch batch, got %T", msg)
+	return batch
+}

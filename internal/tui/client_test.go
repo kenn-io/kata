@@ -926,6 +926,8 @@ func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
 	matched := "abc4"
 	other := "xyz9"
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Kata-Events-Issue-UID", "01JZ0000000000000000000001")
+		require.Equal(t, "abc4", r.URL.Query().Get("issue"))
 		if r.URL.Path != "/api/v1/projects/7/events" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -989,6 +991,8 @@ func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
 func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
 	const wantUID = "01JZ0000000000000000000001"
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Kata-Events-Issue-UID", "01JZ0000000000000000000001")
+		require.Equal(t, wantUID, r.URL.Query().Get("issue"))
 		if r.URL.Query().Get("after_id") != "" {
 			respondJSON(t, w, map[string]any{
 				"events": []map[string]any{}, "next_after_id": 2, "reset_required": false,
@@ -1019,6 +1023,8 @@ func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
 func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 	var calls int
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Kata-Events-Issue-UID", "01JZ0000000000000000000001")
+		require.Equal(t, "abc4", r.URL.Query().Get("issue"))
 		calls++
 		require.Equal(t, "/api/v1/projects/7/events", r.URL.Path)
 		require.Equal(t, "1000", r.URL.Query().Get("limit"))
@@ -1026,7 +1032,7 @@ func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 		case "":
 			respondJSON(t, w, map[string]any{
 				"events": []map[string]any{
-					{"event_id": 1, "type": "issue.created", "issue_short_id": "aaa1", "actor": "a"},
+					{"event_id": 1, "type": "issue.created", "issue_uid": "01JZ0000000000000000000009", "issue_short_id": "aaa1", "actor": "a"},
 				},
 				"next_after_id":  1,
 				"reset_required": false,
@@ -1034,8 +1040,8 @@ func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 		case "1":
 			respondJSON(t, w, map[string]any{
 				"events": []map[string]any{
-					{"event_id": 2, "type": "issue.created", "issue_short_id": "abc4", "actor": "a"},
-					{"event_id": 3, "type": "issue.labeled", "issue_short_id": "abc4", "actor": "a"},
+					{"event_id": 2, "type": "issue.created", "issue_uid": "01JZ0000000000000000000001", "issue_short_id": "abc4", "actor": "a"},
+					{"event_id": 3, "type": "issue.labeled", "issue_uid": "01JZ0000000000000000000001", "issue_short_id": "abc4", "actor": "a"},
 				},
 				"next_after_id":  3,
 				"reset_required": false,

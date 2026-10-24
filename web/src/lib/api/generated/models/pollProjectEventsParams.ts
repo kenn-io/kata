@@ -3,6 +3,10 @@
  */
 
 export type PollProjectEventsParams = {
+  /**
+   * Filter subject history by issue short ID, qualified ref, or UID.
+   */
+  issue?: string
   after_id?: number
   limit?: number
 }
