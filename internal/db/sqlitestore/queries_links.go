@@ -566,17 +566,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		relatedID = link.FromIssueID
 	}
 	ts := nowTimestamp()
-	payload, err := json.Marshal(map[string]any{
-		"link_id":       link.ID,
-		"type":          link.Type,
-		"from_short_id": ev.FromShortID,
-		"from_uid":      ev.FromUID,
-		"to_short_id":   ev.ToShortID,
-		"to_uid":        ev.ToUID,
-		"link_from_uid": link.FromIssueUID,
-		"link_to_uid":   link.ToIssueUID,
-		"updated_at":    ts,
-	})
+	payload, err := db.LinkEventPayload(link, ev, ts, nil)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal unlink payload: %w", err)
 	}

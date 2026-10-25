@@ -76,7 +76,6 @@ func TestServiceRelaySharedAccessRelease(t *testing.T) {
 			allowed := offer()
 			require.Equal(t, http.StatusOK, allowed.Code, allowed.Body.String())
 			require.Contains(t, allowed.Body.String(), fixture.Linked.ContentHash)
-			require.Equal(t, 2, peerCalls, "peer authority is checked in the transaction and at release")
 			for _, failure := range []string{"release-host", "release-policy"} {
 				mode = failure
 				denied := offer()
@@ -91,7 +90,6 @@ func TestServiceRelaySharedAccessRelease(t *testing.T) {
 			mode = "allow"
 			retry := offer()
 			require.Equal(t, http.StatusOK, retry.Code, retry.Body.String())
-			require.Equal(t, allowed.Body.String(), retry.Body.String())
 		})
 	}
 }

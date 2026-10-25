@@ -159,17 +159,7 @@ func (s *Store) DeleteLinkAndEvent(
 		}
 		relatedID, relatedUID := linkPeer(link, eventIssue.ID)
 		updatedAt := nowStoredTimestamp()
-		payload, err := json.Marshal(map[string]any{
-			"link_id":       link.ID,
-			"type":          link.Type,
-			"from_short_id": eventParams.FromShortID,
-			"from_uid":      eventParams.FromUID,
-			"to_short_id":   eventParams.ToShortID,
-			"to_uid":        eventParams.ToUID,
-			"link_from_uid": link.FromIssueUID,
-			"link_to_uid":   link.ToIssueUID,
-			"updated_at":    updatedAt,
-		})
+		payload, err := db.LinkEventPayload(link, eventParams, updatedAt, nil)
 		if err != nil {
 			return fmt.Errorf("marshal unlink payload: %w", err)
 		}

@@ -13,26 +13,22 @@ import (
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
-	t.Cleanup(cleanup)
-	store, err := pgstore.Open(t.Context(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelaySharedAccessEnrollment(t, store, func(ctx context.Context, projectID int64) error {
-		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
-		return err
-	})
-}
-
-func TestRelaySharedAccessNotification(t *testing.T) {
-	for _, form := range []string{"to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null"} {
+	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null"} {
 		t.Run(form, func(t *testing.T) {
 			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 			t.Cleanup(cleanup)
 			store, err := pgstore.Open(t.Context(), dsn)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = store.Close() })
-			dbtest.RunRelaySharedAccessNotification(t, store, form)
+			compact := func(ctx context.Context, projectID int64) error {
+				_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
+				return err
+			}
+			if form == "enrollment" {
+				dbtest.RunRelaySharedAccessEnrollment(t, store, compact)
+			} else {
+				dbtest.RunRelaySharedAccessNotification(t, store, form, compact)
+			}
 		})
 	}
 }

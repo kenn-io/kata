@@ -198,14 +198,14 @@ func relayProjectLinksCheckError(err error) error {
 }
 
 func newRelayCrossProjectLinksError(side string) *api.APIError {
-	message := "this daemon's copy of the project has cross-project issue links"
+	message := "this daemon's project links cross the supported relay group"
 	location := "locally"
 	if side == "hub" {
-		message = "the project on the hub has cross-project issue links"
+		message = "the hub project's links cross the supported relay group"
 		location = "on the hub"
 	}
 	return api.NewError(http.StatusConflict, "relay_cross_project_links",
-		message, "remove cross-project related, blocks, and parent links "+location+" before retrying; ask an operator on that side to remove links to projects you cannot access", nil)
+		message, "check shared-upstream and common-root configuration "+location+"; author crossing relationships at the root; ask an operator to review links to projects you cannot access", nil)
 }
 
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {

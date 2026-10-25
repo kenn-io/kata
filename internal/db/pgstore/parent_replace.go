@@ -99,12 +99,7 @@ func (s *Store) ReplaceParentAndEvents(
 		}
 
 		updatedAt := nowStoredTimestamp()
-		unlinkedPayload, err := json.Marshal(map[string]any{
-			"link_id": oldLink.ID, "type": oldLink.Type,
-			"from_short_id": input.UnlinkEvent.FromShortID, "from_uid": input.UnlinkEvent.FromUID,
-			"to_short_id": input.UnlinkEvent.ToShortID, "to_uid": input.UnlinkEvent.ToUID,
-			"updated_at": updatedAt,
-		})
+		unlinkedPayload, err := db.LinkEventPayload(oldLink, input.UnlinkEvent, updatedAt, nil)
 		if err != nil {
 			return fmt.Errorf("marshal unlink payload: %w", err)
 		}

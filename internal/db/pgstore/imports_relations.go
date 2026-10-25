@@ -386,20 +386,15 @@ func (s *Store) insertImportLinkEvent(
 	link db.Link,
 	updatedAt time.Time,
 ) (db.Event, error) {
-	relatedID := link.ToIssueID
-	if relatedID == issue.ID {
-		relatedID = link.FromIssueID
-	}
+	relatedID, _ := linkPeer(link, issue.ID)
 	toShortID, toUID, err := importIssueIdentByID(ctx, tx, relatedID)
 	if err != nil {
 		return db.Event{}, err
 	}
-	payload, err := json.Marshal(map[string]any{
-		"source": params.Source, "link_id": link.ID, "type": link.Type,
-		"from_short_id": issue.ShortID, "from_uid": issue.UID,
-		"to_short_id": toShortID, "to_uid": toUID,
-		"updated_at": formatStoredTime(updatedAt),
-	})
+	payload, err := db.LinkEventPayload(link, db.LinkEventParams{
+		EventType: eventType, FromShortID: issue.ShortID, FromUID: issue.UID,
+		ToShortID: toShortID, ToUID: toUID,
+	}, formatStoredTime(updatedAt), &params.Source)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal link payload: %w", err)
 	}

@@ -25,14 +25,21 @@ func VisitRelayResetSources(snapshot RootResetSnapshot, visit func(RemoteEvent) 
 		if err := json.Unmarshal(section, &bodies); err != nil {
 			return err
 		}
-		for _, body := range bodies {
-			source, err := DecodeRelaySourceEvent(body)
-			if err != nil {
-				return err
-			}
-			if err := visit(source); err != nil {
-				return err
-			}
+		if err := visitRelaySourceBodies(bodies, visit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func visitRelaySourceBodies(bodies [][]byte, visit func(RemoteEvent) error) error {
+	for _, body := range bodies {
+		event, err := DecodeRelaySourceEvent(body)
+		if err != nil {
+			return err
+		}
+		if err := visit(event); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -88,25 +95,24 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 	events := make([]RemoteEvent, 0, len(sources)+len(entities))
 	byUID := map[string]RemoteEvent{}
 	for section, bodies := range [][][]byte{sources, entities} {
-		for _, body := range bodies {
-			event, err := DecodeRelaySourceEvent(body)
-			if err != nil {
-				return nil, provenance, err
-			}
+		if err := visitRelaySourceBodies(bodies, func(event RemoteEvent) error {
 			if event.ProjectUID != pin.ProjectUID || !uid.Valid(event.EventUID) || !uid.Valid(event.OriginInstanceUID) {
-				return nil, provenance, errors.New("invalid reset source identity or event type")
+				return errors.New("invalid reset source identity or event type")
 			}
 			if section == 1 && (event.OriginInstanceUID != pin.AuthorityUID || (!IsFederationSnapshotEvent(event.Type) && event.Type != "project.metadata_updated")) {
-				return nil, provenance, errors.New("reset entity section requires root snapshot records")
+				return errors.New("reset entity section requires root snapshot records")
 			}
 			if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
-				return nil, provenance, err
+				return err
 			}
 			if _, exists := byUID[event.EventUID]; exists {
-				return nil, provenance, errors.New("duplicate reset event")
+				return errors.New("duplicate reset event")
 			}
 			byUID[event.EventUID] = event
 			events = append(events, event)
+			return nil
+		}); err != nil {
+			return nil, provenance, err
 		}
 	}
 	receipts := map[string]AttributionReceipt{}

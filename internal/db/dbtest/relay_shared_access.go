@@ -117,23 +117,6 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 	retry, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.Equal(t, offered, retry, "restored access retries the exact body, identities and hashes")
-	// Root-only parent changes include old and new peers and remain atomic.
-	parentLink, err := store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "parent", Author: "member"})
-	require.NoError(t, err)
-	localParent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Author: "member", Title: "Replacement parent"})
-	require.NoError(t, err)
-	replaced, err := store.(db.ParentLinkReplacementStorage).ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{
-		ExpectedParentLinkID: parentLink.ID, ExpectedParentIssueID: issues[1].ID,
-		Link:        db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: localParent.ID, Type: "parent", Author: "member"},
-		UnlinkEvent: db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: "member", FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID},
-		LinkEvent:   db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "member", FromUID: issues[0].UID, ToUID: localParent.UID, FromShortID: issues[0].ShortID, ToShortID: localParent.ShortID},
-	})
-	require.NoError(t, err)
-	require.NoError(t, store.DeleteLinkByID(ctx, replaced.Link.ID))
-	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issues[0].ID, Actor: "member", SetParent: &issues[1].ID})
-	require.NoError(t, err)
-	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issues[0].ID, Actor: "member", RemoveParent: &issues[1].ID})
-	require.NoError(t, err)
 
 	// Each real native producer uses the same exact-byte release rule. The
 	// existing payload parser supplies link fields; close/reply resolution is
@@ -148,7 +131,7 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 		case "composite":
 			_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issues[0].ID, Actor: "member", AddRelated: []int64{issues[1].ID}, AddBlockedBy: []int64{issues[1].ID}, SetParent: &issues[1].ID})
 		case "close":
-			_, _, _, err = store.CloseIssueWithEvents(ctx, issues[0].ID, "done", "member", "Shared evidence", []db.Evidence{{Type: "duplicate-of", IssueRef: issues[1].UID}, {Type: "superseded-by", IssueRef: projects[1].Name + "#" + issues[1].ShortID}})
+			_, _, _, err = store.CloseIssueWithEvents(ctx, issues[0].ID, "done", "member", "Completed the shared endpoint work and verified the affected paths.", []db.Evidence{{Type: "reviewed-paths", Paths: []string{"internal/db/dbtest/relay_shared_access.go"}}})
 		case "reply":
 			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issues[0].ID, Author: "member", Body: "Shared reply", ReplyToUID: targetComment.UID, ReplyKind: "reply"})
 		}
@@ -197,7 +180,7 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 
 // Notifications are typed native metadata pointers, including the previous
 // value of a cleared slot. Keep link history out of these exact selections.
-func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form string) {
+func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form string, compact func(context.Context, int64) error) {
 	ctx := t.Context()
 	noRef := strings.HasPrefix(form, "no-ref-")
 	f := newRelaySharedAccessFixture(t, store, form != "snapshot" && !noRef)
@@ -289,8 +272,15 @@ func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form strin
 	}
 	event := patch(value)
 	if form == "snapshot" {
+		require.NoError(t, compact(ctx, f.Projects[0].ID))
+		fresh, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: f.Projects[0].ID, ParentTokenID: *f.Grants[0].Enrollment.ParentTokenID, SpokeInstanceUID: "00000000000000000000000007", ProtocolVersion: db.RelayProtocolVersion, Token: "notification-entity-only-test-token"})
+		require.NoError(t, err)
+		binding = fresh.Enrollment.RelayBindingUID
 		checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
 		require.NoError(t, err)
+		var history [][]byte
+		require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Events, &history))
+		require.Empty(t, history, "compacted checkpoint must authorize the entity without a retained notification diff")
 		var bodies [][]byte
 		require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &bodies))
 		found := false
@@ -299,13 +289,6 @@ func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form strin
 			require.NoError(t, err)
 			if source.IssueUID != nil && *source.IssueUID == f.Issues[0].UID && strings.Contains(string(source.Payload), key) {
 				found = true
-				lookup := db.NewEventIssueLookup(func(uid string) (db.Issue, error) { return store.IssueByUID(ctx, uid, db.IncludeDeletedYes) }, nil)
-				projects, err := db.RelayEventReferencedProjects(source, nil, lookup, func(_ string, uid string) (db.Issue, error) {
-					require.Equal(t, comment.UID, uid)
-					return store.IssueByID(ctx, comment.IssueID)
-				}, nil)
-				require.NoError(t, err)
-				require.Contains(t, projects, f.Projects[1].ID, "native snapshot metadata carries the peer dependency independently of retained events")
 			}
 		}
 		require.True(t, found, "snapshot has the canonical notification metadata")

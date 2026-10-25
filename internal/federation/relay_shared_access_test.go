@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"testing"
 
@@ -44,7 +43,11 @@ func TestRelaySharedAccessAcrossHops(t *testing.T) {
 					syncRelayMatrixNode(t, hubs[i])
 					enrollRelayMatrixReplica(t, hubs[i], leaves[i], name+"-leaf", false)
 					syncRelayMatrixNode(t, leaves[i])
-					issues[i], _, err = root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "assistant", Title: "Shared endpoint"})
+					title := "Shared endpoint"
+					if i == 1 {
+						title = issues[0].UID
+					}
+					issues[i], _, err = root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "assistant", Title: title, Body: title})
 					require.NoError(t, err)
 				}
 				linked, _, err := root.store.CreateLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account},
@@ -105,8 +108,6 @@ func TestRelaySharedAccessAcrossHops(t *testing.T) {
 					unchanged, err := nodes[0].store.IssueByID(ctx, local.ID)
 					require.NoError(t, err)
 					require.Equal(t, local.Title, unchanged.Title)
-					_, err = nodes[0].store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: local.ID, Actor: nodes[0].account, Title: &title})
-					require.NoError(t, err)
 					require.ErrorIs(t, nodes[0].store.DeleteLinkByID(ctx, links[0].ID), db.ErrFederationCrossProjectBoundary)
 				}
 				_, err = root.store.DeleteLinkAndEvent(ctx, linked, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
@@ -154,48 +155,6 @@ func TestRelaySharedAccessExistingPair(t *testing.T) {
 	}
 }
 
-func TestRelaySharedAccessQualifiedEvidence(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			root := newRelayMatrixNode(t, backend, "root-member")
-			hub := newRelayMatrixNode(t, backend, "hub-member")
-			leaf := newRelayMatrixNode(t, backend, "leaf-member")
-			ctx := db.WithRootAttribution(t.Context(), root.signer, root.account)
-			var projects [2]db.Project
-			var issues [2]db.Issue
-			hubs := [2]*relayMatrixNode{}
-			leaves := [2]*relayMatrixNode{}
-			for i, name := range []string{"first-original", "second-original"} {
-				var err error
-				projects[i], err = root.store.CreateProject(ctx, name)
-				require.NoError(t, err)
-				_, err = root.store.EnableProjectFederation(ctx, projects[i].ID, root.account)
-				require.NoError(t, err)
-				root.project = projects[i]
-				hubs[i] = &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
-				leaves[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
-				enrollRelayMatrixReplica(t, root, hubs[i], name+"-hub", true)
-				syncRelayMatrixNode(t, hubs[i])
-				enrollRelayMatrixReplica(t, hubs[i], leaves[i], name+"-leaf", false)
-				syncRelayMatrixNode(t, leaves[i])
-				issues[i], _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Shared endpoint"})
-				require.NoError(t, err)
-			}
-			_, _, _, err := root.store.CloseIssueWithEvents(ctx, issues[0].ID, "done", root.account, "Shared evidence", []db.Evidence{{Type: "superseded-by", IssueRef: projects[1].Name + "#" + issues[1].ShortID}})
-			require.NoError(t, err)
-			for _, node := range hubs {
-				syncRelayMatrixNode(t, node)
-			}
-			for _, node := range leaves {
-				syncRelayMatrixNode(t, node)
-			}
-			local, err := leaves[0].store.IssueByUID(t.Context(), issues[0].UID, db.IncludeDeletedYes)
-			require.NoError(t, err)
-			require.Equal(t, "closed", local.Status)
-		})
-	}
-}
-
 func TestRelaySharedAccessReplyPurge(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, form := range []string{"reply", "notification", "notification-before-enrollment"} {
@@ -219,8 +178,9 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				require.NoError(t, err)
 				comment, _, err := root.store.CreateComment(attr, db.CreateCommentParams{IssueID: target.ID, Author: root.account, Body: "Original"})
 				require.NoError(t, err)
+				var reply db.Comment
 				if form == "reply" {
-					_, _, err = root.store.CreateComment(attr, db.CreateCommentParams{IssueID: source.ID, Author: root.account, Body: "Retained reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+					reply, _, err = root.store.CreateComment(attr, db.CreateCommentParams{IssueID: source.ID, Author: root.account, Body: "Retained reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
 				} else {
 					slot, marshalErr := json.Marshal(notification.Value{From: root.account, Message: "Inspect finding", Re: comment.UID})
 					require.NoError(t, marshalErr)
@@ -245,15 +205,8 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 					require.NoError(t, err)
 					var previous []byte
 					for attempt := range 2 {
-						request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/relay/reset", root.http.URL, project.ID), nil)
-						require.NoError(t, err)
-						request.Header.Set("Authorization", "Bearer "+leaf.credential.Token)
-						response, err := root.http.Client().Do(request)
-						require.NoError(t, err)
-						raw, err := io.ReadAll(response.Body)
-						require.NoError(t, err)
-						require.NoError(t, response.Body.Close())
-						require.Equal(t, http.StatusForbidden, response.StatusCode, string(raw))
+						status, raw := relayMatrixRequest(t, root, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", project.ID), leaf.credential.Token, nil)
+						require.Equal(t, http.StatusForbidden, status, string(raw))
 						var refusal struct {
 							Error struct {
 								Code string `json:"code"`
@@ -298,6 +251,13 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				local, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
 				require.Equal(t, source.Title, local.Title)
+				comments, err := leaf.store.CommentsByIssue(ctx, local.ID)
+				require.NoError(t, err)
+				require.Len(t, comments, 1)
+				require.Equal(t, reply.UID, comments[0].UID)
+				require.Equal(t, reply.Body, comments[0].Body)
+				require.Equal(t, reply.ReplyToUID, comments[0].ReplyToUID)
+				require.Equal(t, reply.ReplyKind, comments[0].ReplyKind)
 			})
 		}
 	}
@@ -305,15 +265,8 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 
 func assertRelayProjectPreview(t *testing.T, root *relayMatrixNode, project db.Project) {
 	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation?relay_protocol_version=1", root.http.URL, project.ID), nil)
-	require.NoError(t, err)
-	request.Header.Set("Authorization", "Bearer "+root.userToken)
-	response, err := root.http.Client().Do(request)
-	require.NoError(t, err)
-	raw, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	assert.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	status, raw := relayMatrixRequest(t, root, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation?relay_protocol_version=1", project.ID), root.userToken, nil)
+	assert.Equal(t, http.StatusOK, status, string(raw))
 }
 
 // Ordinary scalar edits and close do not author crossing relationships. A
@@ -476,5 +429,121 @@ func TestRelaySharedAccessQualifiedEvidenceNameReuse(t *testing.T) {
 				require.Equal(t, closed.Event.ContentHash, copied[0].ContentHash, "native source hash is unchanged")
 			})
 		}
+	}
+}
+
+// Public parent replacement emits the same portable unlink contract as an
+// ordinary delete, so its committed pair must converge through both hops.
+func TestRelaySharedAccessParentReplacement(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "root-member")
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			ctx := t.Context()
+			attr := db.WithRootAttribution(ctx, root.signer, root.account)
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			var hubs, leaves [2]*relayMatrixNode
+			for i, name := range []string{"replace-first", "replace-second"} {
+				var err error
+				projects[i], err = root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = root.store.EnableProjectFederation(attr, projects[i].ID, root.account)
+				require.NoError(t, err)
+				issues[i], _, err = root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Parent endpoint"})
+				require.NoError(t, err)
+				root.project = projects[i]
+				hubs[i] = &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
+				leaves[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
+				enrollRelayMatrixReplica(t, root, hubs[i], name+"-hub", true)
+				syncRelayMatrixNode(t, hubs[i])
+				enrollRelayMatrixReplica(t, hubs[i], leaves[i], name+"-leaf", false)
+				syncRelayMatrixNode(t, leaves[i])
+			}
+			replacement, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[0].ID, Author: root.account, Title: "Replacement parent"})
+			require.NoError(t, err)
+			request := func(path string, body any) {
+				status, raw := relayMatrixRequest(t, root, http.MethodPost, path, root.userToken, body)
+				require.Equal(t, http.StatusOK, status, string(raw))
+			}
+			for _, issue := range []db.Issue{issues[0], issues[1], replacement} {
+				request(fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/acquire", issue.ProjectID, issue.ShortID), map[string]any{"holder": root.account, "actor": root.account, "purpose": "Replace the shared parent"})
+			}
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/links", projects[0].ID, issues[0].ShortID)
+			request(path, map[string]any{"actor": root.account, "type": "parent", "to_ref": issues[1].UID})
+			for _, node := range []*relayMatrixNode{hubs[0], hubs[1], leaves[1], leaves[0]} {
+				syncRelayMatrixNode(t, node)
+			}
+			local, err := leaf.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			parent, err := leaf.store.ParentOf(ctx, local.ID)
+			require.NoError(t, err)
+			require.Equal(t, issues[1].UID, parent.ToIssueUID)
+			before, err := root.store.MaxEventID(ctx)
+			require.NoError(t, err)
+			request(path, map[string]any{"actor": root.account, "type": "parent", "to_ref": replacement.UID, "replace": true})
+			emitted, err := root.store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projects[0].ID, AfterID: before, Limit: 100})
+			require.NoError(t, err)
+			require.Len(t, emitted, 2, "atomic replacement emits its original unlink and link")
+			require.Equal(t, "issue.unlinked", emitted[0].Type)
+			require.Equal(t, "issue.linked", emitted[1].Type)
+			for _, node := range []*relayMatrixNode{hubs[0], hubs[1], leaves[1], leaves[0]} {
+				syncRelayMatrixNode(t, node)
+			}
+			parent, err = leaf.store.ParentOf(ctx, local.ID)
+			require.NoError(t, err)
+			require.Equal(t, replacement.UID, parent.ToIssueUID)
+			links, err := leaf.store.LinksByIssue(ctx, local.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1, "the old crossing parent is removed")
+			for _, original := range emitted {
+				copied, err := leaf.store.EventsByUIDs(ctx, leaves[0].project.ID, []string{original.UID})
+				require.NoError(t, err)
+				require.Len(t, copied, 1)
+				require.Equal(t, original.Payload, copied[0].Payload, "emitted payload is never rewritten by transport")
+				require.Equal(t, original.ContentHash, copied[0].ContentHash)
+			}
+		})
+	}
+}
+
+// Issue notification conventions do not interpret opaque project metadata.
+func TestRelaySharedAccessProjectMetadata(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "root-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			ctx := t.Context()
+			project, err := root.store.CreateProject(ctx, "metadata-project")
+			require.NoError(t, err)
+			root.project = project
+			attr := db.WithRootAttribution(ctx, root.signer, root.account)
+			_, err = root.store.EnableProjectFederation(attr, project.ID, root.account)
+			require.NoError(t, err)
+			enrollRelayMatrixReplica(t, root, leaf, "metadata-replica", false)
+			syncRelayMatrixNode(t, leaf)
+			status, raw := relayMatrixRequest(t, root, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), root.userToken, map[string]any{
+				"actor": root.account, "patch": map[string]any{"notify.project_ui": map[string]any{
+					"from": "project-consumer", "message": "Opaque project configuration", "re": "consumer-record-7",
+				}},
+			})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			committed, err := root.store.ProjectByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.Contains(t, string(committed.Metadata), "consumer-record-7")
+			syncRelayMatrixNode(t, leaf)
+			replicated, err := leaf.store.ProjectByID(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			require.JSONEq(t, string(committed.Metadata), string(replicated.Metadata))
+			binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			_, err = root.store.(db.RelayResetStore).CreateRelayReset(ctx, binding.RelayConfig.BindingUID, root.signer)
+			require.NoError(t, err, "selected project reset metadata is opaque too")
+			syncRelayMatrixNode(t, leaf)
+			replicated, err = leaf.store.ProjectByID(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			require.JSONEq(t, string(committed.Metadata), string(replicated.Metadata))
+		})
 	}
 }

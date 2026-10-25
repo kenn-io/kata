@@ -162,14 +162,14 @@ func RelayEventReferencedProjects(event RemoteEvent, refs []string, lookup *Even
 		return record(commentIssue("", value.Re))
 	}
 	for key, raw := range payload.Metadata {
-		if strings.HasPrefix(key, notification.KeyPrefix) {
+		if strings.HasPrefix(event.Type, "issue.") && strings.HasPrefix(key, notification.KeyPrefix) {
 			if err := slot(raw); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for key, change := range payload.Diff {
-		if strings.HasPrefix(key, notification.KeyPrefix) {
+		if strings.HasPrefix(event.Type, "issue.") && strings.HasPrefix(key, notification.KeyPrefix) {
 			for _, raw := range []jsontext.Value{change.From, change.To} {
 				if err := slot(raw); err != nil {
 					return nil, err
