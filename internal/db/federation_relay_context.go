@@ -32,14 +32,30 @@ func RelayForwardPath(ctx context.Context) []string {
 // no request field or transported actor label can establish it.
 type relayStateCaptureKey struct{}
 
+type relayCheckpointCaptureKey struct{}
+
 // WithRelayStateCapture marks native checkpoint or owner replay without new delivery.
 func WithRelayStateCapture(ctx context.Context) context.Context {
 	return context.WithValue(ctx, relayStateCaptureKey{}, true)
 }
 
+// WithRelayCheckpointCapture marks a fresh root checkpoint capture. It also
+// suppresses ordinary relay deliveries while preserving the more specific
+// checkpoint marker for snapshot encoding.
+func WithRelayCheckpointCapture(ctx context.Context) context.Context {
+	return context.WithValue(WithRelayStateCapture(ctx), relayCheckpointCaptureKey{}, true)
+}
+
 // RelayStateCapture reports the native checkpoint or owner replay marker.
 func RelayStateCapture(ctx context.Context) bool {
 	capture, _ := ctx.Value(relayStateCaptureKey{}).(bool)
+	return capture
+}
+
+// RelayCheckpointCapture reports whether the caller is encoding a new root
+// checkpoint, rather than replaying other retained owner state.
+func RelayCheckpointCapture(ctx context.Context) bool {
+	capture, _ := ctx.Value(relayCheckpointCaptureKey{}).(bool)
 	return capture
 }
 
@@ -183,12 +199,21 @@ func RelayEventReferencedProjects(event RemoteEvent, refs []string, lookup *Even
 // RelayEventReferencedProjectsTx resolves native references against live rows
 // and retained ownership facts, using the backend's fixed SQL conventions.
 func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, refs []string, live func(string) (Issue, error), bind func(int) string, field func(string) string) ([]int64, error) {
+	projects, _, err := RelayEventReferencedProjectsWithPurgeFactsTx(ctx, tx, event, refs, live, bind, field, nil)
+	return projects, err
+}
+
+// RelayEventReferencedProjectsWithPurgeFactsTx also reports whether resolving
+// a reference required a retained purge fact. Fresh root checkpoints use this
+// to omit historical rows whose ownership proof will not travel with them.
+func RelayEventReferencedProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, refs []string, live func(string) (Issue, error), bind func(int) string, field func(string) string, purged func(string) (bool, error)) ([]int64, bool, error) {
+	var usedPurgeFact bool
 	owner := func(query string, args ...any) (Issue, error) {
 		var issue Issue
 		var owners, subjects int
 		err := tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT project_id),COUNT(DISTINCT issue_uid),COALESCE(MIN(project_id),0),COALESCE(MIN(issue_uid),'') FROM (`+query+`) candidates`, args...).Scan(&owners, &subjects, &issue.ProjectID, &issue.UID)
 		if err != nil {
-			return issue, err
+			return Issue{}, err
 		}
 		if owners != 1 || subjects != 1 {
 			return Issue{}, ErrNotFound
@@ -196,6 +221,13 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 		current, err := live(issue.UID)
 		if !errors.Is(err, ErrNotFound) {
 			return current, err
+		}
+		if purged != nil {
+			fromPurge, err := purged(issue.UID)
+			if err != nil {
+				return Issue{}, err
+			}
+			usedPurgeFact = usedPurgeFact || fromPurge
 		}
 		return issue, nil
 	}
@@ -227,7 +259,55 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 	short := func(ref string) (Issue, error) {
 		return owner(`SELECT project_id,uid AS issue_uid FROM issues WHERE short_id=`+bind(1), ref)
 	}
-	return RelayEventReferencedProjects(event, refs, NewEventIssueLookup(byUID, byRef), comment, short)
+	projects, err := RelayEventReferencedProjects(event, refs, NewEventIssueLookup(byUID, byRef), comment, short)
+	return projects, usedPurgeFact, err
+}
+
+// RelayCheckpointMetadata drops only notification comment references that the
+// caller has proved are dangling and authorized to omit. Fresh checkpoints do
+// not carry root-local purge facts, but the remaining notification content is
+// still current state.
+func RelayCheckpointMetadata(raw jsontext.Value, canOmitComment func(string) (bool, error)) (jsontext.Value, error) {
+	var slots map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &slots); err != nil {
+		return nil, err
+	}
+	changed := false
+	for key, slot := range slots {
+		if !strings.HasPrefix(key, notification.KeyPrefix) {
+			continue
+		}
+		var fields map[string]jsontext.Value
+		if json.Unmarshal(slot, &fields) != nil || len(fields["re"]) == 0 {
+			continue
+		}
+		value, _, err := notification.DecodeValue(slot)
+		if err != nil || value.Re == "" {
+			continue
+		}
+		omit, err := canOmitComment(value.Re)
+		if err != nil {
+			return nil, err
+		}
+		if !omit {
+			continue
+		}
+		delete(fields, "re")
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			return nil, err
+		}
+		slots[key] = jsontext.Value(encoded)
+		changed = true
+	}
+	if !changed {
+		return raw, nil
+	}
+	encoded, err := json.Marshal(slots)
+	if err != nil {
+		return nil, err
+	}
+	return jsontext.Value(encoded), nil
 }
 
 func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error)) (Issue, error) {

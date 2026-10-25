@@ -1125,8 +1125,12 @@ func (d *Store) insertFederationBaselineEventsTx(
 	if err != nil {
 		return db.Event{}, err
 	}
+	snapshotPayload := d.federationIssueSnapshotPayload
+	if db.RelayCheckpointCapture(ctx) {
+		snapshotPayload = d.relayCheckpointIssueSnapshotPayload
+	}
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := snapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -1557,6 +1561,32 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	comments := func(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
+		return federationIssueComments(ctx, tx, issue.ID)
+	}
+	return d.federationIssueSnapshotPayloadWithComments(ctx, tx, issue, comments)
+}
+
+// relayCheckpointIssueSnapshotPayload omits reply edges whose target comments
+// no longer exist. A fresh checkpoint cannot carry the root's purge facts that
+// would authorize those dangling references at a later relay hop.
+func (d *Store) relayCheckpointIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	metadata, err := db.RelayCheckpointMetadata(jsontext.Value(issue.Metadata), func(uid string) (bool, error) {
+		return relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, "", "", uid)
+	})
+	if err != nil {
+		return "", fmt.Errorf("sanitize checkpoint notification metadata: %w", err)
+	}
+	issue.Metadata = db.JSONBlob(string(metadata))
+	return d.federationIssueSnapshotPayloadWithComments(ctx, tx, issue, federationCheckpointIssueComments)
+}
+
+func (d *Store) federationIssueSnapshotPayloadWithComments(
+	ctx context.Context,
+	tx *sql.Tx,
+	issue db.Issue,
+	commentsForIssue func(context.Context, *sql.Tx, db.Issue) ([]issueSnapshotComment, error),
+) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
@@ -1565,7 +1595,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return "", err
 	}
-	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	comments, err := commentsForIssue(ctx, tx, issue)
 	if err != nil {
 		return "", err
 	}
@@ -1661,6 +1691,31 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list federation snapshot comments: %w", err)
 	}
+	return scanFederationIssueComments(ctx, rows)
+}
+
+func federationCheckpointIssueComments(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
+	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range comments {
+		comment := &comments[index]
+		if comment.ReplyToUID == "" {
+			continue
+		}
+		omit, err := relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, issue.UID, comment.CommentUID, comment.ReplyToUID)
+		if err != nil {
+			return nil, err
+		}
+		if omit {
+			comment.ReplyToUID, comment.ReplyKind = "", ""
+		}
+	}
+	return comments, nil
+}
+
+func scanFederationIssueComments(ctx context.Context, rows *sql.Rows) ([]issueSnapshotComment, error) {
 	defer func() { _ = rows.Close() }()
 	var out []issueSnapshotComment
 	for rows.Next() {

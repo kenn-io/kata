@@ -81,6 +81,43 @@ func TestRelayResetForwardsToActiveDownstream(t *testing.T) {
 	dbtest.RunRelayResetForwardsToActiveDownstream(t, store)
 }
 
+func TestRelayResetForwardsAfterRootPurgesReferences(t *testing.T) {
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	t.Cleanup(cleanup)
+	root, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+	dbtest.RunRelayResetForwardsAfterRootPurgesReferences(t, root, func(ctx context.Context, project db.Project) (db.Storage, db.Project, func(), error) {
+		relayDSN, cleanupRelay := pgstoretest.NewDatabase(t, ctx)
+		relay, err := pgstore.Open(ctx, relayDSN)
+		if err != nil {
+			cleanupRelay()
+			return nil, db.Project{}, nil, err
+		}
+		relayProject, err := relay.CreateProject(ctx, project.Name)
+		if err != nil {
+			_ = relay.Close()
+			cleanupRelay()
+			return nil, db.Project{}, nil, err
+		}
+		adopted, err := relay.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID: relayProject.ID, HubURL: "https://hub.example",
+			HubProjectID: project.ID, HubProjectUID: project.UID,
+			Actor: "member", RelayProtocolVersion: db.RelayProtocolVersion, EmptyOnly: true,
+		})
+		if err != nil {
+			_ = relay.Close()
+			cleanupRelay()
+			return nil, db.Project{}, nil, err
+		}
+		relayProject = adopted.Project
+		return relay, relayProject, func() {
+			_ = relay.Close()
+			cleanupRelay()
+		}, nil
+	})
+}
+
 func TestRelayResetRepeatedBeforeDownstreamActivation(t *testing.T) {
 	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)

@@ -169,7 +169,7 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	// Existing baseline events advance the same durable HLC as later root writes.
 	// Snapshot labels remain state; only the original signed creation references
 	// below confer creator verification. Captured records do not create echo work.
-	capture := WithRelayStateCapture(ctx)
+	capture := WithRelayCheckpointCapture(ctx)
 	boundary, err := p.Backend.InsertFederationBaselineEvents(capture, project, grant.Actor)
 	if err != nil {
 		return RelayResetCheckpoint{}, err

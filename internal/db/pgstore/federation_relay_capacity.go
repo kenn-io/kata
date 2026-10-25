@@ -97,7 +97,7 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 	}
 	out := make([]db.RelayCheckpointIssue, 0, len(issues))
 	for _, issue := range issues {
-		payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := relayCheckpointIssueSnapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return nil, err
 		}
@@ -111,8 +111,8 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 // or above it are the current-state records a checkpoint creation just wrote.
 func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
 	var records db.RelayCheckpointRecords
-	crosses := func(event db.RemoteEvent) (bool, error) {
-		return relayEventCrossesProjectTx(ctx, tx, project.ID, event)
+	excludeHistory := func(event db.RemoteEvent) (bool, error) {
+		return relayEventCheckpointHistoryExcludedTx(ctx, tx, project.ID, event)
 	}
 	for after := int64(0); ; {
 		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after)
@@ -122,7 +122,7 @@ func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, projec
 		if len(events) == 0 {
 			break
 		}
-		if err := records.AppendEvents(events, boundaryID, crosses); err != nil {
+		if err := records.AppendEvents(events, boundaryID, excludeHistory); err != nil {
 			return records, err
 		}
 		after = events[len(events)-1].ID

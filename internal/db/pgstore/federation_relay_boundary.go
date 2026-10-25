@@ -165,12 +165,32 @@ func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64, clea
 
 // Root-authored shared references retain their original history and hashes.
 func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
-	projects, err := relayEventProjectsTx(ctx, tx, event)
+	crossing, _, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, false)
+	return crossing, err
+}
+
+// Fresh checkpoints cannot carry root-local purge facts. Exclude a history
+// record that needed one to resolve its references, while retaining the strict
+// resolver used for ordinary event authorization and retained checkpoints.
+func relayEventCheckpointHistoryExcludedTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
+	crossing, usedPurgeFact, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, true)
+	return crossing || usedPurgeFact, err
+}
+
+func relayEventBoundaryFactsTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, trackPurgeFacts bool) (bool, bool, error) {
+	var projects []int64
+	var usedPurgeFact bool
+	var err error
+	if trackPurgeFacts {
+		projects, usedPurgeFact, err = relayEventProjectsWithPurgeFactsTx(ctx, tx, event)
+	} else {
+		projects, err = relayEventProjectsTx(ctx, tx, event)
+	}
 	if errors.Is(err, db.ErrNotFound) {
-		return true, nil
+		return true, usedPurgeFact, nil
 	}
 	if err != nil {
-		return false, err
+		return false, usedPurgeFact, err
 	}
 	for _, peer := range projects {
 		if peer == projectID {
@@ -181,21 +201,21 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		if db.FederationEventAffectsLinks(event.Type) {
 			authority, err := relayRootAuthorityTx(ctx, tx, projectID, false)
 			if errors.Is(err, db.ErrNotFound) {
-				return true, nil
+				return true, usedPurgeFact, nil
 			}
 			if err != nil {
-				return false, err
+				return false, usedPurgeFact, err
 			}
 			if event.OriginInstanceUID != authority {
-				return true, nil
+				return true, usedPurgeFact, nil
 			}
 		}
 		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
 		if err != nil || !compatible {
-			return !compatible, err
+			return !compatible, usedPurgeFact, err
 		}
 	}
-	return false, nil
+	return false, usedPurgeFact, nil
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
@@ -250,6 +270,55 @@ func relayEventProjectsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent)
 	return db.RelayEventReferencedProjectsTx(ctx, tx, event, refs,
 		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
 		func(n int) string { return fmt.Sprintf("$%d", n) }, func(field string) string { return "(e.payload::jsonb->>'" + field + "')" })
+}
+
+func relayEventProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, bool, error) {
+	ctx = db.WithAuthorizedProjects(ctx, nil)
+	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	if err != nil {
+		return nil, false, err
+	}
+	return db.RelayEventReferencedProjectsWithPurgeFactsTx(ctx, tx, event, refs,
+		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
+		func(n int) string { return fmt.Sprintf("$%d", n) }, func(field string) string { return "(e.payload::jsonb->>'" + field + "')" },
+		func(uid string) (bool, error) {
+			var purged bool
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM purge_log WHERE issue_uid=$1)`, uid).Scan(&purged)
+			return purged, err
+		})
+}
+
+// A fresh checkpoint may omit a dangling reply edge only after the retained
+// reply event proves the target's owner is still in the same shared group.
+func relayCheckpointCanOmitPurgedCommentReferenceTx(ctx context.Context, tx *sql.Tx, sourceProjectID int64, sourceIssueUID, sourceCommentUID, targetCommentUID string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM comments WHERE uid=$1)`, targetCommentUID).Scan(&exists); err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	query := `SELECT COUNT(DISTINCT p.project_id),COALESCE(MIN(p.project_id),0)
+		FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid
+		WHERE e.type='issue.commented' AND e.related_issue_uid IS NOT NULL AND e.related_issue_uid<>''
+		AND (e.payload::jsonb->>'reply_to_uid')=$1`
+	args := []any{targetCommentUID}
+	if sourceIssueUID != "" {
+		query += ` AND e.issue_uid=$2 AND (e.payload::jsonb->>'comment_uid')=$3`
+		args = append(args, sourceIssueUID, sourceCommentUID)
+	}
+	var owners int
+	var targetProjectID int64
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&owners, &targetProjectID); err != nil {
+		return false, err
+	}
+	if owners != 1 {
+		return false, nil
+	}
+	if targetProjectID == sourceProjectID {
+		return true, nil
+	}
+	return relaySharedProjectsTx(ctx, tx, sourceProjectID, targetProjectID, false, false)
 }
 
 func (d *Store) authorizeRelayEventTx(ctx context.Context, tx *sql.Tx, grant db.FederationEnrollment, event db.RemoteEvent) error {
