@@ -366,7 +366,7 @@ func RunRelaySharedAccessMovedReplyPurge(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "recipient", AdminActor: "admin", PlaintextToken: "moved-reply-parent-test-token"})
 	require.NoError(t, err)
-	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion, Token: "moved-reply-relay-test-token"})
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion, Token: "moved-reply-relay-test-token"}) // #nosec G101 -- synthetic relay token used only in this test.
 	require.NoError(t, err)
 	before, err := store.IssueByID(ctx, source.ID)
 	require.NoError(t, err)

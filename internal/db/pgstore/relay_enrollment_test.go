@@ -24,11 +24,12 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 				_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
 				return err
 			}
-			if form == "enrollment" {
+			switch form {
+			case "enrollment":
 				dbtest.RunRelaySharedAccessEnrollment(t, store, compact)
-			} else if form == "moved-reply-purge" {
+			case "moved-reply-purge":
 				dbtest.RunRelaySharedAccessMovedReplyPurge(t, store)
-			} else {
+			default:
 				dbtest.RunRelaySharedAccessNotification(t, store, form, compact)
 			}
 		})
