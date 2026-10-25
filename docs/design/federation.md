@@ -367,6 +367,10 @@ retained bodies before emitted-prefix mutation, and before returning checkpoint 
 or Entities, including cached and forwarded snapshots. Denial withholds the whole
 response without changing retained bytes. Daemon release checks retain peer dependencies
 and host decisions while the enrollment keeps its owning-project identity.
+A notification pointing to an already-purged comment whose project ownership
+cannot be proved causes refusal of the whole history, including first release.
+This accepted limit has no recovery policy. Temporary access loss instead permits
+an exact retry once access returns; provable ordinary reply/purge recovery remains.
 See the [operating rules](../operations/federation.md#shared-access-relationships).
 For direct spokes, a missing link peer is not a permanent validation failure. The hub accepts
 the event, advances the push cursor, and keeps the edge absent until both endpoint issues are

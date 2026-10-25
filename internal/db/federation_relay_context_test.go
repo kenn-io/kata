@@ -28,7 +28,7 @@ func TestRelayEventReferencedProjects(t *testing.T) {
 		{name: "malformed parent", kind: "issue.closed", payload: `{"parent_uid":42}`, bad: true},
 		{name: "null parent", kind: "issue.closed", payload: `{"parent_uid":null}`, bad: true},
 		{name: "ambiguous parent", kind: "issue.closed", payload: `{"parent_short_id":"missing"}`, bad: true},
-		{name: "mismatched parent", kind: "issue.closed", payload: `{"parent_uid":"peer","parent_short_id":"other"}`, bad: true},
+		{name: "renamed parent display ID", kind: "issue.closed", payload: `{"parent_uid":"peer","parent_short_id":"other"}`, want: []int64{2, 1}},
 		{name: "malformed evidence", kind: "issue.closed", payload: `{"evidence":{}}`, bad: true},
 		{name: "null evidence", kind: "issue.closed", payload: `{"evidence":null}`, bad: true},
 		{name: "unresolved evidence", kind: "issue.closed", payload: `{"evidence":[{"type":"duplicate-of","issue_ref":"missing"}]}`, bad: true},
@@ -45,7 +45,7 @@ func TestRelayEventReferencedProjects(t *testing.T) {
 				return Issue{}, ErrNotFound
 			}
 			lookup := NewEventIssueLookup(byUID, func(_, ref string) (Issue, error) { return byUID(ref) })
-			comment := func(ref string) (Issue, error) {
+			comment := func(_ string, ref string) (Issue, error) {
 				if ref == "comment" {
 					return peer, nil
 				}

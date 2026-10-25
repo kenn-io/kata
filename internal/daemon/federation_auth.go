@@ -274,11 +274,7 @@ func evaluateFederationRequestForCapabilities(
 			if err != nil || peer.DeletedAt != nil {
 				return db.ErrNotFound
 			}
-			if tx != nil {
-				if err := cfg.DB.ProjectAccessTransactionFence(enrollment.Actor, []string{projectUID})(checkCtx, tx); err != nil {
-					return err
-				}
-			}
+
 			if cfg.HostFederationAccess == nil {
 				return nil
 			}

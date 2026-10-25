@@ -462,9 +462,6 @@ func insertAtomicEdgeTx(ctx context.Context, tx *sql.Tx, params db.CreateLinkPar
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
 		return false, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
-		return false, err
-	}
 	var id int64
 	err := tx.QueryRowContext(ctx, `INSERT INTO links(
   from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author

@@ -3,11 +3,14 @@ package dbtest
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 // RelaySharedAccessFixture is one native root and its common-audience pair.
@@ -24,7 +27,11 @@ type RelaySharedAccessFixture struct {
 // embedding-boundary tests, keeping the initial regression at native admission.
 func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAccessFixture {
 	t.Helper()
+	return newRelaySharedAccessFixture(t, store, true)
+}
 
+func newRelaySharedAccessFixture(t *testing.T, store db.Storage, link bool) RelaySharedAccessFixture {
+	t.Helper()
 	ctx := t.Context()
 	team, _, err := store.CreateTeam(ctx, "shared-audience", "admin")
 	require.NoError(t, err)
@@ -55,11 +62,14 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 			Author: "member", Title: "Shared endpoint"})
 		require.NoError(t, err)
 	}
-	_, linked, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID,
-		ToIssueID: issues[1].ID, Type: "blocks", Author: "member"},
-		db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "member",
-			FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
-	require.NoError(t, err)
+	var linked db.Event
+	if link {
+		_, linked, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID,
+			ToIssueID: issues[1].ID, Type: "blocks", Author: "member"},
+			db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "member",
+				FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+		require.NoError(t, err)
+	}
 	var grants [2]db.CreatedFederationEnrollment
 	for i, project := range projects {
 		grants[i], err = store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID,
@@ -191,4 +201,85 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 	entityRetry, err := resetter.CreateRelayReset(ctx, binding, fixture.Signer)
 	require.NoError(t, err)
 	require.Equal(t, entityCheckpoint, entityRetry)
+}
+
+// Notifications are typed native metadata pointers, including the previous
+// value of a cleared slot. Keep link history out of these exact selections.
+func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form string) {
+	ctx := t.Context()
+	f := newRelaySharedAccessFixture(t, store, form != "snapshot")
+	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: f.Issues[1].ID, Author: "member", Body: "Peer finding"})
+	require.NoError(t, err)
+	binding := f.Grants[0].Enrollment.RelayBindingUID
+	slot, err := json.Marshal(notification.Value{From: "member", Message: "Inspect peer finding", Re: comment.UID})
+	require.NoError(t, err)
+	key := notification.MetadataKey("member")
+	patch := func(value jsontext.Value) db.Event {
+		out, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: f.Issues[0].ID, Actor: "member", Patch: map[string]jsontext.Value{key: value}})
+		require.NoError(t, err)
+		require.True(t, out.Changed)
+		return out.Event
+	}
+	peerAccess := func(visible bool) {
+		policy, err := store.ProjectAccessPolicy(ctx, f.Projects[1].UID)
+		require.NoError(t, err)
+		policy.TeamUIDs = nil
+		if visible {
+			policy.TeamUIDs = []string{f.Team.UID}
+		}
+		_, _, err = store.SetProjectAccessPolicy(ctx, policy, "admin")
+		require.NoError(t, err)
+	}
+	drainRelayDeliveries(t, store, binding)
+	if form == "from" {
+		patch(slot)
+		drainRelayDeliveries(t, store, binding)
+	}
+	value := jsontext.Value(slot)
+	if form == "from" {
+		value = jsontext.Value("null")
+	}
+	event := patch(value)
+	if form == "snapshot" {
+		checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
+		require.NoError(t, err)
+		var bodies [][]byte
+		require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &bodies))
+		found := false
+		for _, body := range bodies {
+			source, err := db.DecodeRelaySourceEvent(body)
+			require.NoError(t, err)
+			if source.IssueUID != nil && *source.IssueUID == f.Issues[0].UID && strings.Contains(string(source.Payload), key) {
+				found = true
+				lookup := db.NewEventIssueLookup(func(uid string) (db.Issue, error) { return store.IssueByUID(ctx, uid, db.IncludeDeletedYes) }, nil)
+				projects, err := db.RelayEventReferencedProjects(source, nil, lookup, func(_ string, uid string) (db.Issue, error) {
+					require.Equal(t, comment.UID, uid)
+					return store.IssueByID(ctx, comment.IssueID)
+				}, nil)
+				require.NoError(t, err)
+				require.Contains(t, projects, f.Projects[1].ID, "native snapshot metadata carries the peer dependency independently of retained events")
+			}
+		}
+		require.True(t, found, "snapshot has the canonical notification metadata")
+		peerAccess(false)
+		_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
+		peerAccess(true)
+		require.Error(t, err, "snapshot metadata must authorize its comment's project")
+		retry, err := store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
+		require.NoError(t, err)
+		require.Equal(t, checkpoint, retry)
+		return
+	}
+	exact, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.Len(t, exact, 1, "older crossing history cannot mask the metadata dependency")
+	require.Equal(t, event.UID, exact[0].SourceUID)
+	peerAccess(false)
+	withheld, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	peerAccess(true)
+	require.Error(t, err, "metadata diff must authorize its comment's project")
+	require.Nil(t, withheld)
+	retry, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.Equal(t, exact, retry)
 }

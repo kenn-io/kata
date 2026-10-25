@@ -143,11 +143,18 @@ and appear when both peers arrive, in either order.
 
 Before sending retained events or a checkpoint, the sender checks every
 structured reference against the recipient's current access, including host
-policy. A denied or unresolvable peer suspends the whole response; the sender
+policy. A denied peer suspends the whole response; the sender
 does not strip, reseal, skip or acknowledge its contents. Lost-response retries
 and cached or forwarded checkpoints run the same check. Restore access and
 retry to receive the original bodies and hashes. Previously received data is
 not retracted.
+
+If a notification refers to a permanently deleted comment and the sender
+cannot prove its owning project, it refuses that history. This first-release
+limitation applies to retained responses and the first checkpoint, even when
+every project is accessible. Retrying or restoring access cannot supply the
+missing proof; no recovery procedure is provided for that unprovable history.
+Provable reply references still support ordinary purge/reset recovery.
 
 Upgrade every hop to a build supporting this current-main behavior before
 enabling crossings. Older relay builds reject them. Existing reset size,
@@ -550,7 +557,8 @@ signaled reset checkpoint; a later turn does.
 
 ### Relay checkpoint capacity
 
-A relay must be able to recover after the root purges or compacts history.
+After the root purges or compacts history, recovery requires provable
+references under the [shared-access rules](#shared-access-relationships).
 Recovery uses a root-signed checkpoint containing retained portable history,
 current issue and cron-definition state, creation proofs and artifact manifests.
 **The complete checkpoint must fit in 64 MiB.** Ordinary sync uses batches and
@@ -899,6 +907,10 @@ Source actor and teammate labels remain visible when proof is pending or legacy.
 The accountable actor appears only after the daemon verifies the root receipt.
 
 ### Reset recovery
+
+A checkpoint is refused if an already-purged notification target's owning
+project cannot be proved. This [first-release limit](#shared-access-relationships)
+is separate from temporary access loss and the retained-work blockers below.
 
 Once a relay observes upstream credential or project-access rejection, it
 persists that state and stops serving downstream updates. Temporary network

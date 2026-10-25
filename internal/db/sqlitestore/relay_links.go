@@ -16,7 +16,6 @@ func validateRelayLinkEndpointsInProject(
 	projectID int64,
 	event db.RemoteEvent,
 ) error {
-	rootSource := false
 	var projectUID string
 	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, projectID).Scan(&projectUID); err != nil {
 		return err
@@ -25,7 +24,7 @@ func validateRelayLinkEndpointsInProject(
 	if err != nil {
 		return err
 	}
-	rootSource = event.OriginInstanceUID == pin.AuthorityUID
+	rootSource := event.OriginInstanceUID == pin.AuthorityUID
 	if !db.FederationEventAffectsLinks(event.Type) {
 		return nil
 	}

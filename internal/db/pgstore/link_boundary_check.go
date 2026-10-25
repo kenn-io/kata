@@ -11,7 +11,7 @@ func (s *Store) CheckLinkBoundary(ctx context.Context, fromIssueID, toIssueID in
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, fromIssueID, toIssueID); err != nil {
 			return err
 		}
-		return ensureRelayLinkBoundaryTx(ctx, tx, fromIssueID, toIssueID)
+		return nil
 	})
 }
 

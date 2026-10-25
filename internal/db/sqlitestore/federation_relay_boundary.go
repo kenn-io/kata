@@ -113,25 +113,21 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	if !slices.Contains(group, peerID) {
 		return false, nil
 	}
-	var projectUID, peerUID string
-	if err := tx.QueryRowContext(ctx, `SELECT a.uid,b.uid FROM projects a JOIN projects b ON b.id=? WHERE a.id=? AND a.deleted_at IS NULL AND b.deleted_at IS NULL`, peerID, projectID).Scan(&projectUID, &peerUID); err != nil {
-		return false, err
-	}
-	pin, err := rootPinTx(ctx, tx, projectUID, "")
+	authority, err := relayRootAuthorityTx(ctx, tx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	peer, err := rootPinTx(ctx, tx, peerUID, "")
+	peer, err := relayRootAuthorityTx(ctx, tx, peerID)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if pin.AuthorityUID != peer.AuthorityUID {
+	if authority != peer {
 		return false, nil
 	}
 	if localWrite {
@@ -139,9 +135,30 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
 			return false, err
 		}
-		return pin.AuthorityUID == instance, nil
+		return authority == instance, nil
 	}
 	return true, nil
+}
+
+// Pins take precedence; an enabled native hub is already rooted locally
+// before its first handshake initializes the public signing pin.
+func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
+	var projectUID, role, instance string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role,m.value FROM projects p JOIN federation_bindings b ON b.project_id=p.id JOIN meta m ON m.key='instance_uid' WHERE p.id=? AND p.deleted_at IS NULL AND b.enabled=1`, projectID).Scan(&projectUID, &role, &instance)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	pin, err := rootPinTx(ctx, tx, projectUID, "")
+	if !errors.Is(err, db.ErrNotFound) {
+		return pin.AuthorityUID, err
+	}
+	if role == string(db.FederationRoleHub) {
+		return instance, nil
+	}
+	return "", db.ErrNotFound
 }
 
 // Root-authored shared references retain their original history and hashes.
@@ -157,14 +174,14 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		if peer == projectID {
 			continue
 		}
-		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+		authority, err := relayRootAuthorityTx(ctx, tx, projectID)
 		if errors.Is(err, db.ErrNotFound) {
 			return true, nil
 		}
 		if err != nil {
 			return false, err
 		}
-		if event.OriginInstanceUID != pin.AuthorityUID {
+		if event.OriginInstanceUID != authority {
 			return true, nil
 		}
 		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false)
@@ -224,47 +241,9 @@ func relayEventProjectsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent)
 	if err != nil {
 		return nil, err
 	}
-	byUID := func(ref string) (db.Issue, error) {
-		issue, err := eventIssueByUID(ctx, tx, ref)
-		if !errors.Is(err, db.ErrNotFound) {
-			return issue, err
-		}
-		// Purged endpoints may still have a unique retained creation owner.
-		var count int
-		err = tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT project_id),COALESCE(MIN(project_id),0) FROM events WHERE issue_uid=? AND type IN ('issue.created','issue.snapshot')`, ref).Scan(&count, &issue.ProjectID)
-		if err != nil {
-			return issue, err
-		}
-		if count != 1 {
-			return issue, db.ErrNotFound
-		}
-		return issue, nil
-	}
-	lookup := db.NewEventIssueLookup(byUID, func(project, ref string) (db.Issue, error) { return eventIssueByRef(ctx, tx, project, ref) })
-	return db.RelayEventReferencedProjects(event, refs, lookup,
-		func(ref string) (db.Issue, error) {
-			var issueUID string
-			err := tx.QueryRowContext(ctx, `SELECT i.uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=?`, ref).Scan(&issueUID)
-			if errors.Is(err, sql.ErrNoRows) {
-				return db.Issue{}, db.ErrNotFound
-			}
-			if err != nil {
-				return db.Issue{}, err
-			}
-			return byUID(issueUID)
-		},
-		func(ref string) (db.Issue, error) {
-			var issueUID string
-			var count int
-			err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(uid),'') FROM issues WHERE short_id=?`, ref).Scan(&count, &issueUID)
-			if err != nil {
-				return db.Issue{}, err
-			}
-			if count != 1 {
-				return db.Issue{}, db.ErrNotFound
-			}
-			return byUID(issueUID)
-		})
+	return db.RelayEventReferencedProjectsTx(ctx, tx, event, refs,
+		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
+		func(int) string { return "?" }, func(field string) string { return "json_extract(e.payload,'$." + field + "')" })
 }
 
 func (d *Store) authorizeRelayEventTx(ctx context.Context, tx *sql.Tx, grant db.FederationEnrollment, event db.RemoteEvent) error {

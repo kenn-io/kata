@@ -604,9 +604,6 @@ func insertLinkRowTx(ctx context.Context, tx *sql.Tx, fromID, toID int64, linkTy
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, fromID, toID); err != nil {
 		return err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, fromID, toID); err != nil {
-		return err
-	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,

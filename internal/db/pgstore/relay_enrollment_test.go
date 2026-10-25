@@ -9,10 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
@@ -21,6 +22,19 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
 		return err
 	})
+}
+
+func TestRelaySharedAccessNotification(t *testing.T) {
+	for _, form := range []string{"to", "from", "snapshot"} {
+		t.Run(form, func(t *testing.T) {
+			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+			t.Cleanup(cleanup)
+			store, err := pgstore.Open(t.Context(), dsn)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			dbtest.RunRelaySharedAccessNotification(t, store, form)
+		})
+	}
 }
 
 func TestRelayRootAcceptanceParent(t *testing.T) {

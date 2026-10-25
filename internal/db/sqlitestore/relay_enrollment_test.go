@@ -20,6 +20,17 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 	})
 }
 
+func TestRelaySharedAccessNotification(t *testing.T) {
+	for _, form := range []string{"to", "from", "snapshot"} {
+		t.Run(form, func(t *testing.T) {
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			dbtest.RunRelaySharedAccessNotification(t, store, form)
+		})
+	}
+}
+
 func TestRelayRootAcceptanceParent(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
 	require.NoError(t, err)

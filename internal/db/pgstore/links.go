@@ -236,9 +236,6 @@ func insertLinkTx(ctx context.Context, tx *sql.Tx, params db.CreateLinkParams) (
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
 		return db.Link{}, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
-		return db.Link{}, err
-	}
 	link, err := scanLink(tx.QueryRowContext(ctx, `INSERT INTO links(
 			from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author
 		)
@@ -258,9 +255,6 @@ func prepareLinkInsertTx(
 ) error {
 	if params.FromIssueID == params.ToIssueID {
 		return db.ErrSelfLink
-	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, params.FromIssueID, params.ToIssueID); err != nil {
-		return err
 	}
 	if params.Type != "parent" {
 		return nil

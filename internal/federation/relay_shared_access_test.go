@@ -1,11 +1,19 @@
 package federation_test
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/notification"
 )
 
 // Use the existing real HTTP matrix nodes and transport, including both peer
@@ -116,4 +124,194 @@ func TestRelaySharedAccessAcrossHops(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestRelaySharedAccessExistingPair(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "root-member")
+			ctx := db.WithRootAttribution(t.Context(), root.signer, root.account)
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			for i, name := range []string{"first-existing", "second-existing"} {
+				var err error
+				projects[i], err = root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				issues[i], _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Existing endpoint"})
+				require.NoError(t, err)
+			}
+			_, _, err := root.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "related", Author: root.account}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			require.NoError(t, err)
+			for _, project := range projects {
+				_, err := root.store.EnableProjectFederation(ctx, project.ID, root.account)
+				require.NoError(t, err)
+			}
+			assertRelayProjectPreview(t, root, projects[0])
+			root.project = projects[0]
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			enrollRelayMatrixReplica(t, root, hub, "existing-hub", true)
+		})
+	}
+}
+
+func TestRelaySharedAccessQualifiedEvidence(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "root-member")
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			ctx := db.WithRootAttribution(t.Context(), root.signer, root.account)
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			hubs := [2]*relayMatrixNode{}
+			leaves := [2]*relayMatrixNode{}
+			for i, name := range []string{"first-original", "second-original"} {
+				var err error
+				projects[i], err = root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = root.store.EnableProjectFederation(ctx, projects[i].ID, root.account)
+				require.NoError(t, err)
+				root.project = projects[i]
+				hubs[i] = &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
+				leaves[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
+				enrollRelayMatrixReplica(t, root, hubs[i], name+"-hub", true)
+				syncRelayMatrixNode(t, hubs[i])
+				enrollRelayMatrixReplica(t, hubs[i], leaves[i], name+"-leaf", false)
+				syncRelayMatrixNode(t, leaves[i])
+				issues[i], _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Shared endpoint"})
+				require.NoError(t, err)
+			}
+			_, _, _, err := root.store.CloseIssueWithEvents(ctx, issues[0].ID, "done", root.account, "Shared evidence", []db.Evidence{{Type: "superseded-by", IssueRef: projects[1].Name + "#" + issues[1].ShortID}})
+			require.NoError(t, err)
+			for _, node := range hubs {
+				syncRelayMatrixNode(t, node)
+			}
+			for _, node := range leaves {
+				syncRelayMatrixNode(t, node)
+			}
+			local, err := leaves[0].store.IssueByUID(t.Context(), issues[0].UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "closed", local.Status)
+		})
+	}
+}
+
+func TestRelaySharedAccessReplyPurge(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, form := range []string{"reply", "notification", "notification-before-enrollment"} {
+			t.Run(backend+"/"+form, func(t *testing.T) {
+				ctx := t.Context()
+				root := newRelayMatrixNode(t, backend, "root-member")
+				leaf := newRelayMatrixNode(t, backend, "leaf-member")
+				project, err := root.store.CreateProject(ctx, "reply-project")
+				require.NoError(t, err)
+				root.project = project
+				attr := db.WithRootAttribution(ctx, root.signer, root.account)
+				_, err = root.store.EnableProjectFederation(attr, project.ID, root.account)
+				require.NoError(t, err)
+				if form != "notification-before-enrollment" {
+					enrollRelayMatrixReplica(t, root, leaf, "reply-leaf", false)
+					syncRelayMatrixNode(t, leaf)
+				}
+				source, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: "Reply survives"})
+				require.NoError(t, err)
+				target, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: "Reply target"})
+				require.NoError(t, err)
+				comment, _, err := root.store.CreateComment(attr, db.CreateCommentParams{IssueID: target.ID, Author: root.account, Body: "Original"})
+				require.NoError(t, err)
+				if form == "reply" {
+					_, _, err = root.store.CreateComment(attr, db.CreateCommentParams{IssueID: source.ID, Author: root.account, Body: "Retained reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+				} else {
+					slot, marshalErr := json.Marshal(notification.Value{From: root.account, Message: "Inspect finding", Re: comment.UID})
+					require.NoError(t, marshalErr)
+					_, err = root.store.PatchIssueMetadata(attr, db.PatchIssueMetadataIn{IssueID: source.ID, Actor: root.account, Patch: map[string]jsontext.Value{notification.MetadataKey(root.account): slot}})
+				}
+				require.NoError(t, err)
+				if form != "notification-before-enrollment" {
+					syncRelayMatrixNode(t, leaf)
+				}
+				_, err = root.store.PurgeIssue(attr, target.ID, root.account, nil)
+				require.NoError(t, err)
+				if form == "notification-before-enrollment" {
+					assertRelayProjectPreview(t, root, project)
+					enrollRelayMatrixReplica(t, root, leaf, "reply-leaf", false)
+				}
+				if form != "reply" {
+					// Already-purged notification ownership is unprovable. Refuse
+					// the whole history, even before the first relay release.
+					before, err := root.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+					require.NoError(t, err)
+					cursor, err := root.store.MaxEventID(ctx)
+					require.NoError(t, err)
+					var previous []byte
+					for attempt := range 2 {
+						request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/relay/reset", root.http.URL, project.ID), nil)
+						require.NoError(t, err)
+						request.Header.Set("Authorization", "Bearer "+leaf.credential.Token)
+						response, err := root.http.Client().Do(request)
+						require.NoError(t, err)
+						raw, err := io.ReadAll(response.Body)
+						require.NoError(t, err)
+						require.NoError(t, response.Body.Close())
+						require.Equal(t, http.StatusForbidden, response.StatusCode, string(raw))
+						var refusal struct {
+							Error struct {
+								Code string `json:"code"`
+							} `json:"error"`
+						}
+						require.NoError(t, json.Unmarshal(raw, &refusal))
+						require.Equal(t, "auth_invalid", refusal.Error.Code)
+						for _, hidden := range []string{source.UID, target.UID, comment.UID, "Inspect finding", "snapshot_uid", "signature"} {
+							require.NotContains(t, string(raw), hidden)
+						}
+						if attempt > 0 {
+							require.Equal(t, previous, raw, "retry consistently refuses without disclosing a checkpoint")
+						}
+						previous = raw
+					}
+					after, err := root.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+					require.NoError(t, err)
+					require.Equal(t, before, after, "refusal preserves source metadata and revision")
+					afterCursor, err := root.store.MaxEventID(ctx)
+					require.NoError(t, err)
+					require.Equal(t, cursor, afterCursor, "denied checkpoint capture rolls back its source events")
+					binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+					require.NoError(t, err)
+					localBefore, localErr := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+					require.True(t, localErr == nil || errors.Is(localErr, db.ErrNotFound))
+					require.ErrorContains(t, federation.SyncFederationOnce(ctx, leaf.store, binding, leaf.credential), "returned 403")
+					current, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+					require.NoError(t, err)
+					require.Equal(t, binding.PullCursorEventID, current.PullCursorEventID)
+					require.Equal(t, binding.RelayConfig.ResetEpoch, current.RelayConfig.ResetEpoch)
+					localAfter, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+					if localErr == nil {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, db.ErrNotFound)
+					}
+					require.Equal(t, localBefore, localAfter, "failed sync leaves existing replica data unchanged")
+					return
+				}
+				// A surviving reply proves its purged target's ownership.
+				syncRelayMatrixNode(t, leaf)
+				local, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, source.Title, local.Title)
+			})
+		}
+	}
+}
+
+func assertRelayProjectPreview(t *testing.T, root *relayMatrixNode, project db.Project) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation?relay_protocol_version=1", root.http.URL, project.ID), nil)
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer "+root.userToken)
+	response, err := root.http.Client().Do(request)
+	require.NoError(t, err)
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	assert.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 }
