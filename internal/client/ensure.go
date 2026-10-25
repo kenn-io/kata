@@ -436,7 +436,7 @@ func autoStartWithMigration(ctx context.Context, dataDir string, env []string, m
 	}
 	var running RunningDaemon
 	var unreachable error
-	err := waitForDaemonStartup(ctx, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
+	err := waitForDaemonStartup(ctx, dataDir, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
 		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err

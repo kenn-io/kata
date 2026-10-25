@@ -472,7 +472,7 @@ func defaultLaunchDetachedDaemon(
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
 	// The child may first wait for a replaced daemon to release the store.
-	err = client.WaitForDaemonStartup(ctx, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
+	err = client.WaitForDaemonStartup(ctx, dataDir, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
 		var ok bool
 		record, ok = liveDaemonRecord(dataDir, pid)
 		if ok || !childExited.Load() {
