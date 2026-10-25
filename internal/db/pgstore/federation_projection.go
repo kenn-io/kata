@@ -53,7 +53,7 @@ func (s *Store) enableProjectFederationTx(
 				return db.FederationBinding{}, err
 			}
 			m := newFederatedLinkGroupMaterialization(projectIDs, 0)
-			if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
+			if err := reconcileFederatedLinkGroup(ctx, tx, m, nil, s.instanceUID, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
 		}
@@ -555,17 +555,30 @@ func (s *Store) materializeFederatedProjectTxScoped(
 				return err
 			}
 		}
-		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
+		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs, s.instanceUID, acceptedEventUIDs); err != nil {
 			return err
 		}
 	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
 	}
+	if len(acceptedEventUIDs) > 0 {
+		if err := db.RecordScopedFoldIssueMetadataTx(ctx, tx, s.instanceUID, projectID, projection.ScopedPredicateFacts().IssueMetadata, acceptedEventUIDs); err != nil {
+			return err
+		}
+	}
 	if metadata := projection.ProjectMetadata[m.binding.HubProjectUID]; len(metadata) > 0 {
 		_, err := tx.ExecContext(ctx, `UPDATE projects SET metadata=$1,revision=revision+1
 WHERE id=$2 AND metadata IS DISTINCT FROM $1`, string(metadata), projectID)
-		return mapSQLError(err, nil)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		if len(acceptedEventUIDs) > 0 {
+			if err := db.RecordScopedFoldProjectMetadataTx(ctx, tx, s.instanceUID, projectID, projection.ScopedPredicateFacts().ProjectMetadata, acceptedEventUIDs); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return nil
 }

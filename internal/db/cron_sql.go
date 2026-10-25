@@ -313,6 +313,13 @@ func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, extr
 	if err := writeCronDefinitionRow(ctx, tx, req, next, event, fresh); err != nil {
 		return cronRow{}, Event{}, err
 	}
+	kind := "workflow.definition"
+	if req.job {
+		kind = "job.definition"
+	}
+	if err := recordScopedNativePredicateTx(ctx, tx, a.InstanceUID, project.UID, next.UID, kind); err != nil {
+		return cronRow{}, Event{}, err
+	}
 	if req.job {
 		*extra, err = a.initializeRecurringTx(ctx, tx, req, current, event)
 		if err != nil {

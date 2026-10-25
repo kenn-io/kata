@@ -6,12 +6,11 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"go.kenn.io/kata/internal/uid"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
-
-	"go.kenn.io/kata/internal/uid"
 )
 
 type scopedPredicateKey struct{ project, subject, kind string }
@@ -152,8 +151,8 @@ func validateScopedImportGraph(records []ImportRecord) error {
 		case *ScopedSourceCoverageExport:
 			g.coverageRows = append(g.coverageRows, r)
 		case *ScopedSourceCustodyExport:
-			var principal CustodyPrincipal
-			if err := scopedJSON(r.PrincipalBytes, &principal); err != nil {
+			principal, _, err := DecodeScopedSourceCustodyPrincipal(r.PrincipalBytes)
+			if err != nil {
 				return err
 			}
 			key, err := ScopedPrincipalKey(principal)
@@ -574,6 +573,10 @@ func (g *scopedImportGraph) validateOperations(records []ImportRecord) error {
 			}
 		}
 		for _, expectation := range op.Expectations {
+			// Retained staged/negative/nonroot DATA does not confer token authority.
+			if g.instance != "" && g.instance != op.Principal.AuthorityUID || row.State != "accepted" {
+				continue
+			}
 			token := g.expectations[ScopedOfferedDigest([]byte(expectation.Token))]
 			if token == nil {
 				return errors.New("source operation expectation token missing")
@@ -626,15 +629,38 @@ func (g *scopedImportGraph) validateOperations(records []ImportRecord) error {
 			if !ok || r.ManifestDigest != op.Operation.Digest {
 				return errors.New("custody has no matching complete source manifest")
 			}
-			var p CustodyPrincipal
-			if err := scopedJSON(r.PrincipalBytes, &p); err != nil {
+			p, evidence, err := DecodeScopedSourceCustodyPrincipal(r.PrincipalBytes)
+			if err != nil {
 				return err
 			}
 			if p.AuthorityUID != op.Operation.Principal.AuthorityUID || p.RouteDigest != op.Operation.Principal.RouteDigest {
 				return errors.New("custody principal differs from immutable source authority")
 			}
-			if !g.retainedHopPrincipal(p) {
+			var exactView *ScopedViewKey
+			if evidence != nil {
+				exactView = &evidence.View
+			}
+			if !g.retainedHopPrincipalInView(p, exactView) {
 				return errors.New("custody lacks its own retained authenticated hop principal")
+			}
+			if evidence != nil {
+				generation := g.generations[evidence.View]
+				view, exists := g.descriptors[evidence.View]
+				if !exists || generation == nil || generation.DescriptorDigest != evidence.DescriptorDigest || ScopedOfferedDigest(generation.DescriptorBytes) != evidence.DescriptorDigest || view.AuthorityUID != p.AuthorityUID || view.RouteDigest != p.RouteDigest || !scopedDescriptorHasHop(view, p.BindingUID, p.Epoch, "") || !scopedDescriptorHasHop(view, op.Operation.Principal.BindingUID, op.Operation.Principal.Epoch, op.Operation.SourceInstanceUID) {
+					return errors.New("custody differs from its exact retained admitted view")
+				}
+				selected := map[string]bool{}
+				for _, project := range view.Projects {
+					selected[project.ProjectUID] = true
+				}
+				for _, member := range op.Operation.Members {
+					if !selected[member.ProjectUID] {
+						return errors.New("custody member outside its admitted view")
+					}
+				}
+				if op.Operation.Version == 3 && !selected[op.Operation.ImportIntent.ProjectUID] {
+					return errors.New("custody import intent outside its admitted view")
+				}
 			}
 			if r.ResultAcknowledged && g.operations[r.OperationUID].TerminalBytes == nil {
 				return errors.New("custody result ACK without retained root disposition")
@@ -1651,17 +1677,11 @@ func (g *scopedImportGraph) validateNegotiation(records []ImportRecord) error {
 }
 
 func (g *scopedImportGraph) validateQuotas(records []ImportRecord) error {
-	var total int64
-	bindings := map[string]int64{}
-	private := map[string]int64{}
-	views := map[string]int{}
-	for _, row := range g.views {
+	usage := newScopedSourceBudgetUsage()
+	for uid, row := range g.views {
+		usage.PrivateBytes[uid] = 0
 		if row.State == "active" || row.State == "prepared" {
-			key := row.AuthorityUID + "/" + row.BindingUID
-			views[key]++
-			if views[key] > MaxScopedActiveViews {
-				return errors.New("scoped active view quota exceeded")
-			}
+			usage.ActiveViews[row.AuthorityUID+"/"+row.BindingUID]++
 		}
 	}
 	for _, record := range records {
@@ -1669,7 +1689,9 @@ func (g *scopedImportGraph) validateQuotas(records []ImportRecord) error {
 			continue
 		}
 		size := ScopedRetainedBytes(record)
-		total += size
+		if err := scopedSourceBudgetAdd(usage.FamilyBytes, record.ImportKind(), size); err != nil {
+			return err
+		}
 		var binding, route, view string
 		switch r := record.(type) {
 		case *ScopedDeliveryRecord:
@@ -1692,61 +1714,35 @@ func (g *scopedImportGraph) validateQuotas(records []ImportRecord) error {
 			view = r.ViewUID
 		}
 		if binding != "" {
-			bindings[binding] += size
-			if bindings[binding] > MaxScopedBindingBytes {
-				return errors.New("scoped binding retained-byte quota exceeded; obligations cannot be evicted")
+			if err := scopedSourceBudgetAdd(usage.BindingBytes, binding, size); err != nil {
+				return err
 			}
 		}
 		for uid, row := range g.views {
 			if uid == view || route != "" && row.RouteDigest == route && row.BindingUID == binding {
-				private[uid] += size
-				if private[uid] > MaxScopedRecoveryBytes {
-					return errors.New("scoped private recovery quota exceeded")
+				if err := scopedSourceBudgetAdd(usage.PrivateBytes, uid, size); err != nil {
+					return err
 				}
 			}
 		}
-		if total > MaxScopedDaemonBytes {
-			return errors.New("scoped aggregate retained-byte quota exceeded")
-		}
 	}
-	// Dependency components use actual retained membership edges. No eviction or
-	// inferred event grouping repairs an oversized or incomplete source component.
-	neighbors := map[string][]string{}
 	for uid := range g.operations {
-		neighbors[uid] = nil
+		usage.neighbors[uid] = nil
+		usage.OriginalBytes[uid] = 0
+		for _, body := range g.submissions[uid].OriginalBytes {
+			if err := scopedSourceBudgetAdd(usage.OriginalBytes, uid, int64(len(body))); err != nil {
+				return err
+			}
+		}
 	}
 	for _, row := range g.dependencies {
 		if row.EstablishingOperationUID != nil {
 			a, b := row.OperationUID, *row.EstablishingOperationUID
-			neighbors[a] = append(neighbors[a], b)
-			neighbors[b] = append(neighbors[b], a)
+			usage.neighbors[a] = append(usage.neighbors[a], b)
+			usage.neighbors[b] = append(usage.neighbors[b], a)
 		}
 	}
-	visited := map[string]bool{}
-	for uid := range neighbors {
-		if visited[uid] {
-			continue
-		}
-		pending := []string{uid}
-		count, bodyBytes := 0, 0
-		for len(pending) > 0 {
-			current := pending[len(pending)-1]
-			pending = pending[:len(pending)-1]
-			if visited[current] {
-				continue
-			}
-			visited[current] = true
-			count++
-			for _, body := range g.submissions[current].OriginalBytes {
-				bodyBytes += len(body)
-			}
-			if count > MaxScopedComponentOperations || bodyBytes > MaxScopedComponentOriginalBytes {
-				return errors.New("scoped dependency component exceeds retained source bounds")
-			}
-			pending = append(pending, neighbors[current]...)
-		}
-	}
-	return nil
+	return usage.validate()
 }
 
 func scopedDescriptorHasHop(v ScopedViewDescriptor, binding string, epoch int64, instance string) bool {
@@ -1763,7 +1759,14 @@ func scopedDescriptorHasHop(v ScopedViewDescriptor, binding string, epoch int64,
 // exact retained view tuple can preserve custody; the origin manifest is never
 // evidence of the receiving account. This grants no runtime authority.
 func (g *scopedImportGraph) retainedHopPrincipal(p CustodyPrincipal) bool {
+	return g.retainedHopPrincipalInView(p, nil)
+}
+
+func (g *scopedImportGraph) retainedHopPrincipalInView(p CustodyPrincipal, exactView *ScopedViewKey) bool {
 	for key, descriptor := range g.descriptors {
+		if exactView != nil && key != *exactView {
+			continue
+		}
 		view := g.views[key.ViewUID]
 		if descriptor.AuthorityUID != p.AuthorityUID || descriptor.RouteDigest != p.RouteDigest || !scopedDescriptorHasHop(descriptor, p.BindingUID, p.Epoch, "") {
 			continue
@@ -1784,7 +1787,13 @@ func (g *scopedImportGraph) retainedHopPrincipal(p CustodyPrincipal) bool {
 				continue
 			}
 			expected, ok := g.descriptors[*c.ScopedView]
-			if c.ProtocolVersion != ScopedRelayProtocolVersion || c.Validate(g.instance) != nil || !ok || expected.AuthorityUID != p.AuthorityUID || expected.RouteDigest != p.RouteDigest || c.AuthorityUID != p.AuthorityUID || c.ResetEpoch != p.Epoch || binding.Actor != p.AccountableActor || !scopedDescriptorHasHop(expected, p.BindingUID, p.Epoch, "") {
+			sameRoute := ok && expected.RouteDigest == p.RouteDigest
+			// Only exact framed custody can bind the child to a native owner
+			// prefix. Legacy retained tuples keep their existing exact-route law.
+			if !sameRoute && exactView != nil {
+				sameRoute = g.retainedNativeOwnerPrefix(descriptor, binding)
+			}
+			if c.ProtocolVersion != ScopedRelayProtocolVersion || c.Validate(g.instance) != nil || !ok || expected.AuthorityUID != p.AuthorityUID || !sameRoute || c.AuthorityUID != p.AuthorityUID || c.ResetEpoch != p.Epoch || binding.Actor != p.AccountableActor || !scopedDescriptorHasHop(expected, p.BindingUID, p.Epoch, "") {
 				valid = false
 			}
 		}
@@ -1809,6 +1818,50 @@ func (g *scopedImportGraph) retainedHopPrincipal(p CustodyPrincipal) bool {
 		}
 	}
 	return false
+}
+
+func (g *scopedImportGraph) retainedNativeOwnerPrefix(child ScopedViewDescriptor, binding *FederationBindingExport) bool {
+	c := binding.RelayConfig
+	if c == nil || c.ScopedView == nil {
+		return false
+	}
+	owner, ok := g.descriptors[*c.ScopedView]
+	row := g.views[c.ScopedView.ViewUID]
+	if !ok || row == nil || row.ActiveGeneration == nil || *row.ActiveGeneration != c.ScopedView.Generation || owner.DestinationUID != g.instance || owner.AuthorityUID != child.AuthorityUID || owner.RootCutoverUID != child.RootCutoverUID || c.RootCutoverUID != child.RootCutoverUID || len(owner.Route) == 0 || len(owner.Route) >= len(child.Route) || !slices.Equal(owner.Route, child.Route[:len(owner.Route)]) {
+		return false
+	}
+	terminal := owner.Route[len(owner.Route)-1]
+	path := []string{owner.AuthorityUID}
+	for _, hop := range owner.Route {
+		path = append(path, hop.InstanceUID)
+	}
+	if terminal.InstanceUID != g.instance || terminal.BindingUID != c.BindingUID || terminal.Epoch != c.ResetEpoch || !slices.Equal(c.HubPath, path) || c.UpstreamInstanceUID != path[len(path)-2] || row.BindingUID == c.BindingUID && (row.Epoch != c.ResetEpoch || row.AccountableActor != binding.Actor) {
+		return false
+	}
+	for _, selected := range child.Projects {
+		if !slices.ContainsFunc(owner.Projects, func(pin ScopedProjectPin) bool { return reflect.DeepEqual(pin, selected) }) {
+			return false
+		}
+		stamp := g.ownership[selected.ProjectUID]
+		if stamp == nil || stamp.OwnerViewUID == nil || stamp.OwnerGeneration == nil || *stamp.OwnerViewUID != c.ScopedView.ViewUID || *stamp.OwnerGeneration != c.ScopedView.Generation || stamp.ProtocolFloor != ScopedRelayProtocolVersion || stamp.RootCutoverUID == nil || *stamp.RootCutoverUID != c.RootCutoverUID {
+			return false
+		}
+		matched := false
+		for _, peer := range g.bindings {
+			if g.projectIDs[peer.ProjectID] != selected.ProjectUID {
+				continue
+			}
+			pc := peer.RelayConfig
+			if peer.Role != string(FederationRoleSpoke) || peer.HubProjectUID != selected.ProjectUID || peer.Actor != binding.Actor || pc == nil || pc.Validate(g.instance) != nil || pc.ProtocolVersion != ScopedRelayProtocolVersion || pc.ScopedView == nil || *pc.ScopedView != *c.ScopedView || pc.AuthorityUID != c.AuthorityUID || pc.RootCutoverUID != c.RootCutoverUID || pc.BindingUID != c.BindingUID || pc.ResetEpoch != c.ResetEpoch || pc.UpstreamInstanceUID != c.UpstreamInstanceUID || !slices.Equal(pc.HubPath, c.HubPath) {
+				return false
+			}
+			matched = true
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *scopedImportGraph) validateRecordInventory(records []ImportRecord) error {

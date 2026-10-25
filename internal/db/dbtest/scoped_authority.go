@@ -360,6 +360,7 @@ func NewScopedIncomingAuthorityFixture(t *testing.T, s db.Storage, prefixHops ..
 		case *db.ScopedProjectExport:
 			r.OwnerViewUID = &v.Key.ViewUID
 			r.OwnerGeneration = &v.Key.Generation
+			r.ServingFenced = false
 			records = append(records, r)
 		case *db.ScopedGenerationExport:
 			if r.Generation != v.Key.Generation {

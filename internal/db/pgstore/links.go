@@ -30,7 +30,13 @@ func (s *Store) CreateLink(ctx context.Context, params db.CreateLinkParams) (db.
 		}
 		var err error
 		link, err = insertLinkTx(ctx, tx, params)
-		return err
+		if err != nil {
+			return err
+		}
+		if params.Type == "parent" {
+			return s.recordScopedNativeParentMutationTx(ctx, tx, params.FromIssueID, params.ToIssueID)
+		}
+		return nil
 	})
 	return link, err
 }
@@ -100,7 +106,13 @@ func (s *Store) CreateLinkAndEvent(
 		}
 		_, err = tx.ExecContext(ctx,
 			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID)
-		return mapSQLError(err, nil)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		if link.Type == "parent" {
+			return db.RecordScopedNativeParentPredicateTx(ctx, tx, s.instanceUID, link.FromIssueID)
+		}
+		return nil
 	})
 	return link, event, err
 }
@@ -108,18 +120,7 @@ func (s *Store) CreateLinkAndEvent(
 // DeleteLinkByID removes one edge without emitting an event.
 func (s *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	return s.RetryTransient(ctx, func() error {
-		result, err := s.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, linkID)
-		if err != nil {
-			return mapSQLError(err, nil)
-		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if count == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return s.deleteScopedLinkByID(ctx, linkID)
 	})
 }
 
@@ -180,7 +181,13 @@ func (s *Store) DeleteLinkAndEvent(
 		}
 		_, err = tx.ExecContext(ctx,
 			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID)
-		return mapSQLError(err, nil)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		if link.Type == "parent" {
+			return db.RecordScopedNativeParentPredicateTx(ctx, tx, s.instanceUID, link.FromIssueID)
+		}
+		return nil
 	})
 	return event, err
 }

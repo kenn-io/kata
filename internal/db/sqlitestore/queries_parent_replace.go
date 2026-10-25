@@ -154,6 +154,10 @@ func (d *Store) replaceParentAndEventsTx(
 	if _, err := tx.ExecContext(ctx, `UPDATE issues SET updated_at = ? WHERE id = ?`, updatedAt, eventIssue.ID); err != nil {
 		return result, fmt.Errorf("touch replacement issue: %w", err)
 	}
+	// Only the complete final parent state is one guarded transition.
+	if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, d.instanceUID, result.Link.FromIssueID); err != nil {
+		return result, err
+	}
 	if err := tx.Commit(); err != nil {
 		return result, fmt.Errorf("commit parent replacement: %w", err)
 	}

@@ -58,6 +58,11 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	if err != nil {
 		return db.Link{}, err
 	}
+	if p.Type == "parent" {
+		if err := d.recordScopedNativeParentMutationTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+			return db.Link{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return db.Link{}, err
 	}
@@ -342,18 +347,7 @@ func (d *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, err
 // DeleteLinkByID removes a links row. Returns ErrNotFound when no row exists.
 func (d *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, linkID)
-		if err != nil {
-			return fmt.Errorf("delete link: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("delete link rows affected: %w", err)
-		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return d.deleteScopedLinkByID(ctx, linkID)
 	})
 }
 
@@ -520,6 +514,11 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 		return db.Link{}, db.Event{}, fmt.Errorf("re-fetch link inside tx: %w", err)
 	}
 
+	if link.Type == "parent" {
+		if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, d.instanceUID, link.FromIssueID); err != nil {
+			return db.Link{}, db.Event{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return db.Link{}, db.Event{}, fmt.Errorf("commit: %w", err)
 	}
@@ -598,6 +597,11 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,
 		ts, ev.EventIssueID); err != nil {
 		return db.Event{}, fmt.Errorf("touch issue: %w", err)
+	}
+	if link.Type == "parent" {
+		if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, d.instanceUID, link.FromIssueID); err != nil {
+			return db.Event{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return db.Event{}, fmt.Errorf("commit: %w", err)

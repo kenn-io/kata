@@ -298,6 +298,11 @@ ORDER BY id FOR UPDATE`, params.ProjectID, params.Source, issue.ID)
 				if err != nil {
 					return nil, 0, err
 				}
+				if link.Type == "parent" {
+					if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, s.instanceUID, link.FromIssueID); err != nil {
+						return nil, 0, err
+					}
+				}
 				events = append(events, event)
 			} else if !errors.Is(err, db.ErrNotFound) {
 				return nil, 0, err
@@ -369,6 +374,11 @@ RETURNING id`, fromID, toID, importLink.Type, params.Actor, formatStoredTime(cre
 		)
 		if err != nil {
 			return nil, 0, err
+		}
+		if link.Type == "parent" {
+			if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, s.instanceUID, link.FromIssueID); err != nil {
+				return nil, 0, err
+			}
 		}
 		events = append(events, event)
 		created++

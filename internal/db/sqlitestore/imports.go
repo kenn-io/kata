@@ -754,6 +754,11 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 				if err != nil {
 					return nil, 0, err
 				}
+				if link.Type == "parent" {
+					if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, d.instanceUID, link.FromIssueID); err != nil {
+						return nil, 0, err
+					}
+				}
 				events = append(events, evt)
 			} else if !errors.Is(err, db.ErrNotFound) {
 				return nil, 0, err
@@ -813,6 +818,11 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		evt, err := d.insertLinkEvent(ctx, tx, p, issue, projectName, "issue.linked", link, item.UpdatedAt)
 		if err != nil {
 			return nil, 0, err
+		}
+		if link.Type == "parent" {
+			if err := db.RecordScopedNativeParentPredicateTx(ctx, tx, d.instanceUID, link.FromIssueID); err != nil {
+				return nil, 0, err
+			}
 		}
 		events = append(events, evt)
 		created++

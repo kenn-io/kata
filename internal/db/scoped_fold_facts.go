@@ -172,6 +172,10 @@ func (t *scopedMetadataTrace) replace(before, from, to, after jsontext.Value) {
 	// A whole-value decision supersedes descendant/absence witnesses even if
 	// the current visible value already equals its replacement.
 	t.clear()
+	if t.equal(before, after) {
+		t.write()
+		return
+	}
 	t.delta(before, after)
 }
 func (t *scopedMetadataTrace) beginObject(before jsontext.Value) {

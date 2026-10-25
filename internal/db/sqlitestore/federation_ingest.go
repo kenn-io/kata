@@ -262,6 +262,19 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := materialization.apply(ctx, tx, p.ProjectID, cronValidator); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if len(result.InsertedEventUIDs) > 0 {
+			if err := db.RecordScopedFoldProjectMetadataTx(ctx, tx, d.instanceUID, p.ProjectID, materialization.projection.ScopedPredicateFacts().ProjectMetadata, result.InsertedEventUIDs); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if err := db.RecordScopedFoldIssueMetadataTx(ctx, tx, d.instanceUID, p.ProjectID, materialization.projection.ScopedPredicateFacts().IssueMetadata, result.InsertedEventUIDs); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if materialization.linkProjects != nil {
+				if err := db.RecordScopedFoldParentPredicatesTx(ctx, tx, d.instanceUID, p.ProjectID, materialization.linkProjects, materialization.links.ScopedPredicateFacts().Parents, result.InsertedEventUIDs); err != nil {
+					return db.FederationIngestResult{}, err
+				}
+			}
+		}
 		if err := d.markScopedCanonicalEventsDirtyTx(ctx, tx, cronTargets...); err != nil {
 			return db.FederationIngestResult{}, err
 		}

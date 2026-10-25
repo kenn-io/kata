@@ -18,6 +18,8 @@ import (
 // ScopedOwnerFixture stages all twenty owner-backup families through typed
 // native import, without raw SQL or runtime acceptance/admission shortcuts.
 // Its signed readiness bytes are opaque to PR02; T13 supplies inventory semantics.
+// This retention-only owner stays fenced: its native issue is not represented
+// by the signed active inventory and must never become verified served content.
 type ScopedOwnerFixture struct {
 	Records     []db.ImportRecord
 	View        db.ScopedViewDescriptor
@@ -90,7 +92,7 @@ func ScopedOwnerBackupFixture(t *testing.T) ScopedOwnerFixture {
 		&pins[0], &pins[1],
 		&db.ScopedViewExport{ViewUID: view.Key.ViewUID, CatalogEntryUID: id(6), AuthorityUID: authority, BindingUID: binding, Epoch: 1, AccountableActor: principal.AccountableActor, RouteDigest: principal.RouteDigest, DestinationUID: instance, ActiveGeneration: scopedOwnerPtr(int64(2)), PreparedGeneration: scopedOwnerPtr(int64(3)), State: "active", RequestDigest: view.RequestDigest},
 		&db.ScopedProtocolCutoverExport{CutoverUID: cutover.Cutover.UID, RequestDigest: cutover.Cutover.RequestDigest, ProjectUIDsBytes: projectsRaw, Floor: 2, ReadinessBytes: readiness, SuspendedBindingsBytes: suspension, CertificateBytes: scopedOwnerBytes(t, cutover), State: "committed"},
-		&db.ScopedProjectExport{ProjectUID: p, OwnerViewUID: scopedOwnerPtr(active.Key.ViewUID), OwnerGeneration: scopedOwnerPtr(active.Key.Generation), ProtocolFloor: 2, RootCutoverUID: scopedOwnerPtr(cutover.Cutover.UID)},
+		&db.ScopedProjectExport{ProjectUID: p, OwnerViewUID: scopedOwnerPtr(active.Key.ViewUID), OwnerGeneration: scopedOwnerPtr(active.Key.Generation), ProtocolFloor: 2, RootCutoverUID: scopedOwnerPtr(cutover.Cutover.UID), ServingFenced: true},
 		&db.ScopedProjectExport{ProjectUID: q, ProtocolFloor: 2, RootCutoverUID: scopedOwnerPtr(cutover.Cutover.UID)},
 	}
 	var activeCut db.ScopedCut
@@ -155,7 +157,7 @@ func ScopedOwnerBackupFixture(t *testing.T) ScopedOwnerFixture {
 	require.NoError(t, err)
 	result.Signatures = sign(raw, pins[:1])
 	records = append(records,
-		&db.ScopedSourceOperationExport{OperationUID: op.UID, Digest: op.Digest, SourceInstanceUID: instance, CommandKind: op.CommandKind, ManifestBytes: manifest, PrincipalBytes: principalRaw, PrincipalKey: principalKey, State: "accepted", OverlayState: "settled", AdmissionBytes: scopedOwnerBytes(t, db.ScopedAdmissionEvidence{Version: 1, OperationUID: op.UID, OperationDigest: op.Digest, Principal: principal}), TerminalBytes: scopedOwnerBytes(t, result), CancelRequested: true, RequestFingerprint: strings.Repeat("f", 64)},
+		&db.ScopedSourceOperationExport{OperationUID: op.UID, Digest: op.Digest, SourceInstanceUID: instance, CommandKind: op.CommandKind, ManifestBytes: manifest, PrincipalBytes: principalRaw, PrincipalKey: principalKey, State: "accepted", OverlayState: "settled", AdmissionBytes: scopedOwnerBytes(t, db.ScopedAdmissionEvidence{Version: 1, OperationUID: op.UID, OperationDigest: op.Digest, Principal: principal}), TerminalBytes: scopedOwnerBytes(t, result), CancelRequested: true, RequestFingerprint: db.ScopedOfferedDigest(manifest)},
 		&db.ScopedPrivateSourceExport{EventUID: event.EventUID, ContentHash: event.ContentHash, ProjectUID: p, OperationUID: scopedOwnerPtr(op.UID), Ordinal: scopedOwnerPtr(int64(0)), EventBytes: native, ProvenanceBytes: append(scopedOwnerBytes(t, receipt), ' ')},
 		&db.ScopedSourceCustodyExport{OperationUID: op.UID, BindingUID: binding, Epoch: 1, Direction: "inbound", PrincipalBytes: principalRaw, ManifestDigest: op.Digest, OwnsComplete: true, InvalidationState: "none"},
 		&db.ScopedSourceDependencyExport{OperationUID: op.UID, ProjectUID: p, IssueUID: i, ProofBytes: scopedOwnerBytes(t, proof), State: "satisfied"},
@@ -209,6 +211,7 @@ func ScopedOwnerRootIdleFixture(t *testing.T) ScopedOwnerFixture {
 		case *db.ScopedProjectExport:
 			row.OwnerViewUID = nil
 			row.OwnerGeneration = nil
+			row.ServingFenced = false
 		}
 		records = append(records, record)
 	}

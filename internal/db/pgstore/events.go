@@ -406,6 +406,15 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 			return db.Event{}, fmt.Errorf("hash event content: %w", err)
 		}
 	}
+	// Project state is already final in the native transaction. Refuse a
+	// capped parent predicate before allocating a nontransactional event ID.
+	projectParentComposed := input.ContentHash == "" && originInstanceUID == s.instanceUID &&
+		(input.Type == "project.removed" || input.Type == "project.restored")
+	if projectParentComposed {
+		if err := db.RecordScopedNativeProjectParentPredicatesTx(ctx, tx, s.instanceUID, input.ProjectUID); err != nil {
+			return db.Event{}, err
+		}
+	}
 	var eventID int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO events(
 		  uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid,
@@ -433,6 +442,11 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	if input.ContentHash == "" {
 		if err := s.recordScopedCanonicalCloseEventTx(ctx, tx, event, input.StatusBefore); err != nil {
 			return db.Event{}, err
+		}
+		if !projectParentComposed {
+			if err := db.RecordScopedNativePredicateTx(ctx, tx, s.instanceUID, event); err != nil {
+				return db.Event{}, err
+			}
 		}
 		if err := s.markScopedCanonicalEventsDirtyTx(ctx, tx, db.RemoteEventFromStored(event)); err != nil {
 			return db.Event{}, err

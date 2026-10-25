@@ -144,7 +144,8 @@ func (s *Store) ReplaceParentAndEvents(
 			`UPDATE issues SET updated_at = $1 WHERE id = $2`, updatedAt, eventIssue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		return nil
+		// Only the complete final parent state is one guarded transition.
+		return db.RecordScopedNativeParentPredicateTx(ctx, tx, s.instanceUID, result.Link.FromIssueID)
 	})
 	return result, err
 }

@@ -58,7 +58,7 @@ func reconcileFederationBindingTransitionLinks(
 			return err
 		}
 		m := newFederatedLinkGroupMaterialization(remainingProjectIDs, 0)
-		if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
+		if err := reconcileFederatedLinkGroup(ctx, tx, m, nil, "", nil); err != nil {
 			return err
 		}
 		stillMember := slices.Contains(remainingProjectIDs, previous.ProjectID)
@@ -81,7 +81,7 @@ func reconcileFederationBindingTransitionLinks(
 		return err
 	}
 	m := newFederatedLinkGroupMaterialization(currentProjectIDs, 0)
-	return reconcileFederatedLinkGroup(ctx, tx, m, nil)
+	return reconcileFederatedLinkGroup(ctx, tx, m, nil, "", nil)
 }
 
 func normalizedFederationHubOrigin(raw string) (string, error) {
@@ -160,6 +160,8 @@ func reconcileFederatedLinkGroup(
 	tx *sql.Tx,
 	m *federatedMaterialization,
 	currentIssueIDs map[string]int64,
+	instanceUID string,
+	actualAcceptedUIDs []string,
 ) error {
 	projection, err := federationGroupFoldProjection(ctx, tx, m)
 	if err != nil {
@@ -224,6 +226,9 @@ from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at
 		if err != nil {
 			return mapSQLError(err, linkConstraintErrors)
 		}
+	}
+	if len(actualAcceptedUIDs) > 0 {
+		return db.RecordScopedFoldParentPredicatesTx(ctx, tx, instanceUID, m.projectID, m.groupProjectIDs, projection.ScopedPredicateFacts().Parents, actualAcceptedUIDs)
 	}
 	return nil
 }

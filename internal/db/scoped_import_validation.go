@@ -175,8 +175,8 @@ func ValidateScopedImportRecord(record ImportRecord) error {
 			}
 		}
 	case *ScopedSourceCustodyExport:
-		var principal CustodyPrincipal
-		if err := scopedJSON(r.PrincipalBytes, &principal); err != nil {
+		principal, _, err := DecodeScopedSourceCustodyPrincipal(r.PrincipalBytes)
+		if err != nil {
 			return err
 		}
 		if !uid.Valid(r.OperationUID) || principal.BindingUID != r.BindingUID || principal.Epoch != r.Epoch || !scopedDigest(r.ManifestDigest) || !scopedState(r.Direction, "inbound", "outbound") || !scopedState(r.InvalidationState, "none", "requested", "effective") {

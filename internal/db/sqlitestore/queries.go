@@ -2739,6 +2739,9 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 		if err := d.recordScopedCanonicalCloseEventTx(ctx, tx, e, in.StatusBefore); err != nil {
 			return db.Event{}, err
 		}
+		if err := db.RecordScopedNativePredicateTx(ctx, tx, d.instanceUID, e); err != nil {
+			return db.Event{}, err
+		}
 		if err := d.markScopedCanonicalEventsDirtyTx(ctx, tx, db.RemoteEventFromStored(e)); err != nil {
 			return db.Event{}, err
 		}
