@@ -39,6 +39,8 @@ type FoldProjection struct {
 	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 	cronAuthors     map[string]foldCronAuthorCandidate
+	parentRemoval   func(FoldEvent, FoldLinkKey) bool
+	foldSource      FoldEvent
 }
 
 // FoldCronJob retains project identity alongside the winning job document.

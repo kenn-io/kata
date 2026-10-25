@@ -147,26 +147,36 @@ func scanRelayClassifierKeys(rows *sql.Rows, keys map[string]struct{}, columns i
 	return rows.Close()
 }
 
-// filterRelayCrossProjectLinkEvents keeps deferred relay link additions from
-// resolving against issues in another local project during a later group
-// materialization. Only the crossing additions are removed; a composite
-// event keeps same-project effects; only root sources can change crossings.
-func filterRelayCrossProjectLinkEvents(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectIDs []int64,
-	events []db.FoldEvent,
-) ([]db.FoldEvent, error) {
+// foldRelayLinkEvents applies the existing relay boundary to explicit link
+// effects and to parent assignments that would implicitly remove a crossing.
+func foldRelayLinkEvents(ctx context.Context, tx *sql.Tx, projectIDs []int64, events []db.FoldEvent) (db.FoldProjection, error) {
 	if len(projectIDs) == 0 || len(events) == 0 {
-		return events, nil
+		return db.FoldEvents(events), nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, err
+		return db.FoldProjection{}, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, nil
+		return db.FoldEvents(events), nil
 	}
+	issueProjects, err := loadRelayIssueProjects(ctx, tx, projectIDs)
+	if err != nil {
+		return db.FoldProjection{}, err
+	}
+	filtered, err := filterRelayCrossProjectLinkEvents(ctx, tx, events, classifier, issueProjects)
+	if err != nil {
+		return db.FoldProjection{}, err
+	}
+	var referenceErr error
+	projection := db.FoldEvents(filtered, relayParentRemovalCheck(ctx, tx, classifier, issueProjects, &referenceErr))
+	if referenceErr != nil {
+		return db.FoldProjection{}, referenceErr
+	}
+	return projection, nil
+}
+
+func loadRelayIssueProjects(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[string]string, error) {
 	placeholders, args := projectIDPlaceholders(projectIDs)
 	//nolint:gosec // The IN clause contains only count-derived placeholders; project IDs stay bound.
 	issueRows, err := tx.QueryContext(ctx, `
@@ -192,30 +202,20 @@ func filterRelayCrossProjectLinkEvents(
 	if err := issueRows.Close(); err != nil {
 		return nil, fmt.Errorf("close relay link endpoint projects: %w", err)
 	}
+	return issueProjects, nil
+}
+
+func filterRelayCrossProjectLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier, issueProjects map[string]string) ([]db.FoldEvent, error) {
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
 		}
-		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return nil, err
-		}
 		var referenceErr error
-		crossProject := func(peerUID string) bool {
-			projectUID, ok := issueProjects[peerUID]
-			if !ok || projectUID == event.ProjectUID {
-				return false
-			}
-			if event.OriginInstanceUID != pin.AuthorityUID {
-				return true
-			}
-			peer, err := rootPinTx(ctx, tx, projectUID, "")
-			if err != nil && !errors.Is(err, db.ErrNotFound) {
-				referenceErr = err
-			}
-			return err != nil || peer.AuthorityUID != pin.AuthorityUID
+		crossProject, err := relayCrossProjectCheck(ctx, tx, issueProjects, event, &referenceErr)
+		if err != nil {
+			return nil, err
 		}
 		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject, true)
 		if referenceErr != nil {
@@ -229,4 +229,44 @@ func filterRelayCrossProjectLinkEvents(
 		}
 	}
 	return filtered, nil
+}
+
+func relayCrossProjectCheck(ctx context.Context, tx *sql.Tx, issueProjects map[string]string, event db.FoldEvent, referenceErr *error) (func(string) bool, error) {
+	pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+	return func(peerUID string) bool {
+		projectUID, ok := issueProjects[peerUID]
+		if !ok || projectUID == event.ProjectUID {
+			return false
+		}
+		if event.OriginInstanceUID != pin.AuthorityUID {
+			return true
+		}
+		peer, err := rootPinTx(ctx, tx, projectUID, "")
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			*referenceErr = err
+		}
+		return err != nil || peer.AuthorityUID != pin.AuthorityUID
+	}, nil
+}
+
+func relayParentRemovalCheck(ctx context.Context, tx *sql.Tx, classifier relayOriginClassifier, issueProjects map[string]string, referenceErr *error) func(db.FoldEvent, db.FoldLinkKey) bool {
+	return func(event db.FoldEvent, parent db.FoldLinkKey) bool {
+		if issueProjects[parent.FromUID] == issueProjects[parent.ToUID] {
+			return true
+		}
+		if !classifier.relaySourced(event) {
+			if _, spoke := classifier.relaySpokes[event.ProjectUID]; !spoke {
+				return true
+			}
+		}
+		crossProject, err := relayCrossProjectCheck(ctx, tx, issueProjects, event, referenceErr)
+		if err != nil {
+			*referenceErr = err
+			return false
+		}
+		return !crossProject(parent.FromUID) && !crossProject(parent.ToUID)
+	}
 }

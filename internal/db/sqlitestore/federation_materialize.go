@@ -113,11 +113,10 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		}
 		// The incremental fold reads the same group link history as a full
 		// materialization, so it applies the same relay link boundary.
-		linkEvents, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, linkEvents)
+		m.links, err = foldRelayLinkEvents(ctx, tx, m.linkProjects, linkEvents)
 		if err != nil {
 			return federationMaterialization{}, err
 		}
-		m.links = db.FoldEvents(linkEvents)
 	}
 	if err := m.prepareRows(ctx, tx, projectID, issueScope); err != nil {
 		return federationMaterialization{}, err

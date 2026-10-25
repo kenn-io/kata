@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -585,6 +586,99 @@ func TestRelaySharedAccessProjectMetadata(t *testing.T) {
 			replicated, err = leaf.store.ProjectByID(ctx, leaf.project.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, string(committed.Metadata), string(replicated.Metadata))
+		})
+	}
+}
+
+func TestRelaySharedAccessDelayedRootParent(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRelayMatrixNode(t, backend, "root-member")
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			attr := db.WithRootAttribution(ctx, root.signer, root.account)
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			var hubs, leaves [2]*relayMatrixNode
+			for i, name := range []string{"parent-source", "parent-peer"} {
+				var err error
+				projects[i], err = root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = root.store.EnableProjectFederation(attr, projects[i].ID, root.account)
+				require.NoError(t, err)
+				issues[i], _, err = root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Parent endpoint"})
+				require.NoError(t, err)
+				root.project = projects[i]
+				hubs[i] = &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
+				leaves[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
+				enrollRelayMatrixReplica(t, root, hubs[i], name+"-hub", true)
+				syncRelayMatrixNode(t, hubs[i])
+				enrollRelayMatrixReplica(t, hubs[i], leaves[i], name+"-leaf", false)
+				syncRelayMatrixNode(t, leaves[i])
+			}
+			localParent, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[0].ID, Author: root.account, Title: "Local parent candidate"})
+			require.NoError(t, err)
+			syncRelayMatrixNode(t, hubs[0])
+			syncRelayMatrixNode(t, leaves[0])
+			child, err := leaf.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			candidate, err := leaf.store.IssueByUID(ctx, localParent.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			_, err = leaf.store.ParentOf(ctx, child.ID)
+			require.ErrorIs(t, err, db.ErrNotFound, "the leaf has not received any parent")
+			_, crossing, err := root.store.CreateLinkAndEvent(attr, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "parent", Author: root.account},
+				db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			require.NoError(t, err)
+			// Only real native clocks are used; deliver the older root event later.
+			time.Sleep(2 * time.Millisecond) //nolint:kennlint // Order real SQLite/PostgreSQL producer clocks; synthetic clock control cannot cover native HTTP transport.
+			_, local, err := leaf.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: candidate.ID, Type: "parent", Author: leaf.account},
+				db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: leaf.account, FromUID: child.UID, ToUID: candidate.UID, FromShortID: child.ShortID, ToShortID: candidate.ShortID})
+			require.NoError(t, err, "a same-project assignment is valid before the crossing arrives")
+			require.Greater(t, local.HLCPhysicalMS, crossing.HLCPhysicalMS)
+			parent, err := leaf.store.ParentOf(ctx, child.ID)
+			require.NoError(t, err)
+			require.Equal(t, candidate.UID, parent.ToIssueUID)
+			pin, err := root.store.RootAuthority(ctx, projects[0].UID)
+			require.NoError(t, err)
+			rootProof := false
+			for record, err := range root.store.ExportAttribution(ctx, db.ExportFilter{ProjectID: &projects[0].ID}) {
+				require.NoError(t, err)
+				if receipt, ok := record.(*db.AttributionReceipt); ok && receipt.EventUID == crossing.UID {
+					require.Equal(t, crossing.ContentHash, receipt.ContentHash)
+					require.NoError(t, db.VerifyRootReceipt(pin, *receipt))
+					rootProof = true
+				}
+			}
+			require.True(t, rootProof)
+			syncRelayMatrixNode(t, hubs[0])
+			hubChild, err := hub.store.IssueByUID(ctx, child.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			parent, err = hub.store.ParentOf(ctx, hubChild.ID)
+			require.NoError(t, err)
+			require.Equal(t, issues[1].UID, parent.ToIssueUID, "the hub initially receives the root crossing")
+			for _, node := range []*relayMatrixNode{leaves[0], hubs[0], leaves[0]} {
+				syncRelayMatrixNode(t, node)
+			}
+			for _, node := range []*relayMatrixNode{root, hub, leaf} {
+				current, err := node.store.IssueByUID(ctx, child.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				parent, err := node.store.ParentOf(ctx, current.ID)
+				require.NoError(t, err)
+				require.Equal(t, issues[1].UID, parent.ToIssueUID, "replica assignment cannot implicitly remove a root crossing")
+				links, err := node.store.LinksByIssue(ctx, current.ID)
+				require.NoError(t, err)
+				require.Len(t, links, 1)
+				require.Equal(t, "parent", links[0].Type)
+				require.Equal(t, issues[1].UID, links[0].ToIssueUID)
+				for _, original := range []db.Event{crossing, local} {
+					copied, err := node.store.EventsByUIDs(ctx, current.ProjectID, []string{original.UID})
+					require.NoError(t, err)
+					require.Len(t, copied, 1)
+					require.Equal(t, original.Payload, copied[0].Payload)
+					require.Equal(t, original.ContentHash, copied[0].ContentHash)
+				}
+			}
 		})
 	}
 }
