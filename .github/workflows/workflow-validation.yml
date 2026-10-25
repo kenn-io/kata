@@ -107,6 +107,7 @@ jobs:
       - name: Build release image archives
         run: |
           export OCI_OUTPUT_DIR="$RUNNER_TEMP/oci"
+          mkdir -p "$OCI_OUTPUT_DIR"
           COMMIT="${GITHUB_SHA::8}" REVISION="$GITHUB_SHA" \
             BUILD_DATE="$(git show -s --format=%cI HEAD)" \
             docker buildx bake "--allow=fs.write=$OCI_OUTPUT_DIR" oci-amd64 oci-arm64 \
