@@ -1,6 +1,10 @@
 display_name = "kata"
 
 review_guidelines = """
+Relay authorization must prove every project referenced by selected event or
+reset bytes. A root receipt or source-project ownership does not prove a
+referenced target's project; do not infer it or require new purge-state transport.
+
 Latest stable Go. Be pragmatic — theoretical findings produce churn.
 
 ## Stacked delivery boundaries

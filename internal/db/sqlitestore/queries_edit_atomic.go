@@ -263,7 +263,7 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if !hasExisting || existing.ToIssueID != target.ID {
 			recordedRemoval := false
 			if hasExisting {
-				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID, true); err != nil {
 					return changed, err
 				}
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
@@ -345,7 +345,7 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if parentIssue.ID != *p.RemoveParent {
 			return changed, db.ErrParentMismatch
 		}
-		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, parentIssue.ID); err != nil {
+		if err := checkExistingLinkProjectAccessTx(ctx, tx, existing); err != nil {
 			return changed, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, existing.ID)
@@ -549,7 +549,7 @@ func removeEdgeTx(ctx context.Context, tx *sql.Tx, urlIssue db.Issue, targetID i
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
-	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, urlIssue.ID, target.ID); err != nil {
+	if err := checkLinkProjectsAccessTx(ctx, tx, urlIssue.ID, target.ID); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	from, to := urlIssue.ID, target.ID
@@ -564,6 +564,13 @@ func removeEdgeTx(ctx context.Context, tx *sql.Tx, urlIssue db.Issue, targetID i
 		return false, db.PeerIdentity{}, nil
 	}
 	if err != nil {
+		return false, db.PeerIdentity{}, err
+	}
+	return removeExistingEdgeTx(ctx, tx, link, target.ID)
+}
+
+func removeExistingEdgeTx(ctx context.Context, tx *sql.Tx, link db.Link, targetID int64) (bool, db.PeerIdentity, error) {
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID, true); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID)
@@ -582,7 +589,7 @@ func removeEdgeTx(ctx context.Context, tx *sql.Tx, urlIssue db.Issue, targetID i
 	if rows == 0 {
 		return false, db.PeerIdentity{}, nil
 	}
-	identity, ierr := peerIdentityTx(ctx, tx, target.ID)
+	identity, ierr := peerIdentityTx(ctx, tx, targetID)
 	if ierr != nil {
 		return false, db.PeerIdentity{}, ierr
 	}

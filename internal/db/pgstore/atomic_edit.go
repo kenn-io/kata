@@ -270,7 +270,7 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if errors.Is(err, db.ErrNotFound) || existing.ToIssueID != target.ID {
 			if err == nil {
-				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID, true); err != nil {
 					return changed, err
 				}
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
@@ -321,7 +321,7 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		if existing.ToIssueID != *params.RemoveParent {
 			return changed, db.ErrParentMismatch
 		}
-		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+		if err := checkExistingLinkProjectAccessTx(ctx, tx, existing); err != nil {
 			return changed, err
 		}
 		identity, err := atomicPeerIdentityTx(ctx, tx, existing.ToIssueID)
@@ -492,7 +492,7 @@ func atomicRemoveEdgeTx(
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
-	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
+	if err := checkLinkProjectsAccessTx(ctx, tx, issue.ID, target.ID); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	fromID, toID := issue.ID, target.ID
@@ -509,11 +509,18 @@ func atomicRemoveEdgeTx(
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
+	return atomicRemoveExistingEdgeTx(ctx, tx, link, target.ID)
+}
+
+func atomicRemoveExistingEdgeTx(ctx context.Context, tx *sql.Tx, link db.Link, targetID int64) (bool, db.PeerIdentity, error) {
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID, true); err != nil {
+		return false, db.PeerIdentity{}, err
+	}
 	deleted, err := deleteAtomicLinkTx(ctx, tx, link.ID)
 	if err != nil || !deleted {
 		return false, db.PeerIdentity{}, err
 	}
-	peer, err := atomicPeerIdentityTx(ctx, tx, target.ID)
+	peer, err := atomicPeerIdentityTx(ctx, tx, targetID)
 	return true, peer, err
 }
 

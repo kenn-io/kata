@@ -714,7 +714,7 @@ func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueP
 		resolvedTargets = append(resolvedTargets, createdLinkTarget{UID: toIssueUID, ShortID: toIssueShortID})
 		// Canonical ordering is a storage concern: the payload reports the
 		// peer's stable identity (UID + short_id), not a numeric ref.
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, toIssueID); err != nil {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, toIssueID, false); err != nil {
 			return 0, db.Event{}, err
 		}
 		fromID, toID := issueID, toIssueID

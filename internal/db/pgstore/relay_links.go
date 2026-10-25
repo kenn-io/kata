@@ -44,7 +44,7 @@ func validateRelayLinkEndpointsInProject(
 		}
 		if endpointProjectID != projectID {
 			if rootSource {
-				compatible, err := relaySharedProjectsTx(ctx, tx, projectID, endpointProjectID, false)
+				compatible, err := relaySharedProjectsTx(ctx, tx, projectID, endpointProjectID, false, false)
 				if err != nil {
 					return err
 				}

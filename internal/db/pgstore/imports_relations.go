@@ -286,7 +286,7 @@ ORDER BY id FOR UPDATE`, params.ProjectID, params.Source, issue.ID)
 					!db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
-				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+				if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 					return nil, 0, err
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=$1`, link.ID); err != nil {

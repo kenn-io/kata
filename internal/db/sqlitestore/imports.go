@@ -744,7 +744,7 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 				if !db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
-				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+				if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 					return nil, 0, err
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {

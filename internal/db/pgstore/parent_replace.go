@@ -29,9 +29,7 @@ func (s *Store) ReplaceParentAndEvents(
 		if err := lockProjectAccess(ctx, tx); err != nil {
 			return err
 		}
-		if err := checkLinkEndpointsProjectAccessTx(ctx, tx,
-			input.Link.FromIssueID, input.ExpectedParentIssueID, input.Link.ToIssueID,
-		); err != nil {
+		if err := checkParentReplacementProjectAccessTx(ctx, tx, input); err != nil {
 			return err
 		}
 		if err := requireAddableLinkTargetTx(ctx, tx, input.Link.ToIssueID); err != nil {

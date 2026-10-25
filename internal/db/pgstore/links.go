@@ -117,7 +117,7 @@ func (s *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 		if err != nil {
 			return err
 		}
-		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+		if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=$1`, linkID); err != nil {
@@ -143,7 +143,7 @@ func (s *Store) DeleteLinkAndEvent(
 		if err != nil {
 			return err
 		}
-		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+		if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 			return err
 		}
 		result, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, link.ID)

@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int64) error {
+func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int64, cleanup bool) error {
 	var fromProject, toProject int64
 	err := tx.QueryRowContext(ctx, `SELECT f.project_id,t.project_id FROM issues f JOIN issues t ON t.id=$1 WHERE f.id=$2`, toID, fromID).Scan(&fromProject, &toProject)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -28,7 +28,7 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 		return err
 	}
 	if relayed {
-		compatible, err := relaySharedProjectsTx(ctx, tx, fromProject, toProject, true)
+		compatible, err := relaySharedProjectsTx(ctx, tx, fromProject, toProject, true, cleanup)
 		if err != nil {
 			return err
 		}
@@ -81,7 +81,7 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 		return err
 	}
 	for _, peer := range peers {
-		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false)
+		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 
 // relaySharedProjectsTx reuses the native binding group and pinned authority.
 // Local relationship writes require both endpoints to be authoritative here.
-func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite bool) (bool, error) {
+func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite, cleanup bool) (bool, error) {
 	if projectID == peerID {
 		return true, nil
 	}
@@ -115,14 +115,14 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	if !slices.Contains(group, peerID) {
 		return false, nil
 	}
-	authority, err := relayRootAuthorityTx(ctx, tx, projectID)
+	authority, err := relayRootAuthorityTx(ctx, tx, projectID, cleanup)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	peer, err := relayRootAuthorityTx(ctx, tx, peerID)
+	peer, err := relayRootAuthorityTx(ctx, tx, peerID, cleanup)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}
@@ -144,9 +144,9 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 
 // Pins take precedence; an enabled native hub is already rooted locally
 // before its first handshake initializes the public signing pin.
-func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
+func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64, cleanup bool) (string, error) {
 	var projectUID, role, instance string
-	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role,m.value FROM projects p JOIN federation_bindings b ON b.project_id=p.id JOIN meta m ON m.key='instance_uid' WHERE p.id=$1 AND p.deleted_at IS NULL AND b.enabled=1`, projectID).Scan(&projectUID, &role, &instance)
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role,m.value FROM projects p JOIN federation_bindings b ON b.project_id=p.id JOIN meta m ON m.key='instance_uid' WHERE p.id=$1 AND ($2 OR p.deleted_at IS NULL) AND b.enabled=1`, projectID, cleanup).Scan(&projectUID, &role, &instance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", db.ErrNotFound
 	}
@@ -179,7 +179,7 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		// Only relationship mutations require root authorship. Ordinary close
 		// freezes references whose projects are still authorized at release.
 		if db.FederationEventAffectsLinks(event.Type) {
-			authority, err := relayRootAuthorityTx(ctx, tx, projectID)
+			authority, err := relayRootAuthorityTx(ctx, tx, projectID, false)
 			if errors.Is(err, db.ErrNotFound) {
 				return true, nil
 			}
@@ -190,7 +190,7 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 				return true, nil
 			}
 		}
-		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false)
+		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
 		if err != nil || !compatible {
 			return !compatible, err
 		}
