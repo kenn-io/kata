@@ -228,7 +228,7 @@ func TestRelaySharedAccessArchivedPeerCleanup(t *testing.T) {
 	}
 }
 
-func TestRelaySharedAccessPurgedBareEvidence(t *testing.T) {
+func TestRelaySharedAccessPurgedBareEvidenceForwarding(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -280,25 +280,25 @@ func TestRelaySharedAccessPurgedBareEvidence(t *testing.T) {
 			_, err = hub.store.IssueByUID(ctx, target.UID, db.IncludeDeletedYes)
 			require.ErrorIs(t, err, db.ErrNotFound)
 			copied, err := hub.store.EventsByUIDs(ctx, hub.project.ID, []string{closed.UID})
-			require.NoError(t, err)
-			require.Len(t, copied, 1)
-			require.Equal(t, closed.Payload, copied[0].Payload)
-			require.Equal(t, closed.ContentHash, copied[0].ContentHash)
+			require.ErrorIs(t, err, db.ErrNotFound, "fresh checkpoints omit history whose bare evidence depends on root-local purge facts")
+			require.Empty(t, copied)
 			enrollRelayMatrixReplica(t, hub, leaf, "closed-leaf", false)
 			downstream, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
 			require.NoError(t, err)
 			cursor, err := hub.store.MaxEventID(ctx)
 			require.NoError(t, err)
-			for range 2 {
-				withheld, err := hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
-				require.ErrorIs(t, err, db.ErrNotFound, "the fresh hub lacks concrete ownership for the old bare ref")
-				require.Equal(t, db.RelayResetCheckpoint{}, withheld)
-			}
-			status, refusal := relayMatrixRequest(t, hub, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", hub.project.ID), leaf.credential.Token, nil)
-			require.Equal(t, http.StatusForbidden, status, string(refusal))
-			for _, hidden := range []string{source.UID, target.UID, closed.UID, closed.ContentHash, "snapshot_uid", "signature"} {
-				require.NotContains(t, string(refusal), hidden)
-			}
+			_, err = hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+			require.NoError(t, err, "omitting the old reference allows a fresh downstream reset")
+			syncRelayMatrixNode(t, leaf)
+			leafIssue, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "closed", leafIssue.Status)
+			require.Equal(t, "verified", leafIssue.Verification)
+			_, err = leaf.store.IssueByUID(ctx, target.UID, db.IncludeDeletedYes)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			leafHistory, err := leaf.store.EventsByUIDs(ctx, leaf.project.ID, []string{closed.UID})
+			require.ErrorIs(t, err, db.ErrNotFound)
+			require.Empty(t, leafHistory)
 			after, err := hub.store.IssueByID(ctx, local.ID)
 			require.NoError(t, err)
 			require.Equal(t, local, after)

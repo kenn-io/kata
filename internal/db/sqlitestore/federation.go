@@ -1691,7 +1691,7 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list federation snapshot comments: %w", err)
 	}
-	return scanFederationIssueComments(ctx, rows)
+	return scanFederationIssueComments(rows)
 }
 
 func federationCheckpointIssueComments(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
@@ -1715,7 +1715,7 @@ func federationCheckpointIssueComments(ctx context.Context, tx *sql.Tx, issue db
 	return comments, nil
 }
 
-func scanFederationIssueComments(ctx context.Context, rows *sql.Rows) ([]issueSnapshotComment, error) {
+func scanFederationIssueComments(rows *sql.Rows) ([]issueSnapshotComment, error) {
 	defer func() { _ = rows.Close() }()
 	var out []issueSnapshotComment
 	for rows.Next() {

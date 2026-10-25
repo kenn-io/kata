@@ -50,6 +50,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 			signer = cfg.RootSigning.Signer()
 		}
 		checkpoint, err := store.CreateRelayReset(ctx, principal.RelayBindingUID, signer)
+		err = finishPeerFenceRejection(ctx, err)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
@@ -76,6 +77,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		ctx = db.WithRelayRequestedEpoch(ctx, in.Epoch)
 		envelopes, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, in.Stream, in.Limit)
+		err = finishPeerFenceRejection(ctx, err)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
@@ -149,6 +151,9 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByQuarantine) || errors.Is(err, db.ErrFederationResetBlockedByExternalRoot) {
 		return api.NewError(http.StatusConflict, "relay_reset_blocked", "relay reset is blocked by retained work or bindings", "", nil)
 	}
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return federationCredentialDenied()
 	}
@@ -161,9 +166,6 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationIngestValidation) || errors.Is(err, db.ErrRemoteEventHashMismatch) {
 		// Do not expose source, constraint or project details in protocol errors.
 		return api.NewError(http.StatusBadRequest, "relay_invalid", "relay batch, epoch or acknowledgement is invalid", "", nil)
-	}
-	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
-		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
 	}
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		if apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound {

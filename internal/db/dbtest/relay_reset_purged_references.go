@@ -103,13 +103,13 @@ func RunRelayResetForwardsAfterRootPurgesReferences(
 	require.Equal(t, rootProject.UID, relayProject.UID)
 
 	rootToken, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{
-		Actor: "member", AdminActor: "admin", PlaintextToken: "root-to-relay-reset-test-token",
+		Actor: "member", AdminActor: "admin", PlaintextToken: "root-to-relay-reset-test-token", // #nosec G101 -- synthetic API token used only in this test.
 	})
 	require.NoError(t, err)
 	rootGrant, err := root.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: rootProject.ID, ParentTokenID: rootToken.ID,
 		SpokeInstanceUID: relay.InstanceUID(), ProtocolVersion: db.RelayProtocolVersion,
-		Token: "root-to-relay-enrollment-test-token", ServeDownstream: true,
+		Token: "root-to-relay-enrollment-test-token", ServeDownstream: true, // #nosec G101 -- synthetic relay token used only in this test.
 	})
 	require.NoError(t, err)
 	rootReset, ok := root.(db.RelayResetStore)
@@ -192,13 +192,13 @@ func RunRelayResetForwardsAfterRootPurgesReferences(
 	}
 
 	leafToken, _, err := relay.CreateAPIToken(ctx, db.CreateAPITokenParams{
-		Actor: "member", AdminActor: "admin", PlaintextToken: "relay-to-leaf-reset-test-token",
+		Actor: "member", AdminActor: "admin", PlaintextToken: "relay-to-leaf-reset-test-token", // #nosec G101 -- synthetic API token used only in this test.
 	})
 	require.NoError(t, err)
 	leaf, err := relay.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
 		ProjectID: relayProject.ID, ParentTokenID: leafToken.ID,
 		SpokeInstanceUID: "00000000000000000000000008",
-		ProtocolVersion:  db.RelayProtocolVersion, Token: "relay-to-leaf-enrollment-test-token",
+		ProtocolVersion:  db.RelayProtocolVersion, Token: "relay-to-leaf-enrollment-test-token", // #nosec G101 -- synthetic relay token used only in this test.
 	})
 	require.NoError(t, err)
 	drainRelayGrant(t, relay, leaf.Enrollment.RelayBindingUID, leaf.Enrollment.RelayResetEpoch)

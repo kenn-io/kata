@@ -290,7 +290,14 @@ func evaluateFederationRequestForCapabilities(
 				return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation reference transaction access decision unavailable", "", nil)
 			}
 			if tx != nil && decision.TransactionFence != nil {
-				return sanitizeFederationTransactionFence(decision.TransactionFence)(checkCtx, tx)
+				fenceErr := sanitizeFederationTransactionFence(decision.TransactionFence)(checkCtx, tx)
+				if fenceErr != nil {
+					var response error = api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation reference authorization is unavailable", "", nil)
+					if errors.Is(fenceErr, ErrHostAccessDenied) {
+						response = federationCredentialDenied()
+					}
+					return &peerFenceRejection{err: fenceErr, response: response}
+				}
 			}
 			return nil
 		}

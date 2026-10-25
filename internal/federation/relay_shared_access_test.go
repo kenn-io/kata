@@ -256,8 +256,8 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 					require.Equal(t, localBefore, localAfter, "failed sync leaves existing replica data unchanged")
 					return
 				}
-				// Root-local purge facts prove this reset; installed source bytes do
-				// not independently prove the target's owner to a fresh forwarding hub.
+				// The fresh checkpoint keeps the comment's content and attribution
+				// while omitting the dangling reply edge and its purge-dependent event.
 				hub := newRelayMatrixNode(t, backend, "hub-member")
 				enrollRelayMatrixReplica(t, root, hub, "reply-hub", true)
 				syncRelayMatrixNode(t, hub)
@@ -269,13 +269,11 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				require.Len(t, comments, 1)
 				require.Equal(t, reply.UID, comments[0].UID)
 				require.Equal(t, reply.Body, comments[0].Body)
-				require.Equal(t, reply.ReplyToUID, comments[0].ReplyToUID)
-				require.Equal(t, reply.ReplyKind, comments[0].ReplyKind)
+				require.Empty(t, comments[0].ReplyToUID)
+				require.Empty(t, comments[0].ReplyKind)
 				copied, err := hub.store.EventsByUIDs(ctx, hub.project.ID, []string{replyEvent.UID})
-				require.NoError(t, err)
-				require.Len(t, copied, 1)
-				require.Equal(t, replyEvent.Payload, copied[0].Payload)
-				require.Equal(t, replyEvent.ContentHash, copied[0].ContentHash)
+				require.ErrorIs(t, err, db.ErrNotFound)
+				require.Empty(t, copied)
 				copiedProof, err := hub.store.EntityAttribution(ctx, project.UID, "comment", reply.UID)
 				require.NoError(t, err)
 				require.Equal(t, replyProof, copiedProof)
@@ -284,16 +282,23 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				require.NoError(t, err)
 				cursor, err := hub.store.MaxEventID(ctx)
 				require.NoError(t, err)
-				for range 2 {
-					withheld, err := hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
-					require.ErrorIs(t, err, db.ErrNotFound, "reply identity alone cannot prove current target ownership")
-					require.Equal(t, db.RelayResetCheckpoint{}, withheld)
-				}
-				status, refusal := relayMatrixRequest(t, hub, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", hub.project.ID), leaf.credential.Token, nil)
-				require.Equal(t, http.StatusForbidden, status, string(refusal))
-				for _, hidden := range []string{source.UID, target.UID, comment.UID, reply.UID, "snapshot_uid", "signature"} {
-					require.NotContains(t, string(refusal), hidden)
-				}
+				_, err = hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+				require.NoError(t, err, "the fresh hub can forward the sanitized current-state checkpoint")
+				syncRelayMatrixNode(t, leaf)
+				leafIssue, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				leafComments, err := leaf.store.CommentsByIssue(ctx, leafIssue.ID)
+				require.NoError(t, err)
+				require.Len(t, leafComments, 1)
+				require.Equal(t, reply.UID, leafComments[0].UID)
+				require.Equal(t, reply.Body, leafComments[0].Body)
+				require.Empty(t, leafComments[0].ReplyToUID)
+				require.Empty(t, leafComments[0].ReplyKind)
+				_, err = leaf.store.IssueByUID(ctx, target.UID, db.IncludeDeletedYes)
+				require.ErrorIs(t, err, db.ErrNotFound)
+				leafHistory, err := leaf.store.EventsByUIDs(ctx, leaf.project.ID, []string{replyEvent.UID})
+				require.ErrorIs(t, err, db.ErrNotFound)
+				require.Empty(t, leafHistory)
 				after, err := hub.store.IssueByID(ctx, local.ID)
 				require.NoError(t, err)
 				require.Equal(t, local, after)
@@ -631,7 +636,8 @@ func TestRelaySharedAccessDelayedRootParent(t *testing.T) {
 				db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 			require.NoError(t, err)
 			// Only real native clocks are used; deliver the older root event later.
-			time.Sleep(2 * time.Millisecond) //nolint:kennlint // Order real SQLite/PostgreSQL producer clocks; synthetic clock control cannot cover native HTTP transport.
+			//nolint:kennlint // Order real SQLite/PostgreSQL producer clocks; synthetic clock control cannot cover native HTTP transport.
+			time.Sleep(2 * time.Millisecond)
 			_, local, err := leaf.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: candidate.ID, Type: "parent", Author: leaf.account},
 				db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: leaf.account, FromUID: child.UID, ToUID: candidate.UID, FromShortID: child.ShortID, ToShortID: candidate.ShortID})
 			require.NoError(t, err, "a same-project assignment is valid before the crossing arrives")
