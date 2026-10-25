@@ -178,7 +178,7 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 	require.Equal(t, entityCheckpoint, entityRetry)
 }
 
-// Notifications are typed native metadata pointers, including the previous
+// RunRelaySharedAccessNotification checks typed native metadata pointers, including the previous
 // value of a cleared slot. Keep link history out of these exact selections.
 func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form string, compact func(context.Context, int64) error) {
 	ctx := t.Context()
@@ -192,6 +192,10 @@ func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form strin
 	if noRef {
 		var fields map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal(slot, &fields))
+		if fields == nil {
+			t.Fatal("notification fixture must decode to an object")
+			return
+		}
 		delete(fields, "re")
 		if form == "no-ref-empty" {
 			fields["re"] = jsontext.Value(`""`)

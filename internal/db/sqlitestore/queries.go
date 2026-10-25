@@ -171,8 +171,16 @@ func (d *Store) ProjectByNameIncludingArchived(ctx context.Context, name string)
 // how to surface the archived state; surface-level handlers should
 // inspect DeletedAt themselves. Returns ErrNotFound when no row matches.
 func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error) {
-	row := d.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)
-	return hideSystemProject(scanProject(row))
+	return d.ProjectByUIDTx(ctx, nil, uid)
+}
+
+// ProjectByUIDTx reads the native project through the supplied transaction.
+// A nil transaction uses the store pool for post-transaction callers.
+func (d *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	if tx == nil {
+		tx = d
+	}
+	return hideSystemProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)))
 }
 
 // HardDeleteProject permanently removes a project row by id and returns the

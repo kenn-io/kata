@@ -298,6 +298,7 @@ var alreadyImplemented = map[string]bool{
 	"ProjectByName":                        true, // projects.go
 	"ProjectByNameIncludingArchived":       true, // projects.go
 	"ProjectByUID":                         true, // projects.go
+	"ProjectByUIDTx":                       true, // projects.go
 	"ProjectAliases":                       true, // aliases.go
 	"PurgeIssue":                           true, // purge.go
 	"PurgeProject":                         true, // project_lifecycle.go

@@ -201,11 +201,11 @@ func newRelayCrossProjectLinksError(side string) *api.APIError {
 	message := "this daemon's project links cross the supported relay group"
 	location := "locally"
 	if side == "hub" {
-		message = "the hub project's links cross the supported relay group"
+		message = "the project on the hub has links outside the supported relay group"
 		location = "on the hub"
 	}
 	return api.NewError(http.StatusConflict, "relay_cross_project_links",
-		message, "check shared-upstream and common-root configuration "+location+"; author crossing relationships at the root; ask an operator to review links to projects you cannot access", nil)
+		message, "check shared-upstream and common-root configuration "+location+"; author crossing relationships at the root or remove incompatible links; ask an operator to review links to projects you cannot access", nil)
 }
 
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {

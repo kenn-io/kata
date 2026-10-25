@@ -270,13 +270,12 @@ func evaluateFederationRequestForCapabilities(
 	var referenceCheck db.ProjectAccessTransactionCheck
 	if enrollment.RelayProtocolVersion == db.RelayProtocolVersion {
 		referenceCheck = func(checkCtx context.Context, tx db.Transaction, projectUID string) error {
-			peer, err := cfg.DB.ProjectByUID(db.WithAuthorizedProjects(checkCtx, nil), projectUID)
-			if err != nil || peer.DeletedAt != nil {
-				return db.ErrNotFound
-			}
-
 			if cfg.HostFederationAccess == nil {
 				return nil
+			}
+			peer, err := cfg.DB.ProjectByUIDTx(db.WithAuthorizedProjects(checkCtx, nil), tx, projectUID)
+			if err != nil || peer.DeletedAt != nil {
+				return db.ErrNotFound
 			}
 			decision, err := cfg.HostFederationAccess.AuthorizeFederation(checkCtx, HostFederationAccessRequest{
 				Enrollment: enrollment, EnrollmentProjectUID: project.UID, Project: peer, Capability: capability, Operation: operation,

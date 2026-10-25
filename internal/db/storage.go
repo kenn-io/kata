@@ -94,6 +94,7 @@ type Storage interface {
 	ProjectByName(ctx context.Context, name string) (Project, error)
 	ProjectByNameIncludingArchived(ctx context.Context, name string) (Project, error)
 	ProjectByUID(ctx context.Context, uid string) (Project, error)
+	ProjectByUIDTx(ctx context.Context, tx Transaction, uid string) (Project, error)
 	ListProjects(ctx context.Context) ([]Project, error)
 	ListProjectsIncludingArchived(ctx context.Context) ([]Project, error)
 	RenameProject(ctx context.Context, id int64, name string) (Project, error)

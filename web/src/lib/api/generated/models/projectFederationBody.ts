@@ -9,7 +9,7 @@ export interface ProjectFederationBody {
   project_name: string
   project_uid: string
   relay?: RelayHandshake
-  /** True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it. */
+  /** True when relay_protocol_version was requested and existing links support relay enrollment. Older daemons omit it. */
   relay_links_checked?: boolean
   replay_horizon_event_id: number
   [key: string]: unknown

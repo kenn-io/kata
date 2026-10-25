@@ -62,12 +62,12 @@ func TestRelaySharedAccessAcrossHops(t *testing.T) {
 					if nodes[0] == leaves[0] {
 						upstream, err := hubs[0].store.FederationBindingByProject(ctx, hubs[0].project.ID)
 						require.NoError(t, err)
-						checkpoint, err := root.store.(db.RelayResetStore).CreateRelayReset(ctx, upstream.RelayConfig.BindingUID, root.signer)
+						_, err = root.store.(db.RelayResetStore).CreateRelayReset(ctx, upstream.RelayConfig.BindingUID, root.signer)
 						require.NoError(t, err)
 						syncRelayMatrixNode(t, hubs[0])
 						// Sync may refresh the root baseline before downloading a reset;
 						// compare the forwarded bytes with the checkpoint it actually installed.
-						checkpoint, err = root.store.(db.RelayResetStore).CreateRelayReset(ctx, upstream.RelayConfig.BindingUID, root.signer)
+						checkpoint, err := root.store.(db.RelayResetStore).CreateRelayReset(ctx, upstream.RelayConfig.BindingUID, root.signer)
 						require.NoError(t, err)
 						downstream, err := leaves[0].store.FederationBindingByProject(ctx, leaves[0].project.ID)
 						require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				attr := db.WithRootAttribution(ctx, root.signer, root.account)
 				_, err = root.store.EnableProjectFederation(attr, project.ID, root.account)
 				require.NoError(t, err)
-				if form != "notification-before-enrollment" {
+				if form == "notification" {
 					enrollRelayMatrixReplica(t, root, leaf, "reply-leaf", false)
 					syncRelayMatrixNode(t, leaf)
 				}
@@ -179,15 +179,24 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				comment, _, err := root.store.CreateComment(attr, db.CreateCommentParams{IssueID: target.ID, Author: root.account, Body: "Original"})
 				require.NoError(t, err)
 				var reply db.Comment
+				var replyEvent db.Event
+				var replyProof db.AttributionReceipt
 				if form == "reply" {
-					reply, _, err = root.store.CreateComment(attr, db.CreateCommentParams{IssueID: source.ID, Author: root.account, Body: "Retained reply", ReplyToUID: comment.UID, ReplyKind: "reply"})
+					reply, replyEvent, err = root.store.CreateComment(attr, db.CreateCommentParams{IssueID: source.ID, Author: root.account, Body: "Retained reply", ReplyToUID: comment.UID, ReplyKind: "reply", ValidateReply: true})
+					require.NoError(t, err)
+					replyProof, err = root.store.EntityAttribution(ctx, project.UID, "comment", reply.UID)
+					require.NoError(t, err)
+					pin, err := root.store.RootAuthority(ctx, project.UID)
+					require.NoError(t, err)
+					require.Equal(t, replyEvent.ContentHash, replyProof.ContentHash)
+					require.NoError(t, db.VerifyRootReceipt(pin, replyProof))
 				} else {
 					slot, marshalErr := json.Marshal(notification.Value{From: root.account, Message: "Inspect finding", Re: comment.UID})
 					require.NoError(t, marshalErr)
 					_, err = root.store.PatchIssueMetadata(attr, db.PatchIssueMetadataIn{IssueID: source.ID, Actor: root.account, Patch: map[string]jsontext.Value{notification.MetadataKey(root.account): slot}})
 				}
 				require.NoError(t, err)
-				if form != "notification-before-enrollment" {
+				if form == "notification" {
 					syncRelayMatrixNode(t, leaf)
 				}
 				_, err = root.store.PurgeIssue(attr, target.ID, root.account, nil)
@@ -246,7 +255,12 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 					require.Equal(t, localBefore, localAfter, "failed sync leaves existing replica data unchanged")
 					return
 				}
-				// A surviving reply proves its purged target's ownership.
+				// A fresh hub receives no root-local purge row. The surviving
+				// native reply proves ownership while forwarding its signed reset.
+				hub := newRelayMatrixNode(t, backend, "hub-member")
+				enrollRelayMatrixReplica(t, root, hub, "reply-hub", true)
+				syncRelayMatrixNode(t, hub)
+				enrollRelayMatrixReplica(t, hub, leaf, "reply-leaf", false)
 				syncRelayMatrixNode(t, leaf)
 				local, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
@@ -258,6 +272,14 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 				require.Equal(t, reply.Body, comments[0].Body)
 				require.Equal(t, reply.ReplyToUID, comments[0].ReplyToUID)
 				require.Equal(t, reply.ReplyKind, comments[0].ReplyKind)
+				copied, err := leaf.store.EventsByUIDs(ctx, leaf.project.ID, []string{replyEvent.UID})
+				require.NoError(t, err)
+				require.Len(t, copied, 1)
+				require.Equal(t, replyEvent.Payload, copied[0].Payload)
+				require.Equal(t, replyEvent.ContentHash, copied[0].ContentHash)
+				copiedProof, err := leaf.store.EntityAttribution(ctx, project.UID, "comment", reply.UID)
+				require.NoError(t, err)
+				require.Equal(t, replyProof, copiedProof)
 			})
 		}
 	}

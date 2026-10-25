@@ -127,7 +127,16 @@ func (s *Store) ProjectByNameIncludingArchived(ctx context.Context, name string)
 
 // ProjectByUID returns active or archived projects by stable identity.
 func (s *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error) {
-	return visibleProject(scanProject(s.QueryRowContext(ctx, projectSelect+` WHERE uid = $1`, uid)))
+	return s.ProjectByUIDTx(ctx, nil, uid)
+}
+
+// ProjectByUIDTx reads the native project through the supplied transaction.
+// A nil transaction uses the store pool for post-transaction callers.
+func (s *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	if tx == nil {
+		tx = s
+	}
+	return visibleProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = $1`, uid)))
 }
 
 // RenameProject changes only the canonical name.

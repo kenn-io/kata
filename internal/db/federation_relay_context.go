@@ -204,7 +204,7 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 		if !errors.Is(err, ErrNotFound) {
 			return issue, err
 		}
-		return owner(`SELECT project_id,issue_uid FROM events WHERE issue_uid=`+bind(1)+` AND type IN ('issue.created','issue.snapshot') UNION SELECT project_id,issue_uid FROM purge_log WHERE issue_uid=`+bind(2), uid, uid)
+		return owner(`SELECT project_id,issue_uid FROM events WHERE issue_uid=`+bind(1)+` AND type IN ('issue.created','issue.snapshot') UNION SELECT project_id,issue_uid FROM purge_log WHERE issue_uid=`+bind(2)+` UNION SELECT e.project_id,e.related_issue_uid AS issue_uid FROM events e WHERE e.type='issue.commented' AND e.related_issue_uid=`+bind(3)+` AND COALESCE(`+field("reply_to_uid")+`, '')<>''`, uid, uid, uid)
 	}
 	byRef := func(project, ref string) (Issue, error) {
 		parsed, err := shortid.Parse(ref)
@@ -232,8 +232,9 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 		if !errors.Is(err, ErrNotFound) {
 			return issue, err
 		}
-		// Legal purge retains the reply's portable target issue UID and tombstone.
-		query := `SELECT p.project_id,p.issue_uid FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND ` + field("reply_to_uid") + `=` + bind(1)
+		// Native replies bind their portable target issue to the source project.
+		// That immutable fact survives reset forwarding without a local tombstone.
+		query := `SELECT e.project_id,e.related_issue_uid AS issue_uid FROM events e WHERE e.type='issue.commented' AND e.related_issue_uid IS NOT NULL AND e.related_issue_uid<>'' AND ` + field("reply_to_uid") + `=` + bind(1)
 		args := []any{target}
 		if uid != "" && event.IssueUID != nil {
 			query += ` AND e.issue_uid=` + bind(2) + ` AND ` + field("comment_uid") + `=` + bind(3)
