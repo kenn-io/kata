@@ -15,19 +15,12 @@ func validateRelayLinkEndpointsInProject(
 	tx *sql.Tx,
 	projectID int64,
 	event db.RemoteEvent,
+	authorityUID string,
 ) error {
-	var projectUID string
-	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, projectID).Scan(&projectUID); err != nil {
-		return err
-	}
-	pin, err := rootPinTx(ctx, tx, projectUID, "")
-	if err != nil {
-		return err
-	}
-	rootSource := event.OriginInstanceUID == pin.AuthorityUID
 	if !db.FederationEventAffectsLinks(event.Type) {
 		return nil
 	}
+	rootSource := event.OriginInstanceUID == authorityUID
 	payload := db.PayloadMap(event.Payload)
 	primaryUID, err := payloadIssueUID(event, payload)
 	if err != nil {

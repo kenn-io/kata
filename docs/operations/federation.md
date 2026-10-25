@@ -150,11 +150,13 @@ retry to receive the original bodies and hashes. Previously received data is
 not retracted.
 
 If a notification refers to a permanently deleted comment and the sender
-cannot prove its owning project, it refuses that history. This first-release
-limitation applies to retained responses and the first checkpoint, even when
-every project is accessible. Retrying or restoring access cannot supply the
-missing proof; no recovery procedure is provided for that unprovable history.
-Provable reply references still support ordinary purge/reset recovery.
+cannot prove its owning project, it refuses any selected event or reset
+containing that reference, even when every project is accessible. Retained,
+cached and forwarded responses follow the same rule. Existing native resets
+remain valid when all selected content is authorized; unsafe owner-local
+history need not be selected into a current-state checkpoint. No new recovery
+policy is provided. Provable reply references still support ordinary purge/reset
+recovery.
 
 Upgrade every hop to a build supporting this current-main behavior before
 enabling crossings. Older relay builds reject them. Existing reset size,
@@ -908,8 +910,9 @@ The accountable actor appears only after the daemon verifies the root receipt.
 
 ### Reset recovery
 
-A checkpoint is refused if an already-purged notification target's owning
-project cannot be proved. This [first-release limit](#shared-access-relationships)
+A checkpoint containing a notification reference is refused if its target's
+owning project cannot be proved. A native reset with only authorized selected
+content remains valid. This [first-release limit](#shared-access-relationships)
 is separate from temporary access loss and the retained-work blockers below.
 
 Once a relay observes upstream credential or project-access rejection, it

@@ -315,3 +315,68 @@ func assertRelayProjectPreview(t *testing.T, root *relayMatrixNode, project db.P
 	require.NoError(t, response.Body.Close())
 	assert.Equal(t, http.StatusOK, response.StatusCode, string(raw))
 }
+
+// Ordinary scalar edits and close do not author crossing relationships. A
+// fresh pair keeps the close independent of access-loss and purge scenarios.
+func TestRelaySharedAccessOrdinaryClose(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := newRelayMatrixNode(t, backend, "root-member")
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			ctx := t.Context()
+			attr := db.WithRootAttribution(ctx, root.signer, root.account)
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			var hubs, leaves [2]*relayMatrixNode
+			for i, name := range []string{"close-first", "close-second"} {
+				var err error
+				projects[i], err = root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				_, err = root.store.EnableProjectFederation(attr, projects[i].ID, root.account)
+				require.NoError(t, err)
+				issues[i], _, err = root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Shared endpoint"})
+				require.NoError(t, err)
+			}
+			for _, kind := range []string{"parent", "blocks", "related"} {
+				_, _, err := root.store.CreateLinkAndEvent(attr, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: kind, Author: root.account}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+				require.NoError(t, err)
+			}
+			for i := range projects {
+				root.project = projects[i]
+				hubs[i] = &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
+				leaves[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
+				enrollRelayMatrixReplica(t, root, hubs[i], projects[i].Name+"-hub", true)
+			}
+			for _, node := range hubs {
+				syncRelayMatrixNode(t, node)
+			}
+			for i := range projects {
+				enrollRelayMatrixReplica(t, hubs[i], leaves[i], projects[i].Name+"-leaf", false)
+			}
+			for _, node := range leaves {
+				syncRelayMatrixNode(t, node)
+			}
+			local, err := leaf.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			links, err := leaf.store.LinksByIssue(ctx, local.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 3)
+			title := "Edited at leaf"
+			_, err = leaf.store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: local.ID, Actor: leaf.account, Title: &title})
+			require.NoError(t, err)
+			_, _, _, err = leaf.store.CloseIssueWithEvents(ctx, local.ID, "done", leaf.account, "Completed ordinary work", nil)
+			require.NoError(t, err, "closing is ordinary work, not a crossing relationship mutation")
+			for _, node := range []*relayMatrixNode{leaves[0], hubs[0], leaves[0]} {
+				syncRelayMatrixNode(t, node)
+			}
+			atRoot, err := root.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "closed", atRoot.Status)
+			require.Equal(t, title, atRoot.Title)
+			links, err = leaf.store.LinksByIssue(ctx, local.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 3, "ordinary edit preserves the root-authored relationships")
+		})
+	}
+}

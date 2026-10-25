@@ -26,6 +26,30 @@ func federationEventStream(ctx context.Context) bool {
 	return allowed
 }
 
+// Close payload field discovery is shared; each reader keeps its own
+// ownership resolution and refusal policy.
+type closeEventReferenceFields struct {
+	ParentUID     *string    `json:"parent_uid"`
+	ParentShortID *string    `json:"parent_short_id"`
+	Evidence      []Evidence `json:"evidence"`
+}
+
+func decodeCloseEventReferences(raw jsontext.Value) (closeEventReferenceFields, error) {
+	var fields closeEventReferenceFields
+	err := json.Unmarshal(raw, &fields)
+	return fields, err
+}
+
+func (fields closeEventReferenceFields) issueRefs() []string {
+	refs := make([]string, 0, len(fields.Evidence))
+	for _, evidence := range fields.Evidence {
+		if evidence.Type == "duplicate-of" || evidence.Type == "superseded-by" {
+			refs = append(refs, evidence.IssueRef)
+		}
+	}
+	return refs
+}
+
 // EventRequiresProjectScopeReset detects structured references that cannot be
 // released to a project-scoped reader. The lookup must honor ctx's authorized
 // project boundary so inaccessible issue identities resolve as not found.
@@ -136,12 +160,8 @@ func EventRequiresProjectScopeReset(
 		}
 		return checkUIDs(uids)
 	case "issue.closed":
-		var payload struct {
-			ParentUID     *string    `json:"parent_uid"`
-			ParentShortID *string    `json:"parent_short_id"`
-			Evidence      []Evidence `json:"evidence"`
-		}
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		payload, err := decodeCloseEventReferences(jsontext.Value(event.Payload))
+		if err != nil {
 			return true, nil
 		}
 		if payload.ParentUID == nil || *payload.ParentUID == "" {
@@ -154,13 +174,7 @@ func EventRequiresProjectScopeReset(
 				return private, err
 			}
 		}
-		refs := make([]string, 0, len(payload.Evidence))
-		for _, evidence := range payload.Evidence {
-			if evidence.Type == "duplicate-of" || evidence.Type == "superseded-by" {
-				refs = append(refs, evidence.IssueRef)
-			}
-		}
-		return checkRefs(refs)
+		return checkRefs(payload.issueRefs())
 	case "issue.links_changed":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {

@@ -174,15 +174,19 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		if peer == projectID {
 			continue
 		}
-		authority, err := relayRootAuthorityTx(ctx, tx, projectID)
-		if errors.Is(err, db.ErrNotFound) {
-			return true, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if event.OriginInstanceUID != authority {
-			return true, nil
+		// Only relationship mutations require root authorship. Ordinary close
+		// freezes references whose projects are still authorized at release.
+		if db.FederationEventAffectsLinks(event.Type) {
+			authority, err := relayRootAuthorityTx(ctx, tx, projectID)
+			if errors.Is(err, db.ErrNotFound) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if event.OriginInstanceUID != authority {
+				return true, nil
+			}
 		}
 		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false)
 		if err != nil || !compatible {

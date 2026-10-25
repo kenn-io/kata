@@ -35,29 +35,21 @@ func newRelaySharedAccessFixture(t *testing.T, store db.Storage, link bool) Rela
 	ctx := t.Context()
 	team, _, err := store.CreateTeam(ctx, "shared-audience", "admin")
 	require.NoError(t, err)
-	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+	pair := newRelayLinkBoundaryFixture(t, store, "shared-project", db.CreateAPITokenParams{
 		Actor: "member", AdminActor: "admin", TeamUIDs: []string{team.UID},
 		PlaintextToken: "shared-audience-parent-test-token",
 	})
-	require.NoError(t, err)
-	public, private, err := ed25519.GenerateKey(nil)
-	require.NoError(t, err)
-	var projects [2]db.Project
+	projects := [2]db.Project{pair.project, pair.sibling}
+	public := pair.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: pair.sibling.UID,
+		AuthorityUID: pair.signer.AuthorityUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	var issues [2]db.Issue
-	for i, name := range []string{"first-shared-project", "second-shared-project"} {
-		projects[i], err = store.CreateProject(ctx, name)
-		require.NoError(t, err)
-		project := projects[i]
+	for i, project := range projects {
 		policy, err := store.ProjectAccessPolicy(ctx, project.UID)
 		require.NoError(t, err)
 		policy.Visibility, policy.TeamUIDs = "teams", []string{team.UID}
 		_, _, err = store.SetProjectAccessPolicy(ctx, policy, "admin")
 		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID,
-			Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
-		require.NoError(t, err)
-		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID,
-			AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 		issues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID,
 			Author: "member", Title: "Shared endpoint"})
 		require.NoError(t, err)
@@ -73,12 +65,12 @@ func newRelaySharedAccessFixture(t *testing.T, store db.Storage, link bool) Rela
 	var grants [2]db.CreatedFederationEnrollment
 	for i, project := range projects {
 		grants[i], err = store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID,
-			ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006",
+			ParentTokenID: pair.parentTokenID, SpokeInstanceUID: "00000000000000000000000006",
 			ProtocolVersion: db.RelayProtocolVersion, Token: []string{"first-shared-relay-test-token", "second-shared-relay-test-token"}[i]})
 		require.NoError(t, err, "root-authored crossing links with a shared audience can enroll")
 	}
 
-	return RelaySharedAccessFixture{Projects: projects, Issues: issues, Grants: grants, Linked: linked, Team: team, Signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
+	return RelaySharedAccessFixture{Projects: projects, Issues: issues, Grants: grants, Linked: linked, Team: team, Signer: pair.signer}
 }
 
 // RunRelaySharedAccessEnrollment exercises native admission and exact-byte release.

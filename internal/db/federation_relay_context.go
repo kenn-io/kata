@@ -77,13 +77,10 @@ func RelayEventReferencedProjects(event RemoteEvent, refs []string, lookup *Even
 		refs = append(refs, *event.RelatedIssueUID)
 	}
 	var payload struct {
-		ParentUID     *string                   `json:"parent_uid"`
-		ParentShortID *string                   `json:"parent_short_id"`
-		Evidence      []Evidence                `json:"evidence"`
-		ReplyToUID    *string                   `json:"reply_to_uid"`
-		CommentUID    string                    `json:"comment_uid"`
-		Metadata      map[string]jsontext.Value `json:"metadata"`
-		Diff          map[string]struct {
+		ReplyToUID *string                   `json:"reply_to_uid"`
+		CommentUID string                    `json:"comment_uid"`
+		Metadata   map[string]jsontext.Value `json:"metadata"`
+		Diff       map[string]struct {
 			From jsontext.Value `json:"from"`
 			To   jsontext.Value `json:"to"`
 		} `json:"diff"`
@@ -96,31 +93,33 @@ func RelayEventReferencedProjects(event RemoteEvent, refs []string, lookup *Even
 		return nil, errors.Join(ErrNotFound, err)
 	}
 	if event.Type == "issue.closed" {
+		closed, err := decodeCloseEventReferences(event.Payload)
+		if err != nil {
+			return nil, errors.Join(ErrNotFound, err)
+		}
 		fields := PayloadMap(event.Payload)
 		for _, key := range []string{"parent_uid", "parent_short_id"} {
 			if raw, exists := fields[key]; exists && string(raw) == "null" {
 				return nil, ErrNotFound
 			}
 		}
-		if _, exists := fields["evidence"]; exists && payload.Evidence == nil {
+		if _, exists := fields["evidence"]; exists && closed.Evidence == nil {
 			return nil, ErrNotFound
 		}
 
-		if payload.ParentUID != nil && *payload.ParentUID != "" {
-			issue, err := lookup.IssueByUID(*payload.ParentUID)
+		if closed.ParentUID != nil && *closed.ParentUID != "" {
+			issue, err := lookup.IssueByUID(*closed.ParentUID)
 			if err := record(issue, err); err != nil {
 				return nil, err
 			}
-		} else if payload.ParentShortID != nil && *payload.ParentShortID != "" {
-			if err := record(shortIssue(*payload.ParentShortID)); err != nil {
+		} else if closed.ParentShortID != nil && *closed.ParentShortID != "" {
+			if err := record(shortIssue(*closed.ParentShortID)); err != nil {
 				return nil, err
 			}
 		}
-		for _, item := range payload.Evidence {
-			if item.Type == "duplicate-of" || item.Type == "superseded-by" {
-				if err := record(lookup.IssueByRef(event.ProjectUID, item.IssueRef)); err != nil {
-					return nil, err
-				}
+		for _, ref := range closed.issueRefs() {
+			if err := record(lookup.IssueByRef(event.ProjectUID, ref)); err != nil {
+				return nil, err
 			}
 		}
 	}

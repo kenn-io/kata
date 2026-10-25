@@ -212,9 +212,10 @@ every hop to a build supporting shared-access links before enabling them;
 older relay builds reject crossings.
 
 A notification may refer to a permanently deleted comment whose owning project
-can no longer be proved. The sender refuses that history, including before the
-first relay delivery. Restoring access does not restore the missing ownership
-proof. This is a first-release limitation; see the
+can no longer be proved. The sender refuses a selected event or checkpoint
+containing that reference, including the first checkpoint. An existing native
+reset remains valid when all its selected content is authorized. No new
+recovery policy is provided; see the
 [operating rules](../operations/federation.md#shared-access-relationships).
 
 Embeddings are optional. A project can select one producer and share compatible
@@ -237,7 +238,7 @@ does not establish that it happened.
 | Team membership was removed | Have the upstream operator restore access. The existing connection rechecks authority before resuming. |
 | `signing_rejected` | Repair the signing source or hub key registration. Reconnecting is not the remedy. |
 | Local project-name or identity collision | Resolve the existing project or choose an unused name; do not initialize another copy to bypass the conflict. |
-| Root purge or history reset | Normal sync installs the signed checkpoint unless retained references cannot be proved. See [reset recovery](../operations/federation.md#reset-recovery) for retained-work blockers. |
+| Root purge or history reset | Normal sync installs the signed checkpoint unless selected references cannot be proved. See [reset recovery](../operations/federation.md#reset-recovery) for retained-work blockers. |
 | Hub is permanently gone | Review [local-only disconnect](../operations/federation.md#detach-a-bridge-whose-hub-is-gone). It discards undelivered transport work and cannot revoke the remote grant. |
 
 For a normal disconnect, finish pending deliveries and disconnect or revoke
