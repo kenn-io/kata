@@ -69,6 +69,10 @@ const (
 	daemonRestartProcessWaitTimeout = daemonShutdownDrainTimeout + 5*time.Second
 )
 
+// daemonOwnerLockWait lets a replaced daemon finish its drain, which outlasts
+// its runtime record, before startup refuses its store. A var for tests.
+var daemonOwnerLockWait = daemonRestartProcessWaitTimeout
+
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
 }
@@ -1224,6 +1228,25 @@ func runDaemonProcess(
 	workers := newDaemonWorkerGroup()
 	closeDependencies := true
 	hooksClosed := false
+
+	// A daemon in another PID namespace can share this store while its record
+	// does not block startup and its socket sits under a different runtime dir.
+	// The kernel file lock is visible across namespaces.
+	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonOwnerLockWait)
+	releaseOwner, err := runtimeStore.AcquireOwnerLock(ownerCtx)
+	ownerCancel()
+	if err != nil {
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("another kata daemon owns this store, possibly in another PID namespace; stop it before starting another daemon (owner lock under %s)", ns.DataDir)
+		}
+		return err
+	}
+	defer func() {
+		// Unjoined workers still use storage, so ownership lasts until exit.
+		if closeDependencies {
+			releaseOwner()
+		}
+	}()
 
 	dbPath := startup.DBPath
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
