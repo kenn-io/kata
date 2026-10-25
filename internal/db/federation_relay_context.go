@@ -214,8 +214,12 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 		if parsed.ULID != "" {
 			return byUID(parsed.ULID)
 		}
-		if parsed.Project == "" {
-			return owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2), project, parsed.ShortID)
+		// A qualifier in the native producer's own namespace is contextual,
+		// like a bare ref. The display name is only a routing clue: canonical
+		// ProjectUID and a unique concrete target prove ownership, including
+		// an exact issue tombstone after purge. Access is checked by the caller.
+		if parsed.Project == "" || parsed.Project == event.ProjectName {
+			return owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
 		}
 		// The producer's project name is retained on native history, independent
 		// of local aliases. A name reused by multiple source projects is ambiguous.

@@ -380,3 +380,101 @@ func TestRelaySharedAccessOrdinaryClose(t *testing.T) {
 		})
 	}
 }
+
+// Normal project-name reuse must not break a current, same-project close.
+// Both evidence spellings are accepted by the registered public close API.
+func TestRelaySharedAccessQualifiedEvidenceNameReuse(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, qualified := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/qualified=%v", backend, qualified), func(t *testing.T) {
+				root := newRelayMatrixNode(t, backend, "root-member")
+				leaf := newRelayMatrixNode(t, backend, "leaf-member")
+				ctx := t.Context()
+				attr := db.WithRootAttribution(ctx, root.signer, root.account)
+				request := func(method, path string, body any) []byte {
+					status, raw := relayMatrixRequest(t, root, method, path, root.userToken, body)
+					require.Equal(t, http.StatusOK, status, "%s %s: %s", method, path, raw)
+					return raw
+				}
+				// Keep ordinary native history for a different project which
+				// previously used the current shared project's name.
+				historical, err := root.store.CreateProject(ctx, "source-root")
+				require.NoError(t, err)
+				_, _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: historical.ID, Author: root.account, Title: "Historical issue"})
+				require.NoError(t, err)
+				request(http.MethodPatch, fmt.Sprintf("/api/v1/projects/%d", historical.ID), map[string]any{"name": "retired-root", "actor": root.account})
+				var projects [2]db.Project
+				var issues [2]db.Issue
+				var replicas [2]*relayMatrixNode
+				for i, name := range []string{"source-root", "target-root"} {
+					projects[i], err = root.store.CreateProject(ctx, name)
+					require.NoError(t, err)
+					_, err = root.store.EnableProjectFederation(attr, projects[i].ID, root.account)
+					require.NoError(t, err)
+					issues[i], _, err = root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[i].ID, Author: root.account, Title: "Shared endpoint"})
+					require.NoError(t, err)
+				}
+				target, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{ProjectID: projects[0].ID, Author: root.account, Title: "Same-project replacement"})
+				require.NoError(t, err)
+				for _, kind := range []string{"parent", "blocks"} {
+					_, _, err = root.store.CreateLinkAndEvent(attr,
+						db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: kind, Author: root.account},
+						db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+					require.NoError(t, err)
+				}
+				for i, name := range []string{"source-local", "target-local"} {
+					root.project = projects[i]
+					replicas[i] = &relayMatrixNode{store: leaf.store, http: leaf.http, signer: leaf.signer, userToken: leaf.userToken, account: leaf.account, credentials: leaf.credentials}
+					enrollRelayMatrixReplica(t, root, replicas[i], name, false)
+				}
+				for _, i := range []int{1, 0} {
+					syncRelayMatrixNode(t, replicas[i])
+				}
+				local, err := leaf.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				links, err := leaf.store.LinksByIssue(ctx, local.ID)
+				require.NoError(t, err)
+				require.Len(t, links, 2)
+				ref := target.UID
+				if qualified {
+					ref = projects[0].Name + "#" + target.ShortID
+				}
+				path := fmt.Sprintf("/api/v1/projects/%d/issues/%s", projects[0].ID, issues[0].ShortID)
+				lease := request(http.MethodPost, path+"/lease/actions/acquire", map[string]any{"holder": root.account, "actor": root.account, "purpose": "Complete ordinary issue work"})
+				var granted struct {
+					Granted bool `json:"granted"`
+				}
+				require.NoError(t, json.Unmarshal(lease, &granted))
+				require.True(t, granted.Granted, string(lease))
+				closedBody := request(http.MethodPost, path+"/actions/close", map[string]any{
+					"actor": root.account, "reason": "superseded", "message": "Completed this work in the existing same-project replacement issue.",
+					"evidence": []map[string]any{{"type": "superseded-by", "issue_ref": ref}},
+				})
+				atRoot, err := root.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "closed", atRoot.Status, "registered close API accepted the valid same-project target")
+				var closed struct {
+					Event db.Event `json:"event"`
+				}
+				require.NoError(t, json.Unmarshal(closedBody, &closed))
+				require.NotEmpty(t, closed.Event.UID)
+				require.Contains(t, closed.Event.Payload, ref, "native close keeps the submitted evidence spelling")
+				binding, err := leaf.store.FederationBindingByProject(ctx, replicas[0].project.ID)
+				require.NoError(t, err)
+				require.NoError(t, federation.SyncFederationOnce(ctx, leaf.store, binding, replicas[0].credential),
+					"an accepted same-project ordinary close must remain deliverable after project-name reuse")
+				local, err = leaf.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "closed", local.Status)
+				links, err = leaf.store.LinksByIssue(ctx, local.ID)
+				require.NoError(t, err)
+				require.Len(t, links, 2, "ordinary close preserves root-authored crossing relationships")
+				copied, err := leaf.store.EventsByUIDs(ctx, replicas[0].project.ID, []string{closed.Event.UID})
+				require.NoError(t, err)
+				require.Len(t, copied, 1)
+				require.Equal(t, closed.Event.Payload, copied[0].Payload, "serialized source evidence is unchanged")
+				require.Equal(t, closed.Event.ContentHash, copied[0].ContentHash, "native source hash is unchanged")
+			})
+		}
+	}
+}
