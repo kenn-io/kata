@@ -31,6 +31,12 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
     baseURL: '/api/v1/projects/7/issues/abc4/attachments',
     fetchAttachment,
   })
+  expect(screen.getByRole('button', { name: 'Preview screen.png' }).textContent?.trim()).toBe(
+    'Preview',
+  )
+  expect(screen.getByRole('button', { name: 'Download screen.png' }).textContent?.trim()).toBe(
+    'Download',
+  )
   await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
   await waitFor(() =>
     expect(fetchAttachment).toHaveBeenCalledWith(

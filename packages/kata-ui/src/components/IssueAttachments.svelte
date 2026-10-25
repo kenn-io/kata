@@ -64,9 +64,10 @@
   })
   $effect(() => {
     const next = new Map(entries.map((e) => [e.id, e.reference]))
-    if (baseURL !== previousBaseURL) untrack(clearUploads)
-    if (baseURL !== previousBaseURL) untrack(clearPreviews)
-    else
+    if (baseURL !== previousBaseURL) {
+      untrack(clearUploads)
+      untrack(clearPreviews)
+    } else
       untrack(() => {
         for (const [id, reference] of references) {
           if (next.get(id) === reference) continue
@@ -156,35 +157,33 @@
       <ul>
         {#each entries as entry (entry.id)}
           <li>
-            <span>{entry.name}</span>
-            <span class="description">{entry.media_type} · {entry.size} bytes</span>
+            <div class="file-details">
+              <span class="file-name">{entry.name}</span>
+              <span class="description">{entry.media_type} · {entry.size} bytes</span>
+            </div>
             {#if attachmentsEnabled}
-              {#if entry.size > 100 << 20}
-                <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
-              {:else}
-                {#if entry.image && !previews.has(entry.id)}
+              <div class="file-actions">
+                {#if entry.size > 100 << 20}
+                  <code>kata docbank attachments get &lt;issue&gt; {entry.id}</code>
+                {:else}
+                  {#if (entry.image || entry.video) && !previews.has(entry.id)}
+                    <Button
+                      size="sm"
+                      label={entry.video ? 'Play' : 'Preview'}
+                      ariaLabel={`${entry.video ? 'Play' : 'Preview'} ${entry.name}`}
+                      disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
+                      onclick={() => load(entry, true)}
+                    />
+                  {/if}
                   <Button
                     size="sm"
-                    label={`Preview ${entry.name}`}
+                    label="Download"
+                    ariaLabel={`Download ${entry.name}`}
                     disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
-                    onclick={() => load(entry, true)}
+                    onclick={() => load(entry, false)}
                   />
                 {/if}
-                {#if entry.video && !previews.has(entry.id)}
-                  <Button
-                    size="sm"
-                    label={`Play ${entry.name}`}
-                    disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
-                    onclick={() => load(entry, true)}
-                  />
-                {/if}
-                <Button
-                  size="sm"
-                  label={`Download ${entry.name}`}
-                  disabled={!fetchAttachment || Boolean(loading.get(entry.id))}
-                  onclick={() => load(entry, false)}
-                />
-              {/if}
+              </div>
             {/if}
             {#if states.has(entry.id)}<span role="status">{states.get(entry.id)}</span>{/if}
             {#if previews.has(entry.id)}
@@ -210,8 +209,12 @@
     justify-content: space-between;
     gap: var(--space-4);
   }
+  .attachments {
+    min-width: 0;
+  }
   .preview {
-    width: 100%;
+    grid-column: 1 / -1;
+    min-width: 0;
   }
   .preview :global(video) {
     max-width: 100%;
@@ -224,15 +227,43 @@
   }
   ul {
     display: grid;
-    gap: var(--space-4);
+    gap: var(--space-6);
+    margin: var(--space-4) 0 0;
     padding: 0;
     list-style: none;
   }
   li {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-4);
+  }
+  .file-details {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .file-name {
+    font-weight: var(--font-weight-medium);
+  }
+  .file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    max-width: 100%;
+  }
+  code {
+    overflow-wrap: anywhere;
+  }
+  @container kata-issue-detail (max-width: 440px) {
+    li {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .file-actions {
+      justify-content: flex-start;
+    }
   }
   .description {
     color: var(--text-muted);
