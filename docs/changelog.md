@@ -11,6 +11,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.
 
+- Builds from source, test binaries, and development builds no longer send
+  anonymous telemetry. Release builds set the PostHog project key at link time,
+  and builds without it send nothing. See [Telemetry reporting rules](reference/configuration.md#reporting-rules).
+
 ## 0.20.0
 <small>2026-10-23</small>
 

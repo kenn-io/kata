@@ -19,6 +19,7 @@ class Kata < Formula
       -X go.kenn.io/kata/internal/version.Version=v#{version}
       -X go.kenn.io/kata/internal/version.Distribution=homebrew
       -X go.kenn.io/kata/internal/version.BuildDate={{ .BuildDate }}
+      -X go.kenn.io/kit/telemetry/posthog.projectKey=phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
     ]
     system "go", "build", *std_go_args(ldflags: ldflags), "-mod=vendor", "-trimpath", "-buildvcs=false", "./cmd/kata"
   end

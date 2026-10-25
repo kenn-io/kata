@@ -91,8 +91,14 @@ with an empty module cache and `GOPROXY=off`.
 ## Telemetry
 
 Official archives and package-manager builds use the same anonymous telemetry
-policy. Do not add distribution-specific telemetry behavior. Users can opt out
-before starting the daemon:
+policy. Do not add distribution-specific telemetry behavior. Release builds set
+the existing public PostHog ingestion key at link time from `.goreleaser.yaml`
+for every release build variant, including the binary used by the container
+image. The Homebrew Core formula template supplies the same key when building
+from the release source archive. Update both release configurations to change
+that key. CI snapshots have
+development versions that disable reporting. Ordinary source builds remain
+keyless and send no telemetry. Users can opt out before starting the daemon:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0
@@ -101,9 +107,10 @@ export DO_NOT_TRACK=1
 ```
 
 See [Configuration](../reference/configuration.md#telemetry) for the emitted
-events and excluded data, and [reporting rules](../reference/configuration.md#reporting-rules)
-for CI and build-version requirements. Each CLI, TUI, and MCP process applies
-its own preferences when using an enabled daemon.
+events and excluded data, and
+[reporting rules](../reference/configuration.md#reporting-rules) for CI and
+build-version requirements. Each CLI, TUI, and MCP process applies its own
+preferences when using an enabled daemon.
 
 ## Official tap publishing
 

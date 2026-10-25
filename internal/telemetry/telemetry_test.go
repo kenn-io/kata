@@ -38,40 +38,39 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 	}
 }
 
-// Exercise the standalone product wrapper: Go tests deliberately disable
-// telemetry regardless of environment, so an in-process check is insufficient.
+// testProjectKeyFlag links a placeholder PostHog project key, as release builds
+// link the real one.
+const testProjectKeyFlag = "-X go.kenn.io/kit/telemetry/posthog.projectKey=phc_test_project_key"
+
+// Exercise the standalone product wrapper with and without a linked project key.
 func TestStandaloneTelemetryAdmission(t *testing.T) {
 	scratch := t.TempDir()
-	binary := filepath.Join(scratch, "telemetry-opt-out")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
+	build := func(name string, args ...string) string {
+		binary := filepath.Join(scratch, name)
+		if runtime.GOOS == "windows" {
+			binary += ".exe"
+		}
+		command := exec.Command("go", append(append([]string{"build"}, args...), "-o", binary, "./testprogram")...) //nolint:gosec // fixed tool and test-owned output
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		return binary
 	}
-	build := exec.Command("go", "build", "-o", binary, "./testprogram") //nolint:gosec // fixed tool and test-owned output
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
-	for _, tc := range []struct{ name, env, version, want string }{
-		{"enabled", EnabledEnv + "=1", "v1.2.3", "enabled"},
-		{"0", EnabledEnv + "=0", "v1.2.3", "disabled"},
-		{"development", EnabledEnv + "=1", "dev", "disabled"},
+	release := build("telemetry-release", "-ldflags", testProjectKeyFlag)
+	source := build("telemetry-source")
+	for _, tc := range []struct{ name, binary, env, version, want string }{
+		{"enabled", release, EnabledEnv + "=1", "v1.2.3", "enabled"},
+		{"0", release, EnabledEnv + "=0", "v1.2.3", "disabled"},
+		{"development", release, EnabledEnv + "=1", "dev", "disabled"},
+		{"no project key", source, EnabledEnv + "=1", "v1.2.3", "disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command := exec.Command(binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command := exec.Command(tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
 			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))
 			require.Equal(t, tc.want, strings.TrimSpace(string(output)))
 		})
 	}
-}
-
-func TestNewReporterDisabledDuringGoTests(t *testing.T) {
-	t.Setenv("TELEMETRY_ENABLED", "1")
-	t.Setenv(EnabledEnv, "1")
-
-	reporter, err := NewReporter(Options{})
-	require.NoError(t, err)
-
-	assert.False(t, reporter.Enabled())
 }
 
 func TestAppOpenedSurfaceAllowlist(t *testing.T) {

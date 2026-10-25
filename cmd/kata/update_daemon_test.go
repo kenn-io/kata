@@ -73,7 +73,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			binary += ".exe"
 		}
-		build := exec.CommandContext(t.Context(), "go", "build", "-tags", "kit_posthog_disabled", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version="+version, "-o", binary, "go.kenn.io/kata/cmd/kata") //nolint:gosec // test-owned executable and fixed build arguments
+		build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version="+version, "-o", binary, "go.kenn.io/kata/cmd/kata") //nolint:gosec // test-owned executable and fixed build arguments
 		// Build inside the module, while runtime commands use a scratch workspace.
 		build.Dir = moduleDir
 		build.Env = childEnv

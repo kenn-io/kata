@@ -47,6 +47,7 @@ builds:
       - -X go.kenn.io/kata/internal/version.Version=v{{ .Version }}
       - -X go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}
       - -X go.kenn.io/kata/internal/version.BuildDate={{ .Date }}
+      - -X go.kenn.io/kit/telemetry/posthog.projectKey=phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
     goos:
       - linux
       - darwin
@@ -67,6 +68,7 @@ builds:
       - -X go.kenn.io/kata/internal/version.Version=v{{ .Version }}
       - -X go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}
       - -X go.kenn.io/kata/internal/version.BuildDate={{ .Date }}
+      - -X go.kenn.io/kit/telemetry/posthog.projectKey=phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
       - -X go.kenn.io/kata/internal/version.Distribution=homebrew
     goos:
       - linux
@@ -87,6 +89,7 @@ builds:
       - -X go.kenn.io/kata/internal/version.Version=v{{ .Version }}
       - -X go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}
       - -X go.kenn.io/kata/internal/version.BuildDate={{ .Date }}
+      - -X go.kenn.io/kit/telemetry/posthog.projectKey=phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
       - -X go.kenn.io/kata/internal/version.Distribution=deb
     goos:
       - linux
@@ -106,6 +109,7 @@ builds:
       - -X go.kenn.io/kata/internal/version.Version=v{{ .Version }}
       - -X go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}
       - -X go.kenn.io/kata/internal/version.BuildDate={{ .Date }}
+      - -X go.kenn.io/kit/telemetry/posthog.projectKey=phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
       - -X go.kenn.io/kata/internal/version.Distribution=rpm
     goos:
       - linux

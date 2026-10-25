@@ -178,7 +178,7 @@ func buildKataBinary(t interface {
 			return
 		}
 		kataBuildBin = filepath.Join(kataBuildDir, "kata")
-		build := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", kataBuildBin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
+		build := exec.Command("go", "build", "-o", kataBuildBin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
 		var stderr bytes.Buffer
 		build.Stderr = &stderr
 		if err := build.Run(); err != nil {
