@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kata/internal/telemetry"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -118,6 +119,39 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			require.NoError(t, cutoverErr, "detached child did not complete cutover: %s", output)
 		})
 	}
+}
+
+// A replaced daemon can hold the store owner lock through its shutdown drain,
+// longer than the ordinary readiness budget. Detached start must keep waiting.
+func TestDetachedStartWaitsForStoreOwner(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	for _, key := range []string{"KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_AUTH_TOKEN_FILE", "PORT"} {
+		t.Setenv(key, "")
+	}
+	t.Cleanup(func() { stopStartupFixture(t, home) })
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, copyStartupFixtureExecutable(t), "-test.run=^TestDetachedStartFixture$") //nolint:gosec // executable is copied from this test binary into t.TempDir
+	cmd.Env = append(os.Environ(), "KATA_STARTUP_FIXTURE=1", "KATA_STARTUP_FIXTURE_MODE=owner-drain")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
+// copyStartupFixtureExecutable copies this test binary without the .test
+// suffix: the production launcher refuses to detach ephemeral Go test executables.
+func copyStartupFixtureExecutable(t *testing.T) string {
+	t.Helper()
+	exeSource, err := os.Executable()
+	require.NoError(t, err)
+	body, err := os.ReadFile(exeSource) //nolint:gosec // Copies the current test executable into an isolated detached fixture.
+	require.NoError(t, err)
+	exe := filepath.Join(t.TempDir(), "kata-startup-fixture")
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
+	require.NoError(t, os.WriteFile(exe, body, 0o700)) //nolint:gosec // the copied test executable must be executable
+	return exe
 }
 
 func TestDetachedStartRetryJoinsConcurrentCutoverOwner(t *testing.T) {
@@ -245,6 +279,10 @@ func TestDetachedStartFixture(t *testing.T) {
 		require.Equal(t, "already_running", result.Action)
 		return
 	}
+	if mode == "readiness-timeout" {
+		// No owner holds the store, so only the ordinary readiness budget applies.
+		daemonOwnerLockWait = 0
+	}
 	if mode == "caller-cancel" || mode == "foreign-runtime" {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Second)
@@ -261,7 +299,23 @@ func TestDetachedStartFixture(t *testing.T) {
 		require.NoError(t, err)
 		listen = "127.0.0.1:17778"
 	}
+	if mode == "owner-drain" {
+		release, err := (kitdaemon.RuntimeStore{Dir: nsDir}).AcquireOwnerLock(t.Context())
+		require.NoError(t, err)
+		// The contract is about wall time: ownership outlasts the 5s ordinary readiness budget.
+		timer := time.AfterFunc(6*time.Second, release) //nolint:kennlint // The held duration itself is the behavior under test.
+		t.Cleanup(func() {
+			if timer.Stop() {
+				release()
+			}
+		})
+	}
 	result, err := defaultLaunchDetachedDaemon(ctx, nsDir, listen, false, true)
+	if mode == "owner-drain" {
+		require.NoError(t, err)
+		require.Equal(t, "started", result.Action)
+		return
+	}
 	if mode == "readiness-timeout" {
 		var targetErr *cliError
 		require.ErrorAs(t, err, &targetErr)
@@ -305,6 +359,15 @@ func runStartupFixture() {
 	if err := os.WriteFile(filepath.Join(home, "cutover-child.pid"), []byte(pidRecord), 0o600); err != nil { //nolint:gosec // fixture path under temporary KATA_HOME
 		_, _ = os.Stderr.WriteString(err.Error())
 		os.Exit(1)
+	}
+	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "owner-drain" {
+		newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+		// The parent test kills this daemon through cutover-child.pid.
+		if err := runDaemonProcess(context.Background(), "", false, true, newDaemonRestart(os.Stderr)); err != nil {
+			_, _ = os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
 		if err := notifyStartupFixture("release-child"); err != nil {
