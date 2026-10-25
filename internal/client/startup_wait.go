@@ -10,9 +10,8 @@ import (
 
 	"github.com/gofrs/flock"
 
-	kitdaemon "go.kenn.io/kit/daemon"
-
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemonruntime"
 )
 
 const daemonChildExitGrace = 5 * time.Second
@@ -20,21 +19,22 @@ const daemonChildExitGrace = 5 * time.Second
 // WaitForDaemonStartup waits for readiness, extending the ordinary startup
 // budget while SQLite still needs a cutover. If the child exits first, it
 // checks for a compatible daemon started concurrently: briefly, or for the
-// remaining budget while another daemon owns dataDir's store. The detached
+// remaining budget while another daemon holds ownerLock (see
+// daemonruntime.StoreOwnerLockPath; empty skips that check). The detached
 // child owns its lifetime: neither a readiness timeout nor cancellation kills it.
 func WaitForDaemonStartup(
-	ctx context.Context, dataDir string, wait time.Duration, exited <-chan error,
+	ctx context.Context, ownerLock string, wait time.Duration, exited <-chan error,
 	ready func(context.Context) (bool, error),
 ) error {
-	return waitForDaemonStartup(ctx, dataDir, wait, exited, ready, true)
+	return waitForDaemonStartup(ctx, ownerLock, wait, exited, ready, true)
 }
 
 func waitForDaemonStartup(
-	ctx context.Context, dataDir string, wait time.Duration, exited <-chan error,
+	ctx context.Context, ownerLock string, wait time.Duration, exited <-chan error,
 	ready func(context.Context) (bool, error), migrationAllowed bool,
 ) error {
 	return waitForDaemonStartupWithProbe(ctx, wait, exited, ready, migrationAllowed, sqliteCutoverLocked,
-		func(ctx context.Context) bool { return storeOwnerLocked(ctx, dataDir) })
+		func(context.Context) bool { return ownerLock != "" && daemonruntime.StoreOwnerLocked(ownerLock) })
 }
 
 func waitForDaemonStartupWithProbe(
@@ -175,20 +175,6 @@ func sqliteMigrationPendingForPath(ctx context.Context, path string, inspector S
 	// take longer than the readiness budget, before any temp file exists.
 	version, _, err := inspector.PeekCurrentSchema(ctx)
 	return err == nil && version > 0 && version < inspector.CurrentSchemaVersion()
-}
-
-// storeOwnerLocked reports whether a daemon holds the store owner lock for
-// dataDir. A replaced daemon keeps it through its drain, after its runtime
-// record is gone.
-func storeOwnerLocked(ctx context.Context, dataDir string) bool {
-	probeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireOwnerLock(probeCtx)
-	if err != nil {
-		return ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
-	}
-	release()
-	return false
 }
 
 func sqliteCutoverLocked(ctx context.Context) bool {

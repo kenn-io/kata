@@ -18,6 +18,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
@@ -300,7 +301,9 @@ func TestDetachedStartFixture(t *testing.T) {
 		listen = "127.0.0.1:17778"
 	}
 	if mode == "owner-drain" {
-		release, err := (kitdaemon.RuntimeStore{Dir: nsDir}).AcquireOwnerLock(t.Context())
+		dsn, err := config.KataDSN(t.Context())
+		require.NoError(t, err)
+		release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPath(nsDir, dsn))
 		require.NoError(t, err)
 		// The contract is about wall time: ownership outlasts the 5s ordinary readiness budget.
 		timer := time.AfterFunc(6*time.Second, release) //nolint:kennlint // The held duration itself is the behavior under test.

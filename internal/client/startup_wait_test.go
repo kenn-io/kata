@@ -200,16 +200,6 @@ func TestWaitForDaemonStartupKeepsBudgetWhileStoreOwned(t *testing.T) {
 	})
 }
 
-func TestStoreOwnerLockedReportsHeldOwnerLock(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "runtime")
-	require.False(t, storeOwnerLocked(t.Context(), dir))
-	release, err := (kitdaemon.RuntimeStore{Dir: dir}).AcquireOwnerLock(t.Context())
-	require.NoError(t, err)
-	require.True(t, storeOwnerLocked(t.Context(), dir))
-	release()
-	require.False(t, storeOwnerLocked(t.Context(), dir), "the probe must not keep the lock")
-}
-
 func TestWaitForDaemonStartupReturnsChildExitForOldSchemaWithoutCutover(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "")
@@ -331,7 +321,7 @@ func TestAutoStartProfileIgnoresDefaultHomeCutover(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		started := time.Now()
-		_, err := autoStartWithEnvironment(ctx, profileHome, []string{
+		_, err := autoStartWithEnvironment(ctx, profileHome, "", []string{
 			"KATA_HOME=" + profileHome,
 			"KATA_DSN=" + filepath.Join(profileHome, "kata.db"),
 		})
