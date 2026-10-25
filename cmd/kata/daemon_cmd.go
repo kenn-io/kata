@@ -741,6 +741,15 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 	return r.Version
 }
 
+func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
+	for _, record := range records {
+		switch kitdaemon.RuntimeProcessScope(record) {
+		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
+		}
+	}
+}
+
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
@@ -757,6 +766,7 @@ func daemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
@@ -827,6 +837,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			pids := make([]int, 0, len(recs))
 			for _, rec := range recs {
 				if !daemonruntime.RuntimeProcessAlive(rec) {
@@ -1059,6 +1070,7 @@ func daemonReloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
 					continue
@@ -1186,9 +1198,21 @@ func runDaemonProcess(
 
 	// A foreground launch must reject an existing daemon before opening
 	// storage: a cutover cannot replace a database still owned by its writer.
-	if record, ok := liveDaemonRecord(ns.DataDir, 0); ok {
-		return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon", record.PID)
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	records, err := runtimeStore.List()
+	if err != nil {
+		return err
 	}
+	for _, record := range records {
+		if daemonruntime.RuntimeRecordBlocksStart(record) {
+			return fmt.Errorf("daemon already running pid=%d; wait for it to exit before starting another daemon; runtime record: %s; remove that file if no kata daemon owns that PID", record.PID, record.SourcePath)
+		}
+	}
+	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
 
 	// Wrap ctx with a local cancel so platform-specific shutdown watchers
 	// (e.g. the Windows named-event fired by `kata daemon stop`) can drive
@@ -1223,13 +1247,6 @@ func runDaemonProcess(
 	if rootSigningHealth != nil {
 		fmt.Fprintln(os.Stderr, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
-
-	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = listener.Close() }()
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
 	webEndpoint, err := daemon.ResolveWebEndpoint(daemon.WebEndpointOptions{

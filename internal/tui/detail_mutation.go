@@ -134,11 +134,12 @@ func (dm detailModel) applyMutation(
 	if !applied {
 		return dm, nil
 	}
-	return dm, dm.afterMutation(m, api)
+	cmd := dm.afterMutation(m, api)
+	return dm, cmd
 }
 
 // afterMutation reports an accepted refusal or refreshes after a success.
-func (dm detailModel) afterMutation(m mutationDoneMsg, api detailAPI) tea.Cmd {
+func (dm *detailModel) afterMutation(m mutationDoneMsg, api detailAPI) tea.Cmd {
 	if m.err != nil {
 		return reportShownError(api, m.kind)
 	}
@@ -207,19 +208,16 @@ func mutationSuccessText(m mutationDoneMsg, iss *Issue) string {
 // refetch re-fetches the issue and the three tabs so a retained detail model
 // can converge with daemon state after either a mutation or snapshot restore.
 // The four fetches run in parallel; dm.gen lets a later open/jump reject them.
-func (dm detailModel) refetch(api detailAPI) tea.Cmd {
-	if dm.issue == nil {
+// Before the first issue response arrives, the original read ref is reused.
+func (dm *detailModel) refetch(api detailAPI) tea.Cmd {
+	ref := dm.readRef
+	if dm.issue != nil {
+		ref = dm.issue.ShortID
+	}
+	if ref == "" {
 		return nil
 	}
-	pid := dm.scopePID
-	ref := dm.issue.ShortID
-	gen := dm.gen
-	return tea.Batch(
-		fetchIssue(api, pid, ref, gen),
-		fetchComments(api, pid, ref, gen),
-		fetchEvents(api, pid, ref, gen),
-		fetchLinks(api, pid, ref, gen),
-	)
+	return dm.fetchDetail(api, ref)
 }
 
 // dispatchClose returns a tea.Cmd that calls api.Close and reports the

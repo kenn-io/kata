@@ -38,6 +38,9 @@ func doctorDaemonConfig() diagnostics.Check {
 	if _, err := config.ReadDisplayConfig(); err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local display configuration is invalid", Fix: "Correct [display] in <KATA_HOME>/config.toml; markdown_renderer must begin with an executable."}
 	}
+	if _, err := config.ReadCreateConfig(); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local [create] configuration is invalid", Fix: "Correct [create] in <KATA_HOME>/config.toml; default_priority must be an integer 0 through 4."}
+	}
 	path, err := config.DaemonConfigPath()
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot resolve local configuration path", Fix: "Set KATA_HOME to the intended local data directory."}
@@ -45,7 +48,7 @@ func doctorDaemonConfig() diagnostics.Check {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No optional local daemon config file; defaults and environment overrides validated"}
 	}
-	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Local daemon and display configuration are valid"}
+	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Local daemon and client configuration are valid"}
 }
 
 func doctorHookConfig() diagnostics.Check {

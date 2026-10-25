@@ -152,17 +152,41 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// buildKataBinary compiles `cmd/kata` into a fresh temp dir and returns
-// the absolute path. A separate temp dir keeps build artifacts out of
-// $KATA_HOME so the marker file and runs.jsonl can't collide.
-func buildKataBinary(t *testing.T) string {
+var (
+	kataBuildOnce sync.Once
+	kataBuildDir  string
+	kataBuildBin  string
+	kataBuildErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = os.RemoveAll(kataBuildDir)
+	os.Exit(code)
+}
+
+// buildKataBinary lazily compiles cmd/kata once for this test process.
+// TestMain removes the build directory after all test cleanups finish.
+func buildKataBinary(t interface {
+	Helper()
+	require.TestingT
+}) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "kata")
-	build := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", bin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
-	var stderr bytes.Buffer
-	build.Stderr = &stderr
-	require.NoErrorf(t, build.Run(), "go build kata: %s", stderr.String())
-	return bin
+	kataBuildOnce.Do(func() {
+		kataBuildDir, kataBuildErr = os.MkdirTemp("", "kata-e2e-bin-")
+		if kataBuildErr != nil {
+			return
+		}
+		kataBuildBin = filepath.Join(kataBuildDir, "kata")
+		build := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", kataBuildBin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
+		var stderr bytes.Buffer
+		build.Stderr = &stderr
+		if err := build.Run(); err != nil {
+			kataBuildErr = fmt.Errorf("go build kata: %w: %s", err, stderr.String())
+		}
+	})
+	require.NoError(t, kataBuildErr)
+	return kataBuildBin
 }
 
 // startDaemon spawns `kata daemon start --foreground` in its own process group and

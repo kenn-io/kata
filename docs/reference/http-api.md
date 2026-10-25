@@ -174,10 +174,29 @@ upgrading from earlier releases must send array fields as `[]` (or omit
 optional fields), use the exact request field names, and accept empty response
 collections as `[]` or `{}`.
 
+### Issue event history
+
+HTTP API `0.32.0` adds an `issue` query to
+`GET /api/v1/projects/{project_id}/events?issue={ref}`. It returns one issue’s
+history, filtered before the page limit. `ref` accepts a short ID, qualified
+reference or full UID within the URL project. `after_id` and `limit` page
+through that history; omitting `issue` polls the project feed. Filtered history
+never returns `reset_required`: purging another issue removes only events that
+name it, and events that name an issue the caller cannot see are omitted.
+Scoped credentials receive the same authorized history projection as issue
+detail.
+
+Every successful filtered response includes `X-Kata-Events-Issue-UID` with the
+resolved issue UID, including empty pages. Clients should require
+this acknowledgement on every page: older daemons can ignore the query and
+return unfiltered project events. The TUI stops pagination with an upgrade
+daemon message when the acknowledgement is missing or changes between pages.
+
 ### Version history
 
 | Version | Change |
 | --- | --- |
+| `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
 | `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
 | `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |

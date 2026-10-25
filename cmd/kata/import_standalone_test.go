@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestImportAsStandaloneDetachesCopyWithoutChangingRestore(t *testing.T) {
+func TestImportAsStandaloneDetachesCopyOnSQLiteAndPostgres(t *testing.T) {
 	home := setupKataEnv(t)
 	ctx := t.Context()
 	source := openKataTestDB(t, filepath.Join(home, "source.db"))

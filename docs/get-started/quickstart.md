@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-17
+last_edited: 2026-10-21
 ---
 
 # Quickstart
@@ -267,8 +267,9 @@ kata show abc4
 kata comment abc4 --body "Reproduced on macOS."
 ```
 
-Priorities run from `0` to `4`; `0` is highest. Omit priority when it is not
-useful.
+Priorities run from `0` to `4`; `0` is highest. Omitting `--priority` uses
+[`create.default_priority`](../reference/configuration.md#default-priority-for-issue-creation)
+when configured; otherwise, priority stays unset.
 
 Set a schedule, deadline, or undated parking marker with these commands:
 

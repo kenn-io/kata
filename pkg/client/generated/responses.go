@@ -634,6 +634,7 @@ type DoctorResp struct {
 
 type PollEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -979,6 +980,7 @@ type DigestProjectResp struct {
 
 type PollProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -1018,6 +1020,7 @@ type EnableProjectFederationResp struct {
 
 type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 

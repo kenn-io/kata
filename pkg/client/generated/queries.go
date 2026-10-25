@@ -175,8 +175,10 @@ func (d DigestProjectQuery) Validate() error {
 }
 
 type PollProjectEventsQuery struct {
-	AfterID *int64 `json:"after_id,omitempty"`
-	Limit   *int64 `json:"limit,omitempty"`
+	// Issue Filter subject history by issue short ID, qualified ref, or UID.
+	Issue   *string `json:"issue,omitempty"`
+	AfterID *int64  `json:"after_id,omitempty"`
+	Limit   *int64  `json:"limit,omitempty"`
 }
 
 type GetProjectFederationQuery struct {

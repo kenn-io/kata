@@ -628,6 +628,7 @@ func (c *Client) PollEventsWithResponse(ctx context.Context, options *PollEvents
 		}
 		out.Headers200 = &PollEventsResp200Headers{
 			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataEventsIssueUID:        resp.Headers.Get("X-Kata-Events-Issue-UID"),
 			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
@@ -3706,6 +3707,7 @@ func (c *Client) PollProjectEventsWithResponse(ctx context.Context, options *Pol
 		}
 		out.Headers200 = &PollProjectEventsResp200Headers{
 			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataEventsIssueUID:        resp.Headers.Get("X-Kata-Events-Issue-UID"),
 			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil
@@ -3911,6 +3913,7 @@ func (c *Client) PollFederationProjectEventsWithResponse(ctx context.Context, op
 		}
 		out.Headers200 = &PollFederationProjectEventsResp200Headers{
 			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
+			XKataEventsIssueUID:        resp.Headers.Get("X-Kata-Events-Issue-UID"),
 			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil

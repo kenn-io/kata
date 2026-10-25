@@ -6940,7 +6940,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.31.0
+  version: 0.32.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7227,6 +7227,10 @@ paths:
           headers:
             X-Kata-Event-Features:
               schema:
+                type: string
+            X-Kata-Events-Issue-UID:
+              schema:
+                description: Resolved subject UID when the issue filter is applied, including empty pages.
                 type: string
             X-Kata-Required-Event-Features:
               schema:
@@ -8663,6 +8667,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Filter subject history by issue short ID, qualified ref, or UID.
+          explode: false
+          in: query
+          name: issue
+          schema:
+            description: Filter subject history by issue short ID, qualified ref, or UID.
+            type: string
         - explode: false
           in: query
           name: after_id
@@ -8685,6 +8696,10 @@ paths:
           headers:
             X-Kata-Event-Features:
               schema:
+                type: string
+            X-Kata-Events-Issue-UID:
+              schema:
+                description: Resolved subject UID when the issue filter is applied, including empty pages.
                 type: string
             X-Kata-Required-Event-Features:
               schema:
@@ -8811,6 +8826,10 @@ paths:
           headers:
             X-Kata-Event-Features:
               schema:
+                type: string
+            X-Kata-Events-Issue-UID:
+              schema:
+                description: Resolved subject UID when the issue filter is applied, including empty pages.
                 type: string
             X-Kata-Required-Event-Features:
               schema:

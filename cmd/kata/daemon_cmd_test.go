@@ -3939,3 +3939,57 @@ func TestDaemonWiresSetupFinished(t *testing.T) {
 		t.Fatal("daemon did not report setup_finished")
 	}
 }
+
+func writeUnknownRuntimePID(t *testing.T, pid int) string {
+	t.Helper()
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: pid, ProcessIdentityV2: "unverifiable", StartedAt: time.Now().UTC(),
+		Network: "tcp", Address: "127.0.0.1:7777",
+	})
+	require.NoError(t, err)
+	return path
+}
+
+func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
+	for _, action := range []string{"stop", "reload", "restart", "update"} {
+		t.Run(action, func(t *testing.T) {
+			resetFlags(t)
+			home := setupKataEnv(t)
+			unknown := startSleepProcess(t)
+			unknownPID := unknown.Process.Pid
+			path := writeUnknownRuntimePID(t, unknownPID)
+			localPID := 0
+			switch action {
+			case "restart":
+				original := startDetachedDaemon
+				t.Cleanup(func() { startDetachedDaemon = original })
+				startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+					return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
+				}
+			case "stop", "reload":
+				local := startSleepProcess(t)
+				localPID = local.Process.Pid
+				writeRuntimePID(t, home, local.Process.Pid)
+			}
+
+			var stdout, stderr string
+			var err error
+			if action == "update" {
+				var buf bytes.Buffer
+				err = restartDaemonAfterUpdate(t.Context(), &buf)
+				stderr = buf.String()
+			} else {
+				stdout, stderr, err = executeRootCapture(t, t.Context(), "--agent", "daemon", action)
+			}
+
+			require.NoError(t, err)
+			if action == "stop" || action == "reload" {
+				assert.Contains(t, stdout, "pid="+strconv.Itoa(localPID))
+			}
+			assert.Contains(t, stderr, fmt.Sprintf("skipping daemon pid=%d (another PID namespace or unverifiable identity)", unknownPID))
+			assert.FileExists(t, path)
+		})
+	}
+}
