@@ -207,7 +207,7 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 		return owner(`SELECT project_id,issue_uid FROM events WHERE issue_uid=`+bind(1)+` AND type IN ('issue.created','issue.snapshot') UNION SELECT project_id,issue_uid FROM purge_log WHERE issue_uid=`+bind(2), uid, uid)
 	}
 	byRef := func(project, ref string) (Issue, error) {
-		return relayReferenceByRefTx(ctx, tx, event, project, ref, bind, field, owner, byUID)
+		return relayReferenceByRef(event, project, ref, bind, field, owner, byUID)
 	}
 	comment := func(uid, target string) (Issue, error) {
 		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=`+bind(1), target)
@@ -230,7 +230,7 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 	return RelayEventReferencedProjects(event, refs, NewEventIssueLookup(byUID, byRef), comment, short)
 }
 
-func relayReferenceByRefTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error)) (Issue, error) {
+func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error)) (Issue, error) {
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
 		return Issue{}, ErrNotFound
@@ -241,17 +241,7 @@ func relayReferenceByRefTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, p
 	// An own-name qualifier requires a concrete target in the canonical
 	// source namespace; the unhashed display name is only a routing clue.
 	if parsed.Project == "" || parsed.Project == event.ProjectName {
-		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
-		if parsed.Project == "" && errors.Is(err, ErrNotFound) {
-			// Bare syntax names the canonical source namespace, even after purge.
-			// This authorization result needs no invented target issue UID.
-			err = tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=`+bind(1)+` AND deleted_at IS NULL`, event.ProjectUID).Scan(&issue.ProjectID)
-			if err != nil {
-				return Issue{}, RelayProjectLookupError(err)
-			}
-			return issue, nil
-		}
-		return issue, err
+		return owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
 	}
 	// The producer's project name is retained on native history, independent
 	// of local aliases. A name reused by multiple source projects is ambiguous.

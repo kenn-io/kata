@@ -162,6 +162,10 @@ A retained reply identifies its target issue, but does not prove which project
 owns it after a move. A fresh relay without independent ownership facts refuses
 any selected reply or notification reference to that target.
 
+A bare evidence reference records its original namespace, not the target's owner
+after a move. It also needs concrete ownership facts; the source namespace alone
+cannot authorize delivery.
+
 Upgrade every hop to a build supporting this current-main behavior before
 enabling crossings. Older relay builds reject them. Existing reset size,
 pending-work, quarantine and recovery rules still apply; this does not enable

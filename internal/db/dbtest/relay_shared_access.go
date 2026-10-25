@@ -385,3 +385,120 @@ func RunRelaySharedAccessMovedReplyPurge(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Equal(t, cursor, afterCursor)
 }
+
+// RunRelaySharedAccessMovedBareEvidence checks that an old bare evidence ref
+// cannot substitute the source namespace for a moved target's actual owner.
+func RunRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge bool) {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "evidence-source")
+	require.NoError(t, err)
+	peer, err := store.CreateProject(ctx, "evidence-destination")
+	require.NoError(t, err)
+	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "operator", Title: "Duplicate source"})
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "operator", Title: "Original target"})
+	require.NoError(t, err)
+	oldRef := target.ShortID
+	evidence := []db.Evidence{{Type: "duplicate-of", IssueRef: oldRef}}
+	_, events, changed, err := store.CloseIssueWithEvents(ctx, source.ID, "duplicate", "operator", "This work is already represented by the original target issue.", evidence)
+	require.NoError(t, err)
+	require.True(t, changed)
+	var closed db.Event
+	closedCount := 0
+	for _, event := range events {
+		if event.Type == "issue.closed" {
+			closed, closedCount = event, closedCount+1
+		}
+	}
+	require.Equal(t, 1, closedCount)
+	var payload struct {
+		Evidence []db.Evidence `json:"evidence"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(closed.Payload), &payload))
+	require.Equal(t, evidence, payload.Evidence)
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: target.ID, FromProjectID: project.ID, ToProjectID: peer.ID, IfMatchRev: target.Revision, Actor: "operator"})
+	require.NoError(t, err)
+	require.Equal(t, target.UID, moved.Issue.UID)
+	require.Equal(t, peer.ID, moved.Issue.ProjectID)
+	if purge {
+		purged, err := store.PurgeIssue(ctx, target.ID, "operator", nil)
+		require.NoError(t, err)
+		require.Equal(t, &peer.UID, purged.ProjectUID)
+	}
+	policy, err := store.ProjectAccessPolicy(ctx, peer.UID)
+	require.NoError(t, err)
+	policy.Visibility, policy.TeamUIDs = "teams", nil
+	_, _, err = store.SetProjectAccessPolicy(ctx, policy, "admin")
+	require.NoError(t, err)
+	accessible, err := store.AccessibleProjectUIDs(ctx, "recipient")
+	require.NoError(t, err)
+	require.Contains(t, accessible, project.UID)
+	require.NotContains(t, accessible, peer.UID)
+	public, private, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
+	require.NoError(t, store.PinRootAuthority(ctx, pin))
+	signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}
+	_, err = store.EnableProjectFederation(db.WithRootAttribution(ctx, signer, "operator"), project.ID, "operator")
+	require.NoError(t, err)
+	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "recipient", AdminActor: "admin", PlaintextToken: "moved-evidence-parent-test-token"})
+	require.NoError(t, err)
+	before, err := store.IssueByID(ctx, source.ID)
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000009", ProtocolVersion: db.RelayProtocolVersion, Token: "moved-evidence-relay-test-token"}) // #nosec G101 -- synthetic relay token used only in this test.
+	refused := err != nil
+	if err != nil {
+		require.ErrorIs(t, err, db.ErrNotFound)
+		require.Equal(t, db.CreatedFederationEnrollment{}, grant)
+	} else {
+		before, err = store.IssueByID(ctx, source.ID)
+		require.NoError(t, err)
+		cursor, err = store.MaxEventID(ctx)
+		require.NoError(t, err)
+		checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, grant.Enrollment.RelayBindingUID, signer)
+		refused = err != nil
+		if err != nil {
+			require.ErrorIs(t, err, db.ErrNotFound)
+			require.Equal(t, db.RelayResetCheckpoint{}, checkpoint)
+		} else {
+			require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
+			selected, _, err := db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
+			require.NoError(t, err)
+			for _, event := range selected {
+				require.NotEqual(t, closed.UID, event.EventUID, "old bare ref %s cannot prove moved target %s ownership", oldRef, target.UID)
+				require.NotEqual(t, closed.ContentHash, event.ContentHash)
+				require.NotEqual(t, closed.Payload, string(event.Payload))
+			}
+			var entities [][]byte
+			require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &entities))
+			closedSnapshot := false
+			for _, body := range entities {
+				event, err := db.DecodeRelaySourceEvent(body)
+				require.NoError(t, err)
+				if event.Type != "issue.snapshot" || event.IssueUID == nil || *event.IssueUID != source.UID {
+					continue
+				}
+				var snapshot struct {
+					UID    string `json:"uid"`
+					Status string `json:"status"`
+				}
+				require.NoError(t, json.Unmarshal(event.Payload, &snapshot))
+				require.Equal(t, source.UID, snapshot.UID)
+				require.Equal(t, "closed", snapshot.Status)
+				closedSnapshot = true
+			}
+			require.True(t, closedSnapshot, "safe reset must deliver the source's current closed state")
+		}
+	}
+	after, err := store.IssueByID(ctx, source.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", after.Status)
+	if refused {
+		require.Equal(t, before, after)
+		afterCursor, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Equal(t, cursor, afterCursor)
+	}
+}
