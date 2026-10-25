@@ -192,13 +192,13 @@ func filterRelayCrossProjectLinkEvents(
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
-		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return nil, err
-		}
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
+		}
+		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return nil, err
 		}
 		var referenceErr error
 		crossProject := func(peerUID string) bool {

@@ -262,8 +262,10 @@ func (d *Store) authorizeRelayEventTx(ctx context.Context, tx *sql.Tx, grant db.
 		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, projectID).Scan(&projectUID); err != nil {
 			return db.RelayProjectLookupError(err)
 		}
-		if err := d.ProjectAccessTransactionFence(grant.Actor, []string{projectUID})(ctx, tx); err != nil {
-			return err
+		if projectID != *grant.ProjectID {
+			if err := d.ProjectAccessTransactionFence(grant.Actor, []string{projectUID})(ctx, tx); err != nil {
+				return err
+			}
 		}
 		if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
 			return err
