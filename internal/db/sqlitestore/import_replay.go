@@ -160,6 +160,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if err := reconcileSequences(ctx, tx); err != nil {
 		return err
 	}
+	if err := d.validateScopedRestoreTx(ctx, tx); err != nil {
+		return err
+	}
 	if err := validateBeforeCommit(ctx, tx); err != nil {
 		return err
 	}

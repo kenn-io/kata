@@ -132,6 +132,9 @@ func (s *Store) importReplayTx(
 	if err := s.reconcileReplayIdentities(ctx, tx, sequenceFloors, opts.MergeProject); err != nil {
 		return err
 	}
+	if err := s.validateScopedRestoreTx(ctx, tx); err != nil {
+		return err
+	}
 	return nil
 }
 

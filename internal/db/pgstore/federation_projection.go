@@ -175,6 +175,9 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if err != nil {
 			return err
 		}
+		if err := s.fenceScopedReplicaDepartureTx(ctx, tx, project.UID, binding); err != nil {
+			return err
+		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
 			`DELETE FROM federation_sync_status WHERE project_id=$1`,

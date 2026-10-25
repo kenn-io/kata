@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -1950,8 +1951,21 @@ func RunScopedReplicaCloseLifetime(t *testing.T, open func(*testing.T) db.Storag
 			value := &db.ScopedCloseValue{Kind: "duplicate", PeerProjectUID: f.Projects[0].UID, PeerIssueUID: f.Issue.UID}
 			_, closeEvents, _, err := root.CloseIssueGuarded(t.Context(), db.CloseIssueParams{IssueID: subject.ID, Reason: "duplicate", Actor: "member", CloseValue: value})
 			require.NoError(t, err)
-			view, projects := NewScopedIncomingAuthorityFixture(t, replica)
-			InstallScopedIncomingAuthority(t, replica, view, projects)
+			var projects [2]db.Project
+			var signedFixture *ScopedViewsFixture
+			if operation == "leave_preserves" {
+				signers := db.RootSigners{}
+				for _, selected := range f.Params.View.Projects {
+					signers[selected.ProjectUID] = ScopedCaptureSigner(t, f, selected.ProjectUID)
+				}
+				fixture := NewScopedViewsFixtureFromCapture(t, root, f, signers)
+				signedFixture = &fixture
+				projects = InstallScopedViewsFixture(t, replica, fixture)
+			} else {
+				view, incoming := NewScopedIncomingAuthorityFixture(t, replica)
+				projects = incoming
+				InstallScopedIncomingAuthority(t, replica, view, projects)
+			}
 			// Independent pending custody bytes use the accepted typed owner fixture;
 			// they are not evidence of runtime control admission or activation.
 			records := scopedAuthoritySnapshot(t, replica)
@@ -1964,26 +1978,74 @@ func RunScopedReplicaCloseLifetime(t *testing.T, open func(*testing.T) db.Storag
 				require.NoError(t, err)
 			}
 			originals := map[string]db.RemoteEvent{}
-			for n, p := range f.Projects {
-				require.Equal(t, p.UID, projects[n].UID)
-				events, err := root.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: p.ID, Limit: 1000})
-				require.NoError(t, err)
-				var portable []db.RemoteEvent
-				for _, e := range events {
-					if e.IssueUID == nil {
-						continue
+			if signedFixture != nil {
+				// The signed builder also authors project metadata and retains edges.
+				// Admit both complete histories before folding either project.
+				prefixes := [2][]db.RemoteEvent{}
+				for n, p := range f.Projects {
+					require.Equal(t, p.UID, projects[n].UID)
+					afterID := int64(0)
+					for {
+						events, err := root.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: p.ID, AfterID: afterID, Limit: 100})
+						require.NoError(t, err)
+						if len(events) == 0 {
+							break
+						}
+						for _, event := range events {
+							require.Greater(t, event.ID, afterID)
+							require.Equal(t, p.UID, event.ProjectUID)
+							remote := db.RemoteEventFromStored(event)
+							prefixes[n] = append(prefixes[n], remote)
+							originals[event.UID] = remote
+							afterID = event.ID
+						}
 					}
-					remote := db.RemoteEventFromStored(e)
-					portable = append(portable, remote)
-					originals[e.UID] = remote
+					require.NotEmpty(t, prefixes[n])
+					inserted, err := replica.InsertRemoteEvents(t.Context(), projects[n].ID, prefixes[n])
+					require.NoError(t, err, "complete native pull admission precedes signed-current proof")
+					require.Len(t, inserted, len(prefixes[n]))
+					for _, fresh := range inserted {
+						require.True(t, fresh)
+					}
 				}
-				require.NotEmpty(t, portable)
-				inserted, err := replica.InsertRemoteEvents(t.Context(), projects[n].ID, portable)
-				require.NoError(t, err, "actual native pull admission preflight")
-				for _, fresh := range inserted {
-					require.True(t, fresh)
+				for _, project := range projects {
+					require.NoError(t, replica.MaterializeFederatedProject(t.Context(), project.ID))
 				}
-				require.NoError(t, replica.MaterializeFederatedProject(t.Context(), projects[n].ID))
+				for n, prefix := range prefixes {
+					ids := make([]string, len(prefix))
+					for i, event := range prefix {
+						ids[i] = event.EventUID
+					}
+					retained, err := replica.EventsByUIDs(t.Context(), projects[n].ID, ids)
+					require.NoError(t, err)
+					actual := make([]db.RemoteEvent, 0, len(retained))
+					for _, event := range retained {
+						actual = append(actual, db.RemoteEventFromStored(event))
+					}
+					require.ElementsMatch(t, prefix, actual, "complete portable originals retain every body/hash/clock")
+				}
+			} else {
+				for n, p := range f.Projects {
+					require.Equal(t, p.UID, projects[n].UID)
+					events, err := root.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: p.ID, Limit: 1000})
+					require.NoError(t, err)
+					var portable []db.RemoteEvent
+					for _, e := range events {
+						if e.IssueUID == nil {
+							continue
+						}
+						remote := db.RemoteEventFromStored(e)
+						portable = append(portable, remote)
+						originals[e.UID] = remote
+					}
+					require.NotEmpty(t, portable)
+					inserted, err := replica.InsertRemoteEvents(t.Context(), projects[n].ID, portable)
+					require.NoError(t, err, "actual native pull admission preflight")
+					for _, fresh := range inserted {
+						require.True(t, fresh)
+					}
+					require.NoError(t, replica.MaterializeFederatedProject(t.Context(), projects[n].ID))
+				}
 			}
 			var localSubject db.Issue
 			var localParams db.CreateScopedRelayEnrollmentParams
@@ -2010,6 +2072,38 @@ func RunScopedReplicaCloseLifetime(t *testing.T, open func(*testing.T) db.Storag
 			require.Equal(t, value, proof.Value)
 			require.Equal(t, closeEvents[0].UID, proof.StatusIntentUID)
 			require.Equal(t, control, scopedReplicaControl(t, before, control.RequestUID))
+			if signedFixture != nil {
+				pins := make([]db.RootKeyPin, 0, len(f.Params.View.Projects))
+				selected := make([]string, 0, len(projects))
+				for _, project := range f.Params.View.Projects {
+					pins = append(pins, project.Pin)
+					selected = append(selected, project.ProjectUID)
+				}
+				require.NoError(t, db.VerifyScopedCheckpoint(signedFixture.Checkpoint, f.Params.View, pins))
+				caller, err := replica.ResolveAPIToken(t.Context(), "view-local-token")
+				require.NoError(t, err)
+				allowed, err := replica.AccessibleProjectUIDs(t.Context(), caller.Actor)
+				require.NoError(t, err)
+				require.Subset(t, allowed, selected)
+				readCtx := db.WithAuthorizedProjects(t.Context(), selected)
+				readCtx = db.WithTransactionFence(readCtx, replica.ProjectAccessTransactionFence(caller.Actor, selected))
+				readCtx = db.WithAdditionalTransactionFence(readCtx, db.ActorTokenTransactionFence(caller))
+				beginner, ok := replica.(interface {
+					BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+				})
+				require.True(t, ok, "native storage exposes its real request-fenced transaction")
+				tx, err := beginner.BeginTx(readCtx, nil)
+				require.NoError(t, err, "actual current credential and project fences precede departure")
+				require.NoError(t, tx.Rollback())
+				for _, issueUID := range []string{f.Issue.UID, subject.UID} {
+					issue, err := replica.IssueByUID(t.Context(), issueUID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					require.Equal(t, "closed", issue.Status)
+				}
+				baseline := open(t)
+				require.NoError(t, baseline.ImportReplay(t.Context(), before, db.ImportOptions{}), "signed-current owner is a native restore baseline before departure")
+				require.Equal(t, before, scopedAuthoritySnapshot(t, baseline))
+			}
 			if operation == "leave_preserves" {
 				_, err := replica.LeaveFederationReplica(t.Context(), projects[0].ID)
 				require.NoError(t, err)
