@@ -10,6 +10,16 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
+func TestRelaySharedAccessEnrollment(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelaySharedAccessEnrollment(t, store, func(ctx context.Context, projectID int64) error {
+		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=?`, projectID)
+		return err
+	})
+}
+
 func TestRelayRootAcceptanceParent(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
 	require.NoError(t, err)

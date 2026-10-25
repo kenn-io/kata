@@ -1204,7 +1204,7 @@ func (d *Store) materializeFederatedProjectRelayTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
+	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
 }
 
 func (d *Store) materializeFederatedProjectTxScoped(

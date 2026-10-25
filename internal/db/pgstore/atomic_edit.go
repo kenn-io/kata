@@ -270,6 +270,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if errors.Is(err, db.ErrNotFound) || existing.ToIssueID != target.ID {
 			if err == nil {
+				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+					return changed, err
+				}
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
 				if uidErr != nil {
 					return changed, uidErr

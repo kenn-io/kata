@@ -342,18 +342,22 @@ func (d *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, err
 // DeleteLinkByID removes a links row. Returns ErrNotFound when no row exists.
 func (d *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, linkID)
+		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("delete link: %w", err)
+			return err
 		}
-		n, err := res.RowsAffected()
+		defer func() { _ = tx.Rollback() }()
+		link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id=?`, linkID))
 		if err != nil {
-			return fmt.Errorf("delete link rows affected: %w", err)
+			return err
 		}
-		if n == 0 {
-			return db.ErrNotFound
+		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+			return err
 		}
-		return nil
+		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=?`, linkID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 

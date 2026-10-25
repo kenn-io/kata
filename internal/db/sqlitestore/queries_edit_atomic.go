@@ -263,6 +263,9 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if !hasExisting || existing.ToIssueID != target.ID {
 			recordedRemoval := false
 			if hasExisting {
+				if err := ensureRelayLinkBoundaryTx(ctx, tx, issue.ID, existing.ToIssueID); err != nil {
+					return changed, err
+				}
 				parentProjectUID, uidErr := linkedParentProjectUIDTx(ctx, tx, existing.ToIssueID)
 				if uidErr != nil {
 					return changed, uidErr

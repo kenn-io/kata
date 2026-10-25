@@ -34,5 +34,12 @@ func checkLinkEndpointsProjectAccessTx(ctx context.Context, tx *sql.Tx, issueIDs
 			return err
 		}
 	}
+	if len(issueIDs) > 1 {
+		for _, peerID := range issueIDs[1:] {
+			if err := ensureRelayLinkBoundaryTx(ctx, tx, issueIDs[0], peerID); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

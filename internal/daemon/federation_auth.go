@@ -30,6 +30,7 @@ type federationAuthorization struct {
 	principal        federationPrincipal
 	transactionFence db.TransactionFence
 	projectUID       string
+	referenceCheck   db.ProjectAccessTransactionCheck
 }
 
 type federationAuthorizationContextKey struct{}
@@ -101,10 +102,32 @@ func withFederationAuthorization(
 func withFederationProjectAuthority(ctx context.Context, authorization federationAuthorization) context.Context {
 	if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 		decision.Actor = authorization.principal.Actor
+		if authorization.principal.RelayProtocolVersion == db.RelayProtocolVersion {
+			decision.owner = false
+		}
 		decision.ProjectUIDs = []string{authorization.projectUID}
 		decision.targets = []string{authorization.projectUID}
 	}
-	return db.WithAuthorizedProjects(ctx, []string{authorization.projectUID})
+	ctx = db.WithAuthorizedProjects(ctx, []string{authorization.projectUID})
+	if authorization.referenceCheck == nil {
+		return ctx
+	}
+	return db.WithProjectAccessTransactionCheck(ctx, func(checkCtx context.Context, tx db.Transaction, projectUID string) error {
+		if projectUID == authorization.projectUID {
+			return nil
+		}
+		if err := authorization.referenceCheck(checkCtx, tx, projectUID); err != nil {
+			return err
+		}
+		if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil && !slices.Contains(decision.ProjectUIDs, projectUID) {
+			decision.ProjectUIDs = append(decision.ProjectUIDs, projectUID)
+			decision.targets = append(decision.targets, projectUID)
+			decision.releaseChecks = append(decision.releaseChecks, func(releaseCtx context.Context) error {
+				return authorization.referenceCheck(releaseCtx, nil, projectUID)
+			})
+		}
+		return nil
+	})
 }
 
 func federationAuthorizationFromContext(
@@ -244,13 +267,47 @@ func evaluateFederationRequestForCapabilities(
 			sanitizeFederationTransactionFence(decision.TransactionFence),
 		)
 	}
+	var referenceCheck db.ProjectAccessTransactionCheck
+	if enrollment.RelayProtocolVersion == db.RelayProtocolVersion {
+		referenceCheck = func(checkCtx context.Context, tx db.Transaction, projectUID string) error {
+			peer, err := cfg.DB.ProjectByUID(db.WithAuthorizedProjects(checkCtx, nil), projectUID)
+			if err != nil || peer.DeletedAt != nil {
+				return db.ErrNotFound
+			}
+			if tx != nil {
+				if err := cfg.DB.ProjectAccessTransactionFence(enrollment.Actor, []string{projectUID})(checkCtx, tx); err != nil {
+					return err
+				}
+			}
+			if cfg.HostFederationAccess == nil {
+				return nil
+			}
+			decision, err := cfg.HostFederationAccess.AuthorizeFederation(checkCtx, HostFederationAccessRequest{
+				Enrollment: enrollment, EnrollmentProjectUID: project.UID, Project: peer, Capability: capability, Operation: operation,
+			})
+			if errors.Is(err, ErrHostAccessDenied) {
+				return federationCredentialDenied()
+			}
+			if err != nil {
+				return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation reference authorization is unavailable", "", nil)
+			}
+			if operation.Mutation && decision.TransactionFence == nil {
+				return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "federation reference transaction access decision unavailable", "", nil)
+			}
+			if tx != nil && decision.TransactionFence != nil {
+				return sanitizeFederationTransactionFence(decision.TransactionFence)(checkCtx, tx)
+			}
+			return nil
+		}
+	}
 	scopedProjectID := int64(0)
 	if enrollment.ProjectID != nil {
 		scopedProjectID = *enrollment.ProjectID
 	}
 	return federationAuthorization{
-		capability: capability,
-		projectUID: project.UID,
+		capability:     capability,
+		projectUID:     project.UID,
+		referenceCheck: referenceCheck,
 		principal: federationPrincipal{
 			RelayBindingUID:              enrollment.RelayBindingUID,
 			RelayProtocolVersion:         enrollment.RelayProtocolVersion,

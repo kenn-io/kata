@@ -2390,7 +2390,7 @@ type FederationBridgeBody struct {
 	HubCatalog     string                        `json:"hub_catalog" validate:"required"`
 	HubInstanceUID string                        `json:"hub_instance_uid" validate:"required"`
 
-	// HubLinksChecked True when the hub confirmed the project has no cross-project issue links. False when the hub predates that check; connect can still fail if links exist.
+	// HubLinksChecked True when the hub confirmed existing links support relay enrollment. False when the hub predates that check; connect can still reject unsupported links.
 	HubLinksChecked bool                       `json:"hub_links_checked"`
 	HubProjectID    int64                      `json:"hub_project_id"`
 	HubProjectUID   string                     `json:"hub_project_uid" validate:"required"`
@@ -4824,7 +4824,7 @@ type ProjectFederationBody struct {
 	ProjectUID             string          `json:"project_uid" validate:"required"`
 	Relay                  *RelayHandshake `json:"relay,omitempty"`
 
-	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+	// RelayLinksChecked True when relay_protocol_version was requested and existing links support relay enrollment. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
 	ReplayHorizonEventID int64 `json:"replay_horizon_event_id"`
 }

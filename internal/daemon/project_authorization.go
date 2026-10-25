@@ -26,6 +26,7 @@ type ProjectAccessDecision struct {
 	PolicyRevision int64
 	Actor          string
 	targets        []string
+	releaseChecks  []func(context.Context) error
 	store          db.Storage
 	owner          bool
 	// streamCursor is the last event id an event stream has processed, starting
@@ -290,6 +291,11 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 }
 
 func (d *ProjectAccessDecision) revalidateRelease(ctx context.Context) error {
+	for _, check := range d.releaseChecks {
+		if err := check(ctx); err != nil {
+			return err
+		}
+	}
 	if d.owner {
 		return nil
 	}

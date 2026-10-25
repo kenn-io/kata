@@ -11,12 +11,19 @@ import (
 // project, and keeps everything else the event carries. A composite creation
 // or snapshot keeps its same-project links; a links_changed keeps its removals
 // and its same-project additions; a single-edge issue.linked is dropped only
-// when its own peer crosses. Removals are never dropped: taking an edge away
+// when its own peer crosses. By default removals stay: taking an edge away
 // cannot create a boundary crossing, and dropping a removal would leave the
 // hub with an edge its replicas no longer have. The returned bool is false
-// when the whole event is to be left out of the fold.
-func StripCrossProjectLinkAdditions(event FoldEvent, crossProject func(peerUID string) bool) (FoldEvent, bool, error) {
+// when the whole event is to be left out of the fold. Negotiated replicas pass
+// stripRemovals to protect root-authored crossings from deferred replica edits.
+func StripCrossProjectLinkAdditions(event FoldEvent, crossProject func(peerUID string) bool, stripRemovals ...bool) (FoldEvent, bool, error) {
+	removals := len(stripRemovals) > 0 && stripRemovals[0]
 	switch event.Type {
+	case "issue.unlinked":
+		if !removals {
+			return event, true, nil
+		}
+		fallthrough
 	case "issue.linked":
 		payload := PayloadMap(event.Payload)
 		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
@@ -31,7 +38,7 @@ func StripCrossProjectLinkAdditions(event FoldEvent, crossProject func(peerUID s
 	case "issue.created", "issue.snapshot":
 		return stripCreationLinks(event, crossProject)
 	case "issue.links_changed":
-		return stripLinksChangedAdditions(event, crossProject)
+		return stripLinksChangedAdditions(event, crossProject, removals)
 	}
 	return event, true, nil
 }
@@ -65,14 +72,24 @@ func stripCreationLinks(event FoldEvent, crossProject func(string) bool) (FoldEv
 	return rewritePayload(event, payload, "links", kept)
 }
 
-func stripLinksChangedAdditions(event FoldEvent, crossProject func(string) bool) (FoldEvent, bool, error) {
+func stripLinksChangedAdditions(event FoldEvent, crossProject func(string) bool, removals bool) (FoldEvent, bool, error) {
 	payload := PayloadMap(event.Payload)
 	changed := false
 	if parent, ok := StringValue(payload["parent_set_uid"]); ok && crossProject(parent) {
 		delete(payload, "parent_set_uid")
 		changed = true
 	}
-	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"} {
+	if removals {
+		if parent, ok := StringValue(payload["parent_removed_uid"]); ok && crossProject(parent) {
+			delete(payload, "parent_removed_uid")
+			changed = true
+		}
+	}
+	keys := []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"}
+	if removals {
+		keys = append(keys, "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids")
+	}
+	for _, key := range keys {
 		added := StringSlice(payload[key])
 		kept := make([]string, 0, len(added))
 		for _, peer := range added {

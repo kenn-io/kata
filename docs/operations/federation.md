@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-23
+last_edited: 2026-10-25
 ---
 
 # Federation
@@ -108,13 +108,12 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment.
 
-A relayed project cannot have cross-project issue links. Preflight and connect
-return `409 relay_cross_project_links` when the project has related, blocks, or
-parent links to another project, including incoming links and links on closed
-issues. The error says whether the links are on the hub or in this daemon's copy
-of the project. Remove them on that side and retry; ask an operator there to
-remove links to projects you cannot access. Links that were already removed do
-not count.
+On current main, relays support [shared-access relationships](#shared-access-relationships)
+inside one common-root federation group. Preflight and connect return
+`409 relay_cross_project_links` for unsupported crossings, including incoming
+links and links on closed issues. Remove unsupported links on the named side,
+or enroll their peer projects through the same upstream and root. Ask an
+operator there about projects you cannot access. Removed links do not count.
 
 The hub runs this check, so preflight reports `hub_links_checked`. It is `false`
 when the hub predates API `0.31.0`; the preview is still ready, and the CLI warns
@@ -126,6 +125,36 @@ Direct callers can run the same read-only check with
 `GET /api/v1/projects/{project_id}/federation?relay_protocol_version=1`. A
 passing check sets `relay_links_checked: true`; omitting the parameter keeps
 ordinary metadata behavior.
+
+
+### Shared-access relationships
+
+Enroll both projects through the same upstream origin at every hop. Their
+pinned root must match. Configure project access on every daemon so each
+recipient's account can read both projects; policies may grant that audience
+through equivalent teams. One enrollment token still belongs to one project
+and cannot select the peer project as its transport target.
+
+Create, remove and replace crossing related, blocks and parent relationships
+at the root. Replicas reject crossing relationship mutations atomically,
+including composite edits and old-parent removal. Ordinary issue edits remain
+local-first. Root-authored relationships use native immutable event transport
+and appear when both peers arrive, in either order.
+
+Before sending retained events or a checkpoint, the sender checks every
+structured reference against the recipient's current access, including host
+policy. A denied or unresolvable peer suspends the whole response; the sender
+does not strip, reseal, skip or acknowledge its contents. Lost-response retries
+and cached or forwarded checkpoints run the same check. Restore access and
+retry to receive the original bodies and hashes. Previously received data is
+not retracted.
+
+Upgrade every hop to a build supporting this current-main behavior before
+enabling crossings. Older relay builds reject them. Existing reset size,
+pending-work, quarantine and recovery rules still apply; this does not enable
+cross-project moves, adoption of crossing histories, or mixed-visibility
+filtering. An unsupported historical reference may still require the existing
+safe reset/recovery procedure.
 
 Set `preflight` to `false` to connect. `serve_downstream`
 defaults to `false`. Set it to `true` only when this daemon will relay the
@@ -2235,8 +2264,8 @@ Federation has expected stale or deferred states:
   pushes a different actor is rejected and records the batch in quarantine.
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
-- Direct-spoke links may span projects; negotiated relays reject cross-project
-  links. For direct spokes, a missing peer does not quarantine push: the event
+- Direct-spoke links may span projects; relays support the
+  [shared-access rules](#shared-access-relationships). For direct spokes, a missing peer does not quarantine push: the event
   and cursor advance while the edge remains absent. The edge materializes when
   both endpoint projects are enabled through the same hub federation group.
   Pulling clients must enroll both projects and use the same normalized hub URL

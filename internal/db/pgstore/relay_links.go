@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -15,6 +16,16 @@ func validateRelayLinkEndpointsInProject(
 	projectID int64,
 	event db.RemoteEvent,
 ) error {
+	rootSource := false
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+		return err
+	}
+	pin, err := rootPinTx(ctx, tx, projectUID, "")
+	if err != nil {
+		return err
+	}
+	rootSource = event.OriginInstanceUID == pin.AuthorityUID
 	if !db.FederationEventAffectsLinks(event.Type) {
 		return nil
 	}
@@ -40,6 +51,16 @@ func validateRelayLinkEndpointsInProject(
 			return mapSQLError(err, nil)
 		}
 		if endpointProjectID != projectID {
+			if rootSource {
+				compatible, err := relaySharedProjectsTx(ctx, tx, projectID, endpointProjectID, false)
+				if err != nil {
+					return err
+				}
+				if compatible {
+					continue
+				}
+			}
+
 			return fmt.Errorf("%w: relay link endpoint %s belongs to another project", db.ErrFederationIngestValidation, issueUID)
 		}
 	}
@@ -136,7 +157,7 @@ func scanRelayClassifierKeys(rows *sql.Rows, keys map[string]struct{}, columns i
 // filterRelayCrossProjectLinkEvents keeps deferred relay link additions from
 // resolving against issues in another local project during a later group
 // materialization. Only the crossing additions are removed; a composite
-// event keeps its same-project effects and every removal is applied.
+// event keeps same-project effects; only root sources can change crossings.
 func filterRelayCrossProjectLinkEvents(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -179,15 +200,33 @@ func filterRelayCrossProjectLinkEvents(
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
+		pin, err := rootPinTx(ctx, tx, event.ProjectUID, "")
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return nil, err
+		}
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
 		}
+		var referenceErr error
 		crossProject := func(peerUID string) bool {
 			projectUID, ok := issueProjects[peerUID]
-			return ok && projectUID != event.ProjectUID
+			if !ok || projectUID == event.ProjectUID {
+				return false
+			}
+			if event.OriginInstanceUID != pin.AuthorityUID {
+				return true
+			}
+			peer, err := rootPinTx(ctx, tx, projectUID, "")
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				referenceErr = err
+			}
+			return err != nil || peer.AuthorityUID != pin.AuthorityUID
 		}
-		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject)
+		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject, true)
+		if referenceErr != nil {
+			return nil, referenceErr
+		}
 		if err != nil {
 			return nil, err
 		}

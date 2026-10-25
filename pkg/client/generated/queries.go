@@ -180,7 +180,7 @@ type PollProjectEventsQuery struct {
 }
 
 type GetProjectFederationQuery struct {
-	// RelayProtocolVersion Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+	// RelayProtocolVersion Optionally check existing issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links for unsupported crossings outside a common-root group.
 	RelayProtocolVersion *int64 `json:"relay_protocol_version,omitempty" validate:"omitempty,gte=1,lte=1"`
 }
 

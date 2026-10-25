@@ -11,6 +11,18 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 )
 
+func TestRelaySharedAccessEnrollment(t *testing.T) {
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelaySharedAccessEnrollment(t, store, func(ctx context.Context, projectID int64) error {
+		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
+		return err
+	})
+}
+
 func TestRelayRootAcceptanceParent(t *testing.T) {
 	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
