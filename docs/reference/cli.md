@@ -610,6 +610,11 @@ kata create <title> \
   [--force-new]
 ```
 
+When `--priority` is omitted, `kata create` uses the optional
+[`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
+An explicit `--priority` wins. With neither a flag nor a configured default,
+priority stays unset.
+
 `--meta` binds string-valued metadata at creation and is repeatable.
 
 Before creating an issue, the daemon checks existing non-deleted look-alikes,

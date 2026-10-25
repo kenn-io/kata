@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-24
+last_edited: 2026-10-25
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,6 +10,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.
+
+- Set `[create].default_priority` in `<KATA_HOME>/config.toml` to file issues
+  at that priority when `kata create` omits `--priority`. An explicit
+  `--priority` wins, and `kata doctor` reports an invalid value. See
+  [Default priority for issue creation](reference/configuration.md#default-priority-for-issue-creation).
+  Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 ## 0.20.0
 <small>2026-10-23</small>

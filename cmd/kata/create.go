@@ -46,6 +46,9 @@ A title and body that look like an open or closed issue may be refused with
 the matching refs (conflict, exit 5); pass --force-new only after reading them.
 Relationship flags take refs. --parent groups work and does not gate
 readiness; --blocked-by does. --meta key=value stores a string.
+When --priority is omitted, [create].default_priority in the invoking client's
+<KATA_HOME>/config.toml supplies the priority. Without either setting, priority
+stays unset.
 --agent prints "OK create <ref>"; --json has .issue.short_id.`,
 		Example: `  kata create "fix login race" --body "Safari double-submits the callback." --idempotency-key login-race-2026-10-09 --agent
   kata create "write retry test" --parent abc4 --blocked-by d4ex --idempotency-key retry-test-abc4 --agent
@@ -71,7 +74,7 @@ readiness; --blocked-by does. --meta key=value stores a string.
 	cmd.Flags().Var(newRefSliceValue(&related), "related",
 		"this issue is related to <ref> (symmetric, no ordering; repeatable; "+issueRefHelp+")")
 	cmd.Flags().StringVar(&owner, "owner", "", "initial owner")
-	cmd.Flags().IntVar(&priority, "priority", 0, "initial priority (0..4; 0 = highest)")
+	cmd.Flags().IntVar(&priority, "priority", 0, "initial priority (0..4; 0 = highest); defaults to [create].default_priority when omitted")
 	cmd.Flags().StringArrayVar(&meta, "meta", nil,
 		"initial metadata key=value (repeatable; value stored as a JSON string)")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "send Idempotency-Key header for safe retry")
@@ -99,6 +102,20 @@ readiness; --blocked-by does. --meta key=value stores a string.
 				Kind:     kindValidation,
 				ExitCode: ExitValidation,
 			}
+		}
+
+		var initialPriority *int64
+		if cmd.Flags().Changed("priority") {
+			initialPriority = new(int64(priority))
+		} else {
+			defaults, err := config.ReadCreateConfig()
+			if err != nil {
+				if _, ok := errors.AsType[*os.PathError](err); ok {
+					return err
+				}
+				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			initialPriority = defaults.DefaultPriority
 		}
 
 		handle, err := resolveTeammate(cmd)
@@ -134,12 +151,9 @@ readiness; --blocked-by does. --meta key=value stores a string.
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 
-		req := &generated.CreateIssueBody{Actor: &actor, Title: title, Body: &body}
+		req := &generated.CreateIssueBody{Actor: &actor, Title: title, Body: &body, Priority: initialPriority}
 		if cmd.Flags().Changed("owner") {
 			req.Owner = &owner
-		}
-		if cmd.Flags().Changed("priority") {
-			req.Priority = new(int64(priority))
 		}
 		if len(labels) > 0 {
 			req.Labels = labels
