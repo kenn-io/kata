@@ -79,6 +79,69 @@ func TestRelayLateEnrollmentAfterPurgeBeforeInitialSync(t *testing.T) {
 	}
 }
 
+// An issue is created with a link to an unshared project, then the link is removed.
+// The root withholds the creation because its payload names the unshared project,
+// retains the later assignment, and adds a snapshot after it. The relay must forward
+// the signed checkpoint rather than replay the assignment before the leaf knows the issue.
+func TestRelayLeafRecoversLateSnapshot(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRelayMatrixNode(t, backend, "root-member")
+			relay := newRelayMatrixNode(t, backend, "relay-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			project, err := root.store.CreateProject(ctx, "shared-project")
+			require.NoError(t, err)
+			root.project = project
+			privateProject, err := root.store.CreateProject(ctx, "unshared-project")
+			require.NoError(t, err)
+			privateIssue, _, err := root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: privateProject.ID, Author: "source-agent", Title: "Private peer"})
+			require.NoError(t, err)
+			issue, _, err := root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "source-agent", Title: "Shared issue", Links: []db.InitialLink{{ToNumber: privateIssue.ID, Type: "related"}}})
+			require.NoError(t, err)
+			links, err := root.store.LinksByIssue(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Len(t, links, 1)
+			_, err = root.store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{
+				EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "source-agent",
+				FromUID: issue.UID, ToUID: privateIssue.UID, FromShortID: issue.ShortID, ToShortID: privateIssue.ShortID,
+			})
+			require.NoError(t, err)
+			owner := "source-agent"
+			assigned, err := root.store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: owner})
+			require.NoError(t, err)
+			assignment := assigned.Event
+			require.Equal(t, "issue.assigned", assignment.Type)
+			_, err = root.store.EnableProjectFederation(ctx, project.ID, root.account)
+			require.NoError(t, err)
+			public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+			pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
+			require.NoError(t, root.store.PinRootAuthority(ctx, pin))
+			enrollRelayMatrixReplica(t, root, relay, "relay-alias", true)
+			syncRelayMatrixNode(t, relay)
+			history, err := relay.store.EventsByUIDs(ctx, relay.project.ID, []string{assignment.UID})
+			require.NoError(t, err)
+			require.NotEmpty(t, history, "the relay retains the assignment")
+			boundaries, err := relay.store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: relay.project.ID, IssueUID: issue.UID, ThroughID: history[0].ID, Types: []string{"issue.created", "issue.snapshot"}, Limit: 1})
+			require.NoError(t, err)
+			require.Empty(t, boundaries, "no creation or snapshot precedes the retained assignment")
+			enrollRelayMatrixReplica(t, relay, leaf, "leaf-alias", false)
+			binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			required, err := relay.store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, binding.RelayConfig.BindingUID)
+			require.NoError(t, err)
+			require.True(t, required, "a retained late snapshot must select signed reset")
+
+			syncRelayMatrixNode(t, leaf)
+			got, err := leaf.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, issue.Title, got.Title)
+			require.NotNil(t, got.Owner)
+			require.Equal(t, owner, *got.Owner)
+		})
+	}
+}
+
 func runRelayLateEnrollment(t *testing.T, backend string, compact, rotate bool) {
 	t.Helper()
 	root := newRelayMatrixNode(t, backend, "company-member")

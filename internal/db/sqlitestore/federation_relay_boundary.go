@@ -187,7 +187,22 @@ func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64)
 	return relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, 0)
 }
 
+// relayHistoryHasBoundaryAfterTx detects cross-project references or a mutation
+// retained before its issue's introduction.
 func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
+	var outOfOrder bool
+	//nolint:gosec // Only fixed event-type SQL is concatenated; values use placeholders.
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events m
+		WHERE m.project_id=? AND m.id>? AND m.issue_uid IS NOT NULL
+		AND m.type LIKE 'issue.%' AND m.type NOT IN ('issue.created','issue.snapshot')
+		AND `+federationPushEventTypeCondition("m.type")+`
+		AND NOT EXISTS(SELECT 1 FROM events i WHERE i.project_id=m.project_id
+		AND i.issue_uid=m.issue_uid AND i.type IN ('issue.created','issue.snapshot') AND i.id<m.id))`, projectID, after).Scan(&outOfOrder); err != nil {
+		return false, err
+	}
+	if outOfOrder {
+		return true, nil
+	}
 	for {
 		//nolint:gosec // Only fixed event-type SQL is concatenated; values use placeholders.
 		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.id>? AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)

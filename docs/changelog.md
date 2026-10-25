@@ -31,6 +31,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `build` and `install` targets set the PostHog project key at link time, and
   builds without it send nothing. See [Telemetry reporting rules](reference/configuration.md#reporting-rules).
 
+- A new device connecting through a relay now receives the signed checkpoint
+  and the full issue when the issue's creation was withheld and only later
+  events, such as an assignment, were kept. Before, the device couldn't apply
+  the assignment, and sync stalled.
+
 ## 0.20.0
 <small>2026-10-23</small>
 
