@@ -30,6 +30,9 @@ dims = 128
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example-model")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "1024")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "/run/secrets/embedding-key")
+	t.Setenv("KATA_DOCBANK_URL", "https://docbank.example")
+	t.Setenv("KATA_DOCBANK_API_KEY_FILE", "/run/secrets/docbank-key")
+	t.Setenv("KATA_DOCBANK_FOLDER", "/issues")
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:7777", cfg.Listen)
@@ -39,6 +42,9 @@ dims = 128
 	require.Equal(t, "example-model", cfg.Search.Embeddings.Model)
 	require.Equal(t, 1024, cfg.Search.Embeddings.Dims)
 	require.Equal(t, "/run/secrets/embedding-key", cfg.Search.Embeddings.APIKeyFile)
+	require.Equal(t, "/issues", cfg.Docbank.Folder)
+	require.Equal(t, "https://docbank.example", cfg.Docbank.URL)
+	require.Equal(t, "/run/secrets/docbank-key", cfg.Docbank.APIKeyFile)
 	auth, err := config.ReadAuthConfig()
 	require.NoError(t, err)
 	require.True(t, auth.TrustPrivateNetwork)
@@ -93,7 +99,7 @@ func TestDeploymentInvalidRequestDimensionsFailLoudly(t *testing.T) {
 }
 
 func TestLocalProfileRejectsDeploymentControlReferences(t *testing.T) {
-	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
+	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE", "KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
 		t.Run(key, func(t *testing.T) {
 			_, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir(), Catalog: config.CatalogDaemonConfig{TokenEnv: key}}, true)
 			require.ErrorContains(t, err, "reserved environment key")

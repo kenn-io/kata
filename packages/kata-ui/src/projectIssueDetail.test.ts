@@ -4,11 +4,56 @@ import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/m
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
+const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
+const attachment = {
+  name: 'shot.png',
+  media_type: 'image/png',
+  size: 12,
+  docbank_version: versionID,
+}
+
 function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
   return wire
 }
 
 describe('projectIssueDetail', () => {
+  it.each([
+    ['non-object entry', 'junk'],
+    ['missing name', { ...attachment, name: undefined }],
+    ['wrong media_type type', { ...attachment, media_type: 12 }],
+    ['wrong size type', { ...attachment, size: '12' }],
+    ['missing docbank_version', { ...attachment, docbank_version: undefined }],
+  ])('skips malformed attachment shape: %s', (_rule, invalid) => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Files',
+        status: 'open',
+        metadata: {
+          'attachment.file': invalid,
+        },
+      },
+    })
+    expect(detail.issue.attachments).toEqual({})
+  })
+
+  it('projects attachment keys', () => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Files',
+        status: 'open',
+        metadata: {
+          'attachment.file': attachment,
+          'work.branch': 'feature',
+        },
+      },
+    })
+    expect(detail.issue.attachments).toEqual({
+      file: attachment,
+    })
+  })
+
   it.each(['verified', 'pending', 'legacy'])(
     'preserves %s creation attribution without inventing accountability',
     (verification) => {

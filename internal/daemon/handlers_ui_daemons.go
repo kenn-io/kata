@@ -717,7 +717,14 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), webDaemonProxyTimeout)
+		timeout := webDaemonProxyTimeout
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/projects/"), "/")
+		if strings.HasPrefix(r.URL.Path, "/api/v1/projects/") && len(parts) >= 4 && parts[1] == "issues" && parts[3] == "attachments" &&
+			((r.Method == http.MethodGet && len(parts) == 6 && parts[5] == "content") || (r.Method == http.MethodPost && len(parts) == 4)) {
+			// Reserve time for both sequential transfer legs.
+			timeout = 2*36*time.Minute + 3*time.Minute
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		reverse.ServeHTTP(w, r.WithContext(ctx))
 	})

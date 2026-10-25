@@ -19,6 +19,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. A daemon refuses to start while another daemon owns the same store, including one in another PID namespace whose socket it cannot see or one reaching the same SQLite file through another mount path, and waits up to 30 seconds for a replaced daemon to finish shutting down. A live record whose identity can't be judged still blocks startup.
+- Attach screenshots and recordings to issues through the web UI or `kata docbank attachments`. Configure Docbank on the daemon to store the files. Images preview inline, and videos play in the issue. See [Issue attachments](guide/attachments.md).
 
 - Set `[create].default_priority` in `<KATA_HOME>/config.toml` to file issues
   at that priority when `kata create` omits `--priority`. An explicit

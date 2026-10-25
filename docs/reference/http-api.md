@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-23
+last_edited: 2026-10-25
 ---
 
 # HTTP API schema
@@ -196,6 +196,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
 | `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
@@ -847,6 +848,15 @@ original author, UID, creation time, and thread position. This is the supported
 primitive for redacting comment text before enrolling a project in federation.
 It is not a purge mechanism for data that has already crossed into another
 federated event log.
+
+## Attachment Endpoints
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`
+uploads the raw request body as `application/octet-stream` to Docbank and
+returns the new `attachment_id` with its stored reference. `GET
+/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
+streams the file back. Both return `docbank_not_configured` when the daemon has
+no Docbank. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

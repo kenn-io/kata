@@ -61,6 +61,14 @@ type pathEscapingRequestOptions struct {
 	runtime.RequestOptions
 }
 
+type binaryRequestOptions struct {
+	runtime.RequestOptions
+}
+
+func (o binaryRequestOptions) GetBody() any {
+	return nil
+}
+
 func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
 	if o.RequestOptions == nil {
 		return nil, nil
@@ -394,6 +402,12 @@ type ClientInterface interface {
 
 	UnassignIssue(ctx context.Context, options *UnassignIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnassignIssueResponse, error)
 	UnassignIssueWithResponse(ctx context.Context, options *UnassignIssueRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnassignIssueResp, error)
+
+	AddAttachment(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResponse, error)
+	AddAttachmentWithResponse(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResp, error)
+
+	AttachmentContent(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResponse, error)
+	AttachmentContentWithResponse(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResp, error)
 
 	UnbindExternalRoot(ctx context.Context, options *UnbindExternalRootRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnbindExternalRootResponse, error)
 	UnbindExternalRootWithResponse(ctx context.Context, options *UnbindExternalRootRequestOptions, reqEditors ...runtime.RequestEditorFn) (*UnbindExternalRootResp, error)
@@ -6285,6 +6299,141 @@ func (c *Client) UnassignIssue(ctx context.Context, options *UnassignIssueReques
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/actions/unassign")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddAttachmentResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"actor": {Style: "form", Explode: &[]bool{false}[0]},
+		"name":  {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments",
+		Method:        "POST",
+		Options:       options,
+		ContentType:   "application/octet-stream",
+		QueryEncoding: queryEncoding,
+	}
+
+	// Keep binary bodies out of the runtime's JSON encoder.
+	if options != nil {
+		reqParams.Options = binaryRequestOptions{RequestOptions: options}
+	}
+	reqEditors = append([]runtime.RequestEditorFn{func(_ context.Context, req *http.Request) error {
+		if options == nil || options.Body == nil {
+			return nil
+		}
+		body, err := options.Body.Reader()
+		if err != nil {
+			return err
+		}
+		req.Body = body
+		req.ContentLength = options.Body.FileSize()
+		req.GetBody = options.Body.Reader
+		return nil
+	}}, reqEditors...)
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*AddAttachmentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(AddAttachmentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "AddAttachmentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(AddAttachmentResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "AddAttachmentResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) AttachmentContent(ctx context.Context, options *AttachmentContentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AttachmentContentResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*AttachmentContentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(AttachmentContentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "AttachmentContentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		result := AttachmentContentResponse(bodyBytes)
+		return &result, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

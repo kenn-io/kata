@@ -1,4 +1,5 @@
 import type {
+  KataAttachment,
   KataCreationAttributionModel,
   KataCreationAttributionWire,
   KataIssueDetailModel,
@@ -57,6 +58,19 @@ function relationFor(
   return 'related'
 }
 
+function validAttachment(value: unknown): value is KataAttachment {
+  const raw = value as Record<string, unknown>
+  return (
+    typeof raw === 'object' &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    typeof raw.name === 'string' &&
+    typeof raw.media_type === 'string' &&
+    typeof raw.size === 'number' &&
+    typeof raw.docbank_version === 'string'
+  )
+}
+
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
@@ -88,6 +102,12 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       reference: referenceFor(issue),
       title: issue.title,
       body: issue.body ?? '',
+      attachments: Object.fromEntries(
+        Object.entries(issue.metadata ?? {}).flatMap(([key, raw]) => {
+          if (!key.startsWith('attachment.') || !validAttachment(raw)) return []
+          return [[key.slice('attachment.'.length), raw]]
+        }),
+      ),
       status: issue.status,
       ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),

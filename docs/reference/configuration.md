@@ -1387,3 +1387,24 @@ origins. Configure the selected project and history floor with
 `https://api.ticktick.com`. Project scope and status direction are selected with
 `kata sync ticktick enable`. See [TickTick sync](../operations/ticktick-sync.md)
 for access tokens, field ownership, completion writeback, and recovery limits.
+
+## Docbank attachments
+
+On main after 0.19.0, `[docbank]` enables issue file uploads and reads through a
+separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
+setup and the shared-vault trust boundary.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `url` | empty (disabled) | Docbank base URL; HTTPS or loopback HTTP, without userinfo, query, or fragment. |
+| `api_key` | empty | Inline key, preferred over file and environment sources. |
+| `api_key_file` | empty | Mode-0600 key file, preferred over the environment source. |
+| `api_key_env` | empty | Name of the environment variable containing the key. |
+| `folder` | `/kata` | Clean absolute Docbank folder; uploads go under a project-UID subfolder. |
+
+A configured URL requires a key source. A broken selected credential
+source fails explicitly; Kata does not fall back to another source. Keys are
+resolved on each request.
+
+`KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
+override their corresponding file settings.

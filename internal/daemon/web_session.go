@@ -512,6 +512,9 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 }
 
 func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
+	if len(parts) == 4 && parts[1] == "attachments" && parts[3] == "content" {
+		return r.Method == http.MethodGet
+	}
 	if len(parts) == 0 {
 		return r.Method == http.MethodPost
 	}
@@ -520,7 +523,7 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
-		case "comments", "labels", "links", "metadata", "notifications":
+		case "comments", "labels", "links", "metadata", "notifications", "attachments":
 			return r.Method == http.MethodPost
 		case "actions":
 			return false

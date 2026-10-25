@@ -539,6 +539,16 @@
       "source": "/guide/project-relays.md",
       "destination": "/docs/guide/project-relays.md",
       "permanent": true
+    },
+    {
+      "source": "/guide/attachments/",
+      "destination": "/docs/guide/attachments/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/attachments.md",
+      "destination": "/docs/guide/attachments.md",
+      "permanent": true
     }
   ]
 }

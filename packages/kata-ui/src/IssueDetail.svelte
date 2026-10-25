@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button, Markdown } from '@kenn-io/kit-ui'
 
+  import IssueAttachments from './components/IssueAttachments.svelte'
   import IssueChecklist from './components/IssueChecklist.svelte'
   import IssueComments from './components/IssueComments.svelte'
   import IssueLinks from './components/IssueLinks.svelte'
@@ -9,6 +10,11 @@
 
   let {
     detail,
+    attachmentBaseURL = '',
+    fetchAttachment,
+    uploadAttachment,
+    attachmentsEnabled = false,
+    actionsDisabled = false,
     actions = [],
     onOpenIssue,
     onOpenComment,
@@ -54,6 +60,14 @@
   </section>
 
   <IssueChecklist items={detail.issue.checklist} />
+  <IssueAttachments
+    attachments={detail.issue.attachments}
+    baseURL={attachmentBaseURL}
+    {fetchAttachment}
+    {uploadAttachment}
+    {attachmentsEnabled}
+    {actionsDisabled}
+  />
   <IssueLinks
     parent={detail.parent}
     children={detail.children}

@@ -19,6 +19,7 @@ func scopedRoute(method, pattern string) scopedRouteRule {
 // at the domain boundary; this first gate ensures new or administrative routes
 // fail closed before their handlers resolve any target.
 var issueScopedRoutes = []scopedRouteRule{
+	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/attachments/[^/]+/content`),
 	scopedRoute(http.MethodPost, `/api/v1/ui/telemetry`),
 	scopedRoute(http.MethodGet, `/api/v1/instance`),
 	scopedRoute(http.MethodGet, `/api/v1/health`),
@@ -33,7 +34,7 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/(?:metadata|planning-dates)`),
 	scopedRoute(http.MethodPatch, `/api/v1/projects/[^/]+/issues/[^/]+`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/actions/(?:assign|claim|close|priority|reopen|unassign)`),
-	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/(?:comments|labels|links|metadata|notifications)`),
+	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/(?:comments|labels|links|metadata|notifications|attachments)`),
 	scopedRoute(http.MethodPatch, `/api/v1/projects/[^/]+/issues/[^/]+/comments/[^/]+`),
 	scopedRoute(http.MethodDelete, `/api/v1/projects/[^/]+/issues/[^/]+/(?:labels|links)/[^/]+`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/(?:graph|lease)`),

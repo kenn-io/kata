@@ -7,6 +7,9 @@ import type {
   AckRelayDeliveriesPathParameters,
   AcquireIssueLeasePathParameters,
   ActionRequestBody,
+  AddAttachmentParams,
+  AddAttachmentPathParameters,
+  AddAttachmentResponseBody,
   AddLabelPathParameters,
   AddLabelRequestBody,
   AddLabelResponseBody,
@@ -15,6 +18,7 @@ import type {
   ArchiveCronWorkflowPathParameters,
   AssignIssuePathParameters,
   AssignRequestBody,
+  AttachmentContentPathParameters,
   AuditClosesParams,
   AuditClosesResponseBody,
   BindExternalRootPathParameters,
@@ -4352,6 +4356,108 @@ export const unassignIssue = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(unassignRequestBody),
   })
+}
+
+export type addAttachmentResponse200 = {
+  data: AddAttachmentResponseBody
+  status: 200
+}
+
+export type addAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type addAttachmentResponseSuccess = addAttachmentResponse200 & {
+  headers: Headers
+}
+export type addAttachmentResponseError = addAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type addAttachmentResponse = addAttachmentResponseSuccess | addAttachmentResponseError
+
+export const getAddAttachmentUrl = (
+  { projectId, ref }: AddAttachmentPathParameters,
+  params: AddAttachmentParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments`
+}
+
+export const addAttachment = async (
+  { projectId, ref }: AddAttachmentPathParameters,
+  addAttachmentBody: Blob,
+  params: AddAttachmentParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<addAttachmentResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<addAttachmentResponse>(getAddAttachmentUrl({ projectId, ref }, params), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
+    body: addAttachmentBody,
+  })
+}
+
+export type attachmentContentResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type attachmentContentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type attachmentContentResponseSuccess = attachmentContentResponse200 & {
+  headers: Headers
+}
+export type attachmentContentResponseError = attachmentContentResponseDefault & {
+  headers: Headers
+}
+
+export type attachmentContentResponse =
+  | attachmentContentResponseSuccess
+  | attachmentContentResponseError
+
+export const getAttachmentContentUrl = ({
+  projectId,
+  ref,
+  attachmentId,
+}: AttachmentContentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/${encodeURIComponent(String(attachmentId))}/content`
+}
+
+export const attachmentContent = async (
+  { projectId, ref, attachmentId }: AttachmentContentPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<attachmentContentResponse> => {
+  return orvalFetch<attachmentContentResponse>(
+    getAttachmentContentUrl({ projectId, ref, attachmentId }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type unbindExternalRootResponse200 = {

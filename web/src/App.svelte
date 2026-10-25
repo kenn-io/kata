@@ -14,6 +14,7 @@
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
   import {
+    addAttachment,
     addLabel as addLabelRequest,
     assignIssue,
     captureTelemetryEvent,
@@ -577,6 +578,20 @@
         { headers: context.headers },
       ),
     )
+  }
+
+  async function attachFile(uid: string, file: File): Promise<void> {
+    const target = selectedMutationTarget(uid)
+    if (!target) throw new Error('issue_not_found')
+    const accepted = await runMutation({ draft: file }, (context) =>
+      addAttachment(
+        { projectId: target.project_id, ref: target.ref },
+        file,
+        { name: file.name, ...context.body<{ actor?: string }>({}, requestActor) },
+        { headers: context.headers },
+      ),
+    )
+    if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'attachment_upload_failed')
   }
 
   async function addComment(
@@ -1274,6 +1289,7 @@
         {searchReferences}
         onMoveIssue={moveIssue}
         onPatchMetadata={patchMetadata}
+        onUploadAttachment={attachFile}
         onAddComment={addComment}
         onEditIssue={editIssue}
         onAssignOwner={assignOwner}

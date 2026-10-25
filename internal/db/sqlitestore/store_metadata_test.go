@@ -46,6 +46,37 @@ func TestPatchIssueMetadata_StaleRevisionReturns409(t *testing.T) {
 	assert.Equal(t, iss.Revision, conflict.CurrentRevision)
 }
 
+func TestPatchIssueMetadata_ArchivedProjectRejected(t *testing.T) {
+	t.Parallel()
+	d, ctx, project, iss := setupTestIssue(t)
+
+	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	var eventsBefore int
+	require.NoError(t, d.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventsBefore))
+
+	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
+		},
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
+	var storedMetadata string
+	var storedRevision int64
+	require.NoError(t, d.QueryRow(`SELECT metadata, revision FROM issues WHERE id = ?`, iss.ID).Scan(&storedMetadata, &storedRevision))
+	assert.JSONEq(t, string(iss.Metadata), storedMetadata)
+	assert.Equal(t, iss.Revision, storedRevision)
+
+	var eventsAfter int
+	require.NoError(t, d.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventsAfter))
+	assert.Equal(t, eventsBefore, eventsAfter)
+}
+
 func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testing.T) {
 	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)

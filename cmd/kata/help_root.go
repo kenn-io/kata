@@ -47,6 +47,7 @@ var kataCommandGroups = map[string]string{
 	"unassign":            "change",
 	"label":               "change",
 	"meta":                "change",
+	"docbank":             "change",
 	"schedule":            "change",
 	"deadline":            "change",
 	"notify":              "change",

@@ -34,6 +34,8 @@ func TestWebHandlerAssetsAndNavigationFallback(t *testing.T) {
 		assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
 		assert.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "default-src 'self'")
+		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "img-src 'self' data: blob:")
+		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "media-src 'self' blob:")
 		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "style-src-attr 'unsafe-inline'")
 		var scriptSources []string
 		for directive := range strings.SplitSeq(response.Header().Get("Content-Security-Policy"), ";") {

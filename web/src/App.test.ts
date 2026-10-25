@@ -200,6 +200,104 @@ describe('App', () => {
     expect(searches).toContain('Example')
   })
 
+  it.each([
+    {
+      actorPolicy: 'request',
+      outcome: 'saved',
+      expectedActor: 'kata-web',
+      behavior: 'refreshes authority',
+    },
+    {
+      actorPolicy: 'request',
+      outcome: 'too-large',
+      expectedActor: 'kata-web',
+      behavior: 'surfaces the error and re-enables edit',
+    },
+  ])(
+    '$behavior after a $outcome attachment upload with $actorPolicy attribution',
+    async ({ actorPolicy, outcome, expectedActor }) => {
+      history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const base = snapshot()
+      Object.assign(base.capabilities, { attachments: true, actor_policy: actorPolicy })
+      const accepted = {
+        ...base,
+        selected: {
+          state: 'available',
+          issue: base.collection[0],
+          comments: [],
+          labels: [],
+          links: [],
+          recurrences: [],
+          history: [],
+        },
+      }
+      let finish!: (response: Response) => void
+      const pending = new Promise<Response>((resolve) => {
+        finish = resolve
+      })
+      let uploadURL: URL | undefined
+      let uploadInit: RequestInit | undefined
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(
+            input instanceof Request ? input.url : String(input),
+            window.location.origin,
+          )
+          if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+          if (init?.method === 'POST' && url.pathname.endsWith('/attachments')) {
+            uploadURL = url
+            uploadInit = init
+            return pending
+          }
+          if (url.pathname.endsWith('/ui/snapshot')) snapshotReads++
+          return Response.json(accepted, { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }),
+      )
+      const view = render(App)
+      await screen.findByRole('button', { name: 'Attach files' })
+      const file = new File(['image'], 'screen.png', { type: 'image/png' })
+      await fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+        target: { files: [file] },
+      })
+      await waitFor(() => expect(uploadURL).toBeDefined())
+      const readsBeforeCompletion = snapshotReads
+      expect(uploadURL!.searchParams.get('actor')).toBe(expectedActor)
+      expect(uploadURL!.pathname).toBe(
+        '/api/v1/projects/7/issues/01J00000000000000000000001/attachments',
+      )
+      expect(uploadURL!.searchParams.get('name')).toBe('screen.png')
+      expect(uploadInit?.body).toBe(file)
+      const edit = screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement
+      expect(edit.disabled).toBe(true)
+      if (outcome === 'saved')
+        finish(
+          Response.json({
+            attachment_id: '01JB3Z6V2K8M4Q9T1X5W7Y0RNA',
+            attachment: {
+              name: 'screen.png',
+              media_type: 'image/png',
+              size: 5,
+              docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+            },
+          }),
+        )
+      else if (outcome === 'too-large')
+        finish(Response.json({ error: { code: 'attachment_too_large' } }, { status: 413 }))
+      if (outcome === 'saved')
+        await waitFor(() => expect(snapshotReads).toBeGreaterThan(readsBeforeCompletion))
+      await waitFor(() => expect(edit.disabled).toBe(false))
+      if (outcome === 'too-large')
+        expect(screen.getByRole('alert').textContent).toContain('attachment_too_large')
+    },
+  )
+
   it('renders the Kata application shell while loading', () => {
     sessionStorage.setItem(
       'kata.web.session.v1',

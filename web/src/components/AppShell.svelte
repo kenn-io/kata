@@ -86,6 +86,7 @@
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
+    onUploadAttachment?: ((uid: string, file: File) => Promise<void>) | undefined
     onAddComment: (
       uid: string,
       body: string,
@@ -149,6 +150,7 @@
     searchReferences,
     onMoveIssue,
     onPatchMetadata,
+    onUploadAttachment,
     onAddComment,
     onEditIssue,
     onAssignOwner,
@@ -784,6 +786,8 @@
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
+        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
         {draftFenceGeneration}

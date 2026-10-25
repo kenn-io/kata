@@ -166,6 +166,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	if profile.Config != nil {
 		references = append(references,
 			profile.Config.Auth.TokenEnv,
+			profile.Config.Docbank.APIKeyEnv,
 			profile.Config.Search.Embeddings.APIKeyEnv,
 			profile.Config.GitHubSync.TokenEnvName(),
 			profile.Config.NotionSync.TokenEnv,
@@ -191,6 +192,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	references = append(references, signingReferences...)
 	reserved := []string{
 		"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_AUTH_TOKEN_FILE",
+		"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER",
 		"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE",
 		"KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX",
 		"KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX",

@@ -363,6 +363,14 @@ type UnassignIssueResponse = MutationResponseBody
 
 type UnassignIssueErrorResponse = ErrorEnvelope
 
+type AddAttachmentResponse = AddAttachmentResponseBody
+
+type AddAttachmentErrorResponse = ErrorEnvelope
+
+type AttachmentContentResponse = []byte
+
+type AttachmentContentErrorResponse = ErrorEnvelope
+
 type UnbindExternalRootResponse = ExternalRootBridgeOut
 
 type UnbindExternalRootErrorResponse = ErrorEnvelope
@@ -1295,6 +1303,19 @@ type UnassignIssueResp struct {
 	StatusCode   int
 	JSON200      *UnassignIssueResponse
 	Headers200   *UnassignIssueResp200Headers
+}
+
+type AddAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *AddAttachmentResponse
+}
+
+type AttachmentContentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
 }
 
 type UnbindExternalRootResp struct {

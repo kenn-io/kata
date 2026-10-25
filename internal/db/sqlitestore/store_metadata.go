@@ -92,11 +92,11 @@ func (d *Store) patchIssueMetadataTx(ctx context.Context, tx *sql.Tx, in db.Patc
 	err := tx.QueryRowContext(ctx, `
 		SELECT i.metadata, i.revision, i.project_id, p.uid, p.name
 		  FROM issues i JOIN projects p ON p.id = i.project_id
-		 WHERE i.id = ? AND i.deleted_at IS NULL`,
+		 WHERE i.id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`,
 		in.IssueID,
 	).Scan(&curMetadata, &curRevision, &projectID, &projectUID, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
-		return out, fmt.Errorf("issue %d not found", in.IssueID)
+		return out, fmt.Errorf("issue %d not found: %w", in.IssueID, db.ErrNotFound)
 	}
 	if err != nil {
 		return out, err

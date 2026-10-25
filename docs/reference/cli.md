@@ -2253,3 +2253,16 @@ kata#abc4
 ```
 
 Legacy numeric refs no longer resolve.
+
+## Issue attachments
+
+On main after 0.20.0, attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
+
+```sh
+kata docbank attachments add <issue> <file>...
+kata docbank attachments ls <issue>
+kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
+kata docbank attachments rm <issue> <attachment>
+```
+
+`<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
