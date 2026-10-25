@@ -255,31 +255,50 @@ func TestRelaySharedAccessReplyPurge(t *testing.T) {
 					require.Equal(t, localBefore, localAfter, "failed sync leaves existing replica data unchanged")
 					return
 				}
-				// A fresh hub receives no root-local purge row. The surviving
-				// native reply proves ownership while forwarding its signed reset.
+				// Root-local purge facts prove this reset; installed source bytes do
+				// not independently prove the target's owner to a fresh forwarding hub.
 				hub := newRelayMatrixNode(t, backend, "hub-member")
 				enrollRelayMatrixReplica(t, root, hub, "reply-hub", true)
 				syncRelayMatrixNode(t, hub)
-				enrollRelayMatrixReplica(t, hub, leaf, "reply-leaf", false)
-				syncRelayMatrixNode(t, leaf)
-				local, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+				local, err := hub.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
 				require.Equal(t, source.Title, local.Title)
-				comments, err := leaf.store.CommentsByIssue(ctx, local.ID)
+				comments, err := hub.store.CommentsByIssue(ctx, local.ID)
 				require.NoError(t, err)
 				require.Len(t, comments, 1)
 				require.Equal(t, reply.UID, comments[0].UID)
 				require.Equal(t, reply.Body, comments[0].Body)
 				require.Equal(t, reply.ReplyToUID, comments[0].ReplyToUID)
 				require.Equal(t, reply.ReplyKind, comments[0].ReplyKind)
-				copied, err := leaf.store.EventsByUIDs(ctx, leaf.project.ID, []string{replyEvent.UID})
+				copied, err := hub.store.EventsByUIDs(ctx, hub.project.ID, []string{replyEvent.UID})
 				require.NoError(t, err)
 				require.Len(t, copied, 1)
 				require.Equal(t, replyEvent.Payload, copied[0].Payload)
 				require.Equal(t, replyEvent.ContentHash, copied[0].ContentHash)
-				copiedProof, err := leaf.store.EntityAttribution(ctx, project.UID, "comment", reply.UID)
+				copiedProof, err := hub.store.EntityAttribution(ctx, project.UID, "comment", reply.UID)
 				require.NoError(t, err)
 				require.Equal(t, replyProof, copiedProof)
+				enrollRelayMatrixReplica(t, hub, leaf, "reply-leaf", false)
+				downstream, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+				require.NoError(t, err)
+				cursor, err := hub.store.MaxEventID(ctx)
+				require.NoError(t, err)
+				for range 2 {
+					withheld, err := hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+					require.ErrorIs(t, err, db.ErrNotFound, "reply identity alone cannot prove current target ownership")
+					require.Equal(t, db.RelayResetCheckpoint{}, withheld)
+				}
+				status, refusal := relayMatrixRequest(t, hub, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", hub.project.ID), leaf.credential.Token, nil)
+				require.Equal(t, http.StatusForbidden, status, string(refusal))
+				for _, hidden := range []string{source.UID, target.UID, comment.UID, reply.UID, "snapshot_uid", "signature"} {
+					require.NotContains(t, string(refusal), hidden)
+				}
+				after, err := hub.store.IssueByID(ctx, local.ID)
+				require.NoError(t, err)
+				require.Equal(t, local, after)
+				afterCursor, err := hub.store.MaxEventID(ctx)
+				require.NoError(t, err)
+				require.Equal(t, cursor, afterCursor)
 			})
 		}
 	}

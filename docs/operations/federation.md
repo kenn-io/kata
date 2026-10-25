@@ -158,6 +158,10 @@ history need not be selected into a current-state checkpoint. No new recovery
 policy is provided. Provable reply references still support ordinary purge/reset
 recovery.
 
+A retained reply identifies its target issue, but does not prove which project
+owns it after a move. A fresh relay without independent ownership facts refuses
+any selected reply or notification reference to that target.
+
 Upgrade every hop to a build supporting this current-main behavior before
 enabling crossings. Older relay builds reject them. Existing reset size,
 pending-work, quarantine and recovery rules still apply; this does not enable

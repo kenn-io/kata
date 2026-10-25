@@ -13,7 +13,7 @@ import (
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null"} {
+	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge"} {
 		t.Run(form, func(t *testing.T) {
 			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 			t.Cleanup(cleanup)
@@ -26,6 +26,8 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 			}
 			if form == "enrollment" {
 				dbtest.RunRelaySharedAccessEnrollment(t, store, compact)
+			} else if form == "moved-reply-purge" {
+				dbtest.RunRelaySharedAccessMovedReplyPurge(t, store)
 			} else {
 				dbtest.RunRelaySharedAccessNotification(t, store, form, compact)
 			}
