@@ -17,6 +17,27 @@ type RootResetProvenance struct {
 	Entities []EntityProvenance   `json:"entities"`
 }
 
+// VisitRelayResetSources visits selected Events then Entities in transport
+// order. Transaction ownership and per-source authorization stay with callers.
+func VisitRelayResetSources(snapshot RootResetSnapshot, visit func(RemoteEvent) error) error {
+	for _, section := range [][]byte{snapshot.Events, snapshot.Entities} {
+		var bodies [][]byte
+		if err := json.Unmarshal(section, &bodies); err != nil {
+			return err
+		}
+		for _, body := range bodies {
+			source, err := DecodeRelaySourceEvent(body)
+			if err != nil {
+				return err
+			}
+			if err := visit(source); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // DecodeRootResetPayload validates committed contents before native replacement.
 // Event bodies retain the original payload bytes, including across compaction.
 func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]RemoteEvent, RootResetProvenance, error) {

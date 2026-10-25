@@ -153,8 +153,11 @@ func RelayEventReferencedProjects(event RemoteEvent, refs []string, lookup *Even
 			return nil
 		}
 		value, _, err := notification.DecodeValue(raw)
-		if err != nil || value.Re == "" {
+		if err != nil {
 			return ErrNotFound
+		}
+		if value.Re == "" {
+			return nil
 		}
 		return record(commentIssue("", value.Re))
 	}

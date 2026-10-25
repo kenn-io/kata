@@ -21,7 +21,7 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 }
 
 func TestRelaySharedAccessNotification(t *testing.T) {
-	for _, form := range []string{"to", "from", "snapshot"} {
+	for _, form := range []string{"to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null"} {
 		t.Run(form, func(t *testing.T) {
 			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
 			require.NoError(t, err)

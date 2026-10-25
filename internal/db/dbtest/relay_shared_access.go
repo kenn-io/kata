@@ -199,12 +199,29 @@ func RunRelaySharedAccessEnrollment(t *testing.T, store db.Storage, compact func
 // value of a cleared slot. Keep link history out of these exact selections.
 func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form string) {
 	ctx := t.Context()
-	f := newRelaySharedAccessFixture(t, store, form != "snapshot")
+	noRef := strings.HasPrefix(form, "no-ref-")
+	f := newRelaySharedAccessFixture(t, store, form != "snapshot" && !noRef)
 	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: f.Issues[1].ID, Author: "member", Body: "Peer finding"})
 	require.NoError(t, err)
 	binding := f.Grants[0].Enrollment.RelayBindingUID
 	slot, err := json.Marshal(notification.Value{From: "member", Message: "Inspect peer finding", Re: comment.UID})
 	require.NoError(t, err)
+	if noRef {
+		var fields map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(slot, &fields))
+		delete(fields, "re")
+		if form == "no-ref-empty" {
+			fields["re"] = jsontext.Value(`""`)
+		}
+		if form == "no-ref-null" {
+			fields["re"] = jsontext.Value(`null`)
+		}
+		slot, err = json.Marshal(fields)
+		require.NoError(t, err)
+		value, _, err := notification.DecodeValue(slot)
+		require.NoError(t, err)
+		require.Empty(t, value.Re, "native optional re semantics have no comment dependency")
+	}
 	key := notification.MetadataKey("member")
 	patch := func(value jsontext.Value) db.Event {
 		out, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: f.Issues[0].ID, Actor: "member", Patch: map[string]jsontext.Value{key: value}})
@@ -223,6 +240,45 @@ func RunRelaySharedAccessNotification(t *testing.T, store db.Storage, form strin
 		require.NoError(t, err)
 	}
 	drainRelayDeliveries(t, store, binding)
+	if noRef {
+		event := patch(slot)
+		peerAccess(false)
+		exact, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+		require.NoError(t, err, "a notification with no reference remains deliverable")
+		require.Len(t, exact, 1)
+		source, err := db.DecodeRelaySourceEvent(exact[0].Body)
+		require.NoError(t, err)
+		require.Equal(t, db.RemoteEventFromStored(event), source, "original payload and source hash remain exact")
+		retry, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+		require.NoError(t, err)
+		require.Equal(t, exact, retry)
+		checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
+		require.NoError(t, err, "optional absence also allows selected reset entities")
+		var bodies [][]byte
+		require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &bodies))
+		found := false
+		for _, body := range bodies {
+			entity, err := db.DecodeRelaySourceEvent(body)
+			require.NoError(t, err)
+			if entity.IssueUID == nil || *entity.IssueUID != f.Issues[0].UID {
+				continue
+			}
+			var payload struct {
+				Metadata map[string]jsontext.Value `json:"metadata"`
+			}
+			require.NoError(t, json.Unmarshal(entity.Payload, &payload))
+			var expected, stored map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(slot, &expected))
+			require.NoError(t, json.Unmarshal(payload.Metadata[key], &stored))
+			require.Equal(t, expected["re"], stored["re"], "snapshot retains omitted, empty or null re without rewriting it")
+			found = true
+		}
+		require.True(t, found, "native checkpoint includes the notification's entity")
+		resetRetry, err := store.(db.RelayResetStore).CreateRelayReset(ctx, binding, f.Signer)
+		require.NoError(t, err)
+		require.Equal(t, checkpoint, resetRetry)
+		return
+	}
 	if form == "from" {
 		patch(slot)
 		drainRelayDeliveries(t, store, binding)

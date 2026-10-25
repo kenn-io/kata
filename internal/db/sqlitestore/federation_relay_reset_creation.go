@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -23,22 +22,9 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 		if err != nil {
 			return err
 		}
-		for _, section := range [][]byte{result.Snapshot.Events, result.Snapshot.Entities} {
-			var bodies [][]byte
-			if err := json.Unmarshal(section, &bodies); err != nil {
-				return err
-			}
-			for _, body := range bodies {
-				source, err := db.DecodeRelaySourceEvent(body)
-				if err != nil {
-					return err
-				}
-				if err := d.authorizeRelayEventTx(ctx, tx, grant, source); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return db.VisitRelayResetSources(result.Snapshot, func(source db.RemoteEvent) error {
+			return d.authorizeRelayEventTx(ctx, tx, grant, source)
+		})
 	})
 	if err != nil {
 		return db.RelayResetCheckpoint{}, err
