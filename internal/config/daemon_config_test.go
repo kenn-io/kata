@@ -160,37 +160,62 @@ func TestReadSearchConfig(t *testing.T) {
 	}
 }
 
-func TestReadDaemonConfigTreatsDisplayAsOpaque(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+func TestReadDaemonConfigTreatsClientSectionsAsOpaque(t *testing.T) {
+	for _, tc := range []struct {
+		name, section string
+	}{
+		{name: "display", section: `
 [display]
 markdown_renderer = "not-an-array"
 future_option = true
-`), 0o600))
+`},
+		{name: "create", section: `
+[create]
+default_priority = "invalid client preference"
+unknown_key = true
+[create.future]
+option = 5
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.section), 0o600))
 
-	_, err := config.ReadDaemonConfig()
-	require.NoError(t, err)
+			_, err := config.ReadDaemonConfig()
+			require.NoError(t, err)
+		})
+	}
 }
 
-func TestReadAuthConfigTreatsDisplayAsOpaque(t *testing.T) {
+func TestReadAuthConfigTreatsClientSectionsAsOpaque(t *testing.T) {
 	tests := []struct {
 		name    string
-		display string
+		section string
 	}{
 		{
 			name: "valid renderer argv",
-			display: `
+			section: `
 [display]
 markdown_renderer = ["renderer", "--style", "dark theme", "-"]
 `,
 		},
 		{
 			name: "malformed renderer and unknown display key",
-			display: `
+			section: `
 [display]
 markdown_renderer = "not-an-array"
 future_option = true
+`,
+		},
+		{
+			name: "malformed priority and unknown create keys",
+			section: `
+[create]
+default_priority = "invalid client preference"
+unknown_key = true
+[create.future]
+option = 5
 `,
 		},
 	}
@@ -203,7 +228,7 @@ future_option = true
 [auth]
 token = "client-token"
 trust_private_network = true
-`+tt.display), 0o600))
+`+tt.section), 0o600))
 
 			got, err := config.ReadAuthConfig()
 			require.NoError(t, err)

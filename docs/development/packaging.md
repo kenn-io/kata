@@ -8,23 +8,30 @@ publish a release. Release operators should use the external release process.
 
 ## Container image
 
-The GoReleaser `dockers_v2` pipe selects the ordinary `kata` release binary and
-builds `ghcr.io/kenn-io/kata:<version>` for Linux amd64 and arm64. Its Dockerfile
-copies the prebuilt binary from the platform-specific context and runs it
-directly as UID/GID `1000`, with `/data` as the Kata home. Runtime setup belongs
-to Kata's env/flag interface; the image has no entrypoint wrapper or config seed.
+Kata defines its image; the external release process builds and publishes it as
+`ghcr.io/kenn-io/kata:<version>`. `docker-bake.hcl` declares an `image` target
+for local builds and `oci-amd64` and `oci-arm64` targets that write one OCI
+archive per platform to `OCI_OUTPUT_DIR`. The targets read `VERSION`,
+`OCI_VERSION`, `COMMIT`, `REVISION`, and `BUILD_DATE` for the binary version
+and image labels. GoReleaser does not build images.
 
-The external publisher must provision Docker buildx, arm64 emulation when
-needed, and write access to that GHCR repository. Publish through the existing
-external release process. The repository's snapshot check builds local images
-and exercises their version, user, env-only foreground startup, health probes,
-token permissions, and scheduled backups without publishing. `goreleaser check`
-also validates the configuration but still exits nonzero for the existing,
-deprecated `brews` pipe; the snapshot check exercises that pipe too.
+`docker/release/Dockerfile` builds the web bundle and a static `kata` binary
+from source, then runs it directly as UID/GID `1000` with `/data` as the Kata
+home. Runtime setup belongs to Kata's env/flag interface; the image has no
+entrypoint wrapper or config seed.
 
-See [containers](../operations/containers.md) for operator setup. These image
-and environment features require a matching upstream release before an app
-store can remove its packaging hooks and select the published image.
+To build a local image:
+
+```sh
+docker buildx bake image --load --set image.tags=kata:local
+```
+
+The workflow-validation check builds both platform archives, loads the native
+image, and exercises its version, user, embedded web UI, env-only foreground
+startup, health probes, token permissions, and scheduled backups without
+publishing.
+
+See [containers](../operations/containers.md) for operator setup.
 
 ## Building packages
 

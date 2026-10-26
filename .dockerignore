@@ -11,6 +11,10 @@ coverage.out
 *.out
 /result
 
+# Dependencies and web bundles are rebuilt inside the image.
+**/node_modules
+/web/dist
+
 # Local daemon state and secrets. Docker federation smoke builds should never
 # capture a developer's live data, credentials, or SQLite files in context.
 /.kata/

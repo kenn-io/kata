@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"go.kenn.io/kata/internal/httpurl"
@@ -149,39 +148,28 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 }
 
 // selectedCatalogToken returns the admin token for a catalog entry that was
-// actively selected. A literal token wins; otherwise a non-empty token_env is
-// read. token_env set but empty is an error so the wrong daemon token is not
-// sent — only an entry with NO token configured at all yields the empty-token
-// global fallback.
+// actively selected. token_env set but empty is an error so the wrong daemon
+// token is not sent; only an entry with no token configured at all yields the
+// empty-token global fallback.
 func selectedCatalogToken(e *config.CatalogDaemonConfig) (string, error) {
-	if strings.TrimSpace(e.Token) != "" {
-		return e.Token, nil
-	}
-	if env := strings.TrimSpace(e.TokenEnv); env != "" {
-		token := strings.TrimSpace(os.Getenv(env))
-		if token == "" {
-			return "", &cliError{
-				Message:  fmt.Sprintf("hub admin token_env %q is set but empty; export it or pass --hub-token-env", env),
-				Code:     "hub_token_env_empty",
-				Kind:     kindValidation,
-				ExitCode: ExitValidation,
-			}
+	token, err := e.ClientToken()
+	if empty, ok := errors.AsType[*config.TokenEnvError](err); ok {
+		return "", &cliError{
+			Message:  fmt.Sprintf("hub admin token_env %q is set but empty; export it or pass --hub-token-env", empty.Env),
+			Code:     "hub_token_env_empty",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
 		}
-		return token, nil
 	}
-	return "", nil
+	return token, err
 }
 
 func catalogByName(cat *config.DaemonConfig, name string) *config.CatalogDaemonConfig {
-	if strings.TrimSpace(name) == "" {
+	entry, ok := cat.CatalogDaemon(name)
+	if !ok {
 		return nil
 	}
-	for i := range cat.Daemons {
-		if cat.Daemons[i].Name == name {
-			return &cat.Daemons[i]
-		}
-	}
-	return nil
+	return &entry
 }
 
 func catalogByOrigin(

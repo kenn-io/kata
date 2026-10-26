@@ -1290,6 +1290,8 @@
 
   .row.selected {
     background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
     box-shadow: inset 2px 0 0 var(--accent-blue);
     color: var(--text-primary);
   }

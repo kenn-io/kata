@@ -108,6 +108,8 @@
   }
   .evidence {
     margin-block: var(--space-4, 8px);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
     border-left: 2px solid var(--border-muted);
     padding-left: var(--space-4, 8px);
     overflow-wrap: anywhere;

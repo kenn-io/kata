@@ -299,6 +299,13 @@ isolated credentials, PostgreSQL restrictions, and recovery.
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
 
+A catalog entry's `token`, or the value of the variable its `token_env` names,
+is the bearer credential clients send to that daemon. A command that connects
+to an entry whose `token_env` variable is unset or empty fails; kata never
+falls back to another credential. `kata daemon locate` reports a remote or
+plain local entry without reading its credential. `KATA_AUTH_TOKEN` replaces a
+remote entry's credential, so its `token_env` is not read then.
+
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
 
@@ -353,6 +360,36 @@ do not break daemon startup. A TOML syntax error anywhere in `config.toml` still
 prevents common config parsing. kata validates this client section only when
 `show --render` is active on a terminal, so display-only semantic mistakes do
 not break plain output or redirected output.
+
+## Default priority for issue creation
+
+Set a default for `kata create` in the invoking CLI client's
+`<KATA_HOME>/config.toml`:
+
+```toml
+[create]
+default_priority = 3
+```
+
+Values are integers from `0` (highest) through `4` (lowest). An explicit
+`--priority` overrides the default, including `--priority 0`. Remove or comment
+out `default_priority` to leave priority unset when the flag is omitted; TOML
+has no `null` value. With no setting, creation keeps its existing behavior.
+
+The CLI reads this setting for each creation, so no daemon restart is needed.
+It uses the invoking client's config even when connecting to a remote or named
+daemon. This default applies only to `kata create`; it does not change API,
+MCP, TUI, or import behavior. When `--priority` is omitted, an invalid value or
+a misspelled key under `[create]` makes `kata create` fail before it contacts
+the daemon. An explicit valid priority skips these defaults.
+
+The daemon ignores `[create]` values and keys, `kata doctor` checks them, and
+config readers still reject TOML syntax errors.
+
+Retries with the same idempotency key and effective fields reuse the issue.
+Retries compare the effective priority, so a retry whose effective priority
+changed, for example because the default changed between attempts, gets
+`idempotency_mismatch`; see [the CLI reference](cli.md).
 
 ## TUI preferences
 

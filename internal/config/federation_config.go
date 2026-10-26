@@ -29,16 +29,6 @@ type FederationProjectConfig struct {
 	CredentialProvider []string                  `toml:"credential_provider"`
 }
 
-// CatalogDaemon returns a copy of the named daemon catalog entry.
-func (c *DaemonConfig) CatalogDaemon(name string) (CatalogDaemonConfig, bool) {
-	for _, daemon := range c.Daemons {
-		if daemon.Name == name {
-			return daemon, true
-		}
-	}
-	return CatalogDaemonConfig{}, false
-}
-
 func trimFederationConfig(cfg *DaemonConfig) {
 	for i := range cfg.Federation.Projects {
 		mapping := &cfg.Federation.Projects[i]
@@ -126,7 +116,7 @@ func ValidateFederationAuthentication(mapping FederationProjectConfig, catalog C
 	if mapping.Actor != "" {
 		return errors.New("actor must be supplied by the credential_provider")
 	}
-	if catalog.Token != "" || catalog.TokenEnv != "" {
+	if catalog.HasClientToken() {
 		return errors.New("credential_provider cannot use a catalog token or token_env")
 	}
 	if !strings.HasPrefix(catalog.URL, "https://") {

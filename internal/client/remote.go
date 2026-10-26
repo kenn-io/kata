@@ -29,12 +29,11 @@ const remoteServerEnvVar = "KATA_SERVER"
 // equivalent there is `[server].allow_insecure = true`.
 const allowInsecureEnvVar = "KATA_ALLOW_INSECURE"
 
+// activeRemoteTarget is the active_daemon catalog entry when it is a remote,
+// with its normalized URL.
 type activeRemoteTarget struct {
-	Name          string
-	BaseURL       string
-	Token         string
-	TokenEnv      string
-	AllowInsecure bool
+	entry   config.CatalogDaemonConfig
+	BaseURL string
 }
 
 // ErrRemoteUnavailable wraps probe failures against an explicitly
@@ -220,23 +219,23 @@ func resolveActiveRemoteSelection(
 	if err != nil || !ok {
 		return ResolvedDaemon{}, false, err
 	}
-	token := target.Token
-	if mode != remoteEndpointOnly && !globalAuthTokenOverrideSet() {
-		token, err = resolveActiveRemoteTargetToken(target)
+	token := target.entry.Token
+	if mode != remoteEndpointOnly {
+		token, err = catalogClientToken(target.entry)
 		if err != nil {
 			return ResolvedDaemon{}, false, err
 		}
 	}
 	if mode != remoteRequestTarget && !probeRemote(ctx, target.BaseURL) {
 		return ResolvedDaemon{}, false, fmt.Errorf("%w: %s (%s active_daemon %q)",
-			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.Name)
+			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.entry.Name)
 	}
 	resolved := resolvedForRunning(
-		DaemonSourceActiveDaemon, target.Name, remoteRunningDaemon(target.BaseURL, true),
+		DaemonSourceActiveDaemon, target.entry.Name, remoteRunningDaemon(target.BaseURL, true),
 	)
-	resolved.AllowInsecure = target.AllowInsecure
+	resolved.AllowInsecure = target.entry.AllowInsecure
 	if mode != remoteEndpointOnly {
-		resolved = resolved.withRemoteTargetAuth(token, target.AllowInsecure)
+		resolved = resolved.withRemoteTargetAuth(token, target.entry.AllowInsecure)
 	}
 	return resolved, true, nil
 }
@@ -362,16 +361,14 @@ func namedDaemonTargetForBaseURL(name, baseURL string) (namedDaemonTarget, error
 	if err != nil {
 		return namedDaemonTarget{}, err
 	}
-	for _, d := range cfg.Daemons {
-		if d.Name != name {
-			continue
-		}
-		if d.Local {
-			return namedDaemonTargetFromCatalog(d, strings.TrimRight(baseURL, "/"), true)
-		}
-		return namedDaemonTargetFromCatalog(d, "", false)
+	d, ok := cfg.CatalogDaemon(name)
+	if !ok {
+		return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 	}
-	return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
+	if d.Local {
+		return namedDaemonTargetFromCatalog(d, strings.TrimRight(baseURL, "/"), true)
+	}
+	return namedDaemonTargetFromCatalog(d, "", false)
 }
 
 func namedDaemonTargetFromCatalog(
@@ -388,20 +385,9 @@ func namedDaemonTargetFromCatalog(
 				daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
 		}
 	}
-	activeTarget := activeRemoteTarget{
-		Name:          daemon.Name,
-		BaseURL:       baseURL,
-		Token:         daemon.Token,
-		TokenEnv:      daemon.TokenEnv,
-		AllowInsecure: daemon.AllowInsecure,
-	}
-	token := daemon.Token
-	if local || !globalAuthTokenOverrideSet() {
-		var err error
-		token, err = resolveActiveRemoteTargetToken(activeTarget)
-		if err != nil {
-			return namedDaemonTarget{}, err
-		}
+	token, err := catalogClientToken(daemon)
+	if err != nil {
+		return namedDaemonTarget{}, err
 	}
 	target := namedDaemonTarget{
 		Name:          daemon.Name,
@@ -421,43 +407,17 @@ func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
 	if err != nil {
 		return activeRemoteTarget{}, false, err
 	}
-	if cfg.ActiveDaemon == "" {
+	entry, ok := cfg.ActiveCatalogDaemon()
+	if !ok || entry.Local {
 		return activeRemoteTarget{}, false, nil
 	}
-	for _, daemon := range cfg.Daemons {
-		if daemon.Name != cfg.ActiveDaemon {
-			continue
-		}
-		if daemon.Local {
-			return activeRemoteTarget{}, false, nil
-		}
-		baseURL, err := normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
-		if err != nil {
-			return activeRemoteTarget{}, false,
-				fmt.Errorf("%s daemon %q url %q: %w",
-					daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
-		}
-		return activeRemoteTarget{
-			Name:          daemon.Name,
-			BaseURL:       baseURL,
-			Token:         daemon.Token,
-			TokenEnv:      daemon.TokenEnv,
-			AllowInsecure: daemon.AllowInsecure,
-		}, true, nil
+	baseURL, err := normalizeRemoteURL(entry.URL, entry.AllowInsecure)
+	if err != nil {
+		return activeRemoteTarget{}, false,
+			fmt.Errorf("%s daemon %q url %q: %w",
+				daemonConfigSource(), entry.Name, remoteURLForError(entry.URL), err)
 	}
-	return activeRemoteTarget{}, false, nil
-}
-
-func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
-	if target.TokenEnv == "" {
-		return target.Token, nil
-	}
-	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
-	if token == "" {
-		return "", fmt.Errorf("daemon %q: token_env %q is unset or empty",
-			target.Name, target.TokenEnv)
-	}
-	return token, nil
+	return activeRemoteTarget{entry: entry, BaseURL: baseURL}, true, nil
 }
 
 // activeRemoteTargetAuthForBaseURL is the compatibility bridge for callers
@@ -475,7 +435,7 @@ func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAut
 	if target.BaseURL != strings.TrimRight(baseURL, "/") {
 		return TargetAuth{}, false, nil
 	}
-	token, err := resolveActiveRemoteTargetToken(target)
+	token, err := target.entry.ClientToken()
 	if err != nil {
 		return TargetAuth{}, false, err
 	}
@@ -485,7 +445,7 @@ func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAut
 	}
 	return TargetAuth{
 		Token:               token,
-		AllowInsecure:       target.AllowInsecure,
+		AllowInsecure:       target.entry.AllowInsecure,
 		TrustPrivateNetwork: auth.TrustPrivateNetwork,
 	}, true, nil
 }
@@ -533,7 +493,7 @@ func envAllowInsecure() bool {
 func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 	activeAllows := func() bool {
 		target, ok, err := activeRemoteFromConfig()
-		return err == nil && ok && target.BaseURL == baseURL && target.AllowInsecure
+		return err == nil && ok && target.BaseURL == baseURL && target.entry.AllowInsecure
 	}
 	if v := os.Getenv(remoteServerEnvVar); v != "" {
 		allow := envAllowInsecure()

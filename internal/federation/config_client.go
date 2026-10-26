@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -135,11 +134,8 @@ func NewHubClient(
 }
 
 func catalogToken(catalog config.CatalogDaemonConfig) (string, error) {
-	if catalog.TokenEnv == "" {
-		return strings.TrimSpace(catalog.Token), nil
-	}
-	token := strings.TrimSpace(os.Getenv(catalog.TokenEnv))
-	if token == "" {
+	token, err := catalog.ClientToken()
+	if err != nil {
 		return "", hubError(ErrHubAuthentication, "catalog authentication", 0)
 	}
 	return token, nil
