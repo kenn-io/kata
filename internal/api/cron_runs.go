@@ -26,6 +26,9 @@ type CronCapabilitiesResponse struct {
 	Body          struct {
 		ProjectUID    string   `json:"project_uid"`
 		EventFeatures []string `json:"event_features"`
+		// AgentsViewEnabled reports the serving daemon's [agentsview] opt-in.
+		// It gates presentation of recorded links only.
+		AgentsViewEnabled bool `json:"agentsview_enabled"`
 	}
 }
 

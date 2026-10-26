@@ -3993,3 +3993,56 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		})
 	}
 }
+
+// The serving home's [agentsview] block alone enables the cron presentation;
+// the client-side close transcript preference never does.
+func TestAgentsViewCronServingGate(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+		want         bool
+	}{
+		{name: "absent"},
+		{name: "false", config: "[agentsview]\nenabled = false\n"},
+		{name: "true", config: "[agentsview]\nenabled = true\n", want: true},
+		{name: "client transcript preference", config: "[close.transcript]\nenabled = true\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			home := setupKataEnv(t)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600))
+			t.Setenv("PORT", "")
+			t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+			origReporter := newTelemetryReporter
+			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+			t.Cleanup(func() { newTelemetryReporter = origReporter })
+			served := make(chan bool, 1)
+			origServer := newDaemonServer
+			newDaemonServer = func(cfg daemon.ServerConfig) *daemon.Server {
+				served <- cfg.AgentsViewEnabled
+				return origServer(cfg)
+			}
+			t.Cleanup(func() { newDaemonServer = origServer })
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, true) }()
+			select {
+			case got := <-served:
+				assert.Equal(t, tc.want, got)
+			case err := <-done:
+				t.Fatalf("daemon exited before serving: %v", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("daemon did not construct its server")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil && !errors.Is(err, context.Canceled) {
+					t.Errorf("daemon did not stop cleanly: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("daemon did not stop after context cancellation")
+			}
+		})
+	}
+}

@@ -1037,6 +1037,8 @@ components:
     CronCapabilitiesResponseBody:
       additionalProperties: true
       properties:
+        agentsview_enabled:
+          type: boolean
         event_features:
           items:
             type: string
@@ -1046,6 +1048,7 @@ components:
       required:
         - project_uid
         - event_features
+        - agentsview_enabled
       type: object
     CronDefinitionActionBody:
       additionalProperties: false

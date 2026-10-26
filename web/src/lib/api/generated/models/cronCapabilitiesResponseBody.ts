@@ -3,6 +3,7 @@
  */
 
 export interface CronCapabilitiesResponseBody {
+  agentsview_enabled: boolean
   event_features: string[]
   project_uid: string
   [key: string]: unknown

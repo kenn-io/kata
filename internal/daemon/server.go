@@ -60,10 +60,13 @@ type ServerConfig struct {
 	// DefaultTimezone applies to civil schedules without an issue-level
 	// timezone. Empty preserves the UTC default.
 	DefaultTimezone string
-	StartedAt       time.Time
-	Endpoint        *kitdaemon.Endpoint
-	Broadcaster     *EventBroadcaster
-	FederationWake  func()
+	// AgentsViewEnabled is the serving daemon's [agentsview] opt-in,
+	// advertised on cron capabilities. Zero keeps the integration off.
+	AgentsViewEnabled bool
+	StartedAt         time.Time
+	Endpoint          *kitdaemon.Endpoint
+	Broadcaster       *EventBroadcaster
+	FederationWake    func()
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore

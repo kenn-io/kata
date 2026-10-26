@@ -1232,8 +1232,9 @@ func (c CreateTokenResponseBody) Validate() error {
 }
 
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	AgentsviewEnabled bool     `json:"agentsview_enabled"`
+	EventFeatures     []string `json:"event_features" validate:"required"`
+	ProjectUID        string   `json:"project_uid" validate:"required"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
