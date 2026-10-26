@@ -275,8 +275,8 @@ func checkCronVisibilityProperties(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	projects := []int64{project.ID, other.ID}
 	// Jobs 0-2 belong to the first project and 3-5 to the second.
-	var definitions []cronVisibilityDefinition
-	var jobs []string
+	definitions := make([]cronVisibilityDefinition, 0, 2*3)
+	jobs := make([]string, 0, 2*3)
 	for _, projectID := range projects {
 		for range 3 {
 			definition := cronVisibilityJob(t, store, projectID)
