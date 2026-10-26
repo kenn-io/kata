@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 const transcriptSessionOne = "00000000-0000-4000-8000-000000000001"
@@ -48,20 +49,7 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			if enabled {
 				assert.Equal(t, map[string]any{"session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionOne}, payload["transcript"])
 				// Readers retrieve the same provenance without keeping the close receipt.
-				history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
-				var stream struct {
-					Events []struct {
-						Type    string         `json:"type"`
-						Payload map[string]any `json:"payload"`
-					} `json:"events"`
-				}
-				require.NoError(t, json.Unmarshal([]byte(history), &stream))
-				var provenance any
-				for _, event := range stream.Events {
-					if event.Type == "issue.closed" {
-						provenance = event.Payload["transcript"]
-					}
-				}
+				provenance := closeTranscriptFromHistory(t, env, dir)
 				assert.Equal(t, payload["transcript"], provenance)
 			} else {
 				assert.NotContains(t, payload, "transcript")
@@ -86,6 +74,12 @@ func TestCloseTranscript_ConfiguredSessionEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, stderr)
 
+	provenance := closeTranscriptFromHistory(t, env, dir)
+	assert.Equal(t, map[string]any{"session_id": transcriptSessionTwo, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionTwo}, provenance)
+}
+
+func closeTranscriptFromHistory(t *testing.T, env *testenv.Env, dir string) any {
+	t.Helper()
 	history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
 	var stream struct {
 		Events []struct {
@@ -100,7 +94,7 @@ func TestCloseTranscript_ConfiguredSessionEnv(t *testing.T) {
 			provenance = event.Payload["transcript"]
 		}
 	}
-	assert.Equal(t, map[string]any{"session_id": transcriptSessionTwo, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionTwo}, provenance)
+	return provenance
 }
 
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {

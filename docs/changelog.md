@@ -44,7 +44,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
   Codex links also require daemon HTTP API `0.33.0`; older daemons receive the
   close without the link. `KATA_TRANSCRIPT_AGENT` is no longer read. See
   [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
-
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. A daemon refuses to start while another daemon owns the same store, including one in another PID namespace whose socket it cannot see or one reaching the same SQLite file through another mount path, and waits up to 30 seconds for a replaced daemon to finish shutting down. A live record whose identity can't be judged still blocks startup. Daemons from earlier releases don't take the store lock, so upgrade every daemon that shares a store.
 - Attach screenshots and recordings to issues through the web UI or `kata docbank attachments`. Configure Docbank on the daemon to store the files. Images preview inline, and videos play in the issue. See [Issue attachments](guide/attachments.md).
