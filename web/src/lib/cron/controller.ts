@@ -251,11 +251,11 @@ export class CronController {
         task.again = false
         started = ++this.#clock
         await this.#readCatalog(this.#intent!, task, current)
+        if (current() && this.#selectionStarted < started) await this.#requestSelection(true)
       } while (task.again && current())
       if (!current()) return
       this.#catalog = undefined
       this.#catalogFresh = key
-      if (this.#selectionStarted < started) await this.#requestSelection(true)
     })()
     return task.done
   }
@@ -522,6 +522,7 @@ export class CronController {
       this.#set({
         detail,
         detailLoading: false,
+        detailError: undefined,
         peek: keepPeek ? this.state.peek : { status: issueUID ? 'loading' : 'no-issue' },
       })
       if (selection.kind === 'job') {

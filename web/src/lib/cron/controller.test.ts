@@ -691,6 +691,80 @@ describe('overlapping events', () => {
     }
   })
 
+  test('catalog revalidates the open drawer before a queued sweep starts', async () => {
+    const api = client()
+    const events: string[] = []
+    api.run = vi.fn(async (_project, uid) => {
+      events.push('drawer')
+      return run(uid)
+    })
+    const sweeps: (() => void)[] = []
+    let sweepCount = 0
+    const c = new CronController(api)
+    const selected = withRun()
+    const selection = selected.route.selection!
+    const pending: Promise<void>[] = []
+    try {
+      await c.load({ ...base, route: defaultCronRoute() })
+      await c.select(selection)
+      events.length = 0
+      api.summary.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            events.push(`catalog:${++sweepCount}`)
+            sweeps.push(() => resolve({ failed_runs_24h: 7, window_start: '', window_end: '' }))
+          }),
+      )
+
+      pending.push(c.sync(selected, false))
+      await vi.waitFor(() => expect(sweeps).toHaveLength(1))
+      pending.push(c.sync(selected, false))
+      sweeps.shift()!()
+
+      await vi.waitFor(() =>
+        expect(events.slice(0, 3)).toEqual(['catalog:1', 'drawer', 'catalog:2']),
+      )
+      sweeps.shift()!()
+      await Promise.all(pending)
+    } finally {
+      sweeps.splice(0).forEach((release) => release())
+      await Promise.all(pending)
+      c.destroy()
+    }
+  })
+
+  test('a successful queued detail retry clears its earlier error', async () => {
+    const api = client()
+    const c = new CronController(api)
+    let rejectFirst!: (error: Error) => void
+    api.run = vi
+      .fn<CronClient['run']>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject
+          }),
+      )
+      .mockResolvedValueOnce(run('r'))
+    const selection = { kind: 'run' as const, projectUID: 'p1', uid: 'r' }
+    let pending: Promise<void> | undefined
+    try {
+      await c.load({ ...base, route: defaultCronRoute() })
+      pending = c.select(selection)
+      await vi.waitFor(() => expect(rejectFirst).toBeTypeOf('function'))
+      await c.refresh()
+      rejectFirst(new CronReadError(503))
+
+      await vi.waitFor(() => expect(api.run).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(c.state.detail?.uid).toBe('r'))
+      expect(c.state.detailError).toBeUndefined()
+      await pending
+    } finally {
+      await pending
+      c.destroy()
+    }
+  })
+
   test('changed snapshots keep an open issue peek', async () => {
     vi.useFakeTimers()
     const api = client()
