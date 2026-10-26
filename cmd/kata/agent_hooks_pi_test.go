@@ -363,6 +363,29 @@ func TestPiNativeAttentionRetriesFailures(t *testing.T) {
 	}
 }
 
+func TestPiNativeAttentionCleansUpLostStartResponse(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Scope = "user"
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, "testdata/agent-hooks/pi-lost-start-response.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter and simulates a lost CLI response.
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Pi attention cleanup after a lost start response: %v\n%s", err, output)
+	}
+}
+
 func FuzzPiNativeOwnershipRejectsEdits(f *testing.F) {
 	f.Add("// changed\n")
 	f.Add("\x00")

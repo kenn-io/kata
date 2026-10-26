@@ -227,7 +227,10 @@ export default function kataHooks(pi) {
         const identity = mode === "start" ? await attentionIdentity(adapter, baseline) : baseline.identity;
         if (registry.active.get(baseline.cwd) !== baseline) return;
         if (mode === "start" && (!identity || kataAttentionHostSkip(identity))) return;
-        if (mode === "start") baseline.identity = identity;
+        if (mode === "start") {
+          baseline.identity = identity;
+          baseline.startAttempted = true;
+        }
         const succeeded = await attention(mode, baseline);
         if (registry.active.get(baseline.cwd) === baseline && succeeded) {
           if (mode === "start") {
@@ -235,6 +238,7 @@ export default function kataHooks(pi) {
             kataAttentionHostClaim(identity);
           } else {
             baseline.ended = true;
+            baseline.startAttempted = false;
             kataAttentionHostRelease(baseline.identity);
           }
         }
@@ -252,7 +256,7 @@ export default function kataHooks(pi) {
       const cwd = path.resolve(ctx.cwd);
       const previous = registry.active.get(cwd);
       const baseline = previous?.id === id && !previous.ended ? previous :
-        { id, cwd, executable: options.executable, ref: process.env.KATA_REF || "", started: false, ended: false };
+        { id, cwd, executable: options.executable, ref: process.env.KATA_REF || "", started: false, startAttempted: false, ended: false };
       if (baseline.started || baseline.pending) {
         if (baseline.started && !baseline.pending) {
           const rawMarker = process.env.KATA_ATTENTION_HOST;
@@ -287,7 +291,7 @@ export default function kataHooks(pi) {
         await pending.promise;
         if (pending.mode === "end") return;
       }
-      if (!baseline.started || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
+      if ((!baseline.started && !baseline.startAttempted) || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
       await transition("end", baseline, null);
     });
   }
