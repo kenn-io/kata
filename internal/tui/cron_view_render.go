@@ -333,11 +333,15 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 }
 
 func cronHelpRows(m Model) [][]helplayout.HelpItem {
+	return modalFirstHelpRows(m.modal, [][]helplayout.HelpItem{cronKeyRows(m)})
+}
+
+func cronKeyRows(m Model) []helplayout.HelpItem {
 	open, back := "open", "kata"
 	if len(m.cron.stack) > 0 {
 		open, back = "follow", "back"
 	}
-	rows := [][]helplayout.HelpItem{{
+	rows := []helplayout.HelpItem{
 		{Key: "j/k", Description: "move"},
 		{Key: "↵/l", Description: open},
 		{Key: "h/esc", Description: back},
@@ -345,11 +349,11 @@ func cronHelpRows(m Model) [][]helplayout.HelpItem {
 		{Key: "1-4", Description: "tabs"},
 		{Key: "?", Description: "help"},
 		{Key: "q", Description: "quit"},
-	}}
-	if len(m.cron.stack) == 0 {
-		rows[0] = slices.Insert(rows[0], 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
-	return modalFirstHelpRows(m.modal, rows)
+	if len(m.cron.stack) == 0 {
+		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
+	}
+	return rows
 }
 
 // cronNoticeRows reserves the rows appendNonListDetailExtras adds below the cron screen.
@@ -464,6 +468,6 @@ func cronHelp(m Model) string {
 		strings.Join(intro, "\n"),
 		"",
 	}
-	body = append(body, renderHelpGroup([]helpSection{{title: "Cron keys", rows: cronHelpRows(m)[0]}}))
+	body = append(body, renderHelpGroup([]helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}))
 	return strings.Join(body, "\n")
 }
