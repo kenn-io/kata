@@ -93,7 +93,8 @@
     justify-content: center;
     gap: var(--space-2);
     border: 1px solid var(--border-default);
-    border-radius: 6px;
+    /* The status stripe is a left inset. Square that edge so it stays straight. */
+    border-radius: 0 6px 6px 0;
     background: var(--node-status-bg, var(--bg-surface));
     color: var(--text-primary);
     padding: 9px 10px;
@@ -115,6 +116,7 @@
 
   .graph-task-node--selected {
     border-color: var(--accent-blue);
+    border-radius: 0 6px 6px 0;
     background: color-mix(in srgb, var(--accent-blue) 8%, var(--node-status-bg, var(--bg-surface)));
     box-shadow:
       inset 3px 0 0 var(--node-relation-accent, var(--node-status-accent, var(--border-default))),

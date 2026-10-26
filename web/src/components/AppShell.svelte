@@ -866,6 +866,8 @@
     flex-wrap: wrap;
     gap: 0.25rem 1rem;
     padding: 0.375rem 0.75rem;
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
     border-inline-start: 0.25rem solid var(--accent-yellow);
     background: var(--bg-connection);
     color: var(--text-connection);
