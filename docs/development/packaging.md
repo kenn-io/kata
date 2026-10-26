@@ -95,10 +95,11 @@ policy. Do not add distribution-specific telemetry behavior. Release builds set
 the existing public PostHog ingestion key at link time from `.goreleaser.yaml`
 for every release build variant, including the binary used by the container
 image. The Homebrew Core formula template supplies the same key when building
-from the release source archive. Update both release configurations to change
-that key. CI snapshots have
-development versions that disable reporting. Ordinary source builds remain
-keyless and send no telemetry. Users can opt out before starting the daemon:
+from the release source archive, and the Makefile `build` and `install` targets
+link it through `POSTHOG_PROJECT_KEY`. Update all three to change that key. CI
+snapshots have development versions that disable reporting. Plain `go build`
+source builds remain keyless and send no telemetry. Users can opt out before
+starting the daemon:
 
 ```sh
 export KATA_TELEMETRY_ENABLED=0

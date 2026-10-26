@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-23
+last_edited: 2026-10-26
 ---
 
 # Configuration
@@ -1255,8 +1255,9 @@ credentials send no action outcomes.
 Kata sends telemetry only from builds that carry a PostHog project key and a
 plain release version, `vX.Y.Z` or `X.Y.Z`. Release builds set the key at link
 time with `-X go.kenn.io/kit/telemetry/posthog.projectKey=<key>` from release
-configuration. Ordinary source builds and test binaries have no linked key and
-send nothing. Development and snapshot versions disable reporting even when a
+configuration, and the Makefile `build` and `install` targets set the same key.
+Plain `go build` and `go install` binaries and test binaries have no linked key
+and send nothing. Development and snapshot versions disable reporting even when a
 key is supplied. A present `CI` variable, even empty, disables telemetry.
 
 Disable telemetry with either setting:
