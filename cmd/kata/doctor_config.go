@@ -41,6 +41,12 @@ func doctorDaemonConfig() diagnostics.Check {
 	if _, err := config.ReadCreateConfig(); err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local [create] configuration is invalid", Fix: "Correct [create] in <KATA_HOME>/config.toml; default_priority must be an integer 0 through 4."}
 	}
+	if _, err := config.ReadTeammateConfig(); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local [teammate] configuration is invalid", Fix: "Correct [teammate].infer in <KATA_HOME>/config.toml; use model, harness or off."}
+	}
+	if _, err := teammateInferenceMode(); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local teammate inference environment override is invalid", Fix: "Set KATA_TEAMMATE_INFER to model, harness or off, or unset it."}
+	}
 	path, err := config.DaemonConfigPath()
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot resolve local configuration path", Fix: "Set KATA_HOME to the intended local data directory."}

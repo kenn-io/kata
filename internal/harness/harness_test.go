@@ -1,7 +1,9 @@
 package harness
 
 import (
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -123,6 +125,52 @@ func TestEnvKeys(t *testing.T) {
 	keys[0] = "corrupted"
 	if got := EnvKeys(); !slices.Equal(got, want) {
 		t.Fatalf("mutating returned keys changed registry: %q", got)
+	}
+}
+
+func TestStripEnvPlatformCaseMatching(t *testing.T) {
+	environ := []string{
+		"PATH=first", "CODEX_THREAD_ID=canonical", "codex_thread_id=lower",
+		"Pi_Model=mixed", "Kata_Harness_Session=contract", "kata_harness_model=lower-contract",
+		"codex_thread_id_extra=keep=verbatim", "Pi_Model_EXTRA=keep", "PATH=second",
+	}
+	windowsWant := []string{"PATH=first", "codex_thread_id_extra=keep=verbatim", "Pi_Model_EXTRA=keep", "PATH=second"}
+	posixWant := []string{
+		"PATH=first", "codex_thread_id=lower", "Pi_Model=mixed",
+		"Kata_Harness_Session=contract", "kata_harness_model=lower-contract",
+		"codex_thread_id_extra=keep=verbatim", "Pi_Model_EXTRA=keep", "PATH=second",
+	}
+	for _, tc := range []struct {
+		name            string
+		caseInsensitive bool
+		want            []string
+	}{
+		{"posix", false, posixWant},
+		{"windows", true, windowsWant},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripEnv(environ, tc.caseInsensitive); !slices.Equal(got, tc.want) {
+				t.Fatalf("stripEnv() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	want := posixWant
+	if runtime.GOOS == "windows" {
+		want = windowsWant
+	}
+	if got := StripEnv(environ); !slices.Equal(got, want) {
+		t.Fatalf("StripEnv() on %s = %q, want %q", runtime.GOOS, got, want)
+	}
+}
+
+// Retain the property's minimized Windows case: empty values, no unrelated env.
+func TestStripEnvWindowsEmptyCaseVariants(t *testing.T) {
+	var environ []string
+	for _, key := range EnvKeys() {
+		environ = append(environ, strings.ToLower(key)+"=", strings.ToLower(key[:1])+key[1:]+"=")
+	}
+	if got := stripEnv(environ, true); len(got) != 0 {
+		t.Fatalf("Windows retained empty harness keys: %q", got)
 	}
 }
 

@@ -470,6 +470,9 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
+	if _, present := issueMetadata["teammate"]; present && h.options.TeammateInferred && input.Teammate == nil {
+		handle = ""
+	}
 	issueMetadata, err = teammate.Stamp(issueMetadata, handle)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -619,6 +622,12 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	if err != nil {
 		return nil, CommentOutput{}, err
 	}
+	if input.ReplyTo != "" && h.options.TeammateInferred && input.Teammate == nil {
+		// Until inferred attribution travels separately from the comment body,
+		// keep a typed reply actor-addressed so inference cannot move request
+		// settlement to a different teammate inbox.
+		handle = ""
+	}
 	if handle != "" {
 		health, err := h.options.Client.Health(ctx)
 		if err != nil {
@@ -629,7 +638,13 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 			reported = strings.TrimSpace(*health.APISchemaVersion)
 		}
 		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.18.0") < 0 {
-			return nil, CommentOutput{}, fmt.Errorf("comment teammate attribution requires daemon API 0.18.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+			if !h.options.TeammateInferred || input.Teammate != nil {
+				return nil, CommentOutput{}, fmt.Errorf("comment teammate attribution requires daemon API 0.18.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+			}
+			handle = ""
+			if h.options.Warn != nil {
+				h.options.Warn("teammate: daemon too old for teammate attribution; writing without it")
+			}
 		}
 	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)

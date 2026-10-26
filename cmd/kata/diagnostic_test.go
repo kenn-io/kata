@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/harness"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -37,8 +40,62 @@ func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) {
 
 func TestWhoami_AgentIncludesActorAndSource(t *testing.T) {
 	resetFlags(t)
+	t.Setenv("KATA_TEAMMATE", "")
 	out := string(executeRoot(t, newRootCmd(), "--agent", "whoami", "--as", "tester"))
-	assert.Equal(t, "OK whoami actor=tester source=flag\n", out)
+	assert.Equal(t, "OK whoami actor=tester source=flag teammate=\"\" teammate_source=env harness=\"\"\n", out)
+}
+
+func TestWhoamiReportsTeammate(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTHOR", "alice")
+	t.Setenv("KATA_TEAMMATE_INFER", "model")
+	for _, key := range harness.EnvKeys() {
+		unsetTeammateEnv(t, key)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "00000000-0000-4000-8000-000000000001")
+	previous := detectTeammateHarness
+	t.Cleanup(func() { detectTeammateHarness = previous })
+	for _, explicitEmpty := range []bool{false, true} {
+		for _, format := range []string{"human", "json", "agent"} {
+			t.Run(fmt.Sprintf("%s/explicit_empty=%t", format, explicitEmpty), func(t *testing.T) {
+				resetFlags(t)
+				unsetTeammateEnv(t, "KATA_TEAMMATE")
+				wantHandle, wantSource, wantHarness := "claude", "inferred", "claude"
+				if explicitEmpty {
+					t.Setenv("KATA_TEAMMATE", "")
+					wantHandle, wantSource, wantHarness = "", "env", ""
+				}
+				calls := 0
+				detectTeammateHarness = func() (harness.Detection, harness.Outcome) {
+					calls++
+					return harness.Detect(os.LookupEnv, unavailableTeammateAncestry{}, "")
+				}
+				out := string(executeRoot(t, newRootCmd(), "whoami", "--format", format))
+				if explicitEmpty {
+					assert.Zero(t, calls, "explicit empty skips inference")
+				} else {
+					assert.Equal(t, 1, calls, "whoami must reuse the command's cached resolution")
+				}
+				if format == "json" {
+					var got map[string]any
+					require.NoError(t, json.Unmarshal([]byte(out), &got))
+					assert.Equal(t, map[string]any{
+						"kata_api_version": float64(1), "actor": "alice", "source": "env",
+						"teammate": wantHandle, "teammate_source": wantSource, "harness": wantHarness,
+					}, got)
+					return
+				}
+				want := "actor=alice source=env teammate=" + wantHandle + " teammate_source=" + wantSource + " harness=" + wantHarness + "\n"
+				if format == "agent" {
+					want = "OK whoami " + want
+					if explicitEmpty {
+						want = "OK whoami actor=alice source=env teammate=\"\" teammate_source=env harness=\"\"\n"
+					}
+				}
+				assert.Equal(t, want, out)
+			})
+		}
+	}
 }
 
 func TestHealth_PrintsSchemaVersion(t *testing.T) {

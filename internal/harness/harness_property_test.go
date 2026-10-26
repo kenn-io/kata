@@ -9,6 +9,35 @@ import (
 	"hegel.dev/go/hegel"
 )
 
+// Scrubbing removes canonical identity entries and preserves all other entries
+// in their original order, including duplicates, malformed entries and values.
+func TestPropertyStripEnvKeepsOthers(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		caseInsensitive := hegel.Draw(ht, hegel.Booleans())
+		var environ, want []string
+		for _, entry := range hegel.Draw(ht, hegel.Lists(hegel.Text())) {
+			entry = "OTHER_" + entry
+			environ = append(environ, entry)
+			want = append(want, entry)
+		}
+		for _, key := range EnvKeys() {
+			value := hegel.Draw(ht, hegel.Text())
+			environ = append(environ, key+"="+value, key+"=", key)
+			variants := []string{strings.ToLower(key) + "=" + value, strings.ToLower(key[:1]) + key[1:] + "=" + value}
+			environ = append(environ, variants...)
+			if !caseInsensitive {
+				want = append(want, variants...)
+			}
+			near := key + "_EXTRA=" + value
+			environ = append(environ, near, near)
+			want = append(want, near, near)
+		}
+		if got := stripEnv(environ, caseInsensitive); !slices.Equal(got, want) {
+			ht.Fatalf("StripEnv(%q) = %q, want %q", environ, got, want)
+		}
+	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+}
+
 // Spec property 5: unrelated keys cannot change any detection field or outcome.
 func TestPropertyIrrelevantEnvIgnored(t *testing.T) {
 	seeds := []map[string]string{

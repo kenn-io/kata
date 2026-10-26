@@ -66,7 +66,7 @@ func TestMuseManagedAttentionPreservesOperatorPolicyAndBundle(t *testing.T) {
 	require.Equal(t, "operator-hooks.json", settings["managed_hooks_path"])
 	require.Equal(t, "dark", settings["theme"])
 	allow := settings["managed_hooks_env_vars"].([]any)
-	for _, name := range []string{"CI_TOKEN", "KATA_REF", "KATA_SERVER", "KATA_DAEMON", "KATA_HOME", "KATA_AUTHOR", "KATA_TEAMMATE", "KATA_INBOX_USER", "KATA_AUTH_TOKEN", "KATA_SESSION_ID"} {
+	for _, name := range []string{"CI_TOKEN", "KATA_REF", "KATA_SERVER", "KATA_DAEMON", "KATA_HOME", "KATA_AUTHOR", "KATA_TEAMMATE", "KATA_TEAMMATE_INFER", "KATA_INBOX_USER", "KATA_AUTH_TOKEN", "KATA_SESSION_ID"} {
 		require.Contains(t, allow, name)
 	}
 	require.NotContains(t, allow, "KATA_WORKSPACE", "native cwd must stay authoritative")

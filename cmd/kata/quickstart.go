@@ -154,9 +154,11 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-9. Attribute swarm contributions and request attention without changing the
-   accountable actor or issue owner. The launcher supplies these variables to
-   this child process, not globally to sibling teammates:
+9. Agents are attributed automatically as <actor> / <harness>[.<model>]
+   without changing the accountable actor or issue owner. Named teammates
+   still set KATA_TEAMMATE; KATA_TEAMMATE= opts out;
+   inference never changes inbox or reply addressing. Check with kata whoami.
+   The launcher supplies these variables to each child process:
 
    export KATA_TEAMMATE=teammate-1
    export KATA_INBOX_USER=coordinator/teammate-1
@@ -172,7 +174,7 @@ Use kata as the shared issue ledger for this workspace.
    Comment creation stores the teammate in its dedicated field. New issue
    creation stores metadata.teammate. The author remains the accountable
    actor. --teammate overrides KATA_TEAMMATE, including an explicit empty
-   value that suppresses the inherited default. KATA_INBOX_USER only selects
+   value that suppresses both environment and inferred defaults. KATA_INBOX_USER only selects
    an inbox; it does not set comment or create attribution.
 
    Inbox reads cover open issues in the selected project by default.

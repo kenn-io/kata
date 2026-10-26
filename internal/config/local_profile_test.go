@@ -328,7 +328,7 @@ func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *tes
 }
 
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
-	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
+	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_TEAMMATE_INFER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI"} {
 		t.Run(key, func(t *testing.T) {
 			if key == "TELEMETRY_ENABLED" || key == "DO_NOT_TRACK" || key == "CI" {
 				t.Setenv(key, "")

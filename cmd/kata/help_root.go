@@ -128,7 +128,8 @@ command-specific details; --json prints the full JSON envelope for scripts.
 Errors go to stderr.
 Exit codes: 0 ok, 1 internal, 2 usage, 3 validation, 4 not found, 5 conflict,
 6 confirmation required, 7 daemon unavailable, 8 wait timeout.
-Environment: KATA_AUTHOR actor; KATA_TEAMMATE teammate attribution;
+Environment: KATA_AUTHOR actor; KATA_TEAMMATE teammate attribution (inferred
+from the coding-agent harness when unset; empty disables); KATA_TEAMMATE_INFER model|harness|off
 KATA_INBOX_USER inbox address (actor or actor/teammate); KATA_SERVER remote
 daemon URL; KATA_HOME local daemon state; KATA_AUTH_TOKEN daemon bearer token.`
 

@@ -485,10 +485,10 @@ func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) err
 		if err != nil {
 			return err
 		}
-		if selected == "" {
+		if selected.Handle == "" {
 			return nil
 		}
-		return setCronStringField(fields, "teammate", selected)
+		return setCronStringField(fields, "teammate", selected.Handle)
 	}
 	if !cmd.Flags().Changed("teammate") {
 		return nil
@@ -505,7 +505,7 @@ func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) err
 	if body != nil {
 		value = *body
 	}
-	if selected != value {
+	if selected.Handle != value {
 		return cronCLIValidation("body teammate and --teammate must match")
 	}
 	return nil

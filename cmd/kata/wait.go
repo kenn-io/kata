@@ -358,7 +358,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			if flags.As == "" && instance.Auth.Actor != "" {
 				actor = instance.Auth.Actor
 			}
-			tm, err := resolveTeammate(cmd)
+			tm, err := explicitTeammate(cmd)
 			if err != nil {
 				return err
 			}

@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Attribute coding-agent contributions automatically with a harness and,
+  when available, model label while keeping the accountable actor unchanged.
+  Inspect the result with `kata whoami`, override it with `KATA_TEAMMATE` or
+  `--teammate`, or use an empty value to opt out. Inference never changes inbox
+  or reply addressing. See [Teammate inference](reference/configuration.md#teammate-inference)
+  and [Teammate heads-up](workflows/agents.md#teammate-heads-up).
+
 - Attach Pi and OMP closing-session transcripts with daemon API `0.33.0`, and
   resolve nested harness context through process ancestry. Claude Code and
   Codex attachment remains compatible with API `0.26.0`. See

@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-23
+last_edited: 2026-10-26
 ---
 
 # Agent workflows
@@ -261,6 +261,14 @@ Muse hooks use launcher attention. Native project discovery for Hermes, Kimi
 CLI, Kimi Code and ZCode
 is unverified, so `--scope project` is rejected for them.
 
+Automatic teammate inference for ordinary Muse Code tool commands is not yet
+available in this version. Set `KATA_TEAMMATE=muse` explicitly for those
+commands. Consumer Muse's hookless instructions and shared HTTP MCP connector
+cannot infer the invoking client harness. A Muse-dedicated connector can use
+`kata mcp serve --http 127.0.0.1:7778 --teammate muse`; this attributes every
+client of that connector to the configured teammate. Check attribution with
+`kata whoami`; it does not set an inbox address.
+
 ### Inspect, customize and remove
 
 ```sh
@@ -431,9 +439,21 @@ for the supported forms and the
 
 ## Teammate heads-up
 
-A teammate is a temporary participant working under an existing actor's
-identity. Several teammates can comment on the same issue while recording
-who contributed each comment. A teammate can also create a tracked child issue:
+A teammate records a contributor under an existing actor's identity. Coding
+agents are attributed automatically as `<actor> / <harness>[.<model>]` when
+Kata recognizes their harness. The model suffix appears only when a model is
+available. Plain terminals and ambiguous harness contexts stay untagged.
+Check the current attribution with `kata whoami`.
+
+Named workers still set `KATA_TEAMMATE`. An explicit `--teammate` wins over
+that variable, which wins over inference. `KATA_TEAMMATE=` opts out; an empty
+`--teammate=''` opts out for one command. Configure `model`, `harness`, or
+`off` in [Teammate inference](../reference/configuration.md#teammate-inference).
+
+Inference never changes inbox or reply addressing: `notify` sender addresses,
+`wait --until reply`, inbox selection, and `show --inbound` defaults use only
+explicit teammate values. Named children need distinct teammate and inbox
+addresses supplied to each child process. For example:
 
 ```sh
 export KATA_TEAMMATE=teammate-1
@@ -446,9 +466,8 @@ kata --teammate='' comment abc4 --body "Coordinator summary"
 
 Comments store the optional teammate separately from their accountable
 author. New issues store `metadata.teammate` in the creation transaction.
-`--teammate` overrides the environment default, and an explicit empty value
-suppresses it. A comment on an existing issue does not change that issue's
-creating teammate.
+A comment on an existing issue does not change that issue's creating teammate.
+`KATA_INBOX_USER` selects an inbox; it does not set attribution.
 
 Upgrade every participating daemon before relying on federation to preserve
 teammate attribution. A teammate handle records who contributed; it does not

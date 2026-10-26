@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -405,7 +406,7 @@ func autoStartWithMigration(ctx context.Context, dataDir string, env []string, m
 	exited := make(chan error, 1)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            []string{"daemon", "start", "--foreground"},
-		Env:             env,
+		Env:             config.StripHarnessEnv(env),
 		RefuseEphemeral: true,
 		Exited:          func(err error) { exited <- err },
 	}

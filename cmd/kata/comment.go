@@ -77,11 +77,19 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 		if err != nil {
 			return err
 		}
-		handle, err := resolveTeammate(cmd)
+		resolution, err := resolveTeammate(cmd)
 		if err != nil {
 			return err
 		}
-		if err := preflightCommentTeammate(cmd, handle); err != nil {
+		if replyTo != "" && resolution.Source == "inferred" {
+			// Until inferred attribution travels separately from the comment
+			// body, keep a typed reply actor-addressed so inference cannot move
+			// request settlement to a different teammate inbox.
+			resolution.Handle = ""
+			resolution.Source = "none"
+		}
+		handle, err := preflightCommentTeammate(cmd, resolution)
+		if err != nil {
 			return err
 		}
 		project, issue, err := prepareIssueMutation(cmd, args[0], false)

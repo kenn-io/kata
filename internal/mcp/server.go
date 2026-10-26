@@ -36,10 +36,13 @@ type Options struct {
 	ProjectID         int64
 	ProjectName       string
 	Teammate          string
-	Actor             string
-	Version           string
-	StorageAdmin      *storageadmin.Admin
-	EnableTokenAdmin  bool
+	// TeammateInferred applies only to the startup default; tool overrides are explicit.
+	TeammateInferred bool
+	Warn             func(string)
+	Actor            string
+	Version          string
+	StorageAdmin     *storageadmin.Admin
+	EnableTokenAdmin bool
 	// ObserveToolCall must return immediately; nil disables activity reporting.
 	ObserveToolCall func()
 }

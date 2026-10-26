@@ -71,7 +71,7 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 			var senderTeammate string
 			if !clearRequest {
 				var err error
-				senderTeammate, err = resolveTeammate(cmd)
+				senderTeammate, err = explicitTeammate(cmd)
 				if err != nil {
 					return err
 				}

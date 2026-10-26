@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/harness"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -355,6 +356,47 @@ func TestDiscoverWebRuntime(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:27123", discovered.Origin)
 	assert.True(t, discovered.OriginStable)
 	assert.Equal(t, []string{"loopback", "sse"}, discovered.Capabilities)
+}
+
+func TestAutoStartEnvStripsHarnessKeys(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	for _, key := range harness.EnvKeys() {
+		t.Setenv(key, "inherited-identity")
+	}
+	t.Setenv("KATA_TEAMMATE", "worker")
+	t.Setenv("KATA_INBOX_USER", "operator/worker")
+	t.Setenv("CODEX_THREAD_ID_EXTRA", "keep=verbatim")
+	original := startDetachedDaemonForEnsure
+	t.Cleanup(func() { startDetachedDaemonForEnsure = original })
+	stop := fmt.Errorf("stop after capturing child environment")
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			var childEnv []string
+			startDetachedDaemonForEnsure = func(_ context.Context, opts kitdaemon.StartDetachedOptions) error {
+				childEnv = opts.Env
+				return stop
+			}
+			var err error
+			if profile {
+				errEnv := append(os.Environ(), "CODEX_THREAD_ID=duplicate")
+				_, err = autoStartWithEnvironment(t.Context(), dataDir, errEnv)
+			} else {
+				_, err = autoStart(t.Context(), dataDir)
+			}
+			require.ErrorIs(t, err, stop)
+			for _, entry := range childEnv {
+				key, _, _ := strings.Cut(entry, "=")
+				assert.NotContains(t, harness.EnvKeys(), key)
+			}
+			assert.Contains(t, childEnv, "KATA_TEAMMATE=worker")
+			assert.Contains(t, childEnv, "KATA_INBOX_USER=operator/worker")
+			assert.Contains(t, childEnv, "CODEX_THREAD_ID_EXTRA=keep=verbatim")
+			if !profile {
+				assert.Contains(t, childEnv, daemonruntime.AutoStartMarkerEnv+"=1")
+			}
+			assert.Equal(t, "inherited-identity", os.Getenv("CODEX_THREAD_ID"))
+		})
+	}
 }
 
 func TestAutoStartUsesKitDetachedStarter(t *testing.T) {

@@ -78,6 +78,7 @@ func newRootCmd() *cobra.Command {
 			if cmd.Flags().Changed("as") && flags.As == "" {
 				return &cliError{Message: "--as must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
 			}
+			_, _ = resolveTeammate(cmd)
 			return nil
 		},
 		// Cobra runs this only after the command's RunE succeeded.
@@ -91,7 +92,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "full JSON envelope for scripts")
 	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "agent output: an OK or ERR status line, then command-specific details (use in agent sessions)")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
-	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
+	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE, else inferred from the harness; empty suppresses both)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
 	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name (default: from .kata.toml at or above --workspace)")

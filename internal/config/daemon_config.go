@@ -632,7 +632,7 @@ func decodeConfigSection(name string, dst any) (string, error) {
 }
 
 func isClientConfigKey(key toml.Key) bool {
-	return len(key) > 0 && (key[0] == "display" || key[0] == "create")
+	return len(key) > 0 && (key[0] == "display" || key[0] == "create" || key[0] == "teammate")
 }
 
 func normalizeWebConfig(cfg *WebConfig, trustPrivateNetwork bool) error {

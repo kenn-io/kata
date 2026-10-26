@@ -118,9 +118,14 @@ stays unset.
 			initialPriority = defaults.DefaultPriority
 		}
 
-		handle, err := resolveTeammate(cmd)
+		resolution, err := resolveTeammate(cmd)
 		if err != nil {
 			return err
+		}
+		// Initial metadata is explicit, including an empty teammate value.
+		handle := resolution.Handle
+		if _, present := metaMap["teammate"]; present && resolution.Source == "inferred" {
+			handle = ""
 		}
 		initialMetadata, err := teammate.Stamp(metaMap, handle)
 		if err != nil {

@@ -67,7 +67,7 @@ func extraMuseHandlerTypesValid(handler map[string]any) bool {
 
 // Names, never values, are added to Muse's documented managed-only allowlist.
 // Workspace selection comes from native cwd, not an inherited workspace flag.
-var extraMuseAttentionEnv = []string{"KATA_REF", "KATA_HOME", "KATA_SERVER", "KATA_DAEMON", "KATA_AUTH_TOKEN", "KATA_AUTHOR", "KATA_TEAMMATE", "KATA_INBOX_USER", "KATA_SESSION_ID", "KATA_TRUST_PRIVATE_NETWORK", "KATA_ALLOW_INSECURE"}
+var extraMuseAttentionEnv = []string{"KATA_REF", "KATA_HOME", "KATA_SERVER", "KATA_DAEMON", "KATA_AUTH_TOKEN", "KATA_AUTHOR", "KATA_TEAMMATE", "KATA_TEAMMATE_INFER", "KATA_INBOX_USER", "KATA_SESSION_ID", "KATA_TRUST_PRIVATE_NETWORK", "KATA_ALLOW_INSECURE"}
 
 func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHookPlan, error) {
 	if opts.ManagedAttention && opts.Scope != "user" {

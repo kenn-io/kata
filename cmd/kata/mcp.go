@@ -69,7 +69,12 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			handle, err := resolveTeammate(command)
+			var resolution teammateResolution
+			if httpAddress != "" {
+				resolution.Handle, err = explicitTeammate(command)
+			} else {
+				resolution, err = resolveTeammate(command)
+			}
 			if err != nil {
 				return err
 			}
@@ -168,7 +173,9 @@ func newMCPServeCmd() *cobra.Command {
 				ProjectID:         projectID,
 				ProjectName:       projectName,
 				Actor:             actor,
-				Teammate:          handle,
+				Teammate:          resolution.Handle,
+				TeammateInferred:  resolution.Source == "inferred",
+				Warn:              func(message string) { _, _ = fmt.Fprintln(command.ErrOrStderr(), message) },
 				Version:           version.Version,
 				StorageAdmin:      storage,
 				EnableTokenAdmin:  enableTokenAdmin,

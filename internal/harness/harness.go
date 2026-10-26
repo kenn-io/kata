@@ -6,6 +6,8 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 // Detection carries the native session and unsanitized model identity.
@@ -34,6 +36,17 @@ type Env func(key string) (string, bool)
 // Ancestry locates the nearest candidate harness and its process generation.
 type Ancestry interface {
 	Nearest(candidates []string) (harness, generation string, ok bool)
+}
+
+// StripEnv returns a copy of environ without harness marker or contract keys.
+// Matching follows the platform's environment-key case sensitivity. Other
+// entries retain their original order and contents.
+func StripEnv(environ []string) []string {
+	return config.StripHarnessEnv(environ)
+}
+
+func stripEnv(environ []string, caseInsensitive bool) []string {
+	return config.FilterHarnessEnv(environ, caseInsensitive)
 }
 
 // Detect honors a canonical hook hint, otherwise resolving distinctive marker

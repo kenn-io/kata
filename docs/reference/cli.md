@@ -24,7 +24,7 @@ compactly; `kata --help` has their full descriptions.
 | `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
-| `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
+| `--teammate <handle>` | Set teammate attribution under the accountable actor. Defaults to `KATA_TEAMMATE`, else harness inference; an explicit empty value suppresses both. See [Teammate heads-up](../workflows/agents.md#teammate-heads-up). |
 | `--agent` | Emit an `OK` or `ERR` status line, then command-specific details. Use in agent sessions. |
 | `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
@@ -899,12 +899,15 @@ another. Supply `--idempotency-key` for a retryable write: identical requests
 return the original result, while changing the body, participant, target, or
 kind with that key is a conflict. Equivalent target spellings share a receipt.
 
-`KATA_TEAMMATE` supplies an optional default for comment creation;
-`--teammate` overrides it and `--teammate=''` suppresses it for one
-command. A nonempty teammate requires daemon API 0.18.0 or newer and is
-stored separately from the accountable author. The same default on `kata
-create` writes the string to the new issue's initial `metadata.teammate`.
-Commenting on an existing issue never changes that issue metadata.
+Comments can be attributed automatically to the invoking coding-agent harness.
+Set `KATA_TEAMMATE` for a named worker or override it with `--teammate`;
+an explicitly empty value opts out of both defaults. Explicit nonempty
+teammates require daemon API 0.18.0 or newer. Inferred attribution is best
+effort against older daemons. The teammate is stored separately from the
+accountable author; `kata create` also records its creating teammate in
+`metadata.teammate`. Commenting on an existing issue never changes that
+issue metadata. See [Teammate heads-up](../workflows/agents.md#teammate-heads-up)
+for inference and addressing rules.
 
 `kata comment edit` replaces the current comment body while preserving the
 comment UID, author, teammate, creation time, reply edge, and thread position.
@@ -1670,6 +1673,27 @@ kata tui [issue-ref]
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
 [TUI preferences](configuration.md#tui-preferences).
+
+### Resolved attribution
+
+`kata whoami` reports the client-resolved `actor`, actor `source`, `teammate`,
+`teammate_source`, and `harness` in human, `--json`, and `--agent` output.
+The actor order is `--as`, `KATA_AUTHOR`, `USER`, then git. Teammate attribution
+uses `--teammate`, then a present `KATA_TEAMMATE`, then
+[harness inference](configuration.md#teammate-inference). Empty explicit values
+disable the fallback.
+
+`teammate_source` is `flag`, `env`, `inferred`, `ambiguous`, `disabled`, or
+`none`. Empty teammates and harnesses remain present as empty values. The
+harness is empty when inference was not consulted, including explicit overrides.
+For example:
+
+```text
+actor=alice source=env teammate=claude teammate_source=inferred harness=claude
+```
+
+This command does not query daemon authentication. Use `kata status <ref>`
+for the effective actor and current owner on an authenticated daemon.
 
 ### Diagnosing setup
 

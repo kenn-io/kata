@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/harness"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -389,7 +390,9 @@ func TestCronCLIObservationTeammateSelection(t *testing.T) {
 		flag            []string
 		want            string
 		invalid         bool
+		inferred        bool
 	}{
+		{name: "inferred absent body", inferred: true, want: "pi"},
 		{name: "flag", flag: []string{"--teammate", "adapter"}, want: "adapter"},
 		{name: "environment", env: "adapter", want: "adapter"},
 		{name: "empty flag suppresses environment", env: "adapter", flag: []string{"--teammate", ""}},
@@ -405,6 +408,11 @@ func TestCronCLIObservationTeammateSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("KATA_AUTHOR", "worker")
 			t.Setenv("KATA_TEAMMATE", tc.env)
+			if tc.inferred {
+				unsetTeammateEnv(t, "KATA_TEAMMATE")
+				t.Setenv("KATA_TEAMMATE_INFER", "model")
+				fakeTeammateDetection(t, harness.Detection{Harness: "pi"}, harness.Detected)
+			}
 			env := testenv.New(t)
 			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 			require.NoError(t, err)

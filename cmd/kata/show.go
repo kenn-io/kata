@@ -104,7 +104,14 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 		if flags.As == "" && instance.Auth.Actor != "" {
 			actor = instance.Auth.Actor
 		}
+		handle, err := explicitTeammate(cmd)
+		if err != nil {
+			return err
+		}
 		opts.Selectors.Inbound = actor
+		if handle != "" {
+			opts.Selectors.Inbound += "/" + handle
+		}
 	}
 	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI, opts.Selectors)
 	if err != nil {

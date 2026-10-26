@@ -34,6 +34,7 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/githubsync"
+	"go.kenn.io/kata/internal/harness"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
@@ -1178,6 +1179,10 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 func runDaemonProcess(
 	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
 ) (returnErr error) {
+	// A daemon outlives its launcher; its workers must not inherit that agent.
+	for _, key := range harness.EnvKeys() {
+		_ = os.Unsetenv(key)
+	}
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
 		return err
