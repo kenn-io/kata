@@ -308,3 +308,75 @@ func TestRelaySharedAccessPurgedBareEvidenceForwarding(t *testing.T) {
 		})
 	}
 }
+
+func TestRelayFreshCheckpointOmitsCloseWithExcludedBareReferenceIdentity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRelayMatrixNode(t, backend, "root-member")
+			project, err := root.store.CreateProject(ctx, "linked-project")
+			require.NoError(t, err)
+			root.project = project
+			attr := db.WithRootAttribution(ctx, root.signer, root.account)
+			_, err = root.store.EnableProjectFederation(attr, project.ID, root.account)
+			require.NoError(t, err)
+
+			linkPeer, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{
+				ProjectID: project.ID, Author: root.account, Title: "Initial link peer",
+			})
+			require.NoError(t, err)
+			target, targetCreated, err := root.store.CreateIssue(attr, db.CreateIssueParams{
+				ProjectID: project.ID, Author: root.account, Title: "Evidence target",
+				Links: []db.InitialLink{{Type: "related", ToNumber: linkPeer.ID}},
+			})
+			require.NoError(t, err)
+			source, _, err := root.store.CreateIssue(attr, db.CreateIssueParams{
+				ProjectID: project.ID, Author: root.account, Title: "Closed source",
+			})
+			require.NoError(t, err)
+			_, closeEvents, changed, err := root.store.CloseIssueWithEvents(
+				attr, source.ID, "duplicate", root.account,
+				"This work is already represented by the linked evidence target.",
+				[]db.Evidence{{Type: "duplicate-of", IssueRef: target.ShortID}},
+			)
+			require.NoError(t, err)
+			require.True(t, changed)
+			var closed db.Event
+			for _, event := range closeEvents {
+				if event.Type == "issue.closed" {
+					closed = event
+				}
+			}
+			require.NotEmpty(t, closed.UID)
+
+			_, err = root.store.PurgeIssue(attr, linkPeer.ID, root.account, nil)
+			require.NoError(t, err)
+			hub := newRelayMatrixNode(t, backend, "hub-member")
+			leaf := newRelayMatrixNode(t, backend, "leaf-member")
+			enrollRelayMatrixReplica(t, root, hub, "closed-hub", true)
+			syncRelayMatrixNode(t, hub)
+
+			_, err = hub.store.IssueByUID(ctx, target.UID, db.IncludeDeletedYes)
+			require.NoError(t, err, "current entity state retains the linked evidence target")
+			installed, err := hub.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "closed", installed.Status, "current entity state retains the source's closed status")
+			_, err = hub.store.EventsByUIDs(ctx, hub.project.ID, []string{targetCreated.UID})
+			require.ErrorIs(t, err, db.ErrNotFound, "the target creation event is omitted with its purged initial-link peer")
+			_, err = hub.store.EventsByUIDs(ctx, hub.project.ID, []string{closed.UID})
+			require.ErrorIs(t, err, db.ErrNotFound, "a close whose bare evidence depends on omitted identity history is not forwarded")
+
+			enrollRelayMatrixReplica(t, hub, leaf, "closed-leaf", false)
+			downstream, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
+			require.NoError(t, err)
+			_, err = hub.store.(db.RelayResetStore).CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+			require.NoError(t, err, "the relay forwards a fresh checkpoint after omitting the dependent close history")
+			syncRelayMatrixNode(t, leaf)
+			leafSource, err := leaf.store.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "closed", leafSource.Status)
+			_, err = leaf.store.IssueByUID(ctx, linkPeer.UID, db.IncludeDeletedYes)
+			require.ErrorIs(t, err, db.ErrNotFound)
+		})
+	}
+}

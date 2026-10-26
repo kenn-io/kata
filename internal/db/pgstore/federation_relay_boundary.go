@@ -291,12 +291,22 @@ func relayEventProjectsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent)
 }
 
 func relayEventProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, bool, error) {
+	projects, _, usedPurgeFact, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return projects, usedPurgeFact, err
+}
+
+func relayEventShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]db.RelayShortIDReference, error) {
+	_, references, _, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return references, err
+}
+
+func relayEventProjectsWithShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, []db.RelayShortIDReference, bool, error) {
 	ctx = db.WithAuthorizedProjects(ctx, nil)
 	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return db.RelayEventReferencedProjectsWithPurgeFactsTx(ctx, tx, event, refs,
+	return db.RelayEventReferencedProjectsWithShortIDReferencesTx(ctx, tx, event, refs,
 		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
 		func(n int) string { return fmt.Sprintf("$%d", n) }, func(field string) string { return "(e.payload::jsonb->>'" + field + "')" },
 		func(uid string) (bool, error) {
@@ -308,7 +318,7 @@ func relayEventProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event d
 
 // A fresh checkpoint may omit a dangling reply edge only after the retained
 // reply event proves the target's owner is still in the same shared group.
-func relayCheckpointCanOmitPurgedCommentReferenceTx(ctx context.Context, tx *sql.Tx, sourceProjectID int64, sourceIssueUID, sourceCommentUID, targetCommentUID string) (bool, error) {
+func relayCheckpointCanOmitPurgedCommentReferenceTx(ctx context.Context, tx *sql.Tx, sourceProjectID int64, sourceIssueUID, sourceCommentUID, targetCommentUID string, lockGroup bool) (bool, error) {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM comments WHERE uid=$1)`, targetCommentUID).Scan(&exists); err != nil {
 		return false, err
@@ -336,7 +346,10 @@ func relayCheckpointCanOmitPurgedCommentReferenceTx(ctx context.Context, tx *sql
 	if targetProjectID == sourceProjectID {
 		return true, nil
 	}
-	return relaySharedProjectsTx(ctx, tx, sourceProjectID, targetProjectID, false, false)
+	if lockGroup {
+		return relaySharedProjectsTx(ctx, tx, sourceProjectID, targetProjectID, false, false)
+	}
+	return relaySharedProjectsReadOnlyTx(ctx, tx, sourceProjectID, targetProjectID, false, false)
 }
 
 func (d *Store) authorizeRelayEventTx(ctx context.Context, tx *sql.Tx, grant db.FederationEnrollment, event db.RemoteEvent) error {

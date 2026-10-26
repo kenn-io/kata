@@ -34,13 +34,62 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 // measurement path for a project with retained references to its shared peer.
 func RunRelayCheckpointSizeWithSharedLinks(t *testing.T, store db.Storage) {
 	t.Helper()
-	fixture := NewRelaySharedAccessFixture(t, store)
+	ctx := t.Context()
+	projects := [2]db.Project{}
+	for index, name := range []string{"checkpoint-source", "checkpoint-peer"} {
+		project, err := store.CreateProject(ctx, name)
+		require.NoError(t, err)
+		projects[index] = project
+	}
+	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projects[0].ID, Author: "member", Title: "Shared source",
+	})
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projects[0].ID, Author: "member", Title: "Reply target moved to the shared peer",
+	})
+	require.NoError(t, err)
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projects[1].ID, Author: "member", Title: "Shared endpoint",
+	})
+	require.NoError(t, err)
+	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: target.ID, Author: "member", Body: "Shared reply target", ValidateReply: true,
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: source.ID, Author: "member", Body: "Surviving reply",
+		ReplyToUID: comment.UID, ReplyKind: "reply", ValidateReply: true,
+	})
+	require.NoError(t, err)
+	target, err = store.IssueByID(ctx, target.ID)
+	require.NoError(t, err)
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: target.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID,
+		IfMatchRev: target.Revision, Actor: "member",
+	})
+	require.NoError(t, err)
+	_, err = store.PurgeIssue(ctx, moved.Issue.ID, "admin", nil)
+	require.NoError(t, err)
+	for _, project := range projects {
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: project.ID, Role: db.FederationRoleHub,
+			HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true,
+		})
+		require.NoError(t, err)
+	}
+	_, _, err = store.CreateLinkAndEvent(ctx,
+		db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: peer.ID, Type: "related", Author: "member"},
+		db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, Actor: "member",
+			FromUID: source.UID, ToUID: peer.UID, FromShortID: source.ShortID, ToShortID: peer.ShortID},
+	)
+	require.NoError(t, err)
 	measurer, ok := store.(interface {
 		RelayCheckpointSize(context.Context, int64) (db.RelayCheckpointSize, error)
 	})
 	require.True(t, ok, "storage must expose relay checkpoint size measurement")
-	size, err := measurer.RelayCheckpointSize(t.Context(), fixture.Projects[0].ID)
-	require.NoError(t, err)
+	size, err := measurer.RelayCheckpointSize(ctx, projects[0].ID)
+	require.NoError(t, err, "checkpoint sizing uses non-locking group discovery for a purged shared reply target")
 	require.Positive(t, size.Bytes)
 	require.Positive(t, size.Capacity)
 }

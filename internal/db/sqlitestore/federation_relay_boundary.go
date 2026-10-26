@@ -271,12 +271,22 @@ func relayEventProjectsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent)
 }
 
 func relayEventProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, bool, error) {
+	projects, _, usedPurgeFact, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return projects, usedPurgeFact, err
+}
+
+func relayEventShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]db.RelayShortIDReference, error) {
+	_, references, _, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return references, err
+}
+
+func relayEventProjectsWithShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, []db.RelayShortIDReference, bool, error) {
 	ctx = db.WithAuthorizedProjects(ctx, nil)
 	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return db.RelayEventReferencedProjectsWithPurgeFactsTx(ctx, tx, event, refs,
+	return db.RelayEventReferencedProjectsWithShortIDReferencesTx(ctx, tx, event, refs,
 		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
 		func(int) string { return "?" }, func(field string) string { return "json_extract(e.payload,'$." + field + "')" },
 		func(uid string) (bool, error) {

@@ -285,14 +285,21 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 // no longer exist. A fresh checkpoint cannot carry the root's purge facts that
 // would authorize those dangling references at a later relay hop.
 func relayCheckpointIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	return relayCheckpointIssueSnapshotPayloadWithGroupLock(ctx, tx, issue, true)
+}
+
+func relayCheckpointIssueSnapshotPayloadWithGroupLock(ctx context.Context, tx *sql.Tx, issue db.Issue, lockGroup bool) (string, error) {
 	metadata, err := db.RelayCheckpointMetadata(jsontext.Value(issue.Metadata), func(uid string) (bool, error) {
-		return relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, "", "", uid)
+		return relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, "", "", uid, lockGroup)
 	})
 	if err != nil {
 		return "", fmt.Errorf("sanitize checkpoint notification metadata: %w", err)
 	}
 	issue.Metadata = db.JSONBlob(string(metadata))
-	return federationIssueSnapshotPayloadWithComments(ctx, tx, issue, federationCheckpointIssueComments)
+	comments := func(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
+		return federationCheckpointIssueComments(ctx, tx, issue, lockGroup)
+	}
+	return federationIssueSnapshotPayloadWithComments(ctx, tx, issue, comments)
 }
 
 func federationIssueSnapshotPayloadWithComments(
@@ -402,6 +409,7 @@ func federationCheckpointIssueComments(
 	ctx context.Context,
 	tx *sql.Tx,
 	issue db.Issue,
+	lockGroup bool,
 ) ([]issueSnapshotComment, error) {
 	comments, err := federationIssueComments(ctx, tx, issue.ID)
 	if err != nil {
@@ -412,7 +420,7 @@ func federationCheckpointIssueComments(
 		if comment.ReplyToUID == "" {
 			continue
 		}
-		omit, err := relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, issue.UID, comment.CommentUID, comment.ReplyToUID)
+		omit, err := relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, issue.UID, comment.CommentUID, comment.ReplyToUID, lockGroup)
 		if err != nil {
 			return nil, err
 		}

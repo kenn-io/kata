@@ -203,11 +203,29 @@ func RelayEventReferencedProjectsTx(ctx context.Context, tx *sql.Tx, event Remot
 	return projects, err
 }
 
+// RelayShortIDReference identifies the issue and namespace resolved from a
+// short-ID reference in a retained event.
+type RelayShortIDReference struct {
+	IssueUID   string
+	ProjectUID string
+	ShortID    string
+}
+
 // RelayEventReferencedProjectsWithPurgeFactsTx also reports whether resolving
 // a reference required a retained purge fact. Fresh root checkpoints use this
 // to omit historical rows whose ownership proof will not travel with them.
 func RelayEventReferencedProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, refs []string, live func(string) (Issue, error), bind func(int) string, field func(string) string, purged func(string) (bool, error)) ([]int64, bool, error) {
+	projects, _, usedPurgeFact, err := RelayEventReferencedProjectsWithShortIDReferencesTx(ctx, tx, event, refs, live, bind, field, purged)
+	return projects, usedPurgeFact, err
+}
+
+// RelayEventReferencedProjectsWithShortIDReferencesTx also returns the
+// identities used to resolve short-ID references. A fresh checkpoint can use
+// these to ensure the corresponding pre-reference identity history travels in
+// the same selected bytes.
+func RelayEventReferencedProjectsWithShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event RemoteEvent, refs []string, live func(string) (Issue, error), bind func(int) string, field func(string) string, purged func(string) (bool, error)) ([]int64, []RelayShortIDReference, bool, error) {
 	var usedPurgeFact bool
+	var shortIDReferences []RelayShortIDReference
 	owner := func(query string, args ...any) (Issue, error) {
 		var issue Issue
 		var owners, subjects int
@@ -287,7 +305,14 @@ WHERE e.issue_uid IS NOT NULL AND e.type='issue.moved'
 		if matchedUID == "" {
 			return Issue{}, ErrNotFound
 		}
-		return byUID(matchedUID)
+		issue, err := byUID(matchedUID)
+		if err == nil {
+			reference := RelayShortIDReference{IssueUID: issue.UID, ProjectUID: projectUID, ShortID: shortID}
+			if !slices.Contains(shortIDReferences, reference) {
+				shortIDReferences = append(shortIDReferences, reference)
+			}
+		}
+		return issue, err
 	}
 	projectByName := func(originInstanceUID, name string) (string, error) {
 		var projectCount int
@@ -331,10 +356,22 @@ UNION SELECT project_id FROM project_purge_log WHERE origin_instance_uid=`+bind(
 		return owner(query, args...)
 	}
 	short := func(ref string) (Issue, error) {
-		return owner(`SELECT project_id,uid AS issue_uid FROM issues WHERE short_id=`+bind(1), ref)
+		issue, err := owner(`SELECT project_id,uid AS issue_uid FROM issues WHERE short_id=`+bind(1), ref)
+		if err != nil {
+			return issue, err
+		}
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=`+bind(1), issue.ProjectID).Scan(&projectUID); err != nil {
+			return Issue{}, err
+		}
+		reference := RelayShortIDReference{IssueUID: issue.UID, ProjectUID: projectUID, ShortID: ref}
+		if !slices.Contains(shortIDReferences, reference) {
+			shortIDReferences = append(shortIDReferences, reference)
+		}
+		return issue, nil
 	}
 	projects, err := RelayEventReferencedProjects(event, refs, NewEventIssueLookup(byUID, byRef), comment, short)
-	return projects, usedPurgeFact, err
+	return projects, shortIDReferences, usedPurgeFact, err
 }
 
 // RelayCheckpointMetadata drops only notification comment references that the
@@ -414,9 +451,7 @@ ORDER BY e.hlc_physical_ms,e.hlc_counter,e.origin_instance_uid,e.uid`, issueUID)
 	if err != nil {
 		return false, err
 	}
-	referenceClock := FoldClock{HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, OriginInstanceUID: event.OriginInstanceUID, EventUID: event.EventUID}
 	var history []FoldEvent
-	hasIdentity := false
 	for rows.Next() {
 		var project, eventType, originInstanceUID, eventUID string
 		var physicalMS, counter int64
@@ -430,12 +465,6 @@ ORDER BY e.hlc_physical_ms,e.hlc_counter,e.origin_instance_uid,e.uid`, issueUID)
 			IssueUID: issueUID, Type: eventType, HLCPhysicalMS: physicalMS,
 			HLCCounter: counter, Payload: jsontext.Value(payload),
 		}
-		if compareClock(clockOf(foldEvent), referenceClock) > 0 {
-			continue
-		}
-		if eventType == "issue.created" || eventType == "issue.snapshot" {
-			hasIdentity = true
-		}
 		history = append(history, foldEvent)
 	}
 	if err := rows.Err(); err != nil {
@@ -445,9 +474,75 @@ ORDER BY e.hlc_physical_ms,e.hlc_counter,e.origin_instance_uid,e.uid`, issueUID)
 	if err := rows.Close(); err != nil {
 		return false, err
 	}
-	if !hasIdentity {
-		return false, nil
+	return RelayShortIDHistoryMatchesAtEvent(RelayShortIDReference{
+		IssueUID: issueUID, ProjectUID: projectUID, ShortID: shortID,
+	}, event, history), nil
+}
+
+// RelayShortIDHistoryMatchesAtEvent verifies a short-ID reference using only
+// the supplied portable identity history at the reference event's clock.
+func RelayShortIDHistoryMatchesAtEvent(reference RelayShortIDReference, event RemoteEvent, history []FoldEvent) bool {
+	referenceClock := FoldClock{
+		HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+		OriginInstanceUID: event.OriginInstanceUID, EventUID: event.EventUID,
 	}
-	issue, ok := FoldEvents(history).Issues[issueUID]
-	return ok && issue.ProjectUID == projectUID && issue.ShortID == shortID, nil
+	selected := make([]FoldEvent, 0, len(history))
+	hasIdentity := false
+	for _, foldEvent := range history {
+		if foldEvent.IssueUID != reference.IssueUID || compareClock(clockOf(foldEvent), referenceClock) > 0 {
+			continue
+		}
+		if foldEvent.Type == "issue.created" || foldEvent.Type == "issue.snapshot" {
+			hasIdentity = true
+		}
+		selected = append(selected, foldEvent)
+	}
+	if !hasIdentity {
+		return false
+	}
+	issue, ok := FoldEvents(selected).Issues[reference.IssueUID]
+	return ok && issue.ProjectUID == reference.ProjectUID && issue.ShortID == reference.ShortID
+}
+
+// RelayFoldIdentityEventFromRemote retains only the fields needed to fold an
+// issue's project and short-ID history for checkpoint reference validation.
+func RelayFoldIdentityEventFromRemote(event RemoteEvent) (FoldEvent, error) {
+	issueUID := ""
+	if event.IssueUID != nil {
+		issueUID = *event.IssueUID
+	}
+	relatedIssueUID := ""
+	if event.RelatedIssueUID != nil {
+		relatedIssueUID = *event.RelatedIssueUID
+	}
+	fields := PayloadMap(event.Payload)
+	var payload []byte
+	var err error
+	if event.Type == "issue.moved" {
+		toProjectUID, _ := stringValue(fields["to_project_uid"])
+		toShortID, _ := stringValue(fields["to_short_id"])
+		payload, err = json.Marshal(struct {
+			ToProjectUID string `json:"to_project_uid"`
+			ToShortID    string `json:"to_short_id"`
+		}{ToProjectUID: toProjectUID, ToShortID: toShortID})
+	} else {
+		if issueUID == "" {
+			issueUID, _ = stringValue(fields["uid"])
+		}
+		shortID, _ := stringValue(fields["short_id"])
+		payload, err = json.Marshal(struct {
+			UID     string `json:"uid"`
+			ShortID string `json:"short_id"`
+		}{UID: issueUID, ShortID: shortID})
+	}
+	if err != nil {
+		return FoldEvent{}, err
+	}
+	return FoldEvent{
+		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
+		ProjectUID: event.ProjectUID, IssueUID: issueUID, RelatedIssueUID: relatedIssueUID,
+		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+		HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(EventTimestampFormat),
+		Payload: jsontext.Value(payload),
+	}, nil
 }
