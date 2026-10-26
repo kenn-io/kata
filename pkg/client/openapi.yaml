@@ -1048,6 +1048,66 @@ components:
         id:
           format: int64
           type: integer
+        last_run:
+          nullable: true
+          properties:
+            actor:
+              type: string
+            created_at:
+              format: date-time
+              type: string
+            definition_event_uid:
+              type: string
+            ended_at:
+              format: date-time
+              type: string
+            executor_label:
+              type: string
+            id:
+              format: int64
+              type: integer
+            issue_uid:
+              type: string
+            job_uid:
+              type: string
+            occurrence_key:
+              type: string
+            project_id:
+              format: int64
+              type: integer
+            revision:
+              format: int64
+              type: integer
+            started_at:
+              format: date-time
+              type: string
+            status:
+              type: string
+            summary:
+              $ref: "#/components/schemas/SummaryResponse"
+            teammate:
+              type: string
+            uid:
+              type: string
+            updated_at:
+              format: date-time
+              type: string
+            workflow_definition_event_uid:
+              type: string
+            workflow_uid:
+              type: string
+          required:
+            - id
+            - uid
+            - project_id
+            - actor
+            - status
+            - summary
+            - revision
+            - created_at
+            - updated_at
+          type: object
+          x-omitempty: false
         name:
           type: string
         project_id:
@@ -1063,6 +1123,7 @@ components:
           type: string
       required:
         - definition
+        - last_run
         - id
         - uid
         - project_id
@@ -1247,6 +1308,22 @@ components:
           type: array
       required:
         - runs
+      type: object
+    CronSummaryResponseBody:
+      properties:
+        failed_runs_24h:
+          format: int64
+          type: integer
+        window_end:
+          format: date-time
+          type: string
+        window_start:
+          format: date-time
+          type: string
+      required:
+        - failed_runs_24h
+        - window_start
+        - window_end
       type: object
     CronWorkflow:
       properties:
@@ -6940,7 +7017,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.32.0
+  version: 0.33.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8161,6 +8238,20 @@ paths:
           name: include_deleted
           schema:
             type: boolean
+        - explode: true
+          in: query
+          name: status
+          schema:
+            items:
+              enum:
+                - running
+                - succeeded
+                - failed
+                - cancelled
+                - unknown
+                - never_ran
+              type: string
+            type: array
       responses:
         "200":
           content:
@@ -8358,6 +8449,19 @@ paths:
           name: before_uid
           schema:
             type: string
+        - explode: true
+          in: query
+          name: status
+          schema:
+            items:
+              enum:
+                - running
+                - succeeded
+                - failed
+                - cancelled
+                - unknown
+              type: string
+            type: array
       responses:
         "200":
           content:
@@ -8425,6 +8529,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ObserveCronRunResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/summary:
+    get:
+      operationId: getCronSummary
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronSummaryResponseBody"
           description: OK
         default:
           content:

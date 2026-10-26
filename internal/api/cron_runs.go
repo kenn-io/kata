@@ -1,8 +1,10 @@
 package api
 
 import (
+	"slices"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -81,9 +83,22 @@ type ObserveCronRunResponse struct {
 // CronRunsRequest selects a bounded project-scoped history page.
 type CronRunsRequest struct {
 	CronProjectRequest
-	JobUID    string `query:"job_uid"`
-	Limit     int    `query:"limit" minimum:"0" maximum:"100"`
-	BeforeUID string `query:"before_uid"`
+	JobUID    string   `query:"job_uid"`
+	Limit     int      `query:"limit" minimum:"0" maximum:"100"`
+	BeforeUID string   `query:"before_uid"`
+	Status    []string `query:"status,explode" enum:"running,succeeded,failed,cancelled,unknown"`
+}
+
+// Resolve rejects explicit empty statuses that Huma otherwise treats as absent.
+func (*CronRunsRequest) Resolve(ctx huma.Context) []error { return rejectEmptyCronStatus(ctx) }
+
+// CronSummaryResponse reports failures within one captured daemon-clock window.
+type CronSummaryResponse struct {
+	Body struct {
+		FailedRuns24H int64     `json:"failed_runs_24h"`
+		WindowStart   time.Time `json:"window_start"`
+		WindowEnd     time.Time `json:"window_end"`
+	}
 }
 
 // CronRunsResponse returns evidence and an optional ordinary page cursor.
@@ -92,4 +107,12 @@ type CronRunsResponse struct {
 		Runs          []CronRun `json:"runs"`
 		NextBeforeUID string    `json:"next_before_uid,omitempty"`
 	}
+}
+
+func rejectEmptyCronStatus(ctx huma.Context) []error {
+	u := ctx.URL()
+	if slices.Contains(u.Query()["status"], "") {
+		return []error{NewError(400, "validation", "status must not be empty", "", nil)}
+	}
+	return nil
 }

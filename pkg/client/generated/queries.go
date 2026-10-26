@@ -147,17 +147,50 @@ func (d DetachProjectAliasQuery) Validate() error {
 }
 
 type ListCronJobsQuery struct {
-	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+	IncludeDeleted *bool                     `json:"include_deleted,omitempty"`
+	Status         []ListCronJobsQueryStatus `json:"status,omitempty"`
+}
+
+func (l ListCronJobsQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range l.Status {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Status[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ListCronRunsQuery struct {
-	JobUID    *string `json:"job_uid,omitempty"`
-	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
-	BeforeUID *string `json:"before_uid,omitempty"`
+	JobUID    *string                   `json:"job_uid,omitempty"`
+	Limit     *int64                    `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeUID *string                   `json:"before_uid,omitempty"`
+	Status    []ListCronRunsQueryStatus `json:"status,omitempty"`
 }
 
 func (l ListCronRunsQuery) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+	var errors runtime.ValidationErrors
+	if l.Limit != nil {
+		if err := typesValidator.Var(l.Limit, "omitempty,gte=0,lte=100"); err != nil {
+			errors = errors.Append("Limit", err)
+		}
+	}
+	for i, item := range l.Status {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Status[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ListCronWorkflowsQuery struct {
