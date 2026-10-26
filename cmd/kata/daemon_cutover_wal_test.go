@@ -23,6 +23,7 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 		occupiedEndpoint bool
 		ownedStore       bool
 		ownerAlias       bool
+		ownerDBLink      bool
 		wantError        string
 	}{
 		{name: "live local record", wantError: "daemon already running"},
@@ -33,6 +34,7 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 		// A container bind mount or sandbox can reach the same database through
 		// another path, which hashes to a different runtime namespace.
 		{name: "store owned through another path", ownedStore: true, ownerAlias: true, wantError: "another kata daemon owns this store"},
+		{name: "store owned through a database file symlink", ownedStore: true, ownerDBLink: true, wantError: "another kata daemon owns this store"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -54,14 +56,21 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, occupied.Close()) })
 				err = runDaemonWithListen(ctx, occupied.Addr().String(), false, false)
 			case tc.ownedStore:
-				ownerHome := home
-				if tc.ownerAlias {
+				ownerHome, ownerDB := home, path
+				switch {
+				case tc.ownerAlias:
 					ownerHome = filepath.Join(t.TempDir(), "alias")
+					ownerDB = filepath.Join(ownerHome, "kata.db")
 					if err := os.Symlink(home, ownerHome); err != nil {
 						t.Skipf("symlinks unavailable: %v", err)
 					}
+				case tc.ownerDBLink:
+					ownerDB = filepath.Join(t.TempDir(), "linked.db")
+					if err := os.Symlink(path, ownerDB); err != nil {
+						t.Skipf("symlinks unavailable: %v", err)
+					}
 				}
-				holdStoreOwnerLock(t, ownerHome)
+				holdStoreOwnerLock(t, ownerHome, ownerDB)
 				original := daemonOwnerLockWait
 				t.Cleanup(func() { daemonOwnerLockWait = original })
 				daemonOwnerLockWait = 200 * time.Millisecond
@@ -79,11 +88,11 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 }
 
 // holdStoreOwnerLock takes the store owner lock in a child process using
-// home as KATA_HOME, as a daemon in another PID namespace or mount would.
-func holdStoreOwnerLock(t *testing.T, home string) {
+// home and dbPath, as a daemon in another PID namespace or mount would.
+func holdStoreOwnerLock(t *testing.T, home, dbPath string) {
 	t.Helper()
 	child := exec.Command(os.Args[0], "-test.run=^TestStoreOwnerLockHelperProcess$") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(), "KATA_OWNER_LOCK_HELPER=1", "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"))
+	child.Env = append(os.Environ(), "KATA_OWNER_LOCK_HELPER=1", "KATA_HOME="+home, "KATA_DB="+dbPath)
 	stdin, err := child.StdinPipe()
 	require.NoError(t, err)
 	stdout, err := child.StdoutPipe()

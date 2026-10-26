@@ -16,12 +16,19 @@ const storeOwnerLockRetry = 50 * time.Millisecond
 // second daemon opens the same store. A SQLite lock sits beside the database
 // file: a container bind mount or sandbox can reach that file through another
 // path, which hashes to a different runtime namespace but the same lock file.
-// PostgreSQL has no file, so its lock lives in the runtime namespace.
+// Symlinks to an existing file resolve to its target for the same reason; a
+// database that does not exist yet keeps its configured path. Hard links to
+// one file are not unified. PostgreSQL has no file, so its lock lives in the
+// runtime namespace.
 func StoreOwnerLockPath(dataDir, dsn string) string {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return filepath.Join(dataDir, "store-owner.lock")
 	}
-	return strings.TrimPrefix(dsn, "sqlite://") + ".owner.lock"
+	path := strings.TrimPrefix(dsn, "sqlite://")
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return path + ".owner.lock"
 }
 
 // AcquireStoreOwnerLock waits until ctx ends to hold path exclusively. The
