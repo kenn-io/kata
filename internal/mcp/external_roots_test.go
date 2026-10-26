@@ -59,7 +59,7 @@ func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), externalRootToolNames...)
+	want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.skills"}, externalRootToolNames...)...)
 	require.ElementsMatch(t, want, toolNames(result.Tools))
 }
 
