@@ -931,3 +931,61 @@ test('older history loads during a background sweep and survives it', async () =
     c.destroy()
   }
 })
+
+test('a run that leaves the selected status disappears from refreshed history', async () => {
+  const api = client()
+  const at = (uid: string, time: string) =>
+    ({ uid, status: 'running', created_at: time }) as CronRun
+  api.runs.mockResolvedValue({
+    runs: [at('newer', '2026-10-25T00:00:00Z'), at('older', '2026-10-24T00:00:00Z')],
+  })
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: { ...defaultCronRoute(), tab: 'runs' as const, statuses: ['running'] },
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    api.runs.mockResolvedValue({ runs: [at('newer', '2026-10-25T00:00:00Z')] })
+    await c.sync(intent, false)
+    expect(c.state.projects[0]?.runs.map((run) => run.uid)).toEqual(['newer'])
+  } finally {
+    c.destroy()
+  }
+})
+
+test('catalog updates finish while a drawer revalidation is delayed', async () => {
+  const api = client()
+  const held: (() => void)[] = []
+  let calls = 0
+  api.run = vi.fn((_project, uid) => {
+    calls++
+    const value = { uid, created_at: '', summary: { version: 1 } } as CronRun
+    if (calls === 1) return Promise.resolve(value)
+    return new Promise<CronRun>((resolve) => held.push(() => resolve(value)))
+  })
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: {
+      ...defaultCronRoute(),
+      selection: { kind: 'run' as const, projectUID: 'p1', uid: 'r' },
+    },
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    const summaries = api.summary.mock.calls.length
+    await c.sync(intent, false)
+    await vi.waitFor(() => expect(held).toHaveLength(1))
+    await c.sync(intent, false)
+    expect(api.summary.mock.calls.length).toBe(summaries + 2)
+    expect(c.state.loading).toBe(false)
+    for (const release of held.splice(0)) release()
+  } finally {
+    c.destroy()
+  }
+})

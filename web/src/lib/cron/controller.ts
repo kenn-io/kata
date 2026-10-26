@@ -150,6 +150,8 @@ export class CronController {
   /** Keys the published rows' runs, jobs and workflows were read under. */
   #rowKeys: { runs?: string; jobs?: string; workflows?: string } = {}
   #more: AbortController | undefined
+  /** The drawer revalidation the latest catalog read started. */
+  #revalidation: Promise<void> = Promise.resolve()
   #selection: SelectionTask | undefined
   /** Selection key whose detail is on screen or loading. */
   #selectionKey = ''
@@ -208,7 +210,9 @@ export class CronController {
     return this.#requestCatalog(intent, !unchangedSnapshot)
   }
   async refresh() {
-    if (this.#intent) await this.#requestCatalog(this.#intent, true)
+    if (!this.#intent) return
+    await this.#requestCatalog(this.#intent, true)
+    await this.#revalidation
   }
   async invalidate() {
     await this.refresh()
@@ -254,7 +258,10 @@ export class CronController {
         task.again = false
         started = ++this.#clock
         await this.#readCatalog(this.#intent!, task, current)
-        if (current() && this.#selectionStarted < started) await this.#requestSelection(true)
+        // The drawer revalidates on its own task; a slow detail read must not
+        // hold the catalog, or later snapshots and Refresh would queue behind it.
+        if (current() && this.#selectionStarted < started)
+          this.#revalidation = this.#requestSelection(true)
       } while (task.again && current())
       if (!current()) return
       this.#catalog = undefined
@@ -366,22 +373,19 @@ export class CronController {
     if (!current()) return
     rows.sort((a, b) => a.project.name.localeCompare(b.project.name))
     if (keep.runs) {
-      // Older pages loaded while this sweep ran stay, with their cursor.
+      // Pages that Load more added while this sweep ran stay, with their
+      // cursor. Rows on screen before the sweep are replaced by its answer, so
+      // a run that left the selected statuses disappears.
       const shown = new Map(this.state.projects.map((row) => [row.project.uid, row]))
       for (const row of rows) {
         const earlier = shown.get(row.project.uid)
         if (!earlier || row.error) continue
         row.loadingMore = earlier.loadingMore ?? false
-        const oldest = oldestRun(row.runs),
-          before = oldestRun(earlier.runs)
-        if (!before || (oldest && runOrder(before, oldest) <= 0)) continue
-        const seen = new Set(row.runs.map((run) => run.uid))
-        row.runs = [
-          ...row.runs,
-          ...earlier.runs.filter(
-            (run) => !seen.has(run.uid) && (!oldest || runOrder(run, oldest) > 0),
-          ),
-        ].sort(runOrder)
+        const before = previous.get(row.project.uid)
+        const known = new Set([...(before?.runs ?? []), ...row.runs].map((run) => run.uid))
+        const paged = earlier.runs.filter((run) => !known.has(run.uid))
+        if (!paged.length) continue
+        row.runs = [...row.runs, ...paged].sort(runOrder)
         row.nextBeforeUID = earlier.nextBeforeUID
       }
     }
