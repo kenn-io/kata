@@ -415,7 +415,7 @@ func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error)
 	}
 	timeout := hc.Timeout
 	hc.Timeout = 0
-	hc.Transport = daemonErrorTransport{RoundTripper: transport, origin: origin, timeout: timeout}
+	hc.Transport = teammate.WrapTransport(baseURL, daemonErrorTransport{RoundTripper: transport, origin: origin, timeout: timeout})
 	checkRedirect := hc.CheckRedirect
 	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		var err error
@@ -451,10 +451,6 @@ func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
 	request := req.Clone(state.ctx)
-	if err := teammate.EditRequest(request.Context(), request, t.origin.String()); err != nil {
-		state.stop()
-		return nil, &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
-	}
 	resp, err := t.RoundTripper.RoundTrip(request)
 	if resp != nil && resp.Body != nil {
 		resp.Body = &daemonResponseBody{ReadCloser: resp.Body, state: state, selected: selected}

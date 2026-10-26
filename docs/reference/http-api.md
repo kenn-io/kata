@@ -249,9 +249,12 @@ The CLI freezes explicit `--teammate` or `KATA_TEAMMATE` selection for the
 command. Go callers can use `client.WithTeammate(ctx, handle)`; MCP issue
 mutation tools accept an optional `teammate`, with an empty string overriding
 the startup default. Clients send the header only on mutations to the selected
-daemon origin. No harness detection is involved.
+daemon origin. No harness detection is involved. Invalid explicit CLI flags
+are validation errors. An invalid environment default does not block actions
+that do not consume explicit teammate identity; those requests carry no
+contribution.
 
-Native user issue and live claim events retain the value as
+Native user issue and existing live claim events retain the value as
 `attributed_teammate` in their raw JSON payload before hashing. Full and
 projectable scoped issue history preserve this display field. It does not
 change the accountable actor, explicit comment `teammate`, issue metadata,

@@ -75,7 +75,11 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
-			_, _ = resolveTeammate(cmd) // Freeze errors too; reads do not consume attribution.
+			// Freeze defaults and errors for identity consumers, but reject an
+			// invalid explicitly supplied flag as CLI validation before transport.
+			if _, err := resolveTeammate(cmd); err != nil && cmd.Flags().Changed("teammate") {
+				return err
+			}
 			if cmd.Flags().Changed("as") && flags.As == "" {
 				return &cliError{Message: "--as must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
 			}

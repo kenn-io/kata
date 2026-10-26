@@ -222,21 +222,12 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 		opts.httpClient = http.DefaultClient
 	}
 	normalizedBaseURL := strings.TrimRight(baseURL, "/")
-	// Own the redirect policy wrapper without mutating a caller's shared client.
+	// Own the contribution transport without mutating the caller's client or
+	// redirect policy. The transport prepares every hop, including redirects.
 	httpClient := *opts.httpClient
-	previousRedirect := httpClient.CheckRedirect
-	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if previousRedirect != nil {
-			if err := previousRedirect(req, via); err != nil {
-				return err
-			}
-		} else if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
-		}
-		return teammate.EditRequest(req.Context(), req, normalizedBaseURL)
-	}
+	httpClient.Transport = teammate.WrapTransport(normalizedBaseURL, httpClient.Transport)
 	opts.httpClient = &httpClient
-	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient, origin: normalizedBaseURL})}
+	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
 	for _, editor := range opts.requestEditors {
 		generatedOpts = append(generatedOpts, runtime.WithRequestEditorFn(editor))
 	}
@@ -262,14 +253,9 @@ func internalOpts(opts TransportOptions) internalclient.Opts {
 
 type contextDoer struct {
 	client *http.Client
-	origin string
 }
 
 func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	req = req.Clone(ctx)
-	if err := teammate.EditRequest(ctx, req, d.origin); err != nil {
-		return nil, err
-	}
 	client := d.client
 	if client == nil {
 		client = http.DefaultClient
