@@ -136,7 +136,7 @@ func TestMousePersistentSearch(t *testing.T) {
 		if m.layout == splitlayout.Split {
 			row = 2
 		}
-		m, _ = updateModel(m, mouseLeftClick(4, row))
+		m, _ = updateModel(m, mouseLeftClick(0, row))
 		if m.input.kind != inputSearchBar {
 			t.Fatalf("width %d: click did not open search", width)
 		}
