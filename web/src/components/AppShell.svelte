@@ -646,7 +646,7 @@
       </div>
     {/snippet}
   </TopBar>
-  {#if selectedProject && !credentialRoute && !loading && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+  {#if selectedProject && !credentialRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
     {/key}

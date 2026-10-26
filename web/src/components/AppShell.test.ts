@@ -206,6 +206,29 @@ describe('AppShell', () => {
     },
   )
 
+  test('keeps project sync in place while the snapshot reloads after navigation', async () => {
+    setGeneratedFetch(vi.fn(async () => Response.json({ statuses: [] })))
+    const current = snapshot()
+    const props = {
+      route: {
+        kind: 'kata' as const,
+        projectUID: current.catalog[0]!.project.uid,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps(),
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    }
+    const view = render(AppShell, { props })
+    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+
+    await view.rerender({ ...props, loading: true })
+    expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
+  })
+
   test('renders the workspace header through the kit-ui top bar', () => {
     const { container } = render(AppShell, {
       props: {
