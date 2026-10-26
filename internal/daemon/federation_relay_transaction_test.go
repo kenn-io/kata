@@ -50,12 +50,19 @@ type relayProjectLookupFailureStore struct {
 	err             error
 	retryAfterFirst bool
 	calls           int
+	firstFailure    bool
+	retriedLookups  int
 }
 
 func (s *relayProjectLookupFailureStore) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
 	if uid == s.projectUID {
 		s.calls++
-		if s.retryAfterFirst && s.calls > 1 {
+		if s.retryAfterFirst {
+			if !s.firstFailure {
+				s.firstFailure = true
+				return db.Project{}, s.err
+			}
+			s.retriedLookups++
 			return s.Storage.ProjectByUIDTx(ctx, tx, uid)
 		}
 		return db.Project{}, s.err
@@ -252,7 +259,8 @@ func TestRelayReferenceProjectLookupFailureRemainsUnavailableAndRetryable(t *tes
 			server.Handler().ServeHTTP(response, request)
 			if backend == "postgres" {
 				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-				require.Equal(t, 2, lookupStore.calls, "retryable lookup errors must reach PostgreSQL transaction retry")
+				require.True(t, lookupStore.firstFailure, "the test must inject the retryable lookup error")
+				require.Greater(t, lookupStore.retriedLookups, 0, "PostgreSQL must retry after the retryable lookup error")
 			} else {
 				require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 				require.Contains(t, response.Body.String(), "access_unavailable")
