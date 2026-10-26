@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -4754,4 +4755,53 @@ func TestSyncFederationOnceMaterializesOnlyTouchedIssue(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, got, folded, "incremental issue state must match a full fold")
 	assertFoldedIssuesMatch(t, hub.DB, spoke.DB, p.ID, replica.ID, meta.ReplayHorizonEventID-1)
+}
+
+// The exported push phase needs push authority only. In particular, it cannot
+// accidentally start the runner's pull phase after acknowledging local parents.
+func TestPushDirectSpokeWithPushOnlyEnrollment(t *testing.T) {
+	ctx := t.Context()
+	hub, spoke := testenv.New(t), testenv.New(t)
+	project := createFederatedHubForPush(t, hub)
+	enrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "push-only-token", SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "push", Actor: "tester"})
+	require.NoError(t, err)
+	replica, err := spoke.DB.CreateProjectWithUID(ctx, "spoke-project", project.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, PushEnabled: true, Enabled: true, Actor: "tester", ReplayHorizonEventID: 1})
+	require.NoError(t, err)
+	parent, event, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "Local parent", Author: "tester"})
+	require.NoError(t, err)
+	client, err := NewClient(ctx, hub.URL, enrollment.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	var polls atomic.Int32
+	transport := client.client.Transport
+	client.client.Transport = pushOnlyTestTransport(func(request *http.Request) (*http.Response, error) {
+		if request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/federation/events") {
+			polls.Add(1)
+		}
+		return transport.RoundTrip(request)
+	})
+	release, err := federationcoord.BeginSync(ctx, federationcoord.Key(spoke.DB.InstanceUID(), replica.ID), spoke.DB, replica.ID)
+	require.NoError(t, err)
+	defer release()
+	require.NoError(t, PushDirectSpoke(ctx, spoke.DB, binding, project.ID, client))
+	// Replaying the original binding re-submits the already acknowledged batch.
+	require.NoError(t, PushDirectSpoke(ctx, spoke.DB, binding, project.ID, client))
+	require.Zero(t, polls.Load())
+	mirrored, err := hub.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, parent.Title, mirrored.Title)
+	require.NoError(t, spoke.DB.AdvanceFederationPushCursor(ctx, replica.ID, event.ID-1))
+	current, err := spoke.DB.FederationBindingByProject(ctx, replica.ID)
+	require.NoError(t, err)
+	require.Equal(t, event.ID, current.PushCursorEventID)
+	events, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, IssueUID: parent.UID, Types: []string{"issue.created"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+}
+
+type pushOnlyTestTransport func(*http.Request) (*http.Response, error)
+
+func (f pushOnlyTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }

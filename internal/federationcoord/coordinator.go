@@ -4,6 +4,7 @@ package federationcoord
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 )
@@ -35,6 +36,39 @@ func BeginSync(
 			gate.RUnlock()
 			return nil, err
 		}
+	}
+	return coordinatedRelease(backendRelease, gate.RUnlock), nil
+}
+
+// ErrBusy asks an interactive caller to retry after an endpoint change finishes.
+var ErrBusy = errors.New("federation endpoint is busy; retry shortly")
+
+// TryBeginSync admits shared transport without waiting behind a local rebind.
+func TryBeginSync(ctx context.Context, key string, backend any, projectID int64) (func(), error) {
+	gate := gateFor(key)
+	if !gate.TryRLock() {
+		return nil, ErrBusy
+	}
+	backendRelease := func() {}
+	if locker, ok := backend.(interface {
+		TryAcquireFederationProjectSharedLock(context.Context, int64) (func(), bool, error)
+	}); ok {
+		release, acquired, err := locker.TryAcquireFederationProjectSharedLock(ctx, projectID)
+		if err != nil {
+			gate.RUnlock()
+			return nil, err
+		}
+		if !acquired {
+			gate.RUnlock()
+			return nil, ErrBusy
+		}
+		backendRelease = release
+	} else if _, ok := backend.(interface {
+		AcquireFederationProjectSharedLock(context.Context, int64) (func(), error)
+	}); ok {
+		// A backend with only blocking admission cannot satisfy interactive writes.
+		gate.RUnlock()
+		return nil, ErrBusy
 	}
 	return coordinatedRelease(backendRelease, gate.RUnlock), nil
 }
