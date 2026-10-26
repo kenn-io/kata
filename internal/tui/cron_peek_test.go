@@ -230,11 +230,16 @@ func corePeekReplyFrom(t *testing.T, cmd tea.Cmd) cronPeekMsg {
 	}
 }
 
-// A live change to the peeked issue refreshes the selected run's context in
-// place, and a reply read before a later change never replaces newer context.
+// A live change to the peeked issue, or a reset or reconnect that may have
+// missed one, refreshes the selected run's context in place, and a reply read
+// before a later change never replaces newer context.
 func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
+	signals := map[string]tea.Msg{"reset": resetRequiredMsg{}, "reconnect": sseStatusMsg{state: sseConnected}}
 	for _, eventType := range []string{"issue.commented", "issue.comment_edited", "issue.updated"} {
-		t.Run(eventType, func(t *testing.T) {
+		signals[eventType] = eventReceivedMsg{eventType: eventType, projectID: 7, projectUID: "project-uid", issueUID: "issue-a", commentUID: "comment-a"}
+	}
+	for name, signal := range signals {
+		t.Run(name, func(t *testing.T) {
 			var mu sync.Mutex
 			title, body := "Example issue", "first comment marker"
 			h := newCorePeekHost(t, func(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +259,7 @@ func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
 				mu.Lock()
 				title, body = nextTitle, nextBody
 				mu.Unlock()
-				_, cmd := h.Update(eventReceivedMsg{eventType: eventType, projectID: 7, projectUID: "project-uid", issueUID: "issue-a", commentUID: "comment-a"})
+				_, cmd := h.Update(signal)
 				return cmd
 			}
 			selected := func() string {
@@ -269,16 +274,23 @@ func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
 			run := selected()
 
 			// An event for another issue leaves the peek and its read alone.
-			generation := h.peekGeneration
-			h.Update(eventReceivedMsg{eventType: eventType, projectID: 7, projectUID: "project-uid", issueUID: "issue-b"})
-			if h.peekGeneration != generation {
-				t.Fatal("an unrelated issue event replaced the peek read")
+			if event, ok := signal.(eventReceivedMsg); ok {
+				generation := h.peekGeneration
+				event.issueUID = "issue-b"
+				h.Update(event)
+				if h.peekGeneration != generation {
+					t.Fatal("an unrelated issue event replaced the peek read")
+				}
 			}
 
 			older := corePeekReplyFrom(t, change("Renamed issue", "second comment marker"))
 			newer := corePeekReplyFrom(t, change("Retitled issue", "third comment marker"))
-			if text := ansi.Strip(h.View().Content); !strings.Contains(text, "first comment marker") || strings.Contains(text, "Loading issue") {
-				t.Fatalf("refresh hid the visible peek:\n%s", text)
+			// A reset or reconnect replaces cached cron evidence, so only an
+			// issue change keeps the old context visible meanwhile.
+			if _, ok := signal.(eventReceivedMsg); ok {
+				if text := ansi.Strip(h.View().Content); !strings.Contains(text, "first comment marker") || strings.Contains(text, "Loading issue") {
+					t.Fatalf("refresh hid the visible peek:\n%s", text)
+				}
 			}
 			h.Update(newer)
 			for _, late := range []cronPeekMsg{older, first, older} {
