@@ -268,3 +268,24 @@ test('AgentsViewCron coalesced snapshot syncs re-read the capability once per re
   }
   controller.destroy()
 })
+
+test('AgentsViewCron a refresh during the history read reruns it once with the latest capability', async () => {
+  const api = client(true)
+  let release!: () => void
+  api.issueHistory.mockImplementationOnce(
+    (projectUID, issueUID) =>
+      new Promise((resolve) => (release = () => resolve([closed(projectUID, issueUID)]))),
+  )
+  const controller = new CronController(api)
+  await controller.load(intent())
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  api.capabilities.mockImplementation(async () => ({ agentsviewEnabled: false }))
+  const refreshed = controller.refresh()
+  release()
+  await refreshed
+  await settle()
+  expect(api.capabilities).toHaveBeenCalledTimes(2)
+  expect(api.issueHistory).toHaveBeenCalledOnce()
+  expect(controller.state.relatedSessionURL).toBeUndefined()
+  controller.destroy()
+})
