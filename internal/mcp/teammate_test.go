@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -233,38 +234,132 @@ func mustBoundTeammateScope(t *testing.T) *Scope {
 	return s
 }
 
+// All registered native issue mutations share the same optional contribution
+// channel. Exercise the SDK schema and actual outgoing requests together.
 func TestMCPDisplayContributionPerCall(t *testing.T) {
 	var mu sync.Mutex
 	var headers []string
+	var leaseAttempts int
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
-			mu.Lock()
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.18.0"})
+			return
+		}
+		if r.Method != http.MethodGet {
 			headers = append(headers, r.Header.Get("X-Kata-Teammate"))
-			mu.Unlock()
 		} else {
 			require.Empty(t, r.Header.Get("X-Kata-Teammate"))
 		}
-		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/projects" && r.Method == http.MethodGet {
+			writeJSON(w, map[string]any{"projects": []any{
+				map[string]any{"id": 42, "uid": "01ARZ3NDEKTSV4RRFFQ69G5FAA", "name": "spoke-project"},
+				map[string]any{"id": 43, "uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB", "name": "hub-project"},
+			}})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/bridge") {
+			if strings.HasSuffix(r.URL.Path, "/actions/reconcile") {
+				writeJSON(w, externalRunFixture())
+			} else {
+				writeJSON(w, externalBridgeFixture())
+			}
+			return
+		}
+		if strings.Contains(r.URL.Path, "/lease/actions/") {
+			granted := true
+			if strings.HasSuffix(r.URL.Path, "/acquire") {
+				leaseAttempts++
+				granted = leaseAttempts > 1
+			}
+			writeJSON(w, map[string]any{"granted": granted, "holder": map[string]any{"holder": "coordinator"}})
+			return
+		}
 		_, _ = w.Write(daemonResponse(r))
 	}))
 	defer daemon.Close()
 	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "default-1"})
-	for _, handle := range []string{"worker-1", "worker-2", ""} {
-		for _, tool := range []string{"kata.edit", "kata.claim", "kata.set_label"} {
-			args := map[string]any{"ref": "abc1", "teammate": handle}
-			if tool == "kata.edit" {
-				args["title"] = "Updated"
-			}
-			if tool == "kata.set_label" {
-				args["label"] = "ready"
-				args["present"] = true
-			}
-			result, callErr := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tool, Arguments: args})
-			require.NoError(t, callErr)
-			require.False(t, result.IsError, "%s: %s", tool, mustJSON(t, result))
-		}
+	session := connectTestServerWithOptions(t, Options{Client: client, LongRunningClient: client, Scope: NewAllScope(), Actor: "coordinator", Version: "test", Teammate: "default-1"})
+	cases := []struct {
+		tool   string
+		args   map[string]any
+		writes int
+	}{
+		{"kata.create", map[string]any{"title": "New work", "idempotency_key": "create-display", "project": "spoke-project"}, 1},
+		{"kata.comment", map[string]any{"body": "Progress", "idempotency_key": "comment-display"}, 1},
+		{"kata.edit_comment", map[string]any{"body": "Updated progress", "comment_ref": "c:abc123"}, 1},
+		{"kata.move", map[string]any{"to_project": "hub-project", "revision": 7}, 1},
+		{"kata.bridge_bind", map[string]any{"connector": "example-connector", "external": "root-locator"}, 1},
+		{"kata.bridge_pause", nil, 1},
+		{"kata.bridge_resume", nil, 1},
+		{"kata.bridge_reconcile", nil, 1},
+		{"kata.bridge_resolve_field", map[string]any{"kata_field": "scheduled_on", "use": "kata"}, 1},
+		{"kata.bridge_resolve_comment", map[string]any{"action": "retry"}, 1},
+		{"kata.bridge_unbind", nil, 1},
+		{"kata.assign", map[string]any{"owner": "worker"}, 1},
+		{"kata.unassign", nil, 1},
+		{"kata.edit", map[string]any{"title": "Updated"}, 1},
+		{"kata.claim", nil, 1},
+		{"kata.set_label", map[string]any{"label": "ready", "present": true}, 1},
+		{"kata.set_label", map[string]any{"label": "ready", "present": false}, 1},
+		{"kata.set_metadata", map[string]any{"patch": map[string]any{"context": "keep"}}, 1},
+		{"kata.set_deadline", map[string]any{"clear_deadline": true}, 1},
+		{"kata.set_schedule", map[string]any{"clear_schedule": true}, 1},
+		{"kata.close", map[string]any{"reason": "done", "message": "Completed the requested work and verified focused checks.", "evidence": []any{map[string]any{"type": "test", "command": "go test ./internal/example"}}}, 1},
+		{"kata.reopen", nil, 1},
+		{"kata.delete", map[string]any{"confirm": "DELETE spoke-project#abc1"}, 1},
+		{"kata.restore", nil, 1},
+		{"kata.lease", map[string]any{"action": "acquire"}, 1},
+		{"kata.lease", map[string]any{"action": "renew"}, 1},
+		{"kata.lease", map[string]any{"action": "release"}, 1},
+		{"kata.lease_force_release", map[string]any{"reason": "Operator handoff"}, 1},
+		{"kata.lease_steal", map[string]any{"reason": "Operator handoff"}, 3},
 	}
-	require.Equal(t, []string{"worker-1", "worker-1", "worker-1", "worker-2", "worker-2", "worker-2", "", "", ""}, headers)
+	for _, tc := range cases {
+		t.Run(tc.tool+fmt.Sprint(tc.args), func(t *testing.T) {
+			for _, selection := range []struct {
+				name    string
+				value   any
+				want    string
+				invalid bool
+			}{
+				{"default", nil, "default-1", false}, {"override", "worker-2", "worker-2", false},
+				{"empty", "", "", false}, {"invalid", "bad/handle", "", true},
+			} {
+				t.Run(selection.name, func(t *testing.T) {
+					args := map[string]any{"ref": "spoke-project#abc1"}
+					for k, v := range tc.args {
+						args[k] = v
+					}
+					if tc.tool == "kata.create" {
+						delete(args, "ref")
+					}
+					if selection.value != nil {
+						args["teammate"] = selection.value
+					}
+					mu.Lock()
+					headers = nil
+					leaseAttempts = 0
+					mu.Unlock()
+					result, callErr := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tc.tool, Arguments: args})
+					require.NoError(t, callErr)
+					require.Equal(t, selection.invalid, result.IsError, "%s", mustJSON(t, result))
+					mu.Lock()
+					got := append([]string(nil), headers...)
+					mu.Unlock()
+					if selection.invalid {
+						require.Empty(t, got)
+						return
+					}
+					require.Len(t, got, tc.writes)
+					for _, header := range got {
+						require.Equal(t, selection.want, header)
+					}
+				})
+			}
+		})
+	}
 }

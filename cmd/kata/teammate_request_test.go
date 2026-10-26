@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func TestTeammateResolutionFrozen(t *testing.T) {
@@ -95,4 +96,27 @@ func TestTeammateOldDaemonMutation(t *testing.T) {
 	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "example-project", "edit", "abc1", "--title", "Updated")
 	require.NoError(t, err)
 	require.Equal(t, 1, writes)
+}
+
+func TestTeammateInvalidExplicitFlagClassification(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "Existing issue")
+	_, err := runCLICapture(t, env, dir, "edit", ref, "--title", "Updated", "--teammate=bad/handle")
+	ce := requireCLIError(t, err, ExitValidation)
+	require.Equal(t, kindValidation, ce.Kind)
+	require.Contains(t, ce.Message, "teammate")
+}
+
+func TestTeammateInvalidResolutionFrozen(t *testing.T) {
+	t.Setenv("KATA_TEAMMATE", "bad/handle")
+	cmd := newRootCmd()
+	cmd.SetContext(context.Background())
+	first, firstErr := resolveTeammate(cmd)
+	require.Error(t, firstErr)
+	t.Setenv("KATA_TEAMMATE", "worker-2")
+	second, secondErr := resolveTeammate(cmd)
+	require.Equal(t, first, second)
+	require.Same(t, firstErr, secondErr)
+	_, present := teammate.FromRequest(cmd.Context())
+	require.False(t, present, "invalid optional default must not become request contribution")
 }

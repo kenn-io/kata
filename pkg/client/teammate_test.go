@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,4 +84,45 @@ func TestTeammateOriginAndValidation(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, <-seen, "per-call editors cannot retarget contribution")
+}
+
+func TestTeammateCallerRedirectPolicy(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(fmt.Sprint(reject), func(t *testing.T) {
+			var seen []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = append(seen, r.Header.Get("X-Kata-Teammate"))
+				if r.URL.Path != "/final" {
+					http.Redirect(w, r, "/final", http.StatusTemporaryRedirect)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"issue":{},"changed":true}`))
+			}))
+			defer server.Close()
+			redirects := 0
+			policyErr := errors.New("caller refused redirect")
+			caller := server.Client()
+			originalTransport := caller.Transport
+			caller.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+				redirects++
+				if reject {
+					return policyErr
+				}
+				return nil
+			}
+			c, err := NewWithHTTPClient(server.URL, caller)
+			require.NoError(t, err)
+			require.Same(t, originalTransport, caller.Transport)
+			_, err = c.ReopenIssue(WithTeammate(t.Context(), "worker-1"), &generated.ReopenIssueRequestOptions{PathParams: &generated.ReopenIssuePath{ProjectID: 1, Ref: "abc1"}, Body: &generated.ReopenIssueBody{Actor: new("coordinator")}})
+			require.Equal(t, 1, redirects)
+			if reject {
+				require.ErrorIs(t, err, policyErr)
+				require.Equal(t, []string{"worker-1"}, seen)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, []string{"worker-1", "worker-1"}, seen)
+			}
+		})
+	}
 }

@@ -9,6 +9,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -19,24 +20,27 @@ type LeaseStatusInput struct {
 
 // LeaseInput selects a lease action for the startup actor.
 type LeaseInput struct {
-	Ref        string `json:"ref"`
-	Action     string `json:"action"`
-	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
-	Purpose    string `json:"purpose,omitempty"`
+	Teammate   *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref        string  `json:"ref"`
+	Action     string  `json:"action"`
+	TTLSeconds int64   `json:"ttl_seconds,omitempty"`
+	Purpose    string  `json:"purpose,omitempty"`
 }
 
 // LeaseForceReleaseInput selects a lease for administrative release.
 type LeaseForceReleaseInput struct {
-	Ref    string `json:"ref"`
-	Reason string `json:"reason"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
+	Reason   string  `json:"reason"`
 }
 
 // LeaseStealInput selects a lease for resumable takeover.
 type LeaseStealInput struct {
-	Ref        string `json:"ref"`
-	Reason     string `json:"reason"`
-	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
-	Purpose    string `json:"purpose,omitempty"`
+	Teammate   *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref        string  `json:"ref"`
+	Reason     string  `json:"reason"`
+	TTLSeconds int64   `json:"ttl_seconds,omitempty"`
+	Purpose    string  `json:"purpose,omitempty"`
 }
 
 // LeaseOutput reports current lease state.
@@ -177,6 +181,11 @@ func (h toolHandlers) leaseStatus(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) lease(ctx context.Context, _ *sdkmcp.CallToolRequest, input LeaseInput) (*sdkmcp.CallToolResult, LeaseOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, LeaseOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, LeaseOutput{}, err
@@ -209,6 +218,11 @@ func (h toolHandlers) lease(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 }
 
 func (h toolHandlers) leaseForceRelease(ctx context.Context, _ *sdkmcp.CallToolRequest, input LeaseForceReleaseInput) (*sdkmcp.CallToolResult, LeaseOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, LeaseOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, LeaseOutput{}, err
@@ -233,7 +247,14 @@ func (h toolHandlers) leaseForceRelease(ctx context.Context, _ *sdkmcp.CallToolR
 // of force-releasing it and racing other claimants. Only a denied acquire
 // force-releases the reported holder before one more acquire attempt.
 func (h toolHandlers) leaseSteal(ctx context.Context, _ *sdkmcp.CallToolRequest, input LeaseStealInput) (*sdkmcp.CallToolResult, LeaseOutput, error) {
-	acquire := LeaseInput{Ref: input.Ref, Action: "acquire", TTLSeconds: input.TTLSeconds, Purpose: input.Purpose}
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, LeaseOutput{}, contributionErr
+	}
+	// Pass the resolved value, including explicit empty, through every stage.
+	handle, _ := teammate.FromRequest(ctx)
+	acquire := LeaseInput{Teammate: &handle, Ref: input.Ref, Action: "acquire", TTLSeconds: input.TTLSeconds, Purpose: input.Purpose}
 	_, acquired, err := h.lease(ctx, nil, acquire)
 	if err != nil {
 		return nil, LeaseOutput{}, err
@@ -242,7 +263,7 @@ func (h toolHandlers) leaseSteal(ctx context.Context, _ *sdkmcp.CallToolRequest,
 		return successResult(), acquired, nil
 	}
 	previous := acquired.Holder
-	if _, _, err := h.leaseForceRelease(ctx, nil, LeaseForceReleaseInput{Ref: input.Ref, Reason: input.Reason}); err != nil {
+	if _, _, err := h.leaseForceRelease(ctx, nil, LeaseForceReleaseInput{Teammate: &handle, Ref: input.Ref, Reason: input.Reason}); err != nil {
 		return nil, LeaseOutput{}, err
 	}
 	_, acquired, err = h.lease(ctx, nil, acquire)

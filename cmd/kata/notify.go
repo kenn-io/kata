@@ -81,13 +81,6 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 			if err != nil {
 				return err
 			}
-			if clearRequest {
-				// Clearing addresses only the recipient and has never required a
-				// valid sender. Do not let optional display data block that path.
-				if _, err := resolveTeammate(cmd); err != nil {
-					ctx = kataclient.WithTeammate(ctx, "")
-				}
-			}
 			client, err := httpClientFor(ctx, baseURL)
 			if err != nil {
 				return err

@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
 	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func TestEnvHTTPTimeout(t *testing.T) {
@@ -825,4 +826,64 @@ func TestLocalProfileCompatibilityClientsKeepResolvedCredential(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, resp.Body.Close())
 	}
+}
+
+// Raw CLI requests and generated clients composed over the CLI HTTP client
+// retain the same per-hop contribution and caller redirect policy.
+func TestTeammateCLIClientComposition(t *testing.T) {
+	for _, generatedCall := range []bool{false, true} {
+		t.Run(fmt.Sprint(generatedCall), func(t *testing.T) {
+			var seen []string
+			foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = append(seen, r.Header.Get("X-Kata-Teammate"))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"issue":{},"changed":true}`))
+			}))
+			defer foreign.Close()
+			selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = append(seen, r.Header.Get("X-Kata-Teammate"))
+				http.Redirect(w, r, foreign.URL, http.StatusTemporaryRedirect)
+			}))
+			defer selected.Close()
+			redirects := 0
+			caller := &http.Client{CheckRedirect: func(r *http.Request, via []*http.Request) error {
+				redirects++
+				r.Header.Set("X-Kata-Teammate", "inherited")
+				return nil
+			}}
+			hc, err := markDaemonHTTPClient(selected.URL, caller)
+			require.NoError(t, err)
+			ctx := &teammateReadCounter{Context: kataclient.WithTeammate(t.Context(), "worker-1")}
+			if generatedCall {
+				c, err := kataclient.NewWithHTTPClient(selected.URL, hc)
+				require.NoError(t, err)
+				_, err = c.ReopenIssue(ctx, &generated.ReopenIssueRequestOptions{PathParams: &generated.ReopenIssuePath{ProjectID: 1, Ref: "abc1"}, Body: &generated.ReopenIssueBody{Actor: new("coordinator")}})
+				require.NoError(t, err)
+			} else {
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, selected.URL, strings.NewReader(`{}`))
+				require.NoError(t, err)
+				resp, err := hc.Do(req)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+			}
+			require.Equal(t, []string{"worker-1", ""}, seen)
+			require.Equal(t, 1, redirects)
+			require.EqualValues(t, 1, ctx.reads.Load(), "prepare contribution once per selected-origin hop")
+		})
+	}
+}
+
+// Count reads of the selected value without depending on the context key's
+// private type. Other HTTP context lookups still delegate unchanged.
+type teammateReadCounter struct {
+	context.Context
+	reads atomic.Int32
+}
+
+func (c *teammateReadCounter) Value(key any) any {
+	value := c.Context.Value(key)
+	if handle, ok := value.(string); ok && handle == "worker-1" {
+		c.reads.Add(1)
+	}
+	return value
 }

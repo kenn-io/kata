@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-31
+last_edited: 2026-11-02
 ---
 
 # Model Context Protocol server
@@ -198,12 +198,15 @@ the daemon prose can name children, siblings, and prior closes in other
 projects.
 
 The process may take `--teammate` or `KATA_TEAMMATE` as its default
-participant attribution. `kata.comment` and `kata.create` also accept an
-optional per-call `teammate`; an explicit empty value suppresses the startup
-default. Use the per-call value when siblings share one MCP process so one
-participant's handle cannot leak into another call. Comment output keeps
+participant attribution. Native issue mutation tools accept an optional
+per-call `teammate`, including `kata.assign`, `kata.unassign`, `kata.lease`,
+`kata.lease_force_release`, and `kata.lease_steal`. An explicit empty value
+suppresses the startup default. Use the per-call value when siblings share
+one MCP process so one participant's handle cannot leak into another call. Comment output keeps
 `author` and `teammate` separate. New issues store the teammate in initial
-`metadata.teammate`; comments store it in their dedicated field.
+`metadata.teammate`; comments store it in their dedicated field. Request
+contribution appears as `attributed_teammate` in existing native issue and
+live claim event payloads. Lease renewal does not create a history event.
 
 The MCP server still starts against its documented baseline daemon. A
 `kata.comment` call with a nonempty teammate checks for API 0.18.0 before

@@ -34,7 +34,10 @@ func resolveTeammate(cmd *cobra.Command) (string, error) {
 		err = &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 	}
 	ctx = context.WithValue(ctx, teammateResolutionKey{}, teammateResolution{value, err})
-	cmd.SetContext(teammate.WithRequest(ctx, value))
+	if err == nil {
+		ctx = teammate.WithRequest(ctx, value)
+	}
+	cmd.SetContext(ctx)
 	return value, err
 }
 

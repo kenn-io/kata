@@ -52,3 +52,28 @@ func EditRequest(ctx context.Context, req *http.Request, origin string) error {
 	}
 	return nil
 }
+
+// WrapTransport prepares contribution once per transmitted HTTP hop. Reusing
+// a decorated client replaces this owner rather than stacking preparation.
+func WrapTransport(origin string, transport http.RoundTripper) http.RoundTripper {
+	if existing, ok := transport.(requestTransport); ok {
+		transport = existing.RoundTripper
+	}
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	return requestTransport{RoundTripper: transport, origin: origin}
+}
+
+type requestTransport struct {
+	http.RoundTripper
+	origin string
+}
+
+func (t requestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	request := req.Clone(req.Context())
+	if err := EditRequest(request.Context(), request, t.origin); err != nil {
+		return nil, err
+	}
+	return t.RoundTripper.RoundTrip(request)
+}

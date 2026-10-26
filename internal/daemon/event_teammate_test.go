@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -44,4 +45,28 @@ func TestClaimForwardDisplayContribution(t *testing.T) {
 	_, err = client.ClaimStatus(ctx, 42, "abc1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"POST worker-1", "POST worker-1", "GET "}, requests)
+}
+
+// Every request owns its contribution, including requests with no header.
+func TestEventTeammateShadowsParent(t *testing.T) {
+	for _, tc := range []struct{ name, method, header, want string }{
+		{"absent", "POST", "", ""}, {"read", "GET", "worker-2", ""}, {"override", "POST", "worker-2", "worker-2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(db.WithEventTeammate(t.Context(), "parent-worker"))
+			defer cancel()
+			req := httptest.NewRequest(tc.method, "/", nil).WithContext(ctx)
+			if tc.header != "" {
+				req.Header.Set("X-Kata-Teammate", tc.header)
+			}
+			called := false
+			withEventTeammate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				require.Equal(t, tc.want, db.EventTeammateFromContext(r.Context()))
+				cancel()
+				require.ErrorIs(t, r.Context().Err(), context.Canceled)
+			})).ServeHTTP(httptest.NewRecorder(), req)
+			require.True(t, called)
+		})
+	}
 }
