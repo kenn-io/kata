@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,15 +23,21 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	if !cfg.Enabled {
 		return nil
 	}
-	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
-	if agent == "" && id == "" {
-		var ok bool
-		if agent, id, ok = currentSession(); !ok {
-			warn("ambiguous current session; skipping attachment")
-			return nil
+	id := os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
+	if id == "" {
+		for _, name := range cfg.SessionIDEnv {
+			value := os.Getenv(name)
+			if value == "" {
+				continue
+			}
+			if id != "" && !strings.EqualFold(id, value) {
+				warn("ambiguous current session; skipping attachment")
+				return nil
+			}
+			id = value
 		}
 	}
-	ref := &transcript.Transcript{Agent: agent, SessionID: id}
+	ref := &transcript.Transcript{SessionID: id}
 	if err := ref.Validate(); err != nil {
 		warn("current session unavailable or invalid; skipping attachment")
 		return nil
@@ -50,26 +55,8 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	return ref
 }
 
-// currentSession reads the invoking harness's session. Child agents inherit
-// their parent's environment, so context from both harnesses is ambiguous.
-func currentSession() (agent, id string, ok bool) {
-	thread, session := os.Getenv("CODEX_THREAD_ID"), os.Getenv("CODEX_SESSION_ID")
-	if thread != "" && session != "" && !strings.EqualFold(thread, session) {
-		return "", "", false
-	}
-	codex, claude := cmp.Or(thread, session), os.Getenv("CLAUDE_CODE_SESSION_ID")
-	switch {
-	case codex != "" && claude != "":
-		return "", "", false
-	case claude != "":
-		return "claude", claude, true
-	default:
-		return "codex", codex, true
-	}
-}
-
-// dropUnsupportedTranscript keeps provenance optional: older daemons reject
-// the unknown field, so the close proceeds without it instead of failing.
+// dropUnsupportedTranscript keeps provenance optional: older daemons cannot
+// accept agentless transcripts, so the close proceeds without one.
 func dropUnsupportedTranscript(
 	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
 ) error {

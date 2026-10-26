@@ -11,17 +11,17 @@ import (
 
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Transcript identifies a native Claude Code or Codex session. URL is optional
+// Transcript identifies a session UUID. Agent is an optional legacy field. URL is optional
 // and is a locator, not a claim that AgentsView has indexed the session.
 type Transcript struct {
-	Agent     string `json:"agent" enum:"claude,codex" required:"true"`
+	Agent     string `json:"agent,omitempty" enum:"claude,codex"`
 	SessionID string `json:"session_id" required:"true"`
 	URL       string `json:"url,omitempty"`
 }
 
 // Validate rejects unsupported session identifiers and unsafe locators.
 func (t Transcript) Validate() error {
-	if t.Agent != "codex" && t.Agent != "claude" {
+	if t.Agent != "" && t.Agent != "codex" && t.Agent != "claude" {
 		return errors.New("transcript agent must be codex or claude")
 	}
 	if !sessionIDPattern.MatchString(t.SessionID) {
@@ -46,9 +46,6 @@ func (t Transcript) Link(base string) (string, error) {
 		return "", err
 	}
 	path := "sessions/"
-	if t.Agent == "codex" {
-		path += "codex/"
-	}
 	// Keep escaped prefixes intact: a configured %2F is part of a segment,
 	// not a new path separator. Session UUIDs contain no URL delimiters.
 	u.RawPath = strings.TrimRight(u.EscapedPath(), "/") + "/" + path + t.SessionID

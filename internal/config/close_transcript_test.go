@@ -17,6 +17,7 @@ func TestReadCloseTranscriptConfig(t *testing.T) {
 	cfg, err := ReadCloseTranscriptConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.Enabled)
+	assert.Equal(t, []string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}, cfg.SessionIDEnv)
 	// Client attachment must not resolve unrelated daemon secrets or policy.
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[auth]
 token_file = "/missing/daemon-secret"
@@ -30,6 +31,19 @@ agentsview_url = "https://agentsview.example"
 	require.NoError(t, err)
 	assert.True(t, cfg.Enabled)
 	assert.Equal(t, "https://agentsview.example", cfg.AgentsViewURL)
+	assert.Equal(t, []string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}, cfg.SessionIDEnv)
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{`[]`, cfg.SessionIDEnv},
+		{`["PI_SESSION_ID"]`, []string{"PI_SESSION_ID"}},
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nsession_id_env = "+tc.value), 0600))
+		cfg, err = ReadCloseTranscriptConfig()
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, cfg.SessionIDEnv)
+	}
 }
 
 func TestReadCloseTranscriptConfig_ParseErrorNamesFile(t *testing.T) {
@@ -52,6 +66,7 @@ func TestReadDaemonConfigAcceptsCloseTranscript(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[close.transcript]
 enabled = true
 agentsview_url = "https://agentsview.example"
+session_id_env = ["PI_SESSION_ID"]
 `), 0600))
 	_, err := ReadDaemonConfig()
 	require.NoError(t, err)

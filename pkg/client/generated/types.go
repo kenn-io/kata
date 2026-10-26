@@ -6675,16 +6675,18 @@ func (t TokenScopeOut) Validate() error {
 }
 
 type Transcript struct {
-	Agent     TranscriptAgent `json:"agent" validate:"required"`
-	SessionID string          `json:"session_id" validate:"required"`
-	URL       *string         `json:"url,omitempty"`
+	Agent     *TranscriptAgent `json:"agent,omitempty"`
+	SessionID string           `json:"session_id" validate:"required"`
+	URL       *string          `json:"url,omitempty"`
 }
 
 func (t Transcript) Validate() error {
 	var errors runtime.ValidationErrors
-	if v, ok := any(t.Agent).(runtime.Validator); ok {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Agent", err)
+	if t.Agent != nil {
+		if v, ok := any(t.Agent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Agent", err)
+			}
 		}
 	}
 	if err := typesValidator.Var(t.SessionID, "required"); err != nil {

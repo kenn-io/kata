@@ -27,7 +27,6 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
     const ref = value as Record<string, unknown>
     if (
-      (ref.agent !== 'codex' && ref.agent !== 'claude') ||
       typeof ref.session_id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
     ) {
@@ -35,7 +34,7 @@
     }
 
     const session: { label: string; url?: string } = {
-      label: `Session: ${ref.agent} ${ref.session_id}`,
+      label: `Session: ${ref.session_id}`,
     }
     if (typeof ref.url === 'string') {
       try {

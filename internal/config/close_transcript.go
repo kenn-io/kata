@@ -11,8 +11,9 @@ import (
 // CloseTranscriptConfig is a client preference, read from the invoking
 // client's Kata home even when it targets a remote daemon.
 type CloseTranscriptConfig struct {
-	Enabled       bool   `toml:"enabled"`
-	AgentsViewURL string `toml:"agentsview_url"`
+	Enabled       bool     `toml:"enabled"`
+	AgentsViewURL string   `toml:"agentsview_url"`
+	SessionIDEnv  []string `toml:"session_id_env"`
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
@@ -23,7 +24,7 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- derived from KATA_HOME
 	if errors.Is(err, os.ErrNotExist) {
-		return CloseTranscriptConfig{}, nil
+		return defaultCloseTranscriptConfig(CloseTranscriptConfig{}), nil
 	}
 	if err != nil {
 		return CloseTranscriptConfig{}, fmt.Errorf("read %s: %w", path, err)
@@ -36,5 +37,12 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 	if _, err = toml.Decode(string(data), &file); err != nil {
 		return CloseTranscriptConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return file.Close.Transcript, nil
+	return defaultCloseTranscriptConfig(file.Close.Transcript), nil
+}
+
+func defaultCloseTranscriptConfig(cfg CloseTranscriptConfig) CloseTranscriptConfig {
+	if len(cfg.SessionIDEnv) == 0 {
+		cfg.SessionIDEnv = []string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}
+	}
+	return cfg
 }

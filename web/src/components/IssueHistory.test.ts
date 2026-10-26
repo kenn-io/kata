@@ -27,14 +27,13 @@ describe('IssueHistory', () => {
       type: 'issue.closed',
       payload: {
         transcript: {
-          agent: 'codex',
           session_id: '00000000-0000-4000-8000-000000000001',
-          url: 'https://agentsview.example/sessions/codex/00000000-0000-4000-8000-000000000001',
+          url: 'https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001',
         },
       },
     }
     render(IssueHistory, { props: { events: [closed] } })
-    const link = screen.getByRole('link', { name: /codex.*00000000-0000-4000-8000-000000000001/ })
+    const link = screen.getByRole('link', { name: /Session: 00000000-0000-4000-8000-000000000001/ })
     expect(link.getAttribute('href')).toBe(closed.payload.transcript.url)
     expect(link.getAttribute('rel')).toContain('noreferrer')
   })
@@ -63,30 +62,28 @@ describe('IssueHistory', () => {
         ],
       },
     })
-    expect(screen.getByText(/claude.*00000000-0000-4000-8000-000000000002/)).toBeTruthy()
+    expect(screen.getByText(/Session: 00000000-0000-4000-8000-000000000002/)).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it.each([
-    null,
-    [],
-    { agent: 'unknown', session_id: '00000000-0000-4000-8000-000000000001' },
-    { agent: 'codex', session_id: '/private/chat.jsonl' },
-  ])('omits malformed session coordinates: %s', (transcript) => {
-    render(IssueHistory, {
-      props: {
-        events: [
-          {
-            ...event('close-c', '2026-08-01T12:00:00Z'),
-            type: 'issue.closed',
-            payload: { transcript },
-          },
-        ],
-      },
-    })
-    expect(screen.queryByText(/Session:/)).toBeNull()
-    expect(screen.queryByRole('link')).toBeNull()
-  })
+  it.each([null, [], { agent: 'codex', session_id: '/private/chat.jsonl' }])(
+    'omits malformed session coordinates: %s',
+    (transcript) => {
+      render(IssueHistory, {
+        props: {
+          events: [
+            {
+              ...event('close-c', '2026-08-01T12:00:00Z'),
+              type: 'issue.closed',
+              payload: { transcript },
+            },
+          ],
+        },
+      })
+      expect(screen.queryByText(/Session:/)).toBeNull()
+      expect(screen.queryByRole('link')).toBeNull()
+    },
+  )
 
   it('shows when each event happened beside its description', () => {
     const { container } = render(IssueHistory, {

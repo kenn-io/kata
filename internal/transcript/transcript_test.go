@@ -11,16 +11,13 @@ import (
 )
 
 func TestTranscriptLinks(t *testing.T) {
-	for _, agent := range []string{"codex", "claude"} {
+	for _, agent := range []string{"", "codex", "claude"} {
 		t.Run(agent, func(t *testing.T) {
 			ref := Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
 			require.NoError(t, ref.Validate())
 			got, err := ref.Link("https://agentsview.example/archive/")
 			require.NoError(t, err)
 			want := "https://agentsview.example/archive/sessions/"
-			if agent == "codex" {
-				want += "codex/"
-			}
 			assert.Equal(t, want+ref.SessionID, got)
 		})
 	}
@@ -36,7 +33,7 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 		}
 		agent, route := "claude", "sessions/"
 		if codex {
-			agent, route = "codex", "sessions/codex/"
+			agent, route = "codex", "sessions/"
 		}
 		ref := Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
 		// Exercise both literal path separators and separators encoded within a
@@ -53,6 +50,7 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 }
 
 func TestTranscriptRejectsSensitiveCoordinates(t *testing.T) {
+	assert.Error(t, (Transcript{Agent: "pi", SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
 	for _, id := range []string{"", "../session", "/home/user/sessions/chat.jsonl", "secret?token=value", "session\nother", strings.Repeat("a", 10000)} {
 		assert.Error(t, (&Transcript{Agent: "codex", SessionID: id}).Validate())
 	}
@@ -67,7 +65,7 @@ func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
 	for _, base := range []string{"https://agentsview.example/team%2Farchive", "https://agentsview.example/%2e%2e/archive"} {
 		got, err := ref.Link(base)
 		require.NoError(t, err)
-		assert.Equal(t, base+"/sessions/codex/"+ref.SessionID, got)
+		assert.Equal(t, base+"/sessions/"+ref.SessionID, got)
 	}
 }
 
@@ -83,7 +81,7 @@ func FuzzTranscriptLinkPreservesSession(f *testing.F) {
 		id := hexID[:8] + "-" + hexID[8:12] + "-" + hexID[12:16] + "-" + hexID[16:20] + "-" + hexID[20:]
 		agent, path := "claude", ""
 		if codex {
-			agent, path = "codex", "codex/"
+			agent, path = "codex", ""
 		}
 		ref := Transcript{Agent: agent, SessionID: id}
 		got, err := ref.Link("https://agentsview.example")

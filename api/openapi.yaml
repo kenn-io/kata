@@ -6681,7 +6681,6 @@ components:
         url:
           type: string
       required:
-        - agent
         - session_id
       type: object
     Trigger:

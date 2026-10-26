@@ -4,7 +4,7 @@
 import type { TranscriptAgent } from './transcriptAgent.ts'
 
 export interface Transcript {
-  agent: TranscriptAgent
+  agent?: TranscriptAgent
   session_id: string
   url?: string
 }

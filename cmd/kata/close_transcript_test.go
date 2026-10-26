@@ -46,7 +46,7 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			var payload map[string]any
 			require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
 			if enabled {
-				assert.Equal(t, map[string]any{"agent": "codex", "session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/codex/" + transcriptSessionOne}, payload["transcript"])
+				assert.Equal(t, map[string]any{"session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionOne}, payload["transcript"])
 				// Readers retrieve the same provenance without keeping the close receipt.
 				history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
 				var stream struct {
@@ -72,25 +72,32 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	for _, tc := range []struct {
-		name, agent, id, thread, session, claude, base, wantAgent, wantID, warning string
+		name, id, thread, session, claude, pi, variables, base, wantID, warning string
 	}{
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
-		{name: "partial explicit context", agent: "claude", thread: transcriptSessionOne, warning: "current session unavailable"},
-		{name: "explicit Claude overrides inherited Codex", agent: "claude", id: transcriptSessionTwo, thread: transcriptSessionOne, wantAgent: "claude", wantID: transcriptSessionTwo},
-		{name: "Claude Code context", claude: transcriptSessionOne, wantAgent: "claude", wantID: transcriptSessionOne},
+		{name: "configured session", variables: `["PI_SESSION_ID"]`, pi: transcriptSessionTwo, thread: transcriptSessionOne, wantID: transcriptSessionTwo},
+		{name: "default ignores unconfigured session", pi: transcriptSessionOne, warning: "current session unavailable"},
+		{name: "configured conflict", variables: `["PI_SESSION_ID", "CODEX_THREAD_ID"]`, pi: transcriptSessionOne, thread: transcriptSessionTwo, warning: "ambiguous"},
+		{name: "equal aliases", thread: transcriptSessionOne, session: transcriptSessionOne, wantID: transcriptSessionOne},
+		{name: "explicit session overrides inherited context", id: transcriptSessionTwo, thread: transcriptSessionOne, wantID: transcriptSessionTwo},
+		{name: "Claude Code context", claude: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "nested agent context", claude: transcriptSessionTwo, thread: transcriptSessionOne, warning: "ambiguous"},
-		{name: "explicit pair resolves nested context", agent: "codex", id: transcriptSessionOne, claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantAgent: "codex", wantID: transcriptSessionOne},
-		{name: "session alias", session: transcriptSessionOne, wantAgent: "codex", wantID: transcriptSessionOne},
-		{name: "no AgentsView integration", thread: transcriptSessionOne, wantAgent: "codex", wantID: transcriptSessionOne},
-		{name: "bad link retains ID", thread: transcriptSessionOne, base: "https://user:secret@agentsview.example?token=secret", wantAgent: "codex", wantID: transcriptSessionOne, warning: "URL invalid"},
-		{name: "path never persisted", agent: "codex", id: "/private/session/chat.jsonl", warning: "current session unavailable"},
+		{name: "override resolves configured conflict", variables: `["PI_SESSION_ID", "CODEX_THREAD_ID"]`, pi: transcriptSessionOne, id: transcriptSessionOne, claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},
+		{name: "session alias", session: transcriptSessionOne, wantID: transcriptSessionOne},
+		{name: "no AgentsView integration", thread: transcriptSessionOne, wantID: transcriptSessionOne},
+		{name: "bad link retains ID", thread: transcriptSessionOne, base: "https://user:secret@agentsview.example?token=secret", wantID: transcriptSessionOne, warning: "URL invalid"},
+		{name: "path never persisted", id: "/private/session/chat.jsonl", warning: "current session unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("KATA_HOME", home)
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"), 0600))
-			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": tc.agent, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
+			variables := ""
+			if tc.variables != "" {
+				variables = "session_id_env=" + tc.variables + "\n"
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\n"+variables+"enabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"), 0600))
+			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": "ignored", "PI_SESSION_ID": tc.pi, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
 				t.Setenv(name, value)
 			}
 			cmd := &cobra.Command{}
@@ -102,7 +109,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			} else {
 				require.NotNil(t, ref)
 				assert.Equal(t, tc.wantID, ref.SessionID)
-				assert.Equal(t, tc.wantAgent, ref.Agent)
+				assert.Empty(t, ref.Agent)
 				assert.Empty(t, ref.URL)
 			}
 			if tc.warning == "" {
@@ -130,7 +137,7 @@ func TestCloseTranscript_OldDaemonClosesWithoutProvenance(t *testing.T) {
 		case "/api/v1/projects/resolve":
 			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 		case "/api/v1/health":
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.25.0"}`))
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.31.0"}`))
 		case "/api/v1/projects/1/issues/abc1/actions/close":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
 			_, _ = w.Write([]byte(`{"changed":true}`))
@@ -148,7 +155,7 @@ func TestCloseTranscript_OldDaemonClosesWithoutProvenance(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sent)
 	assert.NotContains(t, sent, "transcript")
-	assert.Contains(t, stderr, "reports 0.25.0")
+	assert.Contains(t, stderr, "reports 0.31.0")
 	assert.Contains(t, stderr, "skipping attachment")
 }
 
