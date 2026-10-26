@@ -37,6 +37,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   record has a process identity Kata can't check. Discovery previously skipped
   it and auto-started a second daemon, which then refused to start beside it.
   `stop`, `restart`, `reload`, and `update` still skip such a record.
+- Keep attention on the lead when a pi child tracks the same issue on the same
+  daemon and project, even when bare and qualified refs differ. Extension
+  reloads restore a missing ownership marker from a successful start without
+  another attention write. Rerun `kata agent-hook install pi` to pick up the fix.
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

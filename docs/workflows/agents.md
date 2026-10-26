@@ -211,6 +211,16 @@ kata agent-hook install muse --managed-attention
 kata agent-hook status pi --json
 ```
 
+A pi child tracking the same issue on the same daemon and project no longer
+marks the lead's issue as needing a human, including when the sessions use
+bare and qualified refs. Extension reloads restore a missing
+`KATA_ATTENTION_HOST` marker from a retained successful start without another
+attention write. Rerun `kata agent-hook install pi` to pick up the fix.
+Protection requires inheriting the lead's marker after its attention start
+succeeds; children launched earlier may still track the lead's issue. The PID
+check confirms liveness but cannot distinguish a reused PID from the original
+host.
+
 Pi uses its structured extension API; reload extensions or restart Pi and
 complete project trust. Amp hidden context requires plugin SDK
 `0.0.0-20260526003443-g9106a62` (May 26, 2026) or newer; there is no separately
