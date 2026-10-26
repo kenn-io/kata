@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	// Embed zones as the kata binary does: trimmed test binaries cannot
+	// fall back to the Go installation's copy.
+	_ "time/tzdata"
 
 	"go.kenn.io/kata/pkg/connector"
 	connectorconformance "go.kenn.io/kata/pkg/connector/conformance"

@@ -14,6 +14,19 @@ BINDIR ?= .
 LDFLAGS = -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE) -X go.kenn.io/kata/internal/version.Distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.projectKey=$(POSTHOG_PROJECT_KEY)
 export GOBIN
 
+# Compile without absolute source paths so every checkout and worktree shares
+# one Go build cache instead of each compiling its own copy of every package.
+# Read `go env` first so flags saved with `go env -w GOFLAGS=...` survive the
+# export. GOFLAGS=-trimpath=false opts out. Debuggers need a source mapping:
+# docs/development/contributing.md#shared-build-cache-and-debugging.
+ifeq ($(origin GOFLAGS),undefined)
+GOFLAGS := $(shell go env GOFLAGS)
+endif
+ifeq ($(filter -trimpath -trimpath=%,$(GOFLAGS)),)
+override GOFLAGS += -trimpath
+endif
+export GOFLAGS
+
 build: web-embed
 	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
 		go build -ldflags="$(LDFLAGS)" -o kata ./cmd/kata
@@ -167,14 +180,14 @@ fmt:
 tui:
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
-	GOFLAGS=-buildvcs=false go build -o "$$tmp/kata" ./cmd/kata; \
+	GOFLAGS="$(GOFLAGS) -buildvcs=false" go build -o "$$tmp/kata" ./cmd/kata; \
 	KATA_COLOR_MODE="$${KATA_COLOR_MODE:-dark}" "$$tmp/kata" tui
 
 tui-demo:
 	@tmp=$$(mktemp -d); \
 	trap 'KATA_HOME="$$tmp/home" "$$tmp/kata" daemon stop >/dev/null 2>&1 || true; rm -rf "$$tmp"' EXIT; \
 	mkdir -p "$$tmp/ws"; \
-	GOFLAGS=-buildvcs=false go build -o "$$tmp/kata" ./cmd/kata; \
+	GOFLAGS="$(GOFLAGS) -buildvcs=false" go build -o "$$tmp/kata" ./cmd/kata; \
 	KATA_HOME="$$tmp/home" "$$tmp/kata" --workspace "$$tmp/ws" init --project github.com/wesm/kata --name kata >/dev/null; \
 	KATA_HOME="$$tmp/home" "$$tmp/kata" --workspace "$$tmp/ws" --as alice create "fix login bug on Safari" --owner claude-4.7 --label tui --label ux >/dev/null; \
 	KATA_HOME="$$tmp/home" "$$tmp/kata" --workspace "$$tmp/ws" --as wesm create "rebuild search index" --owner wesm --label infra >/dev/null; \

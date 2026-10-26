@@ -46,6 +46,12 @@
 - English: Write issues and pull requests in English.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
+- No Compiled-In Source Paths: Never locate files from a path returned by
+  `runtime.Caller` or a stack trace; builds use `-trimpath`, so those paths are
+  module-relative. Tests run from their package directory, so use paths
+  relative to it. Trimmed test binaries also cannot fall back to the Go
+  installation's time zone database, so test files that load named zones
+  blank-import `time/tzdata`.
 - No Bash Content-Assertion Tests: Do not add bash tests that assert shell
   script, workflow, or config behavior by grepping for implementation text.
   These are usually tautological: they prove only that the file contains the
