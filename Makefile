@@ -7,10 +7,11 @@ COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknow
 BUILD_DATE := $(shell v=$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 # Public PostHog ingest key. Builds without it send no telemetry.
 POSTHOG_PROJECT_KEY ?= phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
-# Package manager that owns the binary. Non-empty values disable self-update.
+# Package manager that owns the binary. Values other than empty or kenn
+# disable self-update.
 DISTRIBUTION ?=
 BINDIR ?= .
-LDFLAGS = -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE) -X go.kenn.io/kata/internal/version.Distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.projectKey=$(POSTHOG_PROJECT_KEY)
+LDFLAGS = -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE) -X go.kenn.io/kata/internal/version.Distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.projectKey=$(POSTHOG_PROJECT_KEY)
 export GOBIN
 
 build: web-embed
