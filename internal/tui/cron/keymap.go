@@ -50,6 +50,7 @@ type keymap struct {
 	Delete       key
 	Issue        key
 	Status       key
+	Related      key
 	Save         key
 	SaveAlt      key
 	Yes          key
@@ -107,6 +108,7 @@ func newKeymap() keymap {
 		Delete:       key{Keys: []string{"D"}, Help: "delete", Display: "D"},
 		Issue:        key{Keys: []string{"i"}, Help: "issue", Display: "i"},
 		Status:       key{Keys: []string{"f"}, Help: "status", Display: "f"},
+		Related:      key{Keys: []string{"o"}, Help: "Open in AgentsView", Display: "o"},
 		Save:         key{Keys: []string{"ctrl+s"}, Help: "save", Display: "ctrl+s"},
 		SaveAlt:      key{Keys: []string{"S"}, Help: "save", Display: "S"},
 		Yes:          key{Keys: []string{"y"}, Help: "yes", Display: "y"},

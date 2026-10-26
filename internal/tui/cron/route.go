@@ -54,6 +54,8 @@ func (m *model) routeScreenKey(k tea.KeyPressMsg) tea.Cmd {
 		if m.currentView() == viewList {
 			m.searching = true
 		}
+	case matchesKey(s, keys.Related):
+		return m.openRelated()
 	case matchesKey(s, keys.Status):
 		if m.currentView() == viewList && m.tab != 2 {
 			m.cycleStatus()

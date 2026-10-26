@@ -17,6 +17,14 @@ type cronPeekKey struct {
 	projectUID, issueUID               string
 }
 
+// cronRelatedMsg carries the optional AgentsView locator for an accepted peek.
+type cronRelatedMsg struct {
+	key        cronPeekKey
+	generation uint64
+	url        string
+	err        error
+}
+
 type cronPeekMsg struct {
 	key        cronPeekKey
 	generation uint64
@@ -49,8 +57,14 @@ func (h *cronHost) clearCronPeek() {
 	h.peekKey = cronPeekKey{}
 	h.peekAuth = AuthInfo{}
 	h.peekStale = false
+	h.peekRelatedPending = true
+	h.setCronPeek(cronui.PeekState{})
+}
+
+func (h *cronHost) setCronPeek(state cronui.PeekState) {
+	h.peekState = state
 	if h.board != nil {
-		h.board.SetPeek(cronui.PeekState{})
+		h.board.SetPeek(state)
 	}
 }
 
@@ -86,11 +100,11 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 	}
 	peekAPI, ok := api.(CronPeekAPI)
 	if !ok {
-		h.board.SetPeek(cronui.PeekState{Kind: "unreadable"})
+		h.setCronPeek(cronui.PeekState{Kind: "unreadable"})
 		return nil
 	}
 	if !refresh {
-		h.board.SetPeek(cronui.PeekState{Kind: "loading"})
+		h.setCronPeek(cronui.PeekState{Kind: "loading"})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 	h.peekCancel = cancel
@@ -120,37 +134,127 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 
 // invalidateCronPeek marks the peek stale when a live event changes the
 // peeked issue's title, comments, or readability in the run's project. Each
-// change restarts the read's delay, so a burst of events costs one read.
+// change restarts the read's delay, so a burst of events costs one read. A
+// close, move, restore or snapshot can change which transcript locator is
+// recorded or readable, so those also reread the optional related session.
 func (h *cronHost) invalidateCronPeek(msg eventReceivedMsg) {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.updated",
+	case "issue.commented", "issue.comment_edited", "issue.updated", "issue.closed",
 		"issue.soft_deleted", "issue.restored", "issue.moved", "issue.snapshot":
 	default:
 		return
 	}
-	if h.peekKey != (cronPeekKey{}) && msg.issueUID == h.peekKey.issueUID {
-		h.peekStale = true
+	if h.peekKey == (cronPeekKey{}) || msg.issueUID != h.peekKey.issueUID {
+		return
+	}
+	h.peekStale = true
+	switch msg.eventType {
+	case "issue.closed", "issue.restored", "issue.moved", "issue.snapshot":
+		h.peekRelatedPending = true
 	}
 }
 
-func (h *cronHost) acceptCronPeek(msg cronPeekMsg) {
-	key, ok := h.cronPeekSelection()
-	if !ok || msg.generation != h.peekGeneration || msg.key != h.peekKey || msg.key != key || !reflect.DeepEqual(h.peekAuth, h.native.activeAuth) {
+// currentCronPeek fences a reply to the selection, generation and authority
+// that requested it.
+func (h *cronHost) currentCronPeek(key cronPeekKey, generation uint64) bool {
+	current, ok := h.cronPeekSelection()
+	return ok && generation == h.peekGeneration && key == h.peekKey && key == current && reflect.DeepEqual(h.peekAuth, h.native.activeAuth)
+}
+
+func (h *cronHost) acceptCronPeek(msg cronPeekMsg) tea.Cmd {
+	if !h.currentCronPeek(msg.key, msg.generation) {
+		return nil
+	}
+	if records.AuthRejected(msg.err) {
+		h.clearCronAccess(msg.err)
+		h.updateCronBoard()
+		return nil
+	}
+	if msg.err != nil {
+		// Whatever made the issue unreadable also voids its related session.
+		h.peekRelatedPending = true
+		h.setCronPeek(cronui.PeekState{Kind: "unreadable"})
+		return nil
+	}
+	state := cronui.PeekState{Kind: "ready", Issue: msg.issue}
+	if msg.issue.Latest == nil {
+		state.Kind = "no_comments"
+	}
+	if !h.peekRelatedPending && h.peekState.Issue.ProjectID == msg.issue.ProjectID {
+		// A comment or title refresh keeps the locator already read; only
+		// a new selection or a close of this issue reads it again.
+		state.RelatedURL = h.peekState.RelatedURL
+		h.setCronPeek(state)
+		return nil
+	}
+	h.setCronPeek(state)
+	return h.loadCronRelated(msg.key, msg.generation, msg.issue.ProjectID)
+}
+
+// loadCronRelated is the optional AgentsView read. It starts only after the
+// ordinary peek is readable and only when a browser opener exists, so its
+// failure or delay never affects the core peek.
+func (h *cronHost) loadCronRelated(key cronPeekKey, generation uint64, issueProject int64) tea.Cmd {
+	api := h.native.api
+	if wrapped, ok := api.(*undoClient); ok {
+		api = wrapped.KataAPI
+	}
+	related, ok := api.(CronRelatedAPI)
+	if !ok || h.native.opts.OpenURL == nil || key.projectUID == "" {
+		return nil
+	}
+	// History is read where the issue lives now. An unmoved issue binds the
+	// read to the run's canonical catalog project UID, never the decimal UI
+	// key; a moved one binds to its new project's catalog UID when known.
+	project := cronRelatedProject{id: key.project, uid: key.projectUID, runUID: key.projectUID}
+	if issueProject > 0 && issueProject != key.project {
+		project.id, project.uid = issueProject, h.catalogs[issueProject].uid
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+	h.peekCancel = cancel
+	return func() tea.Msg {
+		defer cancel()
+		locator, err := related.CronRelatedTranscript(ctx, project, key.issueUID)
+		return cronRelatedMsg{key: key, generation: generation, url: locator, err: err}
+	}
+}
+
+func (h *cronHost) acceptCronRelated(msg cronRelatedMsg) {
+	if !h.currentCronPeek(msg.key, msg.generation) || h.peekState.Issue.IssueUID != msg.key.issueUID {
 		return
 	}
+	h.peekRelatedPending = false
+	// Kata rejecting the credential keeps its baseline effect; every other
+	// failure leaves the readable peek without the optional action.
 	if records.AuthRejected(msg.err) {
 		h.clearCronAccess(msg.err)
 		h.updateCronBoard()
 		return
 	}
-	state := cronui.PeekState{Kind: "ready", Issue: msg.issue}
-	if msg.err != nil {
-		state = cronui.PeekState{Kind: "unreadable"}
-	} else if msg.issue.Latest == nil {
-		state.Kind = "no_comments"
+	if msg.err != nil || msg.url == "" {
+		return
 	}
-	h.board.SetPeek(state)
+	state := h.peekState
+	state.RelatedURL = msg.url
+	h.setCronPeek(state)
 }
+
+// openCronRelated opens the current peek's locator only, as one argument to
+// the platform browser adapter.
+func (h *cronHost) openCronRelated(v cronui.OpenRelatedMsg) tea.Cmd {
+	open := h.native.opts.OpenURL
+	key, ok := h.cronPeekSelection()
+	if open == nil || !ok || key != h.peekKey || v.URL == "" || v.URL != h.peekState.RelatedURL {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+		defer cancel()
+		return cronRelatedOpenedMsg{err: open(ctx, v.URL)}
+	}
+}
+
+type cronRelatedOpenedMsg struct{ err error }
 
 // Close releases request authority as well as the existing child editor.
 func (h *cronHost) Close() error {

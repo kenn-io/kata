@@ -37,10 +37,12 @@ type cronHost struct {
 	tabGeneration            uint64
 	background               *tea.BackgroundColorMsg
 	peekKey                  cronPeekKey
+	peekState                cronui.PeekState
 	peekGeneration           uint64
 	peekCancel               context.CancelFunc
 	peekAuth                 AuthInfo
 	peekClosed, peekStale    bool
+	peekRelatedPending       bool
 
 	native             Model
 	tab, width, height int
@@ -60,7 +62,14 @@ func (h *cronHost) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	}()
 	switch v := msg.(type) {
 	case cronPeekMsg:
-		h.acceptCronPeek(v)
+		return h, h.acceptCronPeek(v)
+	case cronRelatedMsg:
+		h.acceptCronRelated(v)
+		return h, nil
+	case cronRelatedOpenedMsg:
+		if v.err != nil && h.board != nil {
+			h.board.NotifyError("could not open AgentsView")
+		}
 		return h, nil
 	case cronNativeInputMsg:
 		if v.epoch != h.epoch || v.tabGeneration != h.tabGeneration || h.tab != 0 {
@@ -100,6 +109,8 @@ func (h *cronHost) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return h, h.cronDetail(v)
 	case cronui.IssueMsg:
 		return h, h.openCronIssue(v)
+	case cronui.OpenRelatedMsg:
+		return h, h.openCronRelated(v)
 	case cronui.TabMsg:
 		if !h.canSwitchCronTabs() {
 			return h, nil
@@ -466,6 +477,8 @@ func (h *cronHost) updateCronChild(msg tea.Msg) tea.Cmd {
 		return h.cronDetail(v)
 	case cronui.IssueMsg:
 		return h.openCronIssue(v)
+	case cronui.OpenRelatedMsg:
+		return h.openCronRelated(v)
 	case cronui.MoreRunsMsg:
 		return h.loadCronRuns("", 0, true)
 	case cronui.RefreshMsg:

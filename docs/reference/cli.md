@@ -1816,6 +1816,15 @@ comment UID. If the run has no linked issue, the issue can't be read, or it has
 no comments, the peek says so and still shows the run summary. Press `i` to
 open the linked issue or `l` to open run detail.
 
+When the serving daemon reports `agentsview_enabled` in its cron capabilities,
+the peek can also offer **Open in AgentsView**, labelled **Related issue
+session**. Kata reads one page of the linked issue's history (up to 1,000
+events) and uses the transcript URL recorded on the issue's latest close. Press
+`o` to open it in your browser. Closing the issue again rereads the link. The link is a session related to the issue, not
+proof that it ran this job. No action appears when the daemon has it disabled,
+when that page has no safe URL, or when the read fails; the rest of the peek is
+unaffected. A rejected Kata credential is handled as on any other read.
+
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
 refusal, `Ctrl+f` enables a forced retry. Use `[` and `]` to select a reply

@@ -71,6 +71,7 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 				}
 			}
 			return runTUI(ctx, tui.Options{
+				OpenURL:          platformOpenTarget,
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,

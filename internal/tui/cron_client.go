@@ -37,7 +37,7 @@ func (c *Client) CronIssuePeek(ctx context.Context, projectID int64, uid string)
 	if err != nil {
 		return records.IssuePeek{}, err
 	}
-	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title}
+	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title, ProjectID: body.Issue.ProjectID}
 	for _, comment := range body.Comments {
 		if peek.Latest == nil || comment.CreatedAt.After(peek.Latest.CreatedAt) || comment.CreatedAt.Equal(peek.Latest.CreatedAt) && comment.UID > peek.Latest.UID {
 			peek.Latest = &records.PeekComment{UID: comment.UID, Author: comment.Author, Body: comment.Body, CreatedAt: comment.CreatedAt}

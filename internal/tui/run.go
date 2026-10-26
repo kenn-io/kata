@@ -93,6 +93,8 @@ type Options struct {
 	InitialIssueRef  string    // optional issue ref to open directly
 	ProjectName      string    // optional explicit project selector
 	Workspace        string    // optional workspace path for project and daemon resolution
+	// OpenURL opens one URL in the platform browser; nil disables browser actions.
+	OpenURL func(context.Context, string) error
 }
 
 // Run starts the TUI. Blocks until the user quits or ctx is cancelled.

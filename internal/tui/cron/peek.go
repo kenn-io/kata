@@ -3,6 +3,8 @@ package cron
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"go.kenn.io/kata/internal/tui/cron/records"
 )
 
@@ -10,9 +12,38 @@ import (
 type PeekState struct {
 	Kind  string
 	Issue records.IssuePeek
+	// RelatedURL is a safe AgentsView locator recorded when the linked issue
+	// closed. It is related issue context, not this run's own session.
+	RelatedURL string
 }
 
+// OpenRelatedMsg asks the host to open the selected peek's related session.
+type OpenRelatedMsg struct{ URL string }
+
 func (m *model) SetPeek(state PeekState) { m.peek = state }
+
+// NotifyError shows a host failure in the status line.
+func (m *model) NotifyError(text string) { m.notify(statusError, text) }
+
+// relatedURL is the current peek's locator when it belongs to the selected run.
+func (m *model) relatedURL(run records.Run) string {
+	if m.peek.RelatedURL == "" || m.peek.Issue.IssueUID == "" || m.peek.Issue.IssueUID != records.Value(run.IssueUID) {
+		return ""
+	}
+	return m.peek.RelatedURL
+}
+
+func (m *model) openRelated() tea.Cmd {
+	run, ok := m.SelectedRun()
+	if !ok {
+		return nil
+	}
+	locator := m.relatedURL(run)
+	if locator == "" {
+		return nil
+	}
+	return func() tea.Msg { return OpenRelatedMsg{URL: locator} }
+}
 
 // SelectedRun identifies the observation whose context is currently visible.
 func (m *model) SelectedRun() (records.Run, bool) {
@@ -71,17 +102,28 @@ func (m *model) renderPeek() bodyLines {
 	if strings.TrimSpace(summary) == "" {
 		summary = "No summary recorded"
 	}
+	related := m.relatedURL(run) != ""
+	full := m.peekHeight() == 5
+	if related {
+		issue += " · Related issue session"
+		if !full {
+			issue += " · o Open in AgentsView"
+		}
+	}
 	lines := bodyLines{
 		{Text: detailMetaStyle.Render("  " + summary)},
 		{Text: subtleStyle.Render("  " + plain(issue))},
 	}
-	if m.peekHeight() == 5 {
+	if full {
 		hint := "l run detail"
 		if m.currentView() == viewRun {
 			hint = "l open job"
 		}
 		if records.Value(run.IssueUID) != "" {
 			hint = "i open issue · " + hint
+		}
+		if related {
+			hint = "o Open in AgentsView · " + hint
 		}
 		hint = "  " + hint
 		lines = append(lines, bodyLine{Text: subtleStyle.Render("  " + plain(author))}, bodyLine{Text: detailMetaStyle.Render("  " + plain(comment))}, bodyLine{Text: subtleStyle.Render(hint)})
