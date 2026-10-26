@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import { parseCronDocument, rawCronValue } from './document'
 import { buildCronJobDraft, serializeCronJobDraft } from './jobDraft'
+import { setJobField } from './jobFields'
 const source =
   '{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"old"},"issue":{"kind":"per-run","title":"Result"},"overlap":"forbid","catchup":"all","options":{"adapter":{"big":9007199254740993,"exp":1e40,"zero":-0,"nil":null,"empty":{},"list":[],"escaped":"\\u0061","__proto__":{}}}}'
 const record = () => ({
@@ -63,4 +64,30 @@ test('missing optional values remain missing; untouched null remains null', () =
   expect(rawCronValue(output, ['checkout_key'])).toBeUndefined()
   expect(rawCronValue(output, ['options', 'adapter', 'nil'])).toBe('null')
   expect(rawCronValue(output, ['timeout_seconds'])).toBe('0')
+})
+
+test('a dormant deadline offset stays out of a recurring job and returns with its action', () => {
+  let d = setJobField(buildCronJobDraft(undefined, 1), 'deadline', '-1h')
+  d = setJobField(d, 'mode', 'recurring')
+  expect(
+    rawCronValue(serializeCronJobDraft(d), ['issue', 'deadline_offset_seconds']),
+  ).toBeUndefined()
+  expect(d.values.deadline).toBe('-3600')
+  d = setJobField(d, 'mode', 'prompt')
+  expect(rawCronValue(serializeCronJobDraft(d), ['issue', 'deadline_offset_seconds'])).toBe('-3600')
+})
+
+test('clearing a stored deadline offset before switching to recurring removes it', () => {
+  const document = parseCronDocument(
+    '{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"cron","cron":"0 * * * *"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Result","deadline_offset_seconds":60},"overlap":"forbid","catchup":"all","options":{}}',
+  )
+  let d = buildCronJobDraft(
+    { uid: 'job', name: 'Example job', definitionEventUID: 'event', document },
+    1,
+  )
+  d = setJobField(d, 'deadline', '')
+  d = setJobField(d, 'mode', 'recurring')
+  expect(
+    rawCronValue(serializeCronJobDraft(d), ['issue', 'deadline_offset_seconds']),
+  ).toBeUndefined()
 })

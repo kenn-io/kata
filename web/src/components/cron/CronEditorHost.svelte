@@ -320,6 +320,7 @@
           editor = undefined
           attempt = undefined
           outcome = undefined
+          if (result.kind === 'deleted') onNavigate({ ...route, selection: undefined })
           onRefresh()
         }
       }

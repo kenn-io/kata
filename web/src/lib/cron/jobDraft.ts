@@ -259,6 +259,8 @@ export function serializeCronJobDraft(draft: CronDefinitionDraft): RawCronDocume
     if (key === 'parent' && values.mode !== 'recurring') continue
     if (key === 'issue' && values.issue_kind !== 'existing') continue
     if (['title', 'body', 'deadline'].includes(key) && values.issue_kind === 'existing') continue
+    // Native recurring jobs carry no deadline offset; only clearing one is written.
+    if (key === 'deadline' && values.mode === 'recurring' && values.deadline) continue
     if (
       key === 'trigger_issue' &&
       !['issue-scheduled', 'issue-deadline'].includes(values.trigger ?? '')

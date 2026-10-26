@@ -883,3 +883,24 @@ test('a cancelled definition read cannot clear a newer read', async () => {
   held[1]!()
   expect(await screen.findByRole('form', { name: 'Job editor' })).toBeTruthy()
 })
+
+test('a delete confirmed by Check outcome closes the deleted job', async () => {
+  const p = writableProps()
+  let gets = 0
+  setGeneratedFetch(async (_url, init) => {
+    if (init?.method === 'DELETE') throw new Error('connection lost')
+    gets++
+    if (gets === 1) return envelope()
+    if (gets === 2) throw new Error('connection lost')
+    return new Response(
+      `{"job":{"uid":"job1","name":"Example job","definition_event_uid":"delete-event","deleted_at":"2026-10-25T00:00:00Z","definition":${definition}}}`,
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+  })
+  render(CronPageWithEditor, p)
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete job' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
+  await fireEvent.click(await screen.findByRole('button', { name: 'Check outcome' }))
+  await vi.waitFor(() => expect(p.onRefresh).toHaveBeenCalled())
+  expect(p.onNavigate).toHaveBeenCalledWith(expect.objectContaining({ selection: undefined }))
+})
