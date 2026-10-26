@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ jobs / Daily summary
+
+▶ State:    enabled
+  Schedule: 0 7 * * *
+  Action:   workflow Summary flow
+  Workflow: Summary flow
+
+  Definition
+  {
+    "action": {
+      "kind": "execute",
+      "workflow_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+    },
+    "catchup": "skip",
+    "enabled": true,
+    "issue": {
+      "kind": "per-run",
+      "title": "Summary result"
+    },
+    "kind": "job",
+
+ j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

@@ -1,0 +1,24 @@
+ Project: all                                                   kata カタ · dev
+kata カタ [jobs] runs workflows
+
+Jobs, runs and workflows belong to one project. Press P to pick one.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

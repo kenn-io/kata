@@ -28,6 +28,7 @@ const (
 	viewFederation
 	viewCredentials
 	viewAttention
+	viewCron
 )
 
 // Model is the top-level Bubble Tea model. Sub-views are embedded by
@@ -61,6 +62,7 @@ type Model struct {
 	width               int
 	height              int
 	keymap              keymap
+	cron                cronState
 	list                listModel
 	inboxReturn         *inboxReturnState
 	inboxAttempt        uint64
@@ -430,6 +432,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		previousReads.stop()
 	}
 	cmd = combineCmds(cmd, m.finishDetailRefresh())
+	var cronCmd tea.Cmd
+	m, cronCmd = m.cronSync()
+	cmd = combineCmds(cmd, cronCmd)
 	screenCmd := m.screenViewCommand(visit)
 	return m, tea.Batch(cmd, screenCmd)
 }
@@ -829,6 +834,8 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronLoadedMsg:
+		return m.cronLoaded(msg), nil, true
 	case tea.BackgroundColorMsg:
 		// The terminal answered Init's in-loop background query. Only
 		// colorAuto consults the answer — explicit KATA_COLOR_MODE
@@ -838,6 +845,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.PasteMsg:
+		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
+			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
+		}
 		// Bubble Tea v2 delivers bracketed pastes as their own message
 		// type. Forward to the active input's bubbles model so a paste
 		// lands atomically (newlines included) instead of as
@@ -889,10 +899,18 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeGlobalKey(msg); ok {
+			// Global navigation leaves cron with Kata as its return target.
+			if m.view == viewCron && next.view != viewCron {
+				next.prevView = m.prevView
+			}
 			return next, cmd, true
 		}
 		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
 			next, cmd := m.startUndo()
+			return next, cmd, true
+		}
+		if m.view == viewCron {
+			next, cmd := m.routeCronKey(msg)
 			return next, cmd, true
 		}
 		if m.view == viewProjects {
@@ -2251,6 +2269,9 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.canQuit() {
 		return m, nil, false
 	}
+	if m.keymap.Tabs.matches(msg) && !m.list.pendingPriority && (m.view == viewList || m.view == viewDetail || m.view == viewCron && !m.cron.help) {
+		return m.switchCronTab(msg.String()), nil, true
+	}
 	// ctrl+c bypasses the confirm modal — fast quit for power users.
 	if msg.String() == "ctrl+c" {
 		m.detail.cancelReads()
@@ -2391,6 +2412,10 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // whatever view the user came from. prevView is preserved so the round
 // trip is reversible — q from viewHelp still quits per routeGlobalKey.
 func (m Model) toggleHelp() (Model, tea.Cmd) {
+	if m.view == viewCron {
+		m.cron.help = !m.cron.help
+		return m, nil
+	}
 	if m.view == viewHelp {
 		m.view = m.prevView
 		return m, nil
@@ -2576,6 +2601,9 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
+		if strings.HasPrefix(msg.eventType, "cron.") {
+			m.cron.events++
+		}
 		m.cache.markStale()
 		if !m.pendingRefetch {
 			m.pendingRefetch = true
@@ -2877,6 +2905,7 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
+	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false
 	m.projectsStale = false
@@ -2970,6 +2999,9 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
+	if m.view == viewCron && m.cron.filtering {
+		return false
+	}
 	if m.modal != modalNone {
 		return false
 	}
@@ -3573,6 +3605,11 @@ func (m Model) cacheEntryForPrompt(s inputState) labelCacheEntry {
 // take the full screen regardless of layout.
 func (m Model) viewBody() string {
 	switch m.view {
+	case viewCron:
+		if m.cron.help {
+			return cronHelp(m)
+		}
+		return renderCron(m)
 	case viewHelp:
 		return renderHelp(m.keymap, m.width, m.list.filter)
 	case viewEmpty:

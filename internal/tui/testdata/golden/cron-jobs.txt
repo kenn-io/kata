@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ 1 job
+
+  Job            State   Trigger           Action             Last loaded run
+▶ Daily summary  enabled 0 7 * * *         workflow Summary … succeeded 1h ago
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

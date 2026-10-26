@@ -1807,6 +1807,21 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
+**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Cron tabs are read-only and show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+
+| Key | Cron lists and details |
+| --- | --- |
+| `j` / `k` | Move through records or every line of a detail. |
+| Enter / `l` | Open a record or follow a detail link. |
+| `h` / Esc | Return from a detail. Esc clears a list filter; h or Esc on an unfiltered list returns to Kata. |
+| `/` | Filter a list; Enter applies the filter and Esc clears it. |
+| `r` | Refresh the loaded data. |
+| `1`–`4` | Switch tabs. |
+| `?` | Explain jobs, workflows, and runs, and show keybindings. |
+| `q` | Quit. |
+
+Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
+
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
 refusal, `Ctrl+f` enables a forced retry. Use `[` and `]` to select a reply

@@ -16,9 +16,10 @@ func newTUICmd() *cobra.Command {
 	var mouse bool
 	cmd := &cobra.Command{
 		Use:   "tui [issue-ref]",
-		Short: "open the interactive issue browser",
+		Short: "browse issues, jobs, runs, and workflows",
 		Long: `kata tui opens a Bubble Tea TUI scoped to the current project (per .kata.toml).
 Pass an optional issue ref to open that issue's detail view directly.
+Press 1-4 to switch between Kata, Jobs, Runs, and Workflows tabs.
 Press ? for help, q to quit.
 
 Mouse support is opt-in. Set [tui] mouse = true in <KATA_HOME>/config.toml

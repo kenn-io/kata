@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs [runs] workflows
+ 1 loaded run · newest 100
+
+  Status     Job            Occurrence   Started     Ended       Summary
+▶ succeeded  Daily summary               05-01 10:00 05-01 11:00 Report ready
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

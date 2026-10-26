@@ -328,9 +328,10 @@ func appendPeers(refs *[]string, refUIDs *[]string, shorts, uids []string) {
 	}
 }
 
-func deref(s *string) string {
+func deref[T any](s *T) T {
 	if s == nil {
-		return ""
+		var zero T
+		return zero
 	}
 	return *s
 }

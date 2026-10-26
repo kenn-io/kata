@@ -1,0 +1,18 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+
+A job is a schedule plus an action.
+A workflow is a named list of steps jobs can run.
+A run is what an executor recorded; runs remember the definition revision they
+used.
+kata cron --help shows creation examples.
+
+Cron keys
+j/k    move
+↵/l    open
+/      filter
+h/esc  kata
+r      refresh
+1-4    tabs
+?      help
+q      quit

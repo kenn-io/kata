@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs runs [workflows]
+ workflows / Summary flow
+
+▶
+  About
+  A daily report
+
+  Input
+  Changes since yesterday
+
+  Steps (1)
+
+  collect
+  Kind:    command
+  Retries: 2
+  echo first
+  echo second
+  {
+    "shell": "sh"
+  }
+
+
+ j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

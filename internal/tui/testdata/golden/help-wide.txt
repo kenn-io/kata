@@ -3,28 +3,29 @@ kata — keybindings
 Global                                 Detail                                            Forms
 ?         help                         tab/C-j        next tab                           ctrl+o         save or apply
 q/ctrl+c  quit                         shift+tab/C-k  prev tab                           esc            cancel
-P         projects                     enter          jump to referenced issue           tab/shift+tab  change field
-I         inbox                        esc/backspace  back                               ctrl+e         open editor
-D         daemons                      e              edit body                          ctrl+u         clear prompt
-F         federation                   c              new comment
-C         credentials                  R              typed reply to selected comment    Filters
-T         attention                    ]              next comment link                  /       search
-L         toggle layout                [              previous comment link              s       cycle status filter
-                                       p              set parent                         f       filter (form)
-Graph                                  b              add blocker                        c       clear filters
-k           up                         l              add related                        ctrl+r  reset filter form
-j           down                       +              add label
-up/C-p      scroll up                  -              remove label
-down/C-n    scroll down                a              assign owner
-pgup/M-v    page up                    A              clear owner
-pgdown/C-v  page down                  t              timed assignment
-g/C-M-<     first                      !              set priority
-G/C-M->     last
-enter       open detail                Children
-space       expand/collapse            N      new child
-right       expand                     j/k    move child cursor
-left        collapse                   ↑↓     scroll detail viewport
-E           expand/collapse all        enter  open child
+1-4       switch tab                   enter          jump to referenced issue           tab/shift+tab  change field
+P         projects                     esc/backspace  back                               ctrl+e         open editor
+I         inbox                        e              edit body                          ctrl+u         clear prompt
+D         daemons                      c              new comment
+F         federation                   R              typed reply to selected comment    Filters
+C         credentials                  ]              next comment link                  /       search
+T         attention                    [              previous comment link              s       cycle status filter
+L         toggle layout                p              set parent                         f       filter (form)
+                                       b              add blocker                        c       clear filters
+Graph                                  l              add related                        ctrl+r  reset filter form
+k           up                         +              add label
+j           down                       -              remove label
+up/C-p      scroll up                  a              assign owner
+down/C-n    scroll down                A              clear owner
+pgup/M-v    page up                    t              timed assignment
+pgdown/C-v  page down                  !              set priority
+g/C-M-<     first
+G/C-M->     last                       Children
+enter       open detail                N      new child
+space       expand/collapse            j/k    move child cursor
+right       expand                     ↑↓     scroll detail viewport
+left        collapse                   enter  open child
+E           expand/collapse all
 n           new issue (form)
 v           toggle flat/nested view
 o           toggle graph order

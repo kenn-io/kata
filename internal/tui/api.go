@@ -16,6 +16,7 @@ import (
 // the union held by Model.api so a single value can be passed to those
 // narrower seams.
 type KataAPI interface {
+	cronAPI
 	listAPI
 	detailAPI
 	federationSpokeAPI

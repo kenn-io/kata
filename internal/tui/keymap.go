@@ -10,6 +10,7 @@ import (
 // reads from this same value so rendered help stays in lockstep with
 // what Update actually handles.
 type keymap struct {
+	Tabs                                                         key
 	Help, Quit                                                   key
 	Projects, Inbox, Daemons, Federation, Credentials, Attention key
 	ToggleLayout                                                 key
@@ -41,6 +42,7 @@ type key struct {
 // newKeymap returns the spec §7.3 bindings.
 func newKeymap() keymap {
 	return keymap{
+		Tabs:         key{Keys: []string{"1", "2", "3", "4"}, Help: "switch tab", Display: "1-4"},
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},

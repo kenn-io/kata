@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ 0 jobs
+
+  Job            State   Trigger           Action             Last loaded run
+jobs unavailable: see error below
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+jobs: no cron permission (403)
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
