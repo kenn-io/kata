@@ -197,7 +197,7 @@ func TestOutcomesProperties(t *testing.T) {
 		require.NoError(t, err)
 		maps.Copy(tc.want, map[string]any{
 			"$geoip_disable": true, "$process_person_profile": false,
-			"application": "", "commit": "", "source": "", "version": "",
+			"application": "", "commit": "", "distribution": "", "source": "", "version": "",
 			"goarch": runtime.GOARCH, "goos": runtime.GOOS,
 		})
 		require.Equal(t, tc.want, properties)

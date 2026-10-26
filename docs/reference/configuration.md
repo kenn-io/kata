@@ -1064,13 +1064,15 @@ range: `0-5`, `6-20`, `21-100`, or `over-100`. Both events also carry
 stable anonymous `instance_uid` as the distinct ID. They do not send project
 names, issue refs, issue content, comments, labels, paths, or actor names. GeoIP
 collection is disabled and PostHog person-profile processing is explicitly
-turned off. Every event reports OS and architecture as `goos` and `goarch`;
+turned off. Every event reports the build channel as `distribution`, such as
+`homebrew`, `kenn`, `deb`, or `rpm`, empty for source builds. Every event
+reports OS and architecture as `goos` and `goarch`;
 kata removes the `$os`, `$os_version`, `$os_distro`, and `$go_version`
 properties the PostHog SDK would add. Use distinct `daemon_active` counts for
 active-install reporting; `daemon_started` is only for startup-volume
 diagnostics.
 
-See [Kit's shared telemetry field inventory](https://github.com/kenn-io/kit/blob/911b2612038d01ee6f1233f8c9e727abe1e87505/telemetry/posthog/fields.md)
+See [Kit's shared telemetry field inventory](https://github.com/kenn-io/kit/blob/56cf03284b381e312cf1e23edc0b1b4fc116d35a/telemetry/posthog/fields.md)
 for every shared payload field. Kata's event properties and allowed values
 are listed below.
 
