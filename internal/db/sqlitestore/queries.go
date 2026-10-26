@@ -2698,6 +2698,10 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 		if err != nil {
 			return db.Event{}, err
 		}
+		in.Payload, err = db.StampEventTeammate(ctx, in.Type, eventActor, in.Payload)
+		if err != nil {
+			return db.Event{}, fmt.Errorf("stamp event teammate: %w", err)
+		}
 		contentHash, err = db.EventContentHash(db.EventHashInput{
 			UID:               eventUID,
 			OriginInstanceUID: originInstanceUID,
@@ -2764,6 +2768,9 @@ func scanEvent(scanner eventScanner) (db.Event, error) {
 	err := scanner.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID,
 		&e.IssueUID, &e.IssueShortID, &e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
 		&e.Type, &e.Actor, &e.Payload, &e.HLCPhysicalMS, &e.HLCCounter, &e.ContentHash, &e.CreatedAt)
+	if err == nil {
+		e.Teammate = db.EventTeammate(e.Type, e.Payload)
+	}
 	return e, err
 }
 

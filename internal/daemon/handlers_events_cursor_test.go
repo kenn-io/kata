@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"hegel.dev/go/hegel"
 )
 
 type blockingResponseWriter struct {
@@ -526,4 +527,36 @@ func TestReadVisibleEventsBudgetsHiddenRows(t *testing.T) {
 			require.Equal(t, tc.wantReset, resetTo)
 		})
 	}
+}
+
+// Every known issue payload projection preserves attribution without leaking unknown fields.
+func TestPropertyScopedProjectionKeepsTeammate(t *testing.T) {
+	kinds := []string{"issue.created", "issue.updated", "issue.commented", "issue.comment_edited", "issue.assigned", "issue.unassigned", "issue.assignment_renewed", "issue.assignment_expired", "issue.priority_set", "issue.priority_cleared", "issue.labeled", "issue.unlabeled", "issue.metadata_updated", "issue.scheduled_reached", "issue.linked", "issue.unlinked", "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored", "issue.moved"}
+	hegel.Test(t, func(ht *hegel.T) {
+		handle := hegel.Draw(ht, hegel.Text())
+		payload, err := json.Marshal(map[string]any{"teammate": handle, "private_field": "secret"})
+		if err != nil {
+			ht.Fatal(err)
+		}
+		for _, kind := range kinds {
+			got, ok := scopedEventPayload(db.Event{Type: kind, Payload: string(payload)})
+			var projected map[string]any
+			if !ok || json.Unmarshal([]byte(got), &projected) != nil || projected["teammate"] != handle {
+				ht.Fatalf("%s lost teammate %q: %s", kind, handle, got)
+			}
+			if _, leaked := projected["private_field"]; leaked {
+				ht.Fatalf("%s leaked private field", kind)
+			}
+		}
+		got, ok := scopedEventPayload(db.Event{Type: "issue.links_changed", Payload: string(payload)})
+		if !ok || got != "" {
+			ht.Fatalf("compound links must retain reset projection: %q, %v", got, ok)
+		}
+	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+}
+
+func TestScopedProjectionKeepsEmptyTeammate(t *testing.T) {
+	got, ok := scopedEventPayload(db.Event{Type: "issue.created", Payload: `{"teammate":""}`})
+	require.True(t, ok)
+	require.JSONEq(t, `{"teammate":""}`, got)
 }

@@ -257,3 +257,64 @@ func TestFederationClientIngestDeclaresCommentReplyWireVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestFederationClientIngestRequiresCronDefinitionTeammateFeature(t *testing.T) {
+	const teammateFeatures = "cron_definition_teammate_v1,cron_v1"
+	for _, tc := range []struct {
+		name         string
+		hubFeatures  string
+		mixedBatch   bool
+		wantPost     int
+		wantPostBody bool
+	}{
+		{name: "old hub refuses before ingest", hubFeatures: db.CronEventFeature},
+		{name: "old hub refuses mixed feature batch", hubFeatures: db.CronEventFeature, mixedBatch: true},
+		{name: "new hub accepts", hubFeatures: teammateFeatures, wantPost: 1, wantPostBody: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			posts := 0
+			var gotBody api.FederationIngestEventsRequestBody
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/42/federation/metadata":
+					w.Header().Set(db.EventFeaturesHeader, tc.hubFeatures)
+					require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
+						ProjectID: 42, ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", ProjectName: "hub-project",
+					}))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/42/federation/events:ingest":
+					posts++
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+					require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{Accepted: 1, PushCursorEventID: 8}))
+				default:
+					t.Errorf("unexpected federation request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+			require.NoError(t, err)
+			events := []api.FederationIngestEventEnvelope{{
+				EventID: 8, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", OriginInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+				ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EP", ProjectName: "spoke-project",
+				Type: "cron.workflow.updated", Actor: "worker", Payload: jsontext.Value(`{"teammate":"worker-7"}`),
+			}}
+			if tc.mixedBatch {
+				events = append(events, api.FederationIngestEventEnvelope{
+					EventID: 9, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", OriginInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+					ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EP", ProjectName: "spoke-project",
+					Type: "cron.job.created", Actor: "worker", Payload: jsontext.Value(`{}`),
+				})
+			}
+			_, err = client.IngestProjectEvents(context.Background(), 42, events)
+
+			if tc.wantPostBody {
+				require.NoError(t, err)
+				assert.Equal(t, 31, gotBody.SchemaVersion, "teammate compatibility is payload-feature-gated while the base cron wire version remains unchanged")
+			} else {
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			}
+			assert.Equal(t, tc.wantPost, posts, "unsupported peers must be refused before event ingestion")
+		})
+	}
+}

@@ -78,20 +78,25 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 	return event.CreatedAt.UTC().Format(EventTimestampFormat)
 }
 
-// ValidateFederationEntries checks comment teammate attribution and requires
+// ValidateFederationEntries checks top-level and comment teammate attribution and requires
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
-	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
-			return fmt.Errorf("%w: event %s %s payload is invalid JSON",
-				ErrFederationIngestValidation, eventUID, eventType)
+	var fields map[string]jsontext.Value
+	// Unrelated legacy events may carry non-object JSON, which has no top-level teammate.
+	if payloadJSON.Kind() == '{' || eventType == "issue.commented" || eventType == "issue.comment_edited" {
+		if err := json.Unmarshal(payloadJSON, &fields); err != nil {
+			return fmt.Errorf("%w: event %s %s payload is invalid JSON", ErrFederationIngestValidation, eventUID, eventType)
 		}
-		if err := validateCommentEntry(payload); err != nil {
+	}
+	if err := validateFederationTeammate(fields["teammate"], eventUID, eventType); err != nil {
+		return err
+	}
+	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
+		if err := validateCommentEntry(fields); err != nil {
 			return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, eventType, err)
 		}
-		return validateFederationTeammate(payload["teammate"], eventUID, eventType)
+		return nil
 	}
 	if eventType != "issue.snapshot" && eventType != "issue.created" {
 		return nil

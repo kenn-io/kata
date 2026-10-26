@@ -193,10 +193,23 @@ this acknowledgement on every page: older daemons can ignore the query and
 return unfiltered project events. The TUI stops pagination with an upgrade
 daemon message when the acknowledgement is missing or changes between pages.
 
+HTTP API `0.34.0` exposes optional `teammate` attribution beside `actor` in
+mutation events, issue history, polling and SSE. Empty attribution is omitted.
+The actor remains accountable; teammate identifies the contributing agent.
+Scoped issue projections retain this attribution while continuing to redact
+private event fields. Compound link changes still require a refresh.
+
+Attribution comes from the event payload's top-level `teammate`; issue creation
+also supports `metadata.teammate` when the top-level key is absent. A present
+empty or null top-level value suppresses that fallback. Federation and JSONL
+import validate top-level attribution consistently: absent, null and valid
+handles are accepted; invalid strings and non-string values are rejected.
+
 ### Version history
 
 | Version | Change |
 | --- | --- |
+| `0.34.0` | Event envelopes expose optional teammate attribution consistently across mutation responses, scoped history, polling and SSE. |
 | `0.33.0` | Close transcript provenance accepts Pi and OMP native sessions alongside Claude Code and Codex. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |

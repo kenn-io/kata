@@ -89,7 +89,8 @@ const commentReplyWireVersion = 32
 
 // FederationEventPayloadWireVersion is FederationEventWireVersion raised to
 // commentReplyWireVersion when a comment or issue document carries a reply
-// link, so hubs that predate replies refuse the push as schema skew.
+// link, so hubs that predate replies refuse the push as schema skew. It also
+// returns payload-scoped features when a strict event decoder gains a field.
 func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int, string, error) {
 	version, feature, err := FederationEventWireVersion(kind)
 	if err != nil {
@@ -98,7 +99,22 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
+	if payloadCarriesCronDefinitionTeammate(kind, payload) {
+		feature = MergeEventFeatures(feature, CronDefinitionTeammateFeature)
+	}
 	return version, feature, nil
+}
+
+func payloadCarriesCronDefinitionTeammate(kind string, payload jsontext.Value) bool {
+	if !isCronDefinitionEvent(kind) {
+		return false
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return false
+	}
+	_, present := fields["teammate"]
+	return present
 }
 
 func payloadCarriesCommentReply(kind string, payload jsontext.Value) bool {

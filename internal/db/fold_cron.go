@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // CronDefinitionEvent is a complete portable document. Snapshot envelopes
@@ -18,6 +19,7 @@ type CronDefinitionEvent struct {
 	Name               string             `json:"name"`
 	Definition         jsontext.Value     `json:"definition"`
 	Author             string             `json:"author"`
+	Teammate           *string            `json:"teammate,omitempty"`
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
 	DeletedAt          *time.Time         `json:"deleted_at,omitempty"`
@@ -82,6 +84,11 @@ func parseCronDefinitionEvent(e FoldEvent) (CronDefinitionEvent, CronDefinition,
 	var in CronDefinitionEvent
 	if err := json.Unmarshal(e.Payload, &in, json.RejectUnknownMembers(true)); err != nil {
 		return in, CronDefinition{}, err
+	}
+	if in.Teammate != nil {
+		if err := teammate.Validate(*in.Teammate); err != nil {
+			return in, CronDefinition{}, fmt.Errorf("invalid cron teammate: %w", err)
+		}
 	}
 	clock := CronDefinitionHLC{Version: 1, PhysicalMS: e.HLCPhysicalMS, Counter: e.HLCCounter, OriginInstanceUID: e.OriginInstanceUID}
 	winner := e.UID

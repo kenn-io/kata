@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Read teammate attribution consistently in mutation events, issue history,
+  polling and SSE with HTTP API `0.34.0`. Federation and JSONL imports reject
+  invalid top-level teammate values. See [Issue event history](reference/http-api.md#issue-event-history).
+
 - Attribute coding-agent contributions automatically with a harness and,
   when available, model label while keeping the accountable actor unchanged.
   Inspect the result with `kata whoami`, override it with `KATA_TEAMMATE` or

@@ -2185,6 +2185,7 @@ type Event struct {
 	RelatedIssueID      *int64    `json:"related_issue_id,omitempty"`
 	RelatedIssueShortID *string   `json:"related_issue_short_id,omitempty"`
 	RelatedIssueUID     *string   `json:"related_issue_uid,omitempty"`
+	Teammate            *string   `json:"teammate,omitempty"`
 	Type                string    `json:"type" validate:"required"`
 	UID                 string    `json:"uid" validate:"required"`
 }
@@ -2212,6 +2213,7 @@ type EventEnvelope struct {
 	RelatedIssueID      *int64          `json:"related_issue_id,omitempty"`
 	RelatedIssueShortID *string         `json:"related_issue_short_id,omitempty"`
 	RelatedIssueUID     *string         `json:"related_issue_uid,omitempty"`
+	Teammate            *string         `json:"teammate,omitempty"`
 	Type                string          `json:"type" validate:"required"`
 }
 

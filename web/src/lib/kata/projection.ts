@@ -216,6 +216,7 @@ function normalizeEvent(
     related_issue_uid: event.related_issue_uid,
     related_issue_short_id: event.related_issue_short_id,
     actor: event.actor,
+    teammate: event.teammate,
     payload: parseEventPayload(event.payload),
     created_at: event.created_at,
   }

@@ -21,6 +21,7 @@ export interface EventEnvelope {
   related_issue_id?: number
   related_issue_short_id?: string
   related_issue_uid?: string
+  teammate?: string
   type: string
   [key: string]: unknown
 }

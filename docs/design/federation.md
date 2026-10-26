@@ -457,6 +457,11 @@ events to envelope version 30 and cron events to version 31 plus
 a future storage version does not automatically change existing wire contents.
 This keeps ordinary traffic compatible with actual schema30 daemons, whose
 ingest handler refuses newer envelope versions before inspecting their events.
+Cron definition payloads that carry teammate attribution also require
+`cron_definition_teammate_v1`. New peers advertise this format separately from
+base `cron_v1`; older peers refuse the payload before returning or ingesting an
+event they cannot fold. This payload feature does not change the database schema
+or the base cron wire version.
 
 `Storage.ReadFederation(ctx, db.FederationReadParams)` captures the project,
 binding, required feature latch, purge boundary, baseline and event cursor in one

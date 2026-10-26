@@ -38,12 +38,29 @@ func checkNativeCronFederation(t *testing.T, hub db.Storage, backend Backend) er
 	project, err := hub.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	job, workflow := nativeFederationDefinitions(t, hub, project)
-	binding, err := hub.EnableProjectFederation(ctx, project.ID, "worker")
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	run, err := hub.ObserveCronRun(ctx, db.ObserveCronRun{
+		ProjectID: project.ID, UID: runUID,
+		JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID,
+		WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID,
+		Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1},
+	})
+	require.NoError(t, err)
+	binding, err := hub.EnableProjectFederation(db.WithEventTeammate(ctx, "snapshot-requester"), project.ID, "worker")
 	require.NoError(t, err)
 	baseline, err := hub.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100})
 	require.NoError(t, err)
 	require.Contains(t, eventTypeNames(baseline), "cron.job.snapshot")
 	require.Contains(t, eventTypeNames(baseline), "cron.workflow.snapshot")
+	var runSnapshot *db.Event
+	for i := range baseline {
+		if baseline[i].Type == "cron.run.snapshot" {
+			assertStoredEventTeammate(t, baseline[i], "")
+			runSnapshot = &baseline[i]
+		}
+	}
+	require.NotNil(t, runSnapshot, "an existing run is included in the federation baseline")
 	lastBaseline, err := hub.MaxFederationBaselineEventID(ctx, project.ID, binding.ReplayHorizonEventID)
 	require.NoError(t, err)
 	require.Equal(t, baseline[len(baseline)-1].ID, lastBaseline, "cron snapshots belong to the bootstrap boundary")
@@ -51,8 +68,11 @@ func checkNativeCronFederation(t *testing.T, hub db.Storage, backend Backend) er
 	require.NoError(t, err)
 	require.Equal(t, lastBaseline, metadata.BaselineThroughEventID)
 	require.Equal(t, db.CronEventFeature, metadata.RequiredFeatures)
-	page, err := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: db.CronEventFeature, Limit: 100})
+	_, err = hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: db.CronEventFeature, Limit: 100})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "old peers must not consume teammate-bearing cron definitions")
+	page, err := hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: db.SupportedEventFeatures, Limit: 100})
 	require.NoError(t, err)
+	require.Equal(t, db.SupportedEventFeatures, page.RequiredFeatures)
 	require.Equal(t, baseline, page.Events)
 	// Fresh peers inherit pre-federation definitions. Each page is materialized
 	// separately, including the deliberately missing workflow dependency first.
@@ -95,6 +115,13 @@ func checkNativeCronFederation(t *testing.T, hub db.Storage, backend Backend) er
 				require.NoError(t, err)
 				require.False(t, inserted)
 			}
+			inserted, err := peer.InsertRemoteEvent(ctx, local.ID, portableNativeEvent(*runSnapshot))
+			require.NoError(t, err)
+			require.True(t, inserted)
+			require.NoError(t, peer.MaterializeFederatedProject(ctx, local.ID))
+			actualRun, err := peer.CronRun(ctx, local.ID, run.Run.UID)
+			require.NoError(t, err)
+			require.Equal(t, run.Run.Teammate, actualRun.Teammate, "snapshot request attribution must not change immutable run identity")
 			actual, err := peer.CronJob(ctx, local.ID, job.UID)
 			require.NoError(t, err)
 			require.Equal(t, job.Definition, actual.Definition)

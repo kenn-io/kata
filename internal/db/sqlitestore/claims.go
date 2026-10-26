@@ -1528,6 +1528,10 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 		return db.Event{}, err
 	}
 	issueUID := in.Claim.IssueUID
+	stampedPayload, err := db.StampEventTeammate(ctx, in.Type, in.Actor, string(b))
+	if err != nil {
+		return db.Event{}, fmt.Errorf("stamp claim event teammate: %w", err)
+	}
 	contentHash, err := db.EventContentHash(db.EventHashInput{
 		UID:               eventUID,
 		OriginInstanceUID: d.instanceUID,
@@ -1539,7 +1543,7 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 		HLCPhysicalMS:     clock.PhysicalMS,
 		HLCCounter:        clock.Counter,
 		CreatedAt:         createdAt,
-		Payload:           jsontext.Value(b),
+		Payload:           jsontext.Value(stampedPayload),
 	})
 	if err != nil {
 		return db.Event{}, fmt.Errorf("content hash: %w", err)
@@ -1551,7 +1555,7 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 		)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		eventUID, d.instanceUID, in.ProjectID, projectName, in.IssueID, issueUID,
-		in.Type, in.Actor, string(b), clock.PhysicalMS, clock.Counter, contentHash, createdAt)
+		in.Type, in.Actor, stampedPayload, clock.PhysicalMS, clock.Counter, contentHash, createdAt)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("insert claim event: %w", err)
 	}

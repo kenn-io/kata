@@ -459,6 +459,7 @@ type Event struct {
 	RelatedIssueShortID *string   `json:"related_issue_short_id,omitempty"`
 	Type                string    `json:"type"`
 	Actor               string    `json:"actor"`
+	Teammate            string    `json:"teammate,omitempty"`
 	Payload             string    `json:"payload"`
 	HLCPhysicalMS       int64     `json:"hlc_physical_ms"`
 	HLCCounter          int64     `json:"hlc_counter"`

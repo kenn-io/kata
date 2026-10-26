@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/uid"
+	"hegel.dev/go/hegel"
 )
 
 func TestImportRoundTripsExportedRows(t *testing.T) {
@@ -44,7 +46,17 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 	require.NoError(t, jsonl.Export(ctx, src, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
 
 	dst := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), dst))
+	require.NoError(t, jsonl.Import(db.WithEventTeammate(ctx, "receiver-worker"), bytes.NewReader(exported.Bytes()), dst))
+	before, err := src.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	after, err := dst.EventsAfter(ctx, db.EventsAfterParams{Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, after, len(before))
+	for i, event := range before {
+		assert.Equal(t, event.Payload, after[i].Payload)
+		assert.Equal(t, event.ContentHash, after[i].ContentHash)
+		assert.Equal(t, event.Teammate, after[i].Teammate)
+	}
 
 	assertTableCount(t, src, dst, "projects")
 	assertTableCount(t, src, dst, "issues")
@@ -677,4 +689,44 @@ func TestNotionSyncTrustedCutoverPreservesEnabled(t *testing.T) {
 	status, err := target.IssueSyncStatusByProject(ctx, b.ProjectID)
 	require.NoError(t, err)
 	assertTimePtrEqual(t, fixture.claim, status.SyncStartedAt)
+}
+
+// Property 12: federation and JSONL use the same top-level validator, with an
+// independent accept/reject oracle and a correct hash for each mutated payload.
+func TestPropertyOneTeammateValidator(t *testing.T) {
+	target := openImportTargetDB(t)
+	hegel.Test(t, func(ht *hegel.T) {
+		kind := hegel.Draw(ht, hegel.OneOf(hegel.Text(), hegel.SampledFrom([]string{"issue.created", "issue.snapshot", "issue.commented", "issue.comment_edited", "issue.closed", "project.created"})))
+		// Avoid unrelated cron wire-version validation while covering arbitrary future types.
+		if strings.HasPrefix(kind, "cron.") {
+			kind = "future." + kind
+		}
+		for _, tc := range []struct {
+			raw      string
+			accepted bool
+		}{{"", true}, {"null", true}, {`"worker-7"`, true}, {`"@bad"`, false}, {"42", false}} {
+			payload := jsontext.Value(`{}`)
+			if tc.raw != "" {
+				payload = jsontext.Value(`{"teammate":` + tc.raw + `}`)
+			}
+			event := db.EventExport{ID: 1, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", OriginInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ProjectID: 1, ProjectUID: "01HZZZZZZZZZZZZZZZZZZZZZ11", ProjectName: "example-project", Type: kind, Actor: "tester", Payload: payload, HLCPhysicalMS: 1777854067000, CreatedAt: "2026-05-04T00:21:07.000Z"}
+			hash, err := db.EventContentHash(db.EventHashInput{UID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, ProjectName: event.ProjectName, Type: event.Type, Actor: event.Actor, Payload: event.Payload, HLCPhysicalMS: event.HLCPhysicalMS, CreatedAt: event.CreatedAt})
+			if err != nil {
+				ht.Fatal(err)
+			}
+			event.ContentHash = hash
+			row, err := json.Marshal(map[string]any{"kind": "event", "data": event})
+			if err != nil {
+				ht.Fatal(err)
+			}
+			federationErr := db.ValidateFederationEntries(kind, event.UID, payload)
+			importErr := importJSONL(t.Context(), target, fmt.Sprintf(`{"kind":"meta","data":{"key":"export_version","value":"%d"}}`, db.CurrentSchemaVersion()), `{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","name":"example-project","metadata":{},"revision":1,"created_at":"2026-05-04T00:00:00.000Z"}}`, string(row))
+			if (federationErr == nil) != tc.accepted || (importErr == nil) != tc.accepted {
+				ht.Fatalf("type %q teammate %q accepted=%v: federation=%v import=%v", kind, tc.raw, tc.accepted, federationErr, importErr)
+			}
+			if !tc.accepted && (!strings.Contains(federationErr.Error(), "teammate") || !strings.Contains(importErr.Error(), "teammate")) {
+				ht.Fatalf("rejected for unrelated cause: federation=%v import=%v", federationErr, importErr)
+			}
+		}
+	}, hegel.WithTestCases(50), hegel.WithDatabase(t.TempDir()))
 }

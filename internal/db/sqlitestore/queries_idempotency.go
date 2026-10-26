@@ -166,6 +166,7 @@ func (d *Store) LookupIssueMutationIdempotency(
 	if err != nil {
 		return nil, fmt.Errorf("lookup issue mutation idempotency: %w", err)
 	}
+	evt.Teammate = db.EventTeammate(evt.Type, evt.Payload)
 	if evt.IssueID == nil {
 		// Defensive: an issue.created event without an issue_id is malformed.
 		return nil, fmt.Errorf("issue mutation idempotency match has no issue_id")

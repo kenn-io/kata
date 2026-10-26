@@ -42,11 +42,49 @@ func checkRunReferenceRestore(t *testing.T, source db.Storage, backend Backend) 
 	job, workflow := nativeFederationDefinitions(t, source, project)
 	otherJob, otherWorkflow := nativeFederationDefinitions(t, source, project)
 	foreignJob, foreignWorkflow := nativeFederationDefinitions(t, source, foreign)
+	definitionCtx := db.WithEventTeammate(t.Context(), "definition-agent")
+	attributedWorkflow, workflowEvent, err := source.PutCronWorkflow(definitionCtx, db.PutCronWorkflow{
+		ProjectID: project.ID,
+		Name:      "Attributed workflow",
+		Actor:     "worker",
+		Definition: cron.WorkflowDefinition{
+			Version: 1,
+			Steps:   []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}},
+		},
+	})
+	require.NoError(t, err)
+	assertStoredEventTeammate(t, workflowEvent, "definition-agent")
+	attributedJob, jobEvents, err := source.PutCronJob(definitionCtx, db.PutCronJob{
+		ProjectID: project.ID,
+		Name:      "Attributed job",
+		Actor:     "worker",
+		Definition: cron.JobDefinition{
+			Version: 1,
+			Kind:    "job",
+			Trigger: cron.Trigger{Kind: "manual"},
+			Action:  cron.Action{Kind: "execute", WorkflowUID: attributedWorkflow.UID},
+			Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Review"},
+			Overlap: "forbid",
+			Catchup: "skip",
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, jobEvents, 1)
+	assertStoredEventTeammate(t, jobEvents[0], "definition-agent")
 	_, ordinaryEvent, err := source.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "worker"})
 	require.NoError(t, err)
 	runUID, err := uid.New()
 	require.NoError(t, err)
 	observed, err := source.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	attributedRunUID, err := uid.New()
+	require.NoError(t, err)
+	attributedObserved, err := source.ObserveCronRun(t.Context(), db.ObserveCronRun{
+		ProjectID: project.ID, UID: attributedRunUID,
+		JobUID: &attributedJob.UID, DefinitionEventUID: &attributedJob.DefinitionEventUID,
+		WorkflowUID: &attributedWorkflow.UID, WorkflowDefinitionEventUID: &attributedWorkflow.DefinitionEventUID,
+		Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1},
+	})
 	require.NoError(t, err)
 	records, err := CollectImportRecords(t.Context(), source, db.ExportFilter{IncludeDeleted: true})
 	require.NoError(t, err)
@@ -92,6 +130,9 @@ func checkRunReferenceRestore(t *testing.T, source db.Storage, backend Backend) 
 	retained, err := target.CronRun(t.Context(), project.ID, observed.Run.UID)
 	require.NoError(t, err)
 	require.Equal(t, observed.Run, retained)
+	attributedRetained, err := target.CronRun(t.Context(), project.ID, attributedObserved.Run.UID)
+	require.NoError(t, err)
+	require.Equal(t, attributedObserved.Run, attributedRetained)
 	return nil
 }
 

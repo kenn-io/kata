@@ -536,7 +536,8 @@ func scopedEventPayload(event db.Event) (string, bool) {
 }
 
 func keySet(keys ...string) map[string]struct{} {
-	out := make(map[string]struct{}, len(keys))
+	out := make(map[string]struct{}, len(keys)+1)
+	out["teammate"] = struct{}{}
 	for _, key := range keys {
 		out[key] = struct{}{}
 	}
@@ -598,6 +599,7 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		RelatedIssueUID:     e.RelatedIssueUID,
 		RelatedIssueShortID: e.RelatedIssueShortID,
 		Actor:               e.Actor,
+		Teammate:            e.Teammate,
 		HLCPhysicalMS:       e.HLCPhysicalMS,
 		HLCCounter:          e.HLCCounter,
 		ContentHash:         e.ContentHash,

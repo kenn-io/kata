@@ -26,6 +26,7 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		{"issue.metadata_updated", `{"diff":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"to":null}}}`, "cron_v1"},
 		{"cron.job.deleted", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"cron.job.created", `{"definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
+		{"cron.workflow.updated", `{"teammate":"worker-7"}`, "cron_definition_teammate_v1,cron_v1"},
 		{"issue.created", `{"metadata":{"description":"cron.occurrence"}}`, ""},
 		{"project.metadata_updated", `{"diff":{"cron.progress.custom":{"to":"value"}}}`, ""},
 	} {
@@ -34,6 +35,10 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		require.Equal(t, tc.required, features)
 		if tc.required != "" {
 			require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
+		}
+		if tc.payload == `{"teammate":"worker-7"}` {
+			require.ErrorIs(t, db.RequireEventFeatures(db.CronEventFeature, features), db.ErrUnsupportedEventFeatures)
+			require.NoError(t, db.RequireEventFeatures(db.SupportedEventFeatures, features))
 		}
 	}
 }
@@ -49,7 +54,7 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	for range 2 {
 		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID)
 		require.NoError(t, err)
-		require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
+		require.Equal(t, db.CronEventFeature, features)
 	}
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
 }

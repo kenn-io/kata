@@ -389,6 +389,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 		ProjectID:              project.ID,
 		Title:                  "idempotent issue",
 		Author:                 "conformance-agent",
+		Metadata:               map[string]jsontext.Value{"teammate": jsontext.Value(`"creator-1"`)},
 		IdempotencyKey:         "request-1",
 		IdempotencyFingerprint: "fingerprint-1",
 	})
@@ -404,6 +405,8 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	assert.Equal(t, issue.ID, match.IssueID)
 	assert.Equal(t, issue.ShortID, match.IssueShortID)
 	assert.Equal(t, event.UID, match.Event.UID)
+	assert.Equal(t, "creator-1", event.Teammate)
+	assert.Equal(t, event.Teammate, match.Event.Teammate)
 	assert.Equal(t, "fingerprint-1", match.Fingerprint)
 
 	missing, err := store.LookupIdempotency(ctx, project.ID, "request-2", since)
@@ -435,7 +438,8 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	assert.Nil(t, missingComment)
 
 	closeFingerprint := strings.Repeat("a", 64)
-	closed, closeEvents, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+	closeCtx := db.WithEventTeammate(ctx, "closer-1")
+	closed, closeEvents, changed, err := store.CloseIssueGuarded(closeCtx, db.CloseIssueParams{
 		IssueID: issue.ID, Reason: "wontfix", Actor: "conformance-agent",
 		Message:        "Recorded the reason for stopping this conformance task.",
 		IdempotencyKey: "close-request-1", IdempotencyFingerprint: closeFingerprint,
@@ -447,6 +451,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	assert.True(t, changed)
 	assert.Equal(t, "closed", closed.Status)
 	require.NotEmpty(t, closeEvents)
+	assert.Equal(t, "closer-1", closeEvents[0].Teammate)
 	closeMatch, err := store.LookupIssueMutationIdempotency(
 		ctx, project.ID, "issue.closed", "close-request-1", since)
 	if err != nil {
@@ -455,6 +460,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	require.NotNil(t, closeMatch)
 	assert.Equal(t, issue.ID, closeMatch.IssueID)
 	assert.Equal(t, closeEvents[0].UID, closeMatch.Event.UID)
+	assert.Equal(t, closeEvents[0].Teammate, closeMatch.Event.Teammate)
 	assert.Equal(t, closeFingerprint, closeMatch.Fingerprint)
 
 	projectGuardIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

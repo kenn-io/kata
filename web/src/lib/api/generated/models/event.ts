@@ -20,6 +20,7 @@ export interface Event {
   related_issue_id?: number
   related_issue_short_id?: string
   related_issue_uid?: string
+  teammate?: string
   type: string
   uid: string
   [key: string]: unknown

@@ -4,6 +4,13 @@ import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test('retains event teammate attribution in selected history', () => {
+    const wire = snapshot()
+    Object.assign(wire.selected!.history![0]!, { teammate: 'example-worker' })
+    const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
+    expect(projection.selected_history[0]).toMatchObject({ teammate: 'example-worker' })
+  })
+
   test.each(['verified', 'pending', 'legacy'] as const)(
     'retains %s creation projections in accepted snapshots',
     (verification) => {

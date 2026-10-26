@@ -392,6 +392,10 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 	}
 	hash := input.ContentHash
 	if hash == "" {
+		input.Payload, err = db.StampEventTeammate(ctx, input.Type, actor, input.Payload)
+		if err != nil {
+			return db.Event{}, fmt.Errorf("stamp event teammate: %w", err)
+		}
 		hash, err = db.EventContentHash(db.EventHashInput{
 			UID: eventUID, OriginInstanceUID: originInstanceUID,
 			ProjectUID: input.ProjectUID, ProjectName: input.ProjectName,
@@ -507,5 +511,6 @@ func scanEvent(row rowScanner) (db.Event, error) {
 	if err != nil {
 		return db.Event{}, fmt.Errorf("parse event created_at: %w", err)
 	}
+	event.Teammate = db.EventTeammate(event.Type, event.Payload)
 	return event, nil
 }

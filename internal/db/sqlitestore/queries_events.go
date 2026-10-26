@@ -245,13 +245,11 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 	}
 	var events []db.Event
 	for rows.Next() {
-		var e db.Event
-		if err := rows.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID, &e.IssueUID, &e.IssueShortID,
-			&e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
-			&e.Type, &e.Actor, &e.Payload, &e.HLCPhysicalMS, &e.HLCCounter, &e.ContentHash, &e.CreatedAt); err != nil {
+		event, err := scanEvent(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-		events = append(events, e)
+		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()

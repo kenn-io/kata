@@ -151,6 +151,7 @@ type MutationResp struct {
 type EventEnvelope struct {
 	ID              int64     `json:"id"`
 	Type            string    `json:"type"`
+	Teammate        string    `json:"teammate,omitempty"`
 	ProjectUID      string    `json:"project_uid,omitempty"`
 	IssueUID        string    `json:"issue_uid,omitempty"`
 	IssueShortID    *string   `json:"issue_short_id,omitempty"`
@@ -301,6 +302,7 @@ type EventLogEntry struct {
 	ID                  int64          `json:"event_id"`
 	Type                string         `json:"type"`
 	Actor               string         `json:"actor"`
+	Teammate            string         `json:"teammate,omitempty"`
 	ProjectUID          string         `json:"project_uid,omitempty"`
 	IssueUID            string         `json:"issue_uid,omitempty"`
 	IssueShortID        *string        `json:"issue_short_id,omitempty"`

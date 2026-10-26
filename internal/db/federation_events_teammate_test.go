@@ -93,3 +93,32 @@ func TestValidateFederationEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFederationEntriesTopLevelTeammate(t *testing.T) {
+	for _, kind := range []string{"", "issue.closed", "issue.created", "issue.snapshot", "project.created", "future.event"} {
+		for _, tc := range []struct {
+			raw   string
+			valid bool
+		}{{"", true}, {"null", true}, {`"worker-7"`, true}, {`""`, true}, {`"@bad"`, false}, {"42", false}} {
+			t.Run(kind+"/"+tc.raw, func(t *testing.T) {
+				payload := `{}`
+				if tc.raw != "" {
+					payload = `{"teammate":` + tc.raw + `}`
+				}
+				err := ValidateFederationEntries(kind, "event-1", jsontext.Value(payload))
+				if tc.valid {
+					require.NoError(t, err)
+				} else {
+					require.ErrorIs(t, err, ErrFederationIngestValidation)
+					require.ErrorContains(t, err, "teammate")
+				}
+			})
+		}
+	}
+}
+
+func TestValidateFederationEntriesUnrelatedNonObjectPayloads(t *testing.T) {
+	for _, payload := range []string{`null`, `[]`, `42`, `false`, `"legacy"`} {
+		require.NoError(t, ValidateFederationEntries("future.event", "event-1", jsontext.Value(payload)), payload)
+	}
+}

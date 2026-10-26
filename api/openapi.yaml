@@ -1955,6 +1955,8 @@ components:
           type: string
         related_issue_uid:
           type: string
+        teammate:
+          type: string
         type:
           type: string
         uid:
@@ -2018,6 +2020,8 @@ components:
         related_issue_short_id:
           type: string
         related_issue_uid:
+          type: string
+        teammate:
           type: string
         type:
           type: string
@@ -7146,7 +7150,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.33.0
+  version: 0.34.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

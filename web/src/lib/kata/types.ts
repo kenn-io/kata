@@ -210,6 +210,7 @@ export interface KataTaskEvent {
   related_issue_uid?: string | undefined
   related_issue_short_id?: string | undefined
   actor: string
+  teammate?: string | undefined
   payload?: Record<string, unknown> | undefined
   created_at: string
 }
