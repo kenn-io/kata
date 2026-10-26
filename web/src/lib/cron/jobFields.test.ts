@@ -374,3 +374,11 @@ test.each(['notify', 'recurring'])(
     expect(rawCronValue(out, ['issue', 'title'])).toBeUndefined()
   },
 )
+test('a Once time survives a recurring detour and returns when Once is reselected', () => {
+  let d = setJobField(draft(), 'trigger', 'once')
+  d = setJobField(d, 'schedule', '2026-11-02T06:30:00Z')
+  d = setJobField(setJobField(d, 'mode', 'recurring'), 'mode', 'prompt')
+  expect(d.values.trigger).toBe('cron')
+  d = setJobField(d, 'trigger', 'once')
+  expect(d.values.schedule).toBe('2026-11-02T06:30:00Z')
+})

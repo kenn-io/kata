@@ -330,8 +330,10 @@ export function setJobField(
       next.values.issue_kind = 'per-run'
       next.values.overlap = 'allow'
       if (!['cron', 'interval'].includes(next.values.trigger ?? '')) {
+        // Keep the schedule for its trigger, as a trigger change does.
+        next.values[`schedule:${next.values.trigger}`] = next.values.schedule ?? ''
         next.values.trigger = 'cron'
-        next.values.schedule = ''
+        next.values.schedule = next.values['schedule:cron'] ?? ''
         next.dirty.add('trigger')
         next.dirty.add('schedule')
       }
