@@ -203,6 +203,10 @@ type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
 
+type GetCronSummaryResponse = CronSummaryResponseBody
+
+type GetCronSummaryErrorResponse = ErrorEnvelope
+
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
 type ListCronWorkflowsErrorResponse = ErrorEnvelope
@@ -927,6 +931,13 @@ type ObserveCronRunResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
+}
+
+type GetCronSummaryResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronSummaryResponse
 }
 
 type ListCronWorkflowsResp struct {

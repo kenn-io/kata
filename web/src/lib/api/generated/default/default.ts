@@ -59,6 +59,7 @@ import type {
   CronJobResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
+  CronSummaryResponseBody,
   CronWorkflowResponseBody,
   DeleteIssuePathParameters,
   DeleteLinkParams,
@@ -108,6 +109,7 @@ import type {
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
+  GetCronSummaryPathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
@@ -2106,6 +2108,15 @@ export const getListCronJobsUrl = (
   const normalizedParams = new URLSearchParams()
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['status']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? 'null' : String(value))
     }
@@ -2364,6 +2375,15 @@ export const getListCronRunsUrl = (
   const normalizedParams = new URLSearchParams()
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['status']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? 'null' : String(value))
     }
@@ -2461,6 +2481,39 @@ export const observeCronRun = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(observeCronRunBody),
+  })
+}
+
+export type getCronSummaryResponse200 = {
+  data: CronSummaryResponseBody
+  status: 200
+}
+
+export type getCronSummaryResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronSummaryResponseSuccess = getCronSummaryResponse200 & {
+  headers: Headers
+}
+export type getCronSummaryResponseError = getCronSummaryResponseDefault & {
+  headers: Headers
+}
+
+export type getCronSummaryResponse = getCronSummaryResponseSuccess | getCronSummaryResponseError
+
+export const getGetCronSummaryUrl = ({ projectId }: GetCronSummaryPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/summary`
+}
+
+export const getCronSummary = async (
+  { projectId }: GetCronSummaryPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronSummaryResponse> => {
+  return orvalFetch<getCronSummaryResponse>(getGetCronSummaryUrl({ projectId }), {
+    ...options,
+    method: 'GET',
   })
 }
 

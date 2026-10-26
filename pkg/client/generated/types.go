@@ -1257,6 +1257,7 @@ type CronJob struct {
 	DefinitionHlc      HLC                       `json:"definition_hlc"`
 	DeletedAt          *time.Time                `json:"deleted_at,omitempty"`
 	ID                 int64                     `json:"id"`
+	LastRun            *CronJob_LastRun          `json:"last_run"`
 	Name               string                    `json:"name" validate:"required"`
 	ProjectID          int64                     `json:"project_id"`
 	Revision           int64                     `json:"revision"`
@@ -1285,8 +1286,65 @@ func (c CronJob) Validate() error {
 			errors = errors.Append("DefinitionHlc", err)
 		}
 	}
+	if c.LastRun != nil {
+		if v, ok := any(c.LastRun).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("LastRun", err)
+			}
+		}
+	}
 	if err := typesValidator.Var(c.Name, "required"); err != nil {
 		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(c.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if err := typesValidator.Var(c.UpdatedAt, "required"); err != nil {
+		errors = errors.Append("UpdatedAt", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronJob_LastRun struct {
+	Actor                      string          `json:"actor" validate:"required"`
+	CreatedAt                  time.Time       `json:"created_at" validate:"required"`
+	DefinitionEventUID         *string         `json:"definition_event_uid,omitempty"`
+	EndedAt                    *time.Time      `json:"ended_at,omitempty"`
+	ExecutorLabel              *string         `json:"executor_label,omitempty"`
+	ID                         int64           `json:"id"`
+	IssueUID                   *string         `json:"issue_uid,omitempty"`
+	JobUID                     *string         `json:"job_uid,omitempty"`
+	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
+	ProjectID                  int64           `json:"project_id"`
+	Revision                   int64           `json:"revision"`
+	StartedAt                  *time.Time      `json:"started_at,omitempty"`
+	Status                     string          `json:"status" validate:"required"`
+	Summary                    SummaryResponse `json:"summary"`
+	Teammate                   *string         `json:"teammate,omitempty"`
+	UID                        string          `json:"uid" validate:"required"`
+	UpdatedAt                  time.Time       `json:"updated_at" validate:"required"`
+	WorkflowDefinitionEventUID *string         `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowUID                *string         `json:"workflow_uid,omitempty"`
+}
+
+func (c CronJob_LastRun) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(c.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if err := typesValidator.Var(c.Status, "required"); err != nil {
+		errors = errors.Append("Status", err)
+	}
+	if v, ok := any(c.Summary).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Summary", err)
+		}
 	}
 	if err := typesValidator.Var(c.UID, "required"); err != nil {
 		errors = errors.Append("UID", err)
@@ -1524,6 +1582,16 @@ func (c CronRunsResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronSummaryResponseBody struct {
+	FailedRuns24H int64     `json:"failed_runs_24h"`
+	WindowEnd     time.Time `json:"window_end" validate:"required"`
+	WindowStart   time.Time `json:"window_start" validate:"required"`
+}
+
+func (c CronSummaryResponseBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type CronWorkflow struct {

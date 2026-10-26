@@ -93,10 +93,14 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
 		}
 		out := &api.CronJobResponse{}
-		out.Body.Job = api.CronJobFrom(value)
+		jobs, readErr := cronJobResponses(ctx, cfg, in.ProjectID, []db.CronJob{value}, nil)
+		if readErr != nil {
+			return nil, cronAPIError(ctx, cfg, readErr, in.ProjectID, in.UID, true)
+		}
+		out.Body.Job = jobs[0]
 		return out, nil
 	})
-	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronJobsResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronJobsRequest) (*api.ListCronJobsResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
@@ -105,9 +109,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
 		out := &api.ListCronJobsResponse{}
-		out.Body.Jobs = []api.CronJob{}
-		for _, value := range values {
-			out.Body.Jobs = append(out.Body.Jobs, api.CronJobFrom(value))
+		out.Body.Jobs, err = cronJobResponses(ctx, cfg, in.ProjectID, values, in.Status)
+		if err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
 		return out, nil
 	})
