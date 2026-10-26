@@ -161,7 +161,11 @@ func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	go func() {
+		// Closing lets both the exit check and cleanup observe the exit.
+		defer close(done)
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
+	}()
 	t.Cleanup(func() {
 		cancel()
 		<-done
