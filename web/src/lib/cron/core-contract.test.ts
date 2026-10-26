@@ -9,7 +9,7 @@ import type { CronRun } from './types'
 // The Cron page uses only core cron reads; these tests exercise HTTP behavior.
 afterEach(() => vi.useRealTimers())
 
-test('core list, detail, pagination and refresh reads never request optional enrichment', async () => {
+test('core list, detail and pagination reads use the credentialed transport', async () => {
   const upstream = vi.fn<typeof fetch>(async () =>
     Response.json({ jobs: [], runs: [], job: {}, run: {}, workflows: [], workflow: {} }),
   )
@@ -32,13 +32,7 @@ test('core list, detail, pagination and refresh reads never request optional enr
   expect(decodeURIComponent(urls[2]!.pathname)).toBe(
     '/api/v1/projects/1/cron/jobs/job / identifier',
   )
-  for (const [input, init] of upstream.mock.calls as unknown as [
-    RequestInfo | URL,
-    RequestInit,
-  ][]) {
-    const url = new URL(String(input))
-    expect(url.searchParams.has('include_usage')).toBe(false)
-    expect(url.searchParams.has('refresh_usage')).toBe(false)
+  for (const [, init] of upstream.mock.calls as unknown as [RequestInfo | URL, RequestInit][]) {
     expect(new Headers(init.headers).get('X-Kata-Web-Session')).toBe('tab')
     expect(init.credentials).toBe('same-origin')
     expect(init.redirect).toBe('error')

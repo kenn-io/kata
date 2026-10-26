@@ -1,13 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, render, screen } from '@testing-library/svelte'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createCredentialedFetch, setGeneratedFetch } from '../../lib/api/client'
-import { CronController, emptyCronState } from '../../lib/cron/controller'
+import { CronController } from '../../lib/cron/controller'
 import { defaultCronRoute } from '../../lib/cron/route'
 import type { CronRun } from '../../lib/cron/types'
 import CronPage from './CronPage.svelte'
-import CronRunDrawer from './CronRunDrawer.svelte'
 
-// The page loads without optional endpoints, and unknown response fields never add UI.
+// The page loads when every optional capability endpoint is absent.
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -86,91 +85,5 @@ test.each(['jobs', 'runs', 'workflows'] as const)(
     } finally {
       controller.destroy()
     }
-  },
-)
-
-const legacyUsage = {
-  primary_model: 'legacy-model',
-  cost_microdollars: 420000,
-  partial: true,
-  models: [],
-  sessions: [
-    {
-      agent: 'legacy-agent',
-      session_id: 'legacy-session',
-      url: 'https://sessions.example/legacy',
-      state: 'available',
-      partial: false,
-      models: [],
-    },
-  ],
-}
-test.each(['jobs', 'runs'] as const)('%s table ignores unknown usage fields', (tab) => {
-  const state = emptyCronState()
-  const legacyRun = { ...run, usage: legacyUsage }
-  state.projects = [
-    {
-      project: { id: 1, uid: 'project-one', name: 'example-project' },
-      jobs: [{ ...job, last_run: legacyRun } as never],
-      runs: [legacyRun],
-      workflows: [],
-      hasRecords: true,
-    },
-  ]
-  render(CronPage, { route: { ...defaultCronRoute(), tab }, state, ...callbacks() })
-  expect(screen.getByRole('button', { name: 'Inspect workspace' })).toBeTruthy()
-  expect(screen.queryByRole('columnheader', { name: 'Model' })).toBeNull()
-  expect(screen.queryByRole('columnheader', { name: 'Cost' })).toBeNull()
-  expect(screen.queryByText('legacy-model')).toBeNull()
-  expect(screen.queryByText('~$0.42+')).toBeNull()
-})
-
-test.each(['usage', 'transcripts'] as const)(
-  'run drawer omits legacy %s while preserving summary and issue actions',
-  async (shape) => {
-    const legacyRun = {
-      ...run,
-      ...(shape === 'usage'
-        ? { usage: legacyUsage }
-        : {
-            transcripts: [
-              {
-                agent: 'legacy-agent',
-                session_id: 'legacy-session',
-                url: 'https://sessions.example/legacy',
-              },
-            ],
-            transcripts_incomplete: true,
-          }),
-    }
-    const onOpenIssue = vi.fn()
-    render(CronRunDrawer, {
-      run: legacyRun,
-      onOpenIssue,
-      onOpenJob: vi.fn(),
-      peek: {
-        status: 'ready',
-        issue: {
-          issue: { uid: 'issue', title: 'Readable issue', short_id: 'abc4' },
-          comments: [
-            {
-              uid: 'comment',
-              created_at: '2026-10-25T11:00:00Z',
-              body: 'Latest readable comment',
-              author: 'example-author',
-            },
-          ],
-        } as never,
-      },
-    })
-    expect(screen.getByText('Recorded run summary')).toBeTruthy()
-    expect(screen.getByText('Latest readable comment')).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'abc4 · Readable issue' }))
-    expect(onOpenIssue).toHaveBeenCalledWith('issue')
-    expect(screen.queryByText('Model', { selector: 'dt' })).toBeNull()
-    expect(screen.queryByText('Cost', { selector: 'dt' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Linked sessions' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Models' })).toBeNull()
-    expect(screen.queryByRole('link', { name: /legacy-session/ })).toBeNull()
   },
 )

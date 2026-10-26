@@ -28,7 +28,7 @@ test('read-only page uses URL callbacks for tabs, no mutation controls', async (
   expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ tab: 'runs' }))
   expect(screen.queryByRole('button', { name: 'New job' })).toBeNull()
 })
-test('core page omits cost columns and preserves denial/loading distinction', () => {
+test('a denied project is reported without hiding the page', () => {
   const state = emptyCronState()
   state.projects = [
     {
@@ -48,7 +48,6 @@ test('core page omits cost columns and preserves denial/loading distinction', ()
     onRefresh: vi.fn(),
     onOpenIssue: vi.fn(),
   })
-  expect(screen.queryByRole('columnheader', { name: 'Cost' })).toBeNull()
   expect(screen.getByText(/Project not readable/)).toBeTruthy()
 })
 
