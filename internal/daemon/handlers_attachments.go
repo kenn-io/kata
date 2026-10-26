@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,10 +29,19 @@ import (
 const attachmentPath = "/api/v1/projects/{project_id}/issues/{ref}/attachments"
 const maxAttachmentBytes = 256 << 20
 
-var attachmentUploadRoute = regexp.MustCompile(`^(/api/v1/ui/proxy)?/api/v1/projects/[^/]+/issues/[^/]+/attachments$`)
+// attachmentProxyTimeout covers both sequential legs of a maximum-size transfer through the daemon switcher.
+const attachmentProxyTimeout = 75 * time.Minute
+
+var attachmentRoute = regexp.MustCompile(`^(?:/api/v1/ui/proxy)?/api/v1/projects/[^/]+/issues/[^/]+/attachments(/[^/]+/content)?$`)
+
+// isAttachmentTransfer matches the upload and content routes, which stream file bytes.
+func isAttachmentTransfer(r *http.Request) bool {
+	m := attachmentRoute.FindStringSubmatch(r.URL.Path)
+	return m != nil && (r.Method == http.MethodPost && m[1] == "" || r.Method == http.MethodGet && m[1] != "")
+}
 
 func isAttachmentUpload(r *http.Request) bool {
-	return r.Method == http.MethodPost && attachmentUploadRoute.MatchString(r.URL.Path)
+	return r.Method == http.MethodPost && isAttachmentTransfer(r)
 }
 
 type attachmentUploadContextKey struct{}
@@ -87,12 +95,6 @@ func binaryContent(mediaType string) map[string]*huma.MediaType {
 	return map[string]*huma.MediaType{mediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}
 }
 
-// attachmentAddedResponses documents the JSON body the upload streams back.
-func attachmentAddedResponses(h huma.API) map[string]*huma.Response {
-	schema := h.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[api.AddAttachmentResponseBody](), true, "")
-	return map[string]*huma.Response{"200": {Description: "Attachment added.", Content: map[string]*huma.MediaType{"application/json": {Schema: schema}}}}
-}
-
 // recheckAttachmentWrite repeats the active-project and claim gates after the
 // Docbank transfer, which can outlast an archive or a lost claim.
 func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string) error {
@@ -109,7 +111,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 		next(huma.WithContext(ctx, context.WithValue(ctx.Context(), attachmentUploadContextKey{}, http.MaxBytesReader(w, r.Body, maxAttachmentBytes))))
 	}
-	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}, Responses: attachmentAddedResponses(h), BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*huma.StreamResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "addAttachment", Method: "POST", Path: attachmentPath, RequestBody: &huma.RequestBody{Required: true, Content: binaryContent("application/octet-stream")}, BodyReadTimeout: -1, Middlewares: huma.Middlewares{rawBody}}, func(ctx context.Context, in *api.AddAttachmentRequest) (*api.AddAttachmentResponse, error) {
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
@@ -177,10 +179,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if res.Changed {
 			cfg.Publish().Event(res.Event.ProjectID, res.Event)
 		}
-		return &huma.StreamResponse{Body: func(hctx huma.Context) {
-			hctx.SetHeader("Content-Type", "application/json")
-			_ = json.MarshalWrite(hctx.BodyWriter(), api.AddAttachmentResponseBody{ID: id, Attachment: e})
-		}}, nil
+		return &api.AddAttachmentResponse{Body: api.AddAttachmentResponseBody{ID: id, Attachment: e}}, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)

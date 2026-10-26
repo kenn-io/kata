@@ -200,29 +200,16 @@ describe('App', () => {
     expect(searches).toContain('Example')
   })
 
-  it.each([
-    {
-      actorPolicy: 'request',
-      outcome: 'saved',
-      expectedActor: 'kata-web',
-      behavior: 'refreshes authority',
-    },
-    {
-      actorPolicy: 'request',
-      outcome: 'too-large',
-      expectedActor: 'kata-web',
-      behavior: 'surfaces the error and re-enables edit',
-    },
-  ])(
-    '$behavior after a $outcome attachment upload with $actorPolicy attribution',
-    async ({ actorPolicy, outcome, expectedActor }) => {
+  it.each(['saved', 'too-large'])(
+    'refreshes authority and re-enables edit after a %s attachment upload',
+    async (outcome) => {
       history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
       sessionStorage.setItem(
         'kata.web.session.v1',
         JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
       )
       const base = snapshot()
-      Object.assign(base.capabilities, { attachments: true, actor_policy: actorPolicy })
+      Object.assign(base.capabilities, { attachments: true, actor_policy: 'request' })
       const accepted = {
         ...base,
         selected: {
@@ -268,7 +255,7 @@ describe('App', () => {
       })
       await waitFor(() => expect(uploadURL).toBeDefined())
       const readsBeforeCompletion = snapshotReads
-      expect(uploadURL!.searchParams.get('actor')).toBe(expectedActor)
+      expect(uploadURL!.searchParams.get('actor')).toBe('kata-web')
       expect(uploadURL!.pathname).toBe(
         '/api/v1/projects/7/issues/01J00000000000000000000001/attachments',
       )

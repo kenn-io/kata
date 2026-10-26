@@ -249,17 +249,10 @@ func downloadAttachmentCLI(ctx context.Context, c *http.Client, endpoint string,
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		if resp.StatusCode >= http.StatusBadRequest {
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			return externalCLIResponseError(resp.StatusCode, b, nil)
-		}
-		return &cliError{
-			HTTPStatus: resp.StatusCode,
-			Message:    fmt.Sprintf("unexpected HTTP status %d downloading attachment", resp.StatusCode),
-			Kind:       kindInternal,
-			ExitCode:   ExitInternal,
-		}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		unexpected := fmt.Errorf("unexpected HTTP status %d downloading attachment", resp.StatusCode)
+		return externalCLIResponseError(resp.StatusCode, b, unexpected)
 	}
 	temp, err := os.CreateTemp(filepath.Dir(dest), ".kata-attachment-*")
 	if err != nil {

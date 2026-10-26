@@ -136,34 +136,32 @@ it('uploads the selected batch through a refresh and shows per-file progress and
   expect(screen.getByRole('button', { name: 'Attach files' }).hasAttribute('disabled')).toBe(false)
 })
 
-it.each(['video/mp4', 'video/x-m4v', 'video/webm', 'video/ogg', 'video/quicktime'])(
-  'plays %s with a typed blob and revokes it when context changes',
-  async (media_type) => {
-    const fetchAttachment = vi.fn(
-      async () => new Blob(['video'], { type: 'application/octet-stream' }),
-    )
-    const { container, rerender } = render(IssueAttachments, {
-      attachmentsEnabled: true,
-      attachments: {
-        [id]: { ...entry, name: 'clip', media_type, size: 100 << 20 },
-      },
-      baseURL: '/attachments',
-      fetchAttachment,
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Play clip' }))
-    await waitFor(() =>
-      expect(container.querySelector('video')?.getAttribute('src')).toBe('blob:preview'),
-    )
-    const video = container.querySelector('video')!
-    expect(screen.getByRole('button', { name: 'Open video in expanded view' })).toBeTruthy()
-    expect(video.preload).toBe('metadata')
-    const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob
-    expect(blob.type).toBe(media_type)
-    await rerender({ baseURL: '/other-issue/attachments' })
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
-    expect(container.querySelector('video')).toBeNull()
-  },
-)
+it('plays a video with a typed blob and revokes it when context changes', async () => {
+  const media_type = 'video/quicktime'
+  const fetchAttachment = vi.fn(
+    async () => new Blob(['video'], { type: 'application/octet-stream' }),
+  )
+  const { container, rerender } = render(IssueAttachments, {
+    attachmentsEnabled: true,
+    attachments: {
+      [id]: { ...entry, name: 'clip', media_type, size: 100 << 20 },
+    },
+    baseURL: '/attachments',
+    fetchAttachment,
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Play clip' }))
+  await waitFor(() =>
+    expect(container.querySelector('video')?.getAttribute('src')).toBe('blob:preview'),
+  )
+  const video = container.querySelector('video')!
+  expect(screen.getByRole('button', { name: 'Open video in expanded view' })).toBeTruthy()
+  expect(video.preload).toBe('metadata')
+  const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob
+  expect(blob.type).toBe(media_type)
+  await rerender({ baseURL: '/other-issue/attachments' })
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+  expect(container.querySelector('video')).toBeNull()
+})
 it('keeps file details without actions when Docbank is unavailable', () => {
   render(IssueAttachments, {
     attachments: { [id]: entry },

@@ -20,3 +20,7 @@ type AddAttachmentResponseBody struct {
 	ID         string              `json:"attachment_id"`
 	Attachment metadata.Attachment `json:"attachment"`
 }
+
+type AddAttachmentResponse struct {
+	Body AddAttachmentResponseBody
+}

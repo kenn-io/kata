@@ -681,9 +681,8 @@ func requireJSONMutation(next http.Handler) http.Handler {
 		if isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
-				message := "Content-Type must be application/json"
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
-					message)
+					"Content-Type must be application/json")
 				return
 			}
 		}

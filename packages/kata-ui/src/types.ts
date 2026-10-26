@@ -2,7 +2,7 @@ export interface KataAttachment {
   name: string
   media_type: string
   size: number
-  docbank_version?: unknown
+  docbank_version: string
 }
 
 export interface KataChecklistItem {

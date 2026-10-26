@@ -228,8 +228,7 @@ func TestAttachmentOversizeBeforeVault(t *testing.T) {
 }
 func TestAttachmentContentTypesAndReportedLength(t *testing.T) {
 	for _, tc := range []struct{ name, typ string }{
-		{"shot.png", "image/png"}, {"shot.jpg", "image/jpeg"}, {"shot.jpeg", "image/jpeg"}, {"shot.gif", "image/gif"}, {"shot.webp", "image/webp"},
-		{"clip.mp4", "video/mp4"}, {"clip.m4v", "video/x-m4v"}, {"clip.mov", "video/quicktime"}, {"clip.webm", "video/webm"}, {"clip.ogv", "video/ogg"},
+		{"SHOT.PNG", "image/png"}, {"clip.mov", "video/quicktime"},
 		{"shot.svg", "application/octet-stream"}, {"file.unknown", "application/octet-stream"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

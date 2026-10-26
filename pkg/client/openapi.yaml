@@ -10120,7 +10120,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AddAttachmentResponseBody"
-          description: Attachment added.
+          description: OK
         default:
           content:
             application/json:
