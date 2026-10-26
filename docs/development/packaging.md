@@ -47,18 +47,17 @@ derive a version. Without the `Version` linker value, `kata version` reports
 architecture-specific packages report the same value. `Commit` may remain
 `unknown` when building with `-buildvcs=false`.
 
-From an extracted release source archive, `make homebrew` runs the Homebrew
-build: vendored modules, cgo enabled, `-trimpath -buildvcs=false`, the public
-PostHog key, and `Distribution=homebrew`. It needs no network, git, Node, or
-Bun. Pass the release values and the install directory on the command line:
+From a clone, `make homebrew` runs the normal `make build` steps with cgo
+enabled and `Distribution=homebrew`. `VERSION`, `COMMIT`, `BUILD_DATE`, and
+`BINDIR` (default `.`) can be set on the command line:
 
 ```sh
 make homebrew VERSION=v0.14.2 BUILD_DATE=2026-08-08T00:00:00Z BINDIR=/path/to/bin
 ```
 
-Other package managers can use the same Makefile linker flags through
-`make build DISTRIBUTION=example-pkg` from a clone; the default empty
-`DISTRIBUTION` keeps `kata update` enabled.
+Other package managers can set their own value with
+`make build DISTRIBUTION=example-pkg`. The default empty `DISTRIBUTION` keeps
+`kata update` enabled.
 
 ## Distribution values
 
