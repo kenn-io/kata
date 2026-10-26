@@ -1701,8 +1701,9 @@ not require a workspace or a running daemon. The output is a single JSON object:
 `name` is the canonical tool name. `version` is the semantic version for a
 release build; development builds may report a development identifier.
 `commit` and `built` identify the source revision and build time.
-`distribution` identifies the package manager that owns the binary and is an
-empty string for ordinary archives and source builds. `go`, `os`, and `arch`
+`distribution` identifies the package manager that owns the binary. It is
+an empty string for ordinary archives and source builds, and `kenn` for
+official direct-download builds, which keep self-updating. `go`, `os`, and `arch`
 describe the build runtime and target. `agent_format` is the version of the
 agent-readable text contract. Consumers should use
 `kata_api_version` to select the JSON schema and ignore additional fields they

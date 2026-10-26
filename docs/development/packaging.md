@@ -66,14 +66,15 @@ Kata recognizes these package-owner values:
 | Value | Owner | Upgrade path |
 | --- | --- | --- |
 | empty | Source build or ordinary Kata release archive | `kata update` |
+| `kenn` | Official direct-download Kata build | `kata update` |
 | `homebrew` | Official Homebrew tap or Homebrew Core | `brew upgrade kata` |
 | `deb` | Kata `.deb` package | Install the newer `.deb` with the system package manager |
 | `rpm` | Kata `.rpm` package | Install the newer `.rpm` with the system package manager |
 
 Third-party packagers should set a stable, recognizable non-empty value such
-as `nixpkgs` or `arch`. Any non-empty value makes install-capable forms of
-`kata update` fail with a usage error before checking the network or writing a
-file. `kata update --check` remains available and reports the owning
+as `nixpkgs` or `arch`. Any value other than empty or `kenn` makes
+install-capable forms of `kata update` fail with a usage error before checking
+the network or writing a file. `kata update --check` remains available and reports the owning
 distribution plus package-manager guidance. `kata version --json` exposes the
 value as `distribution` for support diagnostics.
 

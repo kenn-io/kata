@@ -59,8 +59,8 @@ func newUpdateCmd() *cobra.Command {
 		Short: "check for and install kata updates",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if version.Distribution != "" && !checkOnly {
-				return managedUpdateError(version.Distribution)
+			if managed := packageUpdateGuidance(version.Distribution).Distribution; managed != "" && !checkOnly {
+				return managedUpdateError(managed)
 			}
 			currentIsDevBuild := selfupdate.IsDevBuildVersion(version.Version)
 			client, err := newSelfUpdateClient(version.Version)
@@ -364,9 +364,13 @@ func printUpdateResult(cmd *cobra.Command, info *selfupdate.Info) error {
 	}
 }
 
+// officialDistribution marks official direct-download builds, which update
+// themselves like builds with no distribution.
+const officialDistribution = "kenn"
+
 func packageUpdateGuidance(distribution string) updateGuidance {
 	switch distribution {
-	case "":
+	case "", officialDistribution:
 		return updateGuidance{}
 	case "homebrew":
 		return updateGuidance{

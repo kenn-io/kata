@@ -459,6 +459,51 @@ func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) {
 	assert.Equal(t, "OK update installed=true current=v0.4.0 latest=v0.5.0\n", stdout)
 }
 
+func TestUpdateInstall_OfficialKennDistributionInstalls(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	stubDistribution(t, "kenn")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "update", "--yes")
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "OK update installed=true current=v0.4.0 latest=v0.5.0\n", stdout)
+	assert.Len(t, fake.installed, 1)
+}
+
+func TestUpdateCheck_OfficialKennDistributionHasNoPackageGuidance(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "human", args: []string{"update", "--check"}, want: "update available: v0.4.0 -> v0.5.0\n"},
+		{name: "agent", args: []string{"--agent", "update", "--check"}, want: "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=\"\" package_release_may_lag=false\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags(t)
+			stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+			stubDistribution(t, "kenn")
+			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+				CurrentVersion: "v0.4.0",
+				LatestVersion:  "v0.5.0",
+			}}}
+			stubUpdateClient(t, fake)
+
+			stdout, _, err := executeRootCapture(t, context.Background(), tt.args...)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, stdout)
+		})
+	}
+}
+
 func TestUpdateInstall_WrapsInstallError(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
