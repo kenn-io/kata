@@ -30,7 +30,7 @@ agentsview_url = "https://agentsview.example" # optional; a base path is support
 ```
 
 This is off by default and needs no daemon restart. Attachment needs a daemon
-with HTTP API `0.32.0` or newer. Before attaching a transcript, `kata close`
+with HTTP API `0.33.0` or newer. Before attaching a transcript, `kata close`
 checks the daemon's API version; an older daemon gets a warning on stderr and
 the close proceeds without the transcript. With attachment disabled, close
 requests remain unchanged.
@@ -49,8 +49,14 @@ session_id_env = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID
 ```
 
 A configured list replaces the default; an absent or empty list uses the default.
-For example, set `session_id_env = ["PI_SESSION_ID"]` under `[close.transcript]`
-to use that variable alone, or include it alongside the default variables.
+To include `PI_SESSION_ID` alongside the default variables, set this under
+`[close.transcript]`:
+
+```toml
+session_id_env = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "PI_SESSION_ID"]
+```
+
+To use only that variable, set `session_id_env = ["PI_SESSION_ID"]` instead.
 If multiple configured variables have nonempty values, they must agree
 case-insensitively. Different values are ambiguous and skip the attachment.
 

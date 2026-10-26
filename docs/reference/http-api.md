@@ -117,7 +117,7 @@ API `0.20.0` before project fanout. Paginated `kata.list` and explicit
 single-project lexical `kata.search` require API `0.27.0`. The CLI checks the
 same version before new list options and explicit lexical pagination.
 
-Close requests may explicitly supply `transcript` (agentless objects need HTTP API `0.32.0`):
+Close requests may explicitly supply `transcript` (agentless objects need HTTP API `0.33.0`):
 
 ```json
 {

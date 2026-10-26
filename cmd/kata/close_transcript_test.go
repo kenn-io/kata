@@ -137,7 +137,7 @@ func TestCloseTranscript_OldDaemonClosesWithoutProvenance(t *testing.T) {
 		case "/api/v1/projects/resolve":
 			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 		case "/api/v1/health":
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.31.0"}`))
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.32.0"}`))
 		case "/api/v1/projects/1/issues/abc1/actions/close":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&sent))
 			_, _ = w.Write([]byte(`{"changed":true}`))
@@ -155,7 +155,7 @@ func TestCloseTranscript_OldDaemonClosesWithoutProvenance(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sent)
 	assert.NotContains(t, sent, "transcript")
-	assert.Contains(t, stderr, "reports 0.31.0")
+	assert.Contains(t, stderr, "reports 0.32.0")
 	assert.Contains(t, stderr, "skipping attachment")
 }
 

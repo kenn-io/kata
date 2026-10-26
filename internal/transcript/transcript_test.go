@@ -24,18 +24,14 @@ func TestTranscriptLinks(t *testing.T) {
 }
 
 func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
-	f.Add("team/archive", true, true)
-	f.Add("team?archive#section", false, false)
-	f.Fuzz(func(t *testing.T, prefix string, codex, https bool) {
+	f.Add("team/archive", true)
+	f.Add("team?archive#section", false)
+	f.Fuzz(func(t *testing.T, prefix string, https bool) {
 		scheme := "http"
 		if https {
 			scheme = "https"
 		}
-		agent, route := "claude", "sessions/"
-		if codex {
-			agent, route = "codex", "sessions/"
-		}
-		ref := Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+		ref := Transcript{SessionID: "00000000-0000-4000-8000-000000000001"}
 		// Exercise both literal path separators and separators encoded within a
 		// single segment. Canonical Path serialization alone misses the latter.
 		for _, base := range []string{
@@ -44,7 +40,7 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 		} {
 			got, err := ref.Link(base)
 			require.NoError(t, err)
-			assert.Equal(t, strings.TrimRight(base, "/")+"/"+route+ref.SessionID, got)
+			assert.Equal(t, strings.TrimRight(base, "/")+"/sessions/"+ref.SessionID, got)
 		}
 	})
 }
@@ -72,20 +68,16 @@ func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
 // UUIDs are the stable native IDs for both supported harnesses. Exercise
 // the whole byte domain, independently formatting the UUID and expected URL.
 func FuzzTranscriptLinkPreservesSession(f *testing.F) {
-	f.Add([]byte("0123456789abcdef"), true)
-	f.Add(make([]byte, 16), false)
-	f.Fuzz(func(t *testing.T, raw []byte, codex bool) {
+	f.Add([]byte("0123456789abcdef"))
+	f.Add(make([]byte, 16))
+	f.Fuzz(func(t *testing.T, raw []byte) {
 		var bytes [16]byte
 		copy(bytes[:], raw)
 		hexID := hex.EncodeToString(bytes[:])
 		id := hexID[:8] + "-" + hexID[8:12] + "-" + hexID[12:16] + "-" + hexID[16:20] + "-" + hexID[20:]
-		agent, path := "claude", ""
-		if codex {
-			agent, path = "codex", ""
-		}
-		ref := Transcript{Agent: agent, SessionID: id}
+		ref := Transcript{SessionID: id}
 		got, err := ref.Link("https://agentsview.example")
 		require.NoError(t, err)
-		assert.Equal(t, "https://agentsview.example/sessions/"+path+id, got)
+		assert.Equal(t, "https://agentsview.example/sessions/"+id, got)
 	})
 }

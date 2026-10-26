@@ -39,9 +39,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Share generated agent hooks across machines with `--executable kata` or `kata.exe`. Installation checks PATH and keeps that bare command; project hooks installed with `--executable kata` now also record bare `kata` instead of an absolute path; the harness also needs Kata on its runtime PATH. See [Agent workflows](workflows/agents.md).
 - Link a closing session to AgentsView using `[close.transcript].session_id_env`
-  to choose the session variables. Requires daemon HTTP API `0.32.0` and an
-  AgentsView release with bare UUID session-link resolution; older daemons still
-  receive the close without the link. See
+  to choose the session variables. Requires daemon HTTP API `0.33.0` and an
+  AgentsView release with bare UUID session-link resolution. Daemons older than
+  `0.33.0` receive the close without the link. `KATA_TRANSCRIPT_AGENT` is no
+  longer read. See
   [Closing-session transcripts](reference/configuration.md#closing-session-transcripts).
 
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
