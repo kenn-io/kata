@@ -237,3 +237,34 @@ test('AgentsViewCron makes no history read when the issue is unreadable or moved
     controller.destroy()
   }
 })
+
+test('AgentsViewCron coalesced snapshot syncs re-read the capability once per refresh', async () => {
+  const api = client(true)
+  const controller = new CronController(api)
+  const current = intent()
+  await controller.sync(current, false)
+  await settle()
+  expect(controller.state.relatedSessionURL).toBe(locator)
+  for (const enabled of [false, true]) {
+    api.capabilities.mockImplementation(async () => ({ agentsviewEnabled: enabled }))
+    const capabilityReads = api.capabilities.mock.calls.length
+    const historyReads = api.issueHistory.mock.calls.length
+    let release!: () => void
+    api.summary.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ failed_runs_24h: 0, window_start: '', window_end: '' })
+        }),
+    )
+    const first = controller.sync(current, false)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const coalesced = [controller.sync(current, false), controller.sync(current, false)]
+    release()
+    await Promise.all([first, ...coalesced])
+    await settle()
+    expect(api.capabilities.mock.calls.length).toBe(capabilityReads + 1)
+    expect(api.issueHistory.mock.calls.length).toBe(historyReads + (enabled ? 1 : 0))
+    expect(controller.state.relatedSessionURL).toBe(enabled ? locator : undefined)
+  }
+  controller.destroy()
+})
