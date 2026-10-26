@@ -576,3 +576,76 @@ test('explicit refresh rereads the selected job and its recent runs', async () =
     c.destroy()
   }
 })
+
+test.each(['without', 'with'] as const)(
+  'changed snapshots during a catalog load %s a selection wait for it, then refresh once',
+  async (selected) => {
+    const api = client()
+    api.run = vi.fn(async () => ({ uid: 'r', created_at: '', summary: { version: 1 } }) as CronRun)
+    const held: (() => void)[] = []
+    api.summary.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          held.push(() => resolve({ failed_runs_24h: 7, window_start: '', window_end: '' })),
+        ),
+    )
+    const c = new CronController(api)
+    const intent = {
+      projects: projects.slice(0, 2),
+      route: {
+        ...defaultCronRoute(),
+        ...(selected === 'with'
+          ? { selection: { kind: 'run' as const, projectUID: 'p1', uid: 'r' } }
+          : {}),
+      },
+      daemonID: undefined,
+      authorityGeneration: 1,
+    }
+    try {
+      const first = c.sync(intent, false)
+      await vi.waitFor(() => expect(held).toHaveLength(2))
+      const overlapping = [c.sync(intent, false), c.sync(intent, false), c.sync(intent, false)]
+      expect(api.summary).toHaveBeenCalledTimes(2)
+      for (const release of held.splice(0)) release()
+      await vi.waitFor(() => expect(held).toHaveLength(2))
+      expect(c.state.projects.map((row) => row.project.uid).sort()).toEqual(['p1', 'p2'])
+      expect(c.state.failedRuns24h).toBe(14)
+      for (const release of held.splice(0)) release()
+      await Promise.all([first, ...overlapping])
+      expect(api.summary).toHaveBeenCalledTimes(4)
+      expect(c.state.loading).toBe(false)
+    } finally {
+      c.destroy()
+    }
+  },
+)
+
+test('an authority change during a catalog load still aborts it', async () => {
+  const api = client()
+  let release!: () => void
+  api.summary.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ failed_runs_24h: 99, window_start: '', window_end: '' })
+      }),
+  )
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: defaultCronRoute(),
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    const first = c.sync(intent, false)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    await c.sync({ ...intent, authorityGeneration: 2 }, false)
+    expect(c.state.failedRuns24h).toBe(7)
+    release()
+    await first
+    expect(c.state.failedRuns24h).toBe(7)
+    expect(api.summary).toHaveBeenCalledTimes(2)
+  } finally {
+    c.destroy()
+  }
+})

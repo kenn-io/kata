@@ -111,6 +111,9 @@ export class CronController {
   #selectionAbort?: AbortController
   #catalogLoaded = false
   #catalogNeedsRefresh = false
+  // A changed snapshot that arrives while the same catalog is loading waits for
+  // that load instead of restarting it; only the latest one runs afterwards.
+  #pendingSync: CronIntent | undefined
   #generation = 0
   #selectionGeneration = 0
   #peekTimer: ReturnType<typeof setTimeout> | undefined
@@ -161,6 +164,7 @@ export class CronController {
         }
       : {}
     if (!sameHistory) this.#catalogLoaded = false
+    this.#pendingSync = undefined
     this.#intent = intent
     this.#catalogNeedsRefresh = true
     this.#abort?.abort()
@@ -272,6 +276,8 @@ export class CronController {
     })
     if (this.#intent?.route.selection)
       await this.select(this.#intent.route.selection, keepSelection)
+    const pending = this.#pendingSync
+    if (pending && current()) await this.load(pending)
   }
   async sync(intent: CronIntent, unchangedSnapshot: boolean): Promise<void> {
     const sameCatalog =
@@ -290,6 +296,10 @@ export class CronController {
       if (!this.#abort || this.#abort.signal.aborted) this.#abort = new AbortController()
       if (selectionKey(this.state.selected) !== selectionKey(intent.route.selection))
         await this.select(intent.route.selection)
+      return
+    }
+    if (this.state.loading && sameCatalog) {
+      this.#pendingSync = intent
       return
     }
     await this.load(intent)
@@ -436,6 +446,7 @@ export class CronController {
     }
   }
   async loadBadge(intent: CronIntent): Promise<void> {
+    this.#pendingSync = undefined
     this.#catalogLoaded = false
     this.#intent = intent
     this.#cancelSelection()
@@ -516,6 +527,7 @@ export class CronController {
     this.#peekTimer = undefined
   }
   cancelNavigation(): void {
+    this.#pendingSync = undefined
     this.#generation++
     this.#abort?.abort()
     this.#cancelSelection()
@@ -527,6 +539,7 @@ export class CronController {
     })
   }
   fence() {
+    this.#pendingSync = undefined
     this.#generation++
     this.#abort?.abort()
     this.#cancelSelection()
