@@ -118,6 +118,14 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 	}
 }
 
+func TestScreenViewedAllowsCron(t *testing.T) {
+	reporter, err := NewReporter(Options{})
+	require.NoError(t, err)
+	props, err := reporter.SanitizeProperties("screen_viewed", map[string]any{"screen": "cron", "surface": "web"})
+	require.NoError(t, err)
+	assert.Equal(t, "cron", props["screen"])
+}
+
 func TestProjectCountBucket(t *testing.T) {
 	for _, tc := range []struct {
 		count  int

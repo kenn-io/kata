@@ -29,6 +29,23 @@ owner vocabulary. A federation lease provides exclusive coordination on an
 issue. Recording a run changes neither ownership nor leases. See
 [federation leases](../operations/federation.md#leases-and-write-gates) for that mechanism.
 
+## Inspect cron in the web UI
+
+Open **Cron** in the web sidebar to inspect jobs, runs, and workflows across
+readable projects on the selected daemon. Filter by project or status, filter
+jobs by tags, or group the results by project. The URL retains filters and the
+selected detail drawer.
+
+A job's last result comes from its latest recorded run, even when that run is
+outside the loaded history. **Never ran** means the job has no recorded run.
+The sidebar badge counts failed runs created in the daemon's last 24 hours;
+a partial indicator means some project counts could not be read.
+
+Open a run to read its recorded summary and the latest readable comment on its
+linked issue. Select the issue link to open the full discussion. The drawer
+shows when a run has no issue or its issue cannot be read. Use **Load more** to
+read older run history and **Refresh** to reload current evidence.
+
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,

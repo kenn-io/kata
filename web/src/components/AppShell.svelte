@@ -1,4 +1,7 @@
 <script lang="ts">
+  import CronPage from './cron/CronPage.svelte'
+  import { defaultCronRoute } from '../lib/cron/route'
+  import { emptyCronState, type CronState } from '../lib/cron/controller'
   import { onMount } from 'svelte'
   import { DetailDrawer, IconButton, Tooltip, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
@@ -48,6 +51,9 @@
   type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
+    cronState?: Readonly<CronState>
+    onCronRefresh?: () => void
+    onCronLoadMore?: (projectUID: string) => void
     route: AppRoute
     snapshot: UISnapshot
     loading: boolean
@@ -116,6 +122,9 @@
   }
 
   let {
+    cronState = emptyCronState(),
+    onCronRefresh = () => {},
+    onCronLoadMore = () => {},
     route,
     snapshot,
     loading,
@@ -219,6 +228,7 @@
   let mobileNavigationOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
+  let cronRoute = $derived(route.view === 'cron')
   let credentialRoute = $derived(route.view === 'credentials')
   let accessAdministrationAvailable = $derived(
     snapshot.capabilities.access_admin === true &&
@@ -440,7 +450,7 @@
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
-    if (current.view === 'credentials') return 'all'
+    if (current.view === 'credentials' || current.view === 'cron') return 'all'
     if (current.view) return current.view === 'all-open' ? 'all' : current.view
     return current.projectUID || current.issueUID ? 'all' : 'inbox'
   }
@@ -555,6 +565,19 @@
     {draftFenceGeneration}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
+    cronActive={cronRoute}
+    cronFailedCount={cronState.failedRuns24h}
+    cronBadgePartial={cronState.badgePartial}
+    onOpenCron={() => {
+      mobileNavigationOpen = false
+      navigate({
+        kind: 'kata',
+        view: 'cron',
+        graph: false,
+        filters: emptyShareableFilters(),
+        cron: defaultCronRoute(),
+      })
+    }}
     onOpenView={openView}
     onOpenProject={openProject}
     {onCreateProject}
@@ -618,7 +641,7 @@
             <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
           {/if}
         </IconButton>
-        {#if !credentialRoute}
+        {#if !credentialRoute && !cronRoute}
           <IconButton
             ariaLabel={preferences.splitDirection === 'vertical'
               ? 'Switch to side-by-side layout'
@@ -646,7 +669,7 @@
       </div>
     {/snippet}
   </TopBar>
-  {#if selectedProject && !credentialRoute && !loading && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
+  {#if selectedProject && !credentialRoute && !cronRoute && !loading && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
       <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
     {/key}
@@ -657,7 +680,30 @@
     </div>
 
     <div class="kata-main">
-      {#if credentialRoute}
+      {#if cronRoute}
+        <CronPage
+          route={route.cron ?? defaultCronRoute()}
+          state={cronState}
+          onNavigate={(cron) =>
+            navigate({
+              kind: 'kata',
+              view: 'cron',
+              graph: false,
+              filters: emptyShareableFilters(),
+              cron,
+            })}
+          onLoadMore={onCronLoadMore}
+          onRefresh={onCronRefresh}
+          onOpenIssue={(projectUID, issueUID) =>
+            navigate({
+              kind: 'kata',
+              projectUID,
+              issueUID,
+              graph: false,
+              filters: emptyShareableFilters(),
+            })}
+        />
+      {:else if credentialRoute}
         <div class="credential-scene">
           <CredentialAudit
             tokens={credentialTokens}

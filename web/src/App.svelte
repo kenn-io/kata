@@ -6,6 +6,8 @@
 
   import { commentRetryIdentity } from './lib/kata/commentRetry'
   import type { KataCommentReplyIntent } from './lib/kata/types'
+  import { CronController, emptyCronState } from './lib/cron/controller'
+  import { defaultCronRoute } from './lib/cron/route'
   import AppShell from './components/AppShell.svelte'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
@@ -208,6 +210,11 @@
   $effect(() => {
     reportScreenViewed()
   })
+  const cron = new CronController(undefined, requireAuthentication)
+  let cronState = $state.raw(emptyCronState())
+  const unsubscribeCron = cron.subscribe((state) => {
+    cronState = state
+  })
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
@@ -277,6 +284,7 @@
   }
   const unsubscribe = snapshots.subscribe((state) => {
     authority = { ...state }
+    if (state.authenticationRequired) cron.fence()
     if (
       state.snapshot &&
       !state.loading &&
@@ -305,10 +313,17 @@
     }
     const popstate = () => {
       const next = parseRoute(new URL(window.location.href))
+      const selectionOnly = next.kind !== 'route-error' && canReuseCronSelection(next)
+      if (!selectionOnly) cron.cancelNavigation()
       if (route.kind !== 'route-error' && route.view === 'credentials') fenceCredentialAudit()
       route = next
       if (next.kind === 'route-error') {
         mode = 'route-error'
+        return
+      }
+      if (selectionOnly) {
+        acceptedRoute = next
+        void cron.select(next.cron?.selection)
         return
       }
       mode = authority?.snapshot ? 'ready' : 'loading'
@@ -319,6 +334,9 @@
     window.addEventListener('pageshow', environment)
     window.addEventListener('popstate', popstate)
     window.addEventListener('kata:versionMismatch', showVersionMismatch)
+    const cronSummaryTimer = window.setInterval(() => {
+      if (!document.hidden) void cron.refreshSummaries()
+    }, 60_000)
     const credentialRefreshTimer = window.setInterval(() => {
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }, 30_000)
@@ -338,6 +356,9 @@
       window.removeEventListener('popstate', popstate)
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
       window.clearInterval(credentialRefreshTimer)
+      window.clearInterval(cronSummaryTimer)
+      unsubscribeCron()
+      cron.destroy()
       stopQuietSubscription?.()
       browserTelemetry?.stop()
       sessionEnded?.stop()
@@ -390,7 +411,30 @@
     })
   }
 
+  function canReuseCronSelection(next: AppRoute): boolean {
+    if (
+      route.kind === 'route-error' ||
+      route.view !== 'cron' ||
+      next.view !== 'cron' ||
+      mode !== 'ready' ||
+      !authority?.snapshot ||
+      authority.loading ||
+      authority.stale ||
+      authority.authenticationRequired ||
+      daemonSwitching ||
+      cron.state.loading
+    )
+      return false
+    const withoutSelection = (current: AppRoute) =>
+      serializeRoute({
+        ...current,
+        cron: { ...(current.cron ?? defaultCronRoute()), selection: undefined },
+      })
+    return withoutSelection(route) === withoutSelection(next)
+  }
   function navigate(next: AppRoute): void {
+    const selectionOnly = canReuseCronSelection(next)
+    if (!selectionOnly) cron.cancelNavigation()
     const opensCredentials =
       route.kind !== 'route-error' && route.view !== 'credentials' && next.view === 'credentials'
     if (opensCredentials && route.kind !== 'route-error') {
@@ -410,6 +454,11 @@
     )
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
+    if (selectionOnly) {
+      acceptedRoute = next
+      void cron.select(next.cron?.selection)
+      return
+    }
     mode = authority?.snapshot ? 'ready' : 'loading'
     void startAuthority()
   }
@@ -899,6 +948,7 @@
   function rejectCredentialsAndRequireAuthentication(): boolean {
     sessionEnded?.pause()
     fenceCredentialAudit()
+    cron.fence()
     clearSessionCredentials()
     draftFenceGeneration += 1
     return requireAuthentication()
@@ -993,6 +1043,7 @@
           ?.id ??
         loadedDaemons.find((daemon) => daemon.health !== 'upgrade_required')?.id
       if (retainedDaemonID !== undefined && nextDaemonID !== retainedDaemonID) {
+        cron.fence()
         snapshots.clear()
         referenceGeneration += 1
         referenceAbort?.abort()
@@ -1004,6 +1055,7 @@
       daemonRosterLoaded = true
       activeDaemonID = nextDaemonID
       if (!activeDaemonID) {
+        cron.fence()
         snapshots.clear()
         daemonError = 'No compatible Kata daemon is available'
         return false
@@ -1026,6 +1078,7 @@
         daemonError = undefined
         return false
       }
+      cron.fence()
       snapshots.clear()
       referenceGeneration += 1
       referenceAbort?.abort()
@@ -1054,6 +1107,7 @@
     stream.stop()
     invalidations.pause()
     fenceCredentialAudit()
+    cron.fence()
     snapshots.clear()
     referenceGeneration += 1
     referenceAbort?.abort()
@@ -1087,6 +1141,7 @@
       route = sourceRoute
       acceptedRoute = undefined
       history.replaceState(null, '', serializeRoute(sourceRoute))
+      cron.fence()
       snapshots.clear()
       await startAuthority()
     }
@@ -1097,6 +1152,8 @@
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
     const requestedRoute = route
+    const requestedDaemonID = activeDaemonID
+    const previousSnapshot = snapshots.state.snapshot
     const baseIntent = snapshotIntentForRoute(requestedRoute)
     const intent = activeDaemonID ? { ...baseIntent, daemonID: activeDaemonID } : baseIntent
     const accepted = await snapshots.load(intent, { full })
@@ -1104,12 +1161,28 @@
       requireAuthentication()
       return false
     }
+    if (!accepted || route !== requestedRoute || activeDaemonID !== requestedDaemonID) return false
     if (
       snapshots.state.snapshot &&
       snapshots.state.intent &&
       uiSnapshotIntentKey(snapshots.state.intent) === uiSnapshotIntentKey(intent)
     ) {
       acceptedRoute = requestedRoute
+      if (accepted && !snapshots.state.authenticationRequired) {
+        const intent = {
+          daemonID: activeDaemonID,
+          authorityGeneration: draftFenceGeneration,
+          projects: snapshots.state.snapshot.catalog.map(({ project }) => ({
+            id: project.id,
+            uid: project.uid,
+            name: project.name,
+          })),
+          route: requestedRoute.cron ?? defaultCronRoute(),
+        }
+        if (requestedRoute.view === 'cron')
+          void cron.sync(intent, previousSnapshot === snapshots.state.snapshot)
+        else void cron.loadBadge(intent)
+      }
       return accepted
     }
     return false
@@ -1242,6 +1315,9 @@
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
         route={acceptedRoute ?? route}
+        {cronState}
+        onCronRefresh={() => void cron.refresh()}
+        onCronLoadMore={(uid) => void cron.loadMore(uid)}
         onSearchEmpty={() => reportOutcome('search_empty')}
         snapshot={authority.snapshot}
         loading={authority.loading}

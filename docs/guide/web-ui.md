@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-17
+last_edited: 2026-10-25
 ---
 
 # Web UI
@@ -185,6 +185,13 @@ Switching daemons or losing current authority clears the previous account
 while reconnection is pending. Finite credentials show **Credential expired**
 when their lifetime ends. These summaries never show token values and do not
 load the administrator credential inventory.
+
+## Inspect cron
+
+Open **Cron** in the sidebar to read jobs, runs, and workflows from every
+readable project on the selected daemon. The badge counts failed runs from the
+last 24 hours. See [inspect cron in the web UI](../reference/cron.md#inspect-cron-in-the-web-ui)
+for filters, last results, and run details.
 
 ## Audit provisioned credentials
 

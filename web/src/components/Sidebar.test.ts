@@ -67,6 +67,28 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
 }
 
 describe('Sidebar', () => {
+  it('places Cron immediately before Credentials with the authoritative partial badge', async () => {
+    const onOpenCron = vi.fn()
+    renderSidebar({
+      credentialAuditAvailable: true,
+      cronFailedCount: 37,
+      cronBadgePartial: true,
+      onOpenCron,
+    })
+    const nav = screen.getByRole('navigation', { name: 'System views' })
+    const buttons = within(nav).getAllByRole('button')
+    const index = buttons.findIndex((button) => button.textContent?.includes('Cron'))
+    expect(buttons[index + 1]?.textContent).toContain('Credentials')
+    await fireEvent.click(buttons[index]!)
+    expect(onOpenCron).toHaveBeenCalledOnce()
+    expect(buttons[index]?.getAttribute('aria-label')).toBe('Cron 37 (partial)')
+  })
+  it('keeps Cron available without credential administration', () => {
+    renderSidebar()
+    expect(screen.getByRole('button', { name: 'Cron' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+  })
+
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()

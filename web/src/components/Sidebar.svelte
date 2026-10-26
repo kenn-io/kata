@@ -23,6 +23,10 @@
     /** Why project creation is blocked; undefined when it is allowed. */
     projectCreationBlockedReason: string | undefined
     draftFenceGeneration?: number | undefined
+    cronActive?: boolean
+    cronFailedCount?: number
+    cronBadgePartial?: boolean
+    onOpenCron?: () => void
     credentialAuditAvailable?: boolean | undefined
     credentialAuditActive?: boolean | undefined
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
@@ -37,6 +41,10 @@
     searchFilters,
     projectCreationBlockedReason,
     draftFenceGeneration = 0,
+    cronActive = false,
+    cronFailedCount = 0,
+    cronBadgePartial = false,
+    onOpenCron = () => {},
     credentialAuditAvailable = false,
     credentialAuditActive = false,
     onOpenView,
@@ -157,7 +165,7 @@
         {@const count = viewCount(view.name)}
         <button
           type="button"
-          class:active={!credentialAuditActive && currentView.name === view.name}
+          class:active={!cronActive && !credentialAuditActive && currentView.name === view.name}
           aria-label={count !== undefined ? `${view.label} ${count}` : view.label}
           onclick={() => {
             void onOpenView(view.name)
@@ -170,6 +178,21 @@
           {/if}
         </button>
       {/each}
+      <button
+        type="button"
+        class:active={cronActive}
+        onclick={onOpenCron}
+        aria-label={`Cron${cronFailedCount ? ` ${cronFailedCount}` : ''}${cronBadgePartial ? ' (partial)' : ''}`}
+      >
+        <span class="nav-icon"><AlarmClockIcon size={14} strokeWidth={1.75} /></span><span
+          class="nav-label">Cron</span
+        >
+        {#if cronFailedCount || cronBadgePartial}<span
+            class="nav-count"
+            title="Failed runs in the last 24 hours"
+            >{cronFailedCount}{cronBadgePartial ? ' +' : ''}</span
+          >{/if}
+      </button>
       {#if credentialAuditAvailable}
         <button
           type="button"

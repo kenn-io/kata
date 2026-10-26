@@ -1,3 +1,5 @@
+import { parseCronRoute, writeCronRoute } from './cron/route'
+import type { CronRouteState } from './cron/types'
 import { applicationRoutePath } from './applicationBase'
 
 export const systemViews = [
@@ -10,7 +12,7 @@ export const systemViews = [
 ] as const
 
 export type SystemView = (typeof systemViews)[number]
-export type DaemonView = 'credentials'
+export type DaemonView = 'credentials' | 'cron'
 
 export interface ShareableFilters {
   status: string[]
@@ -31,6 +33,7 @@ export type KataRoute =
       projectUID?: string
       issueUID?: string
       graph: boolean
+      cron?: CronRouteState
     })
   | {
       kind: 'route-error'
@@ -45,6 +48,14 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
     return { kind: 'route-error', path: url.pathname, reason: 'path' }
   }
   const view = url.searchParams.get('view')?.trim()
+  if (view === 'cron')
+    return {
+      kind: 'kata',
+      view,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+      cron: parseCronRoute(url.searchParams),
+    }
   if (view === 'credentials') {
     return {
       kind: 'kata',
@@ -85,6 +96,10 @@ export function serializeRoute(route: KataRoute, routePath = applicationRoutePat
   if (route.kind === 'route-error') return route.path
   const query = new URLSearchParams()
   if (route.view) query.set('view', route.view)
+  if (route.view === 'cron') {
+    writeCronRoute(query, route.cron ?? parseCronRoute(new URLSearchParams()))
+    return `${routePath}?${query}`
+  }
   if (route.projectUID) query.set('scope', route.projectUID)
   if (route.issueUID) query.set('issue', route.issueUID)
   if (route.graph && route.issueUID) query.set('graph', '1')
@@ -131,6 +146,7 @@ function validUID(value: string): boolean {
 
 export function screenNameForRoute(route: KataRoute): string | undefined {
   if (route.kind === 'route-error') return undefined
+  if (route.view === 'cron') return 'cron'
   if (route.view === 'credentials') return 'credentials'
   if (route.issueUID) return route.graph ? 'graph' : 'issue'
   if (route.view) return route.view === 'all-open' ? 'issues' : route.view

@@ -497,6 +497,8 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	}
 
 	switch parts[1] {
+	case "cron":
+		return webLocalCronRequestAllowed(r, parts[2:])
 	case "federation":
 		return len(parts) == 3 && parts[2] == "status" && r.Method == http.MethodGet
 	case "metadata":
@@ -516,7 +518,8 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 		return r.Method == http.MethodPost
 	}
 	if len(parts) == 1 {
-		return r.Method == http.MethodPatch
+		return r.Method == http.MethodPatch ||
+			(parts[0] != "" && r.Method == http.MethodGet && !r.URL.Query().Has("include_deleted"))
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
@@ -538,6 +541,21 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 		}
 	}
 	return false
+}
+
+// webLocalCronRequestAllowed exposes only the reads the web Cron page makes.
+func webLocalCronRequestAllowed(r *http.Request, parts []string) bool {
+	if r.Method != http.MethodGet || len(parts) < 1 || len(parts) > 2 {
+		return false
+	}
+	switch parts[0] {
+	case "summary":
+		return len(parts) == 1
+	case "jobs", "runs", "workflows":
+		return len(parts) == 1 || parts[1] != ""
+	default:
+		return false
+	}
 }
 
 func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *WebSessionManager) bool {

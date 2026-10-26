@@ -352,3 +352,22 @@ function deferredSnapshot() {
     signal: undefined as AbortSignal | undefined,
   }
 }
+
+// Cron records stay outside the snapshot projection contract.
+it('cron requests catalog authority without issue filters or graph projections', () => {
+  const intent = snapshotIntentForRoute({
+    kind: 'kata',
+    view: 'cron',
+    graph: false,
+    filters: { status: ['failed'], owner: ['reader'], label: ['label'], relationship: [] },
+  })
+  expect(intent).toMatchObject({
+    view: 'all-open',
+    statuses: [],
+    owners: [],
+    labels: [],
+    includeGraph: false,
+    includeHistory: false,
+  })
+  expect(intent.selectedIssueUID).toBeUndefined()
+})
