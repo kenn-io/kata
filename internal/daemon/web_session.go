@@ -549,8 +549,17 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	return false
 }
 
-// webLocalCronRequestAllowed exposes only the reads the web Cron page makes.
+// webLocalCronRequestAllowed exposes only the reads and definition edits the
+// web Cron page makes.
 func webLocalCronRequestAllowed(r *http.Request, parts []string) bool {
+	if len(parts) == 2 && parts[1] != "" {
+		switch r.Method {
+		case http.MethodPut:
+			return parts[0] == "jobs" || parts[0] == "workflows"
+		case http.MethodDelete:
+			return parts[0] == "jobs"
+		}
+	}
 	if r.Method != http.MethodGet || len(parts) < 1 || len(parts) > 2 {
 		return false
 	}

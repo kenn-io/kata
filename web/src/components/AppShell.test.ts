@@ -4,7 +4,10 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { setGeneratedFetch } from '../lib/api/client'
 import type { MutationContext, MutationResult } from '../lib/mutations/controller'
 import type { UISnapshot } from '../lib/state/snapshot'
+import { emptyCronState } from '../lib/cron/controller'
+import { defaultCronRoute } from '../lib/cron/route'
 import AppShell from './AppShell.svelte'
+import CronEditorHost from './cron/CronEditorHost.svelte'
 
 describe('AppShell', () => {
   afterEach(() => {
@@ -1583,6 +1586,50 @@ describe('AppShell', () => {
       issueUID: '01J00000000000000000000001',
     })
   })
+})
+
+test('cron forwards creation to the parent-owned editor host', async () => {
+  const current = snapshot(),
+    state = emptyCronState()
+  state.projects = [
+    {
+      project: { id: 1, uid: 'p1', name: 'example-project' },
+      jobs: [],
+      runs: [],
+      workflows: [],
+      hasRecords: false,
+    },
+  ]
+  const editor = render(CronEditorHost, {
+    route: defaultCronRoute(),
+    state,
+    canMutate: true,
+    onMutation: vi.fn(async () => true),
+    onNavigate: vi.fn(),
+    onRefresh: vi.fn(),
+  })
+  render(AppShell, {
+    props: {
+      route: {
+        kind: 'kata',
+        view: 'cron',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+      snapshot: current,
+      loading: false,
+      ...mutationProps({ canMutate: true }),
+      cronState: state,
+      cronEditor: editor.component,
+      onNavigate: vi.fn(),
+      onCreateProject: vi.fn(async () => ({ changed: true })),
+    },
+  })
+  expect((screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled).toBe(
+    false,
+  )
+  await fireEvent.click(screen.getByRole('button', { name: 'New job' }))
+  expect(screen.getByRole('textbox', { name: 'Prompt' })).toBeTruthy()
 })
 
 function mutationProps(overrides: Record<string, unknown> = {}) {

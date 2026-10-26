@@ -834,3 +834,76 @@ func TestWebDaemonCronReadsKeepTargetCredentialsPinned(t *testing.T) {
 	}
 	assert.Equal(t, 7, calls)
 }
+
+func TestWebDaemonCronDefinitionWriteAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		principal      Principal
+		targetWritable bool
+		targetActor    string
+		allowed        bool
+	}{
+		{"request actor", Principal{Kind: PrincipalWebLocal}, true, "request", true},
+		{"read only target", Principal{Kind: PrincipalWebLocal}, false, "request", false},
+		{"identity target", Principal{Kind: PrincipalWebLocal}, true, "identity", false},
+		{"identity source", Principal{Kind: PrincipalTrustedProxy, Actor: "user-a"}, true, "request", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var writes, capabilityReads int
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
+				for _, header := range []string{webSessionHeader, webCSRFHeader, "Cookie", "X-Kata-Actor", "X-Forwarded-For"} {
+					assert.Empty(t, r.Header.Get(header), header)
+				}
+				if r.URL.Path == "/api/v1/instance" {
+					capabilityReads++
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"web_ui_contract_version": api.UISnapshotContractVersion,
+						"web_ui_capabilities":     api.UICapabilities{Writable: test.targetWritable, Updates: "poll", ActorPolicy: test.targetActor},
+					})
+					return
+				}
+				writes++
+				body, err := io.ReadAll(r.Body)
+				assert.NoError(t, err)
+				assert.Equal(t, `{"actor":"user-a","expected_event_uid":"old"}`, string(body))
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(upstream.Close)
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true})
+			issued, err := manager.IssueSession(test.principal, "/kata")
+			require.NoError(t, err)
+			for _, route := range []struct {
+				method, tail string
+				allowed      bool
+			}{
+				{http.MethodPut, "jobs/job-uid", true},
+				{http.MethodPut, "workflows/workflow-uid", true},
+				{http.MethodDelete, "jobs/job-uid", true},
+				{http.MethodDelete, "workflows/workflow-uid", false},
+				{http.MethodPut, "runs/run-uid", false},
+				{http.MethodPost, "jobs", false},
+				{http.MethodPost, "workflows", false},
+				{http.MethodPut, "jobs/job-uid/admin", false},
+				{http.MethodPost, "jobs/job-uid/restore", false},
+			} {
+				withoutCSRF := issued
+				withoutCSRF.CSRF = ""
+				denied := authorizedGatewayRequest(t, handler, manager, withoutCSRF, route.method, "/api/v1/projects/7/cron/"+route.tail, strings.NewReader(`{"actor":"user-a","expected_event_uid":"old"}`), "")
+				assert.Equal(t, http.StatusForbidden, denied.Code, "every remote write requires CSRF")
+				response := authorizedGatewayRequest(t, handler, manager, issued, route.method, "/api/v1/projects/7/cron/"+route.tail, strings.NewReader(`{"actor":"user-a","expected_event_uid":"old"}`), "")
+				want := http.StatusForbidden
+				if test.allowed && route.allowed {
+					want = http.StatusNoContent
+				}
+				assert.Equal(t, want, response.Code, route.method+" "+route.tail+": "+response.Body.String())
+			}
+			if test.allowed {
+				assert.Equal(t, 3, writes)
+				assert.Equal(t, 3, capabilityReads, "revalidate before every write")
+			} else {
+				assert.Zero(t, writes)
+			}
+		})
+	}
+}

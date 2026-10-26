@@ -9,6 +9,8 @@
   import { CronController, emptyCronState } from './lib/cron/controller'
   import { defaultCronRoute } from './lib/cron/route'
   import AppShell from './components/AppShell.svelte'
+  import CronEditorHost, { type CronEditorHandle } from './components/cron/CronEditorHost.svelte'
+  import { CronMutationGate } from './lib/cron/mutations'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
@@ -34,6 +36,7 @@
     patchProjectMetadata,
     patchRecurrence as patchRecurrenceRequest,
     readUIReferences,
+    resolveUIIssueReference,
     removeLabel as removeLabelRequest,
     reopenIssue as reopenIssueRequest,
     setIssuePriority,
@@ -119,6 +122,7 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
+  let cronEditor: CronEditorHandle | undefined = $state()
   let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
   let pendingComment: { identity: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
@@ -223,6 +227,17 @@
     }),
     refresh: refreshMutationAuthority,
     onAuthenticationRequired: requireAuthentication,
+  })
+  const cronMutationGate = new CronMutationGate({
+    pending: () => mutationPending,
+    canMutate: () => !daemonSwitching && (authority?.canMutate ?? false),
+    runMutation: (draft, mutate) =>
+      runMutation({ draft }, (context) =>
+        mutate({
+          ...context,
+          body: (body, actor) => context.body(body, actor ?? requestActor),
+        }),
+      ),
   })
   const accessMutations = new MutationController({
     authority: () => ({
@@ -350,6 +365,7 @@
     }
     return () => {
       destroyed = true
+      cronMutationGate.fence()
       document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('focus', focus)
       window.removeEventListener('pageshow', environment)
@@ -582,6 +598,27 @@
     } finally {
       if (referenceAbort === abort) referenceAbort = undefined
     }
+  }
+
+  async function resolveCronIssue(projectID: number, reference: string): Promise<string> {
+    const generation = draftFenceGeneration,
+      daemonID = activeDaemonID
+    const result = await resolveUIIssueReference({ project_id: projectID, ref: reference })
+    if (
+      destroyed ||
+      generation !== draftFenceGeneration ||
+      daemonID !== activeDaemonID ||
+      !authority?.canMutate
+    )
+      throw new Error('Authority changed. Reopen this draft before saving.')
+    if (result.status !== 200)
+      throw new Error('Issue reference could not be resolved in this project.')
+    if (
+      typeof result.data.issue?.uid !== 'string' ||
+      !/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(result.data.issue.uid)
+    )
+      throw new Error('Issue reference returned an invalid UID.')
+    return result.data.issue.uid
   }
 
   async function searchReferences(query: string): Promise<UIIssueReference[]> {
@@ -880,6 +917,7 @@
     mutate: (context: MutationContext) => Promise<MutationResult>,
     controller: MutationController = mutations,
   ): Promise<boolean> {
+    if (mutationPending) return false
     mutationPending = true
     try {
       const result = await controller.execute(options, mutate)
@@ -949,6 +987,7 @@
     sessionEnded?.pause()
     fenceCredentialAudit()
     cron.fence()
+    cronMutationGate.fence()
     clearSessionCredentials()
     draftFenceGeneration += 1
     return requireAuthentication()
@@ -1102,6 +1141,8 @@
     if (restored.kind === 'route-error') return
 
     daemonSwitching = true
+    cronMutationGate.fence()
+    draftFenceGeneration += 1
     daemonError = undefined
     scheduler.stop()
     stream.stop()
@@ -1316,6 +1357,7 @@
       <AppShell
         route={acceptedRoute ?? route}
         {cronState}
+        {cronEditor}
         onCronRefresh={() => void cron.refresh()}
         onCronLoadMore={(uid) => void cron.loadMore(uid)}
         onSearchEmpty={() => reportOutcome('search_empty')}
@@ -1367,4 +1409,24 @@
       />
     {/if}
   {/if}
+  <CronEditorHost
+    bind:this={cronEditor}
+    route={route.kind === 'route-error' ? defaultCronRoute() : (route.cron ?? defaultCronRoute())}
+    state={cronState}
+    authorityScope={`${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
+    canMutate={!!authority?.canMutate &&
+      !authority.loading &&
+      !authority.stale &&
+      !!authority.snapshot?.capabilities.writable &&
+      !daemonSwitching &&
+      !liveUpdatesReconnecting}
+    {mutationPending}
+    mutationMessage={mutationMessage(mutationState)}
+    onMutation={(draft, mutate) => cronMutationGate.run(draft, mutate)}
+    resolveIssue={resolveCronIssue}
+    onRefresh={() => void cron.refresh()}
+    onNavigate={(cron) => {
+      if (route.kind !== 'route-error' && route.view === 'cron') navigate({ ...route, cron })
+    }}
+  />
 </main>

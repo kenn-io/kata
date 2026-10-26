@@ -6,6 +6,7 @@ export interface MutationAuthority {
 }
 
 export interface MutationContext {
+  signal?: AbortSignal
   headers: Headers
   body<T extends object>(body: T, requestActor?: string): T | (T & { actor: string })
 }
@@ -59,6 +60,7 @@ export class MutationController {
     options: MutationOptions<TDraft>,
     mutate: (context: MutationContext) => Promise<MutationResult>,
   ): Promise<T | false> {
+    if (this.state.kind === 'pending') return false
     if (options.createKey && this.#committedCreates.has(options.createKey)) {
       return this.#committedCreates.get(options.createKey) as T
     }
@@ -99,7 +101,11 @@ export class MutationController {
       if (result.status === 401) {
         this.#onAuthenticationRequired()
         this.state = withDraft({ kind: 'blocked' }, options.draft)
-      } else if (result.status === 412 || error.code === 'revision_conflict') {
+      } else if (
+        result.status === 412 ||
+        error.code === 'revision_conflict' ||
+        (result.status === 409 && error.code === 'cron_conflict')
+      ) {
         await this.#refreshAfterUncertainWrite()
         this.state = withDraft(
           { kind: 'revision-conflict', code: error.code, detail: error.detail },

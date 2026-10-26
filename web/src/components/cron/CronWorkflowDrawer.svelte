@@ -1,10 +1,26 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
   import type { CronWorkflow } from '../../lib/cron/types'
-  let { workflow }: { workflow: CronWorkflow } = $props()
+  let {
+    workflow,
+    canMutate = false,
+    pending = false,
+    onEdit = undefined,
+  }: {
+    workflow: CronWorkflow
+    canMutate?: boolean
+    pending?: boolean
+    onEdit?: (() => void) | undefined
+  } = $props()
 </script>
 
 <div class="detail">
   <h3>{workflow.name}</h3>
+  {#if onEdit && !workflow.deleted_at}<Button
+      label="Edit workflow"
+      onclick={onEdit}
+      disabled={!canMutate || pending}
+    />{/if}
   <p>{workflow.definition.about ?? 'No description'}</p>
   <h4>Input</h4>
   <pre>{workflow.definition.input ?? '—'}</pre>

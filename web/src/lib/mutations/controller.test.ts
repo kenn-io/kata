@@ -46,6 +46,42 @@ describe('MutationController', () => {
     })
   })
 
+  it('preserves a cron draft and classifies only a 409 cron_conflict as revision conflict', async () => {
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh: async () => true,
+    })
+    const draft = { uid: 'retained', definitionEventUID: 'original' }
+    await controller.execute({ draft }, async () => failure(409, 'cron_conflict', 'Changed'))
+    expect(controller.state).toMatchObject({
+      kind: 'revision-conflict',
+      code: 'cron_conflict',
+      draft,
+    })
+    await controller.execute({ draft }, async () => failure(400, 'cron_conflict', 'Invalid'))
+    expect(controller.state.kind).toBe('domain-error')
+  })
+
+  it('blocks a concurrent mutation while an earlier write is pending', async () => {
+    let finish!: () => void
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh: async () => true,
+    })
+    const first = controller.execute({}, async () => {
+      await wait
+      return ok(true)
+    })
+    const second = vi.fn(async () => ok(true))
+    await expect(controller.execute({}, second)).resolves.toBe(false)
+    expect(second).not.toHaveBeenCalled()
+    finish()
+    await first
+  })
+
   it('reports a structured 409 refusal without calling it a revision conflict', async () => {
     const controller = new MutationController({
       authority: () => writableIdentity,

@@ -15,11 +15,11 @@ An observation records evidence; its status does not control whether anything ru
 
 ## Vocabulary
 
-| Name | Meaning |
-| --- | --- |
-| Job | Configured work: its trigger, action, and execution settings. |
-| Workflow | Reusable command or prompt steps and their dependencies. |
-| Run | One execution and its reported status and results. |
+| Name     | Meaning                                                       |
+| -------- | ------------------------------------------------------------- |
+| Job      | Configured work: its trigger, action, and execution settings. |
+| Workflow | Reusable command or prompt steps and their dependencies.      |
+| Run      | One execution and its reported status and results.            |
 
 An execution job can invoke a workflow or supply a single prompt. Each execution has its
 own run UID. A workflow can also be referenced directly by a run.
@@ -46,6 +46,78 @@ linked issue, including after that issue moves to another readable project.
 Select the issue link to open the full discussion. The drawer shows when a run
 has no issue or its issue cannot be read. Use **Load more** to
 read older run history and **Refresh** to reload current evidence.
+
+## Edit cron in the web UI
+
+Writable browser sessions can create and edit jobs and workflows on the Cron
+page, pause or unpause jobs, and delete jobs with confirmation. Read-only
+sessions see no editing controls. Editing changes the shared definition;
+adapter jobs still need an installed adapter to run. The editors need only the
+core cron routes; no optional integration is required.
+
+### Create and edit jobs
+
+Choose **New job**, select its Project, and enter a Name. Choose an Action:
+`prompt` for an adapter prompt, `workflow` for a workflow in the same project,
+`notify` for an inbox notification, or `recurring` for native recurring child
+issues. Select the schedule and fill its visible fields, then choose **Save job**.
+Native recurring jobs accept cron or interval schedules, require a parent issue
+and child title, and use `overlap: "allow"`.
+
+Open an existing job and choose **Edit job** to change its definition. **Pause**
+and **Unpause** change its shared enabled flag. **Delete job** asks for confirmation
+and retains historical definitions and runs. A native recurring job's action
+ownership and parent binding are immutable and appear as read-only values.
+
+Issue references resolve in the selected project before saving. Durations accept
+whole seconds or units such as `2h30m`; only deadline offsets may be negative.
+For a once schedule, **Run at** accepts an RFC3339 instant or a local wall time in
+the selected timezone. Ambiguous or nonexistent local times require an explicit
+RFC3339 offset. There is no next-run preview.
+
+Description, tags, workflow input, existing scheduled offsets, and other adapter
+options are preserved read-only in the job editor. Use `kata cron job` to edit
+those fields. Opaque JSON numbers remain exact when you change another field.
+Secret references name adapter-managed secrets; the editor accepts no credential
+values. Runs remain evidence, without an editor or comment shortcut.
+
+### Create and edit workflows
+
+On **Workflows**, choose **New workflow**, select its Project, and enter its Name,
+About, Input, and optional workflow options. Add command or prompt steps. Each
+step has a unique portable Key, its Command or Prompt, **Runs after** dependencies,
+Retries, and optional step options. Options must be strict JSON objects; numbers
+remain exact. Choose **Save workflow**, or open an existing workflow and choose
+**Edit workflow**.
+
+Dependencies are comma-separated keys of earlier steps. A later-step reference,
+missing key, duplicate dependency, self-reference, or cycle blocks saving. The
+dependency graph updates as you edit, with diagnostics beside the ordered list.
+Renaming a key updates its dependents. Deleting a referenced step lists its
+direct dependents and requires confirmation before removing their references.
+The graph describes dependencies; it does not start or schedule steps.
+
+### Conflicts, uncertain saves, and authority changes
+
+Each edit, pause, or deletion sends the definition event UID captured when the
+editor opened. If another writer changed the definition, the daemon rejects the
+stale request with `409`. The editor keeps your draft and shows the original and
+newer definitions. Compare them and choose **Rebase my edits on newer version**
+before saving again. Rebase preserves untouched fields from the newer version;
+it does not overwrite that version without another guarded save. A deleted
+definition cannot be rebased.
+
+A create retains one UID and one request. If the response is lost, the browser
+reads that UID back to determine whether the write committed. If the outcome
+remains uncertain, it keeps the draft and disables editing and closing. Choose
+**Check outcome** to read back again. **Retry save** or **Retry delete** appears
+only when readback establishes that the retained request can be retried safely.
+Do not start a second create to recover from an uncertain response.
+
+Controls are disabled while another mutation is pending or authority is stale
+or read-only. Authentication rejection and daemon switching fence an open draft:
+it cannot write under the new authority, even after local-session renewal. Close
+the draft and reopen the definition to obtain current authority and a fresh guard.
 
 ## Definitions
 
@@ -106,37 +178,40 @@ these options without interpreting them.
     "version": 1,
     "kind": "job",
     "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 9 * * *", "timezone": "UTC"},
-    "action": {"kind": "execute", "prompt": "Review open issues and summarize next actions."},
-    "issue": {"kind": "per-run", "title": "Daily summary"},
+    "trigger": { "kind": "cron", "cron": "0 9 * * *", "timezone": "UTC" },
+    "action": {
+      "kind": "execute",
+      "prompt": "Review open issues and summarize next actions."
+    },
+    "issue": { "kind": "per-run", "title": "Daily summary" },
     "overlap": "forbid",
     "catchup": "latest",
     "checkout_key": "example-project",
-    "options": {"agent": "codex"}
+    "options": { "agent": "codex" }
   }
 }
 ```
 
 Definitions are strictly decoded: unknown fields are rejected, and each
-definition is bounded to 256 KiB. A *portable name* is 1–256 bytes of letters,
+definition is bounded to 256 KiB. A _portable name_ is 1–256 bytes of letters,
 digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 
 ### Job definitions
 
-| Field | Rule |
-| --- | --- |
-| `version` | Required; must be `1`. |
-| `kind` | Required; must be `"job"`. |
-| `enabled` | Boolean; defaults to `false`. |
-| `trigger` | Required; see [triggers](#triggers). |
-| `action` | Required; see [actions](#actions). |
-| `issue` | Issue policy; see [issue policies](#issue-policies). Required for `execute` and native recurring issues. |
-| `overlap` | Required; `forbid` or `allow`. |
-| `catchup` | Required; `skip`, `latest`, or `all`. |
-| `checkout_key` | Optional portable name. Not allowed with `notify`. |
-| `grace_seconds`, `timeout_seconds` | Optional; zero or greater. |
-| `secret_refs` | Optional object mapping portable names to portable names. |
-| `options` | Optional JSON object for the adapter. |
+| Field                              | Rule                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `version`                          | Required; must be `1`.                                                                                   |
+| `kind`                             | Required; must be `"job"`.                                                                               |
+| `enabled`                          | Boolean; defaults to `false`.                                                                            |
+| `trigger`                          | Required; see [triggers](#triggers).                                                                     |
+| `action`                           | Required; see [actions](#actions).                                                                       |
+| `issue`                            | Issue policy; see [issue policies](#issue-policies). Required for `execute` and native recurring issues. |
+| `overlap`                          | Required; `forbid` or `allow`.                                                                           |
+| `catchup`                          | Required; `skip`, `latest`, or `all`.                                                                    |
+| `checkout_key`                     | Optional portable name. Not allowed with `notify`.                                                       |
+| `grace_seconds`, `timeout_seconds` | Optional; zero or greater.                                                                               |
+| `secret_refs`                      | Optional object mapping portable names to portable names.                                                |
+| `options`                          | Optional JSON object for the adapter.                                                                    |
 
 `options` objects, at any depth, cannot contain these keys (compared without
 case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
@@ -147,14 +222,14 @@ case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
 Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 `America/New_York`. A trigger cannot carry fields that belong to another kind.
 
-| `kind` | Required fields |
-| --- | --- |
-| `manual` | None. |
-| `cron` | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`. |
-| `interval` | `interval_seconds`: a positive integer. |
-| `once` | `at`: an RFC 3339 instant. |
-| `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job. |
-| `issue-deadline` | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
+| `kind`            | Required fields                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manual`          | None.                                                                                                                                                         |
+| `cron`            | `cron`: a five-field expression (minute, hour, day of month, month, day of week) or a descriptor such as `@daily`.                                            |
+| `interval`        | `interval_seconds`: a positive integer.                                                                                                                       |
+| `once`            | `at`: an RFC 3339 instant.                                                                                                                                    |
+| `issue-scheduled` | `issue_uid`: the ULID of the issue whose `scheduled_on` date fires the job.                                                                                   |
+| `issue-deadline`  | `issue_uid`: the ULID of the issue whose `deadline_on` date fires the job. Optional `lead_seconds` (zero or greater) is how long before the deadline to fire. |
 
 ### Cron expressions
 
@@ -195,10 +270,10 @@ peers reject the definition or schedule it differently.
 
 ### Actions
 
-| `kind` | Fields and rules |
-| --- | --- |
-| `execute` | Exactly one of `prompt` (not blank) or `workflow_uid` (a workflow ULID). Requires an `issue` policy. Cannot use an `issue-deadline` trigger. Cannot carry `recipient` or `message`. |
-| `notify` | `recipient`: an exact inbox address of at most 128 bytes, such as `worker` or `worker/adapter`, or `current-owner-or-author`. `message`: at most 1024 bytes; required unless `recipient` is `current-owner-or-author` or this is a native recurring issue job. Cannot carry `prompt` or `workflow_uid`, and the job cannot set `checkout_key`. |
+| `kind`    | Fields and rules                                                                                                                                                                                                                                                                                                                               |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `execute` | Exactly one of `prompt` (not blank) or `workflow_uid` (a workflow ULID). Requires an `issue` policy. Cannot use an `issue-deadline` trigger. Cannot carry `recipient` or `message`.                                                                                                                                                            |
+| `notify`  | `recipient`: an exact inbox address of at most 128 bytes, such as `worker` or `worker/adapter`, or `current-owner-or-author`. `message`: at most 1024 bytes; required unless `recipient` is `current-owner-or-author` or this is a native recurring issue job. Cannot carry `prompt` or `workflow_uid`, and the job cannot set `checkout_key`. |
 
 A `notify` job with an `issue-scheduled` or `issue-deadline` trigger targets
 that issue and may omit `issue`. Any other `notify` job requires an `issue`
@@ -206,10 +281,10 @@ policy of kind `existing` or the native recurring `per-run` policy below.
 
 ### Issue policies
 
-| `kind` | Fields and rules |
-| --- | --- |
-| `existing` | `uid`: the ULID of an existing issue. No other fields. |
-| `per-run` | `title` (not blank) and optional `body`. Optional `scheduled_offset_seconds` and `deadline_offset_seconds` are relative date offsets, in seconds, for the issue the adapter creates. No `uid`. |
+| `kind`     | Fields and rules                                                                                                                                                                               |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `existing` | `uid`: the ULID of an existing issue. No other fields.                                                                                                                                         |
+| `per-run`  | `title` (not blank) and optional `body`. Optional `scheduled_offset_seconds` and `deadline_offset_seconds` are relative date offsets, in seconds, for the issue the adapter creates. No `uid`. |
 
 For `notify`, `per-run` instead requires `parent_uid` and a nonblank `title`.
 It accepts an optional `body`, but no `uid` or date offsets. This selects native
@@ -227,8 +302,8 @@ job with `--parent <ref>`. For example, save this request as `job.json`:
     "version": 1,
     "kind": "job",
     "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 9 1 * *", "timezone": "UTC"},
-    "action": {"kind": "notify", "recipient": "current-owner-or-author"},
+    "trigger": { "kind": "cron", "cron": "0 9 1 * *", "timezone": "UTC" },
+    "action": { "kind": "notify", "recipient": "current-owner-or-author" },
     "issue": {
       "kind": "per-run",
       "title": "Review service",
@@ -284,11 +359,11 @@ An embedded `TZ=` or `CRON_TZ=` must agree with `timezone`. Use
 binding time plus one interval. Calendar schedules start strictly after that
 binding time, without historical backfill.
 
-| `catchup` | After downtime or a pause |
-| --- | --- |
-| `all` | Create every missed child, at most 1000 per job per sweep. Later sweeps continue from durable progress. |
-| `latest` | Create only the newest missed occurrence. Calendar scans examine at most 20,000 occurrences per sweep, retain a fixed scan horizon, and deliver when that scan finishes. Intervals find the newest occurrence directly. |
-| `skip` | Require positive `grace_seconds`; discard older occurrences and deliver those within the grace window, with the same bounded sweep limits. |
+| `catchup` | After downtime or a pause                                                                                                                                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `all`     | Create every missed child, at most 1000 per job per sweep. Later sweeps continue from durable progress.                                                                                                                 |
+| `latest`  | Create only the newest missed occurrence. Calendar scans examine at most 20,000 occurrences per sweep, retain a fixed scan horizon, and deliver when that scan finishes. Intervals find the newest occurrence directly. |
+| `skip`    | Require positive `grace_seconds`; discard older occurrences and deliver those within the grace window, with the same bounded sweep limits.                                                                              |
 
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
@@ -334,13 +409,13 @@ A workflow definition has `version` `1` and a non-empty `steps` array. It may
 also carry `about`, `input`, and `options` (with the same key rules as job
 options). Each step has these fields:
 
-| Field | Rule |
-| --- | --- |
-| `key` | Required portable name, unique within the workflow. |
-| `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
-| `after` | Optional keys of earlier steps this step depends on. |
-| `retries` | Optional; 0–100. |
-| `options` | Optional JSON object for the adapter. |
+| Field     | Rule                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------ |
+| `key`     | Required portable name, unique within the workflow.                                        |
+| `kind`    | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
+| `after`   | Optional keys of earlier steps this step depends on.                                       |
+| `retries` | Optional; 0–100.                                                                           |
+| `options` | Optional JSON object for the adapter.                                                      |
 
 ```json
 {
@@ -348,8 +423,13 @@ options). Each step has these fields:
   "definition": {
     "version": 1,
     "steps": [
-      {"key": "check", "kind": "command", "command": "git diff --check"},
-      {"key": "test", "kind": "command", "command": "go test ./...", "after": ["check"]}
+      { "key": "check", "kind": "command", "command": "git diff --check" },
+      {
+        "key": "test",
+        "kind": "command",
+        "command": "go test ./...",
+        "after": ["check"]
+      }
     ]
   }
 }
@@ -377,9 +457,12 @@ command and the following job body. Save this request as `command.json`:
     "version": 1,
     "kind": "job",
     "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 2 * * *", "timezone": "UTC"},
-    "action": {"kind": "execute", "workflow_uid": "01J00000000000000000000010"},
-    "issue": {"kind": "per-run", "title": "Nightly tests"},
+    "trigger": { "kind": "cron", "cron": "0 2 * * *", "timezone": "UTC" },
+    "action": {
+      "kind": "execute",
+      "workflow_uid": "01J00000000000000000000010"
+    },
+    "issue": { "kind": "per-run", "title": "Nightly tests" },
     "overlap": "forbid",
     "catchup": "latest",
     "checkout_key": "example-project"
@@ -458,7 +541,7 @@ environment. For example:
   "teammate": "adapter",
   "executor_label": "local-worker",
   "status": "running",
-  "summary": {"version": 1, "message": "Review started"},
+  "summary": { "version": 1, "message": "Review started" },
   "expected_revision": 0
 }
 ```

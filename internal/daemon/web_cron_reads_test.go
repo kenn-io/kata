@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// The web Cron page reads summaries, definitions and runs; every cron write
-// and the capability probe stay outside local browser authority.
+// The web Cron page reads summaries, definitions and runs; the capability
+// probe stays outside local browser authority. TestWebLocalCronDefinitionWrites
+// covers the definition writes.
 func TestWebLocalCronReads(t *testing.T) {
-	for _, tail := range []string{"summary", "jobs", "jobs/job-uid", "runs", "runs/run-uid", "workflows", "workflows/workflow-uid"} {
+	for _, tail := range []string{"summary", "jobs", "runs", "runs/run-uid", "workflows"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			r := httptest.NewRequest(method, "/api/v1/projects/1/cron/"+tail, nil)
 			if got := webLocalSPARequestAllowed(r); got != (method == http.MethodGet) {
@@ -27,6 +28,11 @@ func TestWebLocalCronReads(t *testing.T) {
 	} {
 		if webLocalSPARequestAllowed(httptest.NewRequest(http.MethodGet, path, nil)) {
 			t.Errorf("allowed %s", path)
+		}
+	}
+	for _, path := range []string{"/api/v1/projects/1/cron/jobs/job-uid", "/api/v1/projects/1/cron/workflows/workflow-uid"} {
+		if !webLocalSPARequestAllowed(httptest.NewRequest(http.MethodGet, path, nil)) {
+			t.Errorf("denied %s", path)
 		}
 	}
 	if !webLocalSPARequestAllowed(httptest.NewRequest(http.MethodGet, "/api/v1/projects/1/issues/issue-ref", nil)) {

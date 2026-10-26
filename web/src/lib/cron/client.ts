@@ -1,4 +1,5 @@
-import { orvalFetch } from '../api/client'
+import { parseCronDocument, rawCronValue, type RawCronDocument } from './document'
+import { orvalFetch, rawApiFetch } from '../api/client'
 import { AuthenticationRequiredError } from '../auth/session'
 import type { CronRun, CronJob, CronWorkflow, CronSummary, ShowIssueResponseBody } from './types'
 export class CronReadError extends Error {
@@ -11,7 +12,46 @@ interface Query {
   beforeUID?: string
   jobUID?: string
 }
+export interface CronDefinitionRecord {
+  uid: string
+  name: string
+  definitionEventUID: string
+  deletedAt?: string
+  document: RawCronDocument
+}
 export class CronClient {
+  async readDefinition(
+    kind: 'job' | 'workflow',
+    projectID: number,
+    uid: string,
+    signal: AbortSignal,
+  ): Promise<CronDefinitionRecord> {
+    const response = await rawApiFetch(
+      `/api/v1/projects/${projectID}/cron/${kind}s/${encodeURIComponent(uid)}`,
+      { method: 'GET', signal },
+    )
+    if (response.status === 401) throw new AuthenticationRequiredError('Authentication required')
+    if (response.status !== 200) throw new CronReadError(response.status)
+    const envelope = parseCronDocument(await response.text())
+    const raw = rawCronValue(envelope, [kind, 'definition'])
+    if (raw === undefined) throw new Error('Cron definition is missing')
+    // Extract before decoding even the envelope metadata.
+    const document = parseCronDocument(raw)
+    const string = (key: string): string => {
+      const value = rawCronValue(envelope, [kind, key])
+      const decoded: unknown = value === undefined ? undefined : JSON.parse(value)
+      if (typeof decoded !== 'string') throw new Error(`Cron ${key} is missing`)
+      return decoded
+    }
+    const deleted = rawCronValue(envelope, [kind, 'deleted_at'])
+    return {
+      uid: string('uid'),
+      name: string('name'),
+      definitionEventUID: string('definition_event_uid'),
+      ...(deleted && deleted !== 'null' ? { deletedAt: string('deleted_at') } : {}),
+      document,
+    }
+  }
   async read<T>(project: number, path: string, signal: AbortSignal, query: Query = {}): Promise<T> {
     const q = new URLSearchParams()
     for (const status of query.statuses ?? []) q.append('status', status)

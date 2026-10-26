@@ -49,12 +49,21 @@ export function setGeneratedFetch(fetcher: typeof fetch): void {
   generatedFetch = fetcher
 }
 
+// Keep raw consumers on the same authenticated, daemon-selected fetch pipeline.
+export function rawApiFetch(
+  url: string,
+  options: RequestInit,
+  fetcher: typeof fetch = generatedFetch,
+): Promise<Response> {
+  return fetcher(applicationURL(url), options)
+}
+
 export async function orvalFetch<T>(
   url: string,
   options: RequestInit,
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
-  const response = await fetcher(applicationURL(url), options)
+  const response = await rawApiFetch(url, options, fetcher)
   const text = await response.text()
   const data = response.headers.get('Content-Type')?.includes('json') ? JSON.parse(text) : text
   return {

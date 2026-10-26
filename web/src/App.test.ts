@@ -1,10 +1,13 @@
 // @vitest-environment-options { "url": "http://127.0.0.2/kata" }
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
+import * as hegel from '@hegeldev/hegel'
+import * as gs from '@hegeldev/hegel/generators'
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import App from './App.svelte'
+import { saveDaemonRoute } from './lib/daemons/state'
 import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
@@ -1755,6 +1758,470 @@ describe('App', () => {
       expect.arrayContaining(['example-local', 'example-remote']),
     )
   })
+
+  it.each(['all-open', 'cron'] as const)(
+    'retains a fenced Cron draft across a real daemon switch to %s',
+    async (targetView) => {
+      await hegel.testAsync(
+        async (tc) => {
+          const draftText = tc.draw(gs.text({ codec: 'utf-8' }))
+          sessionStorage.clear()
+          localStorage.clear()
+          history.replaceState(null, '', '/kata?view=cron')
+          sessionStorage.setItem(
+            'kata.web.session.v1',
+            JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+          )
+          if (targetView === 'cron') saveDaemonRoute('example-remote', '/kata?view=cron')
+          const local = snapshot()
+          const remote = structuredClone(local)
+          remote.collection[0]!.title = 'Remote issue'
+          const jobUID = '01J00000000000000000000021'
+          const sourceJob = {
+            uid: jobUID,
+            name: 'Source job',
+            definition_event_uid: '01J00000000000000000000031',
+            definition: {
+              version: 1,
+              kind: 'job',
+              enabled: true,
+              trigger: { kind: 'manual' },
+              action: { kind: 'execute', prompt: 'Original source prompt' },
+              issue: { kind: 'per-run', title: 'Inspection' },
+              overlap: 'forbid',
+              catchup: 'all',
+            },
+          }
+          const remoteJob = {
+            ...structuredClone(sourceJob),
+            uid: '01J00000000000000000000022',
+            name: 'Target job',
+          }
+          const writes: Request[] = []
+          const sourceDefinitionReads: string[] = []
+          let savingReopened = false
+          let targetRequested = false
+          let releaseTarget!: () => void
+          const targetSnapshot = new Promise<void>((resolve) => {
+            releaseTarget = resolve
+          })
+          vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+              const request = requestOf(input, init)
+              const path = new URL(request.url).pathname
+              const daemon = request.headers.get('X-Kata-Web-Daemon')
+              if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+              if (path === '/api/v1/ui/daemons')
+                return Response.json({
+                  daemons: [
+                    ...daemonRoster().daemons,
+                    {
+                      id: 'example-remote',
+                      url: 'https://daemon.example',
+                      default: false,
+                      auth: 'token',
+                      health: 'connected',
+                    },
+                  ],
+                })
+              if (path.endsWith('/api/v1/ui/references'))
+                return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+              if (path.endsWith('/api/v1/ui/snapshot')) {
+                if (daemon === 'example-remote') {
+                  targetRequested = true
+                  await targetSnapshot
+                }
+                return Response.json(daemon === 'example-remote' ? remote : local, {
+                  headers: { ETag: `"${daemon}-snapshot"` },
+                })
+              }
+              if (/\/cron\/(jobs|workflows)\//.test(path) && request.method !== 'GET') {
+                writes.push(request)
+                if (!savingReopened) return new Response('', { status: 403 })
+                const body = (await request.clone().json()) as {
+                  name: string
+                  definition: typeof sourceJob.definition
+                }
+                sourceJob.name = body.name
+                sourceJob.definition = body.definition
+                sourceJob.definition_event_uid = '01J00000000000000000000033'
+                return Response.json({ job: sourceJob })
+              }
+              if (path.endsWith('/cron/summary')) return Response.json({ failed_runs_24h: 0 })
+              if (path.endsWith('/cron/jobs'))
+                return Response.json({
+                  jobs: daemon === 'example-remote' ? [remoteJob] : [sourceJob],
+                })
+              if (path.endsWith(`/cron/jobs/${jobUID}`)) {
+                sourceDefinitionReads.push(daemon ?? '')
+                return Response.json({ job: sourceJob })
+              }
+              if (path.endsWith('/cron/workflows')) return Response.json({ workflows: [] })
+              if (path.endsWith('/cron/runs')) return Response.json({ runs: [] })
+              throw new Error(`Unexpected request: ${request.method} ${path}`)
+            }),
+          )
+          try {
+            render(App)
+            await fireEvent.click(await screen.findByRole('button', { name: 'Source job' }))
+            await fireEvent.click(await screen.findByRole('button', { name: 'Edit job' }))
+            const prompt = (await screen.findByRole('textbox', {
+              name: 'Prompt',
+            })) as HTMLTextAreaElement
+            await fireEvent.input(prompt, { target: { value: draftText } })
+            // Textareas normalize CR/LF before the app sees the edited value.
+            const editedText = prompt.value
+            await fireEvent.click(
+              screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
+            )
+            await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+            await waitFor(() => expect(targetRequested).toBe(true))
+            await tick()
+
+            const retained = screen.getByRole('form', { name: 'Job editor' })
+            expect(
+              (within(retained).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement)
+                .value,
+            ).toBe(editedText)
+            expect(screen.getByText(/Authority changed\. Close this draft/)).not.toBeNull()
+            expect(
+              (within(retained).getByRole('button', { name: 'Save job' }) as HTMLButtonElement)
+                .disabled,
+            ).toBe(true)
+            expect(screen.queryByRole('button', { name: 'Source job' })).toBeNull()
+            await fireEvent.submit(retained)
+            expect(writes).toHaveLength(0)
+
+            releaseTarget()
+            await screen.findByRole('button', { name: 'Switch Kata daemon: example-remote' })
+            await waitFor(() =>
+              expect(
+                screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled'),
+              ).toBeNull(),
+            )
+            expect(window.location.search).toBe(`?view=${targetView}`)
+            const fenced = screen.getByRole('form', { name: 'Job editor' })
+            expect(
+              (within(fenced).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement)
+                .value,
+            ).toBe(editedText)
+            expect(screen.getByText(/Authority changed\. Close this draft/)).not.toBeNull()
+            expect(
+              (within(fenced).getByRole('button', { name: 'Save job' }) as HTMLButtonElement)
+                .disabled,
+            ).toBe(true)
+            await fireEvent.submit(fenced)
+            expect(writes).toHaveLength(0)
+
+            await fireEvent.click(within(fenced).getByRole('button', { name: 'Cancel' }))
+            expect(screen.queryByRole('form', { name: 'Job editor' })).toBeNull()
+            expect(window.location.search).toBe(`?view=${targetView}`)
+            sourceJob.definition.action.prompt = 'Latest source prompt'
+            sourceJob.definition_event_uid = '01J00000000000000000000032'
+            const readsBeforeReopen = sourceDefinitionReads.length
+            await fireEvent.click(
+              screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+            )
+            await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
+            await fireEvent.click(await screen.findByRole('button', { name: 'Edit job' }))
+            const reopened = await screen.findByRole('form', { name: 'Job editor' })
+            expect(
+              (within(reopened).getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement)
+                .value,
+            ).toBe('Latest source prompt')
+            expect(
+              (within(reopened).getByRole('button', { name: 'Save job' }) as HTMLButtonElement)
+                .disabled,
+            ).toBe(false)
+            expect(sourceDefinitionReads.length).toBeGreaterThan(readsBeforeReopen)
+            expect(sourceDefinitionReads.every((daemon) => daemon === 'example-local')).toBe(true)
+            expect(writes).toHaveLength(0)
+            savingReopened = true
+            await fireEvent.input(within(reopened).getByRole('textbox', { name: 'Prompt' }), {
+              target: { value: 'Explicit current-authority edit' },
+            })
+            await fireEvent.submit(reopened)
+            await waitFor(() => expect(writes).toHaveLength(1))
+            expect(writes[0]!.headers.get('X-Kata-Web-Daemon')).toBe('example-local')
+            await expect(writes[0]!.clone().json()).resolves.toMatchObject({
+              expected_event_uid: '01J00000000000000000000032',
+              definition: { action: { prompt: 'Explicit current-authority edit' } },
+            })
+          } finally {
+            releaseTarget()
+            cleanup()
+            await tick()
+          }
+        },
+        // Bound full App mounts; raw draft properties have their own 2,000-case suite.
+        { testCases: 8, database: hegel.Database.disabled, reportMultipleFailures: false },
+      )
+    },
+    30_000,
+  )
+
+  it('creates and edits a Cron job when only core cron routes exist', async () => {
+    history.replaceState(null, '', '/kata?view=cron')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const jobs: { uid: string; name: string; definition_event_uid: string; definition: unknown }[] =
+      []
+    const writes: Request[] = []
+    const absent: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (path.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (path.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"core-snapshot"' } })
+        const definition = /\/cron\/jobs\/([^/]+)$/.exec(path)
+        if (definition && request.method === 'PUT') {
+          writes.push(request.clone())
+          const body = (await request.json()) as { name: string; definition: unknown }
+          const job = {
+            uid: definition[1]!,
+            name: body.name,
+            definition_event_uid: `01J0000000000000000000004${writes.length}`,
+            definition: body.definition,
+            last_run: null,
+          }
+          jobs.splice(0, jobs.length, job)
+          return Response.json({ job })
+        }
+        if (definition && request.method === 'GET') return Response.json({ job: jobs[0] })
+        if (path.endsWith('/cron/summary'))
+          return Response.json({ failed_runs_24h: 0, window_start: '', window_end: '' })
+        if (path.endsWith('/cron/jobs')) return Response.json({ jobs })
+        if (path.endsWith('/cron/workflows')) return Response.json({ workflows: [] })
+        if (path.endsWith('/cron/runs')) return Response.json({ runs: [] })
+        absent.push(`${request.method} ${path}`)
+        return new Response('not found', { status: 404 })
+      }),
+    )
+    render(App)
+    const newJob = (await screen.findByRole('button', { name: 'New job' })) as HTMLButtonElement
+    await waitFor(() => expect(newJob.disabled).toBe(false))
+    await fireEvent.click(newJob)
+    const created = await screen.findByRole('form', { name: 'Job editor' })
+    await fireEvent.input(within(created).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Core job' },
+    })
+    await fireEvent.input(within(created).getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Inspect workspace' },
+    })
+    await fireEvent.submit(created)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(new URL(writes[0]!.url).pathname).toMatch(
+      /\/api\/v1\/projects\/7\/cron\/jobs\/[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+    )
+    await expect(writes[0]!.json()).resolves.not.toHaveProperty('expected_event_uid')
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Core job' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Edit job' }))
+    const edited = await screen.findByRole('form', { name: 'Job editor' })
+    await fireEvent.input(within(edited).getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'Inspect again' },
+    })
+    await fireEvent.submit(edited)
+    await waitFor(() => expect(writes).toHaveLength(2))
+    await expect(writes[1]!.json()).resolves.toMatchObject({
+      expected_event_uid: '01J00000000000000000000041',
+      definition: { action: { prompt: 'Inspect again' } },
+    })
+    expect(absent.filter((request) => request.includes('/cron/'))).toEqual([])
+  })
+
+  it.each([
+    ['job', 'reply'],
+    ['job', 'error'],
+    ['workflow', 'reply'],
+    ['workflow', 'error'],
+  ] as const)(
+    'cancels pending Cron %s definition reads across a daemon switch (%s)',
+    async (kind, lateOutcome) => {
+      const cronPath = `/kata?view=cron${kind === 'workflow' ? '&cron_tab=workflows' : ''}`
+      history.replaceState(null, '', cronPath)
+      saveDaemonRoute('example-remote', cronPath)
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const record = (name: string, uid: string) => ({
+        uid,
+        name,
+        definition_event_uid: '01J00000000000000000000031',
+        definition:
+          kind === 'job'
+            ? {
+                version: 1,
+                kind: 'job',
+                enabled: true,
+                trigger: { kind: 'manual' },
+                action: { kind: 'execute', prompt: `${name} text` },
+                issue: { kind: 'per-run', title: 'Inspection' },
+                overlap: 'forbid',
+                catchup: 'all',
+              }
+            : {
+                version: 1,
+                about: `${name} text`,
+                steps: [{ key: 'inspect', kind: 'command', command: 'echo example' }],
+              },
+      })
+      const source = record('Source definition', '01J00000000000000000000021')
+      const target = record('Target definition', '01J00000000000000000000022')
+      const envelope = (value: typeof source) => Response.json({ [kind]: value })
+      let resolveSource!: (response: Response) => void
+      let rejectSource!: (error: Error) => void
+      let resolveTarget!: (response: Response) => void
+      const oldRead = new Promise<Response>((resolve, reject) => {
+        resolveSource = resolve
+        rejectSource = reject
+      })
+      const newRead = new Promise<Response>((resolve) => {
+        resolveTarget = resolve
+      })
+      let captureSourceRead = false
+      let captureTargetRead = false
+      let sourceSignal: AbortSignal | undefined
+      let targetSignal: AbortSignal | undefined
+      const writes: Request[] = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const path = new URL(request.url).pathname
+          const remote = request.headers.get('X-Kata-Web-Daemon') === 'example-remote'
+          if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (path === '/api/v1/ui/daemons')
+            return Response.json({
+              daemons: [
+                ...daemonRoster().daemons,
+                {
+                  id: 'example-remote',
+                  url: 'https://daemon.example',
+                  default: false,
+                  auth: 'token',
+                  health: 'connected',
+                },
+              ],
+            })
+          if (path.endsWith('/api/v1/ui/references'))
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          if (path.endsWith('/api/v1/ui/snapshot'))
+            return Response.json(snapshot(), {
+              headers: { ETag: `"${remote ? 'target' : 'source'}-snapshot"` },
+            })
+          if (/\/cron\/(jobs|workflows)\//.test(path) && request.method !== 'GET') {
+            writes.push(request)
+            return new Response('', { status: 403 })
+          }
+          if (path.endsWith('/cron/summary')) return Response.json({ failed_runs_24h: 0 })
+          if (path.endsWith('/cron/jobs'))
+            return Response.json({ jobs: kind === 'job' ? [remote ? target : source] : [] })
+          if (path.endsWith('/cron/workflows'))
+            return Response.json({
+              workflows: kind === 'workflow' ? [remote ? target : source] : [],
+            })
+          if (path.endsWith('/cron/runs')) return Response.json({ runs: [] })
+          if (path.endsWith(`/cron/${kind}s/${source.uid}`)) {
+            if (captureSourceRead) {
+              captureSourceRead = false
+              sourceSignal = request.signal
+              // Deliberately allow a late reply even after cancellation.
+              return oldRead
+            }
+            return envelope(source)
+          }
+          if (path.endsWith(`/cron/${kind}s/${target.uid}`)) {
+            if (captureTargetRead) {
+              captureTargetRead = false
+              targetSignal = request.signal
+              return newRead
+            }
+            return envelope(target)
+          }
+          throw new Error(`Unexpected request: ${request.method} ${path}`)
+        }),
+      )
+      const editLabel = kind === 'job' ? 'Edit job' : 'Edit workflow'
+      const formLabel = kind === 'job' ? 'Job editor' : 'Workflow editor'
+      const fieldLabel = kind === 'job' ? 'Prompt' : 'About'
+      try {
+        render(App)
+        await fireEvent.click(await screen.findByRole('button', { name: source.name }))
+        const sourceEdit = await screen.findByRole('button', { name: editLabel })
+        captureSourceRead = true
+        await fireEvent.click(sourceEdit)
+        await waitFor(() => expect(sourceSignal).toBeDefined())
+        await fireEvent.click(
+          screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }),
+        )
+        await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+        await screen.findByRole('button', { name: target.name })
+        await waitFor(() => expect(sourceSignal!.aborted).toBe(true))
+        expect(
+          (screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled,
+        ).toBe(false)
+        expect(screen.queryByRole('form', { name: formLabel })).toBeNull()
+
+        await fireEvent.click(screen.getByRole('button', { name: target.name }))
+        const targetEdit = await screen.findByRole('button', { name: editLabel })
+        expect((targetEdit as HTMLButtonElement).disabled).toBe(false)
+        captureTargetRead = true
+        await fireEvent.click(targetEdit)
+        await waitFor(() => expect(targetSignal).toBeDefined())
+        expect((targetEdit as HTMLButtonElement).disabled).toBe(true)
+
+        if (lateOutcome === 'error') {
+          rejectSource(new Error('Late source definition error'))
+          // Drain the rejected fetch and its async catch/finally before checking new pending state.
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          await tick()
+          expect((targetEdit as HTMLButtonElement).disabled).toBe(true)
+          expect(
+            (screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled,
+          ).toBe(true)
+          expect(screen.queryByRole('form', { name: formLabel })).toBeNull()
+          expect(screen.queryByText('Late source definition error')).toBeNull()
+        }
+        expect(targetSignal!.aborted).toBe(false)
+        resolveTarget(envelope(target))
+        const current = await screen.findByRole('form', { name: formLabel })
+        expect(
+          (within(current).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value,
+        ).toBe(target.name)
+        const field = within(current).getByRole('textbox', { name: fieldLabel })
+        expect((field as HTMLTextAreaElement).value).toBe(`${target.name} text`)
+        await fireEvent.input(field, { target: { value: 'Current target draft' } })
+        if (lateOutcome === 'reply') {
+          resolveSource(envelope(source))
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          await tick()
+        }
+        expect(
+          (
+            within(screen.getByRole('form', { name: formLabel })).getByRole('textbox', {
+              name: fieldLabel,
+            }) as HTMLTextAreaElement
+          ).value,
+        ).toBe('Current target draft')
+        expect(screen.queryByText('Late source definition error')).toBeNull()
+        expect(writes).toHaveLength(0)
+      } finally {
+        resolveSource(envelope(source))
+        resolveTarget(envelope(target))
+      }
+    },
+  )
 
   it('keeps the requested daemon selected across transparent authentication recovery', async () => {
     history.replaceState(null, '', '/kata?view=all-open')

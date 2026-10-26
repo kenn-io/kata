@@ -1,5 +1,6 @@
 <script lang="ts">
   import CronPage from './cron/CronPage.svelte'
+  import type { CronEditorHandle } from './cron/CronEditorHost.svelte'
   import { defaultCronRoute } from '../lib/cron/route'
   import { emptyCronState, type CronState } from '../lib/cron/controller'
   import { onMount } from 'svelte'
@@ -51,6 +52,7 @@
   type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
+    cronEditor?: CronEditorHandle | undefined
     cronState?: Readonly<CronState>
     onCronRefresh?: () => void
     onCronLoadMore?: (projectUID: string) => void
@@ -123,6 +125,7 @@
 
   let {
     cronState = emptyCronState(),
+    cronEditor = undefined,
     onCronRefresh = () => {},
     onCronLoadMore = () => {},
     route,
@@ -684,6 +687,14 @@
         <CronPage
           route={route.cron ?? defaultCronRoute()}
           state={cronState}
+          canMutate={canMutate &&
+            !stale &&
+            !readOnly &&
+            !daemonSwitching &&
+            !reconnecting &&
+            !loading}
+          {mutationPending}
+          editor={cronEditor}
           onNavigate={(cron) =>
             navigate({
               kind: 'kata',

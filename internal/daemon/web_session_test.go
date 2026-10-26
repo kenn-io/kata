@@ -820,3 +820,53 @@ func TestBrowserAccessAdministrationBoundary(t *testing.T) {
 		})
 	}
 }
+
+// Cron editors use retained-UID PUT for both creation and replacement. No run,
+// restore, administrative tail, or workflow lifecycle write is part of this UI.
+func TestWebLocalCronDefinitionWrites(t *testing.T) {
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	handler := requireBrowserSession(manager, ListenerPolicy{
+		Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true,
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	for _, test := range []struct {
+		method, tail string
+		allowed      bool
+	}{
+		{http.MethodPut, "jobs/job-uid", true},
+		{http.MethodPut, "workflows/workflow-uid", true},
+		{http.MethodDelete, "jobs/job-uid", true},
+		{http.MethodPost, "jobs", false},
+		{http.MethodPost, "workflows", false},
+		{http.MethodDelete, "workflows/workflow-uid", false},
+		{http.MethodPut, "runs/run-uid", false},
+		{http.MethodPatch, "jobs/job-uid", false},
+		{http.MethodPut, "jobs", false},
+		{http.MethodPut, "jobs/", false},
+		{http.MethodPost, "jobs/job-uid/restore", false},
+		{http.MethodPut, "jobs/job-uid/admin", false},
+		{http.MethodPut, "workflows/workflow-uid/steps", false},
+		{http.MethodDelete, "jobs/job-uid/tail", false},
+		{http.MethodGet, "runs/run-uid/tail", false},
+	} {
+		t.Run(test.method+"/"+test.tail, func(t *testing.T) {
+			for _, csrf := range []bool{false, true} {
+				request := httptest.NewRequest(test.method, "http://127.0.0.1:27123/api/v1/projects/7/cron/"+test.tail, nil)
+				request.AddCookie(manager.Cookie(issued.Cookie))
+				request.Header.Set(webSessionHeader, issued.Session)
+				request.Header.Set("Origin", "http://127.0.0.1:27123")
+				if csrf {
+					request.Header.Set(webCSRFHeader, issued.CSRF)
+				}
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				want := http.StatusForbidden
+				if test.allowed && csrf {
+					want = http.StatusNoContent
+				}
+				assert.Equal(t, want, response.Code, "csrf=%t", csrf)
+			}
+		})
+	}
+}
