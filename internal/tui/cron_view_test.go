@@ -382,7 +382,7 @@ func TestCronAllProjects(t *testing.T) {
 	require.Nil(t, cmd)
 	require.Zero(t, a.calls)
 	require.Len(t, strings.Split(m.viewBody(), "\n"), 24)
-	require.Contains(t, stripANSI(m.viewBody()), "Jobs, runs and workflows belong to one project. Press P to pick one.")
+	require.Contains(t, stripANSI(m.viewBody()), "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows.")
 	require.Equal(t, viewProjects, sendRune(m, 'P').view)
 }
 

@@ -353,7 +353,7 @@ func cronHelpRows(m Model) [][]helplayout.HelpItem {
 }
 func renderCron(m Model) string {
 	if m.scope.allProjects || m.scope.projectID == 0 {
-		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Jobs, runs and workflows belong to one project. Press P to pick one."}
+		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
 		help := cronHelpRows(m)
 		for range max(m.height-len(body)-helpLines(help, m.width), 1) {
 			body = append(body, "")
