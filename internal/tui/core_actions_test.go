@@ -11,8 +11,11 @@ import (
 )
 
 func TestCoreActionSurfaceHeaders(t *testing.T) {
+	t.Setenv("KATA_TEAMMATE", "explicit-worker")
+	t.Setenv("PI_SESSION_ID", "example-session")
 	var surfaces []string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.Header.Get("X-Kata-Teammate"))
 		surfaces = append(surfaces, r.Header.Get("X-Kata-Surface"))
 		respondJSON(t, w, map[string]any{"changed": true})
 	})

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/pagination"
 	"go.kenn.io/kata/internal/similarity"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -130,6 +132,30 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateCreateMetadata(in.Body.Metadata); err != nil {
 			return nil, err
 		}
+		var recordTeammate *string
+		if raw, present := in.Body.Metadata["teammate"]; present {
+			var handle string
+			if err := json.Unmarshal(raw, &handle); err != nil {
+				return nil, api.NewError(400, "invalid_metadata_value", "metadata.teammate must be a string", "", nil)
+			}
+			recordTeammate = &handle
+		}
+		handle := effectiveRecordTeammate(recordTeammate, db.EventTeammateFromContext(ctx))
+		if recordTeammate == nil && handle != "" {
+			stamped, err := teammate.Stamp(nil, handle)
+			if err != nil {
+				return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+			}
+			raw, err := json.Marshal(stamped["teammate"])
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			if in.Body.Metadata == nil {
+				in.Body.Metadata = make(map[string]jsontext.Value)
+			}
+			in.Body.Metadata["teammate"] = raw
+		}
+		ctx = db.WithEventTeammate(ctx, handle)
 		if err := validateIssueTitle(in.Body.Title); err != nil {
 			return nil, err
 		}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"net/http"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 // ClaimRequest is the wire body for federation claim actions.
@@ -65,7 +67,7 @@ func (c *Client) ClaimStatus(
 	hubProjectID int64,
 	ref string,
 ) (ClaimStatusResponse, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}), runtime.WithRequestEditorFn(forwardClaimTeammate))
 	if err != nil {
 		return ClaimStatusResponse{}, err
 	}
@@ -85,7 +87,7 @@ func (c *Client) claimAction(
 	action string,
 	req ClaimRequest,
 ) (ClaimResponse, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}), runtime.WithRequestEditorFn(forwardClaimTeammate))
 	if err != nil {
 		return ClaimResponse{}, err
 	}
@@ -121,4 +123,11 @@ func (c *Client) claimAction(
 		return body, fmt.Errorf("unknown claim action %q", action)
 	}
 	return body, err
+}
+
+// Claim attribution belongs to this request, independently of its hub principal.
+// Replication batches retain each source event's frozen attribution instead.
+func forwardClaimTeammate(ctx context.Context, req *http.Request) error {
+	req.Header.Set("X-Kata-Teammate", db.EventTeammateFromContext(ctx))
+	return nil
 }

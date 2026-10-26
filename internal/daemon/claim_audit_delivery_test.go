@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"testing"
 	"time"
@@ -183,11 +184,20 @@ func claimAuditDeliveryRemoteEvent(
 	eventType string,
 	actor string,
 	hlcPhysicalMS int64,
+	teammate ...string,
 ) db.RemoteEvent {
 	t.Helper()
 	payload := jsontext.Value(`{"issue_uid":"` + issueUID + `","title":"remote title"}`)
 	if eventType == "issue.closed" {
 		payload = jsontext.Value(`{"issue_uid":"` + issueUID + `","reason":"done","closed_at":"2026-05-23T12:00:00.000Z"}`)
+	}
+	if len(teammate) > 0 && teammate[0] != "" {
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(payload, &fields))
+		fields["teammate"] = teammate[0]
+		encoded, err := json.Marshal(fields)
+		require.NoError(t, err)
+		payload = jsontext.Value(encoded)
 	}
 	ev := db.RemoteEvent{
 		EventUID:          eventUID,

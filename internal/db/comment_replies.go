@@ -39,6 +39,9 @@ func ValidCommentReplyKind(kind string) bool {
 }
 
 func validateCommentEntry(entry map[string]jsontext.Value) error {
+	if err := validateCommentAddressingEntry(entry); err != nil {
+		return err
+	}
 	values := map[string]string{}
 	present := map[string]bool{}
 	for _, field := range []string{"comment_uid", "reply_to_uid", "reply_kind", "edited_at"} {

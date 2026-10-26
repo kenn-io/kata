@@ -32,10 +32,11 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		handle, err := teammate.Resolve(in.Body.Teammate, "")
-		if err != nil {
+		handle := effectiveRecordTeammate(in.Body.Teammate, db.EventTeammateFromContext(ctx))
+		if err := teammate.Validate(handle); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
+		ctx = db.WithEventTeammate(ctx, handle)
 		var issue db.Issue
 		resolved := false
 		fingerprint := ""
@@ -108,13 +109,15 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body, handle, replyUID, in.Body.Kind)
 		}
 		var committedEvents []db.Event
-		ctx = db.WithCommentMetadataHook(ctx, commentNotificationHook(), &committedEvents)
+		addressingTeammate := effectiveRecordTeammate(in.Body.Teammate, "")
+		ctx = db.WithCommentMetadataHook(ctx, commentNotificationHookWithTeammate(&addressingTeammate), &committedEvents)
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
-			IssueID:    issue.ID,
-			Author:     actor,
-			Teammate:   handle,
-			Body:       in.Body.Body,
-			ReplyToUID: replyUID, ReplyKind: in.Body.Kind, ValidateReply: true, Force: in.Body.Force,
+			AddressingTeammate: &addressingTeammate,
+			IssueID:            issue.ID,
+			Author:             actor,
+			Teammate:           handle,
+			Body:               in.Body.Body,
+			ReplyToUID:         replyUID, ReplyKind: in.Body.Kind, ValidateReply: true, Force: in.Body.Force,
 			IdempotencyKey:         in.IdempotencyKey,
 			IdempotencyFingerprint: fingerprint,
 		})

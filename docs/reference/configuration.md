@@ -40,7 +40,10 @@ present `KATA_TEAMMATE`, then harness inference. An empty flag or environment
 value suppresses inference too. Set `KATA_TEAMMATE=teammate-1` for a named
 worker, or `KATA_TEAMMATE=` to opt out. Plain terminals and unresolved,
 ambiguous harness contexts stay untagged. Nested agents use process ancestry
-to select the nearest recognized harness when possible.
+to select the nearest recognized harness when possible. Invalid
+`KATA_TEAMMATE` or `KATA_TEAMMATE_INFER` values stop native daemon requests
+before they are sent. Correct or unset the value, or use `--teammate=''`
+to suppress the default for one command.
 
 Inference never changes inbox or reply addressing. Set explicit teammate
 and inbox addresses for named workers; see

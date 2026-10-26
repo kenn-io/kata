@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -476,7 +479,7 @@ func applyCronActor(cmd *cobra.Command, fields map[string]jsontext.Value) error 
 }
 
 // applyCronTeammate keeps observation attribution stable across retries.
-// Explicit JSON, including null or an invalid empty identity, never inherits
+// Explicit JSON, including null or empty suppression, never inherits
 // the environment; --teammate may only confirm it.
 func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) error {
 	raw, frozen := fields["teammate"]
@@ -485,7 +488,7 @@ func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) err
 		if err != nil {
 			return err
 		}
-		if selected.Handle == "" {
+		if selected.Handle == "" || selected.Source == "inferred" {
 			return nil
 		}
 		return setCronStringField(fields, "teammate", selected.Handle)
@@ -647,7 +650,14 @@ func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID i
 		if err := decodeCronCLIRequest(raw, &body); err != nil {
 			return nil, err
 		}
-		response, err := c.ObserveCronRunWithResponse(a.ctx, &generated.ObserveCronRunRequestOptions{PathParams: &generated.ObserveCronRunPath{ProjectID: projectID, RunUID: o.identity}, Body: &body})
+		response, err := c.ObserveCronRunWithResponse(a.ctx, &generated.ObserveCronRunRequestOptions{PathParams: &generated.ObserveCronRunPath{ProjectID: projectID, RunUID: o.identity}, Body: &body}, func(_ context.Context, request *http.Request) error {
+			// The generated optional pointer collapses null to absence. Send
+			// the validated JSON so frozen null remains null on older daemons.
+			request.Body = io.NopCloser(bytes.NewReader(raw))
+			request.ContentLength = int64(len(raw))
+			request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+			return nil
+		})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

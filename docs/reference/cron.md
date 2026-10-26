@@ -427,9 +427,10 @@ The HTTP operation is `PUT /api/v1/projects/{project_id}/cron/runs/{run_uid}`
 (`observeCronRun`). An omitted JSON `teammate` inherits `--teammate` or
 `KATA_TEAMMATE`; an explicit empty flag suppresses that inheritance. An explicit
 JSON string or `null` freezes attribution across retries and ignores the
-environment. An explicit flag must match the frozen value (`null` matches an
-empty flag). An empty JSON string remains invalid; it is never replaced by the
-environment. For example:
+environment. An explicit flag must match the frozen value (`null` and an empty
+string both match an empty flag). Null and empty strings suppress attribution;
+the CLI preserves explicit null on the wire for compatibility with older
+daemons. For example:
 
 ```json
 {

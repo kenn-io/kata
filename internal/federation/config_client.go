@@ -356,6 +356,7 @@ type hubDoer struct {
 
 func (d hubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Kata-Teammate", db.EventTeammateFromContext(ctx))
 	response, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated enrollment routes use the selected operator-configured hub catalog entry.
 	if err != nil {
 		return nil, hubError(ErrHubUnavailable, d.operation, 0)

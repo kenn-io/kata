@@ -109,15 +109,16 @@ func TestFederationClientClaimActionsUseExpectedPaths(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
+		assert.Equal(t, "codex", r.Header.Get("X-Kata-Teammate"))
 		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{}))
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "claim-token", clientpkg.Opts{})
+	client, err := NewClient(db.WithEventTeammate(t.Context(), "codex"), srv.URL, "claim-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	_, err = client.RenewClaim(context.Background(), 42, "abc4", ClaimRequest{Holder: "agent-a", TTLSeconds: 300})
+	_, err = client.RenewClaim(db.WithEventTeammate(t.Context(), "codex"), 42, "abc4", ClaimRequest{Holder: "agent-a", TTLSeconds: 300})
 	require.NoError(t, err)
-	_, err = client.ReleaseClaim(context.Background(), 42, "abc4", ClaimRequest{Holder: "agent-a", Reason: "done"})
+	_, err = client.ReleaseClaim(db.WithEventTeammate(t.Context(), "codex"), 42, "abc4", ClaimRequest{Holder: "agent-a", Reason: "done"})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
@@ -242,4 +243,48 @@ func TestFederationClientClaimStatusParsesDeniedHolderAndHubNow(t *testing.T) {
 	assert.Equal(t, hubNow, got.HubNow)
 	require.NotNil(t, got.Claim)
 	assert.Equal(t, "agent-b", got.Claim.Holder)
+}
+
+func TestFederationClientClaimAttributionAgainstRealHub(t *testing.T) {
+	hub := testenv.New(t)
+	project := createFederatedHubForPush(t, hub)
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Claim target", Author: "tester"})
+	require.NoError(t, err)
+	enrollment, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "claim-attribution-token", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectID: &project.ID, Capabilities: "claim", Actor: "tester"})
+	require.NoError(t, err)
+	client, err := NewClient(t.Context(), hub.URL, enrollment.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	request := ClaimRequest{Holder: "untrusted-holder", ClientKind: "cli", ClaimKind: "timed", TTLSeconds: 300}
+	for _, action := range []struct {
+		name string
+		call func(context.Context, int64, string, ClaimRequest) (ClaimResponse, error)
+	}{{"acquire", client.AcquireClaim}, {"renew", client.RenewClaim}, {"release", client.ReleaseClaim}} {
+		t.Run(action.name, func(t *testing.T) {
+			if action.name == "renew" {
+				request.TTLSeconds = 600
+			}
+			before, err := hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, IssueUID: issue.UID, Limit: 100})
+			require.NoError(t, err)
+			response, err := action.call(db.WithEventTeammate(t.Context(), "codex"), project.ID, issue.ShortID, request)
+			require.NoError(t, err)
+			require.True(t, response.Granted)
+			require.Equal(t, "tester", response.Holder.Holder)
+			if action.name == "renew" {
+				require.Nil(t, response.Event)
+				require.NotNil(t, response.Lease)
+				require.Equal(t, int64(2), response.Lease.Revision)
+				after, err := hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, IssueUID: issue.UID, Limit: 100})
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+				return
+			}
+			require.NotNil(t, response.Event)
+			require.Equal(t, "codex", response.Event.Teammate)
+			stored, err := hub.DB.EventsByUIDs(t.Context(), project.ID, []string{response.Event.UID})
+			require.NoError(t, err)
+			require.Len(t, stored, 1)
+			require.Equal(t, "codex", stored[0].Teammate)
+			require.Equal(t, stored[0].ContentHash, response.Event.ContentHash)
+		})
+	}
 }

@@ -199,6 +199,47 @@ The actor remains accountable; teammate identifies the contributing agent.
 Scoped issue projections retain this attribution while continuing to redact
 private event fields. Compound link changes still require a refresh.
 
+Native clients can send `X-Kata-Teammate` to attribute mutation events. Handles
+contain 1–64 ASCII letters, digits,
+dots, underscores or hyphens and start with a letter or digit. An absent or
+empty header adds no attribution. After authentication, an invalid header
+returns `400 validation` without applying the mutation. The header is single-valued;
+repeated fields are rejected even when their values match. Valid single headers on browser
+sessions are ignored, and the web daemon gateway does not forward the header.
+Older daemons ignore it.
+
+Spokes forward attribution with immediate lease and timed assignment requests.
+Replicated events retain their original payload and content hash. Native claim
+violation and close-release audits generated during ingest use each source
+event's teammate, including an untagged source, rather than the batch sender's.
+System-owned expiry events remain untagged. Lease renewals update lease state
+without adding an audit event; timed assignment renewals do add one.
+
+Offline queued lease acquisition does not yet retain request-header attribution.
+
+Comments, new issues and cron observations resolve one teammate before storage
+and retry fingerprinting. A comment body `teammate`, issue
+`metadata.teammate`, or cron body `teammate` takes precedence when present,
+including an empty string. Cron also accepts explicit `null` to suppress
+attribution. Otherwise the record inherits the request header. Records,
+event attribution, federation replay and configured root receipts agree on
+that value. New issues retain explicit metadata, including an empty teammate
+key; an inherited nonempty teammate is added only when that key is absent.
+Typed replies select their sender inbox from the actor and explicit body
+teammate; the header does not narrow that address.
+
+Comment `teammate: null` retains its existing omitted-field behavior and inherits
+the header. Cron `teammate: null` explicitly suppresses attribution. Non-string
+values other than these accepted null forms are rejected before mutation.
+
+New comment events freeze the explicit reply inbox teammate in the optional
+`addressing_teammate` string, separately from attribution. An empty string selects
+the actor inbox; a named value selects that exact teammate inbox. Snapshot
+comments retain the same value, and retries preserve the original addressing.
+Events without this field retain legacy routing from the recorded teammate.
+This event provenance keeps inferred attribution from moving target or prior-linker
+reply notices while preserving explicit named-team routing.
+
 Attribution comes from the event payload's top-level `teammate`; issue creation
 also supports `metadata.teammate` when the top-level key is absent. A present
 empty or null top-level value suppresses that fallback. Federation and JSONL

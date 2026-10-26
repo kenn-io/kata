@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -227,27 +228,78 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		_, err = client.IngestProjectEvents(t.Context(), project.ID, nil)
 		require.NoError(t, err)
+
+		// Signature admission precedes attribution validation on restricted ingress.
+		// Both rejection paths leave product events and lease state untouched.
+		for _, corruptSignature := range []bool{false, true} {
+			beforeEvents, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			beforeLease, err := env.DB.ClaimStatusReadOnly(t.Context(), project.ID, issue.UID, time.Now().UTC())
+			require.NoError(t, err)
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/acquire", project.ID, issue.ShortID)
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+path, strings.NewReader(`{"holder":"enrolled-actor","client_kind":"cli","claim_kind":"hard"}`))
+			require.NoError(t, err)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			request.Header.Set("X-Kata-Teammate", "@invalid")
+			require.NoError(t, federationsigning.Sign(request, source))
+			if corruptSignature {
+				request.Header.Set("Signature", `sig1=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:`)
+			}
+			response, err := public.Client().Do(request)
+			require.NoError(t, err)
+			raw, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			if corruptSignature {
+				assertAPIError(t, response.StatusCode, raw, http.StatusUnauthorized, "signature_invalid")
+			} else {
+				assertAPIError(t, response.StatusCode, raw, http.StatusBadRequest, "validation")
+			}
+			afterEvents, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, beforeEvents, afterEvents)
+			afterLease, err := env.DB.ClaimStatusReadOnly(t.Context(), project.ID, issue.UID, time.Now().UTC())
+			require.NoError(t, err)
+			require.Equal(t, beforeLease.Held, afterLease.Held)
+			require.Equal(t, beforeLease.Claim, afterLease.Claim)
+		}
 		claim := federation.ClaimRequest{Holder: "spoofed-actor", ClientKind: "cli", ClaimKind: "timed", TTLSeconds: 300, Purpose: "edit"}
-		acquired, err := client.AcquireClaim(t.Context(), project.ID, issue.ShortID, claim)
+		claimCtx := db.WithEventTeammate(t.Context(), "signed-worker")
+		acquired, err := client.AcquireClaim(claimCtx, project.ID, issue.ShortID, claim)
 		require.NoError(t, err)
 		require.True(t, acquired.Granted)
 		require.Equal(t, "enrolled-actor", acquired.Holder.Holder)
-		_, err = client.RenewClaim(t.Context(), project.ID, issue.ShortID, claim)
+		require.NotNil(t, acquired.Event)
+		require.Equal(t, "signed-worker", acquired.Event.Teammate)
+		_, err = client.RenewClaim(claimCtx, project.ID, issue.ShortID, claim)
 		require.NoError(t, err)
 		_, err = client.ClaimStatus(t.Context(), project.ID, issue.ShortID)
 		require.NoError(t, err)
-		_, err = client.ReleaseClaim(t.Context(), project.ID, issue.ShortID, claim)
+		released, err := client.ReleaseClaim(claimCtx, project.ID, issue.ShortID, claim)
 		require.NoError(t, err)
+		require.NotNil(t, released.Event)
+		require.Equal(t, "signed-worker", released.Event.Teammate)
 		// The spoke's real local API forwards with its saved signing source.
-		spokeAuth := map[string]string{"Authorization": "Bearer spoke-user-token"}
+		spokeAuth := map[string]string{"Authorization": "Bearer spoke-user-token", "X-Kata-Teammate": "signed-worker"}
 		for _, action := range []string{"acquire", "renew", "release"} {
 			resp, raw := envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease/actions/%s", replica.Project.ID, mirrored.ShortID, action), map[string]any{"holder": "enrolled-actor", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 300, "purpose": "edit"}, spokeAuth)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+			if action != "renew" {
+				var response api.ClaimActionResponseBody
+				require.NoError(t, json.Unmarshal(raw, &response))
+				require.NotNil(t, response.Event)
+				require.Equal(t, "signed-worker", response.Event.Teammate)
+			}
 		}
 		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", replica.Project.ID, mirrored.ShortID), nil, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		resp, raw = envDoRaw(t, spoke, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/claim", replica.Project.ID, mirrored.ShortID), map[string]any{"actor": "enrolled-actor", "ttl_seconds": 300}, spokeAuth)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+		var assignment api.ClaimResponseBody
+		require.NoError(t, json.Unmarshal(raw, &assignment))
+		require.Len(t, assignment.Events, 1)
+		requireMirroredTeammateEvent(t, env, spoke, project.ID, replica.Project.ID, assignment.Events[0], "signed-worker")
 		// Valid MACs cannot widen the bearer capability or global project scope.
 		globalClient, err := federation.NewClient(t.Context(), base, globalEnrollment.Token, clientpkg.Opts{FederationSigning: &globalSource})
 		require.NoError(t, err)

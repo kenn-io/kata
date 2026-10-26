@@ -38,17 +38,17 @@ func TestNotifyTeammateSenderAndExactRecipients(t *testing.T) {
 	assert.Contains(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-2", "--agent"), "teammate=teammate-1")
 	assert.Contains(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-2", "--context"), `teammate="teammate-1"`)
 
-	// A clear consumes only the recipient, even if the sender default is invalid.
+	// An explicit empty attribution clears a broken default without changing recipients.
 	t.Setenv("KATA_TEAMMATE", "invalid/handle")
-	runCLI(t, env, dir, "notify", ref, "--to", "coordinator/teammate-1", "--clear")
-	assert.Empty(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-1", "--context"))
+	runCLI(t, env, dir, "--teammate=", "notify", ref, "--to", "coordinator/teammate-1", "--clear")
+	assert.Empty(t, runCLI(t, env, dir, "--teammate=", "inbox", "--for", "coordinator/teammate-1", "--context"))
 	for _, recipient := range []string{"coordinator", "coordinator/teammate-2"} {
-		assert.Contains(t, runCLI(t, env, dir, "inbox", "--for", recipient, "--context"), ref)
+		assert.Contains(t, runCLI(t, env, dir, "--teammate=", "inbox", "--for", recipient, "--context"), ref)
 	}
 	_, err = runCLICapture(t, env, dir, "notify", ref, "--to", "coordinator/teammate-2", "--message", "Must not replace")
 	cliErr := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, cliErr.Error(), "teammate")
-	assert.NotContains(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-2", "--context"), "Must not replace")
+	assert.NotContains(t, runCLI(t, env, dir, "--teammate=", "inbox", "--for", "coordinator/teammate-2", "--context"), "Must not replace")
 }
 
 func TestInboxTeammateMalformedOptionalFieldRetainsRequest(t *testing.T) {

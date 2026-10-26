@@ -780,14 +780,15 @@ type createdLinkOut struct {
 }
 
 type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
+	AddressingTeammate *string `json:"addressing_teammate,omitzero"`
+	ReplyToUID         string  `json:"reply_to_uid,omitempty"`
+	ReplyKind          string  `json:"reply_kind,omitempty"`
+	EditedAt           string  `json:"edited_at,omitempty"`
+	CommentUID         string  `json:"comment_uid"`
+	Author             string  `json:"author"`
+	Teammate           string  `json:"teammate,omitempty"`
+	Body               string  `json:"body"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 type issueCreatedPayload struct {
@@ -1348,6 +1349,9 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 	if err := teammate.Validate(p.Teammate); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
+	if err := db.ValidateCommentAddressing(p.AddressingTeammate); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
 	if err := db.ValidateCommentReply("", p.ReplyToUID, p.ReplyKind); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
@@ -1416,17 +1420,19 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 	}
 
 	payloadBytes, err := json.Marshal(struct {
-		ReplyToUID             string `json:"reply_to_uid,omitempty"`
-		ReplyKind              string `json:"reply_kind,omitempty"`
-		CommentUID             string `json:"comment_uid"`
-		Author                 string `json:"author"`
-		Teammate               string `json:"teammate,omitempty"`
-		Body                   string `json:"body"`
-		CreatedAt              string `json:"created_at"`
-		IdempotencyKey         string `json:"idempotency_key,omitempty"`
-		IdempotencyFingerprint string `json:"idempotency_fingerprint,omitempty"`
+		AddressingTeammate     *string `json:"addressing_teammate,omitzero"`
+		ReplyToUID             string  `json:"reply_to_uid,omitempty"`
+		ReplyKind              string  `json:"reply_kind,omitempty"`
+		CommentUID             string  `json:"comment_uid"`
+		Author                 string  `json:"author"`
+		Teammate               string  `json:"teammate,omitempty"`
+		Body                   string  `json:"body"`
+		CreatedAt              string  `json:"created_at"`
+		IdempotencyKey         string  `json:"idempotency_key,omitempty"`
+		IdempotencyFingerprint string  `json:"idempotency_fingerprint,omitempty"`
 	}{
-		ReplyToUID: p.ReplyToUID, ReplyKind: p.ReplyKind,
+		AddressingTeammate: p.AddressingTeammate,
+		ReplyToUID:         p.ReplyToUID, ReplyKind: p.ReplyKind,
 		CommentUID:             commentUID,
 		Author:                 p.Author,
 		Teammate:               p.Teammate,

@@ -38,7 +38,6 @@ type Options struct {
 	Teammate          string
 	// TeammateInferred applies only to the startup default; tool overrides are explicit.
 	TeammateInferred bool
-	Warn             func(string)
 	Actor            string
 	Version          string
 	StorageAdmin     *storageadmin.Admin
@@ -100,6 +99,11 @@ func New(options Options) (*sdkmcp.Server, error) {
 		make(chan struct{}, toolCallConcurrency),
 		options.ObserveToolCall,
 	))
+	server.AddReceivingMiddleware(func(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
+		return func(ctx context.Context, method string, request sdkmcp.Request) (sdkmcp.Result, error) {
+			return next(kataclient.WithTeammate(ctx, options.Teammate), method, request)
+		}
+	})
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
 	registerSectionLoaders(server, options)
 	return server, nil

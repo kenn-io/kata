@@ -220,6 +220,14 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 	if opts.httpClient == nil {
 		opts.httpClient = http.DefaultClient
 	}
+	// Keep the caller's client and transport configuration unchanged.
+	httpClient := *opts.httpClient
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = teammateTransport{RoundTripper: transport}
+	opts.httpClient = &httpClient
 	normalizedBaseURL := strings.TrimRight(baseURL, "/")
 	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
 	for _, editor := range opts.requestEditors {

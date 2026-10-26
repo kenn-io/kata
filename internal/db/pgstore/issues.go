@@ -66,14 +66,15 @@ type createdLink struct {
 }
 
 type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
+	AddressingTeammate *string `json:"addressing_teammate,omitzero"`
+	ReplyToUID         string  `json:"reply_to_uid,omitempty"`
+	ReplyKind          string  `json:"reply_kind,omitempty"`
+	EditedAt           string  `json:"edited_at,omitempty"`
+	CommentUID         string  `json:"comment_uid"`
+	Author             string  `json:"author"`
+	Teammate           string  `json:"teammate,omitempty"`
+	Body               string  `json:"body"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 // CreateIssue persists the initial issue projection and its creation event in

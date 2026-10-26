@@ -17,6 +17,7 @@ import (
 func TestMCPTeammateSharedCalls(t *testing.T) {
 	var mu sync.Mutex
 	requests := map[string]map[string]any{}
+	headers := map[string]string{}
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
@@ -28,6 +29,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			mu.Lock()
 			requests[r.Header.Get("Idempotency-Key")] = body
+			headers[r.Header.Get("Idempotency-Key")] = r.Header.Get("X-Kata-Teammate")
 			mu.Unlock()
 		}
 		var response map[string]any
@@ -44,7 +46,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 	t.Cleanup(daemon.Close)
 	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test"})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "startup"})
 	var wg sync.WaitGroup
 	for _, handle := range []string{"reviewer-7", "implementer-3", ""} {
 		wg.Go(func() {
@@ -77,6 +79,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 	for key, body := range requests {
 		require.Equal(t, "coordinator", body["actor"])
 		handle := strings.TrimPrefix(strings.TrimPrefix(key, "kata.comment"), "kata.create")
+		require.Equal(t, handle, headers[key])
 		attribution := body
 		if strings.HasPrefix(key, "kata.create") {
 			attribution = body["metadata"].(map[string]any)
@@ -242,7 +245,7 @@ func TestMCPTeammateInferredStartupPreservesMetadata(t *testing.T) {
 	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "pi.example", TeammateInferred: true})
-	for _, tc := range []struct{ name, handle string }{{"absent", "pi.example"}, {"explicit", "explicit-worker"}, {"empty", ""}} {
+	for _, tc := range []struct{ name, handle string }{{"absent", ""}, {"explicit", "explicit-worker"}, {"empty", ""}} {
 		args := map[string]any{"title": "New issue", "idempotency_key": "metadata-" + tc.name}
 		if tc.name != "absent" {
 			args["metadata"] = map[string]any{"teammate": tc.handle}
@@ -250,7 +253,12 @@ func TestMCPTeammateInferredStartupPreservesMetadata(t *testing.T) {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.create", Arguments: args})
 		require.NoError(t, err)
 		require.False(t, result.IsError, "%s", mustJSON(t, result))
-		require.Equal(t, tc.handle, requests[len(requests)-1]["metadata"].(map[string]any)["teammate"])
+		metadata, _ := requests[len(requests)-1]["metadata"].(map[string]any)
+		if tc.name == "absent" {
+			require.NotContains(t, metadata, "teammate")
+		} else {
+			require.Equal(t, tc.handle, metadata["teammate"])
+		}
 	}
 	for _, invalid := range []any{123, "bad/handle"} {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.create", Arguments: map[string]any{"title": "Invalid metadata", "idempotency_key": "invalid-metadata", "metadata": map[string]any{"teammate": invalid}}})
@@ -265,6 +273,7 @@ func TestMCPTeammateInferredStartupPreservesMetadata(t *testing.T) {
 
 func TestMCPInferredTypedReplyKeepsActorAddressing(t *testing.T) {
 	var requests []map[string]any
+	var headers []string
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
@@ -275,6 +284,7 @@ func TestMCPInferredTypedReplyKeepsActorAddressing(t *testing.T) {
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			requests = append(requests, body)
+			headers = append(headers, r.Header.Get("X-Kata-Teammate"))
 		}
 		_, _ = w.Write(daemonResponse(r))
 	}))
@@ -302,10 +312,12 @@ func TestMCPInferredTypedReplyKeepsActorAddressing(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.IsError, "%s", mustJSON(t, result))
 		body := requests[len(requests)-1]
-		want := "pi.example"
-		if tc.reply && tc.explicit == "" {
-			want = ""
+		want := ""
+		header := "pi.example"
+		if tc.explicit != "" {
+			header = tc.explicit
 		}
+		require.Equal(t, header, headers[len(headers)-1], tc.name)
 		if tc.explicit != "" {
 			want = tc.explicit
 		}
@@ -317,7 +329,7 @@ func TestMCPInferredTypedReplyKeepsActorAddressing(t *testing.T) {
 	}
 }
 
-func TestMCPTeammateInferredOldDaemonDropsOnlyDefault(t *testing.T) {
+func TestMCPTeammateInferredOldDaemonUsesHeader(t *testing.T) {
 	var requests []map[string]any
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -333,21 +345,19 @@ func TestMCPTeammateInferredOldDaemonDropsOnlyDefault(t *testing.T) {
 	t.Cleanup(daemon.Close)
 	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 	require.NoError(t, err)
-	warnings := []string{}
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "pi.example", TeammateInferred: true, Warn: func(message string) { warnings = append(warnings, message) }})
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "pi.example", TeammateInferred: true})
 	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.comment", Arguments: map[string]any{"ref": "abc1", "body": "progress", "idempotency_key": "inferred"}})
 	require.NoError(t, err)
 	require.False(t, result.IsError, "%s", mustJSON(t, result))
 	require.Len(t, requests, 1)
 	require.NotContains(t, requests[0], "teammate")
-	require.Equal(t, []string{"teammate: daemon too old for teammate attribution; writing without it"}, warnings)
 	result, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.comment", Arguments: map[string]any{"ref": "abc1", "body": "progress", "idempotency_key": "explicit", "teammate": "explicit-worker"}})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Len(t, requests, 1)
 }
 
-func TestMCPInferredTeammateHealthFailuresDoNotDegrade(t *testing.T) {
+func TestMCPExplicitTeammateHealthFailuresDoNotDegrade(t *testing.T) {
 	for _, failure := range []string{"auth", "invalid JSON", "transport"} {
 		t.Run(failure, func(t *testing.T) {
 			var writes atomic.Int32
@@ -370,13 +380,11 @@ func TestMCPInferredTeammateHealthFailuresDoNotDegrade(t *testing.T) {
 			t.Cleanup(daemon.Close)
 			client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 			require.NoError(t, err)
-			var warnings []string
-			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "pi", TeammateInferred: true, Warn: func(message string) { warnings = append(warnings, message) }})
+			session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "explicit-worker"})
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.comment", Arguments: map[string]any{"ref": "abc1", "body": "progress", "idempotency_key": "health-failure"}})
 			require.NoError(t, err)
 			require.True(t, result.IsError)
 			require.Zero(t, writes.Load())
-			require.Empty(t, warnings)
 		})
 	}
 }

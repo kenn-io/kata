@@ -33,24 +33,6 @@ func unsetTeammateEnv(t *testing.T, key string) {
 	})
 }
 
-func TestTeammateCommentInferredFromHarness(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	unsetTeammateEnv(t, "KATA_TEAMMATE")
-	t.Setenv("KATA_TEAMMATE_INFER", "model")
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "00000000-0000-0000-0000-000000000001")
-	// Keep detection independent of the harness running the test process.
-	for _, key := range harness.EnvKeys() {
-		if key != "CLAUDE_CODE_SESSION_ID" {
-			unsetTeammateEnv(t, key)
-		}
-	}
-	ref := createIssue(t, env, pid, "Existing issue")
-	runCLI(t, env, dir, "comment", ref, "--body", "progress")
-	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
-	require.Len(t, got.Comments, 1)
-	require.Equal(t, "claude", got.Comments[0].Teammate)
-}
-
 func TestInferredTypedReplyKeepsActorAddressingAcrossIssues(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	unsetTeammateEnv(t, "KATA_TEAMMATE")
@@ -85,7 +67,7 @@ func TestInferredTypedReplyKeepsActorAddressingAcrossIssues(t *testing.T) {
 			answerUID = comment.UID
 		}
 	}
-	require.Empty(t, answerTeammate, "until attribution and reply routing use separate fields, inferred identity must not change typed reply addressing")
+	require.Equal(t, "pi.example", answerTeammate, "stored attribution follows the inferred request header while reply addressing remains actor-only")
 	require.NotEmpty(t, answerUID)
 	require.Equal(t, answerUID, answered.Re)
 }
@@ -99,21 +81,23 @@ func TestDoctorInvalidTeammateInferenceConfig(t *testing.T) {
 	require.True(t, strings.Contains(finding.Summary, "teammate"), finding.Summary)
 }
 
-func TestInferredCommentDropsOnOldDaemon(t *testing.T) {
+func TestInferredCommentUsesHeaderOnOldDaemon(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	unsetTeammateEnv(t, "KATA_TEAMMATE")
 	t.Setenv("KATA_TEAMMATE_INFER", "model")
 	fakeTeammateDetection(t, harness.Detection{Harness: "pi", Model: "example"}, harness.Detected)
 	var bodies []map[string]any
-	var closes int
+	var closes, health int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/health":
+			health++
 			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.17.0"}`))
 		case r.URL.Path == "/api/v1/projects/resolve":
 			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
+			require.Equal(t, "pi.example", r.Header.Get("X-Kata-Teammate"))
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			bodies = append(bodies, body)
@@ -122,7 +106,7 @@ func TestInferredCommentDropsOnOldDaemon(t *testing.T) {
 			closes++
 			_, _ = w.Write([]byte(`{"issue":{"id":1,"project_id":1,"short_id":"abc1","title":"Existing","revision":2},"changed":true}`))
 		default:
-			_, _ = w.Write([]byte(`{"issue":{"id":1,"project_id":1,"short_id":"abc1","title":"Existing","revision":"rev-1"}}`))
+			_, _ = w.Write([]byte(`{"issue":{"id":1,"project_id":1,"short_id":"abc1","title":"Existing","revision":1}}`))
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -130,21 +114,23 @@ func TestInferredCommentDropsOnOldDaemon(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, bodies, 1)
 	require.NotContains(t, bodies[0], "teammate")
-	require.Equal(t, "teammate: daemon too old for teammate attribution; writing without it\n", stderr)
+	require.Empty(t, stderr)
+	require.Zero(t, health)
 	_, stderr, err = executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), "--project", "example-project", "close", "abc1", "--done", "--message", "Implemented requested behavior and verified the focused tests.", "--test", "focused checks", "--comment", "progress")
 	require.NoError(t, err)
 	require.Equal(t, 1, closes)
 	require.Len(t, bodies, 2)
 	require.NotContains(t, bodies[1], "teammate")
-	require.Equal(t, "teammate: daemon too old for teammate attribution; writing without it\n", stderr)
+	require.Empty(t, stderr)
+	require.Zero(t, health)
 	_, _, err = executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), "--teammate", "explicit", "--project", "example-project", "comment", "abc1", "--body", "progress")
 	require.ErrorContains(t, err, "teammate")
 	require.Len(t, bodies, 2)
 }
 
-func TestInferredTeammateHealthFailuresDoNotDegrade(t *testing.T) {
+func TestExplicitTeammateHealthFailuresDoNotDegrade(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	unsetTeammateEnv(t, "KATA_TEAMMATE")
+	t.Setenv("KATA_TEAMMATE", "explicit-worker")
 	t.Setenv("KATA_TEAMMATE_INFER", "model")
 	fakeTeammateDetection(t, harness.Detection{Harness: "pi"}, harness.Detected)
 	for _, failure := range []string{"auth", "invalid JSON", "transport"} {
@@ -198,24 +184,36 @@ func TestCommentSucceedsWhenAncestryErrors(t *testing.T) {
 }
 
 func TestTeammateInferredCreatePreservesExplicitMetadata(t *testing.T) {
-	env, dir, _ := setupCLIWorkspace(t)
+	t.Setenv("KATA_HOME", t.TempDir())
 	unsetTeammateEnv(t, "KATA_TEAMMATE")
 	t.Setenv("KATA_TEAMMATE_INFER", "model")
 	fakeTeammateDetection(t, harness.Detection{Harness: "pi"}, harness.Detected)
-	for _, tc := range []struct{ name, handle string }{{"absent", "pi"}, {"explicit", "explicit-worker"}, {"empty", ""}} {
-		args := []string{"--json", "create", "New issue " + tc.name, "--force-new"}
+	var metadata map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, "pi", r.Header.Get("X-Kata-Teammate"))
+		if strings.HasSuffix(r.URL.Path, "/issues") {
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			metadata, _ = body["metadata"].(map[string]any)
+			_, _ = w.Write([]byte(`{"issue":{"id":1,"project_id":1,"short_id":"abc1","title":"New issue","revision":1}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct{ name, handle string }{{"absent", ""}, {"explicit", "explicit-worker"}, {"empty", ""}} {
+		args := []string{"--project", "example-project", "create", "New issue " + tc.name, "--force-new"}
 		if tc.name != "absent" {
 			args = append(args, "--meta", "teammate="+tc.handle)
 		}
-		out, err := runCLICapture(t, env, dir, args...)
+		_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
 		require.NoError(t, err)
-		var response struct {
-			Issue struct {
-				Metadata map[string]any `json:"metadata"`
-			} `json:"issue"`
+		if tc.name == "absent" {
+			require.NotContains(t, metadata, "teammate")
+		} else {
+			require.Equal(t, tc.handle, metadata["teammate"])
 		}
-		require.NoError(t, json.Unmarshal([]byte(out), &response))
-		require.Equal(t, tc.handle, response.Issue.Metadata["teammate"])
 	}
 }
 

@@ -78,7 +78,9 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx := command.Context()
+			// Startup resolution is validated above. Runtime attribution belongs to
+			// MCP's per-call context, including an explicit empty override.
+			ctx := context.WithValue(command.Context(), teammateResolutionKey{}, nil)
 			var storage *storageadmin.Admin
 			if strings.TrimSpace(storageRoot) != "" {
 				if err := requireHostLocalExport(ctx); err != nil {
@@ -175,7 +177,6 @@ func newMCPServeCmd() *cobra.Command {
 				Actor:             actor,
 				Teammate:          resolution.Handle,
 				TeammateInferred:  resolution.Source == "inferred",
-				Warn:              func(message string) { _, _ = fmt.Fprintln(command.ErrOrStderr(), message) },
 				Version:           version.Version,
 				StorageAdmin:      storage,
 				EnableTokenAdmin:  enableTokenAdmin,

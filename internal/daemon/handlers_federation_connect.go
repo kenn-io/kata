@@ -360,6 +360,7 @@ func newFederationBridgeAPIClient(client *http.Client, baseURL string) (*generat
 type federationBridgeDoer struct{ client *http.Client }
 
 func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
+	request.Header.Set("X-Kata-Teammate", db.EventTeammateFromContext(ctx))
 	response, err := d.client.Do(request.WithContext(ctx)) //nolint:gosec // G704: generated routes use the explicitly configured, origin-pinned hub client.
 	if err != nil {
 		return nil, api.NewError(503, "hub_unavailable", "selected hub request failed", "retry the same bridge connection", nil)

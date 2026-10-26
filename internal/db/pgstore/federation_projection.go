@@ -279,7 +279,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if err != nil {
 		return "", err
 	}
-	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	comments, err := federationIssueComments(ctx, tx, issue.ProjectID, issue.ID)
 	if err != nil {
 		return "", err
 	}
@@ -355,11 +355,11 @@ ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueComments(
-	ctx context.Context,
-	tx *sql.Tx,
-	issueID int64,
-) ([]issueSnapshotComment, error) {
+func federationIssueComments(ctx context.Context, tx *sql.Tx, projectID, issueID int64) ([]issueSnapshotComment, error) {
+	addressing, err := db.CommentAddressingTeammates(ctx, tx, projectID, issueID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx,
 		`SELECT uid,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at FROM comments WHERE issue_id=$1 ORDER BY id ASC`, issueID)
 	if err != nil {
@@ -374,6 +374,7 @@ func federationIssueComments(
 			return nil, mapSQLError(err, nil)
 		}
 		comment.Teammate = teammate.String
+		comment.AddressingTeammate = addressing[comment.CommentUID]
 		comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = replyTo.String, replyKind.String, editedAt.String
 		output = append(output, comment)
 	}

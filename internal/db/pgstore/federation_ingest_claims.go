@@ -25,6 +25,9 @@ func (s *Store) annotateFederationIngestClaimWorkTx(
 	event db.RemoteEvent,
 	rootHolder db.ClaimPrincipal,
 ) ([]db.Event, error) {
+	// New audits belong to this source event, not the process sending its batch.
+	// Empty source attribution also clears any unrelated request teammate.
+	ctx = db.WithEventTeammate(ctx, db.EventTeammate(event.Type, string(event.Payload)))
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(event)
 	if err != nil || len(issueUIDs) == 0 {
 		return nil, err

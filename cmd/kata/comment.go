@@ -81,13 +81,6 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 		if err != nil {
 			return err
 		}
-		if replyTo != "" && resolution.Source == "inferred" {
-			// Until inferred attribution travels separately from the comment
-			// body, keep a typed reply actor-addressed so inference cannot move
-			// request settlement to a different teammate inbox.
-			resolution.Handle = ""
-			resolution.Source = "none"
-		}
 		handle, err := preflightCommentTeammate(cmd, resolution)
 		if err != nil {
 			return err

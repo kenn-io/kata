@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -447,6 +448,10 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
+	ctx = kataclient.WithTeammate(ctx, handle)
+	if h.options.TeammateInferred && input.Teammate == nil {
+		handle = ""
+	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		return nil, MutationOutput{}, errors.New("title must not be empty")
@@ -469,9 +474,6 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	issueMetadata, err := createMetadata(input)
 	if err != nil {
 		return nil, MutationOutput{}, err
-	}
-	if _, present := issueMetadata["teammate"]; present && h.options.TeammateInferred && input.Teammate == nil {
-		handle = ""
 	}
 	issueMetadata, err = teammate.Stamp(issueMetadata, handle)
 	if err != nil {
@@ -613,20 +615,18 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, input CommentInput) (*sdkmcp.CallToolResult, CommentOutput, error) {
-	if input.ReplyTo != "" || input.Kind != "" || input.Force {
-		if err := h.requireCommentLinksAPI(ctx); err != nil {
-			return nil, CommentOutput{}, err
-		}
-	}
 	handle, err := teammate.Resolve(input.Teammate, h.options.Teammate)
 	if err != nil {
 		return nil, CommentOutput{}, err
 	}
-	if input.ReplyTo != "" && h.options.TeammateInferred && input.Teammate == nil {
-		// Until inferred attribution travels separately from the comment body,
-		// keep a typed reply actor-addressed so inference cannot move request
-		// settlement to a different teammate inbox.
+	ctx = kataclient.WithTeammate(ctx, handle)
+	if h.options.TeammateInferred && input.Teammate == nil {
 		handle = ""
+	}
+	if input.ReplyTo != "" || input.Kind != "" || input.Force {
+		if err := h.requireCommentLinksAPI(ctx); err != nil {
+			return nil, CommentOutput{}, err
+		}
 	}
 	if handle != "" {
 		health, err := h.options.Client.Health(ctx)
@@ -638,13 +638,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 			reported = strings.TrimSpace(*health.APISchemaVersion)
 		}
 		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.18.0") < 0 {
-			if !h.options.TeammateInferred || input.Teammate != nil {
-				return nil, CommentOutput{}, fmt.Errorf("comment teammate attribution requires daemon API 0.18.0 or newer; this daemon reports %q; upgrade the daemon", reported)
-			}
-			handle = ""
-			if h.options.Warn != nil {
-				h.options.Warn("teammate: daemon too old for teammate attribution; writing without it")
-			}
+			return nil, CommentOutput{}, fmt.Errorf("comment teammate attribution requires daemon API 0.18.0 or newer; this daemon reports %q; upgrade the daemon", reported)
 		}
 	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)

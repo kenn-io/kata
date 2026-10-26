@@ -86,6 +86,8 @@ func EventCreationProvenance(event RemoteEvent) (string, []EntityProvenance, err
 			return "", nil, errors.New("comment creation missing UID")
 		}
 		return payload.Teammate, []EntityProvenance{{ProjectUID: event.ProjectUID, Kind: "comment", EntityUID: payload.CommentUID, EventUID: event.EventUID}}, nil
+	case "cron.run.observed":
+		return EventTeammate(event.Type, string(event.Payload)), nil, nil
 	default:
 		return "", nil, nil
 	}

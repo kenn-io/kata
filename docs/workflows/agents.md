@@ -443,7 +443,10 @@ A teammate records a contributor under an existing actor's identity. Coding
 agents are attributed automatically as `<actor> / <harness>[.<model>]` when
 Kata recognizes their harness. The model suffix appears only when a model is
 available. Plain terminals and ambiguous harness contexts stay untagged.
-Check the current attribution with `kata whoami`.
+Check the current attribution with `kata whoami`. Inferred attribution travels
+only in the `X-Kata-Teammate` request header, without a health preflight. Older
+daemons ignore it silently. Explicit handles also retain their existing body
+fields and compatibility checks.
 
 Named workers still set `KATA_TEAMMATE`. An explicit `--teammate` wins over
 that variable, which wins over inference. `KATA_TEAMMATE=` opts out; an empty

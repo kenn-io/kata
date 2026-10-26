@@ -23,6 +23,9 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 	if err := teammate.Validate(params.Teammate); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
+	if err := db.ValidateCommentAddressing(params.AddressingTeammate); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
 	if err := db.ValidateCommentReply("", params.ReplyToUID, params.ReplyKind); err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
@@ -73,17 +76,19 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			return mapSQLError(err, nil)
 		}
 		payload, err := json.Marshal(struct {
-			ReplyToUID             string `json:"reply_to_uid,omitempty"`
-			ReplyKind              string `json:"reply_kind,omitempty"`
-			CommentUID             string `json:"comment_uid"`
-			Author                 string `json:"author"`
-			Teammate               string `json:"teammate,omitempty"`
-			Body                   string `json:"body"`
-			CreatedAt              string `json:"created_at"`
-			IdempotencyKey         string `json:"idempotency_key,omitempty"`
-			IdempotencyFingerprint string `json:"idempotency_fingerprint,omitempty"`
+			AddressingTeammate     *string `json:"addressing_teammate,omitzero"`
+			ReplyToUID             string  `json:"reply_to_uid,omitempty"`
+			ReplyKind              string  `json:"reply_kind,omitempty"`
+			CommentUID             string  `json:"comment_uid"`
+			Author                 string  `json:"author"`
+			Teammate               string  `json:"teammate,omitempty"`
+			Body                   string  `json:"body"`
+			CreatedAt              string  `json:"created_at"`
+			IdempotencyKey         string  `json:"idempotency_key,omitempty"`
+			IdempotencyFingerprint string  `json:"idempotency_fingerprint,omitempty"`
 		}{
-			ReplyToUID: params.ReplyToUID, ReplyKind: params.ReplyKind,
+			AddressingTeammate: params.AddressingTeammate,
+			ReplyToUID:         params.ReplyToUID, ReplyKind: params.ReplyKind,
 			CommentUID:             comment.UID,
 			Author:                 comment.Author,
 			Teammate:               comment.Teammate,

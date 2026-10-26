@@ -168,6 +168,9 @@ type ListAllIssuesParams struct {
 
 // CreateCommentParams carries inputs for CreateComment.
 type CreateCommentParams struct {
+	// AddressingTeammate freezes the explicit inbox identity independently of record attribution.
+	// Nil retains legacy behavior for callers that already provide explicit attribution.
+	AddressingTeammate *string
 	// ValidateReply enables local request validation. Replay/import writes may
 	// retain links whose targets have not arrived yet.
 	ValidateReply          bool

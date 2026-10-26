@@ -2,14 +2,18 @@ package daemon
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type bridgeConnectIdentityStore struct{ db.Storage }
@@ -200,4 +204,28 @@ func TestBridgeConnectDoesNotReserveWhileLeaveIsPending(t *testing.T) {
 	_, found, readErr := credentials.FederationCredential(ctx, body.HubProjectUID)
 	require.NoError(t, readErr)
 	require.False(t, found, "a rejected connect must not strand a new pending enrollment credential")
+}
+
+// Bridge enrollment control requests use the same pinned client for connect
+// and disconnect; attribution must survive independently of its bearer token.
+func TestFederationBridgeClientForwardsTeammate(t *testing.T) {
+	var paths []string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "Bearer bridge-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "codex", r.Header.Get("X-Kata-Teammate"))
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(hub.Close)
+	transport := &http.Client{}
+	require.NoError(t, (config.BearerPolicy{}).ConfigureClient(transport, hub.URL, "bridge-token"))
+	client, err := newFederationBridgeAPIClient(transport, hub.URL)
+	require.NoError(t, err)
+	ctx := db.WithEventTeammate(t.Context(), "codex")
+	_, err = client.CreateFederationEnrollmentWithResponse(ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{ProjectID: 42, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", Capabilities: "claim,pull,push"}})
+	require.NoError(t, err)
+	_, err = client.DisconnectRelayEnrollmentWithResponse(ctx, &generated.DisconnectRelayEnrollmentRequestOptions{PathParams: &generated.DisconnectRelayEnrollmentPath{ProjectID: 42}, Body: &generated.DisconnectRelayEnrollmentBody{SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"/api/v1/federation/enrollments", "/api/v1/projects/42/federation/relay:disconnect"}, paths)
 }

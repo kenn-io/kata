@@ -390,9 +390,7 @@ func TestCronCLIObservationTeammateSelection(t *testing.T) {
 		flag            []string
 		want            string
 		invalid         bool
-		inferred        bool
 	}{
-		{name: "inferred absent body", inferred: true, want: "pi"},
 		{name: "flag", flag: []string{"--teammate", "adapter"}, want: "adapter"},
 		{name: "environment", env: "adapter", want: "adapter"},
 		{name: "empty flag suppresses environment", env: "adapter", flag: []string{"--teammate", ""}},
@@ -403,16 +401,11 @@ func TestCronCLIObservationTeammateSelection(t *testing.T) {
 		{name: "conflicting flag", body: `"frozen"`, flag: []string{"--teammate", "another"}, invalid: true},
 		{name: "empty flag conflicts with frozen body", body: `"frozen"`, flag: []string{"--teammate", ""}, invalid: true},
 		{name: "flag conflicts with frozen null", body: `null`, flag: []string{"--teammate", "adapter"}, invalid: true},
-		{name: "empty body retains bounds", env: "adapter", body: `""`, invalid: true},
+		{name: "empty body suppresses environment", env: "adapter", body: `""`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("KATA_AUTHOR", "worker")
 			t.Setenv("KATA_TEAMMATE", tc.env)
-			if tc.inferred {
-				unsetTeammateEnv(t, "KATA_TEAMMATE")
-				t.Setenv("KATA_TEAMMATE_INFER", "model")
-				fakeTeammateDetection(t, harness.Detection{Harness: "pi"}, harness.Detected)
-			}
 			env := testenv.New(t)
 			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 			require.NoError(t, err)
@@ -760,4 +753,59 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	stored, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
+}
+
+func TestCronInferredTeammateHeaderOnly(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	t.Setenv("KATA_HOME", t.TempDir())
+	unsetTeammateEnv(t, "KATA_TEAMMATE")
+	t.Setenv("KATA_TEAMMATE_INFER", "model")
+	fakeTeammateDetection(t, harness.Detection{Harness: "pi"}, harness.Detected)
+	var body map[string]jsontext.Value
+	var header string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/projects" {
+			_, _ = w.Write([]byte(`{"projects":[{"id":42,"name":"spoke-project"}]}`))
+			return
+		}
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"project":{"id":42,"name":"spoke-project"}}`))
+			return
+		}
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(raw, &body))
+		header = r.Header.Get("X-Kata-Teammate")
+		_, _ = w.Write([]byte(`{"run":{}}`))
+	}))
+	t.Cleanup(daemon.Close)
+	id := cronCLIUID(t)
+	for _, tc := range []struct {
+		name, teammate string
+		present        bool
+	}{
+		{name: "inferred header only"},
+		{name: "null suppresses header", teammate: `null`, present: true},
+		{name: "empty suppresses header", teammate: `""`, present: true},
+		{name: "explicit value", teammate: `"teammate-1"`, present: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]jsontext.Value{}
+			require.NoError(t, json.Unmarshal(mustCronJSON(t, api.ObserveCronRunBody{JobUID: &id, DefinitionEventUID: &id, Status: "running", Summary: cron.Summary{Version: 1}}), &input))
+			if tc.present {
+				input["teammate"] = []byte(tc.teammate)
+			}
+			body = nil
+			_, _, err := executeCronCLI(t, daemon.URL, bytes.NewReader(mustCronJSON(t, input)), "run", "observe", id, "--json-input", "-")
+			require.NoError(t, err)
+			require.Equal(t, "pi", header)
+			if !tc.present {
+				require.NotContains(t, body, "teammate")
+				return
+			}
+			require.Contains(t, body, "teammate", "explicit suppression must survive the generated DTO and wire codec")
+			require.JSONEq(t, tc.teammate, string(body["teammate"]), "explicit null must remain null for older daemons")
+		})
+	}
 }

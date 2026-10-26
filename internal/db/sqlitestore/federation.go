@@ -1593,7 +1593,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return "", err
 	}
-	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	comments, err := federationIssueComments(ctx, tx, issue.ProjectID, issue.ID)
 	if err != nil {
 		return "", err
 	}
@@ -1680,7 +1680,11 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	return out, rows.Err()
 }
 
-func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
+func federationIssueComments(ctx context.Context, tx *sql.Tx, projectID, issueID int64) ([]issueSnapshotComment, error) {
+	addressing, err := db.CommentAddressingTeammates(ctx, tx, projectID, issueID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at
 		  FROM comments
@@ -1706,6 +1710,7 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 			comment.CreatedAt = createdAt.Time.UTC().Format(sqliteCommentTimeFormat)
 		}
 		comment.Teammate = teammate.String
+		comment.AddressingTeammate = addressing[comment.CommentUID]
 		comment.ReplyToUID, comment.ReplyKind = replyTo.String, replyKind.String
 		if editedAt.Valid {
 			comment.EditedAt = editedAt.Time.UTC().Format(sqliteCommentTimeFormat)

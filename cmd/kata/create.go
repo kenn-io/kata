@@ -124,7 +124,7 @@ stays unset.
 		}
 		// Initial metadata is explicit, including an empty teammate value.
 		handle := resolution.Handle
-		if _, present := metaMap["teammate"]; present && resolution.Source == "inferred" {
+		if resolution.Source == "inferred" {
 			handle = ""
 		}
 		initialMetadata, err := teammate.Stamp(metaMap, handle)

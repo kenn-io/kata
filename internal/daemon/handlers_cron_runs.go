@@ -40,7 +40,19 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.ObserveCronRun(ctx, in.Body.Native(in.ProjectID, in.RunUID, actor))
+		recordTeammate := in.Body.Teammate
+		if in.Body.TeammatePresent && recordTeammate == nil {
+			recordTeammate = new(string)
+		}
+		handle := effectiveRecordTeammate(recordTeammate, db.EventTeammateFromContext(ctx))
+		observation := in.Body.Native(in.ProjectID, in.RunUID, actor)
+		// Suppression uses the existing nullable run label representation.
+		observation.Teammate = nil
+		if handle != "" {
+			observation.Teammate = &handle
+		}
+		ctx = db.WithEventTeammate(ctx, handle)
+		result, err := cfg.DB.ObserveCronRun(ctx, observation)
 		if err != nil {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, in.RunUID)
 		}

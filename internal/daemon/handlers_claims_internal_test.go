@@ -106,6 +106,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 		IssueUID: "01HZNQ7VFPK1XGD8R5MABCD4EG",
 	}
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "codex", r.Header.Get("X-Kata-Teammate"))
 		switch r.Method {
 		case http.MethodGet:
 			_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{Held: true, Claim: legacyClaim})
@@ -117,7 +118,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 	}))
 	t.Cleanup(hub.Close)
 
-	client, err := newClaimHubClient(context.Background(), hub.URL, "enrollment-token", false, nil)
+	client, err := newClaimHubClient(db.WithEventTeammate(t.Context(), "codex"), hub.URL, "enrollment-token", false, nil)
 	require.NoError(t, err)
 
 	actions := []struct {
@@ -125,13 +126,13 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 		call func() (api.ClaimActionResponseBody, error)
 	}{
 		{"acquire", func() (api.ClaimActionResponseBody, error) {
-			return client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.AcquireClaim(db.WithEventTeammate(t.Context(), "codex"), 42, "ABC", api.ClaimActionBody{})
 		}},
 		{"renew", func() (api.ClaimActionResponseBody, error) {
-			return client.RenewClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.RenewClaim(db.WithEventTeammate(t.Context(), "codex"), 42, "ABC", api.ClaimActionBody{})
 		}},
 		{"release", func() (api.ClaimActionResponseBody, error) {
-			return client.ReleaseClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.ReleaseClaim(db.WithEventTeammate(t.Context(), "codex"), 42, "ABC", api.ClaimActionBody{})
 		}},
 	}
 	for _, action := range actions {
@@ -143,7 +144,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 		})
 	}
 
-	status, err := client.ClaimStatus(context.Background(), 42, "ABC")
+	status, err := client.ClaimStatus(db.WithEventTeammate(t.Context(), "codex"), 42, "ABC")
 	require.NoError(t, err)
 	assert.Equal(t, legacyClaim, status.Lease)
 	assert.Equal(t, legacyClaim, status.Claim)

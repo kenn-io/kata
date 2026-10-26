@@ -447,12 +447,22 @@ type daemonErrorTransport struct {
 }
 
 func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
+	cached, hasTeammate := req.Context().Value(teammateResolutionKey{}).(cachedTeammateResolution)
+	if selected && hasTeammate && cached.err != nil {
+		return nil, cached.err
+	}
 	state := daemonBudgetFromContext(req.Context())
 	if state == nil {
 		state = newDaemonRequestBudget(req, t.timeout, t.origin)
 	}
-	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
 	request := req.Clone(state.ctx)
+	if selected && hasTeammate {
+		request.Header.Del("X-Kata-Teammate")
+		if cached.resolution.Handle != "" {
+			request.Header.Set("X-Kata-Teammate", cached.resolution.Handle)
+		}
+	}
 	resp, err := t.RoundTripper.RoundTrip(request)
 	if resp != nil && resp.Body != nil {
 		resp.Body = &daemonResponseBody{ReadCloser: resp.Body, state: state, selected: selected}

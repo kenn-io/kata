@@ -17,6 +17,12 @@ import (
 )
 
 func commentNotificationHook() db.CommentMetadataHook {
+	return commentNotificationHookWithTeammate(nil)
+}
+
+// Explicit body attribution also selects the reply inbox. Header attribution
+// belongs to the record and must not narrow actor-addressed requests.
+func commentNotificationHookWithTeammate(addressingTeammate *string) db.CommentMetadataHook {
 	return func(ctx context.Context, tx *sql.Tx, issue db.Issue, reply db.Comment) ([]db.CommentMetadataUpdate, error) {
 		if reply.ReplyToUID == "" {
 			return nil, nil
@@ -31,11 +37,35 @@ func commentNotificationHook() db.CommentMetadataHook {
 		if err := notificationCommentTx(ctx, tx, issue, reply.ReplyToUID, allowed); err != nil {
 			return nil, err
 		}
+		addresses := map[int64]map[string]*string{}
+		inboxTeammate := func(issueID int64, commentUID, fallback string) (string, error) {
+			values, loaded := addresses[issueID]
+			if !loaded {
+				var err error
+				values, err = db.CommentAddressingTeammates(ctx, tx, issue.ProjectID, issueID)
+				if err != nil {
+					return "", err
+				}
+				addresses[issueID] = values
+			}
+			if value := values[commentUID]; value != nil {
+				return *value, nil
+			}
+			return fallback, nil
+		}
 		in := notification.LinkInput{Sender: notification.Identity{Actor: reply.Author, Teammate: reply.Teammate}, ReplyUID: reply.UID, TargetUID: reply.ReplyToUID, Kind: reply.ReplyKind, PendingTargets: map[string]string{}}
-		err = tx.QueryRowContext(ctx, `SELECT c.author,COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2 AND i.deleted_at IS NULL`, reply.ReplyToUID, issue.ProjectID).Scan(&in.Target.Actor, &in.Target.Teammate)
+		if addressingTeammate != nil {
+			in.Sender.Teammate = *addressingTeammate
+		}
+		var targetIssueID int64
+		err = tx.QueryRowContext(ctx, `SELECT c.issue_id,c.author,COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2 AND i.deleted_at IS NULL`, reply.ReplyToUID, issue.ProjectID).Scan(&targetIssueID, &in.Target.Actor, &in.Target.Teammate)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
+		if err != nil {
+			return nil, err
+		}
+		in.Target.Teammate, err = inboxTeammate(targetIssueID, reply.ReplyToUID, in.Target.Teammate)
 		if err != nil {
 			return nil, err
 		}
@@ -107,6 +137,10 @@ func commentNotificationHook() db.CommentMetadataHook {
 				return priorLinkers[i].uid > priorLinkers[j].uid
 			})
 			for _, linker := range priorLinkers {
+				linker.identity.Teammate, err = inboxTeammate(linker.issueID, linker.uid, linker.identity.Teammate)
+				if err != nil {
+					return nil, err
+				}
 				in.PriorLinkers = append(in.PriorLinkers, linker.identity)
 			}
 			for key, raw := range in.Current {

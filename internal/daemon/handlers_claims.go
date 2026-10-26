@@ -860,6 +860,7 @@ func (c *claimHubClient) ClaimIssue(
 		return api.ClaimResponseBody{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Kata-Teammate", db.EventTeammateFromContext(ctx))
 	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
 	if err != nil {
 		return api.ClaimResponseBody{}, err
@@ -1078,6 +1079,7 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 type claimHubDoer struct{ client *http.Client }
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req.Header.Set("X-Kata-Teammate", db.EventTeammateFromContext(ctx))
 	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err

@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 const (
@@ -51,6 +52,7 @@ func TestHubClientPreservesCatalogPathPrefix(t *testing.T) {
 
 func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 	unsetHubClientGlobalAuth(t)
+	ctx := db.WithEventTeammate(t.Context(), "codex")
 
 	var (
 		mu       sync.Mutex
@@ -61,6 +63,7 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		mu.Unlock()
 		assert.Equal(t, "Bearer "+testCatalogBearer, r.Header.Get("Authorization"))
+		assert.Equal(t, "codex", r.Header.Get("X-Kata-Teammate"))
 
 		switch r.Method + " " + r.URL.Path {
 		case "POST /api/v1/projects/resolve":
@@ -107,12 +110,12 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(ctx, config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, Token: testCatalogBearer, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	project, err := hub.EnsureProject(context.Background(), "hub-project", "user-a")
+	project, err := hub.EnsureProject(ctx, "hub-project", "user-a")
 	require.NoError(t, err)
 	assert.Equal(t, federation.HubProject{
 		ID: 42, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "hub-project",
@@ -127,11 +130,11 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 		Actor:                        "user-a",
 		AllowAdoptionSnapshotAuthors: true,
 	}
-	created, err := hub.EnsureEnrollment(context.Background(), enrollmentRequest)
+	created, err := hub.EnsureEnrollment(ctx, enrollmentRequest)
 	require.NoError(t, err)
 	assert.Equal(t, federation.Enrollment{ID: 71, Actor: "identity-user"}, created)
 
-	rotated, err := hub.RotateEnrollment(context.Background(), enrollmentRequest)
+	rotated, err := hub.RotateEnrollment(ctx, enrollmentRequest)
 	require.NoError(t, err)
 	assert.Equal(t, federation.Enrollment{ID: 72, Actor: "identity-user"}, rotated)
 
@@ -700,17 +703,18 @@ func TestHubClientRevokesEnrollmentByExactID(t *testing.T) {
 	unsetHubClientGlobalAuth(t)
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "codex", r.Header.Get("X-Kata-Teammate"))
 		gotPath = r.URL.Path
 		assert.Equal(t, http.MethodPost, r.Method)
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": 47, "revoked": true})
 	}))
 	t.Cleanup(server.Close)
-	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+	hub, err := federation.NewHubClient(db.WithEventTeammate(t.Context(), "codex"), config.CatalogDaemonConfig{
 		Name: "primary", URL: server.URL, AllowInsecure: true,
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, hub.RevokeEnrollment(context.Background(), 47))
+	require.NoError(t, hub.RevokeEnrollment(db.WithEventTeammate(t.Context(), "codex"), 47))
 	assert.Equal(t, "/api/v1/federation/enrollments/47/revoke", gotPath)
 }
 
@@ -763,4 +767,17 @@ func unsetHubClientGlobalAuth(t *testing.T) {
 		})
 	}
 	t.Setenv("KATA_HOME", t.TempDir())
+}
+
+func TestHubClientProjectCreationCarriesTeammate(t *testing.T) {
+	hub := testenv.New(t, testenv.WithAuthToken("catalog-token"))
+	client, err := federation.NewHubClient(t.Context(), config.CatalogDaemonConfig{Name: "primary", URL: hub.URL, Token: "catalog-token"})
+	require.NoError(t, err)
+	project, err := client.EnsureProject(db.WithEventTeammate(t.Context(), "codex"), "hub-project", "coordinator")
+	require.NoError(t, err)
+	events, err := hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Types: []string{"project.created"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "codex", events[0].Teammate)
+	require.Equal(t, "coordinator", events[0].Actor)
 }

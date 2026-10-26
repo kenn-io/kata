@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -29,6 +31,7 @@ type CronCapabilitiesResponse struct {
 
 // ObserveCronRunBody replaces evidence for a caller-retained run UID.
 type ObserveCronRunBody struct {
+	TeammatePresent            bool         `json:"-"`
 	Actor                      string       `json:"actor,omitempty"`
 	JobUID                     *string      `json:"job_uid,omitempty"`
 	DefinitionEventUID         *string      `json:"definition_event_uid,omitempty"`
@@ -43,6 +46,22 @@ type ObserveCronRunBody struct {
 	StartedAt                  *time.Time   `json:"started_at,omitempty"`
 	EndedAt                    *time.Time   `json:"ended_at,omitempty"`
 	ExpectedRevision           int64        `json:"expected_revision" minimum:"0"`
+}
+
+// UnmarshalJSON preserves explicit null suppression without changing the wire schema.
+func (b *ObserveCronRunBody) UnmarshalJSON(data []byte) error {
+	type body ObserveCronRunBody
+	var decoded body
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	_, decoded.TeammatePresent = members["teammate"]
+	*b = ObserveCronRunBody(decoded)
+	return nil
 }
 
 // Native applies the admitted actor and project to the portable input.

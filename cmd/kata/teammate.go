@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -77,8 +76,8 @@ func teammateInferenceMode() (harness.Mode, error) {
 }
 
 // resolveTeammate freezes attribution once per command, including any error.
-// Root pre-run caches errors for attribution consumers without blocking reads
-// or configuration diagnostics that do not need teammate attribution.
+// Root pre-run caches errors so native requests reject invalid attribution,
+// while configuration diagnostics can still run and report their findings.
 func resolveTeammate(cmd *cobra.Command) (teammateResolution, error) {
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -123,7 +122,7 @@ func resolveUncachedTeammate(cmd *cobra.Command) (teammateResolution, error) {
 }
 
 func preflightCommentTeammate(cmd *cobra.Command, resolution teammateResolution) (string, error) {
-	if resolution.Handle == "" {
+	if resolution.Handle == "" || resolution.Source == "inferred" {
 		return "", nil
 	}
 	a, err := dialDaemon(cmd.Context())
@@ -131,13 +130,6 @@ func preflightCommentTeammate(cmd *cobra.Command, resolution teammateResolution)
 		return "", err
 	}
 	err = requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, "0.18.0", "comment teammate attribution")
-	if err != nil && resolution.Source == "inferred" {
-		var cli *cliError
-		if errors.As(err, &cli) && cli.Code == "daemon_api_too_old" {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "teammate: daemon too old for teammate attribution; writing without it")
-			return "", nil
-		}
-	}
 	return resolution.Handle, err
 }
 
