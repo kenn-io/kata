@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -13,6 +14,7 @@ import (
 func isolateAgentHookHomes(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
+	fakeOmp(t, "", exec.ErrNotFound)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	for _, p := range agenthook.Profiles() {

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-24
+last_edited: 2026-10-26
 ---
 
 # CLI reference
@@ -248,7 +248,7 @@ choice.
 
 Use `contract` with `claude`, `codex`, `copilot`, `cursor`, `gemini`, `hermes`,
 or `qwen`, plus native `droid`, `antigravity`, `kimi-code`, `muse` and `zcode`.
-Pi, Amp, OpenCode and OpenClaw use installed code extensions instead of this
+Pi, omp, Amp, OpenCode and OpenClaw use installed code extensions instead of this
 stdin command. Kimi CLI and Grok support attention only. The harness name is
 positional. For example, a Codex SessionStart hook can run:
 
@@ -301,7 +301,7 @@ response on stdout.
 
 ```sh
 kata agent-hook install
-kata agent-hook install codex pi
+kata agent-hook install codex pi omp
 kata agent-hook install codex --config /path/to/second-codex-home/hooks.json
 kata agent-hook install claude --executable /path/to/stable/bin/kata
 kata agent-hook uninstall codex
@@ -315,7 +315,7 @@ Dedicated provider configuration directories count as signals, while generic
 use user configuration signals but selects only project-capable agents. Named
 targets are deterministic and may create configuration for an agent not detected.
 Contradictory explicit scope selections fail before writes. See the
-[18-target coverage matrix](../workflows/agents.md#hook-target-coverage) for
+[19-target coverage matrix](../workflows/agents.md#hook-target-coverage) for
 contract, attention and project-discovery capabilities. Installation and status
 completion offer canonical target names; documented aliases remain accepted.
 
@@ -324,7 +324,7 @@ kata agent-hook install codex --local
 kata agent-hook install opencode
 kata agent-hook install muse --managed-attention
 kata agent-hook install codex --contract-only
-kata init --agent-hooks=codex,pi
+kata init --agent-hooks=codex,pi,omp
 kata agent-hook uninstall pi --contract-only
 ```
 
@@ -364,6 +364,15 @@ uninstalling the existing bundle before choosing another API. Automatic setup
 can skip a failed probe while configuring other agents. Amp supports user or
 project installations, with conflicts detected across recorded project scopes.
 
+omp requires version 18.6.3 or newer. User-scope install, status and uninstall
+run `omp config path` from the home directory with a ten-second timeout.
+An unavailable or invalid result fails explicit selection; automatic selection
+reports `skipped` with reason `omp unavailable`. Project scope installs
+`.omp/extensions/kata.js` without a probe. `--config` is unsupported. A shared
+`PI_CODING_AGENT_DIR` can make pi and omp target the same file; Kata preserves
+it and asks you to separate the roots. Restart omp after installation; offline
+status cannot prove runtime loading. See [native extension setup](../workflows/agents.md#native-extension-setup).
+
 Muse native attention requires user managed-hook environment forwarding.
 `--managed-attention` is an explicit grant and implies attention. Explicit
 single-Muse user setup at a terminal may request that grant once. A valid
@@ -378,7 +387,7 @@ remove the names from Muse settings to revoke it.
 
 `--config` requires one harness and cannot accompany `--all`; code adapters
 without a native config override reject it. Default roots honor the original
-Kit environment selectors plus native Pi, OpenClaw, Kimi Code, Grok and XDG
+Kit environment selectors plus native Pi, omp, OpenClaw, Kimi Code, Grok and XDG
 selectors. Installer `--source` applies only to owned code adapters, as literal
 prompt-file data. Relative user-scope paths are saved as absolute paths from the
 install command's working directory; project-scope paths stay relative to the
@@ -414,7 +423,7 @@ exact direct command recognition across all platform variants. A renamed Kata
 executable carries an explicit ownership marker so later updates can recognize
 it. Custom prompt
 commands and unrelated wrappers remain untouched, retaining their relative order.
-Generated Pi, Amp, OpenCode and OpenClaw artifacts record a digest of their
+Generated Pi, omp, Amp, OpenCode and OpenClaw artifacts record a digest of their
 installed code and metadata. Unedited artifacts can be inspected, upgraded or
 removed after Kata's generator changes. Edited code, metadata and package
 manifests are preserved; move them aside after saving your changes before

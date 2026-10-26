@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ func agentHookCapabilities() []agentHookCapability {
 		{Name: "antigravity", Contract: true, Project: true, Note: "First-invocation contract only; use launcher attention start/end."},
 		{Name: "amp", Contract: true, AttentionStart: true, Project: true, Note: "Use user scope or project scopes; simultaneous owned user/project installs are rejected because Amp plugins run in separate processes. No native session-end event; use launcher attention end. Hidden context requires the May 26 2026 plugin SDK or later."},
 		{Name: "opencode", Contract: true, AttentionStart: true, Project: true, Note: "Setup detects stable OpenCode v1 (>=1.0.154) or v2 (>=2.0.0); no native session-close event, so use launcher attention end."},
+		{Name: "omp", Contract: true, AttentionStart: true, AttentionEnd: true, Project: true, Note: "omp >=18.6.3; restart omp after installation. Offline status cannot confirm runtime loading."},
 		{Name: "pi", Contract: true, AttentionStart: true, AttentionEnd: true, Project: true, Note: "Pi >=0.99.1; reload and complete native project trust. Offline status cannot confirm runtime loading."},
 		{Name: "openclaw", Contract: true, AttentionStart: true, AttentionEnd: true, Project: true, Note: "OpenClaw >=2026.9.7; prompt and attention need authorized workspace capture. Inspect/reload the native plugin before use."},
 		{Name: "kimi-code", Contract: true, AttentionStart: true, AttentionEnd: true, Note: "Contract uses UserPromptSubmit plain output; SessionStart does not consume context. Project discovery is unverified."},
@@ -78,7 +80,7 @@ func agentHookScopePath(target, scope, dir string) (string, error) {
 			return "", agentHookUsage(target + " has no verified project hook discovery; use --scope user")
 		}
 		paths := map[string]string{
-			"claude": ".claude/settings.json", "codex": ".codex/hooks.json", "gemini": ".gemini/settings.json", "copilot": ".github/hooks/kata.json", "cursor": ".cursor/hooks.json", "qwen": ".qwen/settings.json", "droid": ".factory/hooks.json", "antigravity": ".agents/hooks.json", "pi": ".pi/extensions/kata.js", "amp": ".amp/plugins/kata-project.js", "openclaw": ".openclaw/extensions/kata", "muse": ".muse/hooks.json", "grok": ".grok/hooks/kata.json",
+			"claude": ".claude/settings.json", "codex": ".codex/hooks.json", "gemini": ".gemini/settings.json", "copilot": ".github/hooks/kata.json", "cursor": ".cursor/hooks.json", "qwen": ".qwen/settings.json", "droid": ".factory/hooks.json", "antigravity": ".agents/hooks.json", "pi": ".pi/extensions/kata.js", "omp": ".omp/extensions/kata.js", "amp": ".amp/plugins/kata-project.js", "openclaw": ".openclaw/extensions/kata", "muse": ".muse/hooks.json", "grok": ".grok/hooks/kata.json",
 		}
 		if target == "opencode" {
 			return filepath.Abs(openCodeAgentHookFallbackPath(filepath.Join(dir, ".opencode"), scope))
@@ -108,6 +110,12 @@ func agentHookScopePath(target, scope, dir string) (string, error) {
 		return filepath.Join(home, ".factory", "hooks.json"), nil
 	case "antigravity":
 		return filepath.Join(home, ".gemini", "config", "hooks.json"), nil
+	case "omp":
+		root, err := resolveOmpUserRoot(context.Background(), home)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, "extensions", "kata.js"), nil
 	case "pi":
 		root := os.Getenv("PI_CODING_AGENT_DIR")
 		if root == "" {

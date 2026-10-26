@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+import {createOmpHost} from './omp-host.mjs';
+const [extension, cwd, piExtension] = process.argv.slice(2);
+const omp = (await import(pathToFileURL(extension))).default;
+const pi = (await import(pathToFileURL(piExtension))).default;
+const ompHost = createOmpHost({cwd});
+pi(ompHost);
+assert.equal(ompHost.handlers.size, 0);
+const piHost = createOmpHost({cwd});
+delete piHost.zod;
+omp(piHost);
+assert.equal(piHost.handlers.size, 0);

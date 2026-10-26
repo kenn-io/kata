@@ -9,7 +9,7 @@ import (
 )
 
 func TestAgentHookCapabilitiesAndScopes(t *testing.T) {
-	names := []string{"claude", "codex", "gemini", "copilot", "cursor", "qwen", "hermes", "droid", "antigravity", "amp", "opencode", "pi", "openclaw", "kimi-code", "kimi", "muse", "grok", "zcode"}
+	names := []string{"claude", "codex", "gemini", "copilot", "cursor", "qwen", "hermes", "droid", "antigravity", "amp", "opencode", "omp", "pi", "openclaw", "kimi-code", "kimi", "muse", "grok", "zcode"}
 	for _, name := range names {
 		capability, err := lookupAgentHookCapability(name)
 		require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestAgentHookCapabilitiesAndScopes(t *testing.T) {
 			require.True(t, capability.AttentionEnd)
 		}
 	}
-	for _, alias := range []string{"factory", "agy", "antigravity-cli"} {
+	for _, alias := range []string{"factory", "agy", "antigravity-cli", "oh-my-pi"} {
 		_, err := lookupAgentHookCapability(alias)
 		require.NoError(t, err)
 	}
@@ -38,7 +38,7 @@ func TestAgentHookCapabilitiesAndScopes(t *testing.T) {
 		require.Error(t, err)
 	}
 	dir := t.TempDir()
-	for target, want := range map[string]string{"claude": ".claude/settings.json", "codex": ".codex/hooks.json", "copilot": ".github/hooks/kata.json", "cursor": ".cursor/hooks.json", "gemini": ".gemini/settings.json", "qwen": ".qwen/settings.json", "droid": ".factory/hooks.json", "antigravity": ".agents/hooks.json", "pi": ".pi/extensions/kata.js"} {
+	for target, want := range map[string]string{"claude": ".claude/settings.json", "codex": ".codex/hooks.json", "copilot": ".github/hooks/kata.json", "cursor": ".cursor/hooks.json", "gemini": ".gemini/settings.json", "qwen": ".qwen/settings.json", "droid": ".factory/hooks.json", "antigravity": ".agents/hooks.json", "pi": ".pi/extensions/kata.js", "omp": ".omp/extensions/kata.js"} {
 		got, err := agentHookScopePath(target, "project", dir)
 		require.NoError(t, err)
 		require.Equal(t, filepath.Join(dir, filepath.FromSlash(want)), got)

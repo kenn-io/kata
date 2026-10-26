@@ -44,7 +44,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			if err != nil {
 				return err
 			}
-			if capability.Name == "pi" || capability.Name == "openclaw" || capability.Name == "amp" || capability.Name == "opencode" {
+			if capability.Name == "omp" || capability.Name == "pi" || capability.Name == "openclaw" || capability.Name == "amp" || capability.Name == "opencode" {
 				return agentHookUsage(capability.Name + " uses a native extension; install it with kata agent-hook install " + capability.Name)
 			}
 			if !capability.Contract {
@@ -115,7 +115,7 @@ func agentHookHarnessCompletion(_ *cobra.Command, args []string, prefix string) 
 	var names []string
 	if len(args) == 0 {
 		for _, capability := range agentHookCapabilities() {
-			if capability.Contract && capability.Name != "pi" && capability.Name != "openclaw" && capability.Name != "amp" && capability.Name != "opencode" && strings.HasPrefix(capability.Name, prefix) {
+			if capability.Contract && capability.Name != "omp" && capability.Name != "pi" && capability.Name != "openclaw" && capability.Name != "amp" && capability.Name != "opencode" && strings.HasPrefix(capability.Name, prefix) {
 				names = append(names, capability.Name)
 			}
 		}

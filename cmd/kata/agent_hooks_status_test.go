@@ -190,7 +190,7 @@ func TestAgentHooksStatusMissingAndSameFile(t *testing.T) {
 	isolateAgentHookHomes(t)
 	workspace := t.TempDir()
 	report := agentHooksStatusJSON(t, "--scope", "user", "--workspace", workspace)
-	require.Len(t, report["harnesses"], 18)
+	require.Len(t, report["harnesses"], 19)
 	for _, raw := range report["harnesses"].([]any) {
 		harness := raw.(map[string]any)
 		require.Equal(t, false, harness["duplicate"])

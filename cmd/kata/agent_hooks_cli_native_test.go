@@ -318,7 +318,7 @@ func TestAgentHooksCLIStatusUnmanageableNativeConfig(t *testing.T) {
 				}
 				require.NoError(t, json.Unmarshal(failure.Error.Data, &report))
 				if len(names) == 0 {
-					require.Len(t, report.Harnesses, 18)
+					require.Len(t, report.Harnesses, 19)
 				} else {
 					require.Len(t, report.Harnesses, 1)
 				}

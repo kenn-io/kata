@@ -36,7 +36,7 @@ func resolveNativeAgentHookAttention(cmd *cobra.Command, attention, contractOnly
 // such as .github and .agents require a native configuration file instead.
 func nativeAgentHookConfiguredTarget(target nativeAgentHookTarget) (bool, error) {
 	configured, err := nativeAgentHookConfigurationExists(target.capability.Name, target.options.Scope, target.path)
-	if err != nil || configured || target.options.Scope != "project" {
+	if err != nil || configured || target.options.Scope != "project" || target.capability.Name == "omp" {
 		return configured, err
 	}
 	userPath, err := agentHookScopePath(target.capability.Name, "user", target.options.Dir)

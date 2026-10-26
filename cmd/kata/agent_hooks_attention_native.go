@@ -114,13 +114,15 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 func canonicalNativeAttentionTarget(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {
+	case "oh-my-pi":
+		name = "omp"
 	case "factory":
 		name = "droid"
 	case "agy", "antigravity-cli":
 		name = "antigravity"
 	}
 	switch name {
-	case "claude", "codex", "gemini", "copilot", "cursor", "qwen", "hermes", "droid", "antigravity", "amp", "opencode", "pi", "openclaw", "kimi-code", "kimi", "muse", "grok", "zcode":
+	case "claude", "codex", "gemini", "copilot", "cursor", "qwen", "hermes", "droid", "antigravity", "amp", "opencode", "omp", "pi", "openclaw", "kimi-code", "kimi", "muse", "grok", "zcode":
 		return name, nil
 	}
 	return "", agentHookUsage(fmt.Sprintf("unknown harness %q", name))

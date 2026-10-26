@@ -59,11 +59,16 @@ func selectNativeAgentHookTargets(names []string, all bool, scope, config, dir s
 			continue
 		}
 		target.path, err = agentHookScopePath(capability.Name, scope, dir)
+		if automatic && errors.Is(err, errOmpUnavailable) {
+			target.skip = "omp unavailable"
+			targets = append(targets, target)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		if config != "" {
-			if capability.Name == "pi" || capability.Name == "amp" || (capability.Name == "opencode" && scope == "project") {
+			if capability.Name == "omp" || capability.Name == "pi" || capability.Name == "amp" || (capability.Name == "opencode" && scope == "project") {
 				return nil, agentHookUsage(fmt.Sprintf("%s uses auto-discovery; --config is unsupported for this scope", capability.Name))
 			}
 			target.path, err = filepath.Abs(config)
@@ -101,7 +106,7 @@ func nativeAgentHookConfigRoot(name, scope, path string) string {
 	}
 	root := filepath.Dir(path)
 	switch name {
-	case "pi", "amp", "opencode", "grok":
+	case "omp", "pi", "amp", "opencode", "grok":
 		root = filepath.Dir(root)
 	case "openclaw":
 		root = filepath.Dir(root)
@@ -119,6 +124,8 @@ func planNativeAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgent
 		plan, err = planKitAgentHooks(opts, remove)
 	} else {
 		switch opts.Agent {
+		case "omp":
+			plan, err = planOmpAgentHooks(opts, remove)
 		case "pi":
 			plan, err = planPiAgentHooks(opts, remove)
 		case "amp":
@@ -225,7 +232,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			if !remove && !target.capability.Contract && !attention {
 				return agentHookUsage(target.capability.Name + " supports attention only; select --attention and use committed AGENTS.md for the contract")
 			}
-			if !remove && cmd.Flags().Changed("source") && target.capability.Name != "pi" && target.capability.Name != "openclaw" && target.capability.Name != "amp" && target.capability.Name != "opencode" {
+			if !remove && cmd.Flags().Changed("source") && target.capability.Name != "omp" && target.capability.Name != "pi" && target.capability.Name != "openclaw" && target.capability.Name != "amp" && target.capability.Name != "opencode" {
 				return agentHookUsage("--source is supported only by owned native code adapters")
 			}
 		}
@@ -429,11 +436,18 @@ func newAgentHooksStatusCmd() *cobra.Command {
 					}
 				}
 			}
-			selected, err := selectNativeAgentHookTargets(names, false, selectedScope, config, dir)
-			if err != nil {
-				return err
+			for _, name := range names {
+				selected, err := selectNativeAgentHookTargets([]string{name}, false, selectedScope, config, dir)
+				if len(args) == 0 && errors.Is(err, errOmpUnavailable) {
+					capability, _ := lookupAgentHookCapability(name)
+					targets = append(targets, nativeAgentHookTarget{capability: capability, options: nativeAgentHookOptions{Scope: selectedScope}, skip: "omp unavailable"})
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				targets = append(targets, selected...)
 			}
-			targets = append(targets, selected...)
 		}
 		report := collectAgentHookWorkspaceStatus(dir)
 		report.Warnings = append(report.Warnings, "Offline status reports owned configured artifacts; it cannot confirm native loading, hook trust, or runtime permissions.")
@@ -451,6 +465,11 @@ func newAgentHooksStatusCmd() *cobra.Command {
 		}
 		for _, target := range targets {
 			scope := target.options.Scope
+			if target.skip == "omp unavailable" {
+				appendStatus(agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, State: "skipped", Reason: target.skip, User: agentHookUserStatus{Entries: []agentHookStatusEntry{}}})
+				report.Warnings = append(report.Warnings, "omp: "+target.skip)
+				continue
+			}
 			plan, err := planNativeAgentHooks(target.options, true)
 			if err != nil {
 				path := plan.Path

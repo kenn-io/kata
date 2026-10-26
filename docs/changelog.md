@@ -14,6 +14,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   reloads restore a missing ownership marker from a successful start without
   another attention write. Rerun `kata agent-hook install pi` to pick up the fix.
 
+- Install the Kata contract and session attention into omp with `kata agent-hook install omp`.
+
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.
 

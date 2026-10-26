@@ -151,7 +151,7 @@ completed project result separately from the hook failure.
 
 Most contract hooks use SessionStart; Hermes uses first-turn
 `pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
-PreInvocation. Pi, Amp, OpenCode and OpenClaw use native code extensions.
+PreInvocation. Pi, omp, Amp, OpenCode and OpenClaw use native code extensions.
 The contract also loads outside Kata workspaces. Attention requires a tracked
 issue in `KATA_REF` and uses the native workspace for routing.
 
@@ -174,6 +174,7 @@ policy can prevent a configured hook from running.
 | `amp` | Yes | Yes | Launcher | User or project installations; simultaneous owned user/project configurations rejected |
 | `opencode` | Yes | Yes | Launcher | User/project; runtime version selects the matching v1/v2 API |
 | `pi` | Yes | Yes | Yes | User/project; Pi 0.99.1 or newer; graceful quit only |
+| `omp` | Yes | Yes | Yes | User/project; omp 18.6.3 or newer; user scope needs omp on PATH |
 | `openclaw` | Yes | Yes | Yes | User/project; OpenClaw 2026.9.7 or newer; authorized workspace capture required; shared inbox is opt-in |
 | `kimi-code` | Yes | Yes | Yes | User only; UserPromptSubmit context |
 | `kimi` | No | Yes | Yes | Archived Kimi CLI; user only; use committed AGENTS.md for context |
@@ -201,7 +202,7 @@ Multiple Amp project installations are supported.
 ### Native extension setup
 
 ```sh
-kata agent-hook install pi openclaw
+kata agent-hook install pi omp openclaw
 kata agent-hook install opencode
 kata agent-hook install muse --managed-attention
 kata agent-hook status pi --json
@@ -216,6 +217,25 @@ Protection requires inheriting the lead's marker after its attention start
 succeeds; children launched earlier may still track the lead's issue. The PID
 check confirms liveness but cannot distinguish a reused PID from the original
 host.
+
+omp uses a native extension with contract context on every prompt and inbox
+context for the main session. Worker prompts receive contract context, but do
+not receive inbox context until the native delegation binding is installed.
+Only the main agent tracks attention: session switching ends the previous
+session and starts the next; graceful shutdown ends it.
+Use omp 18.6.3 or newer and restart omp after installation. Offline status
+reports configured files and cannot confirm runtime loading.
+
+For user scope, Kata runs `omp config path` from your home directory to resolve
+omp's active profile and configuration root. omp must be on PATH; if it is
+unavailable, an explicit target fails and automatic setup skips it. Project
+scope uses `.omp/extensions/kata.js` without probing omp; omp skips project
+extension discovery when the working directory is home.
+
+Pi and omp can both honor `PI_CODING_AGENT_DIR`. If that makes their generated
+`extensions/kata.js` paths collide, installation preserves the existing file
+and fails. Unset the variable for one harness or select separate roots before
+retrying. Each adapter also ignores the other harness's runtime.
 
 Pi uses its structured extension API; reload extensions or restart Pi and
 complete project trust. Amp hidden context requires plugin SDK
@@ -291,7 +311,7 @@ An unreadable or malformed selected config makes status exit nonzero after
 collecting the other targets. JSON puts that partial report in `error.data`;
 each failed row identifies the config path in `inspection_error`.
 `--config` requires one target and a supported native config-file override;
-Pi and Amp auto-discovered extensions reject it. An executable override can pin
+Pi, omp and Amp auto-discovered extensions reject it. An executable override can pin
 stable Kata commands. Installer `--source` is data for owned code extensions;
 command-hook installers reject it and preserve authored custom-source commands.
 Relative user-scope source paths are saved as absolute paths from the install

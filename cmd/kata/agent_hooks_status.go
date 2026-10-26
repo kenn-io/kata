@@ -48,6 +48,8 @@ type agentHookConfigured struct {
 }
 
 type agentHookHarnessStatus struct {
+	State           string               `json:"state,omitempty"`
+	Reason          string               `json:"reason,omitempty"`
 	InspectionError string               `json:"inspection_error,omitempty"`
 	Scope           string               `json:"scope"`
 	Capabilities    agentHookCapability  `json:"capabilities"`
@@ -210,6 +212,18 @@ func printAgentHookStatus(cmd *cobra.Command, report agentHookStatusReport) erro
 		}
 	}
 	for _, harness := range slices.Concat(report.Harnesses, report.Workspace.Harnesses) {
+		if harness.State == "skipped" {
+			format := "%s (%s): skipped: %s\n"
+			reason := textsafe.Line(harness.Reason)
+			if currentOutputMode() == outputAgent {
+				format = "harness=%s scope=%s state=skipped reason=%s observation=offline\n"
+				reason = agentValue(harness.Reason)
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), format, harness.Harness, harness.Scope, reason); err != nil {
+				return err
+			}
+			continue
+		}
 		if harness.InspectionError != "" {
 			if currentOutputMode() == outputAgent {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "harness=%s scope=%s inspection_error=%s observation=offline\n", harness.Harness, harness.Scope, agentValue(harness.InspectionError))
