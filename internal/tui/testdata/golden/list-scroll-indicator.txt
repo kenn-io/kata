@@ -1,5 +1,5 @@
  Project: kata                                                                                       kata カタ · v0.1.0
- open: 50 · closed: 0 · all: 50
+ / search                                                                                open: 50 · closed: 0 · all: 50
     #     prio status    title                                                           kids    owner         updated
     #s003 —    open      issue s003                                                                            3h ago
     #s004 —    open      issue s004                                                                            4h ago

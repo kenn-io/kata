@@ -1,5 +1,5 @@
  Project: kata                                                                                          kata カタ · dev
- open: 1 · closed: 1 · all: 3
+ / search                                                                                  open: 1 · closed: 1 · all: 3
     #     prio status    title                                                           kids    owner         updated
 ▶   #aaa1 P1   op╭────────────────────────────────────────────────────────────────────────────────────╮-4.7    3h ago
     #bbb2 —    cl│ new issue                                                                          │        1h ago

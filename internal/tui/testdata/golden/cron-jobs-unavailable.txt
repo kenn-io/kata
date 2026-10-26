@@ -1,6 +1,6 @@
  Project: example-project                                       kata カタ · dev
 kata カタ [jobs] runs workflows
- 0 jobs
+ / search                                                                0 jobs
 
   Job            State   Trigger           Action             Last loaded run
 jobs unavailable: see error below

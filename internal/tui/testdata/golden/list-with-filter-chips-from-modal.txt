@@ -1,5 +1,5 @@
  Project: kata                                                                                       kata カタ · v0.1.0
- open: 1 · closed: 0 · all: 1                                       status:open  owner:alice  search:"login"  label:bug
+ /login                                              open: 1 · closed: 0 · all: 1 · status:open  owner:alice  label:bug
     #     prio status    title                                                           kids    owner         updated
 ▶   #42aa —    open      fix login bug on Safari                                                 alice         30m ago
 

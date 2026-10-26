@@ -1,5 +1,5 @@
  Project: kata                                                                                       kata カタ · v0.1.0
- open: 4 · closed: 1 · all: 5
+ / search                                                                                  open: 4 · closed: 1 · all: 5
     #     prio status    title                                                           kids    owner         updated
 ▶+  #p010 —    open      professional workspace polish                                   1/2     wesm          30m ago
     #s020 —    open      standalone queue cleanup                                                              4h ago

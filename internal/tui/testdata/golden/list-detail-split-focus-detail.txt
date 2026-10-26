@@ -1,10 +1,10 @@
  Project: kata                                                                                                                                  kata カタ · dev
 ┌──────────────────────────────────────────────────────────────────┐┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│    #     prio status    title                   kids    updated  ││  #42aa  fix login bug on Safari                                                    [open]│
-│    #aaa1 P1   open      fix login bug on Safari         3h ago   ││  authored by wesm                                                                        │
-│▶   #bbb2 —    closed    rebuild search index            1h ago   ││  owner: none   parent: none                                                              │
-│    #ccc3 —    [deleted] purge stale tokens              2h ago   ││  priority: none                                                                          │
-│                                                                  ││                                                                                          │
+│ / search                            open: 1 · closed: 1 · all: 3 ││  #42aa  fix login bug on Safari                                                    [open]│
+│    #     prio status    title                   kids    updated  ││  authored by wesm                                                                        │
+│    #aaa1 P1   open      fix login bug on Safari         3h ago   ││  owner: none   parent: none                                                              │
+│▶   #bbb2 —    closed    rebuild search index            1h ago   ││  priority: none                                                                          │
+│    #ccc3 —    [deleted] purge stale tokens              2h ago   ││                                                                                          │
 │                                                                  ││  Body                                                                                    │
 │                                                                  ││  Reproduces in Safari 17 only.                                                           │
 │                                                                  ││  Click the login button twice.                                                           │
