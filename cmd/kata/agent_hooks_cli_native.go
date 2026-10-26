@@ -154,7 +154,7 @@ func newNativeAgentHooksMutationCmd(remove bool) *cobra.Command {
 }
 
 func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal func(io.Reader) bool) *cobra.Command {
-	var all, attention, managed, local, contractOnly, shareInbox bool
+	var all, attention, managed, local, contractOnly, shareInbox, plan bool
 	var scope, config, executable, source, api string
 	verb := "install"
 	short := "Install contract and available attention hooks for configured or named agents"
@@ -164,13 +164,28 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 	}
 	cmd := &cobra.Command{Use: verb + " [<harness>...]", Short: short, ValidArgsFunction: agentHookUserCompletion(false)}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if remove && !all && len(args) == 0 {
+		if remove && !all && len(args) == 0 && !cmd.Flags().Changed("plan") {
 			return agentHookUsage("name at least one harness or use --all")
 		}
 		var err error
 		scope, err = resolveNativeAgentHookScope(cmd, scope, local)
 		if err != nil {
 			return err
+		}
+		if cmd.Flags().Changed("plan") {
+			if all || len(args) != 1 {
+				return agentHookUsage("--plan requires exactly one explicit omp target")
+			}
+			capability, err := lookupAgentHookCapability(args[0])
+			if err != nil {
+				return err
+			}
+			if capability.Name != "omp" {
+				return agentHookUsage("--plan currently supports only omp")
+			}
+			if scope != "user" {
+				return agentHookUsage("--plan requires --scope user")
+			}
 		}
 		attention, err = resolveNativeAgentHookAttention(cmd, attention, contractOnly, managed)
 		if err != nil {
@@ -267,9 +282,15 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			opts.ManagedAttention = managed
 			opts.ShareInbox = shareInbox
 			opts.ShareInboxSet = !remove && cmd.Flags().Changed("share-inbox")
+			opts.Plan, opts.PlanSet = plan, cmd.Flags().Changed("plan")
 			opts.API = api
 			opts.Source = source
 			opts.SourceSet = !remove && cmd.Flags().Changed("source")
+			if !remove && opts.Plan {
+				if err := checkOmpPlanPreconditions(cmd.Context(), opts.Home); err != nil {
+					return err
+				}
+			}
 			if !remove && opts.Agent == "opencode" {
 				// Pure install planning checks authored collisions before a probe can
 				// skip this target. An unset API retains any owned SDK/layout choice.
@@ -322,6 +343,9 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			}
 			result.ConfigPath = plan.Path
 			result.Warnings = append(result.Warnings, plan.Warnings...)
+			if remove && plan.CurrentPlan {
+				result.Warnings = append(result.Warnings, "omp's built-in todo stays disabled; re-enable it with omp config reset todo.enabled.")
+			}
 			if target.capability.Note != "" {
 				result.Warnings = append(result.Warnings, target.capability.Note)
 			}
@@ -335,6 +359,13 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 				result.State = "absent"
 				if result.Changed {
 					result.State = "removed"
+				} else if opts.Agent == "omp" && opts.PlanSet && !opts.Plan {
+					for _, change := range plan.Changes {
+						if change.OriginalExists && !change.Remove {
+							result.State = "unchanged"
+							break
+						}
+					}
 				}
 			} else if result.Changed {
 				result.State = "installed"
@@ -371,6 +402,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 	cmd.Flags().BoolVar(&all, "all", false, "discover configured harnesses")
 	cmd.Flags().BoolVar(&local, "local", false, "use project scope in the selected workspace")
 	cmd.Flags().BoolVar(&contractOnly, "contract-only", false, "select only contract hooks; preserve existing attention on install")
+	cmd.Flags().BoolVar(&plan, "plan", false, "select the omp plan layer; requires one explicit omp target in user scope")
 	cmd.Flags().StringVar(&scope, "scope", "user", "installation scope: user or project")
 	cmd.Flags().StringVar(&config, "config", "", "explicit native config file; requires exactly one supported command target")
 	cmd.Flags().BoolVar(&attention, "attention", true, "include available attention directions; --attention=false selects contract only")
@@ -493,7 +525,7 @@ func newAgentHooksStatusCmd() *cobra.Command {
 					continue
 				}
 			}
-			row := agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, Configured: agentHookConfigured{Contract: plan.CurrentContract, AttentionStart: plan.CurrentAttentionStart, AttentionEnd: plan.CurrentAttentionEnd}, User: user, Overlap: scope == "user" && user.Present && len(report.Workspace.CommittedGuidance) > 0}
+			row := agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, Configured: agentHookConfigured{Contract: plan.CurrentContract, AttentionStart: plan.CurrentAttentionStart, AttentionEnd: plan.CurrentAttentionEnd, Plan: plan.CurrentPlan}, User: user, Overlap: scope == "user" && user.Present && len(report.Workspace.CommittedGuidance) > 0}
 			if scope == "user" {
 				switch target.capability.Name {
 				case "claude":

@@ -43,18 +43,54 @@ type instanceStatusForCLI struct {
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status <issue-ref>",
-		Short: "show owner, your actor, and claim hold for one issue",
+		Use:   "status [issue-ref]",
+		Short: "show your effective actor, or an issue owner and claim hold",
 		Long: `Print the issue's identity, current owner, your effective actor, and its
 ownership hold: closed, active, expired, pending, assigned, or unassigned.
 Use it before claim or unassign; kata show's "by <name>" line is the author,
-not the owner. Schedules, someday, and blockers appear in kata show.`,
+not the owner. Schedules, someday, and blockers appear in kata show.
+Omit the issue ref to report only your effective actor and daemon identity.`,
 		Example: `  kata status abc4 --agent`,
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return runActorStatus(cmd)
+			}
 			return runIssueStatus(cmd, args[0])
 		},
 	}
+}
+
+// With no issue, status exposes the same effective daemon actor used for
+// ownership, so clients can establish attribution before creating their parent.
+func runActorStatus(cmd *cobra.Command) error {
+	a, err := discoverDaemonAPI(cmd.Context())
+	if err != nil {
+		return err
+	}
+	var instance instanceStatusForCLI
+	if err := getInstanceStatus(a.ctx, a.client, a.baseURL, &instance); err != nil {
+		return err
+	}
+	actor, source := resolveActor(a.ctx, flags.As, nil)
+	if instance.Auth.Actor != "" {
+		actor, source = instance.Auth.Actor, "daemon"
+	}
+	result := struct {
+		Actor       string `json:"actor"`
+		ActorSource string `json:"actor_source"`
+		Auth        string `json:"auth"`
+		Instance    string `json:"instance"`
+	}{actor, source, instance.Auth.Kind, instance.InstanceUID}
+	if currentOutputMode() == outputJSON {
+		return emitJSON(cmd.OutOrStdout(), result)
+	}
+	prefix := ""
+	if currentOutputMode() == outputAgent {
+		prefix = "OK status "
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%sactor=%s actor_source=%s auth=%s instance=%s\n", prefix, agentValue(actor), agentValue(source), agentValue(instance.Auth.Kind), agentValue(instance.InstanceUID))
+	return err
 }
 
 func runIssueStatus(cmd *cobra.Command, issueRef string) error {

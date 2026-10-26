@@ -2,15 +2,17 @@ import path from 'node:path';
 
 // The runner calls every handler in registration order and chains prompt rewrites.
 export function createOmpHost({cwd, sessionId = 'A', agentKind = 'main', events = {}, sessionFile} = {}) {
-  const handlers = new Map(), calls = [], notifications = [];
-  let id = sessionId;
+  const handlers = new Map(), calls = [], tools = [], notifications = [];
+  let id = sessionId, executing = 0;
   const ctx = {cwd, agent: {kind: agentKind}, sessionManager: {
     getSessionId: () => id,
     getSessionFile: () => sessionFile || path.join(cwd, `${id}.jsonl`),
   },
     ui: {notify: (message, kind) => notifications.push({message, kind})}};
-  const host = {zod: {}, events, handlers, calls, notifications, ctx,
+  const host = {zod: {}, events, handlers, calls, tools, notifications, ctx,
     on(name, fn) {const list = handlers.get(name) || []; list.push(fn); handlers.set(name, list);},
+    registerTool(tool) {const index = tools.findIndex(t => t.name === tool.name); if (index >= 0) tools.splice(index, 1); tools.push(tool);},
+    getAllTools() {if (!executing) throw new Error('tools unavailable during factory'); return tools;},
     async exec(executable, args, options) {
       calls.push({executable, args, options});
       const identityLookup = args[0] === '--json' && args[1] === '--workspace';
@@ -29,12 +31,15 @@ export function createOmpHost({cwd, sessionId = 'A', agentKind = 'main', events 
     },
     setSession(value) {id = value;},
     async emit(name, event = {}) {
-      let result = {...event};
-      for (const fn of handlers.get(name) || []) {
-        const update = await fn(result, ctx);
-        if (update) result = {...result, ...update};
-      }
-      return result;
+      executing++;
+      try {
+        let result = {...event};
+        for (const fn of [...(handlers.get(name) || [])]) {
+          const update = await fn(result, ctx);
+          if (update) result = {...result, ...update};
+        }
+        return result;
+      } finally {executing--;}
     },
   };
   return host;

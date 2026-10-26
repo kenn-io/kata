@@ -148,7 +148,7 @@ func TestOmpPiSharedDirectoryCollision(t *testing.T) {
 	}
 }
 func drawOmpMetadata(ht *hegel.T) ompAgentHookMetadata {
-	return ompAgentHookMetadata{Format: "kata-omp", Version: 1, Scope: hegel.Draw(ht, hegel.SampledFrom([]string{"user", "project"})), Workspace: hegel.Draw(ht, hegel.Text()), Executable: hegel.Draw(ht, hegel.Text().MinSize(1)), Source: hegel.Draw(ht, hegel.Text()), SourceSet: hegel.Draw(ht, hegel.Booleans()), Contract: hegel.Draw(ht, hegel.Booleans()), Attention: hegel.Draw(ht, hegel.Booleans())}
+	return ompAgentHookMetadata{Format: "kata-omp", Version: 1, Scope: hegel.Draw(ht, hegel.SampledFrom([]string{"user", "project"})), Workspace: hegel.Draw(ht, hegel.Text()), Executable: hegel.Draw(ht, hegel.Text().MinSize(1)), Source: hegel.Draw(ht, hegel.Text()), SourceSet: hegel.Draw(ht, hegel.Booleans()), Contract: hegel.Draw(ht, hegel.Booleans()), Attention: hegel.Draw(ht, hegel.Booleans()), Plan: hegel.Draw(ht, hegel.Booleans())}
 }
 func TestOmpOwnershipRejectsBodyEditProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {

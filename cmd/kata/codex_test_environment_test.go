@@ -15,6 +15,9 @@ import (
 // from the developer's real Codex config; user-hook tests select their own homes
 // with t.Setenv. No production behavior or real user config is changed.
 func TestMain(m *testing.M) {
+	if os.Getenv("KATA_NATIVE_PLAN_FIXTURE") == "1" {
+		runPlanSubprocessFixture()
+	}
 	version.Version = "v1.2.3"
 	for _, key := range []string{"CI", "DO_NOT_TRACK", "TELEMETRY_ENABLED", "KATA_TELEMETRY_ENABLED"} {
 		if err := os.Unsetenv(key); err != nil {

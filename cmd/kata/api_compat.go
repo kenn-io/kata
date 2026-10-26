@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	// The plan layer uses metadata CAS and guarded, idempotent closes introduced
+	// with API 0.15.0.
+	apiVersionPlanLayer             = "0.15.0"
 	apiVersionSearchStatus          = "0.20.0"
 	apiVersionListSort              = "0.21.0"
 	apiVersionDiscoveryPagination   = "0.27.0"

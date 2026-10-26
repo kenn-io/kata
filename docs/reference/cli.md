@@ -308,6 +308,15 @@ kata agent-hook uninstall codex
 kata agent-hook uninstall --all
 ```
 
+`kata agent-hook install omp --plan` opts into Kata-backed todo plans, includes
+the contract, and requires user scope and daemon API 0.15.0 or newer. Disable
+omp's built-in todo first with
+`omp config set todo.enabled false`, then restart after installation. Installation
+reads the effective todo setting and rejects the enabled `kata@kata-plugin`;
+it never edits omp settings. `kata agent-hook uninstall omp --plan` removes only
+the plan. See [Kata-backed omp todo plans](../workflows/agents.md#kata-backed-omp-todo-plans)
+for completion evidence, automatic parents, runtime disarming and migration limits.
+
 User scope is the default; `--local` or `--scope project` selects the workspace.
 Bare install discovers configured native agents; `--all` uses the same rule.
 Dedicated provider configuration directories count as signals, while generic
@@ -660,7 +669,7 @@ kata list --all [--status open|closed|all] [--sort oldest|created] [--limit N]
 kata show <issue-ref> [--render]
 kata show <issue-ref> [--thread COMMENT | --inbound[=AUTHOR[/TEAMMATE]]]
                      [--kind reply|confirm|refute|supersede] [--since COMMENT]
-kata status <issue-ref>
+kata status [<issue-ref>]
 kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical [--cursor CURSOR] | --hybrid | --semantic]
 kata search <query> [--status open|closed] [--label LABEL] [--no-label LABEL]
@@ -701,7 +710,11 @@ Backlink evidence retains the newest 50 replies per kind and marks incomplete
 results with `backlinks_truncated` in JSON and agent output. Human output states
 that more replies may be available.
 
-`kata status` reports the issue status and revision, daemon identity, effective
+`kata status --json` without an issue ref reports only the effective actor, its
+source, authentication kind and selected daemon identity. It uses the daemon
+actor for authenticated tokens, even when `KATA_AUTHOR` differs.
+
+`kata status <issue-ref>` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the

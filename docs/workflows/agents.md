@@ -291,6 +291,61 @@ Muse hooks use launcher attention. Native project discovery for Hermes, Kimi
 CLI, Kimi Code and ZCode
 is unverified, so `--scope project` is rejected for them.
 
+### Kata-backed omp todo plans
+
+Use Kata as omp's todo list when a session needs persistent tasks, ownership and
+evidence for completion. Each plan item becomes a child issue. The `todo` tool,
+`/todo` commands, progress widget and stop reminders use that same plan.
+
+```sh
+omp config set todo.enabled false
+kata agent-hook install omp --plan
+```
+
+Restart omp after installing. This opt-in is available only at user scope, with
+omp 18.6.3 or newer and daemon API 0.15.0 or newer. It also installs the
+contract; ordinary installs keep omp's own todo list. The pi plan layer is not
+yet available. Native delegated-agent tracking is still forthcoming; plugin
+users who depend on it should wait before migrating. Installation rejects an enabled
+`kata@kata-plugin`, and Kata never changes omp's todo settings itself.
+
+Initialize a plan with an existing issue ref, `KATA_REF`, or a new automatic
+session parent. Explicit parents remain yours to close. Automatic parents close
+only after every child is closed and delegated jobs have settled. Their evidence
+is copied from the children's recorded close events; each child's own close
+remains authoritative. This does not reverify the children's work. A child that
+reopens and closes again after the final read can race the parent close, leaving
+the parent with the earlier evidence. Missing or reset evidence keeps the parent
+open with `needs-review`. Wontfix children contribute no evidence.
+
+Re-adding a closed or removed item checks current ownership. A concurrent handoff
+across Kata's nonconditional reopen can leave the issue open; the tool stops
+before changing its todo status or removal metadata. Inspect `kata status <ref>`
+and retry after the ownership handoff is settled.
+
+The tool's `done` operation requires typed evidence, such as `test:<command>` or
+`commit:<sha>`, and a message of at least 40 characters explaining the change and
+verification. Block unverified work with a reason. `/todo done` records the user's
+attestation as external evidence. Outside a Kata project, the tool keeps a
+session-local plan. Daemon or authorization failures never become local plans.
+
+A different todo provider, an enabled released plugin, or an unavailable plugin
+inventory disables the native plan layer. If omp's built-in todo becomes enabled,
+the first todo tool execution forwards to it and disables later plan handlers.
+There is a window before that execution in which `/todo` can still reach Kata;
+restart after changing todo settings. Contract and attention capabilities keep
+their own lifecycle.
+
+Remove the plan and restore omp's todo list with:
+
+```sh
+kata agent-hook uninstall omp --plan
+omp config set todo.enabled true
+```
+
+Restart omp again. Plan-only uninstall preserves contract and attention; full
+`kata agent-hook uninstall omp` removes the entire owned adapter.
+
 ### Inspect, customize and remove
 
 ```sh

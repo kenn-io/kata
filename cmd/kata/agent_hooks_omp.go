@@ -6,6 +6,9 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"path/filepath"
+	"strings"
+
+	"go.kenn.io/kata/cmd/kata/agenthookjs"
 )
 
 const ompAgentHookMetadataPrefix = "// kata-native-omp "
@@ -20,6 +23,7 @@ type ompAgentHookMetadata struct {
 	SourceSet  bool   `json:"sourceSet"`
 	Contract   bool   `json:"contract"`
 	Attention  bool   `json:"attention"`
+	Plan       bool   `json:"plan,omitzero"`
 }
 
 func planOmpAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHookPlan, error) {
@@ -75,6 +79,7 @@ func planOmpAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 		plan.CurrentContract = meta.Contract
 		plan.CurrentAttentionStart = meta.Attention
 		plan.CurrentAttentionEnd = meta.Attention
+		plan.CurrentPlan = meta.Plan
 	}
 	if !remove {
 		// User options select additions. Omitted source and attention retain the
@@ -89,31 +94,36 @@ func planOmpAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 			meta.Source = opts.Source
 			meta.SourceSet = true
 		}
-		meta.Contract = meta.Contract || opts.Contract
+		meta.Contract = meta.Contract || opts.Contract || opts.Plan
 		meta.Attention = meta.Attention || opts.Attention
+		meta.Plan = meta.Plan || opts.Plan
 	} else {
-		if opts.Contract {
+		if opts.Plan || (!opts.PlanSet && opts.Contract && opts.Attention) {
+			meta.Plan = false
+		}
+		if opts.Contract && !opts.PlanSet {
 			meta.Contract = false
 		}
-		if opts.Attention {
+		if opts.Attention && !opts.PlanSet {
 			meta.Attention = false
 		}
 	}
 	plan.Contract = meta.Contract
 	plan.AttentionStart = meta.Attention
 	plan.AttentionEnd = meta.Attention
+	plan.Plan = meta.Plan
 	if !exists && remove {
 		return plan, nil
 	}
 	change := nativeAgentHookChange{Path: plan.Path, Original: data, OriginalExists: exists}
-	if remove && !opts.Contract && !opts.Attention {
+	if remove && ((!opts.Contract && !opts.Attention && !opts.Plan) || (opts.PlanSet && !opts.Plan)) {
 		// Inspection preserves an exact previous-version artifact until an
 		// explicit install or removal upgrades it.
 		change.Content = data
 		plan.Changes = []nativeAgentHookChange{change}
 		return plan, nil
 	}
-	if !meta.Contract && !meta.Attention {
+	if !meta.Contract && !meta.Attention && !meta.Plan {
 		if exists {
 			change.Remove = true
 			plan.Changes = []nativeAgentHookChange{change}
@@ -155,7 +165,21 @@ func generateOmpAgentHooks(meta ompAgentHookMetadata) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sealNativeAgentHookCode([]byte(ompAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + nativeAttentionHostGuardJS + ompAgentHookJS)), nil
+	runtimeOptions := string(options)
+	imports := ""
+	wrapper := "\nexport default function kataHooks(pi) { kataBase(pi); }\n"
+	body := strings.Replace(ompAgentHookJS, "export default function kataHooks(pi)", "function kataBase(pi)", 1)
+	if meta.Plan {
+		runtimeOptions = strings.TrimSuffix(runtimeOptions, "}") + `,"minDaemonAPI":"` + apiVersionPlanLayer + `"}`
+		imports = `import { createHash } from "node:crypto";
+import { appendFileSync, realpathSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+`
+		body += agenthookjs.PlanCore + "\n" + agenthookjs.PlanOmp
+		wrapper = "\nexport default function kataHooks(pi) { kataBase(pi); if (options.plan) kataPlanOmp(pi); }\n"
+	}
+	return sealNativeAgentHookCode([]byte(ompAgentHookMetadataPrefix + string(options) + "\n" + imports + "const options = " + runtimeOptions + ";\n" + nativeAttentionHostGuardJS + body + wrapper)), nil
 }
 
 const ompAgentHookJS = `import path from "node:path";

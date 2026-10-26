@@ -45,6 +45,7 @@ type agentHookConfigured struct {
 	Contract       bool `json:"contract"`
 	AttentionStart bool `json:"attention_start"`
 	AttentionEnd   bool `json:"attention_end"`
+	Plan           bool `json:"plan"`
 }
 
 type agentHookHarnessStatus struct {
@@ -255,6 +256,15 @@ func printAgentHookStatus(cmd *cobra.Command, report agentHookStatusReport) erro
 		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), format, harness.Configured.Contract, harness.Configured.AttentionStart, harness.Configured.AttentionEnd); err != nil {
 			return err
+		}
+		if harness.Harness == "omp" {
+			format := "  Plan: %t (offline)\n"
+			if currentOutputMode() == outputAgent {
+				format = "configured_plan=%t observation=offline\n"
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), format, harness.Configured.Plan); err != nil {
+				return err
+			}
 		}
 		config := harness.User
 		if harness.Config != nil {

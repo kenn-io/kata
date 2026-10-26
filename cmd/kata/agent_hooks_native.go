@@ -24,6 +24,7 @@ type nativeAgentHookOptions struct {
 	SourceSet, Contract, Attention                          bool
 	ConfigPathExplicit                                      bool
 	ShareInbox, ShareInboxSet                               bool
+	Plan, PlanSet                                           bool
 }
 type nativeAgentHookChange struct {
 	Path                   string
@@ -38,6 +39,7 @@ type nativeAgentHookPlan struct {
 	CurrentContract, CurrentAttentionStart, CurrentAttentionEnd bool
 	CurrentOwnedContract                                        bool
 	CurrentAPI                                                  string
+	Plan, CurrentPlan                                           bool
 	Warnings                                                    []string
 }
 

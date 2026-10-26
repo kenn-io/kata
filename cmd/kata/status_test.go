@@ -141,3 +141,32 @@ func TestStatusDisplaysTimedAssignmentExpiry(t *testing.T) {
 	assert.Regexp(t, `(?m)^assignment expires: \d{4}-\d{2}-\d{2}T`, human)
 	assert.Regexp(t, `owner=worker assignment_expires_on=\d{4}-\d{2}-\d{2}T[^ ]* hold=assigned`, agent)
 }
+
+func TestStatusWithoutRefReportsEffectiveActor(t *testing.T) {
+	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "actor-status-token", Actor: "daemon-actor", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", "actor-status-token")
+	t.Setenv("KATA_AUTHOR", "local-actor")
+	out := runCLI(t, env, dir, "status", "--json")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, "daemon-actor", got["actor"])
+	assert.Equal(t, "daemon", got["actor_source"])
+	assert.Equal(t, "db_token", got["auth"])
+	assert.NotContains(t, out, "actor-status-token")
+}
+
+func TestStatusWithoutRefReportsLocalActorAndAgentFormat(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	t.Setenv("KATA_AUTHOR", "local-actor")
+	out := runCLI(t, env, dir, "status", "--json")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, "local-actor", got["actor"])
+	assert.Equal(t, "env", got["actor_source"])
+	out = runCLI(t, env, dir, "status", "--agent")
+	assert.Contains(t, out, "OK status actor=local-actor actor_source=env auth=")
+}
