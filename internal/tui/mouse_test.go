@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -120,5 +121,65 @@ func TestMouseClickSelectsProjectsRow(t *testing.T) {
 	}
 	if nm.projectsCursor != 1 {
 		t.Fatalf("projectsCursor=%d, want first concrete project row", nm.projectsCursor)
+	}
+}
+
+func TestMousePersistentSearch(t *testing.T) {
+	for _, width := range []int{80, 160} {
+		m := resizeModel(newTestModel(), width, 40)
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(5)
+		m.list.cursor = 2
+		m.list = m.list.syncSelection(m.list.visibleRows())
+		original := m.list.selectedUID
+		row := 1
+		if m.layout == splitlayout.Split {
+			row = 2
+		}
+		m, _ = updateModel(m, mouseLeftClick(4, row))
+		if m.input.kind != inputSearchBar {
+			t.Fatalf("width %d: click did not open search", width)
+		}
+		m = sendRune(m, 'r')
+		m = sendKey(m, tea.KeyDown)
+		m, _ = updateModel(m, mouseLeftClick(4, row))
+		if m.input.searchFocus != searchFocusQuery {
+			t.Fatal("click did not refocus query")
+		}
+		m = sendKey(m, tea.KeyEscape)
+		if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
+			t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
+		}
+	}
+}
+
+func TestMouseSearchVisibilityGuards(t *testing.T) {
+	for _, state := range []string{"disabled", "narrow", "short", "loading", "error", "modal", "input", "detail"} {
+		t.Run(state, func(t *testing.T) {
+			m := resizeModel(newTestModel(), 80, 24)
+			m.opts.Mouse = true
+			switch state {
+			case "disabled":
+				m.opts.Mouse = false
+			case "narrow":
+				m = resizeModel(m, 79, 24)
+			case "short":
+				m = resizeModel(m, 80, 9)
+			case "loading":
+				m.list.loading = true
+			case "error":
+				m.list.err = fmt.Errorf("unavailable")
+			case "modal":
+				m.modal = modalQuitConfirm
+			case "input":
+				m.input.kind = inputFilterForm
+			case "detail":
+				m.view = viewDetail
+			}
+			next, _ := updateModel(m, mouseLeftClick(4, 1))
+			if next.input.kind == inputSearchBar {
+				t.Fatal("invisible or blocked search accepted click")
+			}
+		})
 	}
 }

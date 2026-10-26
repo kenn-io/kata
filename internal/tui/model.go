@@ -1054,7 +1054,7 @@ func (m Model) listRenderedDataRows() int {
 	}
 	if m.layout == splitlayout.Split {
 		innerH := max(m.splitGeometry().ListInnerH, 2)
-		return max(1, innerH-1)
+		return max(1, innerH-2)
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
 	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)

@@ -616,3 +616,51 @@ func TestCronNoticesFitTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestCronPersistentSearch(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		for _, state := range []string{"idle", "empty", "loading", "unavailable"} {
+			m := sendRune(cronFixture(t), tab)
+			m.opts.Mouse = true
+			switch state {
+			case "empty":
+				m = m.cronFilter("absent-query")
+			case "loading":
+				m.cron.out = true
+			case "unavailable":
+				m.cron.data = &cronData{jobsErr: errors.New("offline"), runsErr: errors.New("offline"), workflowsErr: errors.New("offline")}
+			}
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
+			want := "/ search"
+			if state == "empty" {
+				want = "/absent-query"
+			}
+			require.True(t, strings.HasPrefix(strings.TrimSpace(line), want), "%c %s: %s", tab, state, line)
+			m, _ = updateModel(m, mouseLeftClick(4, 2))
+			require.True(t, m.cron.filtering, "%c %s", tab, state)
+		}
+	}
+}
+
+func TestCronSearchClickGuards(t *testing.T) {
+	for _, state := range []string{"disabled", "narrow", "help", "detail", "projects", "modal"} {
+		m := cronFixture(t)
+		m.opts.Mouse = true
+		switch state {
+		case "disabled":
+			m.opts.Mouse = false
+		case "narrow":
+			m.width = 79
+		case "help":
+			m.cron.help = true
+		case "detail":
+			m = sendKey(m, tea.KeyEnter)
+		case "projects":
+			m.scope.allProjects = true
+		case "modal":
+			m.modal = modalQuitConfirm
+		}
+		m, _ = updateModel(m, mouseLeftClick(4, 2))
+		require.False(t, m.cron.filtering, state)
+	}
+}

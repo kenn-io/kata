@@ -397,19 +397,27 @@ func renderCron(m Model) string {
 		}
 	}
 	query := m.cron.lists[m.cron.tab].query
-	right := ""
-	if query != "" || m.cron.filtering {
-		right = "/" + query
-		if m.cron.filtering {
-			right += "▏"
+	left, right := title, ""
+	if len(m.cron.stack) == 0 {
+		left, right = "/ search", title
+		if query != "" || m.cron.filtering {
+			left = "/" + query
 		}
+		if m.cron.filtering {
+			left += "▏"
+		}
+		if m.cron.out {
+			right += " · loading…"
+		}
+	} else if query != "" {
+		right = "/" + query
 	} else if m.cron.out {
 		right = "loading…"
 	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
-		statsLineStyle.Render(padLeftRightInside(title, right, titleBarInnerWidth(m.width))),
+		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
 	}
 	if header != "" {

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -2399,5 +2400,31 @@ func TestSplit_CursorFollow_RetargetsOnSameShortIDDifferentProject(t *testing.T)
 	if m.nextDetailFollowGen <= startGen {
 		t.Errorf("nextDetailFollowGen did not advance; debounce tick not scheduled "+
 			"(gen=%d, start=%d)", m.nextDetailFollowGen, startGen)
+	}
+}
+
+func TestSplitSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
+	defer snapshotInit(t)()
+	m := resizeModel(newTestModel(), 160, 40)
+	m.opts.Mouse = true
+	m.list.issues = makeTestIssues(60)
+	m = m.applyListViewportCache()
+	lines := strings.Split(stripANSI(m.viewBody()), "\n")
+	count := 0
+	for y, line := range lines {
+		for i := range 60 {
+			ref := fmt.Sprintf("r%03d", i+1)
+			if !strings.Contains(line[:min(len(line), 68)], ref) {
+				continue
+			}
+			clicked, _ := updateModel(m, mouseLeftClick(4, y))
+			if clicked.list.selectedUID != m.list.issues[i].UID {
+				t.Errorf("row %d shows %s but selected %s", y, ref, clicked.list.selectedUID)
+			}
+			count++
+		}
+	}
+	if count == 0 || m.list.pageRows != count {
+		t.Fatalf("page rows=%d rendered=%d", m.list.pageRows, count)
 	}
 }

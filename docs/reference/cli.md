@@ -1702,6 +1702,9 @@ kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
 
+Search stays visible above the issue list and the Jobs, Runs, and Workflows
+lists. Press `/` or, with `--mouse`, click the search line to edit the current query.
+
 `kata tui` asks for confirmation when you press `q`. To quit immediately,
 set `[tui] confirm_quit = false`; see
 [TUI preferences](configuration.md#tui-preferences).

@@ -23,8 +23,8 @@ import (
 // modal is the active centered confirmation and owns footer help while
 // installed. input is the active inline command bar / panel-local prompt /
 // centered form. When input.kind is a command bar, the chrome
-// renders the bar on the info line just above the footer (msgvault
-// pattern) and swaps the help row to the bar's keys.
+// renders search on the stats line above the table and swaps the
+// help row to the bar's keys.
 //
 // narrow signals the list pane is rendering in M6 split mode. The
 // list table drops the owner column when narrow=true so the title
@@ -48,7 +48,7 @@ type viewChrome struct {
 // View renders the list under the M3.5 chrome layer:
 //
 //   - line 1: title bar (brand · project · version)
-//   - line 2: stats line (counts + filter chips)
+//   - line 2: search, counts, and filter chips
 //   - lines 3..H-N: table (header + windowed rows, padded
 //     so the adaptive footer pins to the bottom of the terminal
 //     regardless of row count)
@@ -70,7 +70,7 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 		return lm.renderTinyFallback(width)
 	}
 	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
-	stats := renderStatsLine(width, chrome.scope, lm.issueCounts(), lm.filter)
+	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)
 	helpRows := listHelpRows(lm, chrome)
 	footerLines := helpLines(helpRows, width)
 	footer := renderFooterHelpTable(helpRows, width)
@@ -94,7 +94,7 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 }
 
 // ViewBody returns the body region for an M6 split-mode list pane:
-// table header + windowed rows + fillScreen padding so
+// search/stats line + table header + windowed rows + fillScreen padding so
 // the pane reaches `bodyRows` lines tall. Pulls the narrow flag off
 // chrome so renderBody knows to drop the owner column. The chrome /
 // title-bar / info-line / footer are composed by renderSplit, not
@@ -106,7 +106,8 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 	if lm.err != nil {
 		return errorStyle.Render(lm.err.Error())
 	}
-	return lm.renderBodyArea(width, bodyRows, chrome)
+	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input) + "\n" +
+		lm.renderBodyArea(width, bodyRows-1, chrome)
 }
 
 // listMinHeight is the smallest terminal height the layout supports.
@@ -221,13 +222,23 @@ func titleBarInnerWidth(width int) int {
 	return w
 }
 
-// renderStatsLine is the second header line — counts + filter chips.
+// renderStatsLine puts search before counts and filter chips.
 // SSE state and the actor used to live here in M1; both are gone
 // (SSE surfaces as a flash on the info line when degraded; actor
 // stays in lm.actor for mutation dispatch but isn't surfaced).
-func renderStatsLine(width int, _ scope, c issueCounts, f ListFilter) string {
-	left := statsCountsText(c)
-	right := renderChips(f)
+func renderStatsLine(width int, c issueCounts, f ListFilter, input inputState) string {
+	left := "/ search"
+	if f.Search != "" {
+		left = "/" + sanitizeForLine(f.Search)
+	}
+	if input.kind == inputSearchBar {
+		left = renderInfoBar(input, titleBarInnerWidth(width))
+	}
+	f.Search = ""
+	right := statsCountsText(c)
+	if chips := renderChips(f); chips != "" {
+		right += " · " + chips
+	}
 	body := padLeftRightInside(left, right, titleBarInnerWidth(width))
 	return statsLineStyle.Render(body)
 }
@@ -246,13 +257,11 @@ func statsCountsText(c issueCounts) string {
 // renderListInfoLine renders the info line just above the footer.
 // Sources, in priority order:
 //
-//  1. Active inline command bar (search/owner) — `/buffer` form via
-//     renderInfoBar.
-//  2. A status flash (mutation result like "closed #42").
-//  3. SSE-degraded indicator when sseStatus != connected.
-//  4. A toast (e.g. "resynced").
-//  5. A truncation notice when the loaded issue set hit its limit.
-//  6. Tabs on the left, with the scroll or cursor indicator on the right.
+//  1. A status flash (mutation result like "closed #42").
+//  2. SSE-degraded indicator when sseStatus != connected.
+//  3. A toast (e.g. "resynced").
+//  4. A truncation notice when the loaded issue set hit its limit.
+//  5. Tabs on the left, with the scroll or cursor indicator on the right.
 //
 // dataBudget is the actual data-row budget the table renders into;
 // the scroll indicator only fires when the visible list exceeds it.
@@ -265,8 +274,6 @@ func statsCountsText(c issueCounts) string {
 func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget int) string {
 	body := ""
 	switch {
-	case chrome.input.kind.isCommandBar():
-		body = renderInfoBar(chrome.input, titleBarInnerWidth(width))
 	case lm.status != "":
 		body = lm.status
 	case chrome.sseStatus != sseConnected:
@@ -289,7 +296,7 @@ func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget i
 	return statsLineStyle.Render(padToWidth(body, titleBarInnerWidth(width)))
 }
 
-// renderInfoBar formats the inline command bar for the info line.
+// renderInfoBar formats the search input for the stats line.
 // Single line, no border (the surrounding statsLineStyle already
 // gives the row a chrome look), prefixed by a slash for search.
 //
