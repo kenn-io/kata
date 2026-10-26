@@ -482,6 +482,14 @@ func TestAttentionProjectsOriginInitializesListBeforePaneNavigation(t *testing.T
 			},
 		},
 		{
+			name: "mouse click search",
+			view: viewList,
+			act: func(m Model) (Model, tea.Cmd) {
+				m.opts.Mouse = true
+				return updateModel(m, mouseLeftClick(4, 2))
+			},
+		},
+		{
 			name: "mouse wheel list pane",
 			view: viewDetail,
 			act: func(m Model) (Model, tea.Cmd) {
@@ -524,6 +532,14 @@ func TestAttentionProjectsOriginInitializesListBeforePaneNavigation(t *testing.T
 			m, _ = updateModel(m, loaded)
 			require.False(t, m.list.loading)
 			require.Equal(t, browseAPI.allIssues, m.list.issues)
+			if tc.name == "mouse click search" {
+				require.Equal(t, inputSearchBar, m.input.kind)
+				m = sendRune(m, 'x')
+				m = sendKey(m, tea.KeyEnter)
+				require.Nil(t, m.detail.issue, "detail follows the empty search results")
+				m = sendKey(m, tea.KeyEscape)
+				require.False(t, m.attention.returnToAttention)
+			}
 		})
 	}
 }

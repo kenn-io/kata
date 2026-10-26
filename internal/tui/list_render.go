@@ -309,7 +309,8 @@ func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget i
 func renderInfoBar(s inputState, innerWidth int) string {
 	full := "/"
 	if field := s.activeField(); field != nil {
-		full += field.input.View()
+		fieldWidth := min(innerWidth-1, runewidth.StringWidth(field.value())+1)
+		full += ansi.Truncate(field.input.View(), fieldWidth, "")
 	}
 	return ansi.Truncate(full, innerWidth, "…")
 }

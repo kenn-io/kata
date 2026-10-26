@@ -2428,3 +2428,35 @@ func TestSplitSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
 		t.Fatalf("page rows=%d rendered=%d", m.list.pageRows, count)
 	}
 }
+
+func TestSplitSearchKeepsEditPositionVisible(t *testing.T) {
+	m := resizeModel(newTestModel(), 160, 40)
+	m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
+	m, cmd := updateModel(m, keyRune('/'))
+	require.NotNil(t, cmd)
+	m, _ = updateModel(m, cmd())
+	require.Equal(t, inputSearchBar, m.input.kind)
+	check := func(want string) {
+		t.Helper()
+		row := 1
+		if m.layout == splitlayout.Split {
+			row = 2
+		}
+		line := strings.Split(stripANSI(m.viewBody()), "\n")[row]
+		require.Contains(t, line, want)
+		require.NotContains(t, line, "…", "the active input and caret must fit")
+	}
+	check("TAIL ")
+	m = sendKey(m, tea.KeyEnd)
+	m = sendRune(m, 'Z')
+	check("TAILZ ")
+	for range 3 {
+		m = sendKey(m, tea.KeyLeft)
+	}
+	m = sendRune(m, 'X')
+	check("TAXI")
+	for _, width := range []int{80, 240, 160} {
+		m = resizeModel(m, width, 40)
+		check("TAXI")
+	}
+}

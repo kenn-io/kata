@@ -824,16 +824,24 @@ func TestListPersistentSearch(t *testing.T) {
 			m.list.filter.Search = query
 			for _, editing := range []bool{false, true} {
 				if editing {
-					m.input = newSearchBar(m.list.filter)
+					m, _ = m.openInput(inputSearchBar)
 				}
 				lines := strings.Split(stripANSI(m.viewBody()), "\n")
 				row := 1
 				if m.layout == splitlayout.Split {
 					row = 2
 				}
+				if editing && len(query) < 20 {
+					if !strings.Contains(lines[row], "open:") {
+						t.Errorf("%v: active short search hides counts: %q", size, lines[row])
+					}
+				}
 				want := "/" + query
 				if query == "" && !editing {
 					want = "/ search"
+				}
+				if editing && len(query) >= 20 {
+					want = query[len(query)-20:]
 				}
 				if !strings.Contains(lines[row], want[:min(len(want), 20)]) {
 					t.Errorf("%v editing=%v: search absent from row %d: %q", size, editing, row, lines[row])

@@ -42,7 +42,10 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false
 				return m, nil
 			}
-			return m.openInput(inputSearchBar)
+			m, fetch := m.prepareAttentionListNavigation()
+			m.view = viewList
+			m, open := m.openInput(inputSearchBar)
+			return m, tea.Batch(fetch, open)
 		}
 	}
 	if !m.canQuit() {
