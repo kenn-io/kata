@@ -323,6 +323,9 @@ The seven names are `workflow`, `issues`, `claiming`, `closing`, `teammates`,
 `scheduling`, and `events`. Read `workflow` before your first write. The guides
 reuse the contract and quickstart text shipped by `kata quickstart`, followed
 by a command-to-tool table with the section loaders and MCP differences.
+The workflow guide also includes worked MCP calls for the required steps in
+both bound and multi-project form. Workflow tools link to their relevant
+guide in their descriptions.
 The Markdown body is returned once as text content; structured content holds
 only the guide's name, title, and summary.
 

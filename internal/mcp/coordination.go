@@ -81,7 +81,7 @@ func registerCoordinationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.assign", "Assign issue", "Make another actor the owner of an issue.", mutating, handlers.assign)
-	addTool(server, "kata.inbox", "Read inbox", "List open issues that ask a recipient for attention. Reading does not clear them.", read, handlers.inbox)
+	addTool(server, "kata.inbox", "Read inbox", "List open issues that ask a recipient for attention. Reading does not clear them. See kata.skills {\"name\":\"teammates\"}.", read, handlers.inbox)
 	addTool(server, "kata.status", "Issue status", "Show who owns or holds an issue and which actor this server writes as.", read, handlers.status)
 	addTool(server, "kata.unassign", "Unassign issue", "Clear an issue's owner, optionally only while an expected owner still holds it.", mutating, handlers.unassign)
 }

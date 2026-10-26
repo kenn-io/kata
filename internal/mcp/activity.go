@@ -211,7 +211,7 @@ type StreamEvent struct {
 func registerActivityTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	addTool(server, "kata.digest", "Activity digest", "Read an actor-grouped activity digest for an explicit time window.", read, handlers.digest)
-	addTool(server, "kata.events", "Read events", "Poll events or wait on the live event stream with a resumable cursor.", read, handlers.events)
+	addTool(server, "kata.events", "Read events", "Poll events or wait on the live event stream with a resumable cursor. See kata.skills {\"name\":\"events\"}.", read, handlers.events)
 }
 
 func (h toolHandlers) next(ctx context.Context, _ *sdkmcp.CallToolRequest, input NextInput) (*sdkmcp.CallToolResult, NextOutput, error) {

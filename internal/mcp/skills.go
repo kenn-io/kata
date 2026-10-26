@@ -81,6 +81,7 @@ var skillMarkdown = sync.OnceValue(func() map[string]string {
 		b.WriteString("\n")
 		if guide.name == "workflow" {
 			b.WriteString(skillMCPDifferences + "\n")
+			b.WriteString(renderSkillExamples())
 		}
 		b.WriteString(renderSkillCommands(guide.name))
 		guides[guide.name] = b.String()
