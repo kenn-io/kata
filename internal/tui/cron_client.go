@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"go.kenn.io/kata/internal/tui/cron/records"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -24,18 +25,40 @@ type CronPeekAPI interface {
 
 // CronIssuePeek reads the issue and its comments together through the existing
 // native issue endpoint; GetIssueDetail intentionally omits those comments.
+// An issue keeps its UID when it moves projects. The run's project answers for
+// unmoved issues, including under project-scoped authority; a moved one falls
+// back to the UID read, which the daemon authorizes against its new project.
 func (c *Client) CronIssuePeek(ctx context.Context, projectID int64, uid string) (records.IssuePeek, error) {
 	body, err := c.showIssue(ctx, projectID, uid)
+	if records.Status(err) == http.StatusNotFound {
+		body, err = c.showIssueByUID(ctx, uid)
+	}
 	if err != nil {
 		return records.IssuePeek{}, err
 	}
-	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title}
+	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title, ProjectID: body.Issue.ProjectID}
 	for _, comment := range body.Comments {
 		if peek.Latest == nil || comment.CreatedAt.After(peek.Latest.CreatedAt) || comment.CreatedAt.Equal(peek.Latest.CreatedAt) && comment.UID > peek.Latest.UID {
 			peek.Latest = &records.PeekComment{UID: comment.UID, Author: comment.Author, Body: comment.Body, CreatedAt: comment.CreatedAt}
 		}
 	}
 	return peek, nil
+}
+
+func (c *Client) showIssueByUID(ctx context.Context, uid string) (*showIssueBody, error) {
+	api, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := api.ShowIssueByUIDWithResponse(ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: uid}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var body showIssueBody
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &body); err != nil {
+		return nil, err
+	}
+	return &body, nil
 }
 
 // ListCronJobs reads the selected project catalog through the active daemon transport.

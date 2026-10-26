@@ -43,6 +43,7 @@ type cronIssueMsg struct {
 	epoch      uint64
 	request    uint64
 	project    int64
+	target     int64
 	detail     *IssueDetail
 	err        error
 }
@@ -352,14 +353,19 @@ func (h *cronHost) openCronIssue(v cronui.IssueMsg) tea.Cmd {
 	if !h.cronProjectAccessible(id) {
 		return nil
 	}
+	// A peek that followed a move knows the issue's current project.
+	target := id
+	if h.peekKey.project == id && h.peekKey.issueUID == v.UID && h.peekProject > 0 {
+		target = h.peekProject
+	}
 	h.issueRequest++
 	request, generation := h.issueRequest, h.issueGenerations[id]
 	api, epoch := h.native.api, h.epoch
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		detail, err := api.GetIssueDetail(ctx, id, v.UID)
-		return cronIssueMsg{generation: generation, epoch: epoch, request: request, project: id, detail: detail, err: err}
+		detail, err := api.GetIssueDetail(ctx, target, v.UID)
+		return cronIssueMsg{generation: generation, epoch: epoch, request: request, project: id, target: target, detail: detail, err: err}
 	}
 }
 func (h *cronHost) cronDetail(v cronui.DetailMsg) tea.Cmd {

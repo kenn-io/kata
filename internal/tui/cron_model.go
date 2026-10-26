@@ -40,6 +40,7 @@ type cronHost struct {
 	peekGeneration           uint64
 	peekCancel               context.CancelFunc
 	peekAuth                 AuthInfo
+	peekProject              int64
 	peekClosed, peekStale    bool
 
 	native             Model
@@ -123,7 +124,7 @@ func (h *cronHost) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		h.issueReturnProjects = h.issueReturnProjects || h.native.view == viewProjects
 		h.native = h.native.seedOpenDetail(*v.detail.Issue)
-		h.native.detail.scopePID = v.project
+		h.native.detail.scopePID = v.target
 		h.native.detail.allProjects = h.cronScope.all
 		transition := h.selectCronTab(0)
 		return h, tea.Batch(h.native.fetchOpenDetail(), transition)

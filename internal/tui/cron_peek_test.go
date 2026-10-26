@@ -17,7 +17,9 @@ import (
 	"hegel.dev/go/hegel"
 
 	native "go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	cronui "go.kenn.io/kata/internal/tui/cron"
 	"go.kenn.io/kata/internal/tui/cron/records"
 )
 
@@ -314,36 +316,66 @@ func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
 	}
 }
 
-// Deleting, restoring, snapshotting, or moving the peeked issue rereads it, so
-// the peek never keeps context the run's project can no longer read and shows
-// a restored issue again. Replies read before a transition stay discarded.
+func bearerClient(env *testenv.Env, token string) *Client {
+	base := env.HTTP.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return NewClient(env.URL, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r = r.Clone(r.Context())
+		r.Header.Set("Authorization", "Bearer "+token)
+		return base.RoundTrip(r)
+	})})
+}
+
+// Deleting, restoring, snapshotting, or moving the peeked issue rereads it.
+// The peek never keeps context the reader can no longer read, shows a
+// restored issue again, and follows a move into another readable project by
+// UID; i then opens the issue there. Replies read before a transition stay
+// discarded.
 func TestCronPeekFollowsIssueLifecycle(t *testing.T) {
-	env := testenv.New(t)
-	c := NewClient(env.URL, env.HTTP)
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-test-token"), testenv.WithRequireTokenIdentity())
 	ctx := context.Background()
-	p, err := c.EnsureProject(ctx, "spoke-project", "example-actor")
+	admin := bearerClient(env, "admin-test-token")
+	var projects []db.Project
+	for _, name := range []string{"spoke-project", "hub-project", "restricted-project"} {
+		p, err := env.DB.CreateProject(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projects = append(projects, p)
+	}
+	p, hub, restricted := projects[0], projects[1], projects[2]
+	team, _, err := env.DB.CreateTeam(ctx, "engineering", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub, err := c.EnsureProject(ctx, "hub-project", "example-actor")
+	if _, err := env.DB.SetTeamMembership(ctx, team.UID, "admin", true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := env.DB.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: restricted.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []string{"admin", "reader"} {
+		if _, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: actor + "-test-token", Actor: actor, AdminActor: "admin"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Example issue", Author: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := c.CreateIssue(ctx, p.ID, CreateIssueBody{Title: "Example issue", Actor: "example-actor"})
-	if err != nil {
+	if _, err := admin.AddComment(ctx, p.ID, issue.UID, "first comment marker", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	issue := created.Issue
-	if _, err := c.AddComment(ctx, p.ID, issue.UID, "first comment marker", "example-actor"); err != nil {
-		t.Fatal(err)
-	}
-	action := func(name, body string, header map[string]string) {
+	action := func(project int64, name, body string, header map[string]string) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", env.URL, p.ID, issue.UID, name), strings.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", env.URL, project, issue.UID, name), strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer admin-test-token")
 		for k, v := range header {
 			req.Header.Set(k, v)
 		}
@@ -357,9 +389,18 @@ func TestCronPeekFollowsIssueLifecycle(t *testing.T) {
 			t.Fatal(name, resp.Status, string(raw))
 		}
 	}
+	move := func(from, to db.Project) func() {
+		return func() {
+			current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			action(from.ID, "move", fmt.Sprintf(`{"actor":"admin","to_project_uid":%q}`, to.UID), map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, current.Revision)})
+		}
+	}
 
 	n := initialModel(Options{})
-	n.api = c
+	n.api = bearerClient(env, "reader-test-token")
 	n.scope = scope{projectID: p.ID, projectName: p.Name}
 	h := newCronHost(n)
 	h.tab, h.width, h.height, h.dirty = 2, 120, 32, false
@@ -375,17 +416,16 @@ func TestCronPeekFollowsIssueLifecycle(t *testing.T) {
 		change            func()
 	}{
 		{"issue.soft_deleted", "Issue not readable", "first comment marker", func() {
-			action("delete", `{"actor":"example-actor"}`, map[string]string{"X-Kata-Confirm": fmt.Sprintf("DELETE %s#%s", p.Name, issue.ShortID)})
+			action(p.ID, "delete", `{"actor":"admin"}`, map[string]string{"X-Kata-Confirm": fmt.Sprintf("DELETE %s#%s", p.Name, issue.ShortID)})
 		}},
-		{"issue.restored", "first comment marker", "Issue not readable", func() { action("restore", `{"actor":"example-actor"}`, nil) }},
+		{"issue.restored", "first comment marker", "Issue not readable", func() { action(p.ID, "restore", `{"actor":"admin"}`, nil) }},
 		{"issue.snapshot", "snapshot comment marker", "first comment marker", func() {
-			if _, err := c.AddComment(ctx, p.ID, issue.UID, "snapshot comment marker", "example-actor"); err != nil {
+			if _, err := admin.AddComment(ctx, p.ID, issue.UID, "snapshot comment marker", "admin"); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"issue.moved", "Issue not readable", "snapshot comment marker", func() {
-			action("move", fmt.Sprintf(`{"actor":"example-actor","to_project_uid":%q}`, hub.UID), map[string]string{"If-Match": `"rev-1"`})
-		}},
+		{"issue.moved", "Issue not readable", "snapshot comment marker", move(p, restricted)},
+		{"issue.moved", "snapshot comment marker", "Issue not readable", move(restricted, hub)},
 	}
 	for _, step := range steps {
 		step.change()
@@ -399,6 +439,12 @@ func TestCronPeekFollowsIssueLifecycle(t *testing.T) {
 		if text := ansi.Strip(h.View().Content); !strings.Contains(text, step.want) || strings.Contains(text, step.gone) || !strings.Contains(text, "own summary marker") {
 			t.Fatalf("after %s the peek lacks %q or keeps %q:\n%s", step.event, step.want, step.gone, text)
 		}
+	}
+
+	_, cmd := h.Update(cronui.IssueMsg{ProjectKey: key, UID: issue.UID})
+	drainCronSmoke(t, h, cmd)
+	if h.native.view != viewDetail || h.native.detail.issue == nil || h.native.detail.issue.UID != issue.UID || h.native.detail.scopePID != hub.ID {
+		t.Fatalf("i did not open the moved issue in its current project: view=%v scope=%d", h.native.view, h.native.detail.scopePID)
 	}
 }
 
@@ -451,6 +497,35 @@ func TestCronPeekMissingOrUnreadableIssue(t *testing.T) {
 			}
 			if text := ansi.Strip(h.View().Content); !strings.Contains(text, want) || !strings.Contains(text, "own summary marker") {
 				t.Fatalf("missing issue state %q or own summary:\n%s", want, text)
+			}
+		})
+	}
+}
+
+// A moved issue's UID read keeps the peek's authority handling: a rejected
+// credential clears cron access and a denial stays unreadable.
+func TestCronPeekUIDFallbackAuthority(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			h := newCorePeekHost(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/issues/issue-a" {
+					w.WriteHeader(status)
+					_, _ = w.Write([]byte(`{"error":{"code":"denied","message":"issue unavailable"}}`))
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"issue not found"}}`))
+			})
+			h.Update(corePeekReply(t, h))
+			if status == 401 {
+				if !h.native.activeAuthRejected || len(h.catalogs) != 0 {
+					t.Fatal("UID read auth rejection retained cron authority")
+				}
+				return
+			}
+			if text := ansi.Strip(h.View().Content); !strings.Contains(text, "Issue not readable") {
+				t.Fatalf("denied UID read is not unreadable:\n%s", text)
 			}
 		})
 	}

@@ -358,7 +358,7 @@ func TestCronUnboundIssueBackReturnsProjectPicker(t *testing.T) {
 	n.view = viewProjects
 	h := newCronHost(n)
 	h.catalogs = map[int64]cronCatalog{7: {name: "example-project"}}
-	h.Update(cronIssueMsg{epoch: h.epoch, request: h.issueRequest, project: 7, detail: &IssueDetail{Issue: &Issue{UID: "issue", ShortID: "abcd", ProjectID: 7}}})
+	h.Update(cronIssueMsg{epoch: h.epoch, request: h.issueRequest, project: 7, target: 7, detail: &IssueDetail{Issue: &Issue{UID: "issue", ShortID: "abcd", ProjectID: 7}}})
 	_, cmd := h.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd != nil {
 		h.Update(cmd())
@@ -433,7 +433,7 @@ func TestCronLinkedIssueDoesNotInterceptProjectSelection(t *testing.T) {
 	n.view = viewProjects
 	h := newCronHost(n)
 	h.catalogs = map[int64]cronCatalog{7: {name: "example-project"}}
-	h.Update(cronIssueMsg{epoch: h.epoch, request: h.issueRequest, project: 7, detail: &IssueDetail{Issue: &Issue{UID: "issue", ProjectID: 7}}})
+	h.Update(cronIssueMsg{epoch: h.epoch, request: h.issueRequest, project: 7, target: 7, detail: &IssueDetail{Issue: &Issue{UID: "issue", ProjectID: 7}}})
 	h.native.view = viewProjects
 	h.native.projectsByID = map[int64]string{7: "example-project"}
 	h.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

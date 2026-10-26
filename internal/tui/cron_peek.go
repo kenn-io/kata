@@ -48,6 +48,7 @@ func (h *cronHost) clearCronPeek() {
 	}
 	h.peekKey = cronPeekKey{}
 	h.peekAuth = AuthInfo{}
+	h.peekProject = 0
 	h.peekStale = false
 	if h.board != nil {
 		h.board.SetPeek(cronui.PeekState{})
@@ -144,7 +145,9 @@ func (h *cronHost) acceptCronPeek(msg cronPeekMsg) {
 		return
 	}
 	state := cronui.PeekState{Kind: "ready", Issue: msg.issue}
+	h.peekProject = msg.issue.ProjectID
 	if msg.err != nil {
+		h.peekProject = 0
 		state = cronui.PeekState{Kind: "unreadable"}
 	} else if msg.issue.Latest == nil {
 		state.Kind = "no_comments"
