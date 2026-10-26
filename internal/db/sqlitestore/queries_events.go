@@ -66,6 +66,9 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 		}
 		conds = append(conds, "e.type IN ("+strings.Join(placeholders, ",")+")")
 	}
+	if p.RequireIssueUpdatedStatus {
+		conds = append(conds, "(e.type <> 'issue.updated' OR json_type(e.payload, '$.status') IS NOT NULL)")
+	}
 	q := `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
 	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at

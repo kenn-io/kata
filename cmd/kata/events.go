@@ -179,6 +179,7 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 			ProjectID    int64   `json:"project_id"`
 			IssueShortID *string `json:"issue_short_id"`
 			Actor        string  `json:"actor"`
+			Teammate     string  `json:"teammate"`
 			CreatedAt    string  `json:"created_at"`
 		} `json:"events"`
 		NextAfterID int64 `json:"next_after_id"`
@@ -198,7 +199,7 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(),
 			"%-6d  %-22s  proj=%-3d  %-8s  by %s  %s\n",
-			e.EventID, e.Type, e.ProjectID, issueStr, e.Actor, e.CreatedAt); err != nil {
+			e.EventID, e.Type, e.ProjectID, issueStr, commentAttribution(e.Actor, e.Teammate), e.CreatedAt); err != nil {
 			return err
 		}
 	}
@@ -215,6 +216,7 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 			ProjectName  string  `json:"project_name"`
 			IssueShortID *string `json:"issue_short_id"`
 			Actor        string  `json:"actor"`
+			Teammate     string  `json:"teammate"`
 		} `json:"events"`
 		NextAfterID int64 `json:"next_after_id"`
 	}
@@ -238,6 +240,7 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 			agentOptionalRowField("project", &project),
 			agentOptionalRowField("issue", e.IssueShortID),
 			agentRowField("actor", e.Actor),
+			agentOptionalRowField("teammate", &e.Teammate),
 		); err != nil {
 			return err
 		}
@@ -402,6 +405,7 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 		ProjectName  string  `json:"project_name"`
 		IssueShortID *string `json:"issue_short_id"`
 		Actor        string  `json:"actor"`
+		Teammate     string  `json:"teammate"`
 	}
 	if err := json.Unmarshal([]byte(f.data), &e); err != nil {
 		return streamResult{}, fmt.Errorf("parse event frame: %w", err)
@@ -426,6 +430,11 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	}
 	if e.Actor != "" {
 		if _, err := fmt.Fprintf(out, " actor=%s", agentValue(e.Actor)); err != nil {
+			return streamResult{}, err
+		}
+	}
+	if e.Teammate != "" {
+		if _, err := fmt.Fprintf(out, " teammate=%s", agentValue(e.Teammate)); err != nil {
 			return streamResult{}, err
 		}
 	}

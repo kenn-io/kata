@@ -78,6 +78,9 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 		}
 		conditions = append(conditions, "e.type IN ("+strings.Join(positions, ",")+")")
 	}
+	if params.RequireIssueUpdatedStatus {
+		conditions = append(conditions, "(e.type <> 'issue.updated' OR e.payload::jsonb ? 'status')")
+	}
 	args = append(args, params.Limit)
 	query := eventSelect + ` WHERE ` + strings.Join(conditions, " AND ") +
 		fmt.Sprintf(` ORDER BY e.id ASC LIMIT $%d`, len(args))

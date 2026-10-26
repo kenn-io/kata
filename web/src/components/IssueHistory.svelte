@@ -76,7 +76,12 @@
           <span class="event-icon" aria-hidden="true">
             <EventIcon size={14} strokeWidth={1.8} />
           </span>
-          <span class="event-label">{descriptor.label}</span>
+          <span class="event-label">
+            {descriptor.label}
+            <span class="event-actor"
+              >{event.teammate ? `${event.actor} / ${event.teammate}` : event.actor}</span
+            >
+          </span>
           {#if time}
             <time class="event-time" datetime={event.created_at} title={time.full}
               >{time.short}</time
@@ -134,6 +139,12 @@
 
   .event-label {
     overflow-wrap: anywhere;
+  }
+
+  .event-actor {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
   }
 
   .event-session {

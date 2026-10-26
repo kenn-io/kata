@@ -198,6 +198,8 @@ components:
           type: string
         reason:
           type: string
+        teammate:
+          type: string
         time:
           type: string
       required:
@@ -1462,9 +1464,15 @@ components:
           items:
             $ref: "#/components/schemas/DigestIssueActions"
           type: array
+        teammates:
+          description: Sorted distinct teammate handles from counted events; always an array.
+          items:
+            type: string
+          type: array
         totals:
           $ref: "#/components/schemas/DigestTotals"
       required:
+        - teammates
         - actor
         - totals
         - issues
@@ -3452,6 +3460,26 @@ components:
         - acquired_at
         - revision
         - updated_at
+      type: object
+    IssueCloseSummary:
+      additionalProperties: true
+      properties:
+        actor:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        teammate:
+          type: string
+      required:
+        - event_id
+        - actor
+        - created_at
       type: object
     IssueLabel:
       additionalProperties: true
@@ -6433,6 +6461,8 @@ components:
           items:
             $ref: "#/components/schemas/ClaimViolationOut"
           type: array
+        close:
+          $ref: "#/components/schemas/IssueCloseSummary"
         comments:
           items:
             $ref: "#/components/schemas/CommentOut"

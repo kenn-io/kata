@@ -128,8 +128,9 @@ type issueAccum struct {
 // totals and per-actor sections.
 func aggregateDigest(rows []db.Event) (api.DigestTotals, []api.DigestActorEntry) {
 	type actorState struct {
-		totals api.DigestTotals
-		issues map[issueKey]*issueAccum
+		totals    api.DigestTotals
+		issues    map[issueKey]*issueAccum
+		teammates map[string]struct{}
 	}
 	byActor := map[string]*actorState{}
 	var grand api.DigestTotals
@@ -140,8 +141,11 @@ func aggregateDigest(rows []db.Event) (api.DigestTotals, []api.DigestActorEntry)
 		}
 		st, ok := byActor[e.Actor]
 		if !ok {
-			st = &actorState{issues: map[issueKey]*issueAccum{}}
+			st = &actorState{issues: map[issueKey]*issueAccum{}, teammates: map[string]struct{}{}}
 			byActor[e.Actor] = st
+		}
+		if e.Teammate != "" {
+			st.teammates[e.Teammate] = struct{}{}
 		}
 		// Some event types have no associated issue (none today, but be defensive).
 		var key issueKey
@@ -175,6 +179,11 @@ func aggregateDigest(rows []db.Event) (api.DigestTotals, []api.DigestActorEntry)
 			Actor:  actor,
 			Totals: st.totals,
 		}
+		entry.Teammates = make([]string, 0, len(st.teammates))
+		for teammate := range st.teammates {
+			entry.Teammates = append(entry.Teammates, teammate)
+		}
+		sort.Strings(entry.Teammates)
 		entry.Issues = renderIssueAccums(st.issues)
 		out = append(out, entry)
 	}

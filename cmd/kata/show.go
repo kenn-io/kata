@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -169,6 +170,11 @@ func printShowHuman(
 			return err
 		}
 	}
+	if b.Issue.Status == "closed" && b.Close != nil {
+		if _, err := fmt.Fprintln(out, "closed: "+textsafe.Line(commentAttribution(b.Close.Actor, b.Close.Teammate))+" ("+textsafe.Line(b.Close.Reason)+")"); err != nil {
+			return err
+		}
+	}
 	if b.Issue.Owner != nil && *b.Issue.Owner != "" {
 		if _, err := fmt.Fprintf(out, "owner: %s%s\n", textsafe.Line(*b.Issue.Owner),
 			assignmentExpiryTimeSuffix(b.Issue.AssignmentExpiresOn)); err != nil {
@@ -318,6 +324,7 @@ func compactJSON(raw jsontext.Value) string {
 // response. It is shared by both the human and agent renderers; the
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
+	Close *api.IssueCloseSummary `json:"close"`
 	Issue struct {
 		ShortID string `json:"short_id"`
 		UID     string `json:"uid"`
@@ -507,6 +514,12 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 	}
 	if b.Issue.Status != "" {
 		if err := writeAgentField(w, "Status", agentValue(b.Issue.Status)); err != nil {
+			return err
+		}
+	}
+
+	if b.Issue.Status == "closed" && b.Close != nil {
+		if err := writeAgentField(w, "Closed", agentValue(commentAttribution(b.Close.Actor, b.Close.Teammate)+" ("+b.Close.Reason+")")); err != nil {
 			return err
 		}
 	}

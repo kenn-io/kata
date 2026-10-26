@@ -229,16 +229,20 @@ func eventDescription(e EventLogEntry) string {
 }
 
 // eventChunkLines renders one event into the lines of its events-tab
-// chunk. Most events are single-line: "[type] time actor — description".
+// chunk. Most events are single-line: "[type] time actor / teammate — description".
 // issue.closed events additionally emit indented continuation lines
 // surfacing the close message and each evidence item so reviewers can
 // audit closures directly from the events tab.
 func eventChunkLines(e EventLogEntry, width int, isCursor bool) []string {
-	// Type is daemon-authored; Actor and description interpolate
-	// agent-authored payload fields — sanitize both.
+	// Type is daemon-authored; actor, teammate and description contain
+	// agent-authored text — sanitize at the display boundary.
+	actor := e.Actor
+	if e.Teammate != "" {
+		actor += " / " + e.Teammate
+	}
 	head := fmt.Sprintf("[%s] %s %s — %s",
 		e.Type, fmtTime(e.CreatedAt),
-		sanitizeForDisplay(e.Actor),
+		sanitizeForDisplay(actor),
 		sanitizeForDisplay(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	if e.Type == "issue.closed" {

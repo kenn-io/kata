@@ -456,12 +456,13 @@ type AliasRow struct {
 // clamping (the polling endpoint clamps to [1, 1000]; the SSE drain passes
 // 10001).
 type EventsAfterParams struct {
-	AfterID   int64
-	ProjectID int64 // 0 = cross-project; nonzero adds AND project_id = ?
-	ThroughID int64 // 0 = no upper bound; nonzero adds AND id <= ?
-	IssueUID  string
-	Types     []string
-	Limit     int
+	AfterID                   int64
+	ProjectID                 int64 // 0 = cross-project; nonzero adds AND project_id = ?
+	ThroughID                 int64 // 0 = no upper bound; nonzero adds AND id <= ?
+	IssueUID                  string
+	RequireIssueUpdatedStatus bool // when true, omit issue.updated events without a status field
+	Types                     []string
+	Limit                     int
 }
 
 // EventsInWindowParams selects events whose created_at lies in the closed

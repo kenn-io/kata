@@ -793,12 +793,23 @@ type ShowIssueResponse struct {
 	Body ShowIssueResponseBody
 }
 
+// IssueCloseSummary identifies the explicit close event responsible for the current closed state.
+// It is absent when the authorized event history cannot establish that provenance.
+type IssueCloseSummary struct {
+	EventID   int64     `json:"event_id"`
+	Actor     string    `json:"actor"`
+	Teammate  string    `json:"teammate,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Reason    string    `json:"reason,omitempty"`
+}
+
 // ShowIssueResponseBody is the show-issue payload. The Claim* fields are
 // deprecated aliases of the canonical Lease* fields; see
 // MirrorDeprecatedClaimFields. The type name is load-bearing: Huma publishes
 // this component as "ShowIssueResponseBody", so renaming the Go type renames
 // the published component and breaks every generated client.
 type ShowIssueResponseBody struct {
+	Close               *IssueCloseSummary  `json:"close,omitempty"`
 	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue               ShowIssueOut        `json:"issue"`
 	Comments            []CommentOut        `json:"comments"`
@@ -1390,9 +1401,10 @@ type DigestIssueActions struct {
 // DigestActorEntry is one actor's slice of the digest. Issues is sorted by
 // issue UID for stable rendering.
 type DigestActorEntry struct {
-	Actor  string               `json:"actor"`
-	Totals DigestTotals         `json:"totals"`
-	Issues []DigestIssueActions `json:"issues"`
+	Teammates []string             `json:"teammates" doc:"Sorted distinct teammate handles from counted events; always an array."`
+	Actor     string               `json:"actor"`
+	Totals    DigestTotals         `json:"totals"`
+	Issues    []DigestIssueActions `json:"issues"`
 }
 
 // DigestResponse is the digest payload. ProjectID is 0 for cross-project
@@ -1535,6 +1547,7 @@ type AuditClosesRequest struct {
 // the event recorded one, giving Parent's display ref immutable
 // provenance.
 type AuditCloseRow struct {
+	Teammate      string   `json:"teammate,omitempty"`
 	Time          string   `json:"time"`
 	Actor         string   `json:"actor"`
 	Issue         string   `json:"issue"`

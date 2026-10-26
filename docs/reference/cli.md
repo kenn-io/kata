@@ -671,6 +671,18 @@ pipelines, including `kata show <issue-ref> --render | less -R`, intentionally
 remain plain text. This version has no force-render option for non-terminal
 output.
 
+For a closed issue, `kata show` also displays the current close event's actor
+and optional teammate, such as `closed: alice / claude (done)`. Agent output
+includes a `Closed:` field; JSON includes an optional top-level `close` object
+with `event_id`, `actor`, optional `teammate`, `created_at`, and optional
+`reason`. Reopening removes the summary; closing again selects the new close
+using the same portable event ordering as federation. Snapshot-only closures
+and incomplete or unavailable lifecycle history omit it. A visible older close
+with a matching timestamp does not establish the current closer. After an issue
+moves, its source project's event history must also be readable; a hidden move
+boundary omits the summary. A subtree credential cannot show a close from
+outside its granted project.
+
 `kata show --json` returns `.issue.labels` as a string array, the same shape
 as `.issues[].labels` from `kata list --json`. On `show` the key is always
 present and is `[]` when the issue has no labels. The CLI prints the daemon's
@@ -1538,8 +1550,19 @@ kata digest --since 24h [--until ...] [--project-id N | --all] [--actor NAME ...
 kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|audit-no-change]
 ```
 
-`kata digest` groups recent activity by actor. `kata audit closes` is for
-reviewing close discipline and finding lazy or duplicate closes.
+`kata events` shows `actor / teammate` when attribution is present. Agent
+polling and tail rows keep `actor=` and add `teammate=`; JSON events carry
+`teammate`. Untagged events continue to show the actor alone.
+
+`kata digest` groups recent activity by actor and shows its sorted distinct
+teammates, for example `alice (claude, codex)`. JSON actor entries always carry
+a `teammates` array, including `[]` when no counted events are tagged. Agent
+issue rows add the same list as `teammates=claude,codex` when nonempty. Tags
+never split actor groups or change activity counts.
+
+`kata audit closes` is for reviewing close discipline and finding lazy or
+duplicate closes. Its table has separate actor and teammate columns; agent
+rows add `teammate=` and JSON rows add `teammate` when present.
 
 ## Projects
 

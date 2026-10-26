@@ -9,10 +9,10 @@
   Reproduces in Safari 17 only.
   Click the login button twice.
 
-  Activity   Comments (2)   [ Events (2) ]   Links (1)
+  Activity   Comments (2)   [ Events (3) ]   Links (1)
   > [issue.created] 2026-04-30 10:00 alice — created
-    [issue.commented] 2026-04-30 11:00 bob — added comment
-
+    [issue.commented] 2026-04-30 11:00 bob / codex.gpt-5.1 — added comment
+    [issue.closed] 2026-04-30 12:00 alice / claude.opus-5-5 — closed (done)
 
 
 

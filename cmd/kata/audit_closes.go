@@ -106,8 +106,8 @@ func printAuditClosesTable(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	w := cmd.OutOrStdout()
-	if _, err := fmt.Fprintf(w, "%-20s  %-12s  %-6s  %-7s  %-15s  %-15s  %s\n",
-		"TIME", "ACTOR", "ISSUE", "PARENT", "REASON", "EVIDENCE", "FLAGS"); err != nil {
+	if _, err := fmt.Fprintf(w, "%-20s  %-12s  %-20s  %-6s  %-7s  %-15s  %-15s  %s\n",
+		"TIME", "ACTOR", "TEAMMATE", "ISSUE", "PARENT", "REASON", "EVIDENCE", "FLAGS"); err != nil {
 		return err
 	}
 	for _, r := range resp.Rows {
@@ -122,8 +122,8 @@ func printAuditClosesTable(cmd *cobra.Command, bs []byte) error {
 				break
 			}
 		}
-		if _, err := fmt.Fprintf(w, "%-20s  %-12s  %-6s  %-7s  %-15s  %-15s  %s\n",
-			r.Time, r.Actor, r.Issue, parent, r.Reason,
+		if _, err := fmt.Fprintf(w, "%-20s  %-12s  %-20s  %-6s  %-7s  %-15s  %-15s  %s\n",
+			r.Time, r.Actor, r.Teammate, r.Issue, parent, r.Reason,
 			strings.Join(r.EvidenceTypes, ","),
 			flagsCol); err != nil {
 			return err
@@ -147,6 +147,7 @@ func printAuditClosesAgent(cmd *cobra.Command, bs []byte) error {
 		fields := []agentField{
 			agentRowField("time", r.Time),
 			agentRowField("actor", r.Actor),
+			agentOptionalRowField("teammate", &r.Teammate),
 			agentRowField("issue", r.Issue),
 		}
 		if r.Parent != "" {

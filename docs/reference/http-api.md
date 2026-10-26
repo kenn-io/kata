@@ -357,6 +357,26 @@ bodies. Project access intersects issue-subtree and hosted grants. Writes,
 including purge and merge, recheck the issue's or projects' current state
 inside their transaction.
 
+### Attribution in reports and issue details
+
+Event envelopes carry an optional `teammate` alongside the accountable
+`actor`. Close audit rows project that same field. Digest actor entries keep
+one group per actor and add `teammates`, a sorted distinct array of handles
+from counted events; untagged actors receive `[]`. Counts and filters retain
+their existing meaning.
+
+Issue show responses may include a top-level `close` object with `event_id`,
+`actor`, optional `teammate`, `created_at`, and optional `reason`. It identifies
+the explicit event responsible for the current closed state using portable
+HLC ordering. It is absent for open issues or when readable history cannot
+establish the current closure's explicit provenance, including a snapshot-only
+closure. Incomplete lifecycle history also omits the summary: a visible older
+close with an equal timestamp does not establish the current cycle. Moving an
+issue does not grant access to its original project's history. A hidden move
+boundary produces the existing event reset marker and suppresses the optional
+summary. Subtree credentials also require the close event to belong to their
+granted project, regardless of the accountable actor's other memberships.
+
 ### Requests during access changes
 
 Before releasing a read or write response, the daemon rechecks project access.

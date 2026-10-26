@@ -226,11 +226,12 @@ func buildAuditRows(
 			continue
 		}
 		row := api.AuditCloseRow{
-			Time:    ev.CreatedAt.UTC().Format(time.RFC3339),
-			Actor:   ev.Actor,
-			Reason:  p.Reason,
-			Message: p.Message,
-			EventID: ev.ID,
+			Time:     ev.CreatedAt.UTC().Format(time.RFC3339),
+			Actor:    ev.Actor,
+			Teammate: ev.Teammate,
+			Reason:   p.Reason,
+			Message:  p.Message,
+			EventID:  ev.ID,
 		}
 		if ev.IssueShortID != nil {
 			row.Issue = *ev.IssueShortID

@@ -1046,6 +1046,10 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	out := &api.ShowIssueResponse{}
 	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
+	out.Body.Close, err = currentIssueCloseSummary(ctx, cfg.DB, issue)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
 	var includeDeletedSourceIssueID int64
 	if includeDeleted && issue.DeletedAt != nil {
 		includeDeletedSourceIssueID = issue.ID

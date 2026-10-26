@@ -7,6 +7,8 @@ import type { DigestTotals } from './digestTotals.ts'
 export interface DigestActorEntry {
   actor: string
   issues: DigestIssueActions[]
+  /** Sorted distinct teammate handles from counted events; always an array. */
+  teammates: string[]
   totals: DigestTotals
   [key: string]: unknown
 }

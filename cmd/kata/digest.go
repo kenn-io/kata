@@ -218,8 +218,9 @@ func printDigestHuman(cmd *cobra.Command, bs []byte) error {
 			Unblocked  int `json:"unblocked"`
 		} `json:"totals"`
 		Actors []struct {
-			Actor  string `json:"actor"`
-			Totals struct {
+			Actor     string   `json:"actor"`
+			Teammates []string `json:"teammates"`
+			Totals    struct {
 				Created   int `json:"created"`
 				Closed    int `json:"closed"`
 				Reopened  int `json:"reopened"`
@@ -253,9 +254,13 @@ func printDigestHuman(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	for _, a := range b.Actors {
+		displayActor := a.Actor
+		if len(a.Teammates) > 0 {
+			displayActor += " (" + strings.Join(a.Teammates, ", ") + ")"
+		}
 		if _, err := fmt.Fprintf(out,
 			"\n%s — created=%d closed=%d reopened=%d commented=%d unblocked=%d\n",
-			textsafe.Line(a.Actor), a.Totals.Created, a.Totals.Closed,
+			textsafe.Line(displayActor), a.Totals.Created, a.Totals.Closed,
 			a.Totals.Reopened, a.Totals.Commented, a.Totals.Unblocked); err != nil {
 			return err
 		}
@@ -281,8 +286,9 @@ func printDigestAgent(cmd *cobra.Command, bs []byte) error {
 		Until      time.Time `json:"until"`
 		EventCount int       `json:"event_count"`
 		Actors     []struct {
-			Actor  string `json:"actor"`
-			Issues []struct {
+			Actor     string   `json:"actor"`
+			Teammates []string `json:"teammates"`
+			Issues    []struct {
 				ProjectName  string   `json:"project_name"`
 				IssueShortID string   `json:"issue_short_id"`
 				Actions      []string `json:"actions"`
@@ -307,6 +313,7 @@ func printDigestAgent(cmd *cobra.Command, bs []byte) error {
 		for _, iss := range a.Issues {
 			fields := []agentField{
 				agentRowField("actor", a.Actor),
+				agentRowListField("teammates", a.Teammates),
 				agentRowField("issue", iss.IssueShortID),
 				agentRowListField("actions", iss.Actions),
 			}

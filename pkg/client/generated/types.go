@@ -186,6 +186,7 @@ type AuditCloseRow struct {
 	Parent        *string  `json:"parent,omitempty"`
 	ParentUID     *string  `json:"parent_uid,omitempty"`
 	Reason        string   `json:"reason" validate:"required"`
+	Teammate      *string  `json:"teammate,omitempty"`
 	Time          string   `json:"time" validate:"required"`
 }
 
@@ -1739,7 +1740,10 @@ func (d DetachProjectAliasResponseBody) Validate() error {
 type DigestActorEntry struct {
 	Actor  string               `json:"actor" validate:"required"`
 	Issues []DigestIssueActions `json:"issues" validate:"required"`
-	Totals DigestTotals         `json:"totals"`
+
+	// Teammates Sorted distinct teammate handles from counted events; always an array.
+	Teammates []string     `json:"teammates" validate:"required"`
+	Totals    DigestTotals `json:"totals"`
 }
 
 func (d DigestActorEntry) Validate() error {
@@ -1753,6 +1757,9 @@ func (d DigestActorEntry) Validate() error {
 				errors = errors.Append(fmt.Sprintf("Issues[%d]", i), err)
 			}
 		}
+	}
+	if err := typesValidator.Var(d.Teammates, "required"); err != nil {
+		errors = errors.Append("Teammates", err)
 	}
 	if v, ok := any(d.Totals).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
@@ -3415,6 +3422,18 @@ type IssueClaimOut struct {
 }
 
 func (i IssueClaimOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
+type IssueCloseSummary struct {
+	Actor     string    `json:"actor" validate:"required"`
+	CreatedAt time.Time `json:"created_at" validate:"required"`
+	EventID   int64     `json:"event_id"`
+	Reason    *string   `json:"reason,omitempty"`
+	Teammate  *string   `json:"teammate,omitempty"`
+}
+
+func (i IssueCloseSummary) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
@@ -6307,6 +6326,7 @@ type ShowIssueResponseBody struct {
 	ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
 	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
 	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
+	Close               *IssueCloseSummary  `json:"close,omitempty"`
 	Comments            []CommentOut        `json:"comments" validate:"required"`
 	CommentsTruncated   *bool               `json:"comments_truncated,omitempty"`
 	Issue               ShowIssueOut        `json:"issue"`
@@ -6344,6 +6364,13 @@ func (s ShowIssueResponseBody) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("ClaimViolations[%d]", i), err)
+			}
+		}
+	}
+	if s.Close != nil {
+		if v, ok := any(s.Close).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Close", err)
 			}
 		}
 	}

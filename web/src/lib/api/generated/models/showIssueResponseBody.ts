@@ -4,6 +4,7 @@
 import type { ClaimViolationOut } from './claimViolationOut.ts'
 import type { CommentOut } from './commentOut.ts'
 import type { IssueClaimOut } from './issueClaimOut.ts'
+import type { IssueCloseSummary } from './issueCloseSummary.ts'
 import type { IssueLabel } from './issueLabel.ts'
 import type { IssueOut } from './issueOut.ts'
 import type { IssueRef } from './issueRef.ts'
@@ -17,6 +18,7 @@ export interface ShowIssueResponseBody {
   claim_hub_now?: string
   claim_violation_count?: number
   claim_violations?: ClaimViolationOut[]
+  close?: IssueCloseSummary
   comments: CommentOut[]
   comments_truncated?: boolean
   issue: ShowIssueOut

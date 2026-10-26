@@ -12,6 +12,7 @@ export interface AuditCloseRow {
   parent?: string
   parent_uid?: string
   reason: string
+  teammate?: string
   time: string
   [key: string]: unknown
 }

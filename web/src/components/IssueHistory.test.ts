@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/svelte'
+import { cleanup, render, screen, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { KataTaskEvent } from '../lib/kata/types'
@@ -21,10 +21,99 @@ function event(uid: string, created_at: string): KataTaskEvent {
 describe('IssueHistory', () => {
   afterEach(cleanup)
 
+  it.each(['issue.created', 'issue.commented', 'issue.updated', 'issue.closed', 'issue.future'])(
+    'shows the canonical actor and teammate for %s',
+    (type) => {
+      render(IssueHistory, {
+        props: {
+          events: [
+            {
+              ...event('tagged', '2026-08-01T12:00:00Z'),
+              type,
+              actor: 'alice',
+              teammate: 'claude.opus-5-5',
+              payload: {
+                teammate: 'payload-worker',
+                author: 'payload-author',
+                metadata: { teammate: 'creation-worker' },
+              },
+            },
+          ],
+        },
+      })
+      const row = within(screen.getByRole('listitem'))
+      expect(row.getByText('alice / claude.opus-5-5').textContent).toBe('alice / claude.opus-5-5')
+      expect(row.queryByText(/payload-worker|payload-author|creation-worker/)).toBeNull()
+    },
+  )
+
+  it.each([undefined, ''])('shows the actor alone for an untagged event: %s', (teammate) => {
+    render(IssueHistory, {
+      props: {
+        events: [
+          {
+            ...event('legacy', '2026-08-01T12:00:00Z'),
+            actor: 'alice',
+            teammate,
+            payload: { teammate: 'payload-worker' },
+          },
+        ],
+      },
+    })
+    expect(within(screen.getByRole('listitem')).getByText('alice').textContent).toBe('alice')
+    expect(screen.queryByText(/alice \/|payload-worker/)).toBeNull()
+  })
+
+  it('keeps maximum-length attribution readable as text', () => {
+    const teammate = 'A'.repeat(64)
+    render(IssueHistory, {
+      props: { events: [{ ...event('long', ''), actor: 'alice', teammate }] },
+    })
+    expect(screen.getByText(`alice / ${teammate}`).textContent).toBe(`alice / ${teammate}`)
+  })
+
+  it.each([
+    ['<img src=x onerror="alert(1)">', 'codex', '<img src=x onerror="alert(1)"> / codex'],
+    ['alice', '<script>alert(1)</script>', 'alice / <script>alert(1)</script>'],
+    ['<b>alice & bob</b>', '', '<b>alice & bob</b>'],
+  ])('renders attribution as escaped text: %s / %s', (actor, teammate, label) => {
+    render(IssueHistory, {
+      props: { events: [{ ...event('escaped', ''), actor, teammate }] },
+    })
+    const row = screen.getByRole('listitem')
+    expect(within(row).getByText(label).textContent).toBe(label)
+    expect(row.querySelector('img, script, b')).toBeNull()
+  })
+
+  it('updates attribution on the same event row and preserves other rows', async () => {
+    const first = { ...event('first', '2026-08-01T12:00:00Z'), actor: 'alice' }
+    const second = {
+      ...event('second', '2026-08-01T13:00:00Z'),
+      actor: 'bob',
+      teammate: 'codex',
+    }
+    const view = render(IssueHistory, { props: { events: [first, second] } })
+    const [firstRow, secondRow] = screen.getAllByRole('listitem')
+    expect(within(firstRow!).getByText('alice')).toBeTruthy()
+    expect(within(secondRow!).getByText('bob / codex')).toBeTruthy()
+
+    await view.rerender({ events: [{ ...first, teammate: 'claude.opus-5-5' }, second] })
+    expect(within(firstRow!).getByText('alice / claude.opus-5-5')).toBeTruthy()
+    expect(within(secondRow!).getByText('bob / codex')).toBeTruthy()
+    expect(within(firstRow!).queryByText('alice')).toBeNull()
+
+    await view.rerender({ events: [{ ...first, actor: 'carol', teammate: '' }, second] })
+    expect(within(firstRow!).getByText('carol')).toBeTruthy()
+    expect(within(firstRow!).queryByText('alice / claude.opus-5-5')).toBeNull()
+    expect(within(secondRow!).getByText('bob / codex')).toBeTruthy()
+  })
+
   it('shows the closing session and its optional AgentsView link', () => {
     const closed = {
       ...event('close-a', '2026-08-01T12:00:00Z'),
       type: 'issue.closed',
+      actor: 'alice',
+      teammate: 'codex.gpt-5.1',
       payload: {
         transcript: {
           agent: 'codex',
@@ -37,6 +126,10 @@ describe('IssueHistory', () => {
     const link = screen.getByRole('link', { name: /codex.*00000000-0000-4000-8000-000000000001/ })
     expect(link.getAttribute('href')).toBe(closed.payload.transcript.url)
     expect(link.getAttribute('rel')).toContain('noreferrer')
+    const row = link.closest('li')!
+    expect(within(row).getByText('alice / codex.gpt-5.1')).toBeTruthy()
+    expect(within(row).getByText('closed (done)')).toBeTruthy()
+    expect(row.querySelector('time')?.getAttribute('datetime')).toBe(closed.created_at)
   })
 
   it.each(['pi', 'omp'])('shows the closing %s session', (agent) => {

@@ -493,6 +493,12 @@ func TestSnapshot_Detail_CommentsTab(t *testing.T) {
 func TestSnapshot_Detail_EventsTab(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
+	dm.events[1].Teammate = "codex.gpt-5.1"
+	dm.events = append(dm.events, EventLogEntry{
+		ID: 11, Type: "issue.closed", Actor: "alice", Teammate: "claude.opus-5-5",
+		CreatedAt: time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
+		Payload:   map[string]any{"reason": "done"},
+	})
 	dm.activeTab = tabEvents
 	got := dm.View(120, 30, viewChrome{})
 	assertGolden(t, "detail-events-tab", got)
