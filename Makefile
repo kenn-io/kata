@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -7,7 +7,10 @@ COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknow
 BUILD_DATE := $(shell v=$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 # Public PostHog ingest key. Builds without it send no telemetry.
 POSTHOG_PROJECT_KEY ?= phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf
-LDFLAGS := -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE) -X go.kenn.io/kit/telemetry/posthog.projectKey=$(POSTHOG_PROJECT_KEY)
+# Package manager that owns the binary. Non-empty values disable self-update.
+DISTRIBUTION ?=
+BINDIR ?= .
+LDFLAGS = -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE) -X go.kenn.io/kata/internal/version.Distribution=$(DISTRIBUTION) -X go.kenn.io/kit/telemetry/posthog.projectKey=$(POSTHOG_PROJECT_KEY)
 export GOBIN
 
 build: web-embed
@@ -17,6 +20,13 @@ build: web-embed
 install: web-embed
 	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
 		go install -ldflags="$(LDFLAGS)" ./cmd/kata
+
+# Build from a release source archive, which already carries vendored modules
+# and the production web assets, so this needs no network, git, or Bun.
+# Pass VERSION and BUILD_DATE explicitly; the archive has no git metadata.
+homebrew: DISTRIBUTION := homebrew
+homebrew:
+	CGO_ENABLED=1 go build -mod=vendor -trimpath -buildvcs=false -ldflags="-s -w $(LDFLAGS)" -o "$(BINDIR)/kata" ./cmd/kata
 
 test:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test $(GOFLAGS_TEST) ./...
