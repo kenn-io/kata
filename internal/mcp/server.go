@@ -685,6 +685,7 @@ type CreateInput struct {
 
 // EditInput applies issue field and relationship deltas atomically.
 type EditInput struct {
+	Teammate         *string        `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref              string         `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Title            *string        `json:"title,omitempty" jsonschema:"Replacement title"`
 	Body             *string        `json:"body,omitempty" jsonschema:"Replacement body"`
@@ -720,21 +721,24 @@ type CommentInput struct {
 
 // ClaimInput claims an issue, optionally replacing its current owner.
 type ClaimInput struct {
-	Ref        string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
-	Force      bool   `json:"force,omitempty" jsonschema:"Replace a different current owner"`
-	IfUnowned  bool   `json:"if_unowned,omitempty" jsonschema:"Claim only when the issue has no active owner"`
-	TTLSeconds *int64 `json:"ttl_seconds,omitempty" jsonschema:"Expire the assignment after 60 through 86400 seconds"`
+	Teammate   *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref        string  `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Force      bool    `json:"force,omitempty" jsonschema:"Replace a different current owner"`
+	IfUnowned  bool    `json:"if_unowned,omitempty" jsonschema:"Claim only when the issue has no active owner"`
+	TTLSeconds *int64  `json:"ttl_seconds,omitempty" jsonschema:"Expire the assignment after 60 through 86400 seconds"`
 }
 
 // SetLabelInput makes label presence explicit and naturally idempotent.
 type SetLabelInput struct {
-	Ref     string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
-	Label   string `json:"label" jsonschema:"Project label"`
-	Present bool   `json:"present" jsonschema:"True to add the label; false to remove it"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Label    string  `json:"label" jsonschema:"Project label"`
+	Present  bool    `json:"present" jsonschema:"True to add the label; false to remove it"`
 }
 
 // SetDeadlineInput sets or clears the deadline_on metadata primitive.
 type SetDeadlineInput struct {
+	Teammate      *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
 	Deadline      *string `json:"deadline,omitempty" jsonschema:"Deadline date, local date-time, or RFC 3339 UTC instant ending in Z"`
 	ClearDeadline bool    `json:"clear_deadline,omitempty" jsonschema:"Remove the current deadline"`
@@ -743,6 +747,7 @@ type SetDeadlineInput struct {
 
 // SetScheduleInput sets or clears the scheduled_on metadata primitive.
 type SetScheduleInput struct {
+	Teammate      *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
 	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date, local date-time, or RFC 3339 UTC instant ending in Z"`
 	ClearSchedule bool    `json:"clear_schedule,omitempty" jsonschema:"Remove the current schedule gate"`
@@ -751,6 +756,7 @@ type SetScheduleInput struct {
 
 // SetMetadataInput patches several keys in one operation.
 type SetMetadataInput struct {
+	Teammate *string        `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref      string         `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Patch    map[string]any `json:"patch" jsonschema:"Metadata values to set; JSON null removes a key"`
 	Revision *int64         `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
@@ -770,6 +776,7 @@ type Evidence struct {
 
 // CloseInput makes the completion assertion explicit.
 type CloseInput struct {
+	Teammate       *string    `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref            string     `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Reason         string     `json:"reason" jsonschema:"Close reason: done, wontfix, duplicate, superseded, or audit-no-change"`
 	Message        string     `json:"message" jsonschema:"Substantive completion message"`
@@ -781,7 +788,8 @@ type CloseInput struct {
 
 // ReopenInput reactivates closed work.
 type ReopenInput struct {
-	Ref string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 }
 
 // ProjectIdentity identifies the immutable startup project.

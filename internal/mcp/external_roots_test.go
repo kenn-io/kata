@@ -160,6 +160,7 @@ func TestConnectorToolsUseTypedDaemonRoutes(t *testing.T) {
 
 func TestBridgeToolsUseScopedIssueRoutesAndServerActor(t *testing.T) {
 	requests := make([]externalRootRequest, 0, 8)
+	var contributions []string
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if r.Body != nil {
@@ -168,6 +169,9 @@ func TestBridgeToolsUseScopedIssueRoutesAndServerActor(t *testing.T) {
 			if len(data) != 0 {
 				require.NoError(t, json.Unmarshal(data, &body))
 			}
+		}
+		if r.Method != http.MethodGet {
+			contributions = append(contributions, r.Header.Get("X-Kata-Teammate"))
 		}
 		requests = append(requests, externalRootRequest{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: body})
 		w.Header().Set("Content-Type", "application/json")
@@ -204,10 +208,14 @@ func TestBridgeToolsUseScopedIssueRoutesAndServerActor(t *testing.T) {
 		{name: "kata.bridge_resolve_comment", args: map[string]any{"ref": "abc4", "action": "adopt", "external_comment_id": "opaque ID/with spaces:%25"}},
 		{name: "kata.bridge_unbind", args: map[string]any{"ref": "abc4"}},
 	} {
+		if call.name != "kata.bridge_show" {
+			call.args["teammate"] = "bridge-worker"
+		}
 		output := callWorkflowTool(t, session, call.name, call.args)
 		require.Equal(t, "spoke-project", output["project"].(map[string]any)["name"])
 	}
 
+	require.Equal(t, []string{"bridge-worker", "bridge-worker", "bridge-worker", "bridge-worker", "bridge-worker", "bridge-worker"}, contributions)
 	path := "/api/v1/projects/42/issues/abc4/bridge"
 	require.Equal(t, []externalRootRequest{
 		{Method: http.MethodGet, Path: path},
@@ -356,6 +364,9 @@ func TestExternalConnectorCallsUseLongRunningClient(t *testing.T) {
 	var longRequests atomic.Int64
 	longServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		longRequests.Add(1)
+		if r.Method != http.MethodGet && strings.Contains(r.URL.Path, "/bridge") {
+			require.Equal(t, "startup-worker", r.Header.Get("X-Kata-Teammate"))
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/connectors":
@@ -379,7 +390,7 @@ func TestExternalConnectorCallsUseLongRunningClient(t *testing.T) {
 	scope, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
 	require.NoError(t, err)
 	handlers := toolHandlers{options: Options{
-		Client: defaultClient, LongRunningClient: longClient, Scope: scope, Actor: "example-agent",
+		Client: defaultClient, LongRunningClient: longClient, Scope: scope, Actor: "example-agent", Teammate: "startup-worker",
 	}}
 	wideHandlers := handlers
 	wideHandlers.options.Scope = NewAllScope()

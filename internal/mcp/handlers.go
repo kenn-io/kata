@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -451,6 +452,7 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
+	ctx = kataclient.WithTeammate(ctx, handle)
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		return nil, MutationOutput{}, errors.New("title must not be empty")
@@ -505,6 +507,11 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 }
 
 func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input EditInput) (*sdkmcp.CallToolResult, EditOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, EditOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, EditOutput{}, err
@@ -627,6 +634,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	if err != nil {
 		return nil, CommentOutput{}, err
 	}
+	ctx = kataclient.WithTeammate(ctx, handle)
 	if handle != "" {
 		health, err := h.options.Client.Health(ctx)
 		if err != nil {
@@ -678,6 +686,11 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 }
 
 func (h toolHandlers) claim(ctx context.Context, _ *sdkmcp.CallToolRequest, input ClaimInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	if input.Force && input.IfUnowned {
 		return nil, MutationOutput{}, errors.New("force and if_unowned are mutually exclusive")
 	}
@@ -707,6 +720,11 @@ func (h toolHandlers) claim(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 }
 
 func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetLabelInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -736,6 +754,11 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 }
 
 func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetDeadlineInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -754,6 +777,11 @@ func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) setSchedule(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetScheduleInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -772,6 +800,11 @@ func (h toolHandlers) setSchedule(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetMetadataInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -808,6 +841,11 @@ func (h toolHandlers) patchMetadata(ctx context.Context, project ProjectIdentity
 }
 
 func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, input CloseInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -923,6 +961,11 @@ func (h toolHandlers) scopedCloseError(err error) error {
 }
 
 func (h toolHandlers) reopen(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReopenInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -1737,4 +1780,12 @@ func optionalCommentEnum[T ~string](value string) *T {
 	}
 	converted := T(value)
 	return &converted
+}
+
+func (h toolHandlers) contributionContext(ctx context.Context, override *string) (context.Context, error) {
+	handle, err := teammate.Resolve(override, h.options.Teammate)
+	if err != nil {
+		return ctx, err
+	}
+	return kataclient.WithTeammate(ctx, handle), nil
 }

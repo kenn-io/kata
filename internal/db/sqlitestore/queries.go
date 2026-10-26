@@ -2664,6 +2664,14 @@ func scheduleDefaultTimezone(recurrenceTimezone, daemonTimezone string) string {
 }
 
 func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (db.Event, error) {
+	// Explicit event identity belongs to replay/ingest; never rewrite its bytes.
+	if in.UID == "" && in.OriginInstanceUID == "" && in.ContentHash == "" {
+		payload, err := db.StampEventTeammate(ctx, in.Type, in.Actor, in.Payload)
+		if err != nil {
+			return db.Event{}, err
+		}
+		in.Payload = payload
+	}
 	eventUID := in.UID
 	var err error
 	if eventUID == "" {

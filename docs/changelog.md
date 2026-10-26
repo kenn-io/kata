@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Preserve explicit teammate contribution on native issue and live claim
+  actions in raw event JSON, independently of comment addressing and the
+  accountable actor. CLI, Go-client, and per-call MCP selections use the optional
+  request header; older daemons still accept writes. See
+  [Request contribution](reference/http-api.md#request-contribution).
+
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who

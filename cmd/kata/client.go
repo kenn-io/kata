@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -449,6 +451,10 @@ func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
 	request := req.Clone(state.ctx)
+	if err := teammate.EditRequest(request.Context(), request, t.origin.String()); err != nil {
+		state.stop()
+		return nil, &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+	}
 	resp, err := t.RoundTripper.RoundTrip(request)
 	if resp != nil && resp.Body != nil {
 		resp.Body = &daemonResponseBody{ReadCloser: resp.Body, state: state, selected: selected}

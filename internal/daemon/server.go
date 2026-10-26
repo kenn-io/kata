@@ -18,6 +18,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/klauspost/compress/gzhttp"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"golang.org/x/net/netutil"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -36,7 +37,6 @@ import (
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
-	"golang.org/x/net/netutil"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -392,7 +392,7 @@ func NewServer(cfg ServerConfig) *Server {
 		noProjectDataRoutes(humaAPI.OpenAPI()))
 	s.authPolicy = policy
 
-	s.baseHandler = mux
+	s.baseHandler = withEventTeammate(mux)
 	s.handler, _ = s.HandlerFor(ListenerPolicy{Kind: ListenerSocket})
 	return s
 }

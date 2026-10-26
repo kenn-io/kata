@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -179,17 +180,19 @@ func TestTeammateCLIMoveFollowup(t *testing.T) {
 	require.Equal(t, "reviewer-7", comments[0].Teammate)
 }
 
-func TestTeammateInvalidDefaultDoesNotAffectReadsOrUnattributedEdits(t *testing.T) {
+func TestTeammateInvalidDefaultAllowsReadsAndExplicitEmptyMutations(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "Existing issue")
 	t.Setenv("KATA_TEAMMATE", "bad/handle")
 	runCLI(t, env, dir, "show", ref)
-	runCLI(t, env, dir, "edit", ref, "--title", "Updated")
+	_, err := runCLICapture(t, env, dir, "edit", ref, "--title", "Updated")
+	require.ErrorContains(t, err, "teammate")
+	runCLI(t, env, dir, "--teammate=", "edit", ref, "--title", "Updated")
 	runCLI(t, env, dir, "--teammate=", "comment", ref, "--body", "No attribution")
 	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
 	require.Equal(t, "Updated", got.Issue.Title)
 	require.Len(t, got.Comments, 1)
 	require.Empty(t, got.Comments[0].Teammate)
-	_, err := runCLICapture(t, env, dir, "mcp", "serve")
+	_, err = runCLICapture(t, env, dir, "mcp", "serve")
 	require.ErrorContains(t, err, "teammate")
 }

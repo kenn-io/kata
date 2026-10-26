@@ -16,6 +16,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 const (
@@ -506,7 +507,7 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		// History and mutation responses omit compound peers that may be
 		// outside the subtree. Polling and SSE reset so linked issue views
 		// refresh; reports re-add authorized peers (scoped_authorization.go).
-		return "", true
+		allowedKeys[event.Type] = keySet()
 	}
 	keys, known := allowedKeys[event.Type]
 	if !known {
@@ -519,7 +520,16 @@ func scopedEventPayload(event db.Event) (string, bool) {
 	if json.Unmarshal([]byte(event.Payload), &raw) != nil {
 		return "", false
 	}
-	projected := make(map[string]jsontext.Value, len(keys))
+	projected := make(map[string]jsontext.Value, len(keys)+1)
+	if value, ok := raw["attributed_teammate"]; ok {
+		var handle string
+		if json.Unmarshal(value, &handle) == nil && handle != "" && teammate.Validate(handle) == nil {
+			projected["attributed_teammate"] = value
+		}
+	}
+	if event.Type == "issue.links_changed" && len(projected) == 0 {
+		return "", true
+	}
 	for key := range keys {
 		if value, ok := raw[key]; ok {
 			projected[key] = value

@@ -11,12 +11,14 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestMCPTeammateSharedCalls(t *testing.T) {
 	var mu sync.Mutex
 	requests := map[string]map[string]any{}
+	headers := map[string]string{}
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
@@ -28,6 +30,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			mu.Lock()
 			requests[r.Header.Get("Idempotency-Key")] = body
+			headers[r.Header.Get("Idempotency-Key")] = r.Header.Get("X-Kata-Teammate")
 			mu.Unlock()
 		}
 		var response map[string]any
@@ -77,6 +80,7 @@ func TestMCPTeammateSharedCalls(t *testing.T) {
 	for key, body := range requests {
 		require.Equal(t, "coordinator", body["actor"])
 		handle := strings.TrimPrefix(strings.TrimPrefix(key, "kata.comment"), "kata.create")
+		require.Equal(t, handle, headers[key], "concurrent request contribution")
 		attribution := body
 		if strings.HasPrefix(key, "kata.create") {
 			attribution = body["metadata"].(map[string]any)
@@ -227,4 +231,40 @@ func mustBoundTeammateScope(t *testing.T) *Scope {
 	s, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
 	require.NoError(t, err)
 	return s
+}
+
+func TestMCPDisplayContributionPerCall(t *testing.T) {
+	var mu sync.Mutex
+	var headers []string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			mu.Lock()
+			headers = append(headers, r.Header.Get("X-Kata-Teammate"))
+			mu.Unlock()
+		} else {
+			require.Empty(t, r.Header.Get("X-Kata-Teammate"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(daemonResponse(r))
+	}))
+	defer daemon.Close()
+	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: 42, ProjectName: "spoke-project", Actor: "coordinator", Version: "test", Teammate: "default-1"})
+	for _, handle := range []string{"worker-1", "worker-2", ""} {
+		for _, tool := range []string{"kata.edit", "kata.claim", "kata.set_label"} {
+			args := map[string]any{"ref": "abc1", "teammate": handle}
+			if tool == "kata.edit" {
+				args["title"] = "Updated"
+			}
+			if tool == "kata.set_label" {
+				args["label"] = "ready"
+				args["present"] = true
+			}
+			result, callErr := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: tool, Arguments: args})
+			require.NoError(t, callErr)
+			require.False(t, result.IsError, "%s: %s", tool, mustJSON(t, result))
+		}
+	}
+	require.Equal(t, []string{"worker-1", "worker-1", "worker-1", "worker-2", "worker-2", "worker-2", "", "", ""}, headers)
 }

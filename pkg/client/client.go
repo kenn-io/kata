@@ -20,6 +20,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 
 	internalclient "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -221,7 +222,21 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 		opts.httpClient = http.DefaultClient
 	}
 	normalizedBaseURL := strings.TrimRight(baseURL, "/")
-	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
+	// Own the redirect policy wrapper without mutating a caller's shared client.
+	httpClient := *opts.httpClient
+	previousRedirect := httpClient.CheckRedirect
+	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if previousRedirect != nil {
+			if err := previousRedirect(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return teammate.EditRequest(req.Context(), req, normalizedBaseURL)
+	}
+	opts.httpClient = &httpClient
+	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient, origin: normalizedBaseURL})}
 	for _, editor := range opts.requestEditors {
 		generatedOpts = append(generatedOpts, runtime.WithRequestEditorFn(editor))
 	}
@@ -247,9 +262,14 @@ func internalOpts(opts TransportOptions) internalclient.Opts {
 
 type contextDoer struct {
 	client *http.Client
+	origin string
 }
 
 func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req = req.Clone(ctx)
+	if err := teammate.EditRequest(ctx, req, d.origin); err != nil {
+		return nil, err
+	}
 	client := d.client
 	if client == nil {
 		client = http.DefaultClient

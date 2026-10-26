@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newCloseCmd() *cobra.Command {
@@ -365,6 +365,21 @@ func runActionWithHeaders(
 		}
 		commentProjectID = response.Body.Issue.ProjectID
 		commentIssueRef = response.Body.Issue.UID
+		original := response.Body.OriginalEvent
+		if original == nil {
+			original = response.Body.Event
+		}
+		var contribution struct {
+			Teammate string `json:"attributed_teammate"`
+		}
+		if original != nil {
+			if err := json.Unmarshal([]byte(original.Payload), &contribution); err != nil {
+				return fmt.Errorf("decode close event contribution: %w", err)
+			}
+		}
+		// A retry inherits the committed display value, including its absence.
+		// The explicit comment identity above remains independent.
+		ctx = kataclient.WithTeammate(ctx, contribution.Teammate)
 	}
 	if err := postFollowupCommentWithKey(
 		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, handle, commentKey,
