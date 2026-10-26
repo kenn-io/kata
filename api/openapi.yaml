@@ -4844,6 +4844,9 @@ components:
         baseline_through_event_id:
           format: int64
           type: integer
+        native_cron_writes:
+          description: Supports native recurring job writes using direct project-scoped push enrollments.
+          type: boolean
         project_id:
           format: int64
           type: integer
@@ -8429,6 +8432,10 @@ paths:
     post:
       operationId: createCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8458,6 +8465,10 @@ paths:
     delete:
       operationId: archiveCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8518,6 +8529,10 @@ paths:
     put:
       operationId: replaceCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8552,6 +8567,10 @@ paths:
     post:
       operationId: restoreCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8744,6 +8763,10 @@ paths:
     delete:
       operationId: archiveCronWorkflow
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8838,6 +8861,10 @@ paths:
     post:
       operationId: restoreCronWorkflow
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true

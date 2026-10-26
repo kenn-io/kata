@@ -84,6 +84,7 @@ type FederationProjectMetadataRequest struct {
 // ProjectFederationBody is the hub metadata a trusted spoke needs before it
 // begins project-scoped event polling.
 type ProjectFederationBody struct {
+	NativeCronWrites       bool            `json:"native_cron_writes,omitempty" doc:"Supports native recurring job writes using direct project-scoped push enrollments."`
 	Relay                  *RelayHandshake `json:"relay,omitempty"`
 	ProjectID              int64           `json:"project_id"`
 	ProjectUID             string          `json:"project_uid"`

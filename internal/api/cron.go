@@ -114,6 +114,7 @@ type CronDefinitionActionBody struct {
 
 // CronDefinitionActionRequest addresses an attributed definition lifecycle change.
 type CronDefinitionActionRequest struct {
+	Authorization string `header:"Authorization"`
 	CronDefinitionRequest
 	Body CronDefinitionActionBody
 }
@@ -136,8 +137,9 @@ type PutCronWorkflowBody struct {
 
 // CreateCronJobRequest creates a definition in the selected project.
 type CreateCronJobRequest struct {
-	ProjectID int64 `path:"project_id"`
-	Body      PutCronJobBody
+	Authorization string `header:"Authorization"`
+	ProjectID     int64  `path:"project_id"`
+	Body          PutCronJobBody
 }
 
 // ReplaceCronJobRequest replaces one job at its expected definition event.
