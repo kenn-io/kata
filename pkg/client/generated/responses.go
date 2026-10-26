@@ -203,6 +203,10 @@ type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
 
+type GetCronSummaryResponse = CronSummaryResponseBody
+
+type GetCronSummaryErrorResponse = ErrorEnvelope
+
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
 type ListCronWorkflowsErrorResponse = ErrorEnvelope
@@ -634,6 +638,7 @@ type DoctorResp struct {
 
 type PollEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -928,6 +933,13 @@ type ObserveCronRunResp struct {
 	JSON200      *ObserveCronRunResponse
 }
 
+type GetCronSummaryResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronSummaryResponse
+}
+
 type ListCronWorkflowsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -979,6 +991,7 @@ type DigestProjectResp struct {
 
 type PollProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 
@@ -1018,6 +1031,7 @@ type EnableProjectFederationResp struct {
 
 type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
+	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 

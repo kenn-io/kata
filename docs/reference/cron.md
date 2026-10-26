@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-23
+last_edited: 2026-10-25
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -473,7 +473,29 @@ issue's owner, dates, lease, status, or readiness.
 Responses contain `run`, the exact committed `events`, and `replayed`. Run
 listing is project-scoped, accepts `--job-uid` to list one job's runs, and
 orders by creation time and UID descending. Use `next_before_uid` with `--before-uid` for another
-page. Ordinary federation publishes observations from spokes, folds evidence
+page.
+
+HTTP clients can repeat `status` on `GET /api/v1/projects/{project_id}/cron/runs`
+to select any of `running`, `succeeded`, `failed`, `cancelled`, and `unknown`.
+The selected statuses form a union. Filtering happens before the page limit;
+`before_uid` may name a run outside the selected statuses, but must belong to
+the same project. Invalid statuses fail validation.
+
+Job list and show responses include `last_run`: the latest ordinary run by
+creation time, then UID, or explicit `null` when the job has never run. This
+lookup uses the complete project history, independently of the loaded run page.
+`GET /api/v1/projects/{project_id}/cron/jobs` accepts the same repeated `status`
+values, matched against each job's `last_run` status, plus `never_ran` to select
+jobs with no observations. Invalid statuses fail validation.
+
+`GET /api/v1/projects/{project_id}/cron/summary` returns `failed_runs_24h`,
+`window_start`, and `window_end`. The daemon captures one current instant and
+counts failed observations whose creation time lies within the preceding
+24 hours, including both boundaries. Counts include job and workflow runs
+in the project. Like run listing, the summary is a project read and needs the
+same read access.
+
+Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
 

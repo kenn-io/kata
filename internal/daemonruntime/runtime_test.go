@@ -90,3 +90,18 @@ func TestRuntimeProcessAliveRejectsReusedPID(t *testing.T) {
 
 	assert.False(t, daemonruntime.RuntimeProcessAlive(record))
 }
+
+func TestRuntimeProcessAliveRejectsUnknownScope(t *testing.T) {
+	assert.False(t, daemonruntime.RuntimeProcessAlive(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "unverifiable"}))
+}
+
+func TestRuntimeRecordBlocksStart(t *testing.T) {
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getppid())
+	require.True(t, ok)
+	// A matching creation identity takes precedence over an earlier wall-clock timestamp.
+	assert.True(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), ProcessIdentity: identity, StartedAt: time.Unix(1, 0)}))
+	// An unverifiable identity on a live PID blocks startup regardless of the earlier StartedAt.
+	assert.True(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), ProcessIdentityV2: "unverifiable", StartedAt: time.Unix(1, 0)}))
+	// A legacy record published before its PID's process was created names a reused PID.
+	assert.False(t, daemonruntime.RuntimeRecordBlocksStart(kitdaemon.RuntimeRecord{PID: os.Getppid(), StartedAt: time.Unix(1, 0)}))
+}

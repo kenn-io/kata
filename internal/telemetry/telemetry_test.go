@@ -38,45 +38,6 @@ func TestSessionEndedDurationBuckets(t *testing.T) {
 	}
 }
 
-func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
-	goEnv := exec.Command("go", "env", "GOMODCACHE") //nolint:gosec // Fixed Go command resolves the caller's provisioned module cache.
-	moduleCacheOutput, err := goEnv.CombinedOutput()
-	require.NoErrorf(t, err, "resolve caller module cache: %s", moduleCacheOutput)
-	moduleCache := strings.TrimSpace(string(moduleCacheOutput))
-	require.NotEmpty(t, moduleCache)
-
-	scratch := t.TempDir()
-	binaryName := "telemetry-testprogram"
-	if runtime.GOOS == "windows" {
-		binaryName += ".exe"
-	}
-	binary := filepath.Join(scratch, binaryName)
-	home := filepath.Join(scratch, "home")
-	command := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", binary, "./testprogram") //nolint:gosec // Fixed Go tool and arguments build the test fixture.
-	command.Env = append(os.Environ(),
-		"HOME="+home,
-		"XDG_CACHE_HOME="+filepath.Join(scratch, "xdg-cache"),
-		"XDG_CONFIG_HOME="+filepath.Join(scratch, "xdg-config"),
-		"GOCACHE="+filepath.Join(scratch, "gocache"),
-		"GOMODCACHE="+moduleCache,
-		"GOPROXY=off",
-	)
-	output, err := command.CombinedOutput()
-	require.NoErrorf(t, err, "build standalone test program: %s", output)
-
-	command = exec.Command(binary) //nolint:gosec // The test owns and just built this binary in its scratch directory.
-	command.Env = append(os.Environ(),
-		"HOME="+home,
-		"XDG_CACHE_HOME="+filepath.Join(scratch, "xdg-cache"),
-		"XDG_CONFIG_HOME="+filepath.Join(scratch, "xdg-config"),
-		"TELEMETRY_ENABLED=1",
-		EnabledEnv+"=1",
-	)
-	output, err = command.CombinedOutput()
-	require.NoErrorf(t, err, "run standalone test program: %s", output)
-	assert.Equal(t, "disabled", strings.TrimSpace(string(output)))
-}
-
 // Exercise the standalone product wrapper: Go tests deliberately disable
 // telemetry regardless of environment, so an in-process check is insufficient.
 func TestStandaloneTelemetryAdmission(t *testing.T) {

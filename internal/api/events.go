@@ -79,6 +79,7 @@ type EventReset struct {
 // 1000 server-side; explicit zero or negative Limit returns 400 validation.
 type PollEventsRequest struct {
 	ProjectID int64       `path:"project_id"`
+	Issue     string      `query:"issue,omitempty" doc:"Filter subject history by issue short ID, qualified ref, or UID."`
 	AfterID   int64       `query:"after_id,omitempty"`
 	Limit     OptionalInt `query:"limit,omitempty"`
 }
@@ -103,6 +104,7 @@ type PollEventsBody struct {
 // signals a purge-invalidated cursor; when true, Events is empty and the
 // client should refetch state and resume from ResetAfterID.
 type PollEventsResponse struct {
+	IssueUID              string `header:"X-Kata-Events-Issue-UID" doc:"Resolved subject UID when the issue filter is applied, including empty pages."`
 	EventFeatures         string `header:"X-Kata-Event-Features"`
 	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 	Body                  PollEventsBody

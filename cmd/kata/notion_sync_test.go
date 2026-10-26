@@ -29,7 +29,7 @@ const cliNotionPage = "33333333-3333-4333-8333-333333333333"
 func notionCLIHTTP(t *testing.T, handler http.HandlerFunc) (*testenv.Env, string) {
 	t.Helper()
 	env := testenv.New(t)
-	dir := initBoundWorkspace(t, env.URL, "https://daemon.example/spoke-project.git")
+	dir, _ := initLocalBoundWorkspace(t, env, "spoke-project")
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
@@ -279,8 +279,7 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 	})
 	client := notionsync.NewClient(notionsync.ClientConfig{Transport: transport, LookupEnv: func(string) (string, bool) { return token, true }})
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.NotionSyncFetcher = client })
-	dir := initBoundWorkspace(t, env.URL, "https://daemon.example/spoke-project.git")
-	projectID := resolvePIDViaHTTP(t, env.URL, dir)
+	dir, projectID := initLocalBoundWorkspace(t, env, "spoke-project")
 	// Enable must also wait for paced Notion reads beyond the ordinary CLI timeout.
 	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
 	enable := runCLI(t, env, dir, "sync", "notion", "enable", "--data-source", cliNotionSource, "--done-status", "Delivered")

@@ -60,6 +60,7 @@ type CronRunObservationResult struct {
 
 // CronRunList bounds and scopes ordinary run-history pagination.
 type CronRunList struct {
+	Statuses  []string
 	ProjectID int64
 	JobUID    string
 	Limit     int

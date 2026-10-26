@@ -872,6 +872,47 @@ func (s ShowIssueByUIDQueryKind) Validate() error {
 	}
 }
 
+type ListCronJobsQueryStatus string
+
+const (
+	ListCronJobsQueryStatusCancelled ListCronJobsQueryStatus = "cancelled"
+	ListCronJobsQueryStatusFailed    ListCronJobsQueryStatus = "failed"
+	ListCronJobsQueryStatusRunning   ListCronJobsQueryStatus = "running"
+	ListCronJobsQueryStatusSucceeded ListCronJobsQueryStatus = "succeeded"
+	ListCronJobsQueryStatusUnknown   ListCronJobsQueryStatus = "unknown"
+	NeverRan                         ListCronJobsQueryStatus = "never_ran"
+)
+
+// Validate checks if the ListCronJobsQueryStatus value is valid
+func (l ListCronJobsQueryStatus) Validate() error {
+	switch l {
+	case ListCronJobsQueryStatusCancelled, ListCronJobsQueryStatusFailed, ListCronJobsQueryStatusRunning, ListCronJobsQueryStatusSucceeded, ListCronJobsQueryStatusUnknown, NeverRan:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListCronJobsQueryStatus value, got: %v", l))
+	}
+}
+
+type ListCronRunsQueryStatus string
+
+const (
+	ListCronRunsQueryStatusCancelled ListCronRunsQueryStatus = "cancelled"
+	ListCronRunsQueryStatusFailed    ListCronRunsQueryStatus = "failed"
+	ListCronRunsQueryStatusRunning   ListCronRunsQueryStatus = "running"
+	ListCronRunsQueryStatusSucceeded ListCronRunsQueryStatus = "succeeded"
+	ListCronRunsQueryStatusUnknown   ListCronRunsQueryStatus = "unknown"
+)
+
+// Validate checks if the ListCronRunsQueryStatus value is valid
+func (l ListCronRunsQueryStatus) Validate() error {
+	switch l {
+	case ListCronRunsQueryStatusCancelled, ListCronRunsQueryStatusFailed, ListCronRunsQueryStatusRunning, ListCronRunsQueryStatusSucceeded, ListCronRunsQueryStatusUnknown:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListCronRunsQueryStatus value, got: %v", l))
+	}
+}
+
 type OfferRelayDeliveriesQueryStream string
 
 const (

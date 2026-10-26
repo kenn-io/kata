@@ -434,7 +434,7 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		if u := meta.Undecoded(); len(u) > 0 {
 			keys := make([]string, 0, len(u))
 			for _, k := range u {
-				if !isDisplayConfigKey(k) {
+				if !isClientConfigKey(k) {
 					keys = append(keys, k.String())
 				}
 			}
@@ -561,7 +561,7 @@ func ReadDisplayConfig() (DisplayConfig, error) {
 	var file struct {
 		Display DisplayConfig `toml:"display"`
 	}
-	if err := decodeConfigSection("display", &file); err != nil {
+	if _, err := decodeConfigSection("display", &file); err != nil {
 		return DisplayConfig{}, err
 	}
 	if len(file.Display.MarkdownRenderer) > 0 && file.Display.MarkdownRenderer[0] == "" {
@@ -575,7 +575,7 @@ func ReadTUIConfig() (TUIConfig, error) {
 	var file struct {
 		TUI TUIConfig `toml:"tui"`
 	}
-	if err := decodeConfigSection("tui", &file); err != nil {
+	if _, err := decodeConfigSection("tui", &file); err != nil {
 		return TUIConfig{}, err
 	}
 	return file.TUI, nil
@@ -587,7 +587,7 @@ func ReadSearchConfig() (SearchConfig, error) {
 	var file struct {
 		Search SearchConfig `toml:"search"`
 	}
-	if err := decodeConfigSection("search", &file); err != nil {
+	if _, err := decodeConfigSection("search", &file); err != nil {
 		return SearchConfig{}, err
 	}
 	// Reuse the daemon's deployment overlay so search environment overrides stay consistent.
@@ -603,21 +603,21 @@ func ReadSearchConfig() (SearchConfig, error) {
 	return cfg.Search, nil
 }
 
-func decodeConfigSection(name string, dst any) error {
+func decodeConfigSection(name string, dst any) (string, error) {
 	path, err := DaemonConfigPath()
 	if err != nil {
-		return err
+		return path, err
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return path, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+		return path, fmt.Errorf("read %s: %w", path, err)
 	}
 	meta, err := toml.Decode(string(data), dst)
 	if err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+		return path, fmt.Errorf("parse %s: %w", path, err)
 	}
 	var unknown []string
 	for _, key := range meta.Undecoded() {
@@ -626,13 +626,13 @@ func decodeConfigSection(name string, dst any) error {
 		}
 	}
 	if len(unknown) > 0 {
-		return fmt.Errorf("parse %s: unknown %s key(s): %s", path, name, strings.Join(unknown, ", "))
+		return path, fmt.Errorf("parse %s: unknown %s key(s): %s", path, name, strings.Join(unknown, ", "))
 	}
-	return nil
+	return path, nil
 }
 
-func isDisplayConfigKey(key toml.Key) bool {
-	return len(key) > 0 && key[0] == "display"
+func isClientConfigKey(key toml.Key) bool {
+	return len(key) > 0 && (key[0] == "display" || key[0] == "create")
 }
 
 func normalizeWebConfig(cfg *WebConfig, trustPrivateNetwork bool) error {
@@ -728,7 +728,7 @@ func readAuthConfig(resolveCredential bool) (AuthConfig, error) {
 		if u := meta.Undecoded(); len(u) > 0 {
 			keys := make([]string, 0, len(u))
 			for _, k := range u {
-				if !isDisplayConfigKey(k) {
+				if !isClientConfigKey(k) {
 					keys = append(keys, k.String())
 				}
 			}

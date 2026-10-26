@@ -791,8 +791,8 @@ func TestEdge_DetailJumpBack(t *testing.T) {
 
 	// Press Esc → pop to original (handleBack restores from navStack).
 	m, popCmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if popCmd != nil {
-		t.Fatalf("Esc on stacked detail must not emit a cmd, got %T", popCmd)
+	if popCmd == nil {
+		t.Fatal("restored detail must refresh with a new read lifetime")
 	}
 	if m.detail.issue == nil || m.detail.issue.ShortID != "42aa" {
 		t.Fatalf("post-pop issue = %v, want #42aa (original)", m.detail.issue)

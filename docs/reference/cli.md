@@ -610,6 +610,11 @@ kata create <title> \
   [--force-new]
 ```
 
+When `--priority` is omitted, `kata create` uses the optional
+[`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
+An explicit `--priority` wins. With neither a flag nor a configured default,
+priority stays unset.
+
 `--meta` binds string-valued metadata at creation and is repeatable.
 
 Before creating an issue, the daemon checks existing non-deleted look-alikes,
@@ -1637,6 +1642,8 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
+`kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity and name each skipped PID on stderr.
+
 ```sh
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
@@ -1899,6 +1906,12 @@ the document and the boundary keys jump to its first or final page; `g` and
 document one line. In detail, `C-j` and `C-k` cycle forward and backward
 through activity tabs and the child section. Some terminals send `C-j` as
 Enter; Tab and Shift-Tab remain available for section cycling.
+
+The detail pane requests history for the selected issue. Moving to another
+issue cancels obsolete detail reads; live event bursts coalesce into a refresh,
+with one follow-up refresh if events arrive while reads are running. A remote
+daemon must acknowledge issue-filtered event history. If the Events tab asks
+you to upgrade the daemon, update that server before retrying.
 
 The TUI appends local daemon transport diagnostics to
 `<KATA_HOME>/runtime/<dbhash>/tui.log`, including retried stale-socket failures

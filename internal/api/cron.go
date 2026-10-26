@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json/jsontext"
+	"reflect"
 
+	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -76,6 +78,17 @@ func CronWorkflowDefinitionFrom(value cron.WorkflowDefinition) CronWorkflowDefin
 type CronJob struct {
 	db.CronDefinition
 	Definition CronJobDefinition `json:"definition"`
+	LastRun    *CronRun          `json:"last_run"`
+}
+
+// TransformSchema keeps a never-ran job's explicit null in the wire contract.
+// Inline objects support null in both OpenAPI versions used by our generators.
+func (CronJob) TransformSchema(registry huma.Registry, schema *huma.Schema) *huma.Schema {
+	last := huma.SchemaFromType(registry, reflect.TypeFor[CronRun]())
+	last.Nullable = true
+	last.Extensions = map[string]any{"x-omitempty": false}
+	schema.Properties["last_run"] = last
+	return schema
 }
 
 // CronWorkflow combines workflow identity and revision with its portable definition.
@@ -86,7 +99,7 @@ type CronWorkflow struct {
 
 // CronJobFrom converts a storage value to its API representation.
 func CronJobFrom(value db.CronJob) CronJob {
-	return CronJob{value.CronDefinition, CronJobDefinitionFrom(value.Definition)}
+	return CronJob{CronDefinition: value.CronDefinition, Definition: CronJobDefinitionFrom(value.Definition)}
 }
 
 // CronWorkflowFrom converts a storage value to its API representation.
@@ -105,6 +118,15 @@ type ListCronDefinitionsRequest struct {
 	ProjectID      int64 `path:"project_id"`
 	IncludeDeleted bool  `query:"include_deleted"`
 }
+
+// ListCronJobsRequest selects jobs by their latest run, with never_ran for no run.
+type ListCronJobsRequest struct {
+	ListCronDefinitionsRequest
+	Status []string `query:"status,explode" enum:"running,succeeded,failed,cancelled,unknown,never_ran"`
+}
+
+// Resolve rejects explicit empty statuses that Huma otherwise treats as absent.
+func (*ListCronJobsRequest) Resolve(ctx huma.Context) []error { return rejectEmptyCronStatus(ctx) }
 
 // CronDefinitionActionBody attributes a lifecycle change and supplies its expected revision.
 type CronDefinitionActionBody struct {

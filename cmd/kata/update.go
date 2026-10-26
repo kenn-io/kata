@@ -136,6 +136,7 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	noteSkippedDaemons(stderr, records)
 	for _, record := range records {
 		if !daemonruntime.RuntimeProcessAlive(record) {
 			continue

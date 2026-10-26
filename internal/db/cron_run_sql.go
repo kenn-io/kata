@@ -95,6 +95,10 @@ const CronRunCreatedAtFormat = "2006-01-02T15:04:05.000000000Z"
 
 // Runs reads a bounded creation-time and UID-ordered project history page.
 func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
+	statuses, err := cronRunStatuses(in.Statuses)
+	if err != nil {
+		return nil, err
+	}
 	if in.Limit < 0 {
 		return nil, fmt.Errorf("%w: negative limit", cron.ErrInvalid)
 	}
@@ -111,6 +115,14 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 		}
 		args = append(args, in.JobUID)
 		query += fmt.Sprintf(" AND job_uid=$%d", len(args))
+	}
+	if len(statuses) > 0 {
+		slots := make([]string, len(statuses))
+		for i, status := range statuses {
+			args = append(args, status)
+			slots[i] = fmt.Sprintf("$%d", len(args))
+		}
+		query += " AND status IN (" + strings.Join(slots, ",") + ")"
 	}
 	if in.BeforeUID != "" {
 		if !cronUID(in.BeforeUID) {
