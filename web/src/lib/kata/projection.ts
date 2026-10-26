@@ -198,7 +198,7 @@ function hasAlternateBlockPath(
   return false
 }
 
-function normalizeEvent(
+export function normalizeEvent(
   event: NonNullable<NonNullable<UISnapshot['selected']>['history']>[number],
 ): KataTaskEvent {
   return {

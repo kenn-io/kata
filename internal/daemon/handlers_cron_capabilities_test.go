@@ -69,3 +69,36 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 	require.Equal(t, "getCronCapabilities", host.calls[0].ID)
 	require.False(t, host.calls[0].Policy.Mutation)
 }
+
+func TestAgentsViewCronServingGateRequiresProjectRead(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	other, err := env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	for _, enabled := range []bool{false, true} {
+		host := &capabilitiesReadHost{projectID: project.ID}
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host, AgentsViewEnabled: enabled})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		for _, tc := range []struct {
+			id   int64
+			want int
+		}{{project.ID, 200}, {other.ID, 404}} {
+			request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", tc.id), nil)
+			request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+			if tc.want != 200 {
+				require.NotContains(t, recorder.Body.String(), "agentsview_enabled")
+				continue
+			}
+			var body struct {
+				AgentsViewEnabled *bool `json:"agentsview_enabled"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+			require.NotNil(t, body.AgentsViewEnabled)
+			require.Equal(t, enabled, *body.AgentsViewEnabled)
+		}
+	}
+}

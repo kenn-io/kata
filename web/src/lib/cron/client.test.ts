@@ -104,3 +104,81 @@ test('workflow raw reads use encoded UID and the caller abort signal', async () 
   expect(String(url)).toContain('/cron/workflows/uid%2Fsegment')
   expect(init.signal).toBe(signal)
 })
+
+test('AgentsViewCron capability and issue history use the credentialed transport', async () => {
+  const requests: Request[] = []
+  const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(new URL(String(input), 'http://127.0.0.2'), init)
+    requests.push(request)
+    if (request.url.includes('/cron/capabilities'))
+      return Response.json({ project_uid: 'p1', event_features: [], agentsview_enabled: true })
+    return Response.json({
+      contract_version: '2',
+      cursor: 1,
+      capabilities: { writable: false, updates: 'poll', actor_policy: 'readonly' },
+      catalog: [],
+      collection: [],
+      collection_links: [],
+      selected: {
+        state: 'visible',
+        issue: { uid: 'issue/uid', project_id: 2, title: 'Issue' },
+        links: [],
+        history: [
+          {
+            id: 4,
+            type: 'issue.closed',
+            project_uid: 'p1',
+            issue_uid: 'issue/uid',
+            payload: '{"transcript":{"url":"https://agentsview.example/sessions/abc"}}',
+          },
+        ],
+      },
+    })
+  })
+  setGeneratedFetch(createCredentialedFetch(() => ({ session: 'tab', csrf: 'csrf' }), upstream))
+  const signal = new AbortController().signal
+  const client = new CronClient()
+  await expect(client.capabilities(2, signal)).resolves.toEqual({ agentsviewEnabled: true })
+  const history = await client.issueHistory('p1', 'issue/uid', signal)
+  expect(history.map((event) => [event.event_id, event.payload])).toEqual([
+    [4, { transcript: { url: 'https://agentsview.example/sessions/abc' } }],
+  ])
+  expect(new URL(requests[0]!.url).pathname).toBe('/api/v1/projects/2/cron/capabilities')
+  const snapshot = new URL(requests[1]!.url)
+  expect(snapshot.pathname).toBe('/api/v1/ui/snapshot')
+  expect(snapshot.searchParams.get('project_uid')).toBe('p1')
+  expect(snapshot.searchParams.get('selected_issue_uid')).toBe('issue/uid')
+  expect(snapshot.searchParams.get('include_history')).toBe('true')
+  expect(snapshot.searchParams.get('include_graph')).toBe('false')
+  for (const request of requests) expect(request.headers.get('X-Kata-Web-Session')).toBe('tab')
+})
+
+test('AgentsViewCron reads keep 401 authentication rejection and project-local errors', async () => {
+  const reject = vi.fn(() => true)
+  setGeneratedFetch(
+    createCredentialedFetch(
+      () => undefined,
+      vi.fn(async () => new Response('', { status: 401 })),
+      reject,
+    ),
+  )
+  const signal = new AbortController().signal
+  await expect(new CronClient().capabilities(1, signal)).rejects.toMatchObject({
+    name: 'AuthenticationRequiredError',
+  })
+  await expect(new CronClient().issueHistory('p1', 'issue', signal)).rejects.toMatchObject({
+    name: 'AuthenticationRequiredError',
+  })
+  setGeneratedFetch(vi.fn(async () => new Response('', { status: 403 })))
+  await expect(new CronClient().capabilities(1, signal)).rejects.toBeInstanceOf(CronReadError)
+  await expect(new CronClient().issueHistory('p1', 'issue', signal)).rejects.not.toMatchObject({
+    name: 'AuthenticationRequiredError',
+  })
+})
+
+test('AgentsViewCron capability is disabled when an older daemon omits the field', async () => {
+  setGeneratedFetch(vi.fn(async () => Response.json({ project_uid: 'p1', event_features: [] })))
+  await expect(new CronClient().capabilities(1, new AbortController().signal)).resolves.toEqual({
+    agentsviewEnabled: false,
+  })
+})

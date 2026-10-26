@@ -186,6 +186,7 @@
         {#if cronState.selected.kind === 'run'}<CronRunDrawer
             run={cronState.detail as CronRun}
             peek={cronState.peek}
+            relatedSessionURL={cronState.relatedSessionURL}
             onOpenIssue={(uid) => onOpenIssue(issueProject!.uid, uid)}
             onOpenJob={(uid) => select({ kind: 'job', projectUID: selectionProject!.uid, uid })}
           />

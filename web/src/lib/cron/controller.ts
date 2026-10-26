@@ -1,6 +1,7 @@
 import { compareInstants } from './time'
 import { CronClient, CronReadError } from './client'
 import { isAuthenticationRequiredError } from '../auth/session'
+import { relatedCronTranscriptURL } from './relatedTranscript'
 import type {
   CronRun,
   CronJob,
@@ -45,6 +46,8 @@ export interface CronState {
   detailError?: string | undefined
   recentRuns: CronRun[]
   peek: CronPeek
+  /** Recorded AgentsView locator of the selected run's issue, when enabled. */
+  relatedSessionURL?: string | undefined
 }
 export const emptyCronState = (): CronState => ({
   loading: false,
@@ -57,6 +60,7 @@ export const emptyCronState = (): CronState => ({
   detailLoading: false,
   recentRuns: [],
   peek: { status: 'no-issue' },
+  relatedSessionURL: undefined,
 })
 export function mergedRuns(
   projects: readonly CronProjectState[],
@@ -520,6 +524,7 @@ export class CronController {
       detailLoading: Boolean(selection) && !(retain && this.state.detail),
       recentRuns: retain ? this.state.recentRuns : [],
       peek: retain ? this.state.peek : { status: selection ? 'loading' : 'no-issue' },
+      relatedSessionURL: retain ? this.state.relatedSessionURL : undefined,
     })
     if (!selection) return Promise.resolve()
     let shown!: () => void
@@ -579,6 +584,7 @@ export class CronController {
         detailLoading: false,
         detailError: undefined,
         peek: keepPeek ? this.state.peek : { status: issueUID ? 'loading' : 'no-issue' },
+        relatedSessionURL: keepPeek ? this.state.relatedSessionURL : undefined,
       })
       if (selection.kind === 'job') {
         const page = await this.client.runs(project.id, signal, { jobUID: selection.uid })
@@ -648,18 +654,55 @@ export class CronController {
       )
     })
     if (!current()) return
+    const issueRead = this.client.issue(project.id, issueUID, signal)
+    const related = this.#readRelatedSession(project, issueUID, issueRead, signal, current)
     try {
-      const issue = await this.client.issue(project.id, issueUID, signal)
+      const issue = await issueRead
       if (current())
         this.#set({ peek: { status: issue.comments.length ? 'ready' : 'empty', issue } })
+    } catch (error) {
+      if (current()) {
+        if (isAuthenticationRequiredError(error)) this.#unauthenticated()
+        else this.#set({ peek: { status: 'unreadable' } })
+      }
+    }
+    await related
+  }
+  // Optional AgentsView link: read only after the serving daemon opts in, and
+  // never let its absence or failure affect ordinary cron reads.
+  async #readRelatedSession(
+    project: CronProject,
+    issueUID: string,
+    issueRead: Promise<ShowIssueResponseBody>,
+    signal: AbortSignal,
+    current: () => boolean,
+  ): Promise<void> {
+    let url: string | undefined
+    try {
+      const { agentsviewEnabled } = await this.client.capabilities(project.id, signal)
+      if (!current()) return
+      if (agentsviewEnabled) {
+        // A moved issue keeps its UID; read its history where it lives now.
+        // The peek reports issue-read failures, including authentication.
+        const issue = await issueRead.catch(() => undefined)
+        if (!current()) return
+        const issueProject = this.#intent?.projects.find(
+          (candidate) => candidate.id === issue?.issue.project_id,
+        )
+        if (issueProject) {
+          const history = await this.client.issueHistory(issueProject.uid, issueUID, signal)
+          if (!current()) return
+          url = relatedCronTranscriptURL(true, [project.uid, issueProject.uid], issueUID, history)
+        }
+      }
     } catch (error) {
       if (!current()) return
       if (isAuthenticationRequiredError(error)) {
         this.#unauthenticated()
         return
       }
-      this.#set({ peek: { status: 'unreadable' } })
     }
+    this.#set({ relatedSessionURL: url })
   }
   #cancelPeek() {
     this.#peek?.abort.abort()

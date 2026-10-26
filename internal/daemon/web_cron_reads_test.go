@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-// The web Cron page reads summaries, definitions and runs; the capability
-// probe stays outside local browser authority. TestWebLocalCronDefinitionWrites
-// covers the definition writes.
+// The web Cron page reads capabilities, summaries, definitions and runs.
+// TestWebLocalCronDefinitionWrites covers the definition writes.
 func TestWebLocalCronReads(t *testing.T) {
-	for _, tail := range []string{"summary", "jobs", "runs", "runs/run-uid", "workflows"} {
+	for _, tail := range []string{"capabilities", "summary", "jobs", "runs", "runs/run-uid", "workflows"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			r := httptest.NewRequest(method, "/api/v1/projects/1/cron/"+tail, nil)
 			if got := webLocalSPARequestAllowed(r); got != (method == http.MethodGet) {
@@ -19,7 +18,7 @@ func TestWebLocalCronReads(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		"/api/v1/projects/1/cron/capabilities",
+		"/api/v1/projects/1/cron/capabilities/extra",
 		"/api/v1/projects/no/cron/runs",
 		"/api/v1/projects/1/cron/runs/id/observe",
 		"/api/v1/projects/1/cron/summary/extra",

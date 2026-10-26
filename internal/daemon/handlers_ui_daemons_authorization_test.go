@@ -822,17 +822,17 @@ func TestWebDaemonCronReadsKeepTargetCredentialsPinned(t *testing.T) {
 	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true})
 	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
 	require.NoError(t, err)
-	for _, path := range []string{"summary", "jobs", "jobs/job-uid", "workflows", "workflows/workflow-uid", "runs", "runs/run-uid"} {
+	for _, path := range []string{"capabilities", "summary", "jobs", "jobs/job-uid", "workflows", "workflows/workflow-uid", "runs", "runs/run-uid"} {
 		response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/projects/1/cron/"+path, nil, "")
 		assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
 	}
-	assert.Equal(t, 7, calls)
+	assert.Equal(t, 8, calls)
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		response := authorizedGatewayRequest(t, handler, manager, issued, method, "/api/v1/projects/1/cron/runs/run-uid", strings.NewReader(`{}`), "")
 		assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	}
-	assert.Equal(t, 7, calls)
+	assert.Equal(t, 8, calls)
 }
 
 func TestWebDaemonCronDefinitionWriteAuthority(t *testing.T) {

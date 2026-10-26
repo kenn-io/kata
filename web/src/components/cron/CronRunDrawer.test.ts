@@ -61,3 +61,37 @@ test('newest comment compares exact instants rather than fractional timestamp te
   expect(screen.getByText('Latest fractional body')).toBeTruthy()
   expect(screen.queryByText('Earlier fractional body')).toBeNull()
 })
+
+test('AgentsViewCron action opens the exact related issue session locator', () => {
+  const locator = 'https://AgentsView.Example/Base%2Fpath/sessions/Codex:Session%3A42'
+  render(CronRunDrawer, {
+    run: run,
+    peek: {
+      status: 'empty',
+      issue: { issue: { uid: 'issue', title: 'Readable issue' }, comments: [] } as never,
+    },
+    relatedSessionURL: locator,
+    onOpenIssue: vi.fn(),
+    onOpenJob: vi.fn(),
+  })
+  const link = screen.getByRole('link', { name: 'Open in AgentsView' })
+  expect(link.getAttribute('href')).toBe(locator)
+  expect(link.getAttribute('target')).toBe('_blank')
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  expect(screen.getByText('Related issue session')).toBeTruthy()
+  expect(screen.getByRole('button', { name: /Readable issue/ })).toBeTruthy()
+})
+
+test('AgentsViewCron action is absent without a locator', () => {
+  render(CronRunDrawer, {
+    run: run,
+    peek: {
+      status: 'empty',
+      issue: { issue: { uid: 'issue', title: 'Readable issue' }, comments: [] } as never,
+    },
+    onOpenIssue: vi.fn(),
+    onOpenJob: vi.fn(),
+  })
+  expect(screen.queryByRole('link', { name: 'Open in AgentsView' })).toBeNull()
+  expect(screen.queryByText('Related issue session')).toBeNull()
+})

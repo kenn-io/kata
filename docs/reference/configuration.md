@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-24
+last_edited: 2026-10-25
 ---
 
 # Configuration
@@ -854,6 +854,25 @@ This setting changes only DB-backed token authority. The identity-mode
 bootstrap token, browser sessions, trusted-proxy principals, insecure read-only
 requests, and unauthenticated private-network requests still cannot administer
 connectors.
+
+## AgentsView links for cron runs
+
+To let the web Cron page link a run to the AgentsView session that closed its
+issue, enable this in the **serving daemon's** `<KATA_HOME>/config.toml` and
+restart the daemon:
+
+```toml
+[agentsview]
+enabled = true
+```
+
+It is off by default. The daemon reports it as `agentsview_enabled` on
+`GET /api/v1/projects/{project_id}/cron/capabilities`. The setting holds no URL
+or credential, and Kata never calls AgentsView. Links come from transcripts
+already recorded at close time, so a client's
+[`[close.transcript]`](#closing-session-transcripts) setting decides what gets
+recorded, but never enables this daemon setting. See
+[open a related AgentsView session](cron.md#open-a-related-agentsview-session).
 
 ## Close throttle
 

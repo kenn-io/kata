@@ -47,6 +47,28 @@ Select the issue link to open the full discussion. The drawer shows when a run
 has no issue or its issue cannot be read. Use **Load more** to
 read older run history and **Refresh** to reload current evidence.
 
+### Open a related AgentsView session
+
+When the serving daemon sets [`[agentsview] enabled = true`](configuration.md#agentsview-links-for-cron-runs),
+a run drawer can show **Open in AgentsView** next to **Related issue session**.
+The link is the `transcript.url` recorded when the run's issue was closed with
+[transcript attachment](configuration.md#closing-session-transcripts). It shows
+the session that closed the issue, which is related context: it does not prove
+that session executed this run.
+
+The drawer reads the daemon's cron capabilities and, only when they report
+`agentsview_enabled: true`, that issue's newest 500 history events from the
+project the issue is in now. It uses the run's own issue's `issue.closed` event,
+recorded in the run's project or, after a move, the issue's current project,
+with the greatest event ID whose URL is an absolute HTTP(S) URL with a host and no credentials, query,
+fragment, whitespace, control characters, or backslashes. The link opens in a
+new tab without a referrer. Kata makes no AgentsView request.
+
+With the setting absent or false, or on a daemon that predates it, the drawer
+reads no history for this and shows no action. Disabling the setting removes no
+recorded transcripts; enabling it again shows them. A missing or failed optional
+read leaves the rest of the drawer unchanged.
+
 ## Edit cron in the web UI
 
 Writable browser sessions can create and edit jobs and workflows on the Cron
@@ -479,8 +501,10 @@ checkout. Kata stores the definitions and run evidence.
 
 ## Capabilities
 
-`kata cron capabilities --json` reads the project's UID and advertised
-`event_features` without changing state. The corresponding GET is
+`kata cron capabilities --json` reads the project's UID, advertised
+`event_features`, and `agentsview_enabled` without changing state.
+`agentsview_enabled` reports the serving daemon's
+[`[agentsview]` setting](configuration.md#agentsview-links-for-cron-runs). The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
 `X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
 definitions, run observations, and native recurring child delivery. Missing,

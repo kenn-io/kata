@@ -69,6 +69,9 @@ const (
 	daemonRestartProcessWaitTimeout = daemonShutdownDrainTimeout + 5*time.Second
 )
 
+// newDaemonServer lets startup tests observe the configuration the daemon serves.
+var newDaemonServer = daemon.NewServer
+
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
 }
@@ -1514,12 +1517,13 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
-	srv := daemon.NewServer(daemon.ServerConfig{
+	srv := newDaemonServer(daemon.ServerConfig{
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,
 		RootSigning:               rootSigning,
 		DefaultTimezone:           dcfg.Timezone,
+		AgentsViewEnabled:         dcfg.AgentsView.Enabled,
 		StartedAt:                 time.Now().UTC(),
 		Endpoint:                  &endpoint,
 		Hooks:                     disp,

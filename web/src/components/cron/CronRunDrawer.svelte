@@ -7,11 +7,13 @@
   let {
     run,
     peek,
+    relatedSessionURL = undefined,
     onOpenIssue,
     onOpenJob,
   }: {
     run: CronRun
     peek: CronPeek
+    relatedSessionURL?: string | undefined
     onOpenIssue: (uid: string) => void
     onOpenJob: (uid: string) => void
   } = $props()
@@ -71,6 +73,10 @@
           ><p class="comment-body">{comment.body}</p></CommentCard
         >{:else}<p>No comments</p>{/if}
     {/if}
+    {#if relatedSessionURL}<p class="related-session">
+        <span>Related issue session</span>
+        <a href={relatedSessionURL} target="_blank" rel="noopener noreferrer">Open in AgentsView</a>
+      </p>{/if}
   </section>
 </div>
 
@@ -113,6 +119,15 @@
   }
   .peek {
     min-height: 160px;
+  }
+  .related-session {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    color: var(--text-muted);
+  }
+  .related-session a {
+    color: var(--accent-blue);
   }
   .comment-body {
     white-space: pre-wrap;

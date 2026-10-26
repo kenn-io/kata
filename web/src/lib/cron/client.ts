@@ -2,6 +2,10 @@ import { parseCronDocument, rawCronValue, type RawCronDocument } from './documen
 import { orvalFetch, rawApiFetch } from '../api/client'
 import { AuthenticationRequiredError } from '../auth/session'
 import type { CronRun, CronJob, CronWorkflow, CronSummary, ShowIssueResponseBody } from './types'
+import type { CronCapabilitiesResponseBody } from '../api/generated'
+import { createUISnapshotRequest } from '../state/snapshot'
+import { normalizeEvent } from '../kata/projection'
+import type { KataTaskEvent } from '../kata/types'
 export class CronReadError extends Error {
   constructor(readonly status: number) {
     super(status === 403 ? 'Project not readable' : 'Cron unavailable')
@@ -115,5 +119,37 @@ export class CronClient {
       if (!(error instanceof CronReadError && error.status === 404)) throw error
       return this.#get<ShowIssueResponseBody>('/api/v1/issues/' + encodeURIComponent(uid), signal)
     }
+  }
+  // Daemons predating the field omit agentsview_enabled, which means disabled.
+  async capabilities(project: number, signal: AbortSignal) {
+    const body = await this.read<Partial<CronCapabilitiesResponseBody>>(
+      project,
+      'cron/capabilities',
+      signal,
+    )
+    return { agentsviewEnabled: body.agentsview_enabled === true }
+  }
+  // The selected-issue snapshot carries that issue's newest 500 history events.
+  async issueHistory(
+    projectUID: string,
+    issueUID: string,
+    signal: AbortSignal,
+  ): Promise<readonly KataTaskEvent[]> {
+    const response = await createUISnapshotRequest()(
+      {
+        view: 'all-open',
+        projectUID,
+        selectedIssueUID: issueUID,
+        statuses: [],
+        owners: [],
+        labels: [],
+        relationships: [],
+        includeGraph: false,
+        includeHistory: true,
+      },
+      { signal, full: true },
+    )
+    if (response.status !== 200) throw new Error('Snapshot unavailable')
+    return (response.snapshot.selected?.history ?? []).map(normalizeEvent)
   }
 }

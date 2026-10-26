@@ -52,6 +52,8 @@ type DaemonConfig struct {
 	TUI TUIConfig `toml:"tui"`
 	// Close carries daemon-wide close-flow policy knobs.
 	Close CloseConfig `toml:"close"`
+	// AgentsView opts this serving daemon into AgentsView presentation.
+	AgentsView AgentsViewConfig `toml:"agentsview"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
 	// Web carries browser-listener and externally published origin settings.
@@ -309,6 +311,14 @@ type CatalogDaemonConfig struct {
 	// they select this daemon target.
 	TokenEnv      string `toml:"token_env"`
 	AllowInsecure bool   `toml:"allow_insecure"`
+}
+
+// AgentsViewConfig is the [agentsview] block of the serving daemon's
+// <KATA_HOME>/config.toml. Enabled lets clients offer recorded AgentsView
+// links beside cron runs; it carries no URL or credential and Kata never calls
+// AgentsView. The client-side [close.transcript] preference is separate.
+type AgentsViewConfig struct {
+	Enabled bool `toml:"enabled"`
 }
 
 // CloseConfig is the [close] block of <KATA_HOME>/config.toml.

@@ -564,7 +564,7 @@ func webLocalCronRequestAllowed(r *http.Request, parts []string) bool {
 		return false
 	}
 	switch parts[0] {
-	case "summary":
+	case "capabilities", "summary":
 		return len(parts) == 1
 	case "jobs", "runs", "workflows":
 		return len(parts) == 1 || parts[1] != ""
