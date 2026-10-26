@@ -66,7 +66,7 @@ func runPlanSubprocessFixture() {
 	case "list":
 		output(map[string]any{"issues": []any{}})
 	case "health":
-		output(map[string]any{"api_schema_version": "0.15.0"})
+		output(map[string]any{"api_schema_version": apiVersionPlanLayer})
 	case "status":
 		output(map[string]any{"actor": "actor"})
 	case "show":
@@ -145,7 +145,7 @@ func TestOmpPlanGeneratedFileParses(t *testing.T) {
 			} else {
 				generated, err := os.ReadFile(target) //nolint:gosec // G304: generated adapter is under t.TempDir.
 				require.NoError(t, err)
-				require.Contains(t, string(generated), `"minDaemonAPI":"0.15.0"`)
+				require.Contains(t, string(generated), `"minDaemonAPI":"`+apiVersionPlanLayer+`"`)
 			}
 			out, err := exec.Command(cmd.Path, "--check", target).CombinedOutput() //nolint:gosec // G204: runs Node's syntax check on a generated file under t.TempDir.
 			require.NoError(t, err, "%s", out)

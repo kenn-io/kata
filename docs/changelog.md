@@ -14,6 +14,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   reloads restore a missing ownership marker from a successful start without
   another attention write. Rerun `kata agent-hook install pi` to pick up the fix.
 
+- Bind omp workers to plan tasks with distinct teammates. Unfinished tasks return
+  to the lead with `needs-review` and an inbox notification; interrupted
+  hand-back completes when the plan next loads. The plan layer now requires
+  daemon API 0.18.0 or newer. See [omp plans](workflows/agents.md#kata-backed-omp-todo-plans).
+
 - Use Kata as omp's todo list with `kata agent-hook install omp --plan`. Plans
   persist as child issues with ownership and close evidence; see
   [Kata-backed omp todo plans](workflows/agents.md#kata-backed-omp-todo-plans).

@@ -303,11 +303,10 @@ kata agent-hook install omp --plan
 ```
 
 Restart omp after installing. This opt-in is available only at user scope, with
-omp 18.6.3 or newer and daemon API 0.15.0 or newer. It also installs the
-contract; ordinary installs keep omp's own todo list. The pi plan layer is not
-yet available. Native delegated-agent tracking is still forthcoming; plugin
-users who depend on it should wait before migrating. Installation rejects an enabled
-`kata@kata-plugin`, and Kata never changes omp's todo settings itself.
+omp 18.6.3 or newer and daemon API 0.18.0 or newer. It also installs the contract;
+ordinary installs keep omp's own todo list. The pi plan layer is not yet
+available. Installation rejects an enabled `kata@kata-plugin`, and Kata never
+changes omp's todo settings itself.
 
 Initialize a plan with an existing issue ref, `KATA_REF`, or a new automatic
 session parent. Explicit parents remain yours to close. Automatic parents close
@@ -328,6 +327,16 @@ The tool's `done` operation requires typed evidence, such as `test:<command>` or
 verification. Block unverified work with a reason. `/todo done` records the user's
 attestation as external evidence. Outside a Kata project, the tool keeps a
 session-local plan. Daemon or authorization failures never become local plans.
+
+When a spawned worker's name, issue ref or task text matches an available plan
+item, it receives that issue and its own teammate under the lead's actor. Every
+worker bash command receives its teammate and inbox environment; an unmatched
+worker has no assigned issue and does not inherit the lead's issue ref. Workers
+close their own issues with evidence. A worker that finishes, fails or aborts
+with its issue still open leaves a comment, adds `needs-review` and notifies the
+lead's inbox. The task returns to the lead without changing its todo status.
+If `/new` or `/resume` interrupts hand-back, it completes when the plan next
+loads or omp restarts.
 
 A different todo provider, an enabled released plugin, or an unavailable plugin
 inventory disables the native plan layer. If omp's built-in todo becomes enabled,

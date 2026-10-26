@@ -1,9 +1,23 @@
 // Host port of kata-plugin a1a1050; MIT notice is preserved in plan_core.js.
+const workers = new Map();
+
 function ompMarkers(ctx) {
   return {
     OMPCODE: "1",
     PI_SESSION_ID: ctx.sessionManager?.getSessionId?.() || "",
   };
+}
+
+function leadSessionKey(ctx) {
+  const file = ctx.sessionManager?.getSessionFile?.();
+  const id = ctx.sessionManager?.getSessionId?.();
+  const identity =
+    typeof file === "string" && file
+      ? `file:${sessionKey(file, ctx.cwd)}`
+      : typeof id === "string" && id
+        ? `id:${id}`
+        : "";
+  return identity ? createHash("sha256").update(identity).digest("hex") : "";
 }
 
 function kataPlanOmp(pi) {
@@ -62,11 +76,12 @@ function kataPlanOmp(pi) {
       ),
     );
   }
+  const assignments = new Map();
   function begin(ctx) {
     const started = ++epoch;
     const id = ctx.sessionManager?.getSessionId?.();
     const markers = ompMarkers(ctx);
-    const state = { ctx, id };
+    const state = { ctx, id, leadSessionKey: leadSessionKey(ctx) };
     // The session manager may change before the base attention handler finishes
     // and this layer receives the lifecycle event. Never recapture that id for
     // already-running work, even while its explicit epoch is still current.
@@ -84,8 +99,77 @@ function kataPlanOmp(pi) {
         },
         getSessionName: () => pi.getSessionName?.(),
         isMain: main,
+        beforeReconcile: async () => {
+          const core = state.core,
+            planWorkspace = core.plan.workspace || state.ctx.cwd;
+          if (!core.plan.parent || core.plan.local) return;
+          const running = state.ctx.getAsyncJobSnapshot?.()?.running || [];
+          for (const child of core.plan.tasks) {
+            const id = child.metadata?.["omp.subagent_id"];
+            const ownerSessionKey = child.metadata?.["omp.lead_session_key"];
+            const savedTerminal = child.metadata?.["omp.terminal_state"];
+            const durableTerminal =
+              savedTerminal &&
+              typeof savedTerminal === "object" &&
+              !Array.isArray(savedTerminal) &&
+              savedTerminal.id === id &&
+              savedTerminal.leadSessionKey === ownerSessionKey &&
+              savedTerminal.planParent === core.plan.parent &&
+              savedTerminal.ref === child.ref &&
+              ["completed", "failed", "aborted"].includes(
+                savedTerminal.state,
+              )
+                ? savedTerminal
+                : undefined;
+            const worker = [...workers.values()].find(
+              (w) => w.id === id && w.leadSessionKey === ownerSessionKey,
+            );
+            // A closed task is durable terminal evidence even if the old
+            // plugin stopped before it could persist the worker's event.
+            const closedIssue =
+              child.status === "completed" || child.status === "abandoned";
+            const samePlanTerminal =
+              durableTerminal ||
+              closedIssue ||
+              (worker?.terminalState &&
+                !worker.running &&
+                worker.planParent === core.plan.parent &&
+                worker.ref === child.ref);
+            if (
+              !id ||
+              !ownerSessionKey ||
+              (ownerSessionKey !== state.leadSessionKey && !samePlanTerminal)
+            )
+              continue;
+            if (
+              worker?.running ||
+              (!durableTerminal &&
+                running.some((job) => job.id === id || job.agentId === id))
+            )
+              continue;
+            const cwd =
+              durableTerminal?.workspace || worker?.workspace || planWorkspace;
+            await core.settleDelegate(child.ref, cwd, {
+              id,
+              state:
+                durableTerminal?.state || worker?.terminalState || "aborted",
+              lead:
+                durableTerminal?.leadTeammate ||
+                worker?.leadTeammate ||
+                process.env.KATA_TEAMMATE ||
+                "",
+              leadSessionKey: ownerSessionKey,
+            });
+            for (const [key, entry] of workers)
+              if (entry.id === id && entry.leadSessionKey === ownerSessionKey)
+                workers.delete(key);
+          }
+        },
         allowUI: state.live,
         delegatedRunning: () =>
+          [...workers.values()].some(
+            (w) => w.leadSessionKey === state.leadSessionKey && w.running,
+          ) ||
           (state.core.currentCtx?.getAsyncJobSnapshot?.()?.running || []).some(
             (job) => job.type === "task",
           ),
@@ -108,6 +192,196 @@ function kataPlanOmp(pi) {
       ? state
       : undefined;
   }
+  function self(ctx, sessionFile) {
+    const file =
+      sessionFile || ctx.sessionManager?.getSessionFile?.();
+    if (typeof file !== "string" || !file) return;
+    const matches = [...workers.values()].filter(
+      (entry) =>
+        typeof entry.sessionFile === "string" &&
+        sessionKey(entry.sessionFile, entry.workspace) ===
+          sessionKey(file, entry.workspace),
+    );
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return undefined;
+    return workers.get(sessionKey(file, ctx.cwd));
+  }
+  const ompRegistry = globalThis[Symbol.for("kata.omp.native.v1")]?.get(
+    pi.events,
+  );
+  if (ompRegistry?.workerInboxRecipients instanceof Map)
+    ompRegistry.workerInboxRecipients.set(
+      `${options.scope}:${options.workspace}`,
+      async (ctx, sessionFile) => {
+        const entry = self(ctx, sessionFile);
+        if (!entry) return null;
+        await entry.ready;
+        if (!entry.actor || !entry.teammate) return null;
+        return {
+          recipient: `${entry.actor}/${entry.teammate}`,
+          workspace: entry.workspace,
+        };
+      },
+    );
+  pi.events?.on?.("task:subagent:lifecycle", async (event) => {
+    const activeState = active();
+    if (!event?.id) return;
+    if (event.status === "started") {
+      if (!activeState || !main(activeState.ctx)) return;
+      if (!event.sessionFile) return;
+      const assignment = assignments.get(event.parentToolCallId);
+      const core = assignment ? assignment.core : activeState.core;
+      const planParent = assignment
+        ? assignment.planParent
+        : activeState.core.plan.parent;
+      const workspace = assignment
+        ? assignment.workspace
+        : activeState.core.plan.workspace || activeState.ctx.cwd;
+      const key = sessionKey(event.sessionFile, workspace);
+      const entry = {
+        id: event.id,
+        sessionFile: event.sessionFile,
+        workspace,
+        core,
+        planParent,
+        teammate: teammateFor(event.id),
+        leadSessionKey: assignment
+          ? assignment.leadSessionKey
+          : activeState.leadSessionKey,
+        leadTeammate: assignment
+          ? assignment.leadTeammate
+          : process.env.KATA_TEAMMATE || "",
+        running: true,
+      };
+      if (!entry.leadSessionKey) return;
+      workers.set(key, entry);
+      const index = event.index ?? 0,
+        label = assignment?.labels[index];
+      if (assignment) delete assignment.labels[index];
+      if (assignment && !assignment.labels.some(() => true))
+        assignments.delete(event.parentToolCallId);
+      entry.ready = core
+        .serial(async () => {
+          const cwd =
+            entry.workspace || core.plan.workspace || activeState.ctx.cwd;
+          entry.workspace = cwd;
+          const parent = assignment ? planParent : core.plan.parent;
+          const local = assignment ? assignment.planLocal : core.plan.local;
+          entry.actor = await core.effectiveActor(parent, cwd);
+          if (assignment && (!planParent || assignment.planLocal)) return;
+          if (!parent || local) return;
+          const tasks = assignment
+            ? assignment.planTasks
+            : (await core.load(cwd), core.plan.tasks);
+          const task = matchDelegation(
+            tasks,
+            [assignment?.texts[index], event.description].join("\n"),
+            {
+              label,
+              single: (assignment?.texts.length ?? 1) === 1,
+            },
+          );
+          if (!task) return;
+          entry.planParent = parent;
+          entry.ref = task.ref;
+          await core.delegate(task.ref, cwd, {
+            ...entry,
+            expectedStatus: task.status,
+          });
+        })
+        .catch((error) => {
+          entry.error = error.message;
+          activeState.core.debug(error);
+        });
+      await entry.ready;
+    } else if (["completed", "failed", "aborted"].includes(event.status)) {
+      // Resume changes the lead session ID before its session_start handler
+      // has rebound the plan. Retain worker terminal state during that gap so
+      // the resumed session's reconciliation can settle the assignment.
+      if (!current() || !armed || !main(context)) return;
+      const entry = event.sessionFile
+        ? self(context, event.sessionFile)
+        : [...workers.values()].find((worker) => worker.id === event.id);
+      if (!entry || entry.id !== event.id) return;
+      const key = [...workers.entries()].find(
+        ([, worker]) => worker === entry,
+      )?.[0];
+      if (!key) return;
+      entry.terminalState ||= event.status;
+      await entry.ready;
+      entry.running = false;
+      try {
+        if (entry.ref && entry.core) {
+          const cwd =
+            entry.workspace ||
+            entry.core.plan.workspace ||
+            entry.core.currentCtx?.cwd ||
+            context.cwd;
+          const recorded = await entry.core.recordDelegateTerminal(
+            entry.ref,
+            cwd,
+            {
+              id: entry.id,
+              state: entry.terminalState,
+              leadTeammate: entry.leadTeammate,
+              leadSessionKey: entry.leadSessionKey,
+              planParent: entry.planParent,
+              workspace: cwd,
+              durable: true,
+            },
+          );
+          if (!recorded)
+            throw new Error(
+              `Kata task ${entry.ref} no longer has delegate ${entry.id}`,
+            );
+        }
+        const settlementState = active();
+        if (!settlementState) return;
+        if (
+          settlementState?.core.plan.parent &&
+          settlementState.core.plan.parent !== entry.planParent
+        )
+          return;
+        const samePlan =
+          settlementState?.core.plan.parent === entry.planParent &&
+          settlementState.core.plan.tasks.some(
+            (task) => task.ref === entry.ref,
+          );
+        if (entry.ref && samePlan)
+          await settlementState.core.serial(async () => {
+            const cwd =
+              entry.workspace ||
+              settlementState.core.plan.workspace ||
+              settlementState.ctx.cwd;
+            await settlementState.core.settleDelegate(entry.ref, cwd, {
+              id: entry.id,
+              state: entry.terminalState,
+              lead: entry.leadTeammate,
+              leadSessionKey: entry.leadSessionKey,
+            });
+            await settlementState.core.load(cwd);
+            settlementState.core.refresh(settlementState.ctx);
+          });
+        else if (entry.ref && entry.core) {
+          const cwd =
+            entry.workspace ||
+            entry.core.plan.workspace ||
+            entry.core.currentCtx?.cwd ||
+            context.cwd;
+          await entry.core.settleDelegate(entry.ref, cwd, {
+            id: entry.id,
+            state: entry.terminalState,
+            lead: entry.leadTeammate,
+            leadSessionKey: entry.leadSessionKey,
+            durable: true,
+          });
+        }
+        workers.delete(key);
+      } catch (error) {
+        entry.core?.debug(error);
+      }
+    }
+  });
   const z = pi.zod;
   pi.registerTool({
     name: "todo",
@@ -256,10 +530,51 @@ function kataPlanOmp(pi) {
     ctx.ui?.notify?.(text, "info");
     return { handled: true };
   });
-  pi.on("tool_call", (_event, ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
+    if (!main(ctx)) {
+      const entry = self(ctx);
+      if (!entry || event.toolName !== "bash") return;
+      await entry.ready;
+      const inbox = entry.actor
+        ? `export KATA_INBOX_USER=${quote(`${entry.actor}/${entry.teammate}`)};`
+        : "unset KATA_INBOX_USER;";
+      return {
+        input: {
+          ...event.input,
+          command: `export KATA_TEAMMATE=${quote(entry.teammate)}; ${inbox} ${
+            entry.ref && !entry.error
+              ? `export KATA_REF=${quote(entry.ref)};`
+              : "unset KATA_REF;"
+          }\n${event.input.command}`,
+        },
+      };
+    }
     const state = active(ctx);
     if (!state) return;
-    if (main(ctx)) state.core.currentCtx = ctx;
+    state.core.currentCtx = ctx;
+    if (event.toolName === "task") {
+      await state.core.serial(() => {});
+      if (!state.live() || active(ctx) !== state) return;
+      const items = Array.isArray(event.input?.tasks)
+        ? event.input.tasks
+        : [event.input];
+      const plan = state.core.plan;
+      assignments.set(event.toolCallId, {
+        labels: items.map((item) => item?.name || ""),
+        texts: items.map((item) =>
+          [item?.task, item?.description]
+            .filter((v) => typeof v === "string")
+            .join("\n"),
+        ),
+        core: state.core,
+        planParent: plan.parent,
+        workspace: plan.workspace || ctx.cwd,
+        planLocal: plan.local,
+        planTasks: plan.tasks.map((task) => ({ ...task })),
+        leadSessionKey: state.leadSessionKey,
+        leadTeammate: process.env.KATA_TEAMMATE || "",
+      });
+    }
   });
   pi.on("tool_result", (event, ctx) => {
     const state = active(ctx);
@@ -277,6 +592,24 @@ function kataPlanOmp(pi) {
       return { continue: true, additionalContext };
   });
   pi.on("before_agent_start", async (event, ctx) => {
+    if (!main(ctx)) {
+      const entry = self(ctx);
+      if (!entry) return;
+      await entry.ready;
+      const binding =
+        entry.ref && !entry.error
+          ? `Assigned Kata issue: ${entry.ref}. Close it yourself with evidence:\n${quote(options.executable)} --workspace ${quote(entry.workspace || ctx.cwd)} --project ${quote(entry.ref.split("#")[0])} --teammate ${quote(entry.teammate)} close ${quote(entry.ref)} --done --message '<what changed and how verified>' --evidence 'test:<command>'\nIf unfinished, leave it open and say what remains.`
+          : `No Kata task was assigned.${entry.error ? " " + entry.error : ""}`;
+      const prompt = Array.isArray(event.systemPrompt)
+        ? event.systemPrompt
+        : [event.systemPrompt || ""];
+      return {
+        systemPrompt: [
+          ...prompt.filter((p) => !/^<kata_binding>/.test(p)),
+          `<kata_binding>\n${binding}\n</kata_binding>`,
+        ],
+      };
+    }
     const state = active(ctx);
     if (!state) return;
     if (main(ctx) && state.core.currentId !== state.id)

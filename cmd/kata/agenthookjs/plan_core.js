@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-// Port of kata-plugin a1a1050: canonical core, excluding contract cache and delegation wiring.
+// Port of kata-plugin a1a1050: canonical core, excluding contract cache.
 
 // Host adapters own their event, schema and identity APIs.
 
@@ -553,15 +553,21 @@ function createKataCore(host, options) {
     }
   }
 
-  async function kata(args, cwd, timeout = 120_000, workspace = true) {
-    checkCancellation();
+  async function kata(
+    args,
+    cwd,
+    timeout = 120_000,
+    workspace = true,
+    { durable = false } = {},
+  ) {
+    if (!durable) checkCancellation();
     const routing = [];
     if (sessionTeammate !== undefined && args[0] !== "agent-contract-hook")
       routing.push("--teammate", sessionTeammate);
     if (workspace) routing.push("--workspace", path.resolve(cwd));
-    if (host.current?.() === false)
+    if (!durable && host.current?.() === false)
       throw new Error("Kata plan generation inactive");
-    checkCancellation();
+    if (!durable) checkCancellation();
     if (
       [
         "create",
@@ -576,8 +582,8 @@ function createKataCore(host, options) {
         "unassign",
       ].includes(args[0])
     )
-      await checkDaemonFloor(cwd);
-    if (host.current?.() === false)
+      await checkDaemonFloor(cwd, { durable });
+    if (!durable && host.current?.() === false)
       throw new Error("Kata plan generation inactive");
     const separator = args.indexOf("--");
     const invocation =
@@ -592,10 +598,10 @@ function createKataCore(host, options) {
     const result = await host.exec(
       options.executable,
       invocation,
-      { cwd, timeout, signal: operationSignal },
+      { cwd, timeout, signal: durable ? undefined : operationSignal },
     );
-    checkCancellation();
-    if (host.current?.() === false)
+    if (!durable) checkCancellation();
+    if (!durable && host.current?.() === false)
       throw new Error("Kata plan generation inactive");
     if (result.code !== 0 || result.killed) {
       const detail = (result.stderr || result.stdout || "")
@@ -641,10 +647,12 @@ function createKataCore(host, options) {
     }
     return actorValue;
   }
-  async function checkDaemonFloor(cwd) {
+  async function checkDaemonFloor(cwd, { durable = false } = {}) {
     const key = selection(cwd);
     if (floorSelection === key) return;
-    const health = JSON.parse(await kata(["health", "--json"], cwd));
+    const health = JSON.parse(
+      await kata(["health", "--json"], cwd, 120_000, true, { durable }),
+    );
     const version = health.api_schema_version;
     const parse = (value) =>
       /^\d+\.\d+\.\d+$/.test(value || "") ? value.split(".").map(Number) : [];
@@ -802,12 +810,11 @@ function createKataCore(host, options) {
       return;
     }
     try {
-      const shown = JSON.parse(
+      const { issue, children = [] } = JSON.parse(
         await kata(["show", plan.parent, "--json"], cwd),
       );
-      const children = shown.children ?? [];
       if (
-        !shown.issue ||
+        !issue ||
         !Array.isArray(children) ||
         children.some(
           (c) =>
@@ -841,6 +848,7 @@ function createKataCore(host, options) {
             content: c.title,
             phase: meta["todo.phase"],
             order: taskOrder(c),
+            metadata: meta,
             delegated:
               classifyTask(c, {
                 namespace,
@@ -1429,10 +1437,408 @@ function createKataCore(host, options) {
   // A delegated task is the subagent's; it never occupies the lead's slot.
   const leads = (t) => !t.delegated && !host.isDelegated?.(t.ref);
 
-  // A delegate finished without closing its issue: ask the lead to review it.
-  // A plan task returns to the lead (pending, the lead's teammate) only while
-  // it still carries the delegate's teammate; the subagent id goes last, so a
-  // partial failure leaves it marked delegated rather than free and foreign.
+  async function delegate(
+    ref,
+    cwd,
+    { id, teammate, leadSessionKey, expectedStatus },
+  ) {
+    let decision = await owned(ref, cwd, true);
+    const status = issueTaskStatus(decision);
+    if (status === "blocked" || (expectedStatus && status !== expectedStatus))
+      throw new Error(
+        `Kata task ${ref} changed from ${expectedStatus || "available"} to ${status}; no worker assignment was written.`,
+      );
+    if (decision.metadata?.["omp.subagent_id"] !== undefined)
+      throw new Error(
+        `Kata task ${ref} already has a worker assignment; no worker assignment was written.`,
+      );
+    const pendingTerminal = decision.metadata?.["omp.terminal_state"];
+    if (pendingTerminal !== undefined) {
+      await clearDelegateTerminal(ref, cwd, {
+        id: pendingTerminal?.id,
+        leadSessionKey: pendingTerminal?.leadSessionKey,
+      });
+      decision = JSON.parse(await kata(["show", ref, "--json"], cwd)).issue;
+      if (decision.metadata?.["omp.terminal_state"] !== undefined)
+        throw new Error(
+          `Kata task ${ref} has pending delegate hand-back state; no new worker was assigned.`,
+        );
+    }
+    if (typeof decision.owner !== "string" || !decision.owner)
+      throw new Error(`Kata task ${ref} has no assignment actor.`);
+    decision = await work(
+      ref,
+      "omp.lead_actor",
+      decision.owner,
+      cwd,
+      decision,
+    );
+    if (typeof leadSessionKey === "string" && leadSessionKey)
+      decision = await work(
+        ref,
+        "omp.lead_session_key",
+        leadSessionKey,
+        cwd,
+        decision,
+      );
+    const marked = await work(ref, "omp.subagent_id", id, cwd, decision);
+    await kata(
+      [
+        "meta",
+        "set",
+        ref,
+        "teammate",
+        teammate,
+        "--if-match",
+        String(marked.revision),
+      ],
+      cwd,
+    );
+  }
+
+  async function recordDelegateTerminal(
+    ref,
+    cwd,
+    {
+      id,
+      state,
+      leadTeammate,
+      leadSessionKey,
+      planParent,
+      workspace,
+      durable = false,
+    },
+  ) {
+    if (
+      !id ||
+      !leadSessionKey ||
+      !["completed", "failed", "aborted"].includes(state)
+    )
+      throw new Error("Invalid terminal worker record");
+    // Persist terminal assignment metadata even after its lead generation is
+    // replaced. The guarded writes below verify the exact worker assignment
+    // and issue revision before they can survive that lifecycle boundary.
+    const terminalKata = (args) =>
+      kata(args, cwd, 120_000, true, { durable });
+    const decision = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    if (
+      decision.metadata?.["omp.subagent_id"] !== id ||
+      decision.metadata?.["omp.lead_session_key"] !== leadSessionKey
+    )
+      return false;
+    if (decision.status === "closed") return true;
+    const assignmentActor = decision.metadata?.["omp.lead_actor"];
+    if (
+      typeof assignmentActor !== "string" ||
+      !assignmentActor ||
+      decision.owner !== assignmentActor
+    )
+      return false;
+    const status = JSON.parse(
+      await terminalKata(["status", ref, "--json"]),
+    );
+    if (status.actor !== assignmentActor) return false;
+    const terminal = {
+      id,
+      state,
+      leadTeammate: leadTeammate || "",
+      leadSessionKey,
+      planParent: planParent || plan.parent,
+      ref,
+      workspace: path.resolve(workspace || cwd),
+    };
+    const terminalKey = "omp.terminal_state";
+    const args = ["meta", "set", ref, terminalKey, JSON.stringify(terminal)];
+    args.push("--if-match", String(decision.revision));
+    if (Object.hasOwn(decision.metadata ?? {}, terminalKey))
+      args.push(
+        "--if-value",
+        JSON.stringify(decision.metadata[terminalKey]),
+        "--json-value",
+      );
+    else args.push("--if-absent", "--json-value");
+    await terminalKata(args);
+    const saved = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    const confirmed = saved.metadata?.[terminalKey];
+    if (
+      confirmed?.id !== id ||
+      confirmed?.leadSessionKey !== leadSessionKey ||
+      confirmed?.state !== state ||
+      confirmed?.planParent !== terminal.planParent ||
+      confirmed?.ref !== ref ||
+      confirmed?.workspace !== terminal.workspace
+    )
+      throw new Error(`Kata task ${ref} did not retain its terminal worker state`);
+    return true;
+  }
+
+  async function clearDelegateTerminal(
+    ref,
+    cwd,
+    { id, leadSessionKey, durable = false },
+  ) {
+    const terminalKata = (args) =>
+      kata(args, cwd, 120_000, true, { durable });
+    const issue = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    const terminal = issue.metadata?.["omp.terminal_state"];
+    if (
+      terminal?.id !== id ||
+      terminal?.leadSessionKey !== leadSessionKey
+    )
+      return;
+    await terminalKata(
+      [
+        "meta",
+        "unset",
+        ref,
+        "omp.terminal_state",
+        "--if-match",
+        String(issue.revision),
+        "--if-value",
+        JSON.stringify(terminal),
+        "--json-value",
+      ],
+      cwd,
+    );
+  }
+
+  async function clearDelegateActor(
+    ref,
+    cwd,
+    { actor, durable = false },
+  ) {
+    if (typeof actor !== "string" || !actor) return;
+    const terminalKata = (args) =>
+      kata(args, cwd, 120_000, true, { durable });
+    const issue = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    if (
+      issue.owner !== actor ||
+      issue.metadata?.["omp.lead_actor"] !== actor ||
+      issue.metadata?.["omp.subagent_id"] !== undefined ||
+      issue.metadata?.["omp.terminal_state"] !== undefined
+    )
+      return;
+    await terminalKata(
+      [
+        "meta",
+        "unset",
+        ref,
+        "omp.lead_actor",
+        "--if-match",
+        String(issue.revision),
+        "--if-value",
+        actor,
+      ],
+      cwd,
+    );
+  }
+
+  // Clear the durable marker last so a partial hand-back is retried on reconcile.
+  async function settleDelegate(
+    ref,
+    cwd,
+    { id, state, lead, leadSessionKey, durable = false },
+  ) {
+    const terminalKata = (args) =>
+      kata(args, cwd, 120_000, true, { durable });
+    const issue = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    if (issue.metadata?.["omp.subagent_id"] !== id) return;
+    if (
+      leadSessionKey &&
+      issue.metadata?.["omp.lead_session_key"] !== leadSessionKey
+    )
+      return;
+    if (issue.status === "closed") {
+      await terminalKata(
+        [
+          "meta",
+          "unset",
+          ref,
+          "omp.subagent_id",
+          "--if-value",
+          id,
+          "--if-match",
+          String(issue.revision),
+        ],
+        cwd,
+      );
+      await clearDelegateTerminal(ref, cwd, { id, leadSessionKey, durable });
+      await clearDelegateActor(ref, cwd, {
+        actor: issue.metadata?.["omp.lead_actor"],
+        durable,
+      });
+      return;
+    }
+    const assignmentActor = issue.metadata?.["omp.lead_actor"];
+    if (
+      typeof assignmentActor !== "string" ||
+      !assignmentActor ||
+      issue.owner !== assignmentActor
+    )
+      throw new Error(
+        `Kata task ${ref} changed owner; delegate hand-back was left unchanged.`,
+      );
+    const status = JSON.parse(
+      await terminalKata(["status", ref, "--json"]),
+    );
+    const actor = status.actor;
+    if (typeof actor !== "string" || !actor)
+      throw new Error("Kata effective actor unavailable");
+    if (actor !== assignmentActor)
+      throw new Error(
+        `Kata task ${ref} is no longer under the delegate's original actor; hand-back was left unchanged.`,
+      );
+    const workerTeammate = teammateFor(id);
+    const finalTeammate = lead || undefined;
+    const initialTeammate = issue.metadata?.teammate;
+    const assertSettlementIssue = (current, operation, expectedTeammate) => {
+      if (current.metadata?.["omp.subagent_id"] !== id) {
+        throw new Error(
+          `Kata task ${ref} lost delegate ${id} during ${operation}`,
+        );
+      }
+      if (
+        leadSessionKey &&
+        current.metadata?.["omp.lead_session_key"] !== leadSessionKey
+      )
+        throw new Error(
+          `Kata task ${ref} changed lead session during ${operation}`,
+        );
+      if (current.owner !== assignmentActor)
+        throw new Error(
+          `Kata task ${ref} changed owner during delegate ${operation}`,
+        );
+      if (current.metadata?.teammate !== expectedTeammate)
+        throw new Error(
+          `Kata task ${ref} delegate assignment changed during ${operation}`,
+        );
+    };
+    const mutationIssue = (
+      output,
+      previousRevision,
+      operation,
+      advancesRevision = false,
+    ) => {
+      const mutation = JSON.parse(output);
+      const current = mutation.issue;
+      const expectedRevision =
+        previousRevision + (advancesRevision && mutation.changed ? 1 : 0);
+      if (
+        !Number.isSafeInteger(current?.revision) ||
+        current.revision !== expectedRevision
+      )
+        throw new Error(`Kata task ${ref} changed during delegate ${operation}`);
+      assertSettlementIssue(current, operation, initialTeammate);
+      return current;
+    };
+
+    const comment = await terminalKata(
+      [
+        "comment",
+        ref,
+        "--idempotency-key",
+        `omp-settle:${ref}:${id}`,
+        "--body",
+        `Subagent ${id} stopped without closing its Kata issue. Review the work and supply evidence before closing.`,
+        "--json",
+      ],
+      cwd,
+    );
+    let current = mutationIssue(comment, issue.revision, "comment");
+    const label = await terminalKata(
+      ["label", "add", ref, "needs-review", "--json"],
+      cwd,
+    );
+    current = mutationIssue(label, current.revision, "review label");
+    const notification = await terminalKata(
+      [
+        "notify",
+        ref,
+        "--to",
+        lead ? `${actor}/${lead}` : actor,
+        "--message",
+        `Subagent ${id} ${state}; review the unfinished task.`,
+        "--json",
+      ],
+      cwd,
+    );
+    current = mutationIssue(
+      notification,
+      current.revision,
+      "notification",
+      true,
+    );
+
+    const latest = JSON.parse(
+      await terminalKata(["show", ref, "--json"]),
+    ).issue;
+    if (latest.revision !== current.revision)
+      throw new Error(`Kata task ${ref} changed after delegate notification`);
+    assertSettlementIssue(latest, "settlement", initialTeammate);
+
+    let revision = latest.revision;
+    if (latest.metadata?.teammate === workerTeammate) {
+      const assignment = await terminalKata(
+        [
+          "meta",
+          lead ? "set" : "unset",
+          ref,
+          "teammate",
+          ...(lead ? [lead] : []),
+          "--if-match",
+          String(revision),
+          "--if-value",
+          workerTeammate,
+          "--json",
+        ],
+        cwd,
+      );
+      current = JSON.parse(assignment).issue;
+      if (
+        current.revision !== revision + 1 ||
+        current.metadata?.teammate !== finalTeammate
+      )
+        throw new Error(
+          `Kata task ${ref} delegate assignment changed during hand-back`,
+        );
+      assertSettlementIssue(current, "hand-back", finalTeammate);
+      revision = current.revision;
+    }
+
+    const marker = await terminalKata(
+      [
+        "meta",
+        "unset",
+        ref,
+        "omp.subagent_id",
+        "--if-value",
+        id,
+        "--if-match",
+        String(revision),
+        "--json",
+      ],
+      cwd,
+    );
+    const cleared = JSON.parse(marker);
+    if (
+      cleared.changed &&
+      cleared.issue.metadata?.["omp.subagent_id"] !== undefined
+    )
+      throw new Error(`Kata task ${ref} did not clear delegate ${id}`);
+    await clearDelegateTerminal(ref, cwd, { id, leadSessionKey, durable });
+    await clearDelegateActor(ref, cwd, { actor: assignmentActor, durable });
+  }
+
   async function remove(task, change, cwd) {
     if (plan.local) {
       plan.tasks = plan.tasks.filter((t) => t !== task);
@@ -2322,6 +2728,9 @@ function createKataCore(host, options) {
     checkDaemonFloor,
     owned,
     work,
+    delegate,
+    recordDelegateTerminal,
+    settleDelegate,
     load,
     refresh,
     probe,

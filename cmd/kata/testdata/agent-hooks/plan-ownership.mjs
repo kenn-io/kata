@@ -1,10 +1,13 @@
+import assert from "node:assert/strict";
 import {
   expect,
   test,
   runTests,
   realFixture,
   coreApp,
+  loadCore,
 } from "./plan-test-utils.mjs";
+const { teammateFor } = await loadCore();
 const { cwd, run, kata, close, env } = await realFixture("actor-a", "worker-a");
 process.env.KATA_AUTHOR = "actor-a";
 process.env.KATA_TEAMMATE = "worker-a";
@@ -546,6 +549,88 @@ test("final status CAS refuses an owner change after attention succeeds", async 
   expect(raced).toBe(true);
   expect((await show(ref)).owner).toBe("actor-b");
   expect((await show(ref)).metadata["todo.status"]).toBe("pending");
+});
+// Settlement contracts live at the core boundary; the adapter fixture covers
+// terminal delivery and the lead identity passed to this helper.
+test("partial settlement retries without duplicating its comment", async () => {
+  const parent = await issue();
+  const ref = await issue(["todo.phase=Tasks", "todo.status=pending"], parent);
+  let failNotify = true;
+  const app = host(parent, (args) => {
+    if (args[0] === "notify" && failNotify) {
+      failNotify = false;
+      return { code: 1, stderr: "notification unavailable", stdout: "" };
+    }
+  });
+  const id = "retry";
+  await app.core.delegate(ref, cwd, { id, teammate: teammateFor(id) });
+  const settle = () =>
+    app.core.settleDelegate(ref, cwd, { id, state: "failed", lead: "" });
+  await assert.rejects(settle, /notification unavailable/);
+  expect((await show(ref)).metadata["omp.subagent_id"]).toBe(id);
+  await settle();
+  const view = await kata(["show", ref, "--json"]);
+  expect(view.issue.metadata["omp.subagent_id"]).toBeUndefined();
+  expect(view.issue.metadata.teammate).toBeUndefined();
+  expect(view.comments.filter((c) => c.body.includes(id)).length).toBe(1);
+  expect(view.labels.some((l) => (l.label ?? l) === "needs-review")).toBe(true);
+  const inbox = await kata(["inbox", "--for", "actor-a", "--json"]);
+  expect(inbox.requests.find((r) => r.ref.endsWith(ref)).message).toContain(
+    "Subagent retry failed",
+  );
+});
+test("settlement preserves reassigned teammate", async () => {
+  const parent = await issue();
+  const ref = await issue(["todo.phase=Tasks", "todo.status=pending"], parent);
+  const app = host(parent),
+    id = "reassigned";
+  await app.core.delegate(ref, cwd, { id, teammate: teammateFor(id) });
+  await kata(["assign", ref, "other-actor", "--json"]);
+  await set(ref, "teammate", "other-worker");
+  await app.core.settleDelegate(ref, cwd, {
+    id,
+    state: "failed",
+    lead: "worker-a",
+  });
+  const settled = await show(ref);
+  expect(settled.metadata.teammate).toBe("other-worker");
+  expect(settled.owner).toBe("other-actor");
+  expect(settled.metadata["omp.subagent_id"]).toBeUndefined();
+});
+test("closed delegate clears its marker without settlement writes", async () => {
+  const parent = await issue();
+  const ref = await issue(["todo.phase=Tasks", "todo.status=pending"], parent);
+  const app = host(parent),
+    id = "closed";
+  await app.core.delegate(ref, cwd, { id, teammate: teammateFor(id) });
+  await kata([
+    "close",
+    ref,
+    "--done",
+    "--message",
+    "Finished the delegated check and verified the expected output.",
+    "--evidence",
+    "test:fixture",
+    "--json",
+  ]);
+  const before = await kata(["show", ref, "--json"]);
+  const offset = app.calls.length;
+  await app.core.settleDelegate(ref, cwd, {
+    id,
+    state: "completed",
+    lead: "worker-a",
+  });
+  const after = await kata(["show", ref, "--json"]);
+  expect(after.issue.status).toBe("closed");
+  expect(after.issue.metadata["omp.subagent_id"]).toBeUndefined();
+  expect(after.issue.metadata.teammate).toBe(before.issue.metadata.teammate);
+  expect(after.comments).toEqual(before.comments);
+  expect(after.labels).toEqual(before.labels);
+  expect(
+    app.calls
+      .slice(offset)
+      .some((args) => ["comment", "label", "notify"].includes(args[0])),
+  ).toBe(false);
 });
 try {
   await runTests();

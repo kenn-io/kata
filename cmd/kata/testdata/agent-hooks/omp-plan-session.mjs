@@ -109,7 +109,7 @@ async function check(event, attentionDelay = false, sameID = false) {
       return;
     }
     if (args[0] === "health") {
-      ok({ api_schema_version: "0.15.0" });
+      ok({ api_schema_version: options.minDaemonAPI });
       return;
     }
     if (args[0] === "status") {

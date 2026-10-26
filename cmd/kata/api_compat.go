@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	// The plan layer uses metadata CAS and guarded, idempotent closes introduced
-	// with API 0.15.0.
-	apiVersionPlanLayer             = "0.15.0"
+	// Plan metadata CAS and guarded closes arrived in API 0.15.0; workers use
+	// teammate-attributed close and comment commands from API 0.18.0.
+	apiVersionPlanLayer             = "0.18.0"
 	apiVersionSearchStatus          = "0.20.0"
 	apiVersionListSort              = "0.21.0"
 	apiVersionDiscoveryPagination   = "0.27.0"
