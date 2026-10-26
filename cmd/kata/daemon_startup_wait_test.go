@@ -303,7 +303,7 @@ func TestDetachedStartFixture(t *testing.T) {
 	if mode == "owner-drain" {
 		dsn, err := config.KataDSN(t.Context())
 		require.NoError(t, err)
-		release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPath(nsDir, dsn))
+		release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPaths(nsDir, dsn))
 		require.NoError(t, err)
 		// The contract is about wall time: ownership outlasts the 5s ordinary readiness budget.
 		timer := time.AfterFunc(6*time.Second, release) //nolint:kennlint // The held duration itself is the behavior under test.

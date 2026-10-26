@@ -15,6 +15,8 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/telemetry"
 )
 
 func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
@@ -116,10 +118,68 @@ func TestStoreOwnerLockHelperProcess(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	dsn, err := config.KataDSN(t.Context())
 	require.NoError(t, err)
-	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPath(ns.DataDir, dsn))
+	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPaths(ns.DataDir, dsn))
 	require.NoError(t, err)
 	defer release()
 	_, err = os.Stdout.WriteString("owner-locked\n")
 	require.NoError(t, err)
 	_, _ = io.Copy(io.Discard, os.Stdin)
+}
+
+// Cutover renames the upgraded database onto the configured path, which turns
+// a symlink there into a regular file. The daemon that ran that cutover must
+// still own the path a competing daemon now resolves.
+func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+	target := filepath.Join(home, "kata.db")
+	source, err := sqlitestore.Open(t.Context(), target)
+	require.NoError(t, err)
+	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("KATA_DB", link)
+	// The external-root runner starts after storage opens, so cutover is done.
+	originalRun := runExternalRootRunner
+	started := make(chan struct{}, 1)
+	runExternalRootRunner = func(ctx context.Context, _ *rootbridge.Runner) error {
+		started <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { runExternalRootRunner = originalRun })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("daemon exited before serving: %v", err)
+	}
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	require.True(t, info.Mode().IsRegular(), "cutover must have replaced the symlink for this case to matter")
+
+	original := daemonOwnerLockWait
+	t.Cleanup(func() { daemonOwnerLockWait = original })
+	daemonOwnerLockWait = 200 * time.Millisecond
+	competitorCtx, competitorCancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer competitorCancel()
+	err = runDaemonWithListen(competitorCtx, "127.0.0.1:0", false, false)
+	require.ErrorContains(t, err, "another kata daemon owns this store")
 }

@@ -9,11 +9,11 @@ import (
 )
 
 func TestStoreOwnerLockedReportsHeldLock(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "kata.db.owner.lock")
-	require.False(t, daemonruntime.StoreOwnerLocked(path), "a missing lock file has no owner")
-	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), path)
+	paths := []string{filepath.Join(t.TempDir(), "kata.db.owner.lock")}
+	require.False(t, daemonruntime.StoreOwnerLocked(paths), "a missing lock file has no owner")
+	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), paths)
 	require.NoError(t, err)
-	require.True(t, daemonruntime.StoreOwnerLocked(path))
+	require.True(t, daemonruntime.StoreOwnerLocked(paths))
 	release()
-	require.False(t, daemonruntime.StoreOwnerLocked(path), "the probe must not keep the lock")
+	require.False(t, daemonruntime.StoreOwnerLocked(paths), "the probe must not keep the lock")
 }

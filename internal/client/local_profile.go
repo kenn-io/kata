@@ -198,8 +198,8 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	if err != nil {
 		return resolved, err
 	}
-	ownerLock := daemonruntime.StoreOwnerLockPath(resolved.LocalProfile.DataDir, profile.DSN)
-	running, err := autoStartWithEnvironment(ctx, resolved.LocalProfile.DataDir, ownerLock, env)
+	ownerLocks := daemonruntime.StoreOwnerLockPaths(resolved.LocalProfile.DataDir, profile.DSN)
+	running, err := autoStartWithEnvironment(ctx, resolved.LocalProfile.DataDir, ownerLocks, env)
 	if err != nil {
 		return resolved, err
 	}

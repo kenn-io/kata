@@ -393,20 +393,20 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
-	ownerLock := ""
+	var ownerLocks []string
 	if dsn, err := config.KataDSN(ctx); err == nil {
-		ownerLock = daemonruntime.StoreOwnerLockPath(dataDir, dsn)
+		ownerLocks = daemonruntime.StoreOwnerLockPaths(dataDir, dsn)
 	}
-	return autoStartWithMigration(ctx, dataDir, ownerLock, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"), true)
+	return autoStartWithMigration(ctx, dataDir, ownerLocks, append(os.Environ(), daemonruntime.AutoStartMarkerEnv+"=1"), true)
 }
 
 // Registered profiles require the current schema before startup and must not
 // consult migration state from the caller's unrelated default home.
-func autoStartWithEnvironment(ctx context.Context, dataDir, ownerLock string, env []string) (RunningDaemon, error) {
-	return autoStartWithMigration(ctx, dataDir, ownerLock, env, false)
+func autoStartWithEnvironment(ctx context.Context, dataDir string, ownerLocks, env []string) (RunningDaemon, error) {
+	return autoStartWithMigration(ctx, dataDir, ownerLocks, env, false)
 }
 
-func autoStartWithMigration(ctx context.Context, dataDir, ownerLock string, env []string, migrationAllowed bool) (RunningDaemon, error) {
+func autoStartWithMigration(ctx context.Context, dataDir string, ownerLocks, env []string, migrationAllowed bool) (RunningDaemon, error) {
 	exited := make(chan error, 1)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            []string{"daemon", "start", "--foreground"},
@@ -441,7 +441,7 @@ func autoStartWithMigration(ctx context.Context, dataDir, ownerLock string, env 
 	}
 	var running RunningDaemon
 	var unreachable error
-	err := waitForDaemonStartup(ctx, ownerLock, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
+	err := waitForDaemonStartup(ctx, ownerLocks, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
 		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err

@@ -19,22 +19,22 @@ const daemonChildExitGrace = 5 * time.Second
 // WaitForDaemonStartup waits for readiness, extending the ordinary startup
 // budget while SQLite still needs a cutover. If the child exits first, it
 // checks for a compatible daemon started concurrently: briefly, or for the
-// remaining budget while another daemon holds ownerLock (see
-// daemonruntime.StoreOwnerLockPath; empty skips that check). The detached
+// remaining budget while another daemon holds any of ownerLocks (see
+// daemonruntime.StoreOwnerLockPaths; none skips that check). The detached
 // child owns its lifetime: neither a readiness timeout nor cancellation kills it.
 func WaitForDaemonStartup(
-	ctx context.Context, ownerLock string, wait time.Duration, exited <-chan error,
+	ctx context.Context, ownerLocks []string, wait time.Duration, exited <-chan error,
 	ready func(context.Context) (bool, error),
 ) error {
-	return waitForDaemonStartup(ctx, ownerLock, wait, exited, ready, true)
+	return waitForDaemonStartup(ctx, ownerLocks, wait, exited, ready, true)
 }
 
 func waitForDaemonStartup(
-	ctx context.Context, ownerLock string, wait time.Duration, exited <-chan error,
+	ctx context.Context, ownerLocks []string, wait time.Duration, exited <-chan error,
 	ready func(context.Context) (bool, error), migrationAllowed bool,
 ) error {
 	return waitForDaemonStartupWithProbe(ctx, wait, exited, ready, migrationAllowed, sqliteCutoverLocked,
-		func(context.Context) bool { return ownerLock != "" && daemonruntime.StoreOwnerLocked(ownerLock) })
+		func(context.Context) bool { return daemonruntime.StoreOwnerLocked(ownerLocks) })
 }
 
 func waitForDaemonStartupWithProbe(
