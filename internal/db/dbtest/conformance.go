@@ -181,6 +181,9 @@ var storageScenarios = []scenario{
 	{name: "hub accepts known run actor", methods: []string{"ObserveCronRun", "IngestFederationEvents"}, run: checkHubAcceptsKnownRunActor},
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
+	{name: "spoke rejoin preserves hub embedding producer", methods: []string{"AdoptProjectIntoFederation", "CreateFederationEnrollment", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "LeaveFederationReplica", "PatchProjectMetadata", "PendingFederationPushEvents", "ProjectByID"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		return checkSpokeRejoinPreservesHubEmbeddingProducer(t, store, backend)
+	}},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},
 	{name: "independent run observations", methods: []string{"ObserveCronRun", "CronRun", "ListCronRuns", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkIndependentRunObservations},
 	{name: "cron definition export deleted filter", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkCronDefinitionExportDeletedFilter},

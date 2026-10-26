@@ -2552,6 +2552,25 @@ func (f FederationEmbeddingArtifactStatus) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationEmbeddingArtifactsBody struct {
+	Artifacts []EmbeddingArtifactResponse `json:"artifacts" validate:"required"`
+}
+
+func (f FederationEmbeddingArtifactsBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range f.Artifacts {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Artifacts[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type FederationEmbeddingStatus struct {
 	ArtifactLimit int64                               `json:"artifact_limit"`
 	Artifacts     []FederationEmbeddingArtifactStatus `json:"artifacts" validate:"required"`

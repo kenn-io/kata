@@ -46,9 +46,10 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	"getIssueLeaseStatus": {ID: "getIssueLeaseStatus", Mutation: true},
 	// Fenced despite its read policy: projectFederationBody can call
 	// RefreshProjectFederationBaseline, so this GET writes.
-	"getFederationProjectMetadata":  {ID: "getFederationProjectMetadata", Mutation: true},
-	"pollFederationProjectEvents":   {ID: "pollFederationProjectEvents"},
-	"ingestFederationProjectEvents": {ID: "ingestFederationProjectEvents", Mutation: true},
+	"getFederationProjectMetadata":    {ID: "getFederationProjectMetadata", Mutation: true},
+	"pollFederationProjectEvents":     {ID: "pollFederationProjectEvents"},
+	"getFederationEmbeddingArtifacts": {ID: "getFederationEmbeddingArtifacts"},
+	"ingestFederationProjectEvents":   {ID: "ingestFederationProjectEvents", Mutation: true},
 }
 
 // federationTransportOperation returns the transport-auth facts for

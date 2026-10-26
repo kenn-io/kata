@@ -239,6 +239,10 @@ type GetProjectFederationResponse = ProjectFederationBody
 
 type GetProjectFederationErrorResponse = ErrorEnvelope
 
+type GetFederationEmbeddingArtifactsResponse = FederationEmbeddingArtifactsBody
+
+type GetFederationEmbeddingArtifactsErrorResponse = ErrorEnvelope
+
 type EnableProjectFederationResponse = ProjectFederationBody
 
 type EnableProjectFederationErrorResponse = ErrorEnvelope
@@ -1003,6 +1007,13 @@ type GetProjectFederationResp struct {
 	StatusCode   int
 	JSON200      *GetProjectFederationResponse
 	Headers200   *GetProjectFederationResp200Headers
+}
+
+type GetFederationEmbeddingArtifactsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetFederationEmbeddingArtifactsResponse
 }
 
 type EnableProjectFederationResp200Headers struct {

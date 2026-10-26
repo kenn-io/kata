@@ -1,11 +1,16 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kata/internal/vector"
+	kitvec "go.kenn.io/kit/vector"
 )
 
 // SetShowClaimStatusRefreshTimeoutForTest shortens the hub refresh budget; call it before testenv.New so the restore runs after the daemon stops.
@@ -37,4 +42,24 @@ func FederationReplicaLeavePreparedForTest(store db.Storage, projectName string)
 	defer federationReplicaTransitions.mu.RUnlock()
 	transition, ok := federationReplicaTransitions.transitions[federationReplicaTransitionKey(store, projectName)]
 	return ok && len(transition.preparations) > 0
+}
+
+// SelectLocalProducerForTest runs producer selection for one project with the
+// given binding and recipe, delivering project events to onEvent.
+func SelectLocalProducerForTest(ctx context.Context, store db.Storage, project db.Project, binding db.FederationBinding, recipe embedding.ArtifactIdentity, onEvent func(db.Event)) (bool, error) {
+	r := NewReconciler(store, nil, nil, ReconcilerConfig{OnProjectEvent: func(e db.Event, _ activity.Admission) { onEvent(e) }})
+	return r.selectLocalProducer(ctx, project, binding, recipe)
+}
+
+// ProjectGenerationAllowedForTest runs the generation gate for one project.
+func ProjectGenerationAllowedForTest(ctx context.Context, store db.Storage, projectUID string, recipe embedding.ArtifactIdentity) (bool, error) {
+	return NewReconciler(store, nil, nil, ReconcilerConfig{}).projectGenerationAllowed(ctx, projectUID, recipe, false)
+}
+
+// ReconcileOnceForTest runs one reconcile pass with default batching.
+func ReconcileOnceForTest(ctx context.Context, store db.Storage, idx *vector.Index, emb interface {
+	EncodeFunc() kitvec.EncodeFunc
+	Generation() kitvec.Generation
+}) error {
+	return NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64}).reconcileOnce(ctx)
 }

@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"slices"
 	"strings"
@@ -18,8 +20,47 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	katauid "go.kenn.io/kata/internal/uid"
 )
+
+// federationEmbeddingArtifactBatch filters and caps artifacts in exporter
+// order. The exporter orders by project UID and digest; this route filters to
+// one project, so stopping at the first artifact that exceeds the byte limit
+// preserves the digest-ordered prefix without retaining the rest of the page.
+func federationEmbeddingArtifactBatch(
+	records iter.Seq2[db.ImportRecord, error],
+	currentHash map[string]string,
+	recipeFingerprint string,
+	maxBytes int,
+) ([]embedding.EmbeddingArtifact, error) {
+	batch := make([]embedding.EmbeddingArtifact, 0, 32)
+	total := 0
+	for record, err := range records {
+		if err != nil {
+			return nil, err
+		}
+		exported, ok := record.(*db.EmbeddingArtifactExport)
+		if !ok {
+			return nil, errors.New("unexpected embedding artifact export record")
+		}
+		artifact := exported.EmbeddingArtifact
+		if artifact.RecipeFingerprint != recipeFingerprint || artifact.InputHash != currentHash[artifact.IssueUID] ||
+			embedding.ValidateArtifact(artifact, "", "") != nil {
+			continue
+		}
+		raw, err := json.Marshal(artifact)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) > 0 && total+len(raw) > maxBytes {
+			break
+		}
+		total += len(raw)
+		batch = append(batch, artifact)
+	}
+	return batch, nil
+}
 
 func requireLegacyFederationEnrollmentAuthority(ctx context.Context) error {
 	principal, ok := PrincipalFromContext(ctx)
@@ -916,6 +957,67 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, federationFeatureError(err)
 		}
 		return &api.PollEventsResponse{EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures, Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID}}, nil
+	})
+
+	// getFederationEmbeddingArtifacts serves a direct spoke the hub's durable
+	// portable embedding artifacts. Only an artifact whose InputHash equals the
+	// hash of the hub's CURRENT title and body for its issue is served. That
+	// filters stale digests that pruning has not removed out of the response
+	// prefix. The database exporter orders a single-project batch by digest, and
+	// the route stops at the first matching artifact that would exceed
+	// MaxArtifactBatchBytes. The first artifact is always kept because one valid
+	// artifact is already bounded by MaxArtifactVectorBytes.
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "getFederationEmbeddingArtifacts",
+		Method:      "GET",
+		Path:        "/api/v1/projects/{project_id}/federation/embedding-artifacts",
+	}, func(ctx context.Context, in *api.FederationEmbeddingArtifactsRequest) (*api.FederationEmbeddingArtifactsResponse, error) {
+		var err error
+		var principal federationPrincipal
+		ctx, principal, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+			federationTransportOperation("getFederationEmbeddingArtifacts"))
+		if err != nil {
+			return nil, err
+		}
+		if err := rejectRelayCredentialOnLegacyEvents(principal); err != nil {
+			return nil, err
+		}
+		if in.ProjectID <= 0 {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
+		}
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		// Huma documents the 1..32 bound in the OpenAPI schema but does not
+		// reject a missing or oversized repeated query parameter, so enforce it.
+		if len(in.IssueUIDs) < 1 || len(in.IssueUIDs) > 32 {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "issue_uid must be repeated 1 to 32 times", "", nil)
+		}
+		if in.RecipeFingerprint == "" {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "recipe_fingerprint is required", "", nil)
+		}
+		exporter, ok := cfg.DB.(db.EmbeddingArtifactExporter)
+		if !ok {
+			return nil, internalAPIError(errors.New("storage cannot export embedding artifacts"))
+		}
+		issues, err := cfg.DB.IssuesByUIDs(ctx, in.IssueUIDs, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		currentHash := make(map[string]string, len(issues))
+		for issueUID, issue := range issues {
+			if issue.ProjectID == in.ProjectID {
+				currentHash[issueUID] = embedding.ArtifactInputHash(embedding.EmbedText(issue.Title, issue.Body))
+			}
+		}
+		batch, err := federationEmbeddingArtifactBatch(
+			exporter.ExportEmbeddingArtifacts(ctx, db.ExportFilter{ProjectID: &in.ProjectID}, in.IssueUIDs...),
+			currentHash, in.RecipeFingerprint, embedding.MaxArtifactBatchBytes,
+		)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		return &api.FederationEmbeddingArtifactsResponse{Body: api.FederationEmbeddingArtifactsBody{Artifacts: batch}}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{

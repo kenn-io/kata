@@ -259,6 +259,10 @@ type GetProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type GetFederationEmbeddingArtifactsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type EnableProjectFederationPath struct {
 	ProjectID int64 `json:"project_id"`
 }

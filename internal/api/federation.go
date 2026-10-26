@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 )
 
 // EnableProjectFederationRequest enables pull federation on one hub project.
@@ -463,6 +464,26 @@ type FederationPollEventsRequest struct {
 	Authorization string      `header:"Authorization"`
 	AfterID       int64       `query:"after_id,omitempty"`
 	Limit         OptionalInt `query:"limit,omitempty"`
+}
+
+// FederationEmbeddingArtifactsRequest asks a hub for the durable portable
+// embedding artifacts of up to 32 issues under one recipe fingerprint. It
+// carries its own bearer header because the route bypasses daemon admin auth.
+type FederationEmbeddingArtifactsRequest struct {
+	ProjectID         int64    `path:"project_id"`
+	Authorization     string   `header:"Authorization"`
+	IssueUIDs         []string `query:"issue_uid,explode" minItems:"1" maxItems:"32"`
+	RecipeFingerprint string   `query:"recipe_fingerprint" minLength:"1"`
+}
+
+// FederationEmbeddingArtifactsBody lists the artifacts served for one request.
+type FederationEmbeddingArtifactsBody struct {
+	Artifacts []embedding.EmbeddingArtifact `json:"artifacts"`
+}
+
+// FederationEmbeddingArtifactsResponse wraps FederationEmbeddingArtifactsBody.
+type FederationEmbeddingArtifactsResponse struct {
+	Body FederationEmbeddingArtifactsBody
 }
 
 // FederationIngestEventsRequest is the enrollment-authenticated push transport
