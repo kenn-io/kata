@@ -135,3 +135,30 @@ test('a linked issue that moved projects opens in its current project', async ()
   await fireEvent.click(screen.getByRole('button', { name: 'issue' }))
   expect(onOpenIssue).toHaveBeenLastCalledWith('p2', 'issue')
 })
+
+test.each([
+  { tab: 'jobs', field: 'jobsError', message: 'Jobs refresh unavailable' },
+  { tab: 'workflows', field: 'workflowsError', message: 'Workflows refresh unavailable' },
+  { tab: 'runs', field: 'historyError', message: 'History refresh unavailable' },
+] as const)('a failed $tab refresh is reported on the $tab tab', ({ tab, field, message }) => {
+  const state = emptyCronState()
+  state.projects = [
+    {
+      project: { id: 1, uid: 'p1', name: 'example-project' },
+      jobs: [],
+      runs: [],
+      workflows: [],
+      hasRecords: true,
+      [field]: message,
+    },
+  ]
+  render(CronPage, {
+    route: { ...defaultCronRoute(), tab },
+    state,
+    onNavigate: vi.fn(),
+    onLoadMore: vi.fn(),
+    onRefresh: vi.fn(),
+    onOpenIssue: vi.fn(),
+  })
+  expect(screen.getByText(`example-project: ${message}`)).toBeTruthy()
+})

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DetailDrawer, SegmentedControl, Button } from '@kenn-io/kit-ui'
-  import type { CronState } from '../../lib/cron/controller'
+  import type { CronProjectState, CronState } from '../../lib/cron/controller'
   import { mergedRuns } from '../../lib/cron/controller'
   import type {
     CronRouteState,
@@ -57,6 +57,13 @@
     state.projects.find((p) => p.project.id === state.peek.issue?.issue.project_id)?.project ??
       selectionProject,
   )
+  function tabError(project: CronProjectState) {
+    return route.tab === 'runs'
+      ? project.historyError
+      : route.tab === 'jobs'
+        ? project.jobsError
+        : project.workflowsError
+  }
   function select(selection: CronSelection | undefined) {
     onNavigate({ ...route, selection })
   }
@@ -128,10 +135,10 @@
         />{/if}
     </section>
   {/each}
+  {#each projects.filter((p) => tabError(p)) as project (project.project.uid)}<p role="status">
+      {project.project.name}: {tabError(project)}
+    </p>{/each}
   {#if route.tab === 'runs'}
-    {#each projects.filter((p) => p.historyError) as project (project.project.uid)}<p role="status">
-        {project.project.name}: {project.historyError}
-      </p>{/each}
     {#if projects.some((p) => p.nextBeforeUID)}<p>Loaded history · more runs available</p>{/if}
     {#each projects.filter((p) => p.nextBeforeUID) as project (project.project.uid)}<Button
         disabled={state.loading || (project.loadingMore ?? false)}

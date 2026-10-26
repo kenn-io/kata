@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import * as hegel from '@hegeldev/hegel'
 import * as gs from '@hegeldev/hegel/generators'
 import { CronController, mergedRuns } from './controller'
@@ -648,4 +648,150 @@ test('an authority change during a catalog load still aborts it', async () => {
   } finally {
     c.destroy()
   }
+})
+
+describe('overlapping events', () => {
+  const one = projects.slice(0, 1)
+  const base = { projects: one, daemonID: undefined, authorityGeneration: 1 }
+  const withRun = (uid = 'r') => ({
+    ...base,
+    route: { ...defaultCronRoute(), selection: { kind: 'run' as const, projectUID: 'p1', uid } },
+  })
+  function held<T>() {
+    const calls: { signal: AbortSignal; resolve: (value: T) => void }[] = []
+    const fn = (_project: number, _uid: string, signal: AbortSignal) =>
+      new Promise<T>((resolve) => calls.push({ signal, resolve }))
+    return { calls, fn }
+  }
+  const run = (uid: string, issueUID?: string) =>
+    ({ uid, created_at: '', summary: { version: 1 }, issue_uid: issueUID }) as CronRun
+
+  test('changed snapshots keep an open detail read and revalidate it once afterwards', async () => {
+    const api = client()
+    const detail = held<CronRun>()
+    api.run = vi.fn(detail.fn)
+    const c = new CronController(api)
+    try {
+      await c.load({ ...base, route: defaultCronRoute() })
+      const opened = c.select(withRun().route.selection)
+      expect(detail.calls).toHaveLength(1)
+      await Promise.all([c.sync(withRun(), false), c.sync(withRun(), false)])
+      expect(detail.calls[0]!.signal.aborted).toBe(false)
+      expect(detail.calls).toHaveLength(1)
+      detail.calls[0]!.resolve(run('r'))
+      await opened
+      expect(c.state.detail?.uid).toBe('r')
+      await vi.waitFor(() => expect(detail.calls).toHaveLength(2))
+      detail.calls[1]!.resolve(run('r'))
+      void c.sync(withRun(), false)
+      await vi.waitFor(() => expect(detail.calls).toHaveLength(3))
+      expect(c.state.detailLoading).toBe(false)
+    } finally {
+      c.destroy()
+    }
+  })
+
+  test('changed snapshots keep an open issue peek', async () => {
+    vi.useFakeTimers()
+    const api = client()
+    api.run = vi.fn(async () => run('r', 'issue'))
+    const peek = held<ShowIssueResponseBody>()
+    api.issue = vi.fn(peek.fn)
+    const c = new CronController(api)
+    try {
+      await c.load(withRun())
+      await vi.advanceTimersByTimeAsync(150)
+      expect(peek.calls).toHaveLength(1)
+      await c.sync(withRun(), false)
+      expect(peek.calls[0]!.signal.aborted).toBe(false)
+      peek.calls[0]!.resolve(issueWithComment('issue'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(c.state.peek.status).toBe('ready')
+    } finally {
+      c.destroy()
+      vi.useRealTimers()
+    }
+  })
+
+  test('a coalesced catalog refresh follows the latest drawer selection', async () => {
+    const api = client()
+    api.run = vi.fn(async (_project, uid) => run(uid))
+    let release!: () => void
+    api.summary.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ failed_runs_24h: 7, window_start: '', window_end: '' })
+        }),
+    )
+    const c = new CronController(api)
+    try {
+      const first = c.sync(withRun('a'), false)
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+      const queued = c.sync(withRun('a'), false)
+      await c.select(undefined)
+      release()
+      await Promise.all([first, queued])
+      expect(c.state.selected).toBeUndefined()
+      expect(c.state.detail).toBeUndefined()
+      await c.select({ kind: 'run', projectUID: 'p1', uid: 'b' })
+      expect(c.state.detail?.uid).toBe('b')
+    } finally {
+      c.destroy()
+    }
+  })
+
+  test('a failed job filter refresh never shows jobs from another filter', async () => {
+    const api = client()
+    const ran = { uid: 'job', name: 'Inspect workspace', last_run: run('r') } as never
+    api.jobs.mockResolvedValueOnce({ jobs: [ran] })
+    const c = new CronController(api)
+    try {
+      await c.load({ ...base, route: { ...defaultCronRoute(), tab: 'jobs' } })
+      expect(c.state.projects[0]?.jobs).toHaveLength(1)
+      api.jobs.mockRejectedValueOnce(new CronReadError(503))
+      await c.load({
+        ...base,
+        route: { ...defaultCronRoute(), tab: 'jobs', statuses: ['never_ran'] },
+      })
+      const row = c.state.projects[0]!
+      expect(row.jobs).toEqual([])
+      expect(row.jobsError).toBe('Cron unavailable')
+      expect(row.error).toBeUndefined()
+    } finally {
+      c.destroy()
+    }
+  })
+
+  test('badge sweeps finish under repeated snapshots and refresh once after changes', async () => {
+    const api = client()
+    const sweeps: (() => void)[] = []
+    api.summary.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          sweeps.push(() => resolve({ failed_runs_24h: 7, window_start: '', window_end: '' })),
+        ),
+    )
+    const c = new CronController(api)
+    const intent = { ...base, projects: projects.slice(0, 2), route: defaultCronRoute() }
+    try {
+      const first = c.loadBadge(intent, false)
+      await vi.waitFor(() => expect(sweeps).toHaveLength(2))
+      const repeats = [
+        c.loadBadge(intent, true),
+        c.loadBadge(intent, false),
+        c.loadBadge(intent, true),
+      ]
+      expect(api.summary).toHaveBeenCalledTimes(2)
+      for (const release of sweeps.splice(0)) release()
+      await vi.waitFor(() => expect(c.state.failedRuns24h).toBe(14))
+      await vi.waitFor(() => expect(sweeps).toHaveLength(2))
+      for (const release of sweeps.splice(0)) release()
+      await Promise.all([first, ...repeats])
+      expect(api.summary).toHaveBeenCalledTimes(4)
+      await c.loadBadge(intent, true)
+      expect(api.summary).toHaveBeenCalledTimes(4)
+    } finally {
+      c.destroy()
+    }
+  })
 })

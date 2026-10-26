@@ -38,7 +38,8 @@ afterEach(() => {
 
 function mount() {
   let changed = false,
-    summaryCount = 2
+    summaryCount = 2,
+    summaryReads = 0
   const snapshotStatuses: number[] = []
   const snapshotLoads = vi.spyOn(SnapshotController.prototype, 'load'),
     catalogLoads = vi.spyOn(CronController.prototype, 'load')
@@ -121,12 +122,14 @@ function mount() {
           { headers: { ETag: changed ? '"cron-2"' : '"cron-1"' } },
         )
       }
-      if (url.pathname.endsWith('/cron/summary'))
+      if (url.pathname.endsWith('/cron/summary')) {
+        summaryReads++
         return Response.json({
           failed_runs_24h: summaryCount,
           window_start: '2026-10-24T10:00:00Z',
           window_end: '2026-10-25T10:00:00Z',
         })
+      }
       if (url.pathname.endsWith('/cron/jobs')) return Response.json({ jobs })
       if (url.pathname.endsWith('/cron/workflows')) return Response.json({ workflows: [] })
       if (url.pathname.endsWith('/cron/runs')) {
@@ -150,6 +153,7 @@ function mount() {
     runPages,
     runDetails,
     snapshotStatuses,
+    summaryReads: () => summaryReads,
     setSummary: (count: number) => {
       summaryCount = count
     },
@@ -272,3 +276,20 @@ test.each(['pagination', 'summary'] as const)(
     }
   },
 )
+
+test('App outside Cron keeps the badge from an unchanged 304 poll', async () => {
+  history.replaceState(null, '', '/kata?view=all-open#direct=1')
+  const task = mount()
+  await vi.waitFor(async () => {
+    await tick()
+    expect(screen.queryByRole('button', { name: 'Cron 2' })).not.toBeNull()
+  })
+  const reads = task.summaryReads(),
+    snapshots = task.snapshotLoads.mock.calls.length
+  await vi.advanceTimersByTimeAsync(15000)
+  await vi.waitFor(() => expect(task.snapshotLoads.mock.calls.length).toBeGreaterThan(snapshots))
+  await settle(task)
+  expect(task.snapshotStatuses.at(-1)).toBe(304)
+  expect(task.summaryReads()).toBe(reads)
+  expect(screen.queryByRole('button', { name: 'Cron 2' })).not.toBeNull()
+})

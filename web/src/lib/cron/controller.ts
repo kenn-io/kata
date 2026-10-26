@@ -26,6 +26,8 @@ export interface CronProjectState {
   error?: string
   hasRecords: boolean
   historyError?: string | undefined
+  jobsError?: string | undefined
+  workflowsError?: string | undefined
   loadingMore?: boolean
 }
 export interface CronPeek {
@@ -75,13 +77,19 @@ export function mergedRuns(
         a.project.uid.localeCompare(b.project.uid),
     )
 }
-function historyKey(intent: CronIntent): string {
+// Each key names the authority and query a piece of state was read under.
+function authorityKey(intent: CronIntent): string {
   return JSON.stringify([
     intent.daemonID,
     intent.authorityGeneration,
     intent.projects
       .map((project) => [project.id, project.uid])
       .sort((a, b) => String(a[1]).localeCompare(String(b[1]))),
+  ])
+}
+function historyKey(intent: CronIntent): string {
+  return JSON.stringify([
+    authorityKey(intent),
     [...new Set(intent.route.statuses.filter((status) => status !== 'never_ran'))].sort(),
   ])
 }
@@ -91,8 +99,11 @@ function catalogKey(intent: CronIntent): string {
     intent.route.tab === 'jobs' ? [...new Set(intent.route.statuses)].sort() : [],
   ])
 }
-function selectionKey(selection: CronSelection | undefined): string {
-  return selection ? JSON.stringify([selection.kind, selection.projectUID, selection.uid]) : ''
+function selectionKey(intent: CronIntent | undefined): string {
+  const selection = intent?.route.selection
+  return selection && intent
+    ? JSON.stringify([authorityKey(intent), selection.kind, selection.projectUID, selection.uid])
+    : ''
 }
 function runOrder(a: CronRun, b: CronRun): number {
   return compareInstants(b.created_at, a.created_at) || b.uid.localeCompare(a.uid)
@@ -103,20 +114,50 @@ function oldestRun(runs: readonly CronRun[]): CronRun | undefined {
     undefined,
   )
 }
+/**
+ * One keyed background read. A request for the running key never restarts
+ * it: the request sets `again` and the task runs once more after it finishes.
+ * A request for another key aborts it.
+ */
+interface Task {
+  key: string
+  abort: AbortController
+  again: boolean
+  done: Promise<void>
+}
+interface SelectionTask extends Task {
+  /** Settles once the drawer's detail (and a job's recent runs) is shown. */
+  detail: Promise<void>
+}
+/**
+ * The Cron page's reads, as three independent tasks:
+ *
+ * - catalog: rows for the latest intent's catalog key.
+ * - selection: the drawer's detail, a job's recent runs and a run's issue peek.
+ * - badge: failed-run counts for the authority and project set.
+ *
+ * Changing authority discards every task and all state. Within one authority,
+ * the catalog never cancels selection work, and the selection always follows
+ * the latest intent.
+ */
 export class CronController {
   state = emptyCronState()
   #listeners = new Set<(state: CronState) => void>()
   #intent: CronIntent | undefined
-  #abort?: AbortController
-  #selectionAbort?: AbortController
-  #catalogLoaded = false
-  #catalogNeedsRefresh = false
-  // A changed snapshot that arrives while the same catalog is loading waits for
-  // that load instead of restarting it; only the latest one runs afterwards.
-  #pendingSync: CronIntent | undefined
-  #generation = 0
-  #selectionGeneration = 0
-  #peekTimer: ReturnType<typeof setTimeout> | undefined
+  #catalog: Task | undefined
+  /** Catalog key whose completed result is on screen and current. */
+  #catalogFresh: string | undefined
+  /** Keys the published rows' runs, jobs and workflows were read under. */
+  #rowKeys: { runs?: string; jobs?: string; workflows?: string } = {}
+  #more: AbortController | undefined
+  #selection: SelectionTask | undefined
+  /** Selection key whose detail is on screen or loading. */
+  #selectionKey = ''
+  /** Orders read starts, so a catalog revalidates only selection reads older than it. */
+  #clock = 0
+  #selectionStarted = 0
+  #badge: Task | undefined
+  #badgeFresh: string | undefined
   constructor(
     private readonly client = new CronClient(),
     private readonly reject: () => void = () => {},
@@ -131,53 +172,112 @@ export class CronController {
     this.state = { ...this.state, ...patch }
     for (const listener of this.#listeners) listener(this.state)
   }
-  async load(intent: CronIntent): Promise<void> {
-    const sameAuthority =
-      this.#intent?.daemonID === intent.daemonID &&
-      this.#intent?.authorityGeneration === intent.authorityGeneration
-    const sameHistory =
-      this.#catalogLoaded &&
-      this.#intent !== undefined &&
-      historyKey(this.#intent) === historyKey(intent)
-    const previousProjects = new Map(
-      (sameHistory ? this.state.projects : []).map((row) => [row.project.uid, row]),
-    )
-    const keepSelection =
-      sameHistory && selectionKey(this.state.selected) === selectionKey(intent.route.selection)
-    const retained = sameAuthority
-      ? {
-          failedRuns24h: this.state.failedRuns24h,
-          badgePartial: this.state.badgePartial,
-          ...(sameHistory
-            ? { projects: this.state.projects.map((row) => ({ ...row, loadingMore: false })) }
-            : {}),
-          ...(keepSelection
-            ? {
-                selected: this.state.selected,
-                detail: this.state.detail,
-                detailLoading: this.state.detailLoading,
-                detailError: this.state.detailError,
-                recentRuns: this.state.recentRuns,
-                peek: this.state.peek,
-              }
-            : {}),
-        }
-      : {}
-    if (!sameHistory) this.#catalogLoaded = false
-    this.#pendingSync = undefined
+  #unauthenticated() {
+    this.fence()
+    this.reject()
+  }
+  /** Records the latest intent, discarding everything read under another authority. */
+  #adopt(intent: CronIntent) {
+    const previous = this.#intent
     this.#intent = intent
-    this.#catalogNeedsRefresh = true
-    this.#abort?.abort()
+    if (previous && authorityKey(previous) !== authorityKey(intent)) {
+      this.#abortAll()
+      this.#set(emptyCronState())
+    }
+  }
+  #abortAll() {
+    this.#catalog?.abort.abort()
+    this.#catalog = undefined
+    this.#catalogFresh = undefined
+    this.#rowKeys = {}
+    this.#more?.abort()
+    this.#more = undefined
+    this.#badge?.abort.abort()
+    this.#badge = undefined
+    this.#badgeFresh = undefined
     this.#cancelSelection()
-    const generation = ++this.#generation,
-      abort = new AbortController()
-    this.#abort = abort
-    this.#set({ ...emptyCronState(), ...retained, loading: true })
+  }
+  /** Forces a catalog read for intent; one already running for it is not restarted. */
+  load(intent: CronIntent): Promise<void> {
+    return this.#requestCatalog(intent, true)
+  }
+  /** Applies an accepted snapshot on the Cron page. */
+  sync(intent: CronIntent, unchangedSnapshot: boolean): Promise<void> {
+    return this.#requestCatalog(intent, !unchangedSnapshot)
+  }
+  async refresh() {
+    if (this.#intent) await this.#requestCatalog(this.#intent, true)
+  }
+  async invalidate() {
+    await this.refresh()
+  }
+  #rowsHealthy(): boolean {
+    return this.state.projects.every(
+      (row) =>
+        (!row.error || row.error === projectNotReadable) &&
+        !row.historyError &&
+        !row.jobsError &&
+        !row.workflowsError,
+    )
+  }
+  #requestCatalog(intent: CronIntent, changed: boolean): Promise<void> {
+    this.#adopt(intent)
+    const key = catalogKey(intent)
+    const active = this.#catalog
+    let catalog: Promise<void> | undefined
+    if (active?.key === key) {
+      if (changed) active.again = true
+      catalog = active.done
+    } else if (changed || active || this.#catalogFresh !== key || !this.#rowsHealthy())
+      catalog = this.#startCatalog(key)
+    // Requested after the catalog starts, so its reads count as newer than it.
+    const selection = this.#requestSelection(false)
+    return catalog ?? selection
+  }
+  #startCatalog(key: string): Promise<void> {
+    this.#catalog?.abort.abort()
+    this.#more?.abort()
+    this.#more = undefined
+    this.#catalogFresh = undefined
+    const task: Task = { key, abort: new AbortController(), again: false, done: Promise.resolve() }
+    this.#catalog = task
+    const current = () => this.#catalog === task && !task.abort.signal.aborted
+    task.done = (async () => {
+      let started: number
+      do {
+        task.again = false
+        started = ++this.#clock
+        await this.#readCatalog(this.#intent!, task, current)
+      } while (task.again && current())
+      if (!current()) return
+      this.#catalog = undefined
+      this.#catalogFresh = key
+      if (this.#selectionStarted < started) await this.#requestSelection(true)
+    })()
+    return task.done
+  }
+  async #readCatalog(intent: CronIntent, task: Task, current: () => boolean): Promise<void> {
+    const signal = task.abort.signal
+    const keys = {
+      runs: historyKey(intent),
+      jobs: catalogKey(intent),
+      workflows: authorityKey(intent),
+    }
+    const keep = {
+      runs: this.#rowKeys.runs === keys.runs,
+      jobs: this.#rowKeys.jobs === keys.jobs,
+      workflows: this.#rowKeys.workflows === keys.workflows,
+    }
+    const previous = new Map(this.state.projects.map((row) => [row.project.uid, row]))
+    // Rows stay on screen while they revalidate the same history.
+    this.#set({
+      loading: true,
+      projects: keep.runs ? this.state.projects.map((row) => ({ ...row, loadingMore: false })) : [],
+    })
     const rows: CronProjectState[] = [],
       counts = new Map<string, number>()
     let partial = false,
       index = 0
-    const current = () => !abort.signal.aborted && generation === this.#generation
     const worker = async () => {
       while (index < intent.projects.length && current()) {
         const project = intent.projects[index++]!
@@ -190,7 +290,7 @@ export class CronController {
         }
         try {
           try {
-            const summary = await this.client.summary(project.id, abort.signal)
+            const summary = await this.client.summary(project.id, signal)
             if (!current()) return
             counts.set(project.uid, summary.failed_runs_24h)
           } catch (error) {
@@ -202,19 +302,17 @@ export class CronController {
               throw error
             partial = true
           }
-          const jobs = await this.client.jobs(project.id, abort.signal, {
+          const jobs = await this.client.jobs(project.id, signal, {
             statuses: intent.route.tab === 'jobs' ? intent.route.statuses : [],
           })
           if (!current()) return
-          const workflows = await this.client.workflows(project.id, abort.signal)
+          const workflows = await this.client.workflows(project.id, signal)
           if (!current()) return
           const runs = await this.#runsThrough(
             project.id,
-            abort.signal,
-            {
-              statuses: intent.route.statuses.filter((s) => s !== 'never_ran'),
-            },
-            oldestRun(previousProjects.get(project.uid)?.runs ?? []),
+            signal,
+            { statuses: intent.route.statuses.filter((s) => s !== 'never_ran') },
+            keep.runs ? oldestRun(previous.get(project.uid)?.runs ?? []) : undefined,
           )
           if (!current()) return
           row.jobs = jobs.jobs
@@ -223,11 +321,11 @@ export class CronController {
           row.nextBeforeUID = runs.next_before_uid
           row.hasRecords = Boolean(row.jobs.length || row.workflows.length || row.runs.length)
           if (!row.hasRecords && intent.route.statuses.length) {
-            const all = await this.client.runs(project.id, abort.signal)
+            const all = await this.client.runs(project.id, signal)
             if (!current()) return
             row.hasRecords = all.runs.length > 0
             if (!row.hasRecords) {
-              const allJobs = await this.client.jobs(project.id, abort.signal)
+              const allJobs = await this.client.jobs(project.id, signal)
               if (!current()) return
               row.hasRecords = allJobs.jobs.length > 0
             }
@@ -235,29 +333,26 @@ export class CronController {
         } catch (error) {
           if (!current()) return
           if (isAuthenticationRequiredError(error)) {
-            this.fence()
-            this.reject()
+            this.#unauthenticated()
             return
           }
           partial = true
-          if (error instanceof CronReadError && error.status === 403) counts.delete(project.uid)
-          const previous = previousProjects.get(project.uid)
-          if (
-            previous &&
-            !previous.error &&
-            !(error instanceof CronReadError && error.status === 403)
-          ) {
-            Object.assign(row, previous, {
-              project,
-              loadingMore: false,
-              historyError: 'History refresh unavailable',
+          const denied = error instanceof CronReadError && error.status === 403
+          if (denied) counts.delete(project.uid)
+          const earlier = previous.get(project.uid)
+          if (!denied && earlier && !earlier.error) {
+            // Keep each earlier result only under the query it answered.
+            Object.assign(row, {
+              runs: keep.runs ? earlier.runs : [],
+              nextBeforeUID: keep.runs ? earlier.nextBeforeUID : undefined,
+              jobs: keep.jobs ? earlier.jobs : [],
+              workflows: keep.workflows ? earlier.workflows : [],
+              hasRecords: earlier.hasRecords,
+              historyError: keep.runs ? 'History refresh unavailable' : 'Cron unavailable',
+              jobsError: keep.jobs ? 'Jobs refresh unavailable' : 'Cron unavailable',
+              workflowsError: keep.workflows ? 'Workflows refresh unavailable' : 'Cron unavailable',
             })
-          } else {
-            row.error =
-              error instanceof CronReadError && error.status === 403
-                ? projectNotReadable
-                : 'Cron unavailable'
-          }
+          } else row.error = denied ? projectNotReadable : 'Cron unavailable'
         }
         if (!current()) return
         rows.push(row)
@@ -266,43 +361,14 @@ export class CronController {
     await Promise.all(Array.from({ length: Math.min(4, intent.projects.length) }, worker))
     if (!current()) return
     rows.sort((a, b) => a.project.name.localeCompare(b.project.name))
-    this.#catalogLoaded = true
-    this.#catalogNeedsRefresh = false
+    this.#rowKeys = keys
+    if (!this.#badge) this.#badgeFresh = authorityKey(intent)
     this.#set({
       loading: false,
       projects: rows,
       failedRuns24h: [...counts.values()].reduce((a, b) => a + b, 0),
       badgePartial: partial,
     })
-    if (this.#intent?.route.selection)
-      await this.select(this.#intent.route.selection, keepSelection)
-    const pending = this.#pendingSync
-    if (pending && current()) await this.load(pending)
-  }
-  async sync(intent: CronIntent, unchangedSnapshot: boolean): Promise<void> {
-    const sameCatalog =
-      this.#intent !== undefined && catalogKey(this.#intent) === catalogKey(intent)
-    if (
-      unchangedSnapshot &&
-      sameCatalog &&
-      (this.state.loading ||
-        (this.#catalogLoaded &&
-          !this.#catalogNeedsRefresh &&
-          this.state.projects.every(
-            (row) => (!row.error || row.error === projectNotReadable) && !row.historyError,
-          )))
-    ) {
-      this.#intent = intent
-      if (!this.#abort || this.#abort.signal.aborted) this.#abort = new AbortController()
-      if (selectionKey(this.state.selected) !== selectionKey(intent.route.selection))
-        await this.select(intent.route.selection)
-      return
-    }
-    if (this.state.loading && sameCatalog) {
-      this.#pendingSync = intent
-      return
-    }
-    await this.load(intent)
   }
   async #runsThrough(
     project: number,
@@ -331,10 +397,9 @@ export class CronController {
   }
   async loadMore(projectUID: string): Promise<void> {
     const row = this.state.projects.find((p) => p.project.uid === projectUID)
-    const abort = this.#abort
-    if (this.state.loading || !row?.nextBeforeUID || row.loadingMore || !abort || !this.#intent)
-      return
-    const generation = this.#generation
+    if (this.state.loading || !row?.nextBeforeUID || row.loadingMore || !this.#intent) return
+    const abort = (this.#more ??= new AbortController())
+    const current = () => this.#more === abort && !abort.signal.aborted
     row.loadingMore = true
     row.historyError = undefined
     this.#set({ projects: [...this.state.projects] })
@@ -343,42 +408,93 @@ export class CronController {
         beforeUID: row.nextBeforeUID,
         statuses: this.#intent.route.statuses.filter((s) => s !== 'never_ran'),
       })
-      if (generation !== this.#generation || abort.signal.aborted) return
+      if (!current()) return
       const map = new Map(row.runs.map((run) => [run.uid, run]))
       for (const run of page.runs) map.set(run.uid, run)
       row.runs = [...map.values()]
       row.nextBeforeUID = page.next_before_uid
     } catch (error) {
-      if (generation !== this.#generation || abort.signal.aborted) return
+      if (!current()) return
       if (isAuthenticationRequiredError(error)) {
-        this.fence()
-        this.reject()
+        this.#unauthenticated()
         return
       }
       row.historyError = 'More history unavailable'
     } finally {
-      if (generation === this.#generation) {
+      if (current()) {
         row.loadingMore = false
         this.#set({ projects: [...this.state.projects] })
       }
     }
   }
-  async select(selection: CronSelection | undefined, retainDetail = false): Promise<void> {
+  /** Opens, changes or closes the drawer without touching the catalog. */
+  async select(selection: CronSelection | undefined): Promise<void> {
     if (this.#intent)
       this.#intent = { ...this.#intent, route: { ...this.#intent.route, selection } }
+    else this.#set({ selected: selection })
+    await this.#requestSelection(false)
+  }
+  /**
+   * Follows the latest intent's selection. A revalidation of the selection on
+   * screen keeps its detail and is coalesced with work still running for it.
+   */
+  #requestSelection(revalidate: boolean): Promise<void> {
+    const key = selectionKey(this.#intent)
+    if (key === this.#selectionKey) {
+      if (!revalidate || !key) return this.#selection?.detail ?? Promise.resolve()
+      if (this.#selection) {
+        this.#selection.again = true
+        return Promise.resolve()
+      }
+      return this.#startSelection(key, true)
+    }
+    return this.#startSelection(key, false)
+  }
+  #startSelection(key: string, retain: boolean): Promise<void> {
     this.#cancelSelection()
-    const generation = this.#selectionGeneration,
-      abort = new AbortController()
-    this.#selectionAbort = abort
+    this.#selectionKey = key
+    const selection = this.#intent?.route.selection
     this.#set({
       selected: selection,
-      detail: retainDetail ? this.state.detail : undefined,
+      detail: retain ? this.state.detail : undefined,
       detailError: undefined,
-      detailLoading: Boolean(selection) && !(retainDetail && this.state.detail),
-      recentRuns: retainDetail ? this.state.recentRuns : [],
-      peek: retainDetail ? this.state.peek : { status: selection ? 'loading' : 'no-issue' },
+      detailLoading: Boolean(selection) && !(retain && this.state.detail),
+      recentRuns: retain ? this.state.recentRuns : [],
+      peek: retain ? this.state.peek : { status: selection ? 'loading' : 'no-issue' },
     })
-    if (!selection) return
+    if (!selection) return Promise.resolve()
+    let shown!: () => void
+    const task: SelectionTask = {
+      key,
+      abort: new AbortController(),
+      again: false,
+      done: Promise.resolve(),
+      detail: new Promise<void>((resolve) => (shown = resolve)),
+    }
+    this.#selection = task
+    const current = () => this.#selection === task && !task.abort.signal.aborted
+    task.abort.signal.addEventListener('abort', () => shown(), { once: true })
+    task.done = (async () => {
+      let keepDetail = retain
+      do {
+        task.again = false
+        this.#selectionStarted = ++this.#clock
+        await this.#readSelection(selection, task, current, keepDetail, shown)
+        keepDetail = true
+      } while (task.again && current())
+      shown()
+      if (this.#selection === task) this.#selection = undefined
+    })()
+    return task.detail
+  }
+  async #readSelection(
+    selection: CronSelection,
+    task: SelectionTask,
+    current: () => boolean,
+    retain: boolean,
+    shown: () => void,
+  ): Promise<void> {
+    const signal = task.abort.signal
     const project = this.#intent?.projects.find((p) => p.uid === selection.projectUID)
     if (!project) {
       this.#set({
@@ -388,53 +504,30 @@ export class CronController {
       })
       return
     }
-    const current = () => !abort.signal.aborted && generation === this.#selectionGeneration
+    let issueUID: string | undefined
     try {
       const detail =
         selection.kind === 'run'
-          ? await this.client.run(project.id, selection.uid, abort.signal)
+          ? await this.client.run(project.id, selection.uid, signal)
           : selection.kind === 'job'
-            ? await this.client.job(project.id, selection.uid, abort.signal)
-            : await this.client.workflow(project.id, selection.uid, abort.signal)
+            ? await this.client.job(project.id, selection.uid, signal)
+            : await this.client.workflow(project.id, selection.uid, signal)
       if (!current()) return
-      const issueUID = selection.kind === 'run' ? (detail as CronRun).issue_uid : undefined
-      const keepPeek = retainDetail && issueUID && this.state.peek.issue?.issue.uid === issueUID
+      issueUID = selection.kind === 'run' ? (detail as CronRun).issue_uid : undefined
+      const keepPeek = retain && issueUID && this.state.peek.issue?.issue.uid === issueUID
       this.#set({
         detail,
         detailLoading: false,
         peek: keepPeek ? this.state.peek : { status: issueUID ? 'loading' : 'no-issue' },
       })
       if (selection.kind === 'job') {
-        const page = await this.client.runs(project.id, abort.signal, {
-          jobUID: selection.uid,
-        })
+        const page = await this.client.runs(project.id, signal, { jobUID: selection.uid })
         if (current()) this.#set({ recentRuns: page.runs })
-        return
       }
-      if (!issueUID) return
-      this.#peekTimer = setTimeout(() => {
-        this.#peekTimer = undefined
-        void this.client
-          .issue(project.id, issueUID, abort.signal)
-          .then((issue) => {
-            if (current())
-              this.#set({ peek: { status: issue.comments.length ? 'ready' : 'empty', issue } })
-          })
-          .catch((error) => {
-            if (!current()) return
-            if (isAuthenticationRequiredError(error)) {
-              this.fence()
-              this.reject()
-              return
-            }
-            this.#set({ peek: { status: 'unreadable' } })
-          })
-      }, 150)
     } catch (error) {
       if (!current()) return
       if (isAuthenticationRequiredError(error)) {
-        this.fence()
-        this.reject()
+        this.#unauthenticated()
         return
       }
       this.#set({
@@ -443,68 +536,94 @@ export class CronController {
         detailError: 'Detail not readable',
         peek: { status: 'unreadable' },
       })
+      return
+    } finally {
+      shown()
+    }
+    if (!issueUID || !current()) return
+    // A short delay keeps quick drawer browsing from reading every issue.
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 150)
+      signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer)
+          resolve()
+        },
+        { once: true },
+      )
+    })
+    if (!current()) return
+    try {
+      const issue = await this.client.issue(project.id, issueUID, signal)
+      if (current())
+        this.#set({ peek: { status: issue.comments.length ? 'ready' : 'empty', issue } })
+    } catch (error) {
+      if (!current()) return
+      if (isAuthenticationRequiredError(error)) {
+        this.#unauthenticated()
+        return
+      }
+      this.#set({ peek: { status: 'unreadable' } })
     }
   }
-  async loadBadge(intent: CronIntent): Promise<void> {
-    this.#pendingSync = undefined
-    this.#catalogLoaded = false
-    this.#intent = intent
-    this.#cancelSelection()
-    this.#set({
-      selected: undefined,
-      detail: undefined,
-      detailLoading: false,
-      peek: { status: 'no-issue' },
-    })
-    this.#abort?.abort()
-    const generation = ++this.#generation,
-      abort = new AbortController()
-    this.#abort = abort
+  #cancelSelection() {
+    this.#selection?.abort.abort()
+    this.#selection = undefined
+    this.#selectionKey = ''
+  }
+  /** Applies an accepted snapshot outside the Cron page: only the badge is read. */
+  loadBadge(intent: CronIntent, unchangedSnapshot = false): Promise<void> {
+    this.#adopt({ ...intent, route: { ...intent.route, selection: undefined } })
+    this.#catalog?.abort.abort()
+    this.#catalog = undefined
+    this.#catalogFresh = undefined
+    void this.#requestSelection(false)
+    return this.#requestBadge(!unchangedSnapshot)
+  }
+  async refreshSummaries() {
+    if (this.#intent) await this.#requestBadge(true)
+  }
+  #requestBadge(changed: boolean): Promise<void> {
+    const intent = this.#intent
+    if (!intent) return Promise.resolve()
+    const key = authorityKey(intent)
+    const active = this.#badge
+    if (active?.key === key) {
+      if (changed) active.again = true
+      return active.done
+    }
+    if (!changed && !active && this.#badgeFresh === key) return Promise.resolve()
+    active?.abort.abort()
+    this.#badgeFresh = undefined
+    const task: Task = { key, abort: new AbortController(), again: false, done: Promise.resolve() }
+    this.#badge = task
+    const current = () => this.#badge === task && !task.abort.signal.aborted
+    task.done = (async () => {
+      do {
+        task.again = false
+        await this.#readBadge(this.#intent!, task.abort.signal, current)
+      } while (task.again && current())
+      if (!current()) return
+      this.#badge = undefined
+      this.#badgeFresh = key
+    })()
+    return task.done
+  }
+  async #readBadge(intent: CronIntent, signal: AbortSignal, current: () => boolean) {
     let index = 0,
       total = 0,
       partial = false
-    const current = () => generation === this.#generation && !abort.signal.aborted
     const worker = async () => {
       while (index < intent.projects.length && current()) {
         const project = intent.projects[index++]!
         try {
-          const result = await this.client.summary(project.id, abort.signal)
-          if (current()) total += result.failed_runs_24h
-        } catch (error) {
-          if (!current()) return
-          if (isAuthenticationRequiredError(error)) {
-            this.fence()
-            this.reject()
-            return
-          }
-          partial = true
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(4, intent.projects.length) }, worker))
-    if (current()) this.#set({ failedRuns24h: total, badgePartial: partial })
-  }
-  async refreshSummaries() {
-    if (!this.#intent) return
-    const intent = this.#intent,
-      generation = this.#generation,
-      abort = this.#abort
-    if (!abort) return
-    let index = 0,
-      total = 0,
-      partial = false
-    const current = () => generation === this.#generation && !abort.signal.aborted
-    const worker = async () => {
-      while (index < intent.projects.length && current()) {
-        const p = intent.projects[index++]!
-        try {
-          const summary = await this.client.summary(p.id, abort.signal)
+          const summary = await this.client.summary(project.id, signal)
           if (current()) total += summary.failed_runs_24h
         } catch (error) {
           if (!current()) return
           if (isAuthenticationRequiredError(error)) {
-            this.fence()
-            this.reject()
+            this.#unauthenticated()
             return
           }
           partial = true
@@ -514,22 +633,13 @@ export class CronController {
     await Promise.all(Array.from({ length: Math.min(4, intent.projects.length) }, worker))
     if (current()) this.#set({ failedRuns24h: total, badgePartial: partial })
   }
-  async refresh() {
-    if (this.#intent) await this.load(this.#intent)
-  }
-  async invalidate() {
-    if (this.#intent) await this.load(this.#intent)
-  }
-  #cancelSelection() {
-    this.#selectionGeneration++
-    this.#selectionAbort?.abort()
-    if (this.#peekTimer) clearTimeout(this.#peekTimer)
-    this.#peekTimer = undefined
-  }
+  /** Leaving the page or its filters: catalog and drawer reads stop; the badge continues. */
   cancelNavigation(): void {
-    this.#pendingSync = undefined
-    this.#generation++
-    this.#abort?.abort()
+    // An interrupted read already cleared #catalogFresh; a completed one stays current.
+    this.#catalog?.abort.abort()
+    this.#catalog = undefined
+    this.#more?.abort()
+    this.#more = undefined
     this.#cancelSelection()
     this.#set({
       ...emptyCronState(),
@@ -539,12 +649,8 @@ export class CronController {
     })
   }
   fence() {
-    this.#pendingSync = undefined
-    this.#generation++
-    this.#abort?.abort()
-    this.#cancelSelection()
+    this.#abortAll()
     this.#intent = undefined
-    this.#catalogLoaded = false
     this.#set(emptyCronState())
   }
   destroy() {

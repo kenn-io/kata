@@ -1181,7 +1181,7 @@
         }
         if (requestedRoute.view === 'cron')
           void cron.sync(intent, previousSnapshot === snapshots.state.snapshot)
-        else void cron.loadBadge(intent)
+        else void cron.loadBadge(intent, previousSnapshot === snapshots.state.snapshot)
       }
       return accepted
     }
