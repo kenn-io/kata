@@ -110,6 +110,8 @@ func TestCronFreshness(t *testing.T) {
 		{"coalesce with detail open", keyRune('r'), false},
 		{"reset", resetRequiredMsg{}, false},
 		{"event while away", eventReceivedMsg{eventType: "cron.job.updated", projectID: 7}, true},
+		{"project merged", eventReceivedMsg{eventType: "project.merged", projectID: 7}, false},
+		{"project merged while away", eventReceivedMsg{eventType: "project.merged", projectID: 7}, true},
 		{"reset while away", resetRequiredMsg{}, true},
 		{"disappearing record", keyRune('r'), false},
 	} {
@@ -119,6 +121,10 @@ func TestCronFreshness(t *testing.T) {
 			a := &cronReadTestAPI{KataAPI: &inboxTestAPI{}, data: *m.cron.data}
 			a.data.jobs = slices.Clone(a.data.jobs)
 			a.data.jobs[0].Name = "New title"
+			a.data.workflows = slices.Clone(a.data.workflows)
+			a.data.workflows[0].Name = "New workflow"
+			a.data.runs = slices.Clone(a.data.runs)
+			a.data.runs[0].Summary.Message = new("New run result")
 			m.api = a
 			detail := tc.name == "coalesce with detail open" || tc.name == "disappearing record"
 			if detail {
@@ -167,6 +173,10 @@ func TestCronFreshness(t *testing.T) {
 				require.Contains(t, stripANSI(m.viewBody()), "this job is no longer in the loaded data")
 			} else {
 				require.Contains(t, stripANSI(m.viewBody()), "New title")
+			}
+			if strings.HasPrefix(tc.name, "project merged") {
+				require.Contains(t, stripANSI(sendRune(m, '4').viewBody()), "New workflow")
+				require.Contains(t, stripANSI(sendRune(m, '3').viewBody()), "New run result")
 			}
 		})
 	}
@@ -420,6 +430,10 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 			m, cmd := updateModel(m, keyRune('r'))
 			m, _ = updateModel(m, cmd())
 			m = sendRune(m, tc.tab)
+			if tc.jobsFail {
+				require.Contains(t, stripANSI(m.viewBody()), "unknown")
+				require.NotContains(t, stripANSI(m.viewBody()), "0 jobs")
+			}
 			m = sendKey(m, tea.KeyEnter)
 			_, _, lines := cronScreen(m)
 			var document string
@@ -467,6 +481,9 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m, _ = updateModel(m, cmd())
 	require.Contains(t, stripANSI(m.viewBody()), "Daily")
 	require.Contains(t, stripANSI(m.viewBody()), "refresh failed")
+	m = sendRune(m, '4')
+	require.Contains(t, stripANSI(m.viewBody()), "unknown")
+	require.NotContains(t, stripANSI(m.viewBody()), "1 job")
 }
 
 func TestCronFilterAndTabState(t *testing.T) {

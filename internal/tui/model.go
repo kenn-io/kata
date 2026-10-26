@@ -2601,7 +2601,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") {
+		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" {
 			m.cron.events++
 		}
 		m.cache.markStale()

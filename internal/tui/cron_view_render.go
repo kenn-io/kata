@@ -83,6 +83,13 @@ func cronCount(n int, noun string) string {
 	return fmt.Sprintf("%d %s", n, noun)
 }
 
+func cronWorkflowUsage(p cronData, uid string) string {
+	if p.jobsErr != nil {
+		return "unknown"
+	}
+	return cronCount(len(p.workflowJobs(uid)), "job")
+}
+
 func cronScreen(m Model) (string, string, []cronLine) {
 	if len(m.cron.stack) > 0 {
 		return cronDetail(m, m.cron.stack[len(m.cron.stack)-1].ref)
@@ -140,7 +147,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
-				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronCount(len(p.workflowJobs(w.UID)), "job"), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
+				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
 			}
 		}
 	}
