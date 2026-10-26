@@ -7,12 +7,23 @@ const factory = (await import(pathToFileURL(extension))).default;
 const handlers = new Map(), calls = [];
 let session = 'session-A', pending;
 const result = {code: 0, killed: false, stdout: '', stderr: ''};
+function issueIdentity(ref) {
+  const [project, issue] = ref.includes('#') ? ref.split('#', 2) : ['spoke-project', ref];
+  return JSON.stringify({daemon: 'https://daemon.example', project: project === 'spoke-project' ? 42 : 43, issue: `${project}:${issue}`});
+}
 const pi = {
   on(name, handler) {
     const list = handlers.get(name) || [];
     list.push(handler); handlers.set(name, list);
   },
   async exec(executable, args, options) {
+    if (args[3] === 'daemon') return {...result, stdout: JSON.stringify({
+      network: 'tcp', address: 'https://daemon.example', request_base_url: 'https://daemon.example',
+    })};
+    if (args[3] === 'show') return {...result, stdout: JSON.stringify({issue: {
+      project_id: args[4].includes('#') && !args[4].startsWith('spoke-project#') ? 43 : 42,
+      uid: args[4].includes('#') ? args[4] : `spoke-project:${args[4]}`,
+    }})};
     calls.push({args, options});
     if (pending) return await pending.promise;
     return result;
@@ -39,6 +50,7 @@ function assertRoute(call, id, ref) {
   assert.equal(call.options.timeout, 10000);
 }
 factory(pi);
+delete process.env.KATA_ATTENTION_HOST;
 process.env.KATA_REF = 'captured-ref';
 if (mode === 'end') await emit('session_start', {reason: 'startup'});
 pending = defer();
@@ -47,14 +59,19 @@ const name = mode === 'start' ? 'session_start' : 'session_shutdown';
 const event = {reason: mode === 'start' ? 'resume' : 'quit'};
 const before = calls.length;
 const first = emit(name, event), duplicate = emit(name, event);
-await Promise.resolve();
+await new Promise(setImmediate);
 assert.equal(calls.length, before + 1, 'concurrent lifecycle callbacks must share one command');
 fail(operation); pending = undefined;
 await Promise.all([first, duplicate]);
+const claimed = JSON.stringify({pid: process.pid, identity: issueIdentity('captured-ref')});
+assert.equal(process.env.KATA_ATTENTION_HOST, mode === 'start' ? undefined : claimed,
+  'failed attention does not claim or release the host marker');
 process.env.KATA_REF = 'later-ref';
 await emit(name, event);
 assert.equal(calls.length, before + 2, `failed ${mode} must retry after ${failure}`);
 assertRoute(calls.at(-1), 'session-A', 'captured-ref');
+assert.equal(process.env.KATA_ATTENTION_HOST, mode === 'start' ? claimed : undefined,
+  'successful attention claims or releases the captured issue identity');
 await emit(name, event);
 assert.equal(calls.length, before + 2, `successful ${mode} duplicate must be idempotent`);
 if (mode === 'start') {
@@ -67,7 +84,7 @@ if (mode === 'start') {
 
 // A completed callback from a retired registration must not change its newer
 // replacement's state; both start and end commands may still be in flight.
-for (const staleMode of ['start', 'end']) {
+for (const replacementRef of ['old-ref', 'replacement-ref']) for (const staleMode of ['start', 'end']) {
   session = 'old-' + staleMode; factory(pi);
   process.env.KATA_REF = 'old-ref';
   if (staleMode === 'end') await emit('session_start', {reason: 'new'});
@@ -79,9 +96,11 @@ for (const staleMode of ['start', 'end']) {
   const retiring = snapshot('session_shutdown');
   await emit('session_shutdown', {reason: 'reload'}, oldContext);
   session = 'new-' + staleMode; factory(pi);
-  process.env.KATA_REF = 'replacement-ref'; pending = undefined;
+  process.env.KATA_REF = replacementRef; pending = undefined;
   await emit('session_start', {reason: 'resume'});
   staleOperation.resolve(result); await stale;
+  assert.equal(process.env.KATA_ATTENTION_HOST, JSON.stringify({pid: process.pid, identity: issueIdentity(replacementRef)}),
+    'stale completion cannot claim or release the replacement marker, including for the same ref');
   const count = calls.length;
   for (const callback of retiring) await callback({reason: 'quit'}, oldContext);
   await emit('session_start', {reason: 'resume'});
@@ -89,7 +108,7 @@ for (const staleMode of ['start', 'end']) {
   process.env.KATA_REF = 'unrelated-ref';
   await emit('session_shutdown', {reason: 'quit'});
   assert.equal(calls.length, count + 1);
-  assertRoute(calls.at(-1), session, 'replacement-ref');
+  assertRoute(calls.at(-1), session, replacementRef);
 }
 
 // A quit arriving during start waits for that command. Concurrent quit events

@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-25
+last_edited: 2026-10-26
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Keep attention on the lead when a pi child tracks the same issue on the same
+  daemon and project, even when bare and qualified refs differ. Extension
+  reloads restore a missing ownership marker from a successful start without
+  another attention write. Rerun `kata agent-hook install pi` to pick up the fix.
 
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.

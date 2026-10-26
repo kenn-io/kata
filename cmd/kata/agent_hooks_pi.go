@@ -140,7 +140,7 @@ func parsePiAgentHookMetadata(data []byte) (piAgentHookMetadata, error) {
 	var meta piAgentHookMetadata
 	first, _, ok := bytes.Cut(data, []byte("\n"))
 	if !ok || !bytes.HasPrefix(first, []byte(piAgentHookMetadataPrefix)) {
-		return meta, fmt.Errorf("authored or unrecognized adapter; move it aside before installing")
+		return meta, fmt.Errorf("authored or unrecognized adapter; move it aside before installing; if PI_CODING_AGENT_DIR is shared by pi and omp, unset it for one harness")
 	}
 	if err := json.Unmarshal(bytes.TrimPrefix(first, []byte(piAgentHookMetadataPrefix)), &meta, json.RejectUnknownMembers(true)); err != nil {
 		return meta, fmt.Errorf("invalid ownership metadata: %w", err)
@@ -159,7 +159,7 @@ func generatePiAgentHooks(meta piAgentHookMetadata) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sealNativeAgentHookCode([]byte(piAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + piAgentHookJS)), nil
+	return sealNativeAgentHookCode([]byte(piAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + nativeAttentionHostGuardJS + piAgentHookJS)), nil
 }
 
 const piAgentHookJS = `import path from "node:path";
@@ -171,6 +171,7 @@ const registry = globalThis[registryKey] ||= { adapters: new Map(), active: new 
 const promptState = new WeakMap();
 
 export default function kataHooks(pi) {
+  if (pi.zod) return;
   const key = options.scope + ":" + options.workspace;
   const adapter = { options, pi };
   registry.adapters.set(key, adapter);
@@ -197,31 +198,85 @@ export default function kataHooks(pi) {
       return result.code === 0 && !result.killed;
     } catch { return false; /* Attention is best effort and never emits model context. */ }
   }
-  async function transition(mode, baseline) {
+  async function attentionIdentity(adapter, baseline) {
+    try {
+      const ref = typeof baseline.ref === "string" ? baseline.ref.trim() : "";
+      if (!ref || ref.startsWith("-")) return "";
+      const options = { cwd: baseline.cwd, timeout: 10000 };
+      // Show can start the local daemon. Probe its route only afterward.
+      const issue = await adapter.pi.exec(baseline.executable, ["--json", "--workspace", baseline.cwd, "show", ref], options);
+      if (issue.code !== 0 || issue.killed) return "";
+      const daemon = await adapter.pi.exec(baseline.executable, ["--json", "--workspace", baseline.cwd, "daemon", "locate"], options);
+      if (daemon.code !== 0 || daemon.killed) return "";
+      const route = JSON.parse(daemon.stdout);
+      const resolved = JSON.parse(issue.stdout)?.issue;
+      const daemonIdentity = route.network === "unix" ? route.address :
+        route.network === "tcp" ? route.request_base_url : "";
+      if (typeof daemonIdentity !== "string" || !daemonIdentity ||
+          !Number.isSafeInteger(resolved?.project_id) || resolved.project_id <= 0 ||
+          typeof resolved.uid !== "string" || !resolved.uid) return "";
+      return JSON.stringify({ daemon: daemonIdentity, project: resolved.project_id, issue: resolved.uid });
+    } catch { return ""; /* Without a resolved route and issue, do not claim ownership. */ }
+  }
+  async function transition(mode, baseline, adapter) {
     const pending = { mode };
     baseline.pending = pending;
     pending.promise = (async () => {
-      const succeeded = await attention(mode, baseline);
-      if (registry.active.get(baseline.cwd) === baseline && succeeded) {
-        if (mode === "start") baseline.started = true;
-        else baseline.ended = true;
+      try {
+        if (registry.active.get(baseline.cwd) !== baseline) return;
+        const identity = mode === "start" ? await attentionIdentity(adapter, baseline) : baseline.identity;
+        if (registry.active.get(baseline.cwd) !== baseline) return;
+        if (mode === "start" && (!identity || kataAttentionHostSkip(identity))) return;
+        if (mode === "start") baseline.identity = identity;
+        const succeeded = await attention(mode, baseline);
+        if (registry.active.get(baseline.cwd) === baseline && succeeded) {
+          if (mode === "start") {
+            baseline.started = true;
+            kataAttentionHostClaim(identity);
+          } else {
+            baseline.ended = true;
+            kataAttentionHostRelease(baseline.identity);
+          }
+        }
+      } finally {
+        if (baseline.pending === pending) delete baseline.pending;
       }
-      if (baseline.pending === pending) delete baseline.pending;
     })();
     await pending.promise;
   }
   if (options.attention) {
     pi.on("session_start", async (event, ctx) => {
-      if (!selected(ctx, "attention") || !["startup", "new", "resume", "fork"].includes(event.reason)) return;
+      if (!selected(ctx, "attention") || !["startup", "new", "resume", "fork", "reload"].includes(event.reason)) return;
       const id = ctx.sessionManager.getSessionId();
       if (typeof id !== "string" || !id) return;
       const cwd = path.resolve(ctx.cwd);
       const previous = registry.active.get(cwd);
       const baseline = previous?.id === id && !previous.ended ? previous :
         { id, cwd, executable: options.executable, ref: process.env.KATA_REF || "", started: false, ended: false };
-      if (baseline.started || baseline.pending) return;
+      if (baseline.started || baseline.pending) {
+        if (baseline.started && !baseline.pending) {
+          const rawMarker = process.env.KATA_ATTENTION_HOST;
+          let marker;
+          try { marker = JSON.parse(rawMarker || "null"); } catch {}
+          const markerless = !rawMarker;
+          const ownedLegacyMarker = marker?.pid === process.pid &&
+            typeof marker.ref === "string" && marker.ref === baseline.ref;
+          if (markerless || ownedLegacyMarker) {
+            const identity = baseline.identity || await attentionIdentity(adapter, baseline);
+            if (identity && registry.active.get(cwd) === baseline && baseline.started && !baseline.pending &&
+                process.env.KATA_ATTENTION_HOST === rawMarker) {
+              baseline.identity = identity;
+              kataAttentionHostClaim(identity);
+            }
+          } else if (marker?.pid === process.pid && !baseline.identity &&
+              typeof marker.identity === "string" && marker.identity) {
+            baseline.identity = marker.identity;
+          }
+        }
+        return;
+      }
       registry.active.set(cwd, baseline);
-      await transition("start", baseline);
+      await transition("start", baseline, adapter);
     });
     pi.on("session_shutdown", async (event, ctx) => {
       if (!selected(ctx, "attention") || event.reason !== "quit") return;
@@ -232,8 +287,8 @@ export default function kataHooks(pi) {
         await pending.promise;
         if (pending.mode === "end") return;
       }
-      if (!selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
-      await transition("end", baseline);
+      if (!baseline.started || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
+      await transition("end", baseline, null);
     });
   }
   if (options.contract) pi.on("before_agent_start", async (event, ctx) => {
