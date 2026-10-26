@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 type transactionFunc func(*sql.Tx) error
@@ -30,6 +32,10 @@ func (s *Store) withTx(ctx context.Context, isolation sql.IsolationLevel, operat
 		}
 		defer func() { _ = tx.Rollback() }()
 		if err := operation(tx); err != nil {
+			rollbackErr := tx.Rollback()
+			if db.HasTransactionRollbackCallback(err) {
+				return db.FinishTransactionRollback(ctx, err, rollbackErr)
+			}
 			return err
 		}
 		return tx.Commit()

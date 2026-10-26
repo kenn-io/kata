@@ -239,7 +239,16 @@ func RelayEventReferencedProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.T
 		return owner(`SELECT project_id,issue_uid FROM events WHERE issue_uid=`+bind(1)+` AND type IN ('issue.created','issue.snapshot') UNION SELECT project_id,issue_uid FROM purge_log WHERE issue_uid=`+bind(2), uid, uid)
 	}
 	byRef := func(project, ref string) (Issue, error) {
-		return relayReferenceByRef(event, project, ref, bind, field, owner, byUID)
+		return relayReferenceByRef(event, project, ref, bind, field, owner, byUID, func(project, shortID, currentUID string) (bool, error) {
+			var moved bool
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+SELECT 1 FROM events e
+WHERE e.type='issue.moved'
+  AND `+field("from_project_uid")+`=`+bind(1)+`
+			  AND `+field("from_short_id")+`=`+bind(2)+`
+  AND e.issue_uid<>`+bind(3)+`)`, project, shortID, currentUID).Scan(&moved)
+			return moved, err
+		})
 	}
 	comment := func(uid, target string) (Issue, error) {
 		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=`+bind(1), target)
@@ -310,7 +319,7 @@ func RelayCheckpointMetadata(raw jsontext.Value, canOmitComment func(string) (bo
 	return jsontext.Value(encoded), nil
 }
 
-func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error)) (Issue, error) {
+func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error), movedShortID func(string, string, string) (bool, error)) (Issue, error) {
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
 		return Issue{}, ErrNotFound
@@ -321,7 +330,21 @@ func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) 
 	// An own-name qualifier requires a concrete target in the canonical
 	// source namespace; the unhashed display name is only a routing clue.
 	if parsed.Project == "" || parsed.Project == event.ProjectName {
-		return owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
+		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
+		if err != nil {
+			return Issue{}, err
+		}
+		// A source short ID is ambiguous when a retained move shows that a
+		// different issue used to own it. A move back of this same issue remains
+		// resolvable because the current UID still matches the move history.
+		moved, err := movedShortID(project, parsed.ShortID, issue.UID)
+		if err != nil {
+			return Issue{}, err
+		}
+		if moved {
+			return Issue{}, ErrNotFound
+		}
+		return issue, nil
 	}
 	// The producer's project name is retained on native history, independent
 	// of local aliases. A name reused by multiple source projects is ambiguous.

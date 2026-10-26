@@ -389,6 +389,22 @@ func RunRelaySharedAccessMovedReplyPurge(t *testing.T, store db.Storage) {
 // RunRelaySharedAccessMovedBareEvidence checks that an old bare evidence ref
 // cannot substitute the source namespace for a moved target's actual owner.
 func RunRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge bool) {
+	runRelaySharedAccessMovedBareEvidence(t, store, purge, false, false)
+}
+
+// RunRelaySharedAccessMovedBareEvidenceReusedShortID rejects historical
+// evidence when a moved issue's former short ID has been reused in its source.
+func RunRelaySharedAccessMovedBareEvidenceReusedShortID(t *testing.T, store db.Storage) {
+	runRelaySharedAccessMovedBareEvidence(t, store, false, true, false)
+}
+
+// RunRelaySharedAccessMovedBareEvidenceReturnedToSource allows historical
+// evidence when the original issue, rather than a replacement, owns the ID.
+func RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t *testing.T, store db.Storage) {
+	runRelaySharedAccessMovedBareEvidence(t, store, false, false, true)
+}
+
+func runRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge, reuseShortID, returnToSource bool) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "evidence-source")
 	require.NoError(t, err)
@@ -420,6 +436,24 @@ func RunRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge
 	require.NoError(t, err)
 	require.Equal(t, target.UID, moved.Issue.UID)
 	require.Equal(t, peer.ID, moved.Issue.ProjectID)
+	if returnToSource {
+		moved, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: target.ID, FromProjectID: peer.ID, ToProjectID: project.ID,
+			IfMatchRev: moved.Issue.Revision, Actor: "operator",
+		})
+		require.NoError(t, err)
+		require.Equal(t, target.UID, moved.Issue.UID)
+		require.Equal(t, oldRef, moved.Issue.ShortID)
+	}
+	if reuseShortID {
+		replacementUID := strings.Repeat("0", 26-len(oldRef)) + strings.ToUpper(oldRef)
+		replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Author: "operator", Title: "Replacement target",
+			UID: replacementUID, ShortIDOverride: oldRef,
+		})
+		require.NoError(t, err)
+		require.Equal(t, oldRef, replacement.ShortID, "the moved issue's source short ID can be reused")
+	}
 	if purge {
 		purged, err := store.PurgeIssue(ctx, target.ID, "operator", nil)
 		require.NoError(t, err)
@@ -466,11 +500,14 @@ func RunRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge
 			require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
 			selected, _, err := db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
 			require.NoError(t, err)
+			closedRetained := false
 			for _, event := range selected {
-				require.NotEqual(t, closed.UID, event.EventUID, "old bare ref %s cannot prove moved target %s ownership", oldRef, target.UID)
-				require.NotEqual(t, closed.ContentHash, event.ContentHash)
-				require.NotEqual(t, closed.Payload, string(event.Payload))
+				if event.EventUID == closed.UID {
+					closedRetained = true
+					require.True(t, returnToSource, "old bare ref %s cannot resolve to another issue after %s moved", oldRef, target.UID)
+				}
 			}
+			require.Equal(t, returnToSource, closedRetained)
 			var entities [][]byte
 			require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &entities))
 			closedSnapshot := false
@@ -500,5 +537,8 @@ func RunRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge
 		afterCursor, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Equal(t, cursor, afterCursor)
+	}
+	if returnToSource {
+		require.False(t, refused, "the original issue is still authorized after moving back to its source")
 	}
 }

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	backoff "github.com/cenkalti/backoff/v5"
@@ -36,6 +37,9 @@ func retryTransient(ctx context.Context, cfg retryConfig, isTransient func(error
 		err := op()
 		if err == nil {
 			return struct{}{}, nil
+		}
+		if errors.Is(err, ErrTransactionFinalizationFailed) {
+			return struct{}{}, backoff.Permanent(err)
 		}
 		if !isTransient(err) {
 			return struct{}{}, backoff.Permanent(err)

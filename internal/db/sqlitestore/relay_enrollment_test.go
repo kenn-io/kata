@@ -11,7 +11,7 @@ import (
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge"} {
+	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge", "moved-bare-reuse", "moved-bare-return"} {
 		t.Run(form, func(t *testing.T) {
 			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
 			require.NoError(t, err)
@@ -27,6 +27,10 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 				dbtest.RunRelaySharedAccessMovedReplyPurge(t, store)
 			case "moved-bare-live", "moved-bare-purge":
 				dbtest.RunRelaySharedAccessMovedBareEvidence(t, store, form == "moved-bare-purge")
+			case "moved-bare-reuse":
+				dbtest.RunRelaySharedAccessMovedBareEvidenceReusedShortID(t, store)
+			case "moved-bare-return":
+				dbtest.RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t, store)
 			default:
 				dbtest.RunRelaySharedAccessNotification(t, store, form, compact)
 			}
