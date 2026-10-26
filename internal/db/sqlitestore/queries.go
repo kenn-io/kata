@@ -1770,6 +1770,10 @@ func (d *Store) closeIssueGuarded(
 	if err := db.CheckEvidenceTargetsTx(ctx, tx, p.Evidence); err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	evidence, err := db.ResolveAttachmentEvidence(issue, p.Evidence)
+	if err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	closedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
@@ -1815,7 +1819,7 @@ func (d *Store) closeIssueGuarded(
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
-		Evidence:               p.Evidence,
+		Evidence:               evidence,
 		Transcript:             p.Transcript,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,

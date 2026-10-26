@@ -4,6 +4,7 @@
 
 export interface Evidence {
   account?: string
+  attachment_id?: string
   command?: string
   issue_ref?: string
   paths?: string[]
