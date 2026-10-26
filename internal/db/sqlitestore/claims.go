@@ -12,7 +12,6 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
-
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -1513,6 +1512,11 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal claim event payload: %w", err)
 	}
+	stamped, err := db.StampEventTeammate(ctx, in.Type, in.Actor, string(b))
+	if err != nil {
+		return db.Event{}, err
+	}
+	b = []byte(stamped)
 	eventUID, err := katauid.New()
 	if err != nil {
 		return db.Event{}, fmt.Errorf("generate event uid: %w", err)

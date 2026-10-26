@@ -38,9 +38,10 @@ type NextOutput struct {
 
 // EditCommentInput identifies a comment and its replacement body.
 type EditCommentInput struct {
-	Ref        string `json:"ref"`
-	CommentRef string `json:"comment_ref"`
-	Body       string `json:"body"`
+	Teammate   *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref        string  `json:"ref"`
+	CommentRef string  `json:"comment_ref"`
+	Body       string  `json:"body"`
 }
 
 // EditCommentOutput reports the edited comment and issue state.
@@ -72,11 +73,12 @@ type GraphOutput struct {
 
 // MoveInput selects an issue and destination project.
 type MoveInput struct {
-	Ref       string `json:"ref"`
-	ToProject string `json:"to_project"`
-	Revision  *int64 `json:"revision,omitempty"`
-	Single    bool   `json:"single,omitempty" jsonschema:"Move only this issue; by default its active descendants move too."`
-	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Validate and list every issue that would move without moving."`
+	Teammate  *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref       string  `json:"ref"`
+	ToProject string  `json:"to_project"`
+	Revision  *int64  `json:"revision,omitempty"`
+	Single    bool    `json:"single,omitempty" jsonschema:"Move only this issue; by default its active descendants move too."`
+	DryRun    bool    `json:"dry_run,omitempty" jsonschema:"Validate and list every issue that would move without moving."`
 }
 
 // MoveOutput reports the issue after a project move.
@@ -94,14 +96,16 @@ type MoveOutput struct {
 
 // DeleteInput carries a soft-delete confirmation.
 type DeleteInput struct {
-	Ref     string `json:"ref"`
-	Confirm string `json:"confirm"`
-	Reason  string `json:"reason,omitempty"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
+	Confirm  string  `json:"confirm"`
+	Reason   string  `json:"reason,omitempty"`
 }
 
 // RestoreInput identifies a soft-deleted issue to restore.
 type RestoreInput struct {
-	Ref string `json:"ref"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
 }
 
 // PurgeInput carries an irreversible purge confirmation.
@@ -297,6 +301,11 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 }
 
 func (h toolHandlers) editComment(ctx context.Context, _ *sdkmcp.CallToolRequest, input EditCommentInput) (*sdkmcp.CallToolResult, EditCommentOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, EditCommentOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, EditCommentOutput{}, err
@@ -386,6 +395,11 @@ func (h toolHandlers) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 }
 
 func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input MoveInput) (*sdkmcp.CallToolResult, MoveOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MoveOutput{}, contributionErr
+	}
 	from, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MoveOutput{}, err
@@ -469,6 +483,11 @@ func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input DeleteInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, target, qualified, err := h.destructiveTarget(ctx, input.Ref, input.Confirm, "DELETE")
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -485,6 +504,11 @@ func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input RestoreInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
