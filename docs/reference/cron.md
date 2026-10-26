@@ -13,6 +13,8 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project.
+
 ## Vocabulary
 
 | Name | Meaning |

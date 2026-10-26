@@ -251,10 +251,8 @@ func statsCountsText(c issueCounts) string {
 //  2. A status flash (mutation result like "closed #42").
 //  3. SSE-degraded indicator when sseStatus != connected.
 //  4. A toast (e.g. "resynced").
-//  5. The scroll indicator `[start-end of N]` when the visible window
-//     doesn't fit the full filtered list.
-//  6. The cursor indicator `[N/M]` when the visible list fits.
-//  7. Blank if none of the above apply.
+//  5. A truncation notice when the loaded issue set hit its limit.
+//  6. Tabs on the left, with the scroll or cursor indicator on the right.
 //
 // dataBudget is the actual data-row budget the table renders into;
 // the scroll indicator only fires when the visible list exceeds it.
@@ -279,15 +277,14 @@ func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget i
 		body = fmt.Sprintf("showing first %d issues; refine filters", queueWorkingSetLimit)
 	default:
 		visible := lm.visibleRows()
+		position := ""
 		if n := len(visible); n > 0 && dataBudget > 0 && n > dataBudget {
 			start, end := lm.windowBounds(n, dataBudget)
-			body = rightAlignInside(
-				fmt.Sprintf("[%d-%d of %d]", start+1, end, n),
-				titleBarInnerWidth(width),
-			)
+			position = fmt.Sprintf("[%d-%d of %d]", start+1, end, n)
 		} else if n > 0 {
-			body = rightAlignInside(footerPositionIndicator(lm.cursor, n), titleBarInnerWidth(width))
+			position = footerPositionIndicator(lm.cursor, n)
 		}
+		body = padLeftRightInside(cronTabs(cronKata), position, titleBarInnerWidth(width))
 	}
 	return statsLineStyle.Render(padToWidth(body, titleBarInnerWidth(width)))
 }

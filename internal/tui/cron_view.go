@@ -9,6 +9,13 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
+const (
+	cronKata = iota
+	cronJobs
+	cronRuns
+	cronWorkflows
+)
+
 type cronRef struct {
 	kind int
 	uid  string
@@ -26,9 +33,24 @@ type cronData struct {
 	jobs                []generated.CronJob
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
-	errs                [3]error
+	jobsErr             error
+	workflowsErr        error
+	runsErr             error
 }
 type cronLoadedMsg cronData
+
+func (p cronData) readError(kind int) error {
+	switch kind {
+	case cronJobs:
+		return p.jobsErr
+	case cronRuns:
+		return p.runsErr
+	case cronWorkflows:
+		return p.workflowsErr
+	}
+	return nil
+}
+
 type cronState struct {
 	tab             int
 	lists           [4]cronList
@@ -58,9 +80,9 @@ func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events}
 	return func() tea.Msg {
-		data.jobs, data.errs[0] = cronRead(reader.ListCronJobs, id)
-		data.workflows, data.errs[1] = cronRead(reader.ListCronWorkflows, id)
-		data.runs, data.errs[2] = cronRead(reader.ListCronRuns, id)
+		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
+		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
+		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
 		return cronLoadedMsg(data)
 	}
 }
@@ -75,13 +97,13 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	}
 	data := cronData(msg)
 	if previous := m.cron.data; previous != nil {
-		if data.errs[0] != nil {
+		if data.jobsErr != nil {
 			data.jobs = previous.jobs
 		}
-		if data.errs[1] != nil {
+		if data.workflowsErr != nil {
 			data.workflows = previous.workflows
 		}
-		if data.errs[2] != nil {
+		if data.runsErr != nil {
 			data.runs = previous.runs
 		}
 	}
@@ -99,7 +121,7 @@ func (m Model) leaveCron() Model {
 func (m Model) switchCronTab(key string) Model {
 	tab := int(key[0] - '1')
 	if m.view != viewCron {
-		if tab == 0 {
+		if tab == cronKata {
 			return m
 		}
 		m.prevView = m.view
@@ -108,7 +130,7 @@ func (m Model) switchCronTab(key string) Model {
 		}
 		m.view = viewCron
 	}
-	if tab == 0 {
+	if tab == cronKata {
 		return m.leaveCron()
 	}
 	m.cron.tab, m.cron.stack, m.cron.filtering = tab, nil, false

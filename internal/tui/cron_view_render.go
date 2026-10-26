@@ -123,23 +123,22 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	lines := []cronLine{}
 	add := func(uid string, cells []string) {
-		row := format(cells)
-		if cronMatches(row, m.cron.lists[m.cron.tab].query) {
-			lines = append(lines, cronLine{row, cronRef{m.cron.tab, uid}})
+		if cronMatches(sanitizeForLine(strings.Join(cells, " ")), m.cron.lists[m.cron.tab].query) {
+			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
 		}
 	}
 	if p := m.cron.data; p != nil {
 		runs := p.runs
 		switch m.cron.tab {
-		case 1:
+		case cronJobs:
 			for _, j := range p.jobs {
 				add(j.UID, []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronLast(runs, j.UID, false)})
 			}
-		case 2:
+		case cronRuns:
 			for _, r := range runs {
 				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
-		case 3:
+		case cronWorkflows:
 			for _, w := range p.workflows {
 				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronCount(len(p.workflowJobs(w.UID)), "job"), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
 			}
@@ -147,7 +146,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
-	if m.cron.tab == 2 {
+	if m.cron.tab == cronRuns {
 		title = cronCount(len(lines), "loaded run") + " · newest 100"
 	}
 	return title, format(headers), lines
@@ -191,7 +190,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	}
 	name := ""
 	switch ref.kind {
-	case 1:
+	case cronJobs:
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
 			d.field("State", cronJobState(*j))
@@ -215,7 +214,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.json(def)
 			cronHistory(&d, p, ref)
 		}
-	case 2:
+	case cronRuns:
 		for _, r := range p.runs {
 			if r.UID != ref.uid {
 				continue
@@ -230,14 +229,16 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
 			d.field("Issue", deref(r.IssueUID))
-			d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
+			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
+				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
+			}
 			d.section("Message")
 			d.text(deref(r.Summary.Message), cronRef{})
 			d.section("Recorded with")
 			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.DefinitionEventUID), false)
 			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowDefinitionEventUID), true)
 		}
-	case 3:
+	case cronWorkflows:
 		if w := p.workflow(ref.uid); w != nil {
 			name = w.Name
 			d.section("About")
@@ -260,9 +261,13 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 				d.json(w.Definition.Options)
 			}
 			jobs := p.workflowJobs(ref.uid)
-			d.section(fmt.Sprintf("Used by (%d)", len(jobs)))
+			if p.jobsErr != nil {
+				d.section("Used by · unavailable")
+			} else {
+				d.section(fmt.Sprintf("Used by (%d)", len(jobs)))
+			}
 			for _, j := range jobs {
-				d.text(j.Name, cronRef{1, j.UID})
+				d.text(j.Name, cronRef{cronJobs, j.UID})
 			}
 			cronHistory(&d, p, ref)
 		}
@@ -276,9 +281,9 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	if uid == "" {
 		return
 	}
-	name, event, kind := uid, "", 1
+	name, event, kind := uid, "", cronJobs
 	if workflow {
-		kind = 3
+		kind = cronWorkflows
 		if w := p.workflow(uid); w != nil {
 			name, event = w.Name, w.DefinitionEventUID
 		}
@@ -286,11 +291,11 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 		name, event = j.Name, j.DefinitionEventUID
 	}
 	label := []string{"", "Job", "", "Workflow"}[kind] + ": " + name
-	errorIndex := 0
+	readErr := p.jobsErr
 	if workflow {
-		errorIndex = 1
+		readErr = p.workflowsErr
 	}
-	if p.errs[errorIndex] != nil {
+	if readErr != nil {
 		d.text(label+" · unavailable", cronRef{})
 		return
 	}
@@ -304,10 +309,14 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	d.text(label, cronRef{kind, uid})
 }
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
+	if p.runsErr != nil {
+		d.section("Loaded runs · unavailable")
+		return
+	}
 	runs := []generated.CronRun{}
 	for _, r := range p.runs {
 		uid := r.JobUID
-		if ref.kind == 3 {
+		if ref.kind == cronWorkflows {
 			uid = r.WorkflowUID
 		}
 		if deref(uid) == ref.uid {
@@ -319,7 +328,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 		d.text("no loaded runs", cronRef{})
 	}
 	for _, r := range runs {
-		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{2, r.UID})
+		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
 }
 
@@ -355,9 +364,16 @@ func renderCron(m Model) string {
 	help := cronHelpRows(m)
 	errors := []string{}
 	if m.cron.data != nil {
-		for i, err := range m.cron.data.errs {
-			if err != nil {
-				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine([]string{"jobs", "workflows", "runs"}[i]+": "+err.Error()), m.width)))
+		for _, read := range []struct {
+			name string
+			err  error
+		}{
+			{"jobs", m.cron.data.jobsErr},
+			{"workflows", m.cron.data.workflowsErr},
+			{"runs", m.cron.data.runsErr},
+		} {
+			if read.err != nil {
+				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(read.name+": "+read.err.Error()), m.width)))
 			}
 		}
 	}
@@ -388,7 +404,7 @@ func renderCron(m Model) string {
 		switch {
 		case m.cron.data == nil:
 			empty = "loading cron data…"
-		case m.cron.data.errs[[]int{0, 0, 2, 1}[m.cron.tab]] != nil:
+		case m.cron.data.readError(m.cron.tab) != nil:
 			empty = cronTabNames[m.cron.tab] + " unavailable: see error below"
 		case query != "":
 			empty += " match " + fmt.Sprintf("%q", query)

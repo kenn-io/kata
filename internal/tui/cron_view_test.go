@@ -324,19 +324,19 @@ func (a *cronReadTestAPI) ListCronJobs(_ context.Context, id int64) ([]generated
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
 	a.calls++
-	return slices.Clone(a.data.jobs), a.data.errs[0]
+	return slices.Clone(a.data.jobs), a.data.jobsErr
 }
 func (a *cronReadTestAPI) ListCronWorkflows(_ context.Context, id int64) ([]generated.CronWorkflow, error) {
 	if id != 7 {
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
-	return slices.Clone(a.data.workflows), a.data.errs[1]
+	return slices.Clone(a.data.workflows), a.data.workflowsErr
 }
 func (a *cronReadTestAPI) ListCronRuns(_ context.Context, id int64) ([]generated.CronRun, error) {
 	if id != 7 {
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
-	return slices.Clone(a.data.runs), a.data.errs[2]
+	return slices.Clone(a.data.runs), a.data.runsErr
 }
 
 func TestCronReturnAcrossLayouts(t *testing.T) {
@@ -387,10 +387,48 @@ func TestCronAllProjects(t *testing.T) {
 }
 
 func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		tab      rune
+		jobsFail bool
+	}{
+		{"workflow jobs", '4', true},
+		{"workflow runs", '4', false},
+		{"job runs", '2', false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := cronFixture(t)
+			a := &cronReadTestAPI{data: *m.cron.data}
+			if tc.jobsFail {
+				a.data.jobs = nil
+				a.data.jobsErr = errors.New("jobs read failed")
+			} else {
+				a.data.runs = nil
+				a.data.runsErr = errors.New("runs read failed")
+			}
+			m.api, m.cron.data = a, nil
+			m, cmd := updateModel(m, keyRune('r'))
+			m, _ = updateModel(m, cmd())
+			m = sendRune(m, tc.tab)
+			m = sendKey(m, tea.KeyEnter)
+			_, _, lines := cronScreen(m)
+			var document string
+			for _, line := range lines {
+				document += line.text + "\n"
+			}
+			if tc.jobsFail {
+				require.Contains(t, document, "Used by · unavailable")
+				require.NotContains(t, document, "Used by (0)")
+			} else {
+				require.Contains(t, document, "Loaded runs · unavailable")
+				require.NotContains(t, document, "no loaded runs")
+			}
+		})
+	}
 	m := cronFixture(t)
 	a := &cronReadTestAPI{data: *m.cron.data}
 	a.data.jobs = nil
-	a.data.errs[0] = errors.New(strings.Repeat("permission denied ", 20))
+	a.data.jobsErr = errors.New(strings.Repeat("permission denied ", 20))
 	m.api = a
 	m.cron.data = nil
 	m, cmd := updateModel(m, keyRune('r'))
@@ -413,7 +451,7 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	require.NotContains(t, document, "no longer defined")
 	m = cronFixture(t)
 	a = &cronReadTestAPI{data: *m.cron.data}
-	a.data.errs[0] = errors.New("refresh failed")
+	a.data.jobsErr = errors.New("refresh failed")
 	a.data.jobs = nil
 	m.api = a
 	m, cmd = updateModel(m, keyRune('r'))
@@ -423,6 +461,23 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 }
 
 func TestCronFilterAndTabState(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		t.Run(string(tab), func(t *testing.T) {
+			m := cronFixture(t)
+			m.cron.data.jobs[0].Name = strings.Repeat("long job name ", 12) + "job-suffix"
+			m.cron.data.runs[0].Summary.Message = new(strings.Repeat("long summary ", 12) + "run-suffix")
+			m.cron.data.workflows[0].Name = strings.Repeat("long workflow name ", 12) + "workflow-suffix"
+			m = sendRune(m, tab)
+			m = sendRune(m, '/')
+			query := map[rune]string{'2': "job-suffix", '3': "run-suffix", '4': "workflow-suffix"}[tab]
+			m, _ = updateModel(m, tea.PasteMsg{Content: query})
+			m = sendKey(m, tea.KeyEnter)
+			_, _, lines := cronScreen(m)
+			require.Len(t, lines, 1)
+			m = sendKey(m, tea.KeyEnter)
+			require.Len(t, m.cron.stack, 1)
+		})
+	}
 	m := cronFixture(t)
 	m = sendRune(m, '/')
 	for _, r := range "daily" {
@@ -453,7 +508,7 @@ func TestSnapshot_Cron(t *testing.T) {
 				m, _ = updateModel(m, tea.PasteMsg{Content: "daily"})
 			case "jobs-unavailable":
 				m.cron.data.jobs = nil
-				m.cron.data.errs[0] = errors.New("no cron permission (403)")
+				m.cron.data.jobsErr = errors.New("no cron permission (403)")
 			case "runs":
 				m = sendRune(m, '3')
 			case "job-detail":
@@ -477,6 +532,7 @@ func TestSnapshot_Cron(t *testing.T) {
 func TestCronEntryKeepsTitle(t *testing.T) {
 	m := newTestModel()
 	m.width, m.height = 80, 24
+	require.Contains(t, stripANSI(m.viewBody()), "[kata カタ] jobs runs workflows")
 	title, _, _ := strings.Cut(m.viewBody(), "\n")
 	m = sendRune(m, '2')
 	rows := strings.Split(m.viewBody(), "\n")
@@ -484,6 +540,7 @@ func TestCronEntryKeepsTitle(t *testing.T) {
 	require.Contains(t, stripANSI(rows[1]), "kata カタ [jobs] runs workflows")
 	m = sendRune(m, '1')
 	require.Equal(t, viewList, m.view)
+	require.Contains(t, stripANSI(m.viewBody()), "[kata カタ] jobs runs workflows")
 	m = sendRune(m, '?')
 	m = sendRune(m, '3')
 	require.Equal(t, viewHelp, m.view)
