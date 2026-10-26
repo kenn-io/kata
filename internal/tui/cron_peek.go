@@ -119,11 +119,12 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 }
 
 // invalidateCronPeek marks the peek stale when a live event changes the
-// peeked issue's title or comments. Each change restarts the read's delay, so
-// a burst of events costs one read.
+// peeked issue's title, comments, or readability in the run's project. Each
+// change restarts the read's delay, so a burst of events costs one read.
 func (h *cronHost) invalidateCronPeek(msg eventReceivedMsg) {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.updated":
+	case "issue.commented", "issue.comment_edited", "issue.updated",
+		"issue.soft_deleted", "issue.restored", "issue.moved", "issue.snapshot":
 	default:
 		return
 	}

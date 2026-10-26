@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"hegel.dev/go/hegel"
 
 	native "go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/tui/cron/records"
 )
 
@@ -309,6 +311,94 @@ func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Deleting, restoring, snapshotting, or moving the peeked issue rereads it, so
+// the peek never keeps context the run's project can no longer read and shows
+// a restored issue again. Replies read before a transition stay discarded.
+func TestCronPeekFollowsIssueLifecycle(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	ctx := context.Background()
+	p, err := c.EnsureProject(ctx, "spoke-project", "example-actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := c.EnsureProject(ctx, "hub-project", "example-actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := c.CreateIssue(ctx, p.ID, CreateIssueBody{Title: "Example issue", Actor: "example-actor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := created.Issue
+	if _, err := c.AddComment(ctx, p.ID, issue.UID, "first comment marker", "example-actor"); err != nil {
+		t.Fatal(err)
+	}
+	action := func(name, body string, header map[string]string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", env.URL, p.ID, issue.UID, name), strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range header {
+			req.Header.Set(k, v)
+		}
+		resp, err := env.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatal(name, resp.Status, string(raw))
+		}
+	}
+
+	n := initialModel(Options{})
+	n.api = c
+	n.scope = scope{projectID: p.ID, projectName: p.Name}
+	h := newCronHost(n)
+	h.tab, h.width, h.height, h.dirty = 2, 120, 32, false
+	key := fmt.Sprint(p.ID)
+	h.catalogs = map[int64]cronCatalog{p.ID: {name: p.Name, uid: p.UID, runsLoaded: true, runs: []records.Run{{UID: "run-0", ProjectID: p.ID, ProjectKey: key, IssueUID: &issue.UID, Status: "succeeded", Summary: native.Summary{Version: 1, Message: "own summary marker"}, CreatedAt: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}}}}
+	h.updateCronBoard()
+	t.Cleanup(func() { _ = h.Close() })
+
+	replies := []cronPeekMsg{corePeekReply(t, h)}
+	h.Update(replies[0])
+	steps := []struct {
+		event, want, gone string
+		change            func()
+	}{
+		{"issue.soft_deleted", "Issue not readable", "first comment marker", func() {
+			action("delete", `{"actor":"example-actor"}`, map[string]string{"X-Kata-Confirm": fmt.Sprintf("DELETE %s#%s", p.Name, issue.ShortID)})
+		}},
+		{"issue.restored", "first comment marker", "Issue not readable", func() { action("restore", `{"actor":"example-actor"}`, nil) }},
+		{"issue.snapshot", "snapshot comment marker", "first comment marker", func() {
+			if _, err := c.AddComment(ctx, p.ID, issue.UID, "snapshot comment marker", "example-actor"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"issue.moved", "Issue not readable", "snapshot comment marker", func() {
+			action("move", fmt.Sprintf(`{"actor":"example-actor","to_project_uid":%q}`, hub.UID), map[string]string{"If-Match": `"rev-1"`})
+		}},
+	}
+	for _, step := range steps {
+		step.change()
+		_, cmd := h.Update(eventReceivedMsg{eventType: step.event, projectID: p.ID, projectUID: p.UID, issueUID: issue.UID})
+		reply := corePeekReplyFrom(t, cmd)
+		h.Update(reply)
+		for _, late := range replies {
+			h.Update(late)
+		}
+		replies = append(replies, reply)
+		if text := ansi.Strip(h.View().Content); !strings.Contains(text, step.want) || strings.Contains(text, step.gone) || !strings.Contains(text, "own summary marker") {
+			t.Fatalf("after %s the peek lacks %q or keeps %q:\n%s", step.event, step.want, step.gone, text)
+		}
 	}
 }
 
