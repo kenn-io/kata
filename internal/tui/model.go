@@ -1053,7 +1053,7 @@ func (m Model) applyListViewportCache() Model {
 		field := m.input.activeField()
 		pos := field.input.Position()
 		// Reserve the slash and end cursor, then refresh the visible window.
-		field.input.SetWidth(max(1, titleBarInnerWidth(width)-2))
+		field.input.SetWidth(titleBarInnerWidth(width) - 2)
 		field.input.CursorEnd()
 		field.input.SetCursor(pos)
 	}
