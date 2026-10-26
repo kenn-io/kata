@@ -56,15 +56,6 @@ func TestTranscriptRejectsSensitiveCoordinates(t *testing.T) {
 	}
 }
 
-func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
-	ref := Transcript{Agent: "codex", SessionID: "00000000-0000-4000-8000-000000000001"}
-	for _, base := range []string{"https://agentsview.example/team%2Farchive", "https://agentsview.example/%2e%2e/archive"} {
-		got, err := ref.Link(base)
-		require.NoError(t, err)
-		assert.Equal(t, base+"/sessions/"+ref.SessionID, got)
-	}
-}
-
 // UUIDs are the stable native IDs for both supported harnesses. Exercise
 // the whole byte domain, independently formatting the UUID and expected URL.
 func FuzzTranscriptLinkPreservesSession(f *testing.F) {

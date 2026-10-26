@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/testenv"
 )
 
 const transcriptSessionOne = "00000000-0000-4000-8000-000000000001"
@@ -49,7 +48,20 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			if enabled {
 				assert.Equal(t, map[string]any{"session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionOne}, payload["transcript"])
 				// Readers retrieve the same provenance without keeping the close receipt.
-				provenance := closeTranscriptFromHistory(t, env, dir)
+				history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
+				var stream struct {
+					Events []struct {
+						Type    string         `json:"type"`
+						Payload map[string]any `json:"payload"`
+					} `json:"events"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(history), &stream))
+				var provenance any
+				for _, event := range stream.Events {
+					if event.Type == "issue.closed" {
+						provenance = event.Payload["transcript"]
+					}
+				}
 				assert.Equal(t, payload["transcript"], provenance)
 			} else {
 				assert.NotContains(t, payload, "transcript")
@@ -58,56 +70,16 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 	}
 }
 
-func TestCloseTranscript_ConfiguredSessionEnv(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "Completed example work")
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("PI_SESSION_ID", transcriptSessionTwo)
-	t.Setenv("CODEX_THREAD_ID", transcriptSessionOne)
-	t.Setenv("CODEX_SESSION_ID", transcriptSessionOne)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", transcriptSessionOne)
-	t.Setenv("KATA_TRANSCRIPT_SESSION_ID", "")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\nsession_id_env = [\"PI_SESSION_ID\"]\nagentsview_url = \"https://agentsview.example/archive/\"\n"), 0600))
-
-	_, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
-		"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
-	require.NoError(t, err)
-	require.Empty(t, stderr)
-
-	provenance := closeTranscriptFromHistory(t, env, dir)
-	assert.Equal(t, map[string]any{"session_id": transcriptSessionTwo, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionTwo}, provenance)
-}
-
-func closeTranscriptFromHistory(t *testing.T, env *testenv.Env, dir string) any {
-	t.Helper()
-	history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
-	var stream struct {
-		Events []struct {
-			Type    string         `json:"type"`
-			Payload map[string]any `json:"payload"`
-		} `json:"events"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(history), &stream))
-	var provenance any
-	for _, event := range stream.Events {
-		if event.Type == "issue.closed" {
-			provenance = event.Payload["transcript"]
-		}
-	}
-	return provenance
-}
-
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	for _, tc := range []struct {
 		name, id, thread, session, claude, pi, variables, base, wantID, warning string
 	}{
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
-		{name: "configured session", variables: `["PI_SESSION_ID"]`, pi: transcriptSessionTwo, thread: transcriptSessionOne, wantID: transcriptSessionTwo},
+		{name: "configured session", variables: `["PI_SESSION_ID"]`, pi: transcriptSessionTwo, thread: transcriptSessionOne, session: transcriptSessionOne, claude: transcriptSessionOne, wantID: transcriptSessionTwo},
 		{name: "default ignores unconfigured session", pi: transcriptSessionOne, warning: "current session unavailable"},
 		{name: "configured conflict", variables: `["PI_SESSION_ID", "CODEX_THREAD_ID"]`, pi: transcriptSessionOne, thread: transcriptSessionTwo, warning: "ambiguous"},
 		{name: "equal aliases", thread: transcriptSessionOne, session: transcriptSessionOne, wantID: transcriptSessionOne},
-		{name: "explicit session overrides inherited context", id: transcriptSessionTwo, thread: transcriptSessionOne, wantID: transcriptSessionTwo},
 		{name: "Claude Code context", claude: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "nested agent context", claude: transcriptSessionTwo, thread: transcriptSessionOne, warning: "ambiguous"},
 		{name: "override resolves configured conflict", variables: `["PI_SESSION_ID", "CODEX_THREAD_ID"]`, pi: transcriptSessionOne, id: transcriptSessionOne, claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},

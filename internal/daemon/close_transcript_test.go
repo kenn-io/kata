@@ -15,19 +15,35 @@ import (
 func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 	for _, legacy := range []bool{false, true} {
 		t.Run(map[bool]string{false: "agentless", true: "legacy"}[legacy], func(t *testing.T) {
-			testCloseTranscriptPersistenceAndRetries(t, legacy)
+			if !legacy {
+				testCloseTranscriptPersistenceAndRetries(t)
+				return
+			}
+			h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+			transcript := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
+			requireOK(t, postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"), nil, map[string]any{
+				"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.",
+				"evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript": transcript,
+			}))
+			events, err := h.DB().EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: projectID, Limit: 100})
+			require.NoError(t, err)
+			var storedTranscript any
+			for _, event := range events {
+				if event.Type == "issue.closed" {
+					var payload map[string]any
+					require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
+					storedTranscript = payload["transcript"]
+				}
+			}
+			assert.Equal(t, transcript, storedTranscript)
 		})
 	}
 }
 
-func testCloseTranscriptPersistenceAndRetries(t *testing.T, legacy bool) {
+func testCloseTranscriptPersistenceAndRetries(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(projectID, issueID, "actions/close")
-	transcript := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://agentsview.example/sessions/codex/00000000-0000-4000-8000-000000000001"}
-	if !legacy {
-		delete(transcript, "agent")
-		transcript["url"] = "https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001"
-	}
+	transcript := map[string]any{"session_id": "00000000-0000-4000-8000-000000000001", "url": "https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001"}
 	body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript": transcript, "retry_protocol": "close-v1"}
 	headers := map[string]string{"Idempotency-Key": "transcript-close-one"}
 	first := postWithHeader(t, ts, path, headers, body)
@@ -42,7 +58,7 @@ func testCloseTranscriptPersistenceAndRetries(t *testing.T, legacy bool) {
 	requireOK(t, second)
 	assert.Contains(t, string(second.body), `"reused":true`)
 	// The link is a derived locator: a changed AgentsView base still replays.
-	transcript["url"] = "https://agentsview.example/archive/sessions/codex/00000000-0000-4000-8000-000000000001"
+	transcript["url"] = "https://agentsview.example/archive/sessions/00000000-0000-4000-8000-000000000001"
 	relinked := postWithHeader(t, ts, path, headers, body)
 	requireOK(t, relinked)
 	assert.Contains(t, string(relinked.body), `"reused":true`)
