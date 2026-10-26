@@ -588,3 +588,65 @@ func TestCronGlobalExitKeepsKataReturn(t *testing.T) {
 		})
 	}
 }
+
+func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		t.Run(string(tab), func(t *testing.T) {
+			m := cronFixture(t)
+			data := *m.cron.data
+			job, run, workflow := data.jobs[0], data.runs[0], data.workflows[0]
+			job.UID, run.UID, workflow.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAA", "01ARZ3NDEKTSV4RRFFQ69G5FAA", "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+			job.Name, workflow.Name = "Selected job", "Selected workflow"
+			data.jobs = append(data.jobs, job)
+			data.runs = append(data.runs, run)
+			data.workflows = append(data.workflows, workflow)
+			m, _ = updateModel(m, cronLoadedMsg(data))
+			m = sendRune(m, tab)
+			m = sendRune(m, 'j')
+			job.UID, run.UID, workflow.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAB", "01ARZ3NDEKTSV4RRFFQ69G5FAB", "01ARZ3NDEKTSV4RRFFQ69G5FAB"
+			data.jobs = append([]generated.CronJob{job}, data.jobs...)
+			data.runs = append([]generated.CronRun{run}, data.runs...)
+			data.workflows = append([]generated.CronWorkflow{workflow}, data.workflows...)
+			m.api = &cronReadTestAPI{data: data}
+			m, refresh := updateModel(m, keyRune('r'))
+			require.NotNil(t, refresh)
+			m, _ = updateModel(m, refresh())
+			m = sendKey(m, tea.KeyEnter)
+			require.Len(t, m.cron.stack, 1)
+			require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAA", m.cron.stack[0].ref.uid)
+		})
+	}
+}
+
+func TestCronNoticesFitTerminal(t *testing.T) {
+	for _, screen := range []string{"jobs", "runs", "workflows", "detail", "all-projects"} {
+		for _, notice := range []string{"inbox", "reset"} {
+			t.Run(screen+"/"+notice, func(t *testing.T) {
+				m := cronFixture(t)
+				switch screen {
+				case "runs":
+					m = sendRune(m, '3')
+				case "workflows":
+					m = sendRune(m, '4')
+				case "detail":
+					m = sendKey(m, tea.KeyEnter)
+				case "all-projects":
+					m.scope.allProjects = true
+				}
+				want := "resynced"
+				if notice == "inbox" {
+					m.api = &inboxTestAPI{}
+					var lookup tea.Cmd
+					m, lookup = updateModel(m, keyRune('I'))
+					require.NotNil(t, lookup)
+					m, _ = updateModel(m, lookup())
+					want = "No Inbox project designated"
+				} else {
+					m, _ = updateModel(m, resetRequiredMsg{})
+				}
+				rows := strings.Split(stripANSI(m.viewContent()), "\n")
+				require.Contains(t, strings.Join(rows[:min(len(rows), m.height)], "\n"), want)
+			})
+		}
+	}
+}

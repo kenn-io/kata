@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -107,8 +108,30 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 			data.runs = previous.runs
 		}
 	}
-	m.cron.out, m.cron.data = false, &data
+	return m.cronReplaceData(&data)
+}
+
+// cronReplaceData keeps each list's cursor on the record it selected before.
+func (m Model) cronReplaceData(data *cronData) Model {
+	old := m
+	m.cron.out, m.cron.data = false, data
+	for tab := cronJobs; tab <= cronWorkflows; tab++ {
+		before, after := cronListLines(old, tab), cronListLines(m, tab)
+		cursor := &m.cron.lists[tab].cursor
+		if len(before) == 0 {
+			continue
+		}
+		selected := before[min(max(*cursor, 0), len(before)-1)].target
+		if i := slices.IndexFunc(after, func(l cronLine) bool { return l.target == selected }); i >= 0 {
+			*cursor = i
+		}
+	}
 	return m
+}
+func cronListLines(m Model, tab int) []cronLine {
+	m.cron.tab, m.cron.stack = tab, nil
+	_, _, lines := cronScreen(m)
+	return lines
 }
 func (m Model) leaveCron() Model {
 	m.view = m.prevView

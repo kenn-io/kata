@@ -351,11 +351,19 @@ func cronHelpRows(m Model) [][]helplayout.HelpItem {
 	}
 	return modalFirstHelpRows(m.modal, rows)
 }
+
+// cronNoticeRows reserves the rows appendNonListDetailExtras adds below the cron screen.
+func cronNoticeRows(m Model) int {
+	if notices := m.appendNonListDetailExtras(""); notices != "" {
+		return strings.Count(notices, "\n") + 1
+	}
+	return 0
+}
 func renderCron(m Model) string {
 	if m.scope.allProjects || m.scope.projectID == 0 {
 		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
 		help := cronHelpRows(m)
-		for range max(m.height-len(body)-helpLines(help, m.width), 1) {
+		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
 			body = append(body, "")
 		}
 		return strings.Join(append(body, renderFooterHelpTable(help, m.width)), "\n")
@@ -396,7 +404,7 @@ func renderCron(m Model) string {
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
-	budget := max(m.height-len(body)-max(len(errors), 1)-helpLines(help, m.width), 1)
+	budget := max(m.height-len(body)-max(len(errors), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 	cursor := min(max(*m.cronCursor(), 0), max(len(lines)-1, 0))
 	start, end := windowBounds(len(lines), cursor, budget)
 	if len(lines) == 0 {
