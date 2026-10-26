@@ -98,6 +98,22 @@
     abortScope = authorityScope
   })
   onDestroy(() => abort.abort())
+  // A definition read opens an editor only for the selection that asked for it.
+  // Closing or changing the selection discards the read; open drafts stay.
+  let selectionGeneration = 0
+  const selectionKey = $derived(
+    cronState.selected
+      ? JSON.stringify([
+          cronState.selected.kind,
+          cronState.selected.projectUID,
+          cronState.selected.uid,
+        ])
+      : '',
+  )
+  $effect(() => {
+    void selectionKey
+    selectionGeneration++
+  })
   function isCurrent(controller: AbortController, scope: string | number) {
     return controller === abort && !controller.signal.aborted && scope === authorityScope
   }
@@ -157,7 +173,8 @@
     const project = selectionProject,
       uid = cronState.selected.uid,
       scope = authorityScope,
-      controller = abort
+      controller = abort,
+      generation = selectionGeneration
     const observed = cronState.detail as CronJob
     const observedEvent = observed.definition_event_uid
     const desiredEnabled = !observed.definition.enabled
@@ -165,7 +182,7 @@
     localError = undefined
     try {
       const record = await client.readDefinition('job', project.id, uid, controller.signal)
-      if (!isCurrent(controller, scope) || !canMutate) return
+      if (!isCurrent(controller, scope) || !canMutate || generation !== selectionGeneration) return
       if (record.deletedAt) {
         localError = 'This job was deleted. Refresh the catalog.'
         return
@@ -182,7 +199,7 @@
       intentOperation = operation === 'delete' ? 'delete' : 'save'
       if (operation !== 'edit') await execute(draft, operation === 'delete' ? 'delete' : 'save')
     } catch (error) {
-      if (isCurrent(controller, scope))
+      if (isCurrent(controller, scope) && generation === selectionGeneration)
         localError = isAuthenticationRequiredError(error)
           ? 'Authentication required.'
           : error instanceof Error
@@ -197,12 +214,13 @@
     const project = selectionProject,
       uid = cronState.selected.uid,
       scope = authorityScope,
-      controller = abort
+      controller = abort,
+      generation = selectionGeneration
     localPending = true
     localError = undefined
     try {
       const record = await client.readDefinition('workflow', project.id, uid, controller.signal)
-      if (!isCurrent(controller, scope) || !canMutate) return
+      if (!isCurrent(controller, scope) || !canMutate || generation !== selectionGeneration) return
       if (record.deletedAt) {
         localError = 'This workflow was deleted. Refresh the catalog.'
         return
@@ -217,7 +235,7 @@
       attempt = undefined
       outcome = undefined
     } catch (error) {
-      if (isCurrent(controller, scope))
+      if (isCurrent(controller, scope) && generation === selectionGeneration)
         localError = isAuthenticationRequiredError(error)
           ? 'Authentication required.'
           : error instanceof Error

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, expect, test, vi } from 'vitest'
+import { tick } from 'svelte'
 import { parseCronDocument, rawCronValue } from '../../lib/cron/document'
 import { setGeneratedFetch } from '../../lib/api/client'
 import type { CronMutationOptions } from '../../lib/cron/mutations'
@@ -805,3 +806,36 @@ test.each([
   })
   expect(screen.getByText(`example-project: ${message}`)).toBeTruthy()
 })
+
+const lateReads = [
+  { kind: 'job', change: 'closed' },
+  { kind: 'job', change: 'changed' },
+  { kind: 'workflow', change: 'closed' },
+  { kind: 'workflow', change: 'changed' },
+] as const
+test.each(lateReads)(
+  'a $kind definition read cannot open an editor after the selection $change',
+  async ({ kind, change }) => {
+    const p = kind === 'job' ? writableProps() : workflowProps()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let requested = false
+    setGeneratedFetch(async () => {
+      requested = true
+      await held
+      return kind === 'job' ? envelope() : workflowEnvelope()
+    })
+    const view = render(CronPageWithEditor, p)
+    await fireEvent.click(screen.getByRole('button', { name: `Edit ${kind}` }))
+    await vi.waitFor(() => expect(requested).toBe(true))
+    const state = { ...p.state, detail: undefined }
+    state.selected = change === 'closed' ? undefined : { kind, projectUID: 'p1', uid: 'other' }
+    await view.rerender({ ...p, state })
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await tick()
+    expect(
+      screen.queryByRole('form', { name: kind === 'job' ? 'Job editor' : 'Workflow editor' }),
+    ).toBeNull()
+  },
+)

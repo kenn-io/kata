@@ -346,6 +346,21 @@ export function setJobField(
     next.values.issue_kind = 'existing'
     next.dirty.add('issue_kind')
   }
+  // Selectors such as timezone decide how other edited text normalizes. Text the
+  // new selectors accept is stored in its canonical form, so it serializes as
+  // validated.
+  for (const field of jobFields(next, {
+    persisted: !!next.definitionEventUID,
+    projectUID: '',
+    workflows: [],
+  })) {
+    if (field.key === key || field.kind !== 'text' || !next.dirty.has(field.key)) continue
+    try {
+      next.values[field.key] = canonical(next, field.key, next.values[field.key] ?? '')
+    } catch {
+      /* Keep rejected input visible until corrected. */
+    }
+  }
   return next
 }
 export function validateJobDraft(draft: CronDefinitionDraft): Record<string, string> {

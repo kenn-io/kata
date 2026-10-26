@@ -341,3 +341,13 @@ test('ordinary notify triggers accept an explicitly supplied valid existing issu
     expect(rawCronValue(serializeCronJobDraft(d), ['issue', 'kind'])).toBe('"existing"')
   }
 })
+test('changing the timezone normalizes a once time it made valid', () => {
+  let d = setJobField(draft(), 'trigger', 'once')
+  d = setJobField(d, 'timezone', 'America/New_York')
+  d = setJobField(d, 'schedule', '2026-11-01 01:30')
+  expect(validateJobDraft(d).schedule).toMatch(/Ambiguous/)
+  d = setJobField(d, 'timezone', 'UTC')
+  expect(validateJobDraft(d).schedule).toBeUndefined()
+  expect(d.values.schedule).toBe('2026-11-01T01:30:00Z')
+  expect(rawCronValue(serializeCronJobDraft(d), ['trigger', 'at'])).toBe('"2026-11-01T01:30:00Z"')
+})

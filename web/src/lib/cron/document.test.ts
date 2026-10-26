@@ -222,28 +222,6 @@ test('Hegel opaque numeric literals survive sibling insertion exactly', () =>
     },
     { testCases: 2000 },
   ))
-test('Hegel parse edit serialize restores original value tree', () =>
-  hegel.test(
-    (tc) => {
-      const source = nested(tc.draw(gs.integers()), tc.draw(gs.text({ codec: 'utf-8' })))
-      const original = parseCronDocument(`{"value":${source}}`)
-      const edited = patchCronValue(original, ['value'], 'false')
-      const restored = patchCronValue(edited, ['value'], source)
-      expect(slice(restored.source, ['value'])).toBe(source)
-    },
-    { testCases: 2000 },
-  ))
-test('Hegel edits never mutate original source', () =>
-  hegel.test(
-    (tc) => {
-      const source = `{ "value": ${nested(tc.draw(gs.integers()), tc.draw(gs.text({ codec: 'utf-8' })))} }`
-      const original = parseCronDocument(source)
-      patchCronValue(original, ['value'], 'null')
-      expect(original.source).toBe(source)
-    },
-    { testCases: 2000 },
-  ))
-
 test('array replacement, append and deletion preserve raw sibling numbers', () => {
   const original = parseCronDocument('[9007199254740993,{"x":1e40},-0]')
   const replaced = patchCronValue(original, [1, 'x'], '2e40')

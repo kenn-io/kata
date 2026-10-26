@@ -188,3 +188,17 @@ test('conflict comparison omits internal mode-roundtrip bookkeeping', async () =
     'overlap:ordinary',
   )
 })
+test.each([
+  { field: 'Timeout', key: 'timeout', typed: '2h30m', canonical: '9000' },
+  { field: 'Secret refs', key: 'secret_refs', typed: 'A=b,C=d', canonical: '{"A":"b","C":"d"}' },
+])('$field keeps typed text until blur', async ({ field, key, typed, canonical }) => {
+  const p = props()
+  render(CronJobEditor, p)
+  const input = screen.getByRole('textbox', { name: field }) as HTMLInputElement
+  for (const character of typed)
+    await fireEvent.input(input, { target: { value: input.value + character } })
+  expect(input.value).toBe(typed)
+  expect(p.onchange.mock.lastCall?.[0].values[key]).toBe(canonical)
+  await fireEvent.blur(input)
+  expect(input.value).toBe(canonical)
+})

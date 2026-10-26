@@ -45,6 +45,13 @@
   })
   let current = $derived(draft)
   let errors = $state<Record<string, string>>({})
+  // Text being typed stays as entered; the draft holds its canonical value, and
+  // the field shows that value once focus leaves it.
+  let buffers = $state<Record<string, string>>({})
+  let emitted: CronDefinitionDraft | undefined
+  $effect(() => {
+    if (draft !== emitted) buffers = {}
+  })
   let resolving = $state(false)
   const fields = $derived(
     jobFields(current, { persisted: !!current.definitionEventUID, projectUID, workflows }),
@@ -54,6 +61,7 @@
     if (disabled || operation === 'delete') return
     try {
       current = setJobField(current, key, value)
+      emitted = current
       onchange(current)
       if (Object.keys(errors).length) errors = validateJobDraft(current)
     } catch (e) {
@@ -67,6 +75,7 @@
   }
   async function submit() {
     if (disabled) return
+    buffers = {}
     if (operation === 'delete') {
       await onsubmit(current)
       return
@@ -93,10 +102,12 @@
         resolved = setJobField(resolved, key, uid)
         current = resolved
         captured = resolved
+        emitted = resolved
         onchange(resolved)
       }
       if (destroyed || readonly || pending || current !== captured) return
       current = resolved
+      emitted = resolved
       onchange(resolved)
       await onsubmit(resolved)
     } catch (e) {
@@ -189,10 +200,18 @@
         <label for={`cron-job-${field.key}`}>{field.label}</label>
         <TextInput
           id={`cron-job-${field.key}`}
-          value={current.values[field.key] ?? ''}
+          value={buffers[field.key] ?? current.values[field.key] ?? ''}
           disabled={disabled || operation === 'delete'}
           invalid={!!errors[field.key]}
-          oninput={(value) => change(field.key, value)}
+          oninput={(value) => {
+            buffers = { ...buffers, [field.key]: value }
+            change(field.key, value)
+          }}
+          onblur={() => {
+            const rest = { ...buffers }
+            delete rest[field.key]
+            buffers = rest
+          }}
           block
         />
       {/if}
