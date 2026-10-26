@@ -93,14 +93,20 @@
     if (abortScope !== undefined && abortScope !== authorityScope) {
       abort.abort()
       abort = new AbortController()
+      read?.abort()
+      read = undefined
       localPending = false
     }
     abortScope = authorityScope
   })
-  onDestroy(() => abort.abort())
+  onDestroy(() => {
+    abort.abort()
+    read?.abort()
+  })
   // A definition read opens an editor only for the selection that asked for it.
-  // Closing or changing the selection discards the read; open drafts stay.
-  let selectionGeneration = 0
+  // Closing or changing the selection cancels the read and releases its pending
+  // state; open drafts stay.
+  let read: AbortController | undefined
   const selectionKey = $derived(
     cronState.selected
       ? JSON.stringify([
@@ -112,8 +118,16 @@
   )
   $effect(() => {
     void selectionKey
-    selectionGeneration++
+    if (!read) return
+    read.abort()
+    read = undefined
+    localPending = false
   })
+  function startRead() {
+    read?.abort()
+    read = new AbortController()
+    return read
+  }
   function isCurrent(controller: AbortController, scope: string | number) {
     return controller === abort && !controller.signal.aborted && scope === authorityScope
   }
@@ -174,15 +188,16 @@
       uid = cronState.selected.uid,
       scope = authorityScope,
       controller = abort,
-      generation = selectionGeneration
+      reading = startRead()
     const observed = cronState.detail as CronJob
     const observedEvent = observed.definition_event_uid
     const desiredEnabled = !observed.definition.enabled
+    let released = false
     localPending = true
     localError = undefined
     try {
-      const record = await client.readDefinition('job', project.id, uid, controller.signal)
-      if (!isCurrent(controller, scope) || !canMutate || generation !== selectionGeneration) return
+      const record = await client.readDefinition('job', project.id, uid, reading.signal)
+      if (!isCurrent(controller, scope) || !canMutate || read !== reading) return
       if (record.deletedAt) {
         localError = 'This job was deleted. Refresh the catalog.'
         return
@@ -197,16 +212,25 @@
       attempt = undefined
       outcome = undefined
       intentOperation = operation === 'delete' ? 'delete' : 'save'
-      if (operation !== 'edit') await execute(draft, operation === 'delete' ? 'delete' : 'save')
+      if (operation !== 'edit') {
+        // The write owns pending state from here; a selection change must not
+        // release it.
+        read = undefined
+        released = true
+        await execute(draft, operation === 'delete' ? 'delete' : 'save')
+      }
     } catch (error) {
-      if (isCurrent(controller, scope) && generation === selectionGeneration)
+      if (isCurrent(controller, scope) && (read === reading || released))
         localError = isAuthenticationRequiredError(error)
           ? 'Authentication required.'
           : error instanceof Error
             ? error.message
             : 'Job could not be read.'
     } finally {
-      if (isCurrent(controller, scope)) localPending = false
+      if (read === reading) {
+        read = undefined
+        if (isCurrent(controller, scope)) localPending = false
+      }
     }
   }
   export async function openWorkflow() {
@@ -215,12 +239,12 @@
       uid = cronState.selected.uid,
       scope = authorityScope,
       controller = abort,
-      generation = selectionGeneration
+      reading = startRead()
     localPending = true
     localError = undefined
     try {
-      const record = await client.readDefinition('workflow', project.id, uid, controller.signal)
-      if (!isCurrent(controller, scope) || !canMutate || generation !== selectionGeneration) return
+      const record = await client.readDefinition('workflow', project.id, uid, reading.signal)
+      if (!isCurrent(controller, scope) || !canMutate || read !== reading) return
       if (record.deletedAt) {
         localError = 'This workflow was deleted. Refresh the catalog.'
         return
@@ -235,14 +259,17 @@
       attempt = undefined
       outcome = undefined
     } catch (error) {
-      if (isCurrent(controller, scope) && generation === selectionGeneration)
+      if (isCurrent(controller, scope) && read === reading)
         localError = isAuthenticationRequiredError(error)
           ? 'Authentication required.'
           : error instanceof Error
             ? error.message
             : 'Workflow could not be read.'
     } finally {
-      if (isCurrent(controller, scope)) localPending = false
+      if (read === reading) {
+        read = undefined
+        if (isCurrent(controller, scope)) localPending = false
+      }
     }
   }
   async function execute(

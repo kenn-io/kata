@@ -839,3 +839,47 @@ test.each(lateReads)(
     ).toBeNull()
   },
 )
+
+test('dismissing a job during its definition read cancels it and frees the controls', async () => {
+  const p = writableProps()
+  let signal: AbortSignal | undefined
+  setGeneratedFetch(async (_url, init) => {
+    signal = init?.signal ?? undefined
+    return new Promise<Response>(() => {})
+  })
+  const view = render(CronPageWithEditor, p)
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit job' }))
+  await vi.waitFor(() => expect(signal).toBeDefined())
+  expect((screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled).toBe(true)
+  await view.rerender({ ...p, state: { ...p.state, selected: undefined, detail: undefined } })
+  expect(signal?.aborted).toBe(true)
+  await vi.waitFor(() =>
+    expect((screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  )
+})
+
+test('a cancelled definition read cannot clear a newer read', async () => {
+  const p = writableProps()
+  const held: (() => void)[] = []
+  setGeneratedFetch(() => new Promise<Response>((resolve) => held.push(() => resolve(envelope()))))
+  const view = render(CronPageWithEditor, p)
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit job' }))
+  await vi.waitFor(() => expect(held).toHaveLength(1))
+  const second = {
+    ...p.state,
+    selected: { kind: 'job' as const, projectUID: 'p1', uid: 'job2' },
+    detail: { ...(p.state.detail as CronJob), uid: 'job2' },
+  }
+  await view.rerender({ ...p, state: second })
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit job' }))
+  await vi.waitFor(() => expect(held).toHaveLength(2))
+  held[0]!()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await tick()
+  expect((screen.getByRole('button', { name: 'New job' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('form', { name: 'Job editor' })).toBeNull()
+  held[1]!()
+  expect(await screen.findByRole('form', { name: 'Job editor' })).toBeTruthy()
+})
