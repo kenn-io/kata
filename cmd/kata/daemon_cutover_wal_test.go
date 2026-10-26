@@ -187,3 +187,27 @@ func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 	err = runDaemonWithListen(competitorCtx, "127.0.0.1:0", false, false)
 	require.ErrorContains(t, err, "another kata daemon owns this store")
 }
+
+// SQLite creates a missing database through a dangling symlink, so an owner
+// configured through that link must also own the target's name.
+func TestForegroundRefusesStoreOwnedThroughDanglingSymlink(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("PORT", "")
+	target := filepath.Join(home, "fresh.db")
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	holdStoreOwnerLock(t, home, link)
+	original := daemonOwnerLockWait
+	t.Cleanup(func() { daemonOwnerLockWait = original })
+	daemonOwnerLockWait = 200 * time.Millisecond
+	t.Setenv("KATA_DB", target)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	require.ErrorContains(t, runDaemon(ctx), "another kata daemon owns this store")
+	_, err := os.Stat(target)
+	require.ErrorIs(t, err, os.ErrNotExist, "must refuse before creating the database")
+}

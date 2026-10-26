@@ -13,31 +13,53 @@ import (
 
 const storeOwnerLockRetry = 50 * time.Millisecond
 
+// maxStoreSymlinkHops bounds a symlink chain, as the OS does when it opens one.
+const maxStoreSymlinkHops = 40
+
 // StoreOwnerLockPaths names the locks a daemon holds for its whole life so no
 // second daemon opens the same store. A SQLite lock sits beside the database
 // file: a container bind mount or sandbox can reach that file through another
 // path, which hashes to a different runtime namespace but the same lock file.
 //
-// When the configured file is a symlink, the target gets a lock too. Cutover
-// renames the upgraded database onto the configured path, turning the link
-// into a regular file, so both names must stay owned. Directory symlinks are
-// resolved first so one file never gets two locks. Hard links to one file are
-// not unified. PostgreSQL has no file, so its lock lives in the runtime
-// namespace. The paths are sorted so every daemon takes them in one order.
+// Every name on a symlink chain to the database gets a lock, including a
+// target SQLite has not created yet. Cutover renames the upgraded database
+// onto the configured path, which turns that link into a regular file, so
+// every name another daemon might be configured with must stay owned.
+// Directory symlinks are resolved first so one file never gets two locks.
+// Hard links to one file are not unified. PostgreSQL has no file, so its lock
+// lives in the runtime namespace. The paths are sorted so every daemon takes
+// them in one order.
 func StoreOwnerLockPaths(dataDir, dsn string) []string {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return []string{filepath.Join(dataDir, "store-owner.lock")}
 	}
-	path := strings.TrimPrefix(dsn, "sqlite://")
-	if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
-		path = filepath.Join(dir, filepath.Base(path))
-	}
-	paths := []string{path + ".owner.lock"}
-	if target, err := filepath.EvalSymlinks(path); err == nil && target != path {
-		paths = append(paths, target+".owner.lock")
+	var paths []string
+	for _, name := range sqliteFileNames(strings.TrimPrefix(dsn, "sqlite://")) {
+		paths = append(paths, name+".owner.lock")
 	}
 	slices.Sort(paths)
-	return paths
+	return slices.Compact(paths)
+}
+
+// sqliteFileNames lists path and each symlink hop from it, whether or not the
+// last name exists yet.
+func sqliteFileNames(path string) []string {
+	var names []string
+	for range maxStoreSymlinkHops {
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+			path = filepath.Join(dir, filepath.Base(path))
+		}
+		names = append(names, path)
+		target, err := os.Readlink(path)
+		if err != nil {
+			break
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		path = target
+	}
+	return names
 }
 
 // AcquireStoreOwnerLock waits until ctx ends to hold every path exclusively.
