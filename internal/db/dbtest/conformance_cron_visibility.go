@@ -23,6 +23,8 @@ func cronVisibilityUID(n int) string { return fmt.Sprintf("01J%023d", n) }
 
 // Seed evidence directly to control creation instants without changing the
 // production clock. These are ordinary rows in each backend's isolated fixture.
+// As producers require, a job UID belongs to one project and each job or
+// project workflow has its own definition event UID.
 func seedCronVisibilityRun(t *testing.T, store db.Storage, project int64, runID int, job, status string, at time.Time) db.CronRun {
 	t.Helper()
 	q := store.(interface {
@@ -30,9 +32,9 @@ func seedCronVisibilityRun(t *testing.T, store db.Storage, project int64, runID 
 	})
 	var jobUID, definitionUID, workflowUID, workflowDefinitionUID any
 	if job == "" {
-		workflowUID, workflowDefinitionUID = cronVisibilityUID(90000), cronVisibilityUID(90001)
+		workflowUID, workflowDefinitionUID = cronVisibilityUID(90000+2*int(project)), cronVisibilityUID(90001+2*int(project))
 	} else {
-		jobUID, definitionUID = job, cronVisibilityUID(90002)
+		jobUID, definitionUID = job, "01K"+job[3:]
 	}
 	id := cronVisibilityUID(runID)
 	_, err := q.ExecContext(t.Context(), `INSERT INTO cron_runs
@@ -51,7 +53,7 @@ func checkCronVisibilityLatest(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	oldJob, busyJob, neverJob, otherJob := cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002), cronVisibilityUID(1003)
+	oldJob, busyJob, neverJob, otherJob, otherNewerJob := cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002), cronVisibilityUID(1003), cronVisibilityUID(1004)
 	old := seedCronVisibilityRun(t, store, project.ID, 1, oldJob, "failed", at.Add(-72*time.Hour))
 	seedCronVisibilityRun(t, store, project.ID, 2, oldJob, "failed", at.Add(-48*time.Hour))
 	winner := seedCronVisibilityRun(t, store, project.ID, 3, oldJob, "succeeded", at.Add(-48*time.Hour))
@@ -64,7 +66,7 @@ func checkCronVisibilityLatest(t *testing.T, store db.Storage) error {
 	for i := range 130 {
 		busy = seedCronVisibilityRun(t, store, project.ID, 10+i, busyJob, "running", at.Add(time.Duration(i)*time.Second))
 	}
-	seedCronVisibilityRun(t, store, other.ID, 200, oldJob, "failed", at.Add(24*time.Hour))
+	seedCronVisibilityRun(t, store, other.ID, 200, otherNewerJob, "failed", at.Add(24*time.Hour))
 	foreign := seedCronVisibilityRun(t, store, other.ID, 201, otherJob, "failed", at)
 	seedCronVisibilityRun(t, store, project.ID, 202, "", "failed", at)
 
@@ -94,13 +96,13 @@ func checkCronVisibilityStatusPages(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	job, otherJob := cronVisibilityUID(1000), cronVisibilityUID(1001)
+	job, otherJob, foreignJob := cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002)
 	failed := seedCronVisibilityRun(t, store, project.ID, 1, job, "failed", at)
 	cancelled := seedCronVisibilityRun(t, store, project.ID, 2, job, "cancelled", at)
 	newer := seedCronVisibilityRun(t, store, project.ID, 3, job, "failed", at)
 	seedCronVisibilityRun(t, store, project.ID, 4, job, "succeeded", at.Add(time.Second))
 	seedCronVisibilityRun(t, store, project.ID, 5, otherJob, "failed", at.Add(time.Second))
-	foreign := seedCronVisibilityRun(t, store, other.ID, 6, job, "failed", at)
+	foreign := seedCronVisibilityRun(t, store, other.ID, 6, foreignJob, "failed", at)
 
 	query := db.CronRunList{ProjectID: project.ID, JobUID: job, Limit: 2}
 	query.Statuses = []string{"failed", "cancelled", "failed"}
@@ -144,7 +146,7 @@ func checkCronVisibilityFailedCount(t *testing.T, store db.Storage) error {
 		seedCronVisibilityRun(t, store, project.ID, i+10, job, status, until)
 	}
 	seedCronVisibilityRun(t, store, project.ID, 20, "", "failed", until)
-	seedCronVisibilityRun(t, store, other.ID, 21, job, "failed", until)
+	seedCronVisibilityRun(t, store, other.ID, 21, cronVisibilityUID(1001), "failed", until)
 	count, err := store.CountFailedCronRuns(ctx, project.ID, since.In(time.FixedZone("offset", -7*60*60)), until)
 	require.NoError(t, err)
 	require.EqualValues(t, 4, count, "include both boundaries, including workflow-only observations")
@@ -245,13 +247,14 @@ func checkCronVisibilityProperties(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	projects := []int64{project.ID, other.ID}
-	jobs := []string{cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002)}
+	// Jobs 0-2 belong to the first project and 3-5 to the second.
+	jobs := []string{cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002), cronVisibilityUID(1003), cronVisibilityUID(1004), cronVisibilityUID(1005)}
 	base := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	var runs []db.CronRun
 	for i := range 30 {
 		// Nonmonotonic/tied creation times and interleaved projects make a
 		// first-row, globally keyed, or UID-only oracle observably wrong.
-		runs = append(runs, seedCronVisibilityRun(t, store, projects[i%2], i+1, jobs[i%3], cronVisibilityStatuses[i%5], base.Add(time.Duration((i*7)%9-4)*time.Hour)))
+		runs = append(runs, seedCronVisibilityRun(t, store, projects[i%2], i+1, jobs[(i%2)*3+i%3], cronVisibilityStatuses[i%5], base.Add(time.Duration((i*7)%9-4)*time.Hour)))
 	}
 	t.Run("latest lookup matches independent history", func(t *testing.T) {
 		hegel.Test(t, func(ht *hegel.T) {

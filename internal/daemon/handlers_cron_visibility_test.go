@@ -18,13 +18,14 @@ import (
 )
 
 // Fixtures are ordinary cron rows in the isolated test database. Direct inserts
-// control creation order without changing the production clock or schema.
-func seedCoreVisibilityRun(t *testing.T, env *testenv.Env, project int64, n int, job, status string, at time.Time) string {
+// control creation order without changing the production clock or schema; each
+// run references its own job's project and definition event, as producers require.
+func seedCoreVisibilityRun(t *testing.T, env *testenv.Env, n int, job db.CronJob, status string, at time.Time) string {
 	t.Helper()
 	id := fmt.Sprintf("01J%023d", n)
 	_, err := env.DB.ExecContext(t.Context(), `INSERT INTO cron_runs
 		(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at)
-		VALUES($1,$2,$3,$4,'worker',$5,$6,$6)`, id, project, job, fmt.Sprintf("01J%023d", 90000), status, at.UTC().Format(db.CronRunCreatedAtFormat))
+		VALUES($1,$2,$3,$4,'worker',$5,$6,$6)`, id, job.ProjectID, job.UID, job.DefinitionEventUID, status, at.UTC().Format(db.CronRunCreatedAtFormat))
 	require.NoError(t, err)
 	return id
 }
@@ -45,12 +46,13 @@ func TestCronCoreLatestAcrossHistory(t *testing.T) {
 	quiet := coreVisibilityJob(t, env, project.ID, "Quiet")
 	busy := coreVisibilityJob(t, env, project.ID, "Busy")
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	seedCoreVisibilityRun(t, env, project.ID, 1, quiet.UID, "failed", at)
-	winner := seedCoreVisibilityRun(t, env, project.ID, 2, quiet.UID, "succeeded", at)
+	seedCoreVisibilityRun(t, env, 1, quiet, "failed", at)
+	winner := seedCoreVisibilityRun(t, env, 2, quiet, "succeeded", at)
 	for i := range 105 {
-		seedCoreVisibilityRun(t, env, project.ID, 10+i, busy.UID, "running", at.Add(time.Hour))
+		seedCoreVisibilityRun(t, env, 10+i, busy, "running", at.Add(time.Hour))
 	}
-	seedCoreVisibilityRun(t, env, other.ID, 200, quiet.UID, "failed", at.Add(24*time.Hour))
+	foreignJob := coreVisibilityJob(t, env, other.ID, "Quiet")
+	seedCoreVisibilityRun(t, env, 200, foreignJob, "failed", at.Add(24*time.Hour))
 	base := fmt.Sprintf("/api/v1/projects/%d/cron", project.ID)
 	for _, path := range []string{base + "/jobs", base + "/jobs/" + quiet.UID} {
 		status, raw := cronHTTP(t, env, http.MethodGet, path, nil)
@@ -81,7 +83,7 @@ func TestCronCoreNeverRanFilter(t *testing.T) {
 	project := seedProject(t, env, "example-project")
 	never := coreVisibilityJob(t, env, project.ID, "Never")
 	ran := coreVisibilityJob(t, env, project.ID, "Ran")
-	seedCoreVisibilityRun(t, env, project.ID, 1, ran.UID, "succeeded", time.Now().UTC())
+	seedCoreVisibilityRun(t, env, 1, ran, "succeeded", time.Now().UTC())
 	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs?status=never_ran", project.ID), nil)
 	require.Equalf(t, 200, status, "%s", raw)
 	var response struct {
@@ -104,12 +106,13 @@ func TestCronCoreStatusPages(t *testing.T) {
 	job := coreVisibilityJob(t, env, project.ID, "Inspect")
 	otherJob := coreVisibilityJob(t, env, project.ID, "Other")
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	old := seedCoreVisibilityRun(t, env, project.ID, 1, job.UID, "failed", at)
-	cancelled := seedCoreVisibilityRun(t, env, project.ID, 2, job.UID, "cancelled", at)
-	newer := seedCoreVisibilityRun(t, env, project.ID, 3, job.UID, "failed", at)
-	cursor := seedCoreVisibilityRun(t, env, project.ID, 4, job.UID, "succeeded", at.Add(time.Second))
-	seedCoreVisibilityRun(t, env, project.ID, 5, otherJob.UID, "failed", at.Add(time.Second))
-	foreign := seedCoreVisibilityRun(t, env, other.ID, 6, job.UID, "failed", at)
+	old := seedCoreVisibilityRun(t, env, 1, job, "failed", at)
+	cancelled := seedCoreVisibilityRun(t, env, 2, job, "cancelled", at)
+	newer := seedCoreVisibilityRun(t, env, 3, job, "failed", at)
+	cursor := seedCoreVisibilityRun(t, env, 4, job, "succeeded", at.Add(time.Second))
+	seedCoreVisibilityRun(t, env, 5, otherJob, "failed", at.Add(time.Second))
+	foreignJob := coreVisibilityJob(t, env, other.ID, "Inspect")
+	foreign := seedCoreVisibilityRun(t, env, 6, foreignJob, "failed", at)
 	base := fmt.Sprintf("/api/v1/projects/%d/cron/runs?job_uid=%s&limit=2", project.ID, job.UID)
 	for _, tc := range []struct {
 		query string
@@ -180,9 +183,10 @@ func TestCronCoreSummaryRestrictedProfile(t *testing.T) {
 	other := seedProject(t, env, "other-project")
 	job := coreVisibilityJob(t, env, project.ID, "Inspect")
 	for i, at := range []time.Time{now.Add(-24*time.Hour - time.Nanosecond), now.Add(-24 * time.Hour), now, now.Add(time.Nanosecond)} {
-		seedCoreVisibilityRun(t, env, project.ID, i+1, job.UID, "failed", at)
+		seedCoreVisibilityRun(t, env, i+1, job, "failed", at)
 	}
-	seedCoreVisibilityRun(t, env, other.ID, 10, job.UID, "failed", now)
+	foreignJob := coreVisibilityJob(t, env, other.ID, "Inspect")
+	seedCoreVisibilityRun(t, env, 10, foreignJob, "failed", now)
 	host := &capabilitiesReadHost{projectID: project.ID}
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host, EmbeddingProfile: daemon.EmbeddingProfile("restricted"), UIClock: func() time.Time { clockCalls++; return now }})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
