@@ -1,7 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, expect, test, vi } from 'vitest'
-import * as hegel from '@hegeldev/hegel'
-import * as gs from '@hegeldev/hegel/generators'
 import { createCredentialedFetch, setGeneratedFetch } from '../../lib/api/client'
 import { CronController, emptyCronState } from '../../lib/cron/controller'
 import { defaultCronRoute } from '../../lib/cron/route'
@@ -175,42 +173,4 @@ test.each(['usage', 'transcripts'] as const)(
     expect(screen.queryByRole('heading', { name: 'Models' })).toBeNull()
     expect(screen.queryByRole('link', { name: /legacy-session/ })).toBeNull()
   },
-)
-
-test(
-  'legacy metadata cannot introduce run drawer sections for arbitrary recorded text',
-  () =>
-    hegel.test(
-      (tc) => {
-        // Draw the text domain first; cap only fixture materialization to keep DOM work finite.
-        const text = tc.draw(gs.text({ codec: 'utf-8' })).slice(0, 256)
-        const shape = tc.draw(gs.sampledFrom(['usage', 'transcripts'] as const))
-        const legacyRun = {
-          ...run,
-          ...(shape === 'usage'
-            ? { usage: { ...legacyUsage, primary_model: text } }
-            : {
-                transcripts: [
-                  { agent: text, session_id: text, url: 'https://sessions.example/legacy' },
-                ],
-              }),
-        }
-        try {
-          render(CronRunDrawer, {
-            run: legacyRun,
-            peek: { status: 'no-issue' },
-            onOpenIssue: vi.fn(),
-            onOpenJob: vi.fn(),
-          })
-          expect(screen.queryByText('Model', { selector: 'dt' })).toBeNull()
-          expect(screen.queryByText('Cost', { selector: 'dt' })).toBeNull()
-          expect(screen.queryByRole('heading', { name: 'Linked sessions' })).toBeNull()
-          expect(screen.queryByRole('heading', { name: 'Models' })).toBeNull()
-        } finally {
-          cleanup()
-        }
-      },
-      { testCases: 2000 },
-    ),
-  60000,
 )

@@ -64,6 +64,11 @@ async function cronReads(page: Page, project: { projectID: number; projectUID: s
   await page.route('**/api/v1/projects/*/cron/**', async (route) => {
     const url = new URL(route.request().url()),
       tail = url.pathname.split('/cron/')[1] ?? ''
+    // Reads addressed to the remote daemon reach its real, empty cron store.
+    if (route.request().headers()['x-kata-web-daemon'] === 'example-remote') {
+      await route.continue()
+      return
+    }
     const scope = Number(/projects\/(\d+)\/cron/.exec(url.pathname)?.[1])
     if (scope !== project.projectID) {
       await route.fulfill({
@@ -244,22 +249,36 @@ test('a denied project keeps readable rows and marks the failure count partial',
 test('daemon switching fences old cron rows and selected detail', async ({ page, kata }) => {
   await kata.launch(page)
   await cronReads(page, kata)
-  await page.goto(
-    `${kata.origin}/kata?view=cron&cron_tab=runs&cron_kind=run&cron_scope=${kata.projectUID}&cron_uid=${runUID}`,
-  )
-  await expect(
-    page.getByText('Runner could not complete the inspection', { exact: true }),
-  ).toBeVisible()
-  await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Switch Kata daemon: example-local' }).click()
-  await page.getByRole('menuitemradio', { name: /example-remote/ }).click()
-  await expect(
-    page.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
-  ).toBeVisible()
+  // The modal drawer's overlay would dismiss it before a pointer reached the
+  // switcher, so dispatch the clicks directly: the fence must not rely on that.
+  const switchTo = async (from: string, to: string) => {
+    await page.getByRole('button', { name: `Switch Kata daemon: ${from}` }).dispatchEvent('click')
+    await page.getByRole('menuitemradio', { name: new RegExp(to) }).dispatchEvent('click')
+    await expect(page.getByRole('button', { name: `Switch Kata daemon: ${to}` })).toBeVisible()
+  }
+  // Leave the remote daemon on its Cron page so the final switch lands there.
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+  await switchTo('example-local', 'example-remote')
+  await page.getByRole('button', { name: /^Cron/ }).click()
+  await expect(page.getByText('No cron records in these projects.')).toBeVisible()
+  await switchTo('example-remote', 'example-local')
+  await page.getByRole('button', { name: /^Cron/ }).click()
+  await page.getByRole('radio', { name: 'Runs', exact: true }).click()
+  await page
+    .getByRole('row', { name: /^failed/ })
+    .getByRole('button', { name: 'Inspect workspace', exact: true })
+    .click()
+  const detail = page.getByRole('dialog', { name: 'Run detail' })
+  await expect(detail.getByText('Runner could not complete the inspection')).toBeVisible()
+  await switchTo('example-local', 'example-remote')
+  await expect(page).toHaveURL(/view=cron/)
+  await expect(page.getByText('No cron records in these projects.')).toBeVisible()
+  await expect(page.getByRole('row', { name: /^failed/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Inspect workspace', exact: true })).toHaveCount(0)
   await expect(
     page.getByText('Runner could not complete the inspection', { exact: true }),
   ).toHaveCount(0)
-  await expect(page.getByRole('dialog', { name: 'Run detail' })).toHaveCount(0)
+  await expect(detail).toHaveCount(0)
 })
 
 test('read-only browser authority can read cron', async ({ page, kata }) => {

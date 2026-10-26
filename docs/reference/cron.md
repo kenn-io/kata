@@ -42,8 +42,9 @@ The sidebar badge counts failed runs created in the daemon's last 24 hours;
 a partial indicator means some project counts could not be read.
 
 Open a run to read its recorded summary and the latest readable comment on its
-linked issue. Select the issue link to open the full discussion. The drawer
-shows when a run has no issue or its issue cannot be read. Use **Load more** to
+linked issue, including after that issue moves to another readable project.
+Select the issue link to open the full discussion. The drawer shows when a run
+has no issue or its issue cannot be read. Use **Load more** to
 read older run history and **Refresh** to reload current evidence.
 
 ## Definitions

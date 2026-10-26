@@ -52,6 +52,11 @@
   const selectionProject = $derived(
     state.projects.find((p) => p.project.uid === state.selected?.projectUID)?.project,
   )
+  // A linked issue may have moved since the run; open it where it lives now.
+  const issueProject = $derived(
+    state.projects.find((p) => p.project.id === state.peek.issue?.issue.project_id)?.project ??
+      selectionProject,
+  )
   function select(selection: CronSelection | undefined) {
     onNavigate({ ...route, selection })
   }
@@ -151,7 +156,7 @@
         {#if state.selected.kind === 'run'}<CronRunDrawer
             run={state.detail as CronRun}
             peek={state.peek}
-            onOpenIssue={(uid) => onOpenIssue(selectionProject!.uid, uid)}
+            onOpenIssue={(uid) => onOpenIssue(issueProject!.uid, uid)}
             onOpenJob={(uid) => select({ kind: 'job', projectUID: selectionProject!.uid, uid })}
           />
         {:else if state.selected.kind === 'job'}<CronJobDrawer

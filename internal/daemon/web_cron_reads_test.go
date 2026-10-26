@@ -35,4 +35,21 @@ func TestWebLocalCronReads(t *testing.T) {
 	if webLocalSPARequestAllowed(httptest.NewRequest(http.MethodGet, "/api/v1/projects/1/issues/issue-ref?include_deleted=true", nil)) {
 		t.Error("deleted issue read allowed")
 	}
+	// A linked issue keeps its UID when it moves to another project, so the
+	// drawer may read it by UID alone.
+	if !webLocalSPARequestAllowed(httptest.NewRequest(http.MethodGet, "/api/v1/issues/issue-uid", nil)) {
+		t.Error("linked issue read by UID denied")
+	}
+	for _, r := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/api/v1/issues/issue-uid?include_deleted=true", nil),
+		httptest.NewRequest(http.MethodGet, "/api/v1/issues", nil),
+		httptest.NewRequest(http.MethodGet, "/api/v1/issues/", nil),
+		httptest.NewRequest(http.MethodGet, "/api/v1/issues/issue-uid/extra", nil),
+		httptest.NewRequest(http.MethodPatch, "/api/v1/issues/issue-uid", nil),
+		httptest.NewRequest(http.MethodDelete, "/api/v1/issues/issue-uid", nil),
+	} {
+		if webLocalSPARequestAllowed(r) {
+			t.Errorf("allowed %s %s", r.Method, r.URL)
+		}
+	}
 }

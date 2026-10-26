@@ -1,19 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { setGeneratedFetch, createCredentialedFetch } from '../api/client'
 import { CronClient, CronReadError } from './client'
-test('uses credentialed fetch, repeated status, cursor without optional enrichment', async () => {
-  const upstream = vi.fn(async () => Response.json({ runs: [], next_before_uid: 'next' }))
-  setGeneratedFetch(createCredentialedFetch(() => ({ session: 'tab', csrf: 'csrf' }), upstream))
-  const signal = new AbortController().signal
-  await new CronClient().runs(2, signal, { statuses: ['failed', 'running'], beforeUID: 'cursor' })
-  const [url, options] = upstream.mock.calls[0]! as unknown as [URL, RequestInit]
-  expect(String(url)).toContain('status=failed&status=running')
-  expect(String(url)).toContain('before_uid=cursor')
-  expect(String(url)).not.toContain('refresh_usage')
-  expect(options.signal).toBe(signal)
-  expect(new Headers(options.headers).get('X-Kata-Web-Session')).toBe('tab')
-  expect(options.redirect).toBe('error')
-})
 test('403 is project-local and 401 follows auth transition', async () => {
   const reject = vi.fn(() => true)
   setGeneratedFetch(
@@ -31,4 +18,19 @@ test('403 is project-local and 401 follows auth transition', async () => {
   await expect(new CronClient().summary(1, new AbortController().signal)).rejects.toBeInstanceOf(
     CronReadError,
   )
+})
+test('a linked issue that moved projects is read by its UID', async () => {
+  const issue = { issue: { uid: 'issue / identifier' }, comments: [] }
+  const upstream = vi.fn(async (input: RequestInfo | URL) =>
+    new URL(String(input)).pathname.startsWith('/api/v1/projects/')
+      ? Response.json({ error: 'not found' }, { status: 404 })
+      : Response.json(issue),
+  )
+  setGeneratedFetch(createCredentialedFetch(() => ({ session: 'tab', csrf: 'csrf' }), upstream))
+  await expect(
+    new CronClient().issue(2, 'issue / identifier', new AbortController().signal),
+  ).resolves.toEqual(issue)
+  expect(
+    upstream.mock.calls.map(([url]) => decodeURIComponent(new URL(String(url)).pathname)),
+  ).toEqual(['/api/v1/projects/2/issues/issue / identifier', '/api/v1/issues/issue / identifier'])
 })

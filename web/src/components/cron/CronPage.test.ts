@@ -86,3 +86,52 @@ test('switching from Jobs to Runs clears the job-only never-ran status', async (
   await fireEvent.click(screen.getByRole('radio', { name: 'Runs' }))
   expect(onNavigate).toHaveBeenCalledWith(expect.objectContaining({ tab: 'runs', statuses: [] }))
 })
+
+test('a linked issue that moved projects opens in its current project', async () => {
+  const onOpenIssue = vi.fn()
+  const state = emptyCronState()
+  const run = {
+    uid: 'run',
+    status: 'failed',
+    issue_uid: 'issue',
+    created_at: '2026-01-01',
+    summary: { version: 1 },
+  } as never
+  state.projects = [
+    {
+      project: { id: 1, uid: 'p1', name: 'example-project' },
+      hasRecords: true,
+      jobs: [],
+      workflows: [],
+      runs: [run],
+    },
+    {
+      project: { id: 2, uid: 'p2', name: 'example-inbox' },
+      hasRecords: false,
+      jobs: [],
+      workflows: [],
+      runs: [],
+    },
+  ]
+  state.selected = { kind: 'run', projectUID: 'p1', uid: 'run' }
+  state.detail = run
+  state.peek = {
+    status: 'empty',
+    issue: {
+      issue: { uid: 'issue', project_id: 2, short_id: 'abc4', title: 'Moved issue' },
+      comments: [],
+    } as never,
+  }
+  render(CronPage, {
+    route: { ...defaultCronRoute(), tab: 'runs' },
+    state,
+    onNavigate: vi.fn(),
+    onLoadMore: vi.fn(),
+    onRefresh: vi.fn(),
+    onOpenIssue,
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'abc4 · Moved issue' }))
+  expect(onOpenIssue).toHaveBeenLastCalledWith('p2', 'issue')
+  await fireEvent.click(screen.getByRole('button', { name: 'issue' }))
+  expect(onOpenIssue).toHaveBeenLastCalledWith('p2', 'issue')
+})

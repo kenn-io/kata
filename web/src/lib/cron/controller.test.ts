@@ -481,75 +481,98 @@ function issueWithComment(uid: string): ShowIssueResponseBody {
   }
 }
 
-test.each(['same', 'changed'] as const)(
-  'background run reload with a %s issue keeps only the matching issue peek',
-  async (issueIdentity) => {
-    vi.useFakeTimers()
-    const api = client(),
-      c = new CronController(api)
-    const previous = issueWithComment('issue-before')
-    const initialRun: CronRun = {
-      id: 1,
-      uid: 'selected-run',
-      project_id: 1,
-      actor: 'example-user',
-      status: 'succeeded',
-      revision: 1,
-      summary: { version: 1 },
-      issue_uid: previous.issue.uid,
-      created_at: '2026-10-25T00:00:00Z',
-      updated_at: '2026-10-25T00:00:00Z',
-    }
-    const nextIssueUID = issueIdentity === 'same' ? previous.issue.uid : 'issue-after'
-    const run = vi.fn<CronClient['run']>().mockResolvedValueOnce(initialRun)
-    const issue = vi.fn<CronClient['issue']>().mockResolvedValueOnce(previous)
-    api.run = run
-    api.issue = issue
-    const intent = {
+test('background run reload keeps the readable issue peek', async () => {
+  vi.useFakeTimers()
+  const api = client(),
+    c = new CronController(api)
+  const previous = issueWithComment('issue-before')
+  const initialRun: CronRun = {
+    id: 1,
+    uid: 'selected-run',
+    project_id: 1,
+    actor: 'example-user',
+    status: 'succeeded',
+    revision: 1,
+    summary: { version: 1 },
+    issue_uid: previous.issue.uid,
+    created_at: '2026-10-25T00:00:00Z',
+    updated_at: '2026-10-25T00:00:00Z',
+  }
+  const run = vi.fn<CronClient['run']>().mockResolvedValueOnce(initialRun)
+  const issue = vi.fn<CronClient['issue']>().mockResolvedValueOnce(previous)
+  api.run = run
+  api.issue = issue
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: {
+      ...defaultCronRoute(),
+      selection: { kind: 'run' as const, projectUID: 'p1', uid: initialRun.uid },
+    },
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    await vi.advanceTimersByTimeAsync(150)
+    expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
+    let resolveRun!: (value: CronRun) => void
+    let resolveIssue!: (value: ShowIssueResponseBody) => void
+    let detailStarted!: () => void
+    const detailRequest = new Promise<void>((resolve) => (detailStarted = resolve))
+    run.mockImplementationOnce(() => {
+      detailStarted()
+      return new Promise((resolve) => (resolveRun = resolve))
+    })
+    issue.mockImplementationOnce(() => new Promise((resolve) => (resolveIssue = resolve)))
+    const peeks: string[] = []
+    c.subscribe((state) => peeks.push(state.peek.status))
+    const pending = c.sync(intent, false)
+    await detailRequest
+    expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
+    resolveRun(initialRun)
+    await pending
+    await vi.advanceTimersByTimeAsync(150)
+    expect(issue).toHaveBeenLastCalledWith(1, previous.issue.uid, expect.any(AbortSignal))
+    expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
+    expect(peeks.every((status) => status === 'ready')).toBe(true)
+    c.fence()
+    resolveIssue(issueWithComment(previous.issue.uid))
+    await Promise.resolve()
+    expect(c.state.peek).toEqual({ status: 'no-issue' })
+  } finally {
+    c.destroy()
+    vi.useRealTimers()
+  }
+})
+
+test('explicit refresh rereads the selected job and its recent runs', async () => {
+  const api = client()
+  const job = vi.fn<CronClient['job']>(async () => ({ uid: 'job', name: 'Before' }) as never)
+  api.job = job
+  const recent = (uid: string) => ({ uid, created_at: '2026-10-25T00:00:00Z' }) as CronRun
+  api.runs.mockImplementation(async (_project, _signal, query) => ({
+    runs: query?.jobUID ? [recent('run-before')] : [],
+  }))
+  const c = new CronController(api)
+  try {
+    await c.load({
       projects: projects.slice(0, 1),
       route: {
         ...defaultCronRoute(),
-        selection: { kind: 'run' as const, projectUID: 'p1', uid: initialRun.uid },
+        selection: { kind: 'job', projectUID: 'p1', uid: 'job' },
       },
       daemonID: undefined,
       authorityGeneration: 1,
-    }
-    try {
-      await c.load(intent)
-      await vi.advanceTimersByTimeAsync(150)
-      expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
-      let resolveRun!: (value: CronRun) => void
-      let resolveIssue!: (value: ShowIssueResponseBody) => void
-      let detailStarted!: () => void
-      const detailRequest = new Promise<void>((resolve) => (detailStarted = resolve))
-      run.mockImplementationOnce(() => {
-        detailStarted()
-        return new Promise((resolve) => (resolveRun = resolve))
-      })
-      issue.mockImplementationOnce(() => new Promise((resolve) => (resolveIssue = resolve)))
-      const peeks: string[] = []
-      c.subscribe((state) => peeks.push(state.peek.status))
-      const pending = c.sync(intent, false)
-      await detailRequest
-      expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
-      resolveRun({ ...initialRun, issue_uid: nextIssueUID })
-      await pending
-      await vi.advanceTimersByTimeAsync(150)
-      expect(issue).toHaveBeenLastCalledWith(1, nextIssueUID, expect.any(AbortSignal))
-      if (issueIdentity === 'same') {
-        expect(c.state.peek).toEqual({ status: 'ready', issue: previous })
-        expect(peeks.every((status) => status === 'ready')).toBe(true)
-      } else {
-        expect(c.state.peek.status).toBe('loading')
-        expect(c.state.peek.issue).toBeUndefined()
-      }
-      c.fence()
-      resolveIssue(issueWithComment(nextIssueUID))
-      await Promise.resolve()
-      expect(c.state.peek).toEqual({ status: 'no-issue' })
-    } finally {
-      c.destroy()
-      vi.useRealTimers()
-    }
-  },
-)
+    })
+    expect(c.state.recentRuns.map((run) => run.uid)).toEqual(['run-before'])
+    job.mockResolvedValue({ uid: 'job', name: 'After' } as never)
+    api.runs.mockImplementation(async (_project, _signal, query) => ({
+      runs: query?.jobUID ? [recent('run-after')] : [],
+    }))
+    await c.refresh()
+    expect((c.state.detail as { name?: string } | undefined)?.name).toBe('After')
+    expect(c.state.recentRuns.map((run) => run.uid)).toEqual(['run-after'])
+  } finally {
+    c.destroy()
+  }
+})

@@ -17,10 +17,10 @@ export class CronClient {
     for (const status of query.statuses ?? []) q.append('status', status)
     if (query.beforeUID) q.set('before_uid', query.beforeUID)
     if (query.jobUID) q.set('job_uid', query.jobUID)
-    const response = await orvalFetch<{ data: T; status: number }>(
-      `/api/v1/projects/${project}/${path}${q.size ? '?' + q : ''}`,
-      { method: 'GET', signal },
-    )
+    return this.#get<T>(`/api/v1/projects/${project}/${path}${q.size ? '?' + q : ''}`, signal)
+  }
+  async #get<T>(url: string, signal: AbortSignal): Promise<T> {
+    const response = await orvalFetch<{ data: T; status: number }>(url, { method: 'GET', signal })
     if (response.status === 401) throw new AuthenticationRequiredError('Authentication required')
     if (response.status !== 200) throw new CronReadError(response.status)
     return response.data
@@ -61,7 +61,19 @@ export class CronClient {
       )
     ).workflow
   }
-  issue(project: number, uid: string, signal: AbortSignal) {
-    return this.read<ShowIssueResponseBody>(project, 'issues/' + encodeURIComponent(uid), signal)
+  // An issue keeps its UID when it moves projects. The run's project answers
+  // for unmoved issues, including under project-scoped authority; a moved one
+  // falls back to the UID read.
+  async issue(project: number, uid: string, signal: AbortSignal) {
+    try {
+      return await this.read<ShowIssueResponseBody>(
+        project,
+        'issues/' + encodeURIComponent(uid),
+        signal,
+      )
+    } catch (error) {
+      if (!(error instanceof CronReadError && error.status === 404)) throw error
+      return this.#get<ShowIssueResponseBody>('/api/v1/issues/' + encodeURIComponent(uid), signal)
+    }
   }
 }

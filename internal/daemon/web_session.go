@@ -483,6 +483,12 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 		innerPath := strings.TrimPrefix(r.URL.Path, webDaemonProxyPrefix)
 		return webDaemonProxyRequestAllowed(r, innerPath)
 	}
+	// A run's linked issue may have moved to another project; its UID still
+	// resolves it.
+	if uid, ok := strings.CutPrefix(r.URL.Path, "/api/v1/issues/"); ok {
+		return uid != "" && !strings.Contains(uid, "/") && r.Method == http.MethodGet &&
+			!r.URL.Query().Has("include_deleted")
+	}
 
 	const projectPrefix = "/api/v1/projects/"
 	if !strings.HasPrefix(r.URL.Path, projectPrefix) {
