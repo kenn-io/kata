@@ -320,6 +320,11 @@ export function setJobField(
   next.values[key] = value
   next.dirty.add(key)
   if (key === 'mode') {
+    // Notify and recurring imply their own issue policy; an execution job gets
+    // back the policy it had before the detour.
+    const executes = (mode: string | undefined) => mode === 'prompt' || mode === 'workflow'
+    if (executes(draft.values.mode) && !executes(text))
+      next.values['issue_kind:execute'] = draft.values.issue_kind ?? 'per-run'
     if (text === 'recurring') {
       next.values['overlap:ordinary'] = draft.values.overlap ?? 'forbid'
       next.values.issue_kind = 'per-run'
@@ -334,8 +339,8 @@ export function setJobField(
     if (draft.values.mode === 'recurring' && text !== 'recurring')
       next.values.overlap = draft.values['overlap:ordinary'] ?? 'forbid'
     if (text === 'notify') next.values.issue_kind = 'existing'
-    if ((text === 'prompt' || text === 'workflow') && draft.values.mode === 'notify')
-      next.values.issue_kind = 'per-run'
+    if (executes(text) && !executes(draft.values.mode))
+      next.values.issue_kind = draft.values['issue_kind:execute'] ?? 'per-run'
   }
   if (
     key === 'issue' &&

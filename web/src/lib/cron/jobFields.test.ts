@@ -351,3 +351,26 @@ test('changing the timezone normalizes a once time it made valid', () => {
   expect(d.values.schedule).toBe('2026-11-01T01:30:00Z')
   expect(rawCronValue(serializeCronJobDraft(d), ['trigger', 'at'])).toBe('"2026-11-01T01:30:00Z"')
 })
+test.each(['notify', 'recurring'])(
+  'an execution job keeps its existing-issue policy across a %s detour',
+  (detour) => {
+    const uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
+    let d = buildCronJobDraft(
+      {
+        uid: 'job',
+        name: 'Example job',
+        definitionEventUID: 'event',
+        document: parseCronDocument(
+          `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"cron","cron":"0 * * * *"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"existing","uid":"${uid}"},"overlap":"forbid","catchup":"all","options":{}}`,
+        ),
+      },
+      1,
+    )
+    d = setJobField(setJobField(d, 'mode', detour), 'mode', 'prompt')
+    expect(d.values.issue_kind).toBe('existing')
+    const out = serializeCronJobDraft(d)
+    expect(rawCronValue(out, ['issue', 'kind'])).toBe('"existing"')
+    expect(rawCronValue(out, ['issue', 'uid'])).toBe(`"${uid}"`)
+    expect(rawCronValue(out, ['issue', 'title'])).toBeUndefined()
+  },
+)
