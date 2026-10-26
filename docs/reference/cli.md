@@ -1823,11 +1823,11 @@ session**. Kata reads one page of the linked issue's history (up to 1,000
 events) in the project the issue is in now, and uses the transcript URL
 recorded on the issue's latest close in that project or the run's. Press `o`
 to open it in your browser. If the issue closes, moves, or is restored while
-its run is selected, the peek reads the link again. The link is a session related to the
-issue, not proof that it ran this job. No action appears when the daemon has it
-disabled, when that page has no safe URL, or when the read fails; the rest of
-the peek is unaffected. A rejected Kata credential is handled as on any other
-read.
+its run is selected, the peek reads the link again. The link is a session
+related to the issue, not proof that it ran this job. No action appears when
+the daemon has it disabled, when that page has no safe URL, or when the read
+fails; the rest of the peek is unaffected. A rejected Kata credential is
+handled as on any other read.
 
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
