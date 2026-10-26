@@ -32,7 +32,7 @@ func (d *Store) RelayCheckpointSize(ctx context.Context, projectID int64) (db.Re
 	if err != nil {
 		return db.RelayCheckpointSize{}, err
 	}
-	return d.relayCheckpointSizeTx(ctx, tx, project, actor)
+	return d.relayCheckpointSizeTx(ctx, tx, project, actor, false)
 }
 
 func (d *Store) relayCheckpointCapacity() int64 {
@@ -64,8 +64,8 @@ func relayCheckpointActorBoundTx(ctx context.Context, tx *sql.Tx, projectID int6
 
 // relayCheckpointSizeTx serializes retained history plus the baseline a
 // capture would add and measures the result against the capacity.
-func (d *Store) relayCheckpointSizeTx(ctx context.Context, tx *sql.Tx, project db.Project, actor string) (db.RelayCheckpointSize, error) {
-	records, err := d.relayCheckpointRecordsTx(ctx, tx, project, math.MaxInt64)
+func (d *Store) relayCheckpointSizeTx(ctx context.Context, tx *sql.Tx, project db.Project, actor string, lockGroup bool) (db.RelayCheckpointSize, error) {
+	records, err := d.relayCheckpointRecordsTx(ctx, tx, project, math.MaxInt64, lockGroup)
 	if err != nil {
 		return db.RelayCheckpointSize{}, err
 	}
@@ -109,10 +109,10 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 // relayCheckpointRecordsTx loads every record a root checkpoint for project
 // serializes. Portable events below boundaryID are retained history; events at
 // or above it are the current-state records a checkpoint creation just wrote.
-func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
+func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64, lockGroup bool) (db.RelayCheckpointRecords, error) {
 	var records db.RelayCheckpointRecords
 	excludeHistory := func(event db.RemoteEvent) (bool, error) {
-		return relayEventCheckpointHistoryExcludedTx(ctx, tx, project.ID, event)
+		return relayEventCheckpointHistoryExcludedTx(ctx, tx, project.ID, event, lockGroup)
 	}
 	for after := int64(0); ; {
 		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after)

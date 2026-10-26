@@ -110,7 +110,7 @@ func (d *Store) CreateRelayEnrollment(ctx context.Context, p db.CreateRelayEnrol
 			if err != nil {
 				return err
 			}
-			size, err := d.relayCheckpointSizeTx(ctx, tx, project, parent.Actor)
+			size, err := d.relayCheckpointSizeTx(ctx, tx, project, parent.Actor, true)
 			if err != nil {
 				return err
 			}

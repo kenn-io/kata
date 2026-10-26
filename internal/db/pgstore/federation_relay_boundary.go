@@ -95,6 +95,14 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 // relaySharedProjectsTx reuses the native binding group and pinned authority.
 // Local relationship writes require both endpoints to be authoritative here.
 func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite, cleanup bool) (bool, error) {
+	return relaySharedProjectsWithGroupLockTx(ctx, tx, projectID, peerID, localWrite, cleanup, true)
+}
+
+func relaySharedProjectsReadOnlyTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite, cleanup bool) (bool, error) {
+	return relaySharedProjectsWithGroupLockTx(ctx, tx, projectID, peerID, localWrite, cleanup, false)
+}
+
+func relaySharedProjectsWithGroupLockTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite, cleanup, lockGroup bool) (bool, error) {
 	if projectID == peerID {
 		return true, nil
 	}
@@ -108,7 +116,12 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	if !binding.Enabled || (localWrite && binding.Role != db.FederationRoleHub) {
 		return false, nil
 	}
-	group, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+	var group []int64
+	if lockGroup {
+		group, err = federationBindingGroupProjectIDs(ctx, tx, binding)
+	} else {
+		group, err = federationBindingGroupProjectIDsReadOnly(ctx, tx, binding)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -165,19 +178,19 @@ func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64, clea
 
 // Root-authored shared references retain their original history and hashes.
 func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
-	crossing, _, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, false)
+	crossing, _, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, false, true)
 	return crossing, err
 }
 
 // Fresh checkpoints cannot carry root-local purge facts. Exclude a history
 // record that needed one to resolve its references, while retaining the strict
 // resolver used for ordinary event authorization and retained checkpoints.
-func relayEventCheckpointHistoryExcludedTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
-	crossing, usedPurgeFact, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, true)
+func relayEventCheckpointHistoryExcludedTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, lockGroup bool) (bool, error) {
+	crossing, usedPurgeFact, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, true, lockGroup)
 	return crossing || usedPurgeFact, err
 }
 
-func relayEventBoundaryFactsTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, trackPurgeFacts bool) (bool, bool, error) {
+func relayEventBoundaryFactsTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, trackPurgeFacts, lockGroup bool) (bool, bool, error) {
 	var projects []int64
 	var usedPurgeFact bool
 	var err error
@@ -210,7 +223,12 @@ func relayEventBoundaryFactsTx(ctx context.Context, tx *sql.Tx, projectID int64,
 				return true, usedPurgeFact, nil
 			}
 		}
-		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
+		var compatible bool
+		if lockGroup {
+			compatible, err = relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
+		} else {
+			compatible, err = relaySharedProjectsReadOnlyTx(ctx, tx, projectID, peer, false, false)
+		}
 		if err != nil || !compatible {
 			return !compatible, usedPurgeFact, err
 		}

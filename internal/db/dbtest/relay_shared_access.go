@@ -30,6 +30,21 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 	return newRelaySharedAccessFixture(t, store, true)
 }
 
+// RunRelayCheckpointSizeWithSharedLinks exercises the read-only checkpoint
+// measurement path for a project with retained references to its shared peer.
+func RunRelayCheckpointSizeWithSharedLinks(t *testing.T, store db.Storage) {
+	t.Helper()
+	fixture := NewRelaySharedAccessFixture(t, store)
+	measurer, ok := store.(interface {
+		RelayCheckpointSize(context.Context, int64) (db.RelayCheckpointSize, error)
+	})
+	require.True(t, ok, "storage must expose relay checkpoint size measurement")
+	size, err := measurer.RelayCheckpointSize(t.Context(), fixture.Projects[0].ID)
+	require.NoError(t, err)
+	require.Positive(t, size.Bytes)
+	require.Positive(t, size.Capacity)
+}
+
 func newRelaySharedAccessFixture(t *testing.T, store db.Storage, link bool) RelaySharedAccessFixture {
 	t.Helper()
 	ctx := t.Context()
@@ -408,6 +423,94 @@ func RunRelaySharedAccessMovedBareEvidenceReusedShortIDAfterPurge(t *testing.T, 
 // evidence when the original issue, rather than a replacement, owns the ID.
 func RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t *testing.T, store db.Storage) {
 	runRelaySharedAccessMovedBareEvidence(t, store, false, false, true)
+}
+
+// RunRelaySharedAccessQualifiedEvidenceNameReuseAfterPurge excludes history
+// when a purged namespace is reused by a project with an older colliding ID.
+func RunRelaySharedAccessQualifiedEvidenceNameReuseAfterPurge(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	fixture := NewRelaySharedAccessFixture(t, store)
+	originalProject, err := store.CreateProject(ctx, "qualified-target")
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: originalProject.ID, Author: "admin", Title: "Original target",
+	})
+	require.NoError(t, err)
+	replacementUID := strings.Repeat("0", 26-len(target.ShortID)) + strings.ToUpper(target.ShortID)
+	replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: fixture.Projects[1].ID, Author: "member", Title: "Older colliding target",
+		UID: replacementUID, ShortIDOverride: target.ShortID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, target.ShortID, replacement.ShortID)
+	_, events, changed, err := store.CloseIssueWithEvents(ctx, fixture.Issues[0].ID,
+		"duplicate", "member", "This work is represented by the qualified target issue.",
+		[]db.Evidence{{Type: "duplicate-of", IssueRef: originalProject.Name + "#" + target.ShortID}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	var closed db.Event
+	for _, event := range events {
+		if event.Type == "issue.closed" {
+			closed = event
+		}
+	}
+	require.NotEmpty(t, closed.UID)
+	privateProject, err := store.CreateProject(ctx, "private-target")
+	require.NoError(t, err)
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: target.ID, FromProjectID: originalProject.ID, ToProjectID: privateProject.ID,
+		IfMatchRev: target.Revision, Actor: "admin",
+	})
+	require.NoError(t, err)
+	require.Equal(t, privateProject.ID, moved.Issue.ProjectID)
+	privatePolicy, err := store.ProjectAccessPolicy(ctx, privateProject.UID)
+	require.NoError(t, err)
+	privatePolicy.Visibility, privatePolicy.TeamUIDs = "teams", nil
+	_, _, err = store.SetProjectAccessPolicy(ctx, privatePolicy, "admin")
+	require.NoError(t, err)
+	archived, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: originalProject.ID, Actor: "admin", Force: true,
+	})
+	require.NoError(t, err)
+	_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: archived.ID, Actor: "admin"})
+	require.NoError(t, err)
+	_, _, changed, err = store.RenameProjectAndEvent(ctx, fixture.Projects[1].ID, originalProject.Name, "admin")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx,
+		fixture.Grants[0].Enrollment.RelayBindingUID, fixture.Signer)
+	require.NoError(t, err)
+	var history [][]byte
+	require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Events, &history))
+	for _, body := range history {
+		event, err := db.DecodeRelaySourceEvent(body)
+		require.NoError(t, err)
+		require.NotEqual(t, closed.UID, event.EventUID,
+			"a reused project name cannot authorize the purged namespace's historical evidence")
+	}
+	var entities [][]byte
+	require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Entities, &entities))
+	closedSnapshot := false
+	for _, body := range entities {
+		event, err := db.DecodeRelaySourceEvent(body)
+		require.NoError(t, err)
+		if event.Type != "issue.snapshot" || event.IssueUID == nil || *event.IssueUID != fixture.Issues[0].UID {
+			continue
+		}
+		var snapshot struct {
+			UID    string `json:"uid"`
+			Status string `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(event.Payload, &snapshot))
+		require.Equal(t, fixture.Issues[0].UID, snapshot.UID)
+		require.Equal(t, "closed", snapshot.Status)
+		closedSnapshot = true
+	}
+	require.True(t, closedSnapshot, "checkpoint keeps current closed state in entity snapshots")
+	issue, err := store.IssueByUID(ctx, fixture.Issues[0].UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, "closed", issue.Status, "safe current-state snapshots retain the close")
 }
 
 func runRelaySharedAccessMovedBareEvidence(t *testing.T, store db.Storage, purge, reuseShortID, returnToSource bool) {

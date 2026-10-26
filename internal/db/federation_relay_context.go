@@ -294,8 +294,9 @@ WHERE e.issue_uid IS NOT NULL AND e.type='issue.moved'
 		var projectID int64
 		err := tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT project_id),COALESCE(MIN(project_id),0) FROM (
 SELECT project_id FROM events WHERE origin_instance_uid=`+bind(1)+` AND project_name=`+bind(2)+`
-UNION SELECT project_id FROM purge_log WHERE origin_instance_uid=`+bind(3)+` AND project_name=`+bind(4)+`) named`,
-			originInstanceUID, name, originInstanceUID, name).Scan(&projectCount, &projectID)
+UNION SELECT project_id FROM purge_log WHERE origin_instance_uid=`+bind(3)+` AND project_name=`+bind(4)+`
+UNION SELECT project_id FROM project_purge_log WHERE origin_instance_uid=`+bind(5)+` AND project_name=`+bind(6)+`) named`,
+			originInstanceUID, name, originInstanceUID, name, originInstanceUID, name).Scan(&projectCount, &projectID)
 		if err != nil {
 			return "", err
 		}

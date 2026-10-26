@@ -13,7 +13,7 @@ import (
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge", "moved-bare-reuse", "moved-bare-reuse-purge", "moved-bare-return"} {
+	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge", "moved-bare-reuse", "moved-bare-reuse-purge", "moved-bare-return", "qualified-name-reuse-purge"} {
 		t.Run(form, func(t *testing.T) {
 			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 			t.Cleanup(cleanup)
@@ -37,11 +37,22 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 				dbtest.RunRelaySharedAccessMovedBareEvidenceReusedShortIDAfterPurge(t, store)
 			case "moved-bare-return":
 				dbtest.RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t, store)
+			case "qualified-name-reuse-purge":
+				dbtest.RunRelaySharedAccessQualifiedEvidenceNameReuseAfterPurge(t, store)
 			default:
 				dbtest.RunRelaySharedAccessNotification(t, store, form, compact)
 			}
 		})
 	}
+}
+
+func TestRelayCheckpointSizeWithSharedLinks(t *testing.T) {
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayCheckpointSizeWithSharedLinks(t, store)
 }
 
 func TestRelayRootAcceptanceParent(t *testing.T) {
