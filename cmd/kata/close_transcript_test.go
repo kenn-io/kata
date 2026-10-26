@@ -70,6 +70,39 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 	}
 }
 
+func TestCloseTranscript_ConfiguredSessionEnv(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "Completed example work")
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("PI_SESSION_ID", transcriptSessionTwo)
+	t.Setenv("CODEX_THREAD_ID", transcriptSessionOne)
+	t.Setenv("CODEX_SESSION_ID", transcriptSessionOne)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", transcriptSessionOne)
+	t.Setenv("KATA_TRANSCRIPT_SESSION_ID", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\nsession_id_env = [\"PI_SESSION_ID\"]\nagentsview_url = \"https://agentsview.example/archive/\"\n"), 0600))
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
+		"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+
+	history := runCLI(t, env, dir, "--json", "events", "--after", "0", "--limit", "100")
+	var stream struct {
+		Events []struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
+		} `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(history), &stream))
+	var provenance any
+	for _, event := range stream.Events {
+		if event.Type == "issue.closed" {
+			provenance = event.Payload["transcript"]
+		}
+	}
+	assert.Equal(t, map[string]any{"session_id": transcriptSessionTwo, "url": "https://agentsview.example/archive/sessions/" + transcriptSessionTwo}, provenance)
+}
+
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	for _, tc := range []struct {
 		name, id, thread, session, claude, pi, variables, base, wantID, warning string
