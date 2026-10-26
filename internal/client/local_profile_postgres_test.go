@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testpg"
 )
 
 func TestLocalProfilePostgresStorageInspectionRetainsUnsupportedSchema(t *testing.T) {
-	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	dsn, cleanup := testpg.NewPostgresContainer(t, t.Context())
 	t.Cleanup(cleanup)
 	database, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestEnsureRunningKeepsDaemonWhenPostgresValidateModeCannotOpenSchema(t *tes
 		{name: "bootstrap older schema", mode: "bootstrap", schema: older, replaced: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+			dsn, cleanup := testpg.NewPostgresContainer(t, t.Context())
 			t.Cleanup(cleanup)
 			database, err := sql.Open("pgx", dsn)
 			require.NoError(t, err)
