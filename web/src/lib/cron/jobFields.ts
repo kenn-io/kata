@@ -374,7 +374,7 @@ export function setJobField(
   }
   return next
 }
-export function validateJobDraft(draft: CronDefinitionDraft): Record<string, string> {
+function draftErrors(draft: CronDefinitionDraft): Record<string, string> {
   const errors: Record<string, string> = {},
     v = draft.values
   for (const field of jobFields(draft, {
@@ -455,4 +455,17 @@ export function validateJobDraft(draft: CronDefinitionDraft): Record<string, str
     errors.trigger = 'Deadline actions are notification-only.'
   if (v.checkout && !portable(v.checkout)) errors.checkout = 'Checkout must be a portable key.'
   return errors
+}
+/**
+ * Errors for the fields the form shows for the final action, trigger and issue
+ * policy. A hidden field is never serialized, so its leftover text cannot
+ * block saving.
+ */
+export function validateJobDraft(draft: CronDefinitionDraft): Record<string, string> {
+  const visible = new Set(
+    jobFields(draft, { persisted: !!draft.definitionEventUID, projectUID: '', workflows: [] })
+      .filter((field) => field.kind !== 'readonly' || field.key === 'mode')
+      .map((field) => field.key),
+  )
+  return Object.fromEntries(Object.entries(draftErrors(draft)).filter(([key]) => visible.has(key)))
 }

@@ -404,3 +404,27 @@ test.each(['issue-scheduled', 'issue-deadline'])(
     expect(rawCronValue(serializeCronJobDraft(d), ['issue'])).toBeUndefined()
   },
 )
+
+const notifyJob = (fields: string) =>
+  existing(
+    `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"issue-scheduled","issue_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},"action":{"kind":"notify","recipient":"current-owner-or-author"},"overlap":"forbid","catchup":"all"${fields}}`,
+  )
+test('an issue field edited under prompt never reaches a notify job without a policy', () => {
+  let d = setJobField(notifyJob(''), 'mode', 'prompt')
+  d = setJobField(setJobField(d, 'title', 'Dormant title'), 'mode', 'notify')
+  expect(validateJobDraft(d)).toEqual({})
+  expect(rawCronValue(serializeCronJobDraft(d), ['issue'])).toBeUndefined()
+})
+test.each(['notify', 'recurring'])('a hidden invalid checkout cannot block a %s save', (mode) => {
+  const d = setJobField(setJobField(draft(), 'checkout', '../workspace'), 'mode', mode)
+  expect(validateJobDraft(d).checkout).toBeUndefined()
+  expect(rawCronValue(serializeCronJobDraft(d), ['checkout_key'])).toBeUndefined()
+})
+test('a notify job keeps its original timeout and secret refs across a prompt detour', () => {
+  let d = notifyJob(',"timeout_seconds":60,"secret_refs":{"TOKEN":"vault-token"}')
+  d = setJobField(setJobField(d, 'mode', 'prompt'), 'timeout', '120')
+  d = setJobField(d, 'mode', 'notify')
+  const out = serializeCronJobDraft(d)
+  expect(rawCronValue(out, ['timeout_seconds'])).toBe('60')
+  expect(rawCronValue(out, ['secret_refs'])).toBe('{"TOKEN":"vault-token"}')
+})

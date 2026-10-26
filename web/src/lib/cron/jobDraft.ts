@@ -2,6 +2,7 @@ import { createULID } from '../ulid'
 import type { CronDefinitionRecord } from './client'
 import { parseCronDocument, patchCronValue, rawCronValue, type RawCronDocument } from './document'
 import { parseTree, type Node } from 'jsonc-parser'
+import { jobFields } from './jobFields'
 
 export interface CronDefinitionDraft {
   kind: 'job' | 'workflow'
@@ -158,6 +159,50 @@ function exactSeconds(key: string, text: string): string {
     throw new Error(`${key}: seconds cannot be represented safely`)
   return value.toString()
 }
+/**
+ * The definition fields the daemon accepts for an action, trigger and issue
+ * policy (see internal/cron/validate.go). Everything else is removed when a
+ * job is saved, whatever the draft still remembers.
+ */
+export function supportedJobFields(values: Readonly<Record<string, string>>): Set<string> {
+  const keys = new Set([
+    'description',
+    'tags',
+    'input',
+    'profile',
+    'run_parent',
+    'enabled',
+    'trigger',
+    'timezone',
+    'overlap',
+    'catchup',
+    'grace',
+  ])
+  const mode = values.mode,
+    policy = values.issue_kind
+  if (ownPath(schedules, values.trigger ?? '')) keys.add('schedule')
+  if (['issue-scheduled', 'issue-deadline'].includes(values.trigger ?? ''))
+    keys.add('trigger_issue')
+  if (values.trigger === 'issue-deadline') keys.add('lead')
+  if (mode === 'prompt' || mode === 'workflow') {
+    keys.add(mode)
+    for (const key of ['timeout', 'checkout', 'secret_refs', 'issue_kind']) keys.add(key)
+    if (policy === 'existing') keys.add('issue')
+    if (policy === 'per-run')
+      for (const key of ['title', 'body', 'deadline', 'scheduled_offset']) keys.add(key)
+  } else if (mode === 'recurring') {
+    for (const key of ['recipient', 'message', 'issue_kind', 'parent', 'title', 'body'])
+      keys.add(key)
+  } else {
+    for (const key of ['recipient', 'message', 'timeout', 'secret_refs']) keys.add(key)
+    if (policy !== undefined) keys.add('issue_kind')
+    if (policy === 'existing') keys.add('issue')
+  }
+  return keys
+}
+function zeroValue(raw: string | undefined): boolean {
+  return raw === undefined || ['null', '""', '0', '{}', '[]'].includes(raw.replace(/\s/g, ''))
+}
 export function serializeCronJobDraft(draft: CronDefinitionDraft): RawCronDocument {
   if (draft.kind !== 'job') throw new Error('Expected a job draft')
   // The server rejects unknown typed fields. Refuse visibly instead of stripping them.
@@ -178,33 +223,20 @@ export function serializeCronJobDraft(draft: CronDefinitionDraft): RawCronDocume
   const set = (path: readonly string[], value: string) => {
     doc = patchCronValue(doc, path, JSON.stringify(value))
   }
-  if (draft.dirty.has('mode')) {
-    const execute = values.mode === 'prompt' || values.mode === 'workflow'
-    set(['action', 'kind'], execute ? 'execute' : 'notify')
-    for (const key of execute ? ['recipient', 'message'] : ['prompt', 'workflow_uid'])
-      remove(['action', key])
-    if (values.mode === 'prompt') remove(['action', 'workflow_uid'])
-    if (values.mode === 'workflow') remove(['action', 'prompt'])
-    if (!execute) {
-      remove(['checkout_key'])
-      remove(['timeout_seconds'])
-      remove(['secret_refs'])
-      if (values.mode === 'recurring') {
-        const rawOptions = rawCronValue(draft.original, ['options']),
-          options = rawOptions ? parseTree(rawOptions) : undefined
-        if (options && (options.type !== 'object' || !!options.children?.length))
-          throw new Error('Cannot preserve adapter options in native recurring mode')
-        if (
-          (rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== undefined &&
-            rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== 'null') ||
-          (rawCronValue(draft.original, ['issue', 'deadline_offset_seconds']) !== undefined &&
-            rawCronValue(draft.original, ['issue', 'deadline_offset_seconds']) !== 'null' &&
-            !(draft.dirty.has('deadline') && values.deadline === ''))
-        )
-          throw new Error('Cannot preserve offsets in native recurring mode')
-        set(['overlap'], 'allow')
-      }
-    }
+  const execute = values.mode === 'prompt' || values.mode === 'workflow'
+  if (values.mode === 'recurring' && !originallyRecurring) {
+    const rawOptions = rawCronValue(draft.original, ['options']),
+      options = rawOptions ? parseTree(rawOptions) : undefined
+    if (options && (options.type !== 'object' || !!options.children?.length))
+      throw new Error('Cannot preserve adapter options in native recurring mode')
+    if (
+      (rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== undefined &&
+        rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== 'null') ||
+      (rawCronValue(draft.original, ['issue', 'deadline_offset_seconds']) !== undefined &&
+        rawCronValue(draft.original, ['issue', 'deadline_offset_seconds']) !== 'null' &&
+        !(draft.dirty.has('deadline') && values.deadline === ''))
+    )
+      throw new Error('Cannot preserve offsets in native recurring mode')
   }
   if (
     values.issue_kind === 'existing' &&
@@ -212,90 +244,61 @@ export function serializeCronJobDraft(draft: CronDefinitionDraft): RawCronDocume
     rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== 'null'
   )
     throw new Error('Cannot preserve the existing scheduled offset with an existing-issue policy')
-  // An absent issue policy stays absent; a mode change alone never adds one.
-  const issueKind = values.issue_kind
-  if ((draft.dirty.has('mode') || draft.dirty.has('issue_kind')) && issueKind === undefined)
-    remove(['issue'])
-  else if (draft.dirty.has('mode') || draft.dirty.has('issue_kind')) {
-    set(['issue', 'kind'], issueKind!)
-    if (values.issue_kind === 'existing')
-      for (const key of ['parent_uid', 'title', 'body', 'deadline_offset_seconds'])
-        remove(['issue', key])
-    else remove(['issue', 'uid'])
-    if (values.mode !== 'recurring') remove(['issue', 'parent_uid'])
-    if (values.mode !== 'recurring' && values.issue_kind === 'per-run' && !values.title?.trim())
-      set(['issue', 'title'], values.name ?? '')
+  // One rule for every field: the final action, trigger and issue policy decide
+  // which fields the request may carry. An edit is written only while its field
+  // is visible; an untouched field keeps its original value; anything the final
+  // state does not support is removed, so dormant edits never leak.
+  const supported = supportedJobFields(values)
+  const visible = new Set(
+    jobFields(draft, { persisted: !!draft.definitionEventUID, projectUID: '', workflows: [] })
+      .filter((field) => field.kind !== 'readonly')
+      .map((field) => field.key),
+  )
+  if (draft.dirty.has('mode')) set(['action', 'kind'], execute ? 'execute' : 'notify')
+  if (values.issue_kind === undefined) remove(['issue'])
+  else if (draft.dirty.has('mode') || draft.dirty.has('issue_kind'))
+    set(['issue', 'kind'], values.issue_kind)
+  for (const [kind, path] of Object.entries(schedules)) if (kind !== values.trigger) remove(path)
+  for (const [key, fieldPath] of Object.entries(cronJobFieldPaths)) {
+    if (key === 'issue_kind' || key === 'trigger') continue
+    const path = key === 'schedule' ? undefined : fieldPath
+    if (!path) continue
+    if (!supported.has(key)) {
+      // The daemon decodes null and empty values as absent. A null stays byte
+      // for byte, and so does an empty value while the action is unchanged;
+      // anything else is removed.
+      const raw = rawCronValue(doc, path)
+      if (raw !== 'null' && !(zeroValue(raw) && !draft.dirty.has('mode'))) remove(path)
+      continue
+    }
+    if (draft.dirty.has(key) && visible.has(key)) doc = patchCronValue(doc, path, encode(key))
   }
-  if (draft.dirty.has('trigger')) {
-    const active =
-      values.trigger === 'cron'
-        ? 'cron'
-        : values.trigger === 'interval'
-          ? 'interval_seconds'
-          : values.trigger === 'once'
-            ? 'at'
-            : ''
-    for (const key of ['cron', 'interval_seconds', 'at'])
-      if (key !== active) remove(['trigger', key])
-    if (!['issue-scheduled', 'issue-deadline'].includes(values.trigger ?? ''))
-      remove(['trigger', 'issue_uid'])
-    if (values.trigger !== 'issue-deadline') remove(['trigger', 'lead_seconds'])
-  }
-  for (const key of draft.dirty) {
-    if (key === 'name' || key === 'mode') continue
-    // Drafts remember dormant input while switching modes. Only active fields
-    // may be written back, otherwise an old dirty field revives invalid state.
-    if (
-      (key === 'prompt' && values.mode !== 'prompt') ||
-      (key === 'workflow' && values.mode !== 'workflow')
-    )
-      continue
-    if (
-      ['recipient', 'message'].includes(key) &&
-      ['prompt', 'workflow'].includes(values.mode ?? '')
-    )
-      continue
-    if (
-      ['timeout', 'checkout', 'secret_refs'].includes(key) &&
-      !['prompt', 'workflow'].includes(values.mode ?? '')
-    )
-      continue
-    if (key === 'parent' && values.mode !== 'recurring') continue
-    if (key === 'issue' && values.issue_kind !== 'existing') continue
-    if (['title', 'body', 'deadline'].includes(key) && values.issue_kind === 'existing') continue
-    // Native recurring jobs carry no deadline offset; only clearing one is written.
-    if (key === 'deadline' && values.mode === 'recurring' && values.deadline) continue
-    if (
-      key === 'trigger_issue' &&
-      !['issue-scheduled', 'issue-deadline'].includes(values.trigger ?? '')
-    )
-      continue
-    if (key === 'lead' && values.trigger !== 'issue-deadline') continue
-    if (key === 'schedule' && !ownPath(schedules, values.trigger ?? '')) continue
-    const path =
-      key === 'schedule'
-        ? ownPath(schedules, draft.values.trigger ?? '')
-        : ownPath(cronJobFieldPaths, key)
-    if (!path) throw new Error(`Unsupported cron field: ${key}`)
-    const text = draft.values[key] ?? ''
-    let replacement: string | undefined
-    if (secondsFields.has(key) || (key === 'schedule' && draft.values.trigger === 'interval'))
-      replacement = text === '' ? undefined : exactSeconds(key, text)
-    else if (key === 'enabled') {
-      if (text !== 'true' && text !== 'false') throw new Error('enabled: expected true or false')
-      replacement = text
-    } else if (key === 'tags' || key === 'secret_refs') {
-      replacement = text === '' ? undefined : parseCronDocument(text).source
-    } else replacement = text === '' ? undefined : JSON.stringify(text)
-    doc = patchCronValue(doc, path, replacement)
-  }
+  if (draft.dirty.has('trigger')) set(['trigger', 'kind'], values.trigger ?? '')
+  const schedulePath = ownPath(schedules, values.trigger ?? '')
+  if (schedulePath && draft.dirty.has('schedule') && visible.has('schedule'))
+    doc = patchCronValue(doc, schedulePath, encode('schedule'))
+  if (values.mode === 'recurring' && rawCronValue(doc, ['overlap']) !== '"allow"')
+    set(['overlap'], 'allow')
+  const title = fieldText(doc, ['issue', 'title'])
   if (
     values.issue_kind === 'per-run' &&
-    ['prompt', 'workflow'].includes(values.mode ?? '') &&
-    !values.title?.trim() &&
+    execute &&
+    !title?.trim() &&
     (!draft.definitionEventUID ||
       ['title', 'mode', 'issue_kind'].some((key) => draft.dirty.has(key)))
   )
     set(['issue', 'title'], values.name ?? '')
   return doc
+  function encode(key: string): string | undefined {
+    const text = values[key] ?? ''
+    if (secondsFields.has(key) || (key === 'schedule' && values.trigger === 'interval'))
+      return text === '' ? undefined : exactSeconds(key, text)
+    if (key === 'enabled') {
+      if (text !== 'true' && text !== 'false') throw new Error('enabled: expected true or false')
+      return text
+    }
+    if (key === 'tags' || key === 'secret_refs')
+      return text === '' ? undefined : parseCronDocument(text).source
+    return text === '' ? undefined : JSON.stringify(text)
+  }
 }

@@ -19,6 +19,7 @@ const props = () => ({
 })
 test('invalid field text remains visible and prevents submission', async () => {
   const p = props()
+  p.draft.values = { ...p.draft.values, name: 'Example', prompt: 'Do work' }
   render(CronJobEditor, p)
   await fireEvent.input(screen.getByRole('textbox', { name: 'Timeout' }), {
     target: { value: '9007199254740993' },
@@ -28,7 +29,9 @@ test('invalid field text remains visible and prevents submission', async () => {
   expect((screen.getByRole('textbox', { name: 'Timeout' }) as HTMLInputElement).value).toBe(
     '9007199254740993',
   )
-  expect(screen.getAllByRole('alert').length).toBeGreaterThan(0)
+  expect(screen.getAllByRole('alert').map((alert) => alert.textContent)).toEqual([
+    'Duration must fit Go seconds (maximum 9223372036); only deadline offsets may be negative.',
+  ])
 })
 test.each([
   { readonly: true, pending: false },
