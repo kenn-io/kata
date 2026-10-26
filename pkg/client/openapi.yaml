@@ -6473,6 +6473,8 @@ components:
           enum:
             - claude
             - codex
+            - pi
+            - omp
           type: string
         session_id:
           type: string
@@ -6940,7 +6942,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.32.0
+  version: 0.33.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

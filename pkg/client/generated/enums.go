@@ -753,12 +753,14 @@ type TranscriptAgent string
 const (
 	Claude TranscriptAgent = "claude"
 	Codex  TranscriptAgent = "codex"
+	Omp    TranscriptAgent = "omp"
+	Pi     TranscriptAgent = "pi"
 )
 
 // Validate checks if the TranscriptAgent value is valid
 func (t TranscriptAgent) Validate() error {
 	switch t {
-	case Claude, Codex:
+	case Claude, Codex, Omp, Pi:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TranscriptAgent value, got: %v", t))

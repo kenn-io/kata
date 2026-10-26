@@ -6,23 +6,31 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Transcript identifies a native Claude Code or Codex session. URL is optional
+var agents = []string{"claude", "codex", "pi", "omp"}
+
+// Agents returns harnesses whose native UUIDs can identify a closing session.
+func Agents() []string {
+	return slices.Clone(agents)
+}
+
+// Transcript identifies a native coding-agent session. URL is optional
 // and is a locator, not a claim that AgentsView has indexed the session.
 type Transcript struct {
-	Agent     string `json:"agent" enum:"claude,codex" required:"true"`
+	Agent     string `json:"agent" enum:"claude,codex,pi,omp" required:"true"`
 	SessionID string `json:"session_id" required:"true"`
 	URL       string `json:"url,omitempty"`
 }
 
 // Validate rejects unsupported session identifiers and unsafe locators.
 func (t Transcript) Validate() error {
-	if t.Agent != "codex" && t.Agent != "claude" {
-		return errors.New("transcript agent must be codex or claude")
+	if !slices.Contains(agents, t.Agent) {
+		return errors.New("transcript agent must be one of " + strings.Join(agents, ", "))
 	}
 	if !sessionIDPattern.MatchString(t.SessionID) {
 		return errors.New("transcript session_id must be a native session UUID")
@@ -46,8 +54,8 @@ func (t Transcript) Link(base string) (string, error) {
 		return "", err
 	}
 	path := "sessions/"
-	if t.Agent == "codex" {
-		path += "codex/"
+	if t.Agent != "claude" {
+		path += t.Agent + "/"
 	}
 	// Keep escaped prefixes intact: a configured %2F is part of a segment,
 	// not a new path separator. Session UUIDs contain no URL delimiters.

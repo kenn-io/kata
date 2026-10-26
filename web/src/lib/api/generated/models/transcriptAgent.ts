@@ -7,4 +7,6 @@ export type TranscriptAgent = (typeof TranscriptAgent)[keyof typeof TranscriptAg
 export const TranscriptAgent = {
   claude: 'claude',
   codex: 'codex',
+  pi: 'pi',
+  omp: 'omp',
 } as const

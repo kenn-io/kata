@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-23
+last_edited: 2026-10-26
 ---
 
 # HTTP API schema
@@ -133,11 +133,12 @@ Close requests may explicitly supply `transcript` (HTTP API `0.26.0`):
 }
 ```
 
-The agent is `codex` or `claude`, `session_id` is its native UUID, and `url` is
-optional absolute HTTP(S) without credentials, query, or fragment. Supply a
-verified locator for namespaced imported archives. The daemon stores this
-separately from evidence in the close event; it does not fetch or verify the
-chat. Its `agent` and `session_id` participate in retry identity; `url` does
+The agent is `claude`, `codex`, `pi`, or `omp`; Pi and OMP require HTTP API
+`0.33.0`, while Claude Code and Codex require `0.26.0`. `session_id` is the
+agent's native UUID, and `url` is optional absolute HTTP(S) without credentials,
+query, or fragment. Supply a verified locator for namespaced imported
+archives. The daemon stores this separately from evidence in the close event;
+it does not fetch or verify the chat. Its `agent` and `session_id` participate in retry identity; `url` does
 not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
 not daemon-side session discovery.
 
@@ -196,6 +197,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.33.0` | Close transcript provenance accepts Pi and OMP native sessions alongside Claude Code and Codex. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
 | `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |

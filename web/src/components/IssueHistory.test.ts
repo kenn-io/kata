@@ -39,6 +39,21 @@ describe('IssueHistory', () => {
     expect(link.getAttribute('rel')).toContain('noreferrer')
   })
 
+  it.each(['pi', 'omp'])('shows the closing %s session', (agent) => {
+    render(IssueHistory, {
+      props: {
+        events: [
+          {
+            ...event('close-native', '2026-08-01T12:00:00Z'),
+            type: 'issue.closed',
+            payload: { transcript: { agent, session_id: '00000000-0000-4000-8000-000000000001' } },
+          },
+        ],
+      },
+    })
+    expect(screen.getByText(`Session: ${agent} 00000000-0000-4000-8000-000000000001`)).toBeTruthy()
+  })
+
   it.each([
     undefined,
     'javascript:alert(1)',

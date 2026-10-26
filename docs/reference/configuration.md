@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-24
+last_edited: 2026-10-26
 ---
 
 # Configuration
@@ -29,11 +29,12 @@ enabled = true
 agentsview_url = "https://agentsview.example" # optional; a base path is supported
 ```
 
-This is off by default and needs no daemon restart. Attachment needs a daemon
-with HTTP API `0.26.0` or newer. Before attaching a transcript, `kata close`
-checks the daemon's API version; an older daemon gets a warning on stderr and
-the close proceeds without the transcript. With attachment disabled, close
-requests remain unchanged.
+This is off by default and needs no daemon restart. Claude Code and Codex
+attachment needs daemon HTTP API `0.26.0` or newer; Pi and OMP need `0.33.0`
+or newer. Before attaching a transcript, `kata close` checks the daemon's API
+version; an older daemon gets a warning on stderr and the close proceeds
+without the transcript. With attachment disabled, close requests remain
+unchanged.
 
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
@@ -44,10 +45,15 @@ closes do not infer a session from the daemon's environment.
 
 Claude Code context comes from `CLAUDE_CODE_SESSION_ID`. Codex context comes
 from `CODEX_THREAD_ID`, falling back to `CODEX_SESSION_ID`; if both Codex
-variables are populated they must agree. A child agent inherits its parent's
-variables, so Claude Code and Codex context together is ambiguous and skipped.
-For a nested agent or an explicit harness handoff, pass the actual current
-native session UUID as a pair:
+variables are populated they must agree. Pi is identified by
+`PI_CODING_AGENT=true`, OMP by `OMPCODE=1`; both use `PI_SESSION_ID` as their
+native session UUID.
+
+A child agent can inherit its parent's variables. Kata uses shared harness
+detection and process ancestry to select the nearest invoking harness when
+multiple harnesses have markers. If ancestry cannot resolve them, attachment
+is ambiguous and skipped. For an explicit harness handoff, pass the actual
+current native session UUID as a pair:
 
 ```sh
 KATA_TRANSCRIPT_AGENT=claude \
@@ -57,16 +63,18 @@ kata close example-project#abc4 --done \
   --test "go test ./internal/example"
 ```
 
-Only Claude Code and Codex native UUID sessions are supported initially. Kata
+Claude Code, Codex, Pi, and OMP native UUID sessions are supported. Kata
 never scans recent chat files or reuses another issue's session. Missing,
 invalid, partially supplied, or ambiguous context warns on stderr and skips the
 attachment; the close can still succeed. An unconfigured AgentsView URL simply
 stores the identifier. An invalid URL warns and stores only the identifier.
 URLs must be absolute HTTP(S), with no embedded credentials, query, or fragment.
 
-AgentsView's native session IDs and routes are `codex:<UUID>` at
-`/sessions/codex/<UUID>` and Claude's bare `<UUID>` at `/sessions/<UUID>`. These
-routes are supported by the [AgentsView v0.44.0 router](https://github.com/kenn-io/agentsview/blob/v0.44.0/frontend/src/lib/stores/router.svelte.ts),
+Generated links use `/sessions/codex/<UUID>` for Codex,
+`/sessions/pi/<UUID>` for Pi, `/sessions/omp/<UUID>` for OMP, and
+`/sessions/<UUID>` for Claude Code. Codex's native AgentsView ID is
+`codex:<UUID>`; Claude's is the bare `<UUID>`. The Claude/Codex routes are
+supported by the [AgentsView v0.44.0 router](https://github.com/kenn-io/agentsview/blob/v0.44.0/frontend/src/lib/stores/router.svelte.ts),
 including its PostgreSQL server.
 Set `agentsview_url` only for an installation indexing those native IDs.
 Imported archives can namespace IDs (for example, `workstation~codex:<UUID>`);
@@ -120,7 +128,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
-| `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`codex` or `claude`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override Claude Code and Codex environment context. |
+| `KATA_TRANSCRIPT_AGENT`, `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session (`claude`, `codex`, `pi`, or `omp`, and its native UUID). Used only when close transcript attachment is enabled. Supply both; they override automatic harness detection. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |

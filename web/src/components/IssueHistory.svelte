@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KataTaskEvent } from '../lib/kata/types'
+  import { TranscriptAgent } from '../lib/api/generated/models/transcriptAgent'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
 
   import { describeKataEvent } from '../lib/history/format'
@@ -9,6 +10,8 @@
   }
 
   let { events }: Props = $props()
+
+  const transcriptAgents = new Set<string>(Object.values(TranscriptAgent))
 
   const fullTimestamp = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'full',
@@ -27,7 +30,8 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
     const ref = value as Record<string, unknown>
     if (
-      (ref.agent !== 'codex' && ref.agent !== 'claude') ||
+      typeof ref.agent !== 'string' ||
+      !transcriptAgents.has(ref.agent) ||
       typeof ref.session_id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
     ) {

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-24
+last_edited: 2026-10-26
 ---
 
 # CLI reference
@@ -953,8 +953,11 @@ exact retry with a matching idempotency key returns the committed receipt even
 after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
-attaches the current agent session and optional AgentsView link alongside the
-close evidence. It never supplies completion evidence on its own.
+attaches the current Claude Code, Codex, Pi, or OMP session and optional
+AgentsView link alongside the close evidence. Pi and OMP attachment requires
+daemon API `0.33.0`; Claude Code and Codex require `0.26.0`. Older daemons
+receive the close without the attachment. A session never supplies completion
+evidence on its own.
 
 Evidence is validated against the close reason:
 
