@@ -817,7 +817,7 @@ func snapLabelPromptModel() Model {
 // Search stays above the records even with no matches or a narrow split pane.
 func TestListPersistentSearch(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, size := range [][2]int{{80, 10}, {120, 30}, {160, 40}} {
+	for _, size := range [][2]int{{80, 9}, {80, 10}, {120, 30}, {160, 40}} {
 		for _, query := range []string{"", "no-match-anywhere", strings.Repeat("query", 30)} {
 			m := resizeModel(newTestModel(), size[0], size[1])
 			m.list.issues = makeTestIssues(30)
@@ -828,7 +828,9 @@ func TestListPersistentSearch(t *testing.T) {
 				}
 				lines := strings.Split(stripANSI(m.viewBody()), "\n")
 				row := 1
-				if m.layout == splitlayout.Split {
+				if size[1] < listMinHeight {
+					row = 0
+				} else if m.layout == splitlayout.Split {
 					row = 2
 				}
 				if editing && len(query) < 20 {

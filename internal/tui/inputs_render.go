@@ -7,8 +7,8 @@ import (
 )
 
 // renderInputBar formats the inline command bar as a bordered box.
-// Used by the M3a above-the-table layout; M3.5 moved bars to the
-// info line via renderInfoBar instead. Kept for any caller that
+// Used by the M3a above-the-table layout; search now uses the
+// stats line via renderInfoBar instead. Kept for any caller that
 // wants the heavier bordered presentation.
 //
 //nolint:unused // superseded by renderInfoBar in M3.5

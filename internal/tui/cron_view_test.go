@@ -642,6 +642,28 @@ func TestCronPersistentSearch(t *testing.T) {
 	}
 }
 
+func TestCronLongSearchEditVisible(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		for _, prefix := range []string{strings.Repeat("a", 90), strings.Repeat("界", 45)} {
+			m := sendRune(cronFixture(t), tab)
+			m.opts.Mouse = true
+			m, _ = updateModel(m, mouseLeftClick(4, 2))
+			m, _ = updateModel(m, tea.PasteMsg{Content: prefix + "TAIL"})
+			m = sendRune(m, 'Z')
+			require.Equal(t, prefix+"TAILZ", m.cron.lists[m.cron.tab].query)
+			line := strings.Split(ansi.Strip(m.viewBody()), "\n")[2]
+			require.Contains(t, line, "TAILZ▏", "tab %c must show the edited tail and caret", tab)
+			require.LessOrEqual(t, ansi.StringWidth(line), 80)
+			m = sendKey(m, tea.KeyEnter)
+			require.Equal(t, prefix+"TAILZ", m.cron.lists[m.cron.tab].query)
+			m, _ = updateModel(m, mouseLeftClick(4, 2))
+			m = sendKey(m, tea.KeyEscape)
+			require.Empty(t, m.cron.lists[m.cron.tab].query)
+			require.False(t, m.cron.filtering)
+		}
+	}
+}
+
 func TestCronSearchClickGuards(t *testing.T) {
 	for _, state := range []string{"disabled", "narrow", "help", "detail", "projects", "modal"} {
 		m := cronFixture(t)

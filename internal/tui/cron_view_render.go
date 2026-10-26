@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -405,6 +406,9 @@ func renderCron(m Model) string {
 		}
 		if m.cron.filtering {
 			left += "▏"
+			if overflow := runewidth.StringWidth(left) - titleBarInnerWidth(m.width); overflow > 0 {
+				left = "/" + runewidth.TruncateLeft(left, overflow+1, "")
+			}
 		}
 		if m.cron.out {
 			right += " · loading…"

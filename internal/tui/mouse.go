@@ -33,9 +33,11 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		row := 1
 		if m.layout == splitlayout.Split {
 			row = 2
+		} else if m.height < listMinHeight {
+			row = 0
 		}
 		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
-			m.height >= listMinHeight && !m.list.loading && m.list.err == nil && mouse.Y == row &&
+			!m.list.loading && m.list.err == nil && mouse.Y == row &&
 			(m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
 			m.focus = focusList
 			if m.input.kind == inputSearchBar {
@@ -148,6 +150,9 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.view == viewList {
+		if m.height < listMinHeight {
+			return m.mouseListClick(y - 2) // Search and table header precede compact rows.
+		}
 		return m.mouseListClick(y - stackedListDataRowY)
 	}
 	return m, nil
@@ -184,6 +189,9 @@ func (m Model) listDataBudget() int {
 	if m.layout == splitlayout.Split {
 		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return innerH - 2
+	}
+	if m.height < listMinHeight {
+		return m.listRenderedDataRows()
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
 	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)

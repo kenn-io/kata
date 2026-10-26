@@ -52,7 +52,7 @@ type viewChrome struct {
 //   - lines 3..H-N: table (header + windowed rows, padded
 //     so the adaptive footer pins to the bottom of the terminal
 //     regardless of row count)
-//   - line H-1: info line (active input bar OR scroll/flash text)
+//   - line H-1: info line (scroll/flash text)
 //   - line H:   footer help table (one or more rows)
 //
 // The table body absorbs the slack so the footer always sits on the
@@ -65,9 +65,7 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 		return errorStyle.Render(lm.err.Error())
 	}
 	if width <= 0 || height < listMinHeight {
-		// Below the floor, render whatever fits without the chrome
-		// layout math (avoids divide-by-negative or empty renders).
-		return lm.renderTinyFallback(width)
+		return lm.renderTinyFallback(width, height, chrome)
 	}
 	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	stats := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)
@@ -110,8 +108,8 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 		lm.renderBodyArea(width, bodyRows-1, chrome)
 }
 
-// listMinHeight is the smallest terminal height the layout supports.
-// Below this we fall through to the bare fallback render.
+// listMinHeight is the smallest height for the full list chrome.
+// Below this we show search and the table without the title or footer.
 const listMinHeight = 10
 
 // listBodyFloor is the smallest row count the table body will ever
@@ -119,11 +117,13 @@ const listMinHeight = 10
 // tight on a small terminal.
 const listBodyFloor = 5
 
-// renderTinyFallback is the degraded render for terminals below the
-// minimum height. M5 will replace this with a proper "too narrow"
-// hint; for now it's just the table without chrome.
-func (lm listModel) renderTinyFallback(width int) string {
-	return lm.renderBody(width, listBodyFloor, viewChrome{})
+// renderTinyFallback keeps search visible above as many table rows as fit.
+func (lm listModel) renderTinyFallback(width, height int, chrome viewChrome) string {
+	search := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)
+	if height <= 1 {
+		return search
+	}
+	return search + "\n" + lm.renderBodyArea(width, height-1, chrome)
 }
 
 // renderBodyArea wraps renderBody with the fillScreen padding that

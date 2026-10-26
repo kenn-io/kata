@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -181,5 +182,56 @@ func TestMouseSearchVisibilityGuards(t *testing.T) {
 				t.Fatal("invisible or blocked search accepted click")
 			}
 		})
+	}
+}
+
+func TestCompactSearchRowsMatchPagingAndClicks(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, height := range []int{3, 9} {
+		m := resizeModel(newTestModel(), 80, height)
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(30)
+		m = m.applyListViewportCache()
+		m, cmd := updateModel(m, keyRune('/'))
+		m, _ = updateModel(m, cmd())
+		m = sendRune(m, 'x')
+		if !strings.Contains(strings.Split(stripANSI(m.viewBody()), "\n")[0], "/x") {
+			t.Fatalf("height %d: active search is hidden", height)
+		}
+		m = sendKey(m, tea.KeyEscape)
+		m, _ = updateModel(m, mouseLeftClick(4, 0))
+		if m.input.kind != inputSearchBar {
+			t.Fatalf("height %d: compact search click did not focus input", height)
+		}
+		m = sendRune(m, 'r')
+		m = sendKey(m, tea.KeyDown)
+		m, _ = updateModel(m, mouseLeftClick(4, 0))
+		if m.input.searchFocus != searchFocusQuery {
+			t.Fatal("compact search click did not refocus query")
+		}
+		m = sendKey(m, tea.KeyEscape)
+		for range 2 {
+			lines := strings.Split(stripANSI(m.viewBody()), "\n")
+			if len(lines) > height {
+				t.Fatalf("height %d: frame has %d rows", height, len(lines))
+			}
+			count := 0
+			for y, line := range lines {
+				for i, issue := range m.list.issues {
+					if !strings.Contains(line, fmt.Sprintf("r%03d", i+1)) {
+						continue
+					}
+					clicked, _ := updateModel(m, mouseLeftClick(4, y))
+					if clicked.list.selectedUID != issue.UID {
+						t.Fatalf("height %d row %d: wrong issue selected", height, y)
+					}
+					count++
+				}
+			}
+			if count != height-2 || m.list.pageRows != count {
+				t.Fatalf("height %d: page rows=%d rendered=%d", height, m.list.pageRows, count)
+			}
+			m = sendKey(m, tea.KeyPgDown)
+		}
 	}
 }
