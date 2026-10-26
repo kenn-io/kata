@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -353,18 +354,25 @@ func (h *cronHost) openCronIssue(v cronui.IssueMsg) tea.Cmd {
 	if !h.cronProjectAccessible(id) {
 		return nil
 	}
-	// A peek that followed a move knows the issue's current project.
-	target := id
-	if h.peekKey.project == id && h.peekKey.issueUID == v.UID && h.peekProject > 0 {
-		target = h.peekProject
-	}
 	h.issueRequest++
 	request, generation := h.issueRequest, h.issueGenerations[id]
 	api, epoch := h.native.api, h.epoch
+	locator, _ := cronAPIFor(api).(CronPeekAPI)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
+		// An issue keeps its UID when it moves projects; the run's project no
+		// longer has it, so open it where the UID read finds it.
+		target := id
 		detail, err := api.GetIssueDetail(ctx, target, v.UID)
+		if records.Status(err) == http.StatusNotFound && locator != nil {
+			if moved, lookupErr := locator.CronIssueProject(ctx, v.UID); lookupErr != nil {
+				err = lookupErr
+			} else if moved != id {
+				target = moved
+				detail, err = api.GetIssueDetail(ctx, target, v.UID)
+			}
+		}
 		return cronIssueMsg{generation: generation, epoch: epoch, request: request, project: id, target: target, detail: detail, err: err}
 	}
 }

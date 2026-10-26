@@ -40,7 +40,6 @@ type cronHost struct {
 	peekGeneration           uint64
 	peekCancel               context.CancelFunc
 	peekAuth                 AuthInfo
-	peekProject              int64
 	peekClosed, peekStale    bool
 
 	native             Model

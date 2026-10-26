@@ -2,11 +2,9 @@ package records
 
 import "time"
 
-// IssuePeek is the selected issue's current readable context. ProjectID is
-// the issue's current project, which differs from the run's after a move.
+// IssuePeek is the selected issue's current readable context.
 type IssuePeek struct {
 	IssueUID, ShortID, Title string
-	ProjectID                int64
 	Latest                   *PeekComment
 }
 

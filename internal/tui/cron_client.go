@@ -21,6 +21,7 @@ type CronAPI interface {
 // CronPeekAPI is optional so issue-only and older clients remain usable.
 type CronPeekAPI interface {
 	CronIssuePeek(context.Context, int64, string) (records.IssuePeek, error)
+	CronIssueProject(context.Context, string) (int64, error)
 }
 
 // CronIssuePeek reads the issue and its comments together through the existing
@@ -36,13 +37,22 @@ func (c *Client) CronIssuePeek(ctx context.Context, projectID int64, uid string)
 	if err != nil {
 		return records.IssuePeek{}, err
 	}
-	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title, ProjectID: body.Issue.ProjectID}
+	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title}
 	for _, comment := range body.Comments {
 		if peek.Latest == nil || comment.CreatedAt.After(peek.Latest.CreatedAt) || comment.CreatedAt.Equal(peek.Latest.CreatedAt) && comment.UID > peek.Latest.UID {
 			peek.Latest = &records.PeekComment{UID: comment.UID, Author: comment.Author, Body: comment.Body, CreatedAt: comment.CreatedAt}
 		}
 	}
 	return peek, nil
+}
+
+// CronIssueProject finds a run's linked issue after it moved projects.
+func (c *Client) CronIssueProject(ctx context.Context, uid string) (int64, error) {
+	body, err := c.showIssueByUID(ctx, uid)
+	if err != nil {
+		return 0, err
+	}
+	return body.Issue.ProjectID, nil
 }
 
 func (c *Client) showIssueByUID(ctx context.Context, uid string) (*showIssueBody, error) {

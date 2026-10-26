@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -528,6 +529,30 @@ func TestCronPeekUIDFallbackAuthority(t *testing.T) {
 				t.Fatalf("denied UID read is not unreadable:\n%s", text)
 			}
 		})
+	}
+}
+
+// Opening a moved issue keeps credential handling: a rejected UID lookup
+// clears cron authority instead of opening anything.
+func TestCronIssueUIDLookupRejection(t *testing.T) {
+	var looked atomic.Bool
+	h := newCorePeekHost(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/issues/issue-a" {
+			looked.Store(true)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"code":"token_invalid","message":"token rejected"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"issue_not_found","message":"issue not found"}}`))
+	})
+	pressCronIssue(t, h)
+	if !looked.Load() {
+		t.Fatal("opening the issue did not look it up by UID")
+	}
+	if h.native.view == viewDetail || !h.native.activeAuthRejected || len(h.catalogs) != 0 {
+		t.Fatalf("rejected UID lookup kept cron authority: view=%v rejected=%t catalogs=%d", h.native.view, h.native.activeAuthRejected, len(h.catalogs))
 	}
 }
 
