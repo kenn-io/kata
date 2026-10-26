@@ -1,6 +1,8 @@
 // Package agentguide holds canonical agent guidance shared by the CLI and MCP server.
 package agentguide
 
+import "strings"
+
 // Contract is the marker-free agent workflow contract.
 const Contract = "Kata is the system of record for intent.\n\n" +
 	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
@@ -64,21 +66,16 @@ Schedule/someday defer work; deadlines don’t. kata deadline <ref> <date-or-tim
 Reached schedules and deadlines use notify.* for the current owner, or the author when unowned; clear with kata notify <ref> --to <recipient> --clear.
 `
 
-// Quickstart is the full CLI agent briefing.
-const Quickstart = fragIntro +
-	fragClosing +
-	fragOutputFlags +
-	fragRealWork +
-	fragSearchCreateUpdate +
-	fragClaiming +
-	fragScheduling +
-	fragRelationships +
-	fragTeammates +
-	fragMutationComments +
-	fragDestructive +
-	fragEvents +
-	fragDaemonRecovery +
-	fragRemoteDaemon
+// Quickstart is the full CLI agent briefing: every fragment, in order.
+var Quickstart = joinFragments()
+
+func joinFragments() string {
+	var b strings.Builder
+	for _, f := range Fragments {
+		b.WriteString(f.Text)
+	}
+	return b.String()
+}
 
 // Fragment is one named, verbatim part of Quickstart.
 type Fragment struct{ ID, Text string }

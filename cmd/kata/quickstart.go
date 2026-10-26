@@ -18,7 +18,7 @@ instruction-following, not enforcement, and provides no native attention support
 Choose authentication explicitly; create the scheduled task through Muse itself.
 `
 
-const agentQuickstartText = agentguide.Quickstart
+var agentQuickstartText = agentguide.Quickstart
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
 Do not create practice, tutorial, example, or scratchpad issues.
