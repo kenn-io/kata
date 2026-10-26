@@ -320,11 +320,13 @@ export function setJobField(
   next.values[key] = value
   next.dirty.add(key)
   if (key === 'mode') {
-    // Notify and recurring imply their own issue policy; an execution job gets
-    // back the policy it had before the detour.
-    const executes = (mode: string | undefined) => mode === 'prompt' || mode === 'workflow'
-    if (executes(draft.values.mode) && !executes(text))
-      next.values['issue_kind:execute'] = draft.values.issue_kind ?? 'per-run'
+    // Each action family keeps its own issue policy, including an absent one
+    // (stored as ''), and gets it back after a detour through another family.
+    const family = (mode: string | undefined) =>
+      mode === 'prompt' || mode === 'workflow' ? 'execute' : (mode ?? '')
+    const leaving = family(draft.values.mode),
+      entering = family(text)
+    if (leaving !== entering) next.values[`issue_kind:${leaving}`] = draft.values.issue_kind ?? ''
     if (text === 'recurring') {
       next.values['overlap:ordinary'] = draft.values.overlap ?? 'forbid'
       next.values.issue_kind = 'per-run'
@@ -340,9 +342,11 @@ export function setJobField(
     }
     if (draft.values.mode === 'recurring' && text !== 'recurring')
       next.values.overlap = draft.values['overlap:ordinary'] ?? 'forbid'
-    if (text === 'notify') next.values.issue_kind = 'existing'
-    if (executes(text) && !executes(draft.values.mode))
-      next.values.issue_kind = draft.values['issue_kind:execute'] ?? 'per-run'
+    if (leaving !== entering && entering !== 'recurring') {
+      const kept = draft.values[`issue_kind:${entering}`]
+      if (kept === '') delete next.values.issue_kind
+      else next.values.issue_kind = kept ?? (entering === 'notify' ? 'existing' : 'per-run')
+    }
   }
   if (
     key === 'issue' &&

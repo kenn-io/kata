@@ -212,8 +212,12 @@ export function serializeCronJobDraft(draft: CronDefinitionDraft): RawCronDocume
     rawCronValue(draft.original, ['issue', 'scheduled_offset_seconds']) !== 'null'
   )
     throw new Error('Cannot preserve the existing scheduled offset with an existing-issue policy')
-  if (draft.dirty.has('mode') || draft.dirty.has('issue_kind')) {
-    set(['issue', 'kind'], values.issue_kind ?? 'per-run')
+  // An absent issue policy stays absent; a mode change alone never adds one.
+  const issueKind = values.issue_kind
+  if ((draft.dirty.has('mode') || draft.dirty.has('issue_kind')) && issueKind === undefined)
+    remove(['issue'])
+  else if (draft.dirty.has('mode') || draft.dirty.has('issue_kind')) {
+    set(['issue', 'kind'], issueKind!)
     if (values.issue_kind === 'existing')
       for (const key of ['parent_uid', 'title', 'body', 'deadline_offset_seconds'])
         remove(['issue', key])

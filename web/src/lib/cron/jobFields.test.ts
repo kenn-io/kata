@@ -382,3 +382,25 @@ test('a Once time survives a recurring detour and returns when Once is reselecte
   d = setJobField(d, 'trigger', 'once')
   expect(d.values.schedule).toBe('2026-11-02T06:30:00Z')
 })
+test.each(['issue-scheduled', 'issue-deadline'])(
+  'a %s notify job without an issue policy keeps it absent across an action round trip',
+  (trigger) => {
+    let d = buildCronJobDraft(
+      {
+        uid: 'job',
+        name: 'Example job',
+        definitionEventUID: 'event',
+        document: parseCronDocument(
+          `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"${trigger}","issue_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},"action":{"kind":"notify","recipient":"current-owner-or-author"},"overlap":"forbid","catchup":"all","options":{}}`,
+        ),
+      },
+      1,
+    )
+    expect(d.values.issue_kind).toBeUndefined()
+    for (const mode of ['prompt', 'workflow'])
+      d = setJobField(setJobField(d, 'mode', mode), 'mode', 'notify')
+    expect(d.values.issue_kind).toBeUndefined()
+    expect(validateJobDraft(d).issue).toBeUndefined()
+    expect(rawCronValue(serializeCronJobDraft(d), ['issue'])).toBeUndefined()
+  },
+)
