@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-23
+last_edited: 2026-10-26
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -275,7 +275,9 @@ binding time, without historical backfill.
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver, even with push
-writes enabled, and cannot create or edit native recurring definitions. An old
+writes enabled, and cannot create, edit, delete, or restore native recurring
+definitions. Run the same command against the project's owning hub, for example
+with `--daemon <hub-name>`. An old
 peer that lacks `cron_v1` cannot receive a project containing cron state,
 including native recurring metadata on ordinary issue events. Capability refusal
 happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into

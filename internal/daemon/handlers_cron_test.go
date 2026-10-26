@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -34,6 +35,97 @@ func cronHTTPUID(t *testing.T) string {
 }
 func cronHTTPDefinition(_ *testing.T) cron.JobDefinition {
 	return cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspection result"}, Overlap: "forbid", Catchup: "all", Options: []byte(`{"model":"example"}`)}
+}
+
+func TestCronNativeSpokeWriteHint(t *testing.T) {
+	for _, operation := range []string{"create", "update", "delete", "restore"} {
+		t.Run(operation, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			project := seedProject(t, env, "spoke-project")
+			parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Periodic work", Author: "operator"})
+			require.NoError(t, err)
+			definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true,
+				Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
+				Action:  cron.Action{Kind: "notify", Recipient: "current-owner-or-author"},
+				Issue:   &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}, Overlap: "allow", Catchup: "all"}
+			path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
+			method := http.MethodPost
+			body := map[string]any{"actor": "operator", "name": "Periodic review", "definition": definition}
+			if operation != "create" {
+				job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Periodic review", Actor: "operator", Definition: definition})
+				require.NoError(t, err)
+				if operation == "restore" {
+					job, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: job.Name, Definition: job.Definition, Actor: "operator", Deleted: true})
+					require.NoError(t, err)
+				}
+				body["expected_event_uid"] = job.DefinitionEventUID
+				path += "/" + job.UID
+				switch operation {
+				case "update":
+					method = http.MethodPut
+				case "delete":
+					method = http.MethodDelete
+					delete(body, "name")
+					delete(body, "definition")
+				case "restore":
+					path += "/restore"
+					delete(body, "name")
+					delete(body, "definition")
+				}
+			}
+			_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID,
+				Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42,
+				HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+			require.NoError(t, err)
+			before, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			status, raw := cronHTTP(t, env, method, path, body)
+			require.Equalf(t, http.StatusConflict, status, "%s", raw)
+			var response api.ErrorEnvelope
+			require.NoError(t, json.Unmarshal(raw, &response))
+			require.Equal(t, "federated_read_only", response.Error.Code)
+			require.Equal(t, "native recurring jobs are created and edited on the project's owning hub", response.Error.Message)
+			require.Equal(t, "Run the same command against the project's owning hub, for example with --daemon <hub-name>.", response.Error.Hint)
+			after, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			status, raw = cronHTTP(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID),
+				map[string]any{"actor": "operator", "name": "Adapter job", "definition": cronHTTPDefinition(t)})
+			require.Equalf(t, http.StatusCreated, status, "%s", raw)
+		})
+	}
+}
+
+func TestCronNativeHubCreate(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			project := seedProject(t, env, "hub-project")
+			parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Periodic work", Author: "operator"})
+			require.NoError(t, err)
+			binding, err := env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
+			require.NoError(t, err)
+			binding.Enabled = enabled
+			_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+			require.NoError(t, err)
+			definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true,
+				Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
+				Action:  cron.Action{Kind: "notify", Recipient: "current-owner-or-author"},
+				Issue:   &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}, Overlap: "allow", Catchup: "all"}
+			status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID),
+				map[string]any{"actor": "operator", "name": "Periodic review", "definition": definition})
+			if enabled {
+				require.Equalf(t, http.StatusCreated, status, "%s", raw)
+			} else {
+				require.Equalf(t, http.StatusConflict, status, "%s", raw)
+				var response api.ErrorEnvelope
+				require.NoError(t, json.Unmarshal(raw, &response))
+				require.Equal(t, "federated_read_only", response.Error.Code)
+				require.Equal(t, "federated spoke project is read-only\nfederated spoke operation unsupported", response.Error.Message)
+				require.Empty(t, response.Error.Hint)
+			}
+		})
+	}
 }
 
 func TestCronDefinitionAPI(t *testing.T) {

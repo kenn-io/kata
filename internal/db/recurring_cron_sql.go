@@ -56,17 +56,17 @@ func recurringWriteContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, recurringWriteKey{}, true)
 }
 
-func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
-	var role string
+func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool, FederationRole, error) {
+	var role FederationRole
 	var enabled int
 	err := tx.QueryRowContext(ctx, `SELECT role,enabled FROM federation_bindings WHERE project_id=$1`, projectID).Scan(&role, &enabled)
 	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
+		return true, "", nil
 	}
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	return role == string(FederationRoleHub) && enabled == 1, nil
+	return role == FederationRoleHub && enabled == 1, role, nil
 }
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
@@ -113,11 +113,14 @@ func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPu
 	if !oldNative && !newNative {
 		return nil
 	}
-	authority, err := recurringAuthority(ctx, tx, req.projectID)
+	authority, role, err := recurringAuthority(ctx, tx, req.projectID)
 	if err != nil {
 		return err
 	}
 	if !authority {
+		if role == FederationRoleSpoke {
+			return errors.Join(ErrFederatedReadOnly, ErrFederatedSpokeUnsupported, ErrRecurringHubRequired)
+		}
 		return errors.Join(ErrFederatedReadOnly, ErrFederatedSpokeUnsupported)
 	}
 	if oldNative && (!newNative || old.Issue.ParentUID != next.Issue.ParentUID) {
@@ -215,7 +218,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		} else if err != nil {
 			return err
 		}
-		authority, err := recurringAuthority(ctx, tx, in.ProjectID)
+		authority, _, err := recurringAuthority(ctx, tx, in.ProjectID)
 		if err != nil || !authority {
 			return err
 		}

@@ -51,6 +51,22 @@ func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) 
 	err := command.Execute()
 	return out.String(), diagnostic.String(), err
 }
+
+func TestCronCLIJobMutationHelpNamesHub(t *testing.T) {
+	for _, resource := range []string{"job", "workflow"} {
+		for _, operation := range []string{"create", "update", "delete", "restore"} {
+			t.Run(resource+"/"+operation, func(t *testing.T) {
+				out, _, err := executeCronCLI(t, "http://daemon.example", nil, resource, operation, "--help")
+				require.NoError(t, err)
+				if resource == "job" {
+					require.Contains(t, out, "Native recurring jobs must be created, edited, deleted, and restored on the project's owning hub; run the same command there with --daemon <hub-name>.")
+				} else {
+					require.NotContains(t, out, "--daemon <hub-name>")
+				}
+			})
+		}
+	}
+}
 func cronCLIJob(_ *testing.T) api.PutCronJobBody {
 	return api.PutCronJobBody{Name: "Inspect", Definition: api.CronJobDefinition{Version: 1, Kind: "job", Enabled: false, Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect the workspace"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspection"}, Overlap: "forbid", Catchup: "all", Options: api.JSONRawObject(`{"limit":9007199254740993}`)}}
 }

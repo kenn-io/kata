@@ -236,6 +236,10 @@ var (
 	// operations that remain hub-only even when a spoke is push-enabled.
 	ErrFederatedSpokeUnsupported = errors.New("federated spoke operation unsupported")
 
+	// ErrRecurringHubRequired identifies native recurring definition writes on a
+	// spoke. It is joined with the existing federation refusal sentinels.
+	ErrRecurringHubRequired = errors.New("native recurring jobs are created and edited on the project's owning hub")
+
 	// ErrFederatedMoveUnsupported is returned when a move involves any federated
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")

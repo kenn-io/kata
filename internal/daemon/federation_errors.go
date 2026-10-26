@@ -14,6 +14,10 @@ func federationReadOnlyError(err error) error {
 			"both projects must be unfederated; disabling sync retains the federation binding", nil)
 	}
 	if errors.Is(err, db.ErrFederatedReadOnly) {
+		if errors.Is(err, db.ErrRecurringHubRequired) {
+			return api.NewError(409, "federated_read_only", db.ErrRecurringHubRequired.Error(),
+				"Run the same command against the project's owning hub, for example with --daemon <hub-name>.", nil)
+		}
 		return api.NewError(409, "federated_read_only", err.Error(), "", nil)
 	}
 	return nil
