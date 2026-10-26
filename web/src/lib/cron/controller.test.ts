@@ -325,7 +325,8 @@ test('cancelled reconciliation reloads before an unchanged snapshot can reuse th
       }),
   )
   const pending = c.invalidate()
-  expect(c.state.loading).toBe(true)
+  // Revalidating rows already on screen is not a loading state.
+  expect(c.state.loading).toBe(false)
   c.cancelNavigation()
   await c.sync({ ...intent, route: { ...intent.route, groupByProject: true } }, true)
   expect(api.summary).toHaveBeenCalledTimes(3)
@@ -891,4 +892,42 @@ test('a destroyed controller ignores requests from an unmounted page', async () 
   await c.refreshSummaries()
   for (const read of [api.summary, api.jobs, api.runs, api.workflows, api.run])
     expect(read).not.toHaveBeenCalled()
+})
+
+test('older history loads during a background sweep and survives it', async () => {
+  const api = client()
+  const at = (uid: string, time: string) => ({ uid, created_at: time }) as CronRun
+  api.runs.mockImplementation(async (_project, _signal, query) =>
+    query?.beforeUID === 'cursor-1'
+      ? { runs: [at('older', '2026-10-23T00:00:00Z')], next_before_uid: 'cursor-2' }
+      : { runs: [at('newest', '2026-10-25T00:00:00Z')], next_before_uid: 'cursor-1' },
+  )
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: defaultCronRoute(),
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    let release!: () => void
+    api.summary.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ failed_runs_24h: 7, window_start: '', window_end: '' })
+        }),
+    )
+    const sweep = c.sync(intent, false)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    expect(c.state.loading).toBe(false)
+    await c.loadMore('p1')
+    expect(c.state.projects[0]?.runs.map((run) => run.uid)).toEqual(['newest', 'older'])
+    release()
+    await sweep
+    expect(c.state.projects[0]?.runs.map((run) => run.uid)).toEqual(['newest', 'older'])
+    expect(c.state.projects[0]?.nextBeforeUID).toBe('cursor-2')
+  } finally {
+    c.destroy()
+  }
 })

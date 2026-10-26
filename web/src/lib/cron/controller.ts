@@ -239,8 +239,11 @@ export class CronController {
   }
   #startCatalog(key: string): Promise<void> {
     this.#catalog?.abort.abort()
-    this.#more?.abort()
-    this.#more = undefined
+    // Older history keeps loading while the same history revalidates.
+    if (!this.#intent || this.#rowKeys.runs !== historyKey(this.#intent)) {
+      this.#more?.abort()
+      this.#more = undefined
+    }
     this.#catalogFresh = undefined
     const task: Task = { key, abort: new AbortController(), again: false, done: Promise.resolve() }
     this.#catalog = task
@@ -272,11 +275,9 @@ export class CronController {
       workflows: this.#rowKeys.workflows === keys.workflows,
     }
     const previous = new Map(this.state.projects.map((row) => [row.project.uid, row]))
-    // Rows stay on screen while they revalidate the same history.
-    this.#set({
-      loading: true,
-      projects: keep.runs ? this.state.projects.map((row) => ({ ...row, loadingMore: false })) : [],
-    })
+    // Rows stay on screen while they revalidate the same history; only a
+    // read with nothing to show is a loading state.
+    if (!keep.runs) this.#set({ loading: true, projects: [] })
     const rows: CronProjectState[] = [],
       counts = new Map<string, number>()
     let partial = false,
@@ -364,6 +365,26 @@ export class CronController {
     await Promise.all(Array.from({ length: Math.min(4, intent.projects.length) }, worker))
     if (!current()) return
     rows.sort((a, b) => a.project.name.localeCompare(b.project.name))
+    if (keep.runs) {
+      // Older pages loaded while this sweep ran stay, with their cursor.
+      const shown = new Map(this.state.projects.map((row) => [row.project.uid, row]))
+      for (const row of rows) {
+        const earlier = shown.get(row.project.uid)
+        if (!earlier || row.error) continue
+        row.loadingMore = earlier.loadingMore ?? false
+        const oldest = oldestRun(row.runs),
+          before = oldestRun(earlier.runs)
+        if (!before || (oldest && runOrder(before, oldest) <= 0)) continue
+        const seen = new Set(row.runs.map((run) => run.uid))
+        row.runs = [
+          ...row.runs,
+          ...earlier.runs.filter(
+            (run) => !seen.has(run.uid) && (!oldest || runOrder(run, oldest) > 0),
+          ),
+        ].sort(runOrder)
+        row.nextBeforeUID = earlier.nextBeforeUID
+      }
+    }
     this.#rowKeys = keys
     if (!this.#badge) this.#badgeFresh = authorityKey(intent)
     this.#set({
@@ -403,31 +424,49 @@ export class CronController {
     if (this.state.loading || !row?.nextBeforeUID || row.loadingMore || !this.#intent) return
     const abort = (this.#more ??= new AbortController())
     const current = () => this.#more === abort && !abort.signal.aborted
-    row.loadingMore = true
-    row.historyError = undefined
-    this.#set({ projects: [...this.state.projects] })
+    const cursor = row.nextBeforeUID
+    // A background sweep may replace the row while the page loads; apply the
+    // result to whichever row is on screen when it arrives.
+    const update = (change: (shown: CronProjectState) => void) => {
+      this.#set({
+        projects: this.state.projects.map((shown) => {
+          if (shown.project.uid !== projectUID) return shown
+          const next = { ...shown }
+          change(next)
+          return next
+        }),
+      })
+    }
+    update((shown) => {
+      shown.loadingMore = true
+      shown.historyError = undefined
+    })
     try {
       const page = await this.client.runs(row.project.id, abort.signal, {
-        beforeUID: row.nextBeforeUID,
+        beforeUID: cursor,
         statuses: this.#intent.route.statuses.filter((s) => s !== 'never_ran'),
       })
       if (!current()) return
-      const map = new Map(row.runs.map((run) => [run.uid, run]))
-      for (const run of page.runs) map.set(run.uid, run)
-      row.runs = [...map.values()]
-      row.nextBeforeUID = page.next_before_uid
+      update((shown) => {
+        const before = oldestRun(shown.runs),
+          oldest = oldestRun(page.runs)
+        const map = new Map(shown.runs.map((run) => [run.uid, run]))
+        for (const run of page.runs) map.set(run.uid, run)
+        shown.runs = [...map.values()].sort(runOrder)
+        if (shown.nextBeforeUID === cursor || (oldest && (!before || runOrder(oldest, before) > 0)))
+          shown.nextBeforeUID = page.next_before_uid
+        shown.loadingMore = false
+      })
     } catch (error) {
       if (!current()) return
       if (isAuthenticationRequiredError(error)) {
         this.#unauthenticated()
         return
       }
-      row.historyError = 'More history unavailable'
-    } finally {
-      if (current()) {
-        row.loadingMore = false
-        this.#set({ projects: [...this.state.projects] })
-      }
+      update((shown) => {
+        shown.historyError = 'More history unavailable'
+        shown.loadingMore = false
+      })
     }
   }
   /** Opens, changes or closes the drawer without touching the catalog. */
