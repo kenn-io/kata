@@ -238,17 +238,81 @@ func RelayEventReferencedProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.T
 		}
 		return owner(`SELECT project_id,issue_uid FROM events WHERE issue_uid=`+bind(1)+` AND type IN ('issue.created','issue.snapshot') UNION SELECT project_id,issue_uid FROM purge_log WHERE issue_uid=`+bind(2), uid, uid)
 	}
+	byShortID := func(projectUID, shortID string) (Issue, error) {
+		rows, err := tx.QueryContext(ctx, `
+SELECT e.issue_uid
+FROM events e JOIN projects p ON p.id=e.project_id
+WHERE e.issue_uid IS NOT NULL AND e.type IN ('issue.created','issue.snapshot')
+  AND p.uid=`+bind(1)+` AND `+field("short_id")+`=`+bind(2)+`
+UNION
+SELECT e.issue_uid
+FROM events e
+WHERE e.issue_uid IS NOT NULL AND e.type='issue.moved'
+  AND ((`+field("from_project_uid")+`=`+bind(3)+` AND `+field("from_short_id")+`=`+bind(4)+`)
+    OR (`+field("to_project_uid")+`=`+bind(5)+` AND `+field("to_short_id")+`=`+bind(6)+`))`,
+			projectUID, shortID, projectUID, shortID, projectUID, shortID) // #nosec G202 -- Query fragments and JSON fields are fixed; reference values use backend bind placeholders.
+		if err != nil {
+			return Issue{}, err
+		}
+		var candidates []string
+		for rows.Next() {
+			var uid string
+			if err := rows.Scan(&uid); err != nil {
+				_ = rows.Close()
+				return Issue{}, err
+			}
+			candidates = append(candidates, uid)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return Issue{}, err
+		}
+		if err := rows.Close(); err != nil {
+			return Issue{}, err
+		}
+		var matchedUID string
+		for _, candidateUID := range candidates {
+			matched, err := relayIssueMatchesShortIDAtEvent(ctx, tx, candidateUID, projectUID, shortID, event, bind)
+			if err != nil {
+				return Issue{}, err
+			}
+			if !matched {
+				continue
+			}
+			if matchedUID != "" && matchedUID != candidateUID {
+				return Issue{}, ErrNotFound
+			}
+			matchedUID = candidateUID
+		}
+		if matchedUID == "" {
+			return Issue{}, ErrNotFound
+		}
+		return byUID(matchedUID)
+	}
+	projectByName := func(originInstanceUID, name string) (string, error) {
+		var projectCount int
+		var projectID int64
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT project_id),COALESCE(MIN(project_id),0) FROM (
+SELECT project_id FROM events WHERE origin_instance_uid=`+bind(1)+` AND project_name=`+bind(2)+`
+UNION SELECT project_id FROM purge_log WHERE origin_instance_uid=`+bind(3)+` AND project_name=`+bind(4)+`) named`,
+			originInstanceUID, name, originInstanceUID, name).Scan(&projectCount, &projectID)
+		if err != nil {
+			return "", err
+		}
+		if projectCount != 1 {
+			return "", ErrNotFound
+		}
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=`+bind(1), projectID).Scan(&projectUID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", ErrNotFound
+			}
+			return "", err
+		}
+		return projectUID, nil
+	}
 	byRef := func(project, ref string) (Issue, error) {
-		return relayReferenceByRef(event, project, ref, bind, field, owner, byUID, func(project, shortID, currentUID string) (bool, error) {
-			var moved bool
-			err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-SELECT 1 FROM events e
-WHERE e.type='issue.moved'
-  AND `+field("from_project_uid")+`=`+bind(1)+`
-			  AND `+field("from_short_id")+`=`+bind(2)+`
-  AND e.issue_uid<>`+bind(3)+`)`, project, shortID, currentUID).Scan(&moved)
-			return moved, err
-		})
+		return relayReferenceByRef(event, project, ref, byUID, byShortID, projectByName)
 	}
 	comment := func(uid, target string) (Issue, error) {
 		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=`+bind(1), target)
@@ -319,7 +383,7 @@ func RelayCheckpointMetadata(raw jsontext.Value, canOmitComment func(string) (bo
 	return jsontext.Value(encoded), nil
 }
 
-func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) string, field func(string) string, owner func(string, ...any) (Issue, error), byUID func(string) (Issue, error), movedShortID func(string, string, string) (bool, error)) (Issue, error) {
+func relayReferenceByRef(event RemoteEvent, project, ref string, byUID func(string) (Issue, error), byShortID func(string, string) (Issue, error), projectByName func(string, string) (string, error)) (Issue, error) {
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
 		return Issue{}, ErrNotFound
@@ -330,25 +394,59 @@ func relayReferenceByRef(event RemoteEvent, project, ref string, bind func(int) 
 	// An own-name qualifier requires a concrete target in the canonical
 	// source namespace; the unhashed display name is only a routing clue.
 	if parsed.Project == "" || parsed.Project == event.ProjectName {
-		issue, err := owner(`SELECT i.project_id,i.uid AS issue_uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=`+bind(1)+` AND i.short_id=`+bind(2)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_uid=`+bind(3)+` AND short_id=`+bind(4), project, parsed.ShortID, project, parsed.ShortID)
-		if err != nil {
-			return Issue{}, err
-		}
-		// A source short ID is ambiguous when a retained move shows that a
-		// different issue used to own it. A move back of this same issue remains
-		// resolvable because the current UID still matches the move history.
-		moved, err := movedShortID(project, parsed.ShortID, issue.UID)
-		if err != nil {
-			return Issue{}, err
-		}
-		if moved {
-			return Issue{}, ErrNotFound
-		}
-		return issue, nil
+		return byShortID(project, parsed.ShortID)
 	}
 	// The producer's project name is retained on native history, independent
 	// of local aliases. A name reused by multiple source projects is ambiguous.
-	named := `WITH named AS (SELECT DISTINCT project_id FROM events WHERE origin_instance_uid=` + bind(1) + ` AND project_name=` + bind(2) + ` UNION SELECT project_id FROM purge_log WHERE origin_instance_uid=` + bind(3) + ` AND project_name=` + bind(4) + `) `
-	unique := `(SELECT MIN(project_id) FROM named HAVING COUNT(*)=1)`
-	return owner(named+`SELECT e.project_id,e.issue_uid FROM events e WHERE e.project_id=`+unique+` AND e.type IN ('issue.created','issue.snapshot') AND `+field("short_id")+`=`+bind(5)+` UNION SELECT project_id,issue_uid FROM purge_log WHERE project_id=`+unique+` AND short_id=`+bind(6), event.OriginInstanceUID, parsed.Project, event.OriginInstanceUID, parsed.Project, parsed.ShortID, parsed.ShortID)
+	projectUID, err := projectByName(event.OriginInstanceUID, parsed.Project)
+	if err != nil {
+		return Issue{}, err
+	}
+	return byShortID(projectUID, parsed.ShortID)
+}
+
+func relayIssueMatchesShortIDAtEvent(ctx context.Context, tx *sql.Tx, issueUID, projectUID, shortID string, event RemoteEvent, bind func(int) string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT p.uid,e.type,e.origin_instance_uid,e.uid,e.hlc_physical_ms,e.hlc_counter,e.payload
+FROM events e JOIN projects p ON p.id=e.project_id
+WHERE e.issue_uid=`+bind(1)+` AND e.type IN ('issue.created','issue.snapshot','issue.moved')
+ORDER BY e.hlc_physical_ms,e.hlc_counter,e.origin_instance_uid,e.uid`, issueUID) // #nosec G202 -- The query uses a backend bind placeholder for the issue UID.
+	if err != nil {
+		return false, err
+	}
+	referenceClock := FoldClock{HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, OriginInstanceUID: event.OriginInstanceUID, EventUID: event.EventUID}
+	var history []FoldEvent
+	hasIdentity := false
+	for rows.Next() {
+		var project, eventType, originInstanceUID, eventUID string
+		var physicalMS, counter int64
+		var payload []byte
+		if err := rows.Scan(&project, &eventType, &originInstanceUID, &eventUID, &physicalMS, &counter, &payload); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		foldEvent := FoldEvent{
+			UID: eventUID, OriginInstanceUID: originInstanceUID, ProjectUID: project,
+			IssueUID: issueUID, Type: eventType, HLCPhysicalMS: physicalMS,
+			HLCCounter: counter, Payload: jsontext.Value(payload),
+		}
+		if compareClock(clockOf(foldEvent), referenceClock) > 0 {
+			continue
+		}
+		if eventType == "issue.created" || eventType == "issue.snapshot" {
+			hasIdentity = true
+		}
+		history = append(history, foldEvent)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if !hasIdentity {
+		return false, nil
+	}
+	issue, ok := FoldEvents(history).Issues[issueUID]
+	return ok && issue.ProjectUID == projectUID && issue.ShortID == shortID, nil
 }

@@ -398,6 +398,12 @@ func RunRelaySharedAccessMovedBareEvidenceReusedShortID(t *testing.T, store db.S
 	runRelaySharedAccessMovedBareEvidence(t, store, false, true, false)
 }
 
+// RunRelaySharedAccessMovedBareEvidenceReusedShortIDAfterPurge rejects a
+// replacement short ID when purging its former owner removes the move event.
+func RunRelaySharedAccessMovedBareEvidenceReusedShortIDAfterPurge(t *testing.T, store db.Storage) {
+	runRelaySharedAccessMovedBareEvidence(t, store, true, true, false)
+}
+
 // RunRelaySharedAccessMovedBareEvidenceReturnedToSource allows historical
 // evidence when the original issue, rather than a replacement, owns the ID.
 func RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t *testing.T, store db.Storage) {

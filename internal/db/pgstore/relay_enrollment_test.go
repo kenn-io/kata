@@ -13,7 +13,7 @@ import (
 )
 
 func TestRelaySharedAccessEnrollment(t *testing.T) {
-	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge", "moved-bare-reuse", "moved-bare-return"} {
+	for _, form := range []string{"enrollment", "to", "from", "snapshot", "no-ref-omitted", "no-ref-empty", "no-ref-null", "moved-reply-purge", "moved-bare-live", "moved-bare-purge", "moved-bare-reuse", "moved-bare-reuse-purge", "moved-bare-return"} {
 		t.Run(form, func(t *testing.T) {
 			dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
 			t.Cleanup(cleanup)
@@ -33,6 +33,8 @@ func TestRelaySharedAccessEnrollment(t *testing.T) {
 				dbtest.RunRelaySharedAccessMovedBareEvidence(t, store, form == "moved-bare-purge")
 			case "moved-bare-reuse":
 				dbtest.RunRelaySharedAccessMovedBareEvidenceReusedShortID(t, store)
+			case "moved-bare-reuse-purge":
+				dbtest.RunRelaySharedAccessMovedBareEvidenceReusedShortIDAfterPurge(t, store)
 			case "moved-bare-return":
 				dbtest.RunRelaySharedAccessMovedBareEvidenceReturnedToSource(t, store)
 			default:
