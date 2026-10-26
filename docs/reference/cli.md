@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-24
+last_edited: 2026-10-26
 ---
 
 # CLI reference
@@ -304,6 +304,7 @@ kata agent-hook install
 kata agent-hook install codex pi
 kata agent-hook install codex --config /path/to/second-codex-home/hooks.json
 kata agent-hook install claude --executable /path/to/stable/bin/kata
+kata agent-hook install claude --executable kata
 kata agent-hook uninstall codex
 kata agent-hook uninstall --all
 ```
@@ -396,11 +397,14 @@ commands; bare hooks do not provide session-ownership fencing.
 
 Project setup uses the portable `kata` command by default so teammates do not
 inherit the installer's machine-specific path. `--executable` overrides it.
-User setup chooses an absolute executable path in this order:
+User setup chooses its executable in this order:
 
-1. `--executable <path-or-command>`. Bare commands are resolved on `PATH`;
-   relative paths are made absolute. The result must be an existing regular
-   executable file. Invalid values fail before any config is written.
+1. `--executable <path-or-command>`. Bare `kata` and `kata.exe` are checked on
+   `PATH` and recorded as given, so hooks can move between machines. Kata must
+   be on the harness's runtime `PATH`. Other bare commands are resolved on
+   `PATH` and saved as absolute paths; explicit paths are also made absolute.
+   Use a path to pin an executable. Every override must resolve to an existing
+   regular executable file; invalid values fail before any config is written.
 2. The first executable `kata` on `PATH` whose resolved symlink target matches
    the running binary. This keeps a stable package-manager shim when possible.
 3. The running binary's path, with a warning that it may not survive an upgrade.

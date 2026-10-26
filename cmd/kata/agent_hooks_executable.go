@@ -38,6 +38,10 @@ func resolveAgentHookExecutable(override string, env agentHookExecutableEnv) (st
 		if !info.Mode().IsRegular() {
 			return "", "", fmt.Errorf("hook executable %s is not a regular file", path)
 		}
+		// Preserve recognized bare Kata commands.
+		if !strings.ContainsAny(override, "/\\") && isKataHookExecutable(override) {
+			return override, "", nil
+		}
 		path, err = filepath.Abs(path)
 		return path, "", err
 	}

@@ -368,7 +368,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 	cmd.Flags().StringVar(&config, "config", "", "explicit native config file; requires exactly one supported command target")
 	cmd.Flags().BoolVar(&attention, "attention", true, "include available attention directions; --attention=false selects contract only")
 	if !remove {
-		cmd.Flags().StringVar(&executable, "executable", "", "existing executable path or command on PATH to install")
+		cmd.Flags().StringVar(&executable, "executable", "", "existing executable path or command on PATH; bare kata/kata.exe is recorded as given")
 		cmd.Flags().StringVar(&source, "source", "", "contract prompt file for an owned native code adapter")
 		cmd.Flags().StringVar(&api, "api", "", "advanced OpenCode API override: v1 or v2 (default: probe opencode --version)")
 		cmd.Flags().BoolVar(&managed, "managed-attention", false, "grant Muse global forwarding of Kata variables, including KATA_AUTH_TOKEN, to all Muse managed hooks")

@@ -304,14 +304,27 @@ func TestAgentHooksInstallExecutableOverride(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	bin := t.TempDir()
-	name := "example-kata"
+	name := "kata"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	executable := filepath.Join(bin, name)
 	require.NoError(t, os.WriteFile(executable, []byte("fixture"), 0o700)) //nolint:gosec // G306: executable fixture.
 	t.Setenv("PATH", bin)
-	for _, override := range []string{name, executable} {
+	renamed := "example-kata"
+	if runtime.GOOS == "windows" {
+		renamed += ".exe"
+	}
+	renamedExecutable := filepath.Join(bin, renamed)
+	require.NoError(t, os.WriteFile(renamedExecutable, []byte("fixture"), 0o700)) //nolint:gosec // G306: executable fixture.
+	for _, tc := range []struct {
+		override, want string
+	}{
+		{name, name},
+		{renamed, renamedExecutable},
+		{executable, executable},
+	} {
+		override := tc.override
 		t.Run(override, func(t *testing.T) {
 			config := filepath.Join(t.TempDir(), "hooks.json")
 			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "--contract-only", "codex", "--config", config, "--executable", override)
@@ -319,8 +332,21 @@ func TestAgentHooksInstallExecutableOverride(t *testing.T) {
 			status, err := readAgentHookStatus(agenthook.AgentCodex, config, "")
 			require.NoError(t, err)
 			require.Len(t, status.Entries, 1)
-			require.Equal(t, executable, status.Entries[0].Executable)
+			require.Equal(t, tc.want, status.Entries[0].Executable)
 			require.True(t, status.Entries[0].ExecutableExists)
+
+			if override != name {
+				return
+			}
+			piDir := t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", piDir)
+			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "pi", "--executable", override)
+			require.NoError(t, err, stderr)
+			data, err := os.ReadFile(filepath.Join(piDir, "extensions", "kata.js")) //nolint:gosec // G304: generated configuration fixture stays inside the isolated test home.
+			require.NoError(t, err)
+			meta, err := parsePiAgentHookMetadata(data)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, meta.Executable)
 		})
 	}
 	nonExecutable := filepath.Join(bin, "plain-file")

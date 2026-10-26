@@ -17,6 +17,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `config.toml` or running `kata daemon locate`. See
   [Go client](reference/go-client.md#connect-to-a-catalog-daemon-by-name).
 
+- Share generated agent hooks across machines with `--executable kata` or `kata.exe`. Installation checks PATH and keeps that bare command; project hooks installed with `--executable kata` now also record bare `kata` instead of an absolute path; the harness also needs Kata on its runtime PATH. See [Agent workflows](workflows/agents.md).
 - Pull the container image from `ghcr.io/kenn-io/kata:<version>` starting with the next release. Releases 0.19.0 and 0.20.0 documented the image but did not publish it; see [Containers](operations/containers.md).
 - Stop, restart, reload, and update only daemons whose records identify local processes; each command names skipped records from another PID namespace or with unverifiable identity on stderr. Foreground start proceeds over a live record from another PID namespace, while a live record whose identity can't be judged still blocks startup.
 

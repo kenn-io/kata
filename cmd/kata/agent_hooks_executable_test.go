@@ -33,12 +33,6 @@ func TestAgentHookExecutableResolution(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, shim, got)
 	require.Empty(t, warning)
-	override := filepath.Join(dir, "explicit shim.exe")
-	require.NoError(t, os.WriteFile(override, []byte("fixture"), 0o700)) //nolint:gosec // G306: executable fixture.
-	got, warning, err = resolveAgentHookExecutable(override, env)
-	require.NoError(t, err)
-	require.Equal(t, override, got)
-	require.Empty(t, warning)
 	env.Path = first
 	got, warning, err = resolveAgentHookExecutable("", env)
 	require.NoError(t, err)
@@ -47,9 +41,52 @@ func TestAgentHookExecutableResolution(t *testing.T) {
 	env.Executable = func() (string, error) { return "", errors.New("executable failed") }
 	_, _, err = resolveAgentHookExecutable("", env)
 	require.ErrorContains(t, err, "executable failed")
-	got, _, err = resolveAgentHookExecutable(override, env)
-	require.NoError(t, err)
-	require.Equal(t, override, got)
+}
+
+func TestAgentHookExecutableOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	t.Chdir(t.TempDir())
+	for _, name := range []string{"kata", "kata.exe", "kata-dev"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o700)) //nolint:gosec // G306: owner-only executable fixture for PATH selection.
+	}
+	renamed := "kata-dev"
+	pathName := "kata"
+	if runtime.GOOS == "windows" {
+		renamed += ".exe"
+		pathName += ".exe"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, renamed), []byte("fixture"), 0o700)) //nolint:gosec // G306: owner-only executable fixture for PATH selection.
+	}
+	override := filepath.Join(dir, "explicit shim.exe")
+	require.NoError(t, os.WriteFile(override, []byte("fixture"), 0o700)) //nolint:gosec // G306: executable fixture.
+	env := defaultAgentHookExecutableEnv()
+	env.Executable = func() (string, error) { return "", errors.New("executable failed") }
+	for _, tc := range []struct {
+		override, want string
+	}{
+		{"kata", "kata"},
+		{"kata.exe", "kata.exe"},
+		{renamed, filepath.Join(dir, renamed)},
+		{"./kata", filepath.Join(dir, pathName)},
+		{override, override},
+	} {
+		t.Run(tc.override, func(t *testing.T) {
+			if tc.override == "./kata" {
+				t.Chdir(dir)
+			}
+			got, warning, err := resolveAgentHookExecutable(tc.override, env)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+			require.Empty(t, warning)
+		})
+	}
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+	t.Chdir(emptyDir)
+	for _, name := range []string{"kata", "kata.exe"} {
+		_, _, err := resolveAgentHookExecutable(name, defaultAgentHookExecutableEnv())
+		require.ErrorContains(t, err, "resolve hook executable", name)
+	}
 }
 
 func TestDefaultAgentHookExecutableEnvPreservesStableDirectoryAlias(t *testing.T) {

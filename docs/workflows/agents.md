@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-23
+last_edited: 2026-10-26
 ---
 
 # Agent workflows
@@ -144,8 +144,12 @@ another hook selector with `--agent-hooks`.
 
 Project hooks use `kata` from each teammate's PATH. Use `--executable` on
 `agent-hook install` to choose another executable explicitly; user setup
-defaults to an absolute path. If init reports a hook error after creating or
-binding the project, the binding remains. Fix the error and rerun init. Its
+defaults to an absolute path. For portable user hooks, pass `--executable kata`
+(or `kata.exe`): it is checked on PATH and recorded as given. Reinstalls must
+also pass `--executable kata` to keep the hook portable; a flagless user
+install records an absolute path. Kata must also be on the harness's runtime
+PATH. If init reports a hook error after creating or binding the project, the
+binding remains. Fix the error and rerun init. Its
 [structured error](../reference/cli.md#workspace-initialization) records the
 completed project result separately from the hook failure.
 
@@ -281,8 +285,10 @@ An unreadable or malformed selected config makes status exit nonzero after
 collecting the other targets. JSON puts that partial report in `error.data`;
 each failed row identifies the config path in `inspection_error`.
 `--config` requires one target and a supported native config-file override;
-Pi and Amp auto-discovered extensions reject it. An executable override can pin
-stable Kata commands. Installer `--source` is data for owned code extensions;
+Pi and Amp auto-discovered extensions reject it. Use an explicit
+`--executable <path>` to pin a stable Kata command; paths are made absolute.
+Other bare command names are resolved on PATH and saved as absolute paths.
+Installer `--source` is data for owned code extensions;
 command-hook installers reject it and preserve authored custom-source commands.
 Relative user-scope source paths are saved as absolute paths from the install
 command's working directory. Project-scope source paths stay relative to the
