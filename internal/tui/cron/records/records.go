@@ -3,6 +3,7 @@ package records
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"time"
 
 	native "go.kenn.io/kata/internal/cron"
@@ -22,6 +23,31 @@ type Job struct {
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
+	LastRun            *Run           `json:"last_run"`
+	// LastRunKnown records whether the daemon supplied authoritative last_run evidence.
+	// Explicit null remains authoritative never-ran.
+	LastRunKnown bool `json:"-"`
+}
+
+// UnmarshalJSON preserves the distinction between an omitted legacy last_run
+// and the authoritative nullable field returned by newer daemons.
+func (j *Job) UnmarshalJSON(data []byte) error {
+	type wireJob Job
+	decoded := wireJob(*j)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var presence struct {
+		LastRun jsontext.Value `json:"last_run"`
+	}
+	if err := json.Unmarshal(data, &presence); err != nil {
+		return err
+	}
+	*j = Job(decoded)
+	if len(presence.LastRun) != 0 {
+		j.LastRunKnown = true
+	}
+	return nil
 }
 
 // Workflow uses the same identity and revision envelope as a job.

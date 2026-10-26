@@ -17,6 +17,27 @@ type CronAPI interface {
 	ShowCronRun(context.Context, int64, string) (records.Run, error)
 }
 
+// CronPeekAPI is optional so issue-only and older clients remain usable.
+type CronPeekAPI interface {
+	CronIssuePeek(context.Context, int64, string) (records.IssuePeek, error)
+}
+
+// CronIssuePeek reads the issue and its comments together through the existing
+// native issue endpoint; GetIssueDetail intentionally omits those comments.
+func (c *Client) CronIssuePeek(ctx context.Context, projectID int64, uid string) (records.IssuePeek, error) {
+	body, err := c.showIssue(ctx, projectID, uid)
+	if err != nil {
+		return records.IssuePeek{}, err
+	}
+	peek := records.IssuePeek{IssueUID: body.Issue.UID, ShortID: body.Issue.ShortID, Title: body.Issue.Title}
+	for _, comment := range body.Comments {
+		if peek.Latest == nil || comment.CreatedAt.After(peek.Latest.CreatedAt) || comment.CreatedAt.Equal(peek.Latest.CreatedAt) && comment.UID > peek.Latest.UID {
+			peek.Latest = &records.PeekComment{UID: comment.UID, Author: comment.Author, Body: comment.Body, CreatedAt: comment.CreatedAt}
+		}
+	}
+	return peek, nil
+}
+
 // ListCronJobs reads the selected project catalog through the active daemon transport.
 func (c *Client) ListCronJobs(ctx context.Context, projectID int64) ([]records.Job, error) {
 	api, err := c.generatedClient()
@@ -34,6 +55,9 @@ func (c *Client) ListCronJobs(ctx context.Context, projectID int64) ([]records.J
 	for i := range out.Jobs {
 		out.Jobs[i].ProjectID = projectID
 		out.Jobs[i].ProjectUID = fmt.Sprint(projectID)
+		if run := out.Jobs[i].LastRun; run != nil {
+			run.ProjectID, run.ProjectKey = projectID, fmt.Sprint(projectID)
+		}
 	}
 	return out.Jobs, err
 }

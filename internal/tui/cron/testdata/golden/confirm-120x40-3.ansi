@@ -1,8 +1,8 @@
 ╭───────────┬──────┬──────┬───────────╮
 │[2m kata カタ [m│[1m jobs [m│[2m runs [m│[2m workflows [m│
 ┴───────────┘      └──────┴───────────┴─────────────────────────────────────────────────────────────────────────────────
-[1m  # status    job                                                                         schedule  workflow     updated[m
-[7m▶[m[7m [m[7m—[m[7m [m[7msucceeded[m[7m [m[7mDaily summary                                                              [m[7m [m[7m0 7 * * *[m[7m [m[7mSummary flow[m[7m [m[7m3h ago [m
+[1m  # last status job                                                                       schedule  workflow     updated[m
+[7m▶[m[7m [m[7m—[m[7m [m[7msucceeded  [m[7m [m[7mDaily summary                                                            [m[7m [m[7m0 7 * * *[m[7m [m[7mSummary flow[m[7m [m[7m3h ago [m
 
 
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
@@ -35,6 +36,11 @@ type cronHost struct {
 	issueReturnProjects      bool
 	tabGeneration            uint64
 	background               *tea.BackgroundColorMsg
+	peekKey                  cronPeekKey
+	peekGeneration           uint64
+	peekCancel               context.CancelFunc
+	peekAuth                 AuthInfo
+	peekClosed               bool
 
 	native             Model
 	tab, width, height int
@@ -47,9 +53,15 @@ func newCronHost(native Model) *cronHost {
 	return h
 }
 func (h *cronHost) Init() tea.Cmd { return wrapNativeInput(h.native.Init(), h.epoch, h.tabGeneration) }
-func (h *cronHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	defer h.resizeCronBoard()
+func (h *cronHost) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
+	defer func() {
+		h.resizeCronBoard()
+		cmd = tea.Batch(cmd, h.syncCronPeek())
+	}()
 	switch v := msg.(type) {
+	case cronPeekMsg:
+		h.acceptCronPeek(v)
+		return h, nil
 	case cronNativeInputMsg:
 		if v.epoch != h.epoch || v.tabGeneration != h.tabGeneration || h.tab != 0 {
 			return h, nil
@@ -141,8 +153,9 @@ func (h *cronHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			c.detailProblem = cronProblemText(v.err)
 		} else {
+			v.run = h.reconcileCronRun(v.project, v.run)
+			c = h.catalogs[v.project]
 			c.detailProblem = ""
-			v.run.ProjectKey = fmt.Sprint(v.project)
 			c.runs = mergeCronRuns(c.runs, []records.Run{v.run})
 		}
 		h.catalogs[v.project] = c
@@ -216,7 +229,7 @@ func (h *cronHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" && h.native.view == viewDetail && len(h.native.detail.navStack) == 0 {
 		back = true
 	}
-	next, cmd := h.native.Update(msg)
+	next, cmd = h.native.Update(msg)
 	h.native = next.(Model)
 	if h.issueReturnProjects && back && h.native.view == viewList {
 		h.native.view = viewProjects
@@ -425,6 +438,7 @@ func (h *cronHost) updateCronChild(msg tea.Msg) tea.Cmd {
 					found := false
 					for i, old := range c.jobs {
 						if old.UID == j.UID {
+							j.LastRun, j.LastRunKnown = old.LastRun, old.LastRunKnown
 							c.jobs[i] = j
 							found = true
 							break

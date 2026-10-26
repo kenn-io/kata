@@ -54,6 +54,10 @@ func (m *model) routeScreenKey(k tea.KeyPressMsg) tea.Cmd {
 		if m.currentView() == viewList {
 			m.searching = true
 		}
+	case matchesKey(s, keys.Status):
+		if m.currentView() == viewList && m.tab != 2 {
+			m.cycleStatus()
+		}
 	case matchesKey(s, keys.Layout):
 		_, split := m.splitGeometry()
 		m.listOnly = split

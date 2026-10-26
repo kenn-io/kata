@@ -77,7 +77,7 @@ func TestCronSnapshots(t *testing.T) {
 					m.Resize(size[0], height)
 					text := m.View().Content
 					if f, ok := m.editor.(*workflowForm); ok {
-						text = strings.ReplaceAll(text, f.path, "/tmp/example-workflow.json")
+						text = strings.ReplaceAll(text, truncate(f.path, size[0]), "/tmp/example-workflow.json")
 					}
 					if m.TabsVisible() {
 						text = m.Tabs(m.tab+1, size[0]) + "\n" + text

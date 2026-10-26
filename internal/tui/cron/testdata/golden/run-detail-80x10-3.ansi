@@ -4,7 +4,7 @@ outcome        succeeded
 trigger        —
 occurrence     scheduled-example
 run            run-1
-job            job-1
-workflow       flow-1
-↓ 6 more
+↓ 8 more
+  Recorded summary
+  No issue linked
  [1mh/←[m back▕ [1ml/→[m open job▕ [1mj/k[m scroll▕ [1mK[m kata▕ [1mr[m refresh▕ [1mctrl+d/u[m scroll▕ [1mq[m quit 

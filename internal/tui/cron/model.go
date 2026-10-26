@@ -39,6 +39,7 @@ type model struct {
 	marqueeState
 	listState
 	data          Data
+	peek          PeekState
 	opts          Options
 	now           func() time.Time
 	width, height int
@@ -162,7 +163,6 @@ func (m *model) rebuild() {
 		for _, v := range m.visibleJobs() {
 			rows = append(rows, row{kind: "job", projectUID: v.key.projectUID, uid: v.key.uid, label: v.entry.Name, search: v.search, job: v.index})
 		}
-		m.jobMatches = len(rows)
 	case 1:
 		for i, r := range m.data.Runs {
 			v := m.runViews[scopedRowKey(r.ProjectKey, r.UID)]
@@ -173,9 +173,12 @@ func (m *model) rebuild() {
 	}
 	m.rows = nil
 	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.search), strings.ToLower(m.query)) {
+		if strings.Contains(strings.ToLower(r.search), strings.ToLower(m.query)) && m.statusMatches(r) {
 			m.rows = append(m.rows, r)
 		}
+	}
+	if m.tab == 0 {
+		m.jobMatches = len(m.rows)
 	}
 	if selected != "" {
 		m.cursor = 0
@@ -196,7 +199,7 @@ type row struct {
 type listState struct {
 	follow              bool
 	tab, cursor, scroll int
-	query               string
+	query, status       string
 	searching           bool
 	rows                []row
 }
@@ -225,8 +228,8 @@ func (m *model) selectedJobRun() (records.Run, bool) {
 		}
 		return records.Run{}, false
 	}
-	if len(v.runIndexes) > 0 {
-		return m.data.Runs[v.runIndexes[0]], true
+	if r := m.jobLastRun(v); r != nil {
+		return *r, true
 	}
 	return records.Run{}, false
 }

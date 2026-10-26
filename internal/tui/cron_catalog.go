@@ -50,6 +50,7 @@ func (h *cronHost) syncCronScope() {
 	h.cronScope = stamp
 	h.cronDenied = false
 	h.epoch++
+	h.clearCronPeek()
 	if h.board != nil {
 		_ = h.board.Close()
 	}
@@ -143,7 +144,13 @@ func (h *cronHost) loadCronCatalog() tea.Cmd {
 					cat.err = err
 				}
 				for i := range cat.jobs {
+					cat.jobs[i].ProjectID, cat.jobs[i].ProjectUID = p.ID, fmt.Sprint(p.ID)
 					cat.jobs[i].Project = p.Name
+					if last := cat.jobs[i].LastRun; last != nil {
+						run := *last
+						run.ProjectID, run.ProjectKey, run.ProjectName = p.ID, fmt.Sprint(p.ID), p.Name
+						cat.jobs[i].LastRun = &run
+					}
 				}
 				for i := range cat.workflows {
 					cat.workflows[i].Project = p.Name
@@ -215,6 +222,13 @@ func (h *cronHost) acceptCronCatalog(msg cronCatalogMsg) {
 			}
 			cat.runs, cat.before, cat.runsLoaded = old.runs, old.before, old.runsLoaded
 			cat.evidence = old.evidence
+		}
+		for i := range cat.jobs {
+			if last := cat.jobs[i].LastRun; last != nil {
+				run := h.reconcileCronRun(id, *last)
+				run.ProjectName = cat.name
+				cat.jobs[i].LastRun = &run
+			}
 		}
 		h.catalogs[id] = cat
 	}
@@ -290,6 +304,9 @@ func (h *cronHost) denyCronProject(id int64, problem string) {
 }
 
 func (h *cronHost) forgetCronProject(id int64) {
+	if h.peekKey.project == id {
+		h.clearCronPeek()
+	}
 	delete(h.detailPending, id)
 	h.issueRequest++
 	if h.issueGenerations == nil {
@@ -322,6 +339,7 @@ func (h *cronHost) clearCronAccess(err error) bool {
 	if status != 401 && status != 403 {
 		return false
 	}
+	h.clearCronPeek()
 	if h.board != nil {
 		_ = h.board.Close()
 	}

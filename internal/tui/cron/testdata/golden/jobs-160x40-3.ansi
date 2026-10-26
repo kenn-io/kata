@@ -2,8 +2,8 @@
 │[2m kata カタ [m│[1m jobs [m│[2m runs [m│[2m workflows [m│
 ┴───────────┘      └──────┴───────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────┐┌────────────────────────────────────────────────┐
-│[1m  # status    job                                                                          schedule  updated[m││[1mDaily summary                                   [m│
-│[7m▶[m[7m [m[7m—[m[7m [m[7msucceeded[m[7m [m[7mDaily summary                                                               [m[7m [m[7m0 7 * * *[m[7m [m[7m3h ago [m││                                                │
+│[1m  # last status job                                                                        schedule  updated[m││[1mDaily summary                                   [m│
+│[7m▶[m[7m [m[7m—[m[7m [m[7msucceeded  [m[7m [m[7mDaily summary                                                             [m[7m [m[7m0 7 * * *[m[7m [m[7m3h ago [m││                                                │
 │                                                                                                            ││state     enabled                               │
 │                                                                                                            ││schedule  0 7 * * *                             │
 │                                                                                                            ││workflow  Summary flow                          │
@@ -34,7 +34,7 @@
 │                                                                                                            ││                                                │
 │                                                                                                            ││                                                │
 │                                                                                                            ││                                                │
-│                                                                                                            ││                                                │
 └────────────────────────────────────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
   page 1/1
- [1mtab[m tabs▕ [1m/[m search▕ [1m[ ][m page▕ [1mj/k[m move▕ [1ml/→[m open▕ [1mp[m pause▕ [1mn[m new▕ [1me[m edit▕ [1mD[m delete▕ [1mi[m issue▕ [1mK[m kata▕ [1mr[m reload▕ [1mL[m layout▕ [1mq[m quit▕ [1m1–4[m tabs▕ [1mctrl+d/u[m scroll     
+ [1mtab[m tabs       ▕ [1m/[m search▕ [1mf[m status▕ [1m[ ][m page▕ [1mj/k[m move▕ [1ml/→[m open▕ [1mp[m pause▕ [1mn[m new▕ [1me[m edit▕ [1mD[m delete▕ [1mi[m issue▕ [1mK[m kata▕ [1mr[m reload▕ [1mL[m layout▕ [1mq[m quit▕ [1m1–4[m tabs     
+ [1mctrl+d/u[m scroll                                                                                                                                                

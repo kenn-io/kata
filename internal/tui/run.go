@@ -122,9 +122,7 @@ func Run(ctx context.Context, opts Options) error {
 	started := time.Now()
 	host := newCronHost(m)
 	_, err = tea.NewProgram(host, programOpts(ctx, opts)...).Run()
-	if host.board != nil {
-		err = errors.Join(err, host.board.Close())
-	}
+	err = errors.Join(err, host.Close())
 	elapsed := time.Since(started)
 	c.ReportSessionEnded(elapsed)
 	return err

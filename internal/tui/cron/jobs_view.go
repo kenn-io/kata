@@ -142,7 +142,8 @@ func (m *model) rebuildJobIndex() {
 		}
 		index.jobMemo[key] = cached
 		v := &jobView{key: key, entry: entry, def: cached.def, decodeErr: cached.err, runIndexes: groups[key], index: i}
-		v.job = records.Job{ProjectUID: key.projectUID, Project: entry.Project, UID: entry.UID, Name: entry.Name, DefinitionEventUID: entry.DefinitionEventUID, Definition: entry.Definition, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, DeletedAt: entry.DeletedAt}
+		v.job = entry
+		v.job.ProjectUID = key.projectUID
 		v.shape = jobShape(v.def)
 		v.schedule = jobSchedule(v.def.Trigger)
 		if v.shape == "workflow" {
@@ -175,10 +176,9 @@ func (m *model) rebuildJobIndex() {
 			v.profile = "default"
 		}
 		last := ""
-		if len(v.runIndexes) > 0 {
-			r := m.data.Runs[v.runIndexes[0]]
+		if r := m.jobLastRun(v); r != nil {
 			last = r.Status
-			v.issue = refs.run(m, r)
+			v.issue = refs.run(m, *r)
 		}
 		if v.issue == "" {
 			v.issue = qualifiedIssueRef(m.projectName(key.projectUID), jobIssueUID(v.def))
@@ -192,6 +192,19 @@ func (m *model) rebuildJobIndex() {
 	}
 	m.jobs = index
 }
+
+// jobLastRun trusts authoritative catalog membership. Only an omitted legacy
+// field falls back to the newest loaded observation for this project/job.
+func (m *model) jobLastRun(v *jobView) *records.Run {
+	if v.entry.LastRun != nil || v.entry.LastRunKnown {
+		return v.entry.LastRun
+	}
+	if len(v.runIndexes) > 0 {
+		return &m.data.Runs[v.runIndexes[0]]
+	}
+	return nil
+}
+
 func (m *model) visibleJobs() []*jobView {
 	if m.jobs == nil {
 		return nil

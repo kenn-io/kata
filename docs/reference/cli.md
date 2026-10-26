@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-24
+last_edited: 2026-10-25
 ---
 
 # CLI reference
@@ -1792,6 +1792,22 @@ tabs in the same terminal. Pass an optional issue ref,
 such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
+
+The `jobs` tab shows each job's last status as reported by the daemon, even
+when that run is outside the loaded history. `never ran` means the job has no
+runs. Daemons that predate last-run reporting fall back to loaded history and
+show `unloaded` when it has no run for the job.
+
+Press `f` in the `jobs` or `runs` tab to cycle a status filter: `running`,
+`succeeded`, `failed`, `cancelled`, and `unknown`. The `jobs` tab also offers
+`never ran`, and filters on each job's last status. The `runs` tab filters the
+loaded history; press `]` at the end of the list to load more.
+
+Selecting a run shows its recorded summary and its linked issue: the issue
+title and the latest readable comment, ordered by creation time and then
+comment UID. If the run has no linked issue, the issue can't be read, or it has
+no comments, the peek says so and still shows the run summary. Press `i` to
+open the linked issue or `l` to open run detail.
 
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply

@@ -140,31 +140,12 @@ func (h *cronHost) acceptCronRuns(msg cronRunsMsg) {
 		return
 	}
 
-	// Page membership comes from the response; accepted revisions never go back.
-	known := map[string]records.Run{}
-	remember := func(r records.Run) {
-		if previous, ok := known[r.UID]; !ok || r.Revision > previous.Revision {
-			known[r.UID] = r
-		}
-	}
-	for _, r := range cat.runs {
-		remember(r)
-	}
-	for key, page := range h.jobPages {
-		if key.project == msg.key.project {
-			for _, r := range page.Runs {
-				remember(r)
-			}
-		}
-	}
+	// Keep authoritative latest evidence and accepted revisions consistent across
+	// catalog, history and detail without changing page membership or cursors.
 	for i := range msg.page.Runs {
-		if accepted, ok := known[msg.page.Runs[i].UID]; ok && accepted.Revision > msg.page.Runs[i].Revision {
-			msg.page.Runs[i] = accepted
-		}
-		msg.page.Runs[i].ProjectID = msg.key.project
-		msg.page.Runs[i].ProjectKey = fmt.Sprint(msg.key.project)
-		msg.page.Runs[i].ProjectName = cat.name
+		msg.page.Runs[i] = h.reconcileCronRun(msg.key.project, msg.page.Runs[i])
 	}
+	cat = h.catalogs[msg.key.project]
 	if msg.key.job != "" {
 		if h.jobPages == nil {
 			h.jobPages = map[cronRunKey]records.RunPage{}
@@ -193,6 +174,57 @@ func (h *cronHost) acceptCronRuns(msg cronRunsMsg) {
 	}
 	h.catalogs[msg.key.project] = cat
 }
+
+// reconcileCronRun preserves higher accepted revisions within one project.
+func (h *cronHost) reconcileCronRun(project int64, run records.Run) records.Run {
+	cat, ok := h.catalogs[project]
+	if !ok {
+		return run
+	}
+	consider := func(old records.Run) {
+		if old.UID == run.UID && old.Revision > run.Revision {
+			run = old
+		}
+	}
+	for _, old := range cat.runs {
+		consider(old)
+	}
+	for _, job := range cat.jobs {
+		if job.LastRun != nil {
+			consider(*job.LastRun)
+		}
+	}
+	for key, page := range h.jobPages {
+		if key.project == project {
+			for _, old := range page.Runs {
+				consider(old)
+			}
+		}
+	}
+	run.ProjectID, run.ProjectKey, run.ProjectName = project, fmt.Sprint(project), cat.name
+	for i := range cat.runs {
+		if cat.runs[i].UID == run.UID {
+			cat.runs[i] = run
+		}
+	}
+	for i := range cat.jobs {
+		if last := cat.jobs[i].LastRun; last != nil && last.UID == run.UID {
+			cat.jobs[i].LastRun = &run
+		}
+	}
+	for key, page := range h.jobPages {
+		if key.project == project {
+			for i := range page.Runs {
+				if page.Runs[i].UID == run.UID {
+					page.Runs[i] = run
+				}
+			}
+		}
+	}
+	h.catalogs[project] = cat
+	return run
+}
+
 func mergeCronRuns(old, in []records.Run) []records.Run {
 	out := append([]records.Run(nil), old...)
 	index := map[string]int{}
@@ -228,13 +260,28 @@ func (h *cronHost) updateCronBoard() {
 		c := h.catalogs[id]
 		key := fmt.Sprint(id)
 		d.Projects[key] = cronui.Data{Project: c.name}
-		d.Jobs = append(d.Jobs, c.jobs...)
 		d.Workflows = append(d.Workflows, c.workflows...)
 		runs := c.runs
 		for k, page := range h.jobPages {
 			if k.project == id {
 				runs = mergeCronRuns(runs, page.Runs)
 			}
+		}
+		// Job reads provide authoritative latest runs even when a job's last
+		// execution falls outside the loaded history page. Merge only within
+		// this project, retaining newer accepted revisions and page cursors.
+		lastRuns := make([]records.Run, 0, len(c.jobs))
+		for _, job := range c.jobs {
+			if job.LastRun != nil {
+				run := *job.LastRun
+				run.ProjectID, run.ProjectKey, run.ProjectName = id, key, c.name
+				job.LastRun = &run
+				lastRuns = append(lastRuns, run)
+			}
+			d.Jobs = append(d.Jobs, job)
+		}
+		if len(lastRuns) > 0 {
+			runs = mergeCronRuns(runs, lastRuns)
 		}
 		d.Runs = append(d.Runs, runs...)
 		d.MoreRuns = d.MoreRuns || c.runsLoaded && c.before != ""

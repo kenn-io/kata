@@ -2,6 +2,7 @@ package cron
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -43,7 +44,7 @@ func (m *model) renderFrame() renderedFrame {
 			extra = m.jobsExtras()
 		}
 		if m.tab == 1 {
-			if m.query != "" {
+			if m.query != "" || m.status != "" {
 				extra = append(extra, fmt.Sprintf("%d of %d match", len(m.rows), len(m.data.Runs)))
 			}
 			extra = append(extra, "loaded history")
@@ -56,12 +57,18 @@ func (m *model) renderFrame() renderedFrame {
 		}
 		bottom = append(bottom, bodyLine{Text: pageLabel(page, pages, extra...)})
 	}
+	peekStart := len(bottom)
 	bottom = append(bottom, m.renderJobBox()...)
 	bottom = append(bottom, m.footer()...)
 	if len(m.projectChoices) == 0 && m.conflict == nil && len(m.confirm) == 0 {
 		for _, line := range help.Lines(m.width) {
 			bottom = append(bottom, bodyLine{Text: line})
 		}
+	}
+	peek := m.renderPeek()
+	if len(peek) > 0 {
+		available := min(len(peek), max(0, m.height-len(bottom)))
+		bottom = slices.Insert(bottom, peekStart, peek[:available]...)
 	}
 	if len(m.projectChoices) > 0 {
 		body = bodyLines{{Text: "  " + detailSectionHeaderStyle.Render("new job in project")}, {Text: ""}}
@@ -92,12 +99,18 @@ func (m *model) renderFrame() renderedFrame {
 		scroll = nil
 		follow = false
 	}
-	frame := (pane{Body: body, Bottom: bottom, Width: m.width, Scroll: scroll, Follow: follow}).Render(m.height)
+	p := pane{Body: body, Bottom: bottom, Width: m.width, Scroll: scroll, Follow: follow}
+	if len(peek) > 0 && len(bottom) >= m.height {
+		// A tiny selected-run view may have room only for its chrome and peek.
+		// Avoid the pane's ordinary minimum body row displacing that footer.
+		p = pane{Top: bottom, Width: m.width}
+	}
+	frame := p.Render(m.height)
 	m.hits = frame.Hits
 	return frame
 }
 func (m *model) footer() bodyLines {
-	return footer(m.notice, m.data.Problems, searchState{Query: m.query, Editing: m.searching})
+	return footer(m.notice, m.data.Problems, searchState{Query: m.query, Editing: m.searching, Status: m.status})
 }
 func (m *model) pageRows() int {
 	help := jobsHelp()
@@ -111,7 +124,7 @@ func (m *model) pageRows() int {
 	if _, split := m.splitGeometry(); split {
 		borders = 2
 	}
-	return max(3, m.height-2-len(help.Lines(m.width))-len(m.footer())-m.jobBoxHeight()-borders)
+	return max(3, m.height-2-len(help.Lines(m.width))-len(m.footer())-m.jobBoxHeight()-m.peekHeight()-borders)
 }
 func (m *model) pageSize() int { return max(1, m.height/2) }
 func pager(total, cursor, rows int) (start, end, page, pages int) {

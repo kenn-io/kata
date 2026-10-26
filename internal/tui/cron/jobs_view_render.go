@@ -43,7 +43,13 @@ func (m *model) jobsColumns() []column {
 			extra = append(extra, column{Title: title, Width: 14, Shrink: 2})
 		}
 	}
-	return executionColumns("job", "schedule", "updated", extra...)
+	cols := executionColumns("job", "schedule", "updated", extra...)
+	for i := range cols {
+		if cols[i].Title == "status" {
+			cols[i].Title = "last status"
+		}
+	}
+	return cols
 }
 
 // JobsPage builds the visible page's cells once, for both sizing and drawing.
@@ -83,16 +89,18 @@ func (m *model) jobCells(v *jobView) []cell {
 		name += " (invalid)"
 		role = attentionStyle
 	}
-	last := "unloaded"
+	last := "never ran"
 	lastRole := subtleStyle
 	updated := v.entry.UpdatedAt
 	if v.entry.CreatedAt.After(updated) {
 		updated = v.entry.CreatedAt
 	}
-	if len(v.runIndexes) > 0 {
-		r := m.data.Runs[v.runIndexes[0]]
-		last, lastRole = runLabel(r)
-		updated = latestActivity(updated, r)
+	lastRun := m.jobLastRun(v)
+	if lastRun != nil {
+		last, lastRole = runLabel(*lastRun)
+		updated = latestActivity(updated, *lastRun)
+	} else if !v.entry.LastRunKnown {
+		last = "unloaded"
 	}
 	project := v.entry.Project
 	if project == "" {
@@ -105,7 +113,7 @@ func (m *model) jobCells(v *jobView) []cell {
 		switch col.Title {
 		case "#":
 			c.Text = issue
-		case "status":
+		case "last status":
 			c = cell{Text: last, Style: lastRole}
 		case "job":
 			c = cell{Text: m.listName(project, name, issue), Style: role}
@@ -166,8 +174,8 @@ func (m *model) renderJobs() bodyLines {
 	}
 	if len(m.rows) == 0 {
 		message := "no jobs yet — press n to add one"
-		if m.query != "" {
-			message = "no jobs match " + clean(m.query)
+		if m.query != "" || m.status != "" {
+			message = strings.TrimSpace("no jobs match " + clean(m.query))
 		}
 		body = append(body, bodyLine{Text: "  " + subtleStyle.Render(message)})
 	}
@@ -184,7 +192,7 @@ func (m *model) renderJobs() bodyLines {
 
 func (m *model) jobsExtras() []string {
 	var extras []string
-	if m.query != "" {
+	if m.query != "" || m.status != "" {
 		extras = append(extras, fmt.Sprintf("%d of %d match", m.jobMatches, len(m.jobs.byKey)))
 	}
 	return extras
@@ -238,10 +246,15 @@ func (m *model) renderJobInspector(v *jobView, width int) bodyLines {
 	}
 	plain("parent", m.knownIssueRef(v.key.projectUID, parent))
 	body = append(body, bodyLine{})
-	if len(v.runIndexes) == 0 {
-		return append(body, bodyLine{Text: subtleStyle.Render("no loaded run observations")})
+	lastRun := m.jobLastRun(v)
+	if lastRun == nil {
+		label := "never ran"
+		if !v.entry.LastRunKnown {
+			label = "no loaded run observations"
+		}
+		return append(body, bodyLine{Text: subtleStyle.Render(label)})
 	}
-	r := m.data.Runs[v.runIndexes[0]]
+	r := *lastRun
 	label, role := runLabel(r)
 	when := ""
 	if r.StartedAt != nil {

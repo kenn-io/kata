@@ -456,6 +456,7 @@ func (m *model) acceptSavedJob(j records.Job) {
 	found := false
 	for i, old := range m.data.Jobs {
 		if old.ProjectUID == j.ProjectUID && old.UID == j.UID {
+			j.LastRun, j.LastRunKnown = old.LastRun, old.LastRunKnown
 			m.data.Jobs[i] = j
 			found = true
 			break

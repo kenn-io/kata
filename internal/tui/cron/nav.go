@@ -28,7 +28,7 @@ type navFrame struct {
 	name                          string
 	selectionOrdinal, scroll      int
 	follow                        bool
-	query                         string
+	query, status                 string
 	expanded                      map[string]bool
 }
 
@@ -70,7 +70,7 @@ func (m *model) saveFrame() {
 	f.tab = m.tab
 	f.scroll = m.scroll
 	f.follow = m.follow
-	f.query = m.query
+	f.query, f.status = m.query, m.status
 	f.expanded = maps.Clone(m.expanded)
 	if f.view == viewList {
 		if m.cursor >= 0 && m.cursor < len(m.rows) {
@@ -118,7 +118,7 @@ func (m *model) restoreFrame(f navFrame) {
 		m.nav[len(m.nav)-1].name = r.label
 	}
 	m.tab = f.tab
-	m.query = f.query
+	m.query, m.status = f.query, f.status
 	m.expanded = maps.Clone(f.expanded)
 	if m.expanded == nil {
 		m.expanded = map[string]bool{}

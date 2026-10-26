@@ -63,6 +63,8 @@ func (c *Client) SaveCronJob(ctx context.Context, projectID int64, actor string,
 	out.Job.ProjectID = projectID
 	out.Job.ProjectUID = fmt.Sprint(projectID)
 	out.Job.Project = job.Project
+	// Definition mutation receipts do not replace recorded run evidence.
+	out.Job.LastRun, out.Job.LastRunKnown = job.LastRun, job.LastRunKnown
 	return out.Job, err
 }
 func optionalCronGuard(guard string) *string {

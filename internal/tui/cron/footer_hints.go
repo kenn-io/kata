@@ -71,8 +71,8 @@ type statusNotice struct {
 	Until time.Time
 }
 type searchState struct {
-	Query   string
-	Editing bool
+	Query, Status string
+	Editing       bool
 }
 
 func errorText(s string) string { return "error: " + strings.TrimPrefix(plain(s), "error: ") }
@@ -101,8 +101,13 @@ func footer(status statusNotice, conditions []string, search searchState) bodyLi
 		}
 		b = append(b, bodyLine{Text: role.Render(text)})
 	}
+	if search.Status != "" {
+		b = append(b, bodyLine{}, bodyLine{Text: subtleStyle.Render("status: " + statusFilterLabel(search.Status) + "  (f cycles)")})
+	}
 	if search.Editing || search.Query != "" {
-		b = append(b, bodyLine{})
+		if search.Status == "" {
+			b = append(b, bodyLine{})
+		}
 		text := subtleStyle.Render("filter: " + plain(search.Query) + "  (esc clears)")
 		if search.Editing {
 			text = chipActive.Render("/"+plain(search.Query)+"▏") + subtleStyle.Render("  enter keep · esc clear")
@@ -113,12 +118,12 @@ func footer(status statusNotice, conditions []string, search searchState) bodyLi
 }
 
 func jobsHelp() footerHelp {
-	full := []helpItem{hintGroup("tab", "tabs", 6, keys.NextTab, keys.PrevTab), keys.Search.hint(14), hintGroup("[ ]", "page", 7, keys.PrevPage, keys.NextPage, keys.PrevPageAlt, keys.NextPageAlt), hintGroup("j/k", "move", 16, keys.Down, keys.Up, keys.ScrollUp, keys.ScrollDown), hintGroup("l/\u2192", "open", 15, keys.Open, keys.Right, keys.Accept), keys.Pause.hint(11), keys.New.hint(13), keys.Edit.hint(5), keys.Delete.hint(4), keys.Issue.hint(2), keys.Kata.hint(1), keys.Reload.hint(1), keys.Layout.hint(1), hintGroup("q", "quit", 99, keys.Quit, keys.Interrupt)}
+	full := []helpItem{hintGroup("tab", "tabs", 6, keys.NextTab, keys.PrevTab), keys.Search.hint(14), keys.Status.hint(3), hintGroup("[ ]", "page", 7, keys.PrevPage, keys.NextPage, keys.PrevPageAlt, keys.NextPageAlt), hintGroup("j/k", "move", 16, keys.Down, keys.Up, keys.ScrollUp, keys.ScrollDown), hintGroup("l/\u2192", "open", 15, keys.Open, keys.Right, keys.Accept), keys.Pause.hint(11), keys.New.hint(13), keys.Edit.hint(5), keys.Delete.hint(4), keys.Issue.hint(2), keys.Kata.hint(1), keys.Reload.hint(1), keys.Layout.hint(1), hintGroup("q", "quit", 99, keys.Quit, keys.Interrupt)}
 	return footerHelp{Full: append(full, navigationHints()...)}
 }
 
 func runsHelp() footerHelp {
-	full := []helpItem{hintGroup("tab", "tabs", 0, keys.NextTab, keys.PrevTab), keys.Search.hint(0), hintGroup("[ ]", "page", 0, keys.PrevPage, keys.NextPage, keys.PrevPageAlt, keys.NextPageAlt), hintGroup("j/k", "move", 0, keys.Down, keys.Up, keys.ScrollUp, keys.ScrollDown), hintGroup("l/\u2192", "open", 0, keys.Open, keys.Right, keys.Accept), keys.Issue.hint(0), keys.Kata.hint(1), keys.Reload.hint(1), keys.Layout.hint(1), hintGroup("q", "quit", 99, keys.Quit, keys.Interrupt)}
+	full := []helpItem{hintGroup("tab", "tabs", 0, keys.NextTab, keys.PrevTab), keys.Search.hint(0), keys.Status.hint(0), hintGroup("[ ]", "page", 0, keys.PrevPage, keys.NextPage, keys.PrevPageAlt, keys.NextPageAlt), hintGroup("j/k", "move", 0, keys.Down, keys.Up, keys.ScrollUp, keys.ScrollDown), hintGroup("l/\u2192", "open", 0, keys.Open, keys.Right, keys.Accept), keys.Issue.hint(0), keys.Kata.hint(1), keys.Reload.hint(1), keys.Layout.hint(1), hintGroup("q", "quit", 99, keys.Quit, keys.Interrupt)}
 	short := []helpItem{hintGroup("tab", "tabs", 5, keys.NextTab, keys.PrevTab), keys.Search.hint(7), hintGroup("[ ]", "page", 6, keys.PrevPage, keys.NextPage, keys.PrevPageAlt, keys.NextPageAlt), hintGroup("j/k", "move", 8, keys.Down, keys.Up, keys.ScrollUp, keys.ScrollDown), hintGroup("l/\u2192", "open", 9, keys.Open, keys.Right, keys.Accept), keys.Layout.hint(1), hintGroup("q", "quit", 99, keys.Quit, keys.Interrupt)}
 	return footerHelp{Full: append(full, navigationHints()...), Short: short}
 }
